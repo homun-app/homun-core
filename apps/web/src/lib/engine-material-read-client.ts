@@ -109,3 +109,20 @@ export async function prepareMaterialRead(
     expected_version: current["version"],
   });
 }
+
+/** Read an existing project material: no upload, the durable source is reused. */
+export async function prepareReadFromMaterial(
+  work: Work,
+  materialId: string,
+  operationId: string,
+): Promise<MaterialRead> {
+  const existing = (await listMaterialReads(work.id)).find((item) => item.id === operationId);
+  if (existing) return existing;
+  const current = (await listEngineWorks()).find((w) => w["id"] === work.id);
+  if (!current) throw new HomunClientError("not_found", "Lavoro non accessibile");
+  return request(work.id, "", {
+    command_id: operationId,
+    material_id: materialId,
+    expected_version: current["version"],
+  });
+}

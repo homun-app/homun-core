@@ -112,3 +112,23 @@ export async function preparePriceComparison(
     max_rows: 10000,
   });
 }
+
+/** Compare two existing project materials: no upload, durable sources are reused. */
+export async function prepareComparisonFromMaterials(
+  work: Work,
+  leftMaterialId: string,
+  rightMaterialId: string,
+  operationId: string,
+): Promise<PriceComparison> {
+  const existing = (await listPriceComparisons(work.id)).find((item) => item.id === operationId);
+  if (existing) return existing;
+  const current = (await listEngineWorks()).find((w) => w["id"] === work.id);
+  if (!current) throw new HomunClientError("not_found", "Lavoro non accessibile");
+  return request(work.id, "", {
+    command_id: operationId,
+    left_material_id: leftMaterialId,
+    right_material_id: rightMaterialId,
+    expected_version: current["version"],
+    max_rows: 10000,
+  });
+}

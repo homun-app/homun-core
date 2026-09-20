@@ -2,6 +2,8 @@ import { useState } from "react";
 import type { Work } from "./conversation-types";
 import { useMaterialRead } from "@/hooks/useMaterialRead";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
+import { EngineMaterialPicker } from "./EngineMaterialPicker";
+import { eligibleForRead } from "@/lib/engine-material-selection";
 import "./engine-material-read.css";
 
 /** Authorized material read: provenance-bound extract, approval before execution. */
@@ -15,6 +17,8 @@ export function EngineMaterialRead({
   onChanged: () => Promise<void>;
 }) {
   const [file, setFile] = useState<File | null>(null);
+  const [mode, setMode] = useState<"upload" | "pick">("upload");
+  const [picked, setPicked] = useState("");
   const tool = useMaterialRead(work, onChanged);
   const p = tool.proposal;
   return (
@@ -27,27 +31,73 @@ export function EngineMaterialRead({
         </p>
         {(!p || ["failed", "blocked"].includes(p.status)) && (
           <>
-            <label>
-              Materiale da leggere
-              <input
-                type="file"
-                accept=".txt,.md,.csv,.tsv,.json,.log,.pdf"
-                disabled={tool.busy}
-                onChange={(e) => {
-                  setFile(e.target.files?.[0] ?? null);
-                  tool.newFiles();
-                }}
-              />
-            </label>
-            <p>Testo, CSV o PDF fino a 2 MB. Estratto limitato ai primi 8.000 caratteri.</p>
-            <button
-              type="button"
-              className="cw-secondary"
-              disabled={tool.busy || !file}
-              onClick={() => file && void tool.prepare(file)}
-            >
-              Prepara la lettura
-            </button>
+            <div className="cs-actions">
+              <button
+                type="button"
+                className={mode === "upload" ? "cw-secondary" : "cs-link"}
+                onClick={() => setMode("upload")}
+              >
+                Carica un file
+              </button>
+              <button
+                type="button"
+                className={mode === "pick" ? "cw-secondary" : "cs-link"}
+                onClick={() => setMode("pick")}
+              >
+                Usa un materiale del progetto
+              </button>
+            </div>
+            {mode === "upload" ? (
+              <>
+                <label>
+                  Materiale da leggere
+                  <input
+                    type="file"
+                    accept=".txt,.md,.csv,.tsv,.json,.log,.pdf"
+                    disabled={tool.busy}
+                    onChange={(e) => {
+                      setFile(e.target.files?.[0] ?? null);
+                      tool.newFiles();
+                    }}
+                  />
+                </label>
+                <p>Testo, CSV o PDF fino a 2 MB. Estratto limitato ai primi 8.000 caratteri.</p>
+                <button
+                  type="button"
+                  className="cw-secondary"
+                  disabled={tool.busy || !file}
+                  onClick={() => file && void tool.prepare(file)}
+                >
+                  Prepara la lettura
+                </button>
+              </>
+            ) : (
+              <>
+                <EngineMaterialPicker
+                  work={work}
+                  filter={eligibleForRead}
+                  label="Materiale da leggere"
+                  value={picked}
+                  disabled={tool.busy}
+                  onChange={(id) => {
+                    setPicked(id);
+                    tool.newFiles();
+                  }}
+                />
+                <p>
+                  Riferimento con versione e hash già registrati: nessun nuovo caricamento, la
+                  fonte esistente è riutilizzata così com'è.
+                </p>
+                <button
+                  type="button"
+                  className="cw-secondary"
+                  disabled={tool.busy || !picked}
+                  onClick={() => void tool.prepareFromMaterial(picked)}
+                >
+                  Prepara la lettura
+                </button>
+              </>
+            )}
           </>
         )}
         {p && (

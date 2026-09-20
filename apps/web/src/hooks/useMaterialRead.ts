@@ -5,6 +5,7 @@ import {
   approveMaterialRead,
   listMaterialReads,
   prepareMaterialRead,
+  prepareReadFromMaterial,
   type MaterialRead,
 } from "@/lib/engine-material-read-client";
 
@@ -57,6 +58,18 @@ export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
       setBusy(false);
     }
   }
+  async function prepareFromMaterial(materialId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      setProposal(await prepareReadFromMaterial(work, materialId, operation.current));
+      await callback.current();
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function approve() {
     if (!proposal) return;
     setBusy(true);
@@ -75,6 +88,7 @@ export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
     busy,
     error,
     prepare,
+    prepareFromMaterial,
     approve,
     newFiles: () => {
       operation.current = crypto.randomUUID();

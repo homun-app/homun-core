@@ -3,6 +3,8 @@ import { useState } from "react";
 import type { Work } from "./conversation-types";
 import { usePriceComparison } from "@/hooks/usePriceComparison";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
+import { EngineMaterialPicker } from "./EngineMaterialPicker";
+import { eligibleForComparison } from "@/lib/engine-material-selection";
 import "./engine-price-comparison.css";
 
 function download(text: string, extension: string) {
@@ -28,6 +30,9 @@ export function EnginePriceComparison({
 }) {
   const [left, setLeft] = useState<File | null>(null);
   const [right, setRight] = useState<File | null>(null);
+  const [mode, setMode] = useState<"upload" | "pick">("upload");
+  const [pickedLeft, setPickedLeft] = useState("");
+  const [pickedRight, setPickedRight] = useState("");
   const tool = usePriceComparison(work, onChanged);
   const p = tool.proposal;
   return (
@@ -41,42 +46,99 @@ export function EnginePriceComparison({
           ["failed", "blocked"].includes(p.status) ||
           (p.status === "pending_approval" && Boolean(tool.error))) && (
           <>
-            <label>
-              Listino precedente
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                disabled={tool.busy}
-                onChange={(e) => {
-                  setLeft(e.target.files?.[0] ?? null);
-                  tool.newFiles();
-                }}
-              />
-            </label>
-            <label>
-              Listino aggiornato
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                disabled={tool.busy}
-                onChange={(e) => {
-                  setRight(e.target.files?.[0] ?? null);
-                  tool.newFiles();
-                }}
-              />
-            </label>
-            <p>
-              CSV con colonne sku, name, price, currency. Massimo 2 MB per file e 10.000 righe
-              complessive.
-            </p>
-            <button
-              type="button"
-              className="cw-secondary"
-              disabled={tool.busy || !left || !right}
-              onClick={() => left && right && void tool.prepare(left, right)}
-            >
-              Prepara il confronto
-            </button>
+            <div className="cs-actions">
+              <button
+                type="button"
+                className={mode === "upload" ? "cw-secondary" : "cs-link"}
+                onClick={() => setMode("upload")}
+              >
+                Carica due file
+              </button>
+              <button
+                type="button"
+                className={mode === "pick" ? "cw-secondary" : "cs-link"}
+                onClick={() => setMode("pick")}
+              >
+                Usa i materiali del progetto
+              </button>
+            </div>
+            {mode === "upload" ? (
+              <>
+                <label>
+                  Listino precedente
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    disabled={tool.busy}
+                    onChange={(e) => {
+                      setLeft(e.target.files?.[0] ?? null);
+                      tool.newFiles();
+                    }}
+                  />
+                </label>
+                <label>
+                  Listino aggiornato
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    disabled={tool.busy}
+                    onChange={(e) => {
+                      setRight(e.target.files?.[0] ?? null);
+                      tool.newFiles();
+                    }}
+                  />
+                </label>
+                <p>
+                  CSV con colonne sku, name, price, currency. Massimo 2 MB per file e 10.000 righe
+                  complessive.
+                </p>
+                <button
+                  type="button"
+                  className="cw-secondary"
+                  disabled={tool.busy || !left || !right}
+                  onClick={() => left && right && void tool.prepare(left, right)}
+                >
+                  Prepara il confronto
+                </button>
+              </>
+            ) : (
+              <>
+                <EngineMaterialPicker
+                  work={work}
+                  filter={eligibleForComparison}
+                  label="Listino precedente"
+                  value={pickedLeft}
+                  disabled={tool.busy}
+                  onChange={(id) => {
+                    setPickedLeft(id);
+                    tool.newFiles();
+                  }}
+                />
+                <EngineMaterialPicker
+                  work={work}
+                  filter={eligibleForComparison}
+                  label="Listino aggiornato"
+                  value={pickedRight}
+                  disabled={tool.busy}
+                  onChange={(id) => {
+                    setPickedRight(id);
+                    tool.newFiles();
+                  }}
+                />
+                <p>
+                  Fonti già registrate con versione e hash: nessun nuovo caricamento. Seleziona due
+                  CSV diversi.
+                </p>
+                <button
+                  type="button"
+                  className="cw-secondary"
+                  disabled={tool.busy || !pickedLeft || !pickedRight || pickedLeft === pickedRight}
+                  onClick={() => void tool.prepareFromMaterials(pickedLeft, pickedRight)}
+                >
+                  Prepara il confronto
+                </button>
+              </>
+            )}
           </>
         )}
         {p && (

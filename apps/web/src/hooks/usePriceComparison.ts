@@ -4,6 +4,7 @@ import type { Work } from "@/components/builder/conversation-types";
 import {
   approvePriceComparison,
   listPriceComparisons,
+  prepareComparisonFromMaterials,
   preparePriceComparison,
   type PriceComparison,
 } from "@/lib/engine-price-comparison-client";
@@ -56,6 +57,18 @@ export function usePriceComparison(work: Work, onChanged: () => Promise<void>) {
       setBusy(false);
     }
   }
+  async function prepareFromMaterials(leftId: string, rightId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      setProposal(await prepareComparisonFromMaterials(work, leftId, rightId, operation.current));
+      await callback.current();
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function approve() {
     if (!proposal) return;
     setBusy(true);
@@ -74,6 +87,7 @@ export function usePriceComparison(work: Work, onChanged: () => Promise<void>) {
     busy,
     error,
     prepare,
+    prepareFromMaterials,
     approve,
     newFiles: () => {
       operation.current = crypto.randomUUID();
