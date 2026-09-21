@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Work } from "@/components/builder/conversation-types";
+import { isHomunClientError } from "@/lib/homun-errors";
 import {
   confirmWorkIntake,
   listWorkIntakes,
@@ -66,7 +67,20 @@ export function useWorkIntake(work: Work, onChanged: () => Promise<void>) {
       );
       await callback.current();
     } catch (cause) {
-      setError(cause);
+      // A 404 after an engine restart means the cached proposal no longer
+      // exists: refresh the intake list instead of showing a dead-end error.
+      if (isHomunClientError(cause) && cause.code === "not_found") {
+        setProposal(null);
+        setError(null);
+        try {
+          const list = await listWorkIntakes(work.id);
+          setProposal(list.at(-1) ?? null);
+        } catch {
+          setError(cause);
+        }
+      } else {
+        setError(cause);
+      }
     } finally {
       setBusy(false);
     }
@@ -82,7 +96,13 @@ export function useWorkIntake(work: Work, onChanged: () => Promise<void>) {
       await callback.current();
       return next.status !== "failed";
     } catch (cause) {
-      setError(cause);
+      if (isHomunClientError(cause) && cause.code === "not_found") {
+        // Stale work after engine restart: clear and let the effect re-fetch.
+        setProposal(null);
+        setError(null);
+      } else {
+        setError(cause);
+      }
       return false;
     } finally {
       setBusy(false);
