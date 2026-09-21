@@ -39,7 +39,7 @@ import {
 import {
   isCompletedNoticeForViewer,
   isPendingForViewer,
-  workStatusLabel,
+  workspaceWorkStatus,
 } from "./conversation-work-status";
 import { useConversationPrototypeStorage } from "./useConversationPrototypeStorage";
 import { type Phase, type Work } from "./conversation-types";
@@ -49,7 +49,6 @@ import { useEngineWorkspace } from "@/hooks/useEngineWorkspace";
 import { isEngineBackedWork } from "@/lib/conversation-engine-bridge";
 
 import { projectWorkspaceData } from "@/lib/engine-project-projection";
-import { engineStatusLabel } from "@/lib/engine-work-status";
 export type { Work } from "./conversation-types";
 const demoMode = resolveDemoMode();
 const { storageKey } = demoMode;
@@ -167,16 +166,10 @@ export function ConversationWorkspace() {
   }, [engine.backend, engine.loaded, engine.works, works, active]);
 
   function workStatus(w: Work) {
-    if (w.source === "engine") {
-      if (w.engineIntakePending) return "In attesa della tua conferma";
-      if (w.engineStatus) return engineStatusLabel(w.engineStatus);
-    }
-    return workStatusLabel(w, scenarios, spaceData.profiles);
+    return workspaceWorkStatus(w, scenarios, spaceData.profiles);
   }
   const pending = (engine.backend === "engine" ? engine.works : works).filter((w) =>
-    w.source === "engine" && w.engineIntakePending
-      ? true
-      : isPendingForViewer(w, viewer, scenarios, spaceData.profiles),
+    isPendingForViewer(w, viewer, scenarios, spaceData.profiles),
   );
   const completedNotices = (engine.backend === "engine" ? engine.works : works).filter((w) =>
     isCompletedNoticeForViewer(w, viewer, preferences.resultNotifications, seenResults),

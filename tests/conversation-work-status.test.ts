@@ -5,6 +5,7 @@ import {
   isCompletedNoticeForViewer,
   isPendingForViewer,
   workStatusLabel,
+  workspaceWorkStatus,
 } from "../apps/web/src/components/builder/conversation-work-status.ts";
 import { initialScenarios } from "../apps/web/src/components/builder/conversation-scenarios.ts";
 import type { Work } from "../apps/web/src/components/builder/conversation-types.ts";
@@ -82,6 +83,42 @@ describe("notification helpers", () => {
         true,
         ["Fabio:w1"],
       ),
+      false,
+    );
+  });
+});
+
+describe("workspaceWorkStatus (engine works)", () => {
+  it("a pending brief asks for the person's confirmation; other states use Italian labels", () => {
+    assert.equal(
+      workspaceWorkStatus(sampleWork({ source: "engine", engineIntakePending: true }), [], undefined),
+      "In attesa della tua conferma",
+    );
+    assert.equal(
+      workspaceWorkStatus(sampleWork({ source: "engine", engineStatus: "running" }), [], undefined),
+      "In corso",
+    );
+    assert.equal(
+      workspaceWorkStatus(sampleWork({ source: "engine", engineStatus: "waiting_input" }), [], undefined),
+      "In attesa del tuo contributo",
+    );
+    assert.equal(
+      workspaceWorkStatus(sampleWork({ source: "engine", engineStatus: "insolito" }), [], undefined),
+      "Stato da verificare",
+    );
+  });
+
+  it("simulation works keep the scenario-based vocabulary", () => {
+    assert.equal(workspaceWorkStatus(sampleWork({ phase: "waiting" }), initialScenarios, undefined), "Serve il tuo contributo");
+  });
+
+  it("a pending engine brief needs the viewer regardless of phase", () => {
+    assert.equal(
+      isPendingForViewer(sampleWork({ source: "engine", phase: "proposal", engineIntakePending: true }), "Fabio", initialScenarios, undefined),
+      true,
+    );
+    assert.equal(
+      isPendingForViewer(sampleWork({ source: "engine", phase: "proposal" }), "Fabio", initialScenarios, undefined),
       false,
     );
   });

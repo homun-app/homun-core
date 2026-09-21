@@ -298,6 +298,8 @@ export async function ingestEngineMaterial(input: {
   extractStatus: string;
   title: string;
   version: number;
+  /** False when identical bytes were already in the project (idempotent re-ingest). */
+  created: boolean;
 }> {
   const workspaceId = input.workspaceId ?? DEFAULT_WORKSPACE_ID;
   const baseUrl = input.baseUrl ?? ENGINE_DEFAULT_BASE_URL;
@@ -328,6 +330,7 @@ export async function ingestEngineMaterial(input: {
     extractStatus: String(body["extract_status"] ?? "none"),
     title: String(body["title"] ?? input.file.name),
     version: typeof body["version"] === "number" ? body["version"] : 1,
+    created: body["created"] !== false,
   };
 }
 

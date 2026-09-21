@@ -149,6 +149,28 @@ def register_prepared_material(ctx: CommandContext, actor: Actor, command_id: st
         raise ValidationError("Invalid prepared material metadata")
     if payload["extract_status"] not in {"extracted", "unsupported", "failed"}:
         raise ValidationError("Invalid extraction status")
+    # Same bytes in the same project are one material: re-ingesting an
+    # unchanged file is idempotent, so a project never lists twins and a
+    # comparison can never select one document as both of its sources.
+    for material in ctx.store.materials.values():
+        if (
+            material.project_id == project_id
+            and material.content_hash == content_hash
+            and material.status == "active"
+        ):
+            return {
+                "material_id": material.id,
+                "project_id": material.project_id,
+                "version": material.version,
+                "kind": material.kind,
+                "status": material.status,
+                "extract_status": material.extract_status,
+                "content_hash": material.content_hash,
+                "mime_type": material.mime_type,
+                "byte_size": material.byte_size,
+                "title": material.title,
+                "created": False,
+            }
     material_id = new_id("mat")
     version = 1
     material = MaterialVersion(
@@ -186,7 +208,7 @@ def register_prepared_material(ctx: CommandContext, actor: Actor, command_id: st
     )
     return {
         "material_id": material.id,
-        "project_id": project_id,
+        "project_id": material.project_id,
         "version": material.version,
         "kind": material.kind,
         "status": material.status,
@@ -195,5 +217,6 @@ def register_prepared_material(ctx: CommandContext, actor: Actor, command_id: st
         "mime_type": material.mime_type,
         "byte_size": material.byte_size,
         "title": material.title,
+        "created": True,
     }
 

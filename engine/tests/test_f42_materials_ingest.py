@@ -112,6 +112,54 @@ def test_http_ingest_unsupported_not_claimed_read(client) -> None:
     assert content.json()["extract_status"] == "unsupported"
 
 
+def test_reingesting_same_bytes_is_idempotent_per_project(client) -> None:
+    tc, _data_dir = client
+    project_id = _project(tc)
+    first = tc.post(
+        f"/v1/workspaces/ws_local/projects/{project_id}/materials/ingest",
+        headers=_headers(),
+        files={"file": ("listino-marzo.csv", b"sku,price\nA,10\n", "text/csv")},
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["created"] is True
+    material_id = first.json()["material_id"]
+
+    again = tc.post(
+        f"/v1/workspaces/ws_local/projects/{project_id}/materials/ingest",
+        headers=_headers(),
+        files={"file": ("listino-marzo-di-nuovo.csv", b"sku,price\nA,10\n", "text/csv")},
+    )
+    assert again.status_code == 200, again.text
+    assert again.json()["created"] is False
+    assert again.json()["material_id"] == material_id
+
+    materials = tc.get(
+        f"/v1/workspaces/ws_local/projects/{project_id}/materials",
+        headers=_headers(),
+    ).json()["items"]
+    assert len(materials) == 1, materials
+
+    # Same bytes in another project stay a separate material.
+    other = tc.post(
+        "/v1/workspaces/ws_local/commands",
+        headers=_headers(),
+        json={
+            "command_id": "cmd_f42_proj2",
+            "type": "project.create",
+            "payload": {"name": "Altro"},
+        },
+    )
+    other_id = str(other.json()["result"]["project_id"])
+    elsewhere = tc.post(
+        f"/v1/workspaces/ws_local/projects/{other_id}/materials/ingest",
+        headers=_headers(),
+        files={"file": ("listino-marzo.csv", b"sku,price\nA,10\n", "text/csv")},
+    )
+    assert elsewhere.status_code == 200, elsewhere.text
+    assert elsewhere.json()["created"] is True
+    assert elsewhere.json()["material_id"] != material_id
+
+
 def test_ingest_requires_write_grant(client) -> None:
     tc, _data_dir = client
     project_id = _project(tc)

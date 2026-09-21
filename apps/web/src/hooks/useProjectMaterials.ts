@@ -9,10 +9,12 @@ import {
 import { resolveEngineProjectForWork } from "@/lib/engine-work-project";
 
 export type IngestOutcome = {
-  /** Materials actually stored in the project. */
+  /** Materials stored in (or already present in) the project. */
   addedIds: string[];
   /** Stored materials the current tool can select. */
   eligibleIds: string[];
+  /** Files whose bytes were already in the project (idempotent re-ingest). */
+  existing: number;
   /** Files rejected by the engine (size, storage). */
   failed: number;
 };
@@ -62,9 +64,11 @@ export function useProjectMaterials(
     setError(null);
     try {
       const projectId = await resolveEngineProjectForWork(workRef.current, "Materiali del lavoro");
-      // Everything the person picked lands in the project; per-file failures
-      // never abort the rest of a folder upload.
+      // Everything the person picked lands in the project (identical bytes
+      // return the existing material); per-file failures never abort the rest
+      // of a folder upload.
       const addedIds: string[] = [];
+      let existing = 0;
       let failed = 0;
       for (const file of files) {
         const relativePath =
@@ -78,16 +82,17 @@ export function useProjectMaterials(
             ...(relativePath ? { relativePath } : {}),
           });
           addedIds.push(added.materialId);
+          if (!added.created) existing += 1;
         } catch {
           failed += 1;
         }
       }
       const reloaded = await reload();
       const eligibleIds = addedIds.filter((id) => reloaded.some((m) => m.id === id));
-      return { addedIds, eligibleIds, failed };
+      return { addedIds, eligibleIds, existing, failed };
     } catch (cause) {
       setError(cause);
-      return { addedIds: [], eligibleIds: [], failed: files.length };
+      return { addedIds: [], eligibleIds: [], existing: 0, failed: files.length };
     } finally {
       setBusy(false);
     }

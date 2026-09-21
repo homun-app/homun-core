@@ -2,6 +2,7 @@
  * Pure work-status and notification helpers for the simulated workspace.
  */
 
+import { engineStatusLabel } from "../../lib/engine-work-status.ts";
 import { isHumanMember, type MemberProfile } from "./conversation-members.ts";
 import { phaseText, scenarioForWork, type ConversationScenario } from "./conversation-scenarios.ts";
 import type { Work } from "./conversation-types.ts";
@@ -24,6 +25,19 @@ export function workStatusLabel(
   return phaseText[w.phase];
 }
 
+/** Status line for any work, engine-backed included: product language only. */
+export function workspaceWorkStatus(
+  w: Work,
+  scenarios: ConversationScenario[],
+  profiles: Profiles,
+): string {
+  if (w.source === "engine") {
+    if (w.engineIntakePending) return "In attesa della tua conferma";
+    if (w.engineStatus) return engineStatusLabel(w.engineStatus);
+  }
+  return workStatusLabel(w, scenarios, profiles);
+}
+
 export function isPendingForViewer(
   w: Work,
   viewer: string,
@@ -31,6 +45,7 @@ export function isPendingForViewer(
   profiles: Profiles,
 ): boolean {
   if (w.coordinatedBy || w.archived) return false;
+  if (w.source === "engine" && w.engineIntakePending) return true;
   if (w.request?.status === "pending") return w.request.to === viewer;
   const agent = scenarioForWork(w, scenarios).agent;
   if (isHumanMember(agent, profiles)) {

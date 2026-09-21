@@ -40,7 +40,13 @@ def test_recovery_preserves_shared_references_and_legacy_files(client):
     tc, root = client
     project = _project(tc)
     first = upload(tc, project).json()
-    second = upload(tc, project, command='upload-2').json()
+    # Identical bytes in the same project are one material; a second project
+    # keeps its own reference to the shared content-addressed original.
+    other = tc.post('/v1/workspaces/ws_local/commands', headers=_headers(),
+                    json={'command_id': 'cmd_recovery_proj2', 'type': 'project.create',
+                          'payload': {'name': 'Altro'}})
+    other_project = str(other.json()['result']['project_id'])
+    second = upload(tc, other_project, command='upload-2').json()
     assert second['material_id'] != first['material_id']
     ctx = get_context()
     with ctx.repository.transaction() as store:

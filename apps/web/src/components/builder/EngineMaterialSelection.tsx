@@ -52,17 +52,25 @@ export function EngineMaterialSelection({
 
   async function add(files: File[]) {
     if (!files.length) return;
-    const { addedIds, eligibleIds, failed } = await sources.ingest(files);
+    const { addedIds, eligibleIds, existing, failed } = await sources.ingest(files);
     if (!addedIds.length && !failed) return;
     // Fresh uploads that pass the tool's eligibility become the selection,
     // keeping earlier picks only when there is room for them.
     const merged = [...selected.filter((id) => !eligibleIds.includes(id)), ...eligibleIds];
     onSelectionChange(merged.length > maxSelected ? eligibleIds.slice(0, maxSelected) : merged);
-    const parts: string[] = [];
-    if (eligibleIds.length) parts.push(`${eligibleIds.length} file aggiunti al progetto e selezionati.`);
+    const fresh = addedIds.length - existing;
     const stored = addedIds.length - eligibleIds.length;
-    if (stored) parts.push(`${stored} archiviati nel progetto ma non usati da questo strumento.`);
-    if (failed) parts.push(`${failed} non caricati per un errore.`);
+    const parts: string[] = [];
+    if (fresh === 1) parts.push("1 file aggiunto al progetto.");
+    if (fresh > 1) parts.push(`${fresh} file aggiunti al progetto.`);
+    if (existing === 1) parts.push("1 file era già nel progetto.");
+    if (existing > 1) parts.push(`${existing} file erano già nel progetto.`);
+    if (eligibleIds.length === 1) parts.push("1 file selezionato.");
+    if (eligibleIds.length > 1) parts.push(`${eligibleIds.length} file selezionati.`);
+    if (stored === 1) parts.push("1 archiviato nel progetto ma non usato da questo strumento.");
+    if (stored > 1) parts.push(`${stored} archiviati nel progetto ma non usati da questo strumento.`);
+    if (failed === 1) parts.push("1 non caricato per un errore.");
+    if (failed > 1) parts.push(`${failed} non caricati per un errore.`);
     setNotice(parts.join(" "));
   }
 
