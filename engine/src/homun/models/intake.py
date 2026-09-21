@@ -98,7 +98,11 @@ def _model_capabilities(capabilities):
 
 
 def _extract_json_payload(text):
-    """Code fences first; thinking models may also prepend prose — take the JSON object."""
+    """Code fences first; thinking models may prepend or append prose.
+
+    Scans every opening brace and returns the first complete JSON object,
+    ignoring anything the model wrote after it (a second block, commentary).
+    """
     raw = text.strip()
     if raw.startswith('```'):
         raw = raw.split('\n',1)[1].rsplit('```',1)[0].strip()
@@ -107,12 +111,16 @@ def _extract_json_payload(text):
         return raw
     except ValueError:
         pass
-    start = raw.find('{')
-    end = raw.rfind('}')
-    if start >= 0 and end > start:
-        candidate = raw[start:end+1]
-        json.loads(candidate)  # raises when the braces are not a JSON object
-        return candidate
+    decoder = json.JSONDecoder()
+    for start, char in enumerate(raw):
+        if char != '{':
+            continue
+        try:
+            value, end = decoder.raw_decode(raw, start)
+        except ValueError:
+            continue
+        if isinstance(value, dict) and value:
+            return raw[start:end]
     raise ValueError('No JSON object found in model response')
 
 
