@@ -10,6 +10,7 @@ import {
 } from "@/lib/engine-material-read-client";
 
 export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
+  const [reads, setReads] = useState<MaterialRead[]>([]);
   const [proposal, setProposal] = useState<MaterialRead | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -26,6 +27,7 @@ export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
         const items = await listMaterialReads(work.id);
         if (!live) return;
         const next = items.at(-1) ?? null;
+        setReads(items);
         setProposal(next);
         if (next?.status === "completed" && finished.current !== next.id) {
           finished.current = next.id;
@@ -45,7 +47,7 @@ export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
       live = false;
       if (timer) clearTimeout(timer);
     };
-  }, [work.id, proposal?.status]);
+  }, [work.id, work.revision, proposal?.status]);
   async function prepare(file: File) {
     setBusy(true);
     setError(null);
@@ -85,6 +87,7 @@ export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
   }
   return {
     proposal,
+    reads,
     busy,
     error,
     prepare,

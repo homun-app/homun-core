@@ -19,18 +19,24 @@ from typing import Any
 from homun.storage.backup_types import BackupError, BackupManifest
 from homun.storage.backup_io import _sha256_file, _export_sqlite_copy, _assert_clean_destination
 from homun.storage.schema import UnsupportedSchemaVersion, validate_schema_version
+from homun.storage.sqlite import _open_connection
 
 BACKUP_FORMAT = "homun-engine-backup"
 BACKUP_FORMAT_VERSION = 1
 
 
-def _validate_workspace_version(database: Path) -> None:
+def _validate_workspace_version(database: Path, encryption_key: bytes | None = None) -> None:
     """Check the snapshot's version without initializing or migrating it."""
+    from homun.storage.encryption import EncryptionError
     try:
-        with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as conn:
+        with closing(_open_connection(database, encryption_key, readonly=True)) as conn:
             validate_schema_version(conn)
     except UnsupportedSchemaVersion as exc:
         raise BackupError(str(exc)) from exc
+    except BackupError:
+        raise
+    except EncryptionError as exc:
+        raise BackupError(f'Workspace key required or wrong: {exc}') from exc
     except sqlite3.Error as exc:
         raise BackupError('Invalid workspace database') from exc
 
@@ -48,6 +54,7 @@ def create_backup(
     backups_root: Path,
     live_connection: sqlite3.Connection | None = None,
     stamp: str | None = None,
+    encryption_key: bytes | None = None,
 ) -> Path:
     """Write a consistent SQLite copy + manifest under backups_root/<stamp>/."""
     if not re.fullmatch(r"[A-Za-z0-9_-]+", workspace_id):
@@ -63,8 +70,9 @@ def create_backup(
     db_name = f"{workspace_id}.sqlite3"
     dest_db = backup_dir / db_name
     try:
-        _export_sqlite_copy(source_db, dest_db, live_connection=live_connection)
-        _validate_workspace_version(dest_db)
+        _export_sqlite_copy(source_db, dest_db, live_connection=live_connection,
+                            encryption_key=encryption_key)
+        _validate_workspace_version(dest_db, encryption_key)
         digest = _sha256_file(dest_db)
         manifest = BackupManifest(
             format=BACKUP_FORMAT,
@@ -80,7 +88,10 @@ def create_backup(
             ],
             notes=[
                 "Consistent SQLite online backup (sqlite3.Connection.backup).",
-                "Encryption at rest is not included (D-CRYPTO-01).",
+                *(["Workspace database is SQLCipher-encrypted; verification and "
+                   "restore require the same workspace key."]
+                  if encryption_key is not None else
+                  ["Encryption at rest is not included (D-CRYPTO-01)."]),
                 "File materials/blobs are not part of this F2.5 slice.",
             ],
         )
@@ -128,7 +139,7 @@ def read_manifest(backup_dir: Path) -> BackupManifest:
     return manifest
 
 
-def verify_backup(backup_dir: Path) -> BackupManifest:
+def verify_backup(backup_dir: Path, *, encryption_key: bytes | None = None) -> BackupManifest:
     manifest = read_manifest(backup_dir)
     if manifest.version == 2:
         from homun.storage.installation_backup import verify_installation_backup
@@ -147,7 +158,7 @@ def verify_backup(backup_dir: Path) -> BackupManifest:
         expected_bytes = entry.get("bytes")
         if expected_bytes is not None and path.stat().st_size != int(expected_bytes):
             raise BackupError(f"Size mismatch for {name}")
-        _validate_workspace_version(path)
+        _validate_workspace_version(path, encryption_key)
     return manifest
 
 
@@ -157,9 +168,10 @@ def restore_backup(
     *,
     backup_dir: Path,
     destination_data_dir: Path,
+    encryption_key: bytes | None = None,
 ) -> Path:
     """Restore verified backup files into an empty data directory."""
-    manifest = verify_backup(backup_dir)
+    manifest = verify_backup(backup_dir, encryption_key=encryption_key)
     if manifest.version == 2:
         from homun.storage.installation_backup import restore_installation_backup
         return restore_installation_backup(backup_dir, destination_data_dir)

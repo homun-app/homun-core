@@ -1,6 +1,8 @@
 /** Human review of a submitted artifact: approve concludes the work (Fonte=motore). */
 import { defaultLocalActor, postEngineCommand } from "./engine-domain-client.ts";
 
+import { HomunClientError } from "./homun-errors.ts";
+
 export type WorkReviewDecision = "approve" | "request_changes";
 
 export function reviewEngineWork(input: {
@@ -11,6 +13,10 @@ export function reviewEngineWork(input: {
   comment?: string;
   commandId?: string;
 }): Promise<{ status: string; version: number }> {
+  const comment = input.comment?.trim();
+  if (input.decision === "request_changes" && !comment) {
+    throw new HomunClientError("validation_error", "Descrivi le correzioni richieste");
+  }
   return postEngineCommand({
     type: "work.review",
     payload: {
@@ -18,7 +24,7 @@ export function reviewEngineWork(input: {
       expected_version: input.expectedVersion,
       artifact_version_id: input.artifactVersionId,
       decision: input.decision,
-      ...(input.comment ? { comment: input.comment } : {}),
+      ...(comment ? { comment } : {}),
     },
     ...(input.commandId ? { commandId: input.commandId } : {}),
     actor: defaultLocalActor(),

@@ -4,6 +4,7 @@ from pathlib import Path
 import hashlib
 import sqlite3
 from homun.storage.backup_types import BackupError
+from homun.storage.sqlite import _open_connection
 
 
 def _sha256_file(path: Path) -> str:
@@ -21,13 +22,17 @@ def _export_sqlite_copy(
     source_db: Path,
     dest_db: Path,
     live_connection: sqlite3.Connection | None = None,
+    encryption_key: bytes | None = None,
 ) -> None:
     dest_db.parent.mkdir(parents=True, exist_ok=True)
     if dest_db.exists():
         raise BackupError(f"Backup database already exists: {dest_db}")
 
+    # The destination connection carries the same driver and key as the
+    # source: an encrypted workspace is backed up to an encrypted copy,
+    # never re-plaintexted in the backup directory.
     if live_connection is not None:
-        dest = sqlite3.connect(dest_db)
+        dest = _open_connection(dest_db, encryption_key)
         try:
             live_connection.backup(dest)
             dest.commit()
@@ -38,8 +43,8 @@ def _export_sqlite_copy(
     if not source_db.exists():
         raise BackupError(f"Source database missing: {source_db}")
 
-    source = sqlite3.connect(source_db.resolve().as_uri()+"?mode=ro", uri=True)
-    dest = sqlite3.connect(dest_db)
+    source = _open_connection(source_db, encryption_key, readonly=True)
+    dest = _open_connection(dest_db, encryption_key)
     try:
         source.backup(dest)
         dest.commit()

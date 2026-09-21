@@ -13,15 +13,39 @@ from homun.storage.documents import ENTITY_TYPES, write_delta
 from homun.storage.schema import initialize
 
 
-def _open_connection(path: Path, encryption_key: bytes | None = None) -> sqlite3.Connection:
-    """Open a workspace connection; SQLCipher when a key is provided."""
+def _open_connection(path: Path, encryption_key: bytes | None = None, *,
+                     readonly: bool = False) -> sqlite3.Connection:
+    """Use the same driver/key for every connection, fail before schema writes."""
+    from homun.storage.encryption import EncryptionError
+    if encryption_key is not None and (not isinstance(encryption_key, bytes) or len(encryption_key) != 32):
+        raise EncryptionError("Workspace key must contain exactly 32 bytes")
+    if path.is_file() and path.stat().st_size:
+        with path.open('rb') as handle:
+            plaintext = handle.read(16) == b'SQLite format 3\x00'
+        if encryption_key is not None and plaintext:
+            raise EncryptionError("Existing plaintext workspace requires an explicit migration; it was not changed")
+        if encryption_key is None and not plaintext:
+            raise EncryptionError("Workspace is encrypted or invalid; an explicit valid key is required")
+    driver = sqlite3
     if encryption_key is not None:
-        import sqlcipher3
-        conn = sqlcipher3.connect(str(path), check_same_thread=False)
-        # Set the key before any schema access; hex literal form.
-        conn.execute("PRAGMA key = \"x'" + encryption_key.hex() + "'\"")
+        try:
+            import sqlcipher3 as driver
+        except ImportError as exc:
+            raise EncryptionError("SQLCipher is unavailable; install homun-engine[encryption]") from exc
+    target = path.resolve().as_uri() + '?mode=ro' if readonly else str(path)
+    conn = driver.connect(target, uri=readonly, check_same_thread=False)
+    try:
+        if encryption_key is not None:
+            if not conn.execute('PRAGMA cipher_version').fetchone():
+                raise EncryptionError("SQLCipher encryption support is unavailable")
+            conn.execute("PRAGMA key = \"x'" + encryption_key.hex() + "'\"")
+        conn.execute('SELECT count(*) FROM sqlite_master').fetchone()
         return conn
-    return sqlite3.connect(path, check_same_thread=False)
+    except Exception as exc:
+        conn.close()
+        if encryption_key is not None:
+            raise EncryptionError("Cannot unlock workspace with the supplied key") from exc
+        raise
 
 
 class SqliteWorkspaceRepository:

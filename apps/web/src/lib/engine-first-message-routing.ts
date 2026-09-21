@@ -11,6 +11,7 @@ import {
   resolveFirstMessageRoute,
 } from "./engine-intake-client.ts";
 import { isHomunClientError } from "./homun-errors.ts";
+import { isAgreementRevisable } from "./engine-intake-display.ts";
 
 export type FirstMessageRoute = { route: "chat" | "propose"; language?: string | undefined };
 
@@ -20,6 +21,9 @@ export async function routeEngineFirstMessage(
   signal?: AbortSignal,
 ): Promise<FirstMessageRoute> {
   const intake = (await listWorkIntakes(work.id, signal)).at(-1);
+  if (intake?.status === "confirmed" && isAgreementRevisable(work)) {
+    return classifyFreshRequest(work.id, text, signal);
+  }
   const base = {
     hasIntake: Boolean(intake),
     intakeConfirmed: intake?.status === "confirmed",

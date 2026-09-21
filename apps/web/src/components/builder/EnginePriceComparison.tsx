@@ -1,5 +1,4 @@
 import { MessageResponse } from "../ai-elements/message";
-import { Check } from "lucide-react";
 import { useState } from "react";
 import type { Work } from "./conversation-types";
 import { usePriceComparison } from "@/hooks/usePriceComparison";
@@ -9,7 +8,7 @@ import {
   COMPARISON_UPLOAD_EXTENSIONS,
   eligibleForComparison,
 } from "@/lib/engine-material-selection";
-import { reviewEngineWork } from "@/lib/engine-work-review";
+import { EngineResultReview } from "./EngineResultReview";
 import "./engine-price-comparison.css";
 
 function download(text: string, extension: string) {
@@ -34,29 +33,9 @@ export function EnginePriceComparison({
   onChanged: () => Promise<void>;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
-  const [reviewBusy, setReviewBusy] = useState(false);
-  const [reviewError, setReviewError] = useState<unknown>(null);
   const tool = usePriceComparison(work, onChanged);
   const p = tool.proposal;
 
-  async function concludeWork() {
-    if (!p?.artifact_id) return;
-    setReviewBusy(true);
-    setReviewError(null);
-    try {
-      await reviewEngineWork({
-        workId: work.id,
-        expectedVersion: work.revision,
-        artifactVersionId: p.artifact_id,
-        decision: "approve",
-      });
-      await onChanged();
-    } catch (cause) {
-      setReviewError(cause);
-    } finally {
-      setReviewBusy(false);
-    }
-  }
   return (
     <section className="cw-price-tool" aria-label="Confronto listini">
       <details open={p !== null || initiallyOpen || undefined}>
@@ -65,6 +44,7 @@ export function EnginePriceComparison({
           Confronto locale per SKU. I file restano nel progetto; nessun invio a servizi esterni.
         </p>
         {(!p ||
+          (p.status === "completed" && work.engineStatus === "ready") ||
           ["failed", "blocked"].includes(p.status) ||
           (p.status === "pending_approval" && Boolean(tool.error))) && (
           <>
@@ -164,33 +144,13 @@ export function EnginePriceComparison({
                     <MessageResponse>{p.report_markdown ?? ""}</MessageResponse>
                   </div>
                 </details>
-                {p.artifact_id && work.engineStatus === "review" ? (
-                  <>
-                    <button
-                      className="cw-primary"
-                      disabled={reviewBusy}
-                      onClick={() => void concludeWork()}
-                    >
-                      Approva il risultato e concludi il lavoro
-                    </button>
-                    <p className="cw-hint">
-                      Approvando chiudi la revisione: il report resta disponibile e il lavoro
-                      risulta completato. Per chiedere modifiche, scrivi in chat cosa correggere.
-                    </p>
-                  </>
-                ) : (
-                  work.engineStatus === "completed" && (
-                    <p role="status">
-                      <Check size={15} /> Risultato approvato: lavoro completato.
-                    </p>
-                  )
-                )}
+                <EngineResultReview key={p.artifact_id} work={work} artifactId={p.artifact_id} onChanged={onChanged} />
               </>
             )}
           </>
         )}
         {tool.busy && <p role="status">Preparazione in corso…</p>}
-        <HomunErrorNotice error={tool.error ?? reviewError} />
+        <HomunErrorNotice error={tool.error} />
       </details>
     </section>
   );

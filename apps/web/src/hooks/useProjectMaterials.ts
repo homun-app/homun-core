@@ -1,102 +1,98 @@
-/** Project materials as tool sources: load eligible items, ingest added files into the project. */
-import { useCallback, useEffect, useRef, useState } from "react";
+/** Project materials as tool sources; reading never creates a project. */
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Work } from "@/components/builder/conversation-types";
-import {
-  archiveEngineMaterial,
-  ingestEngineMaterial,
-  listEngineMaterials,
-  type EngineMaterial,
-} from "@/lib/engine-projects-client";
-import { resolveEngineProjectForWork } from "@/lib/engine-work-project";
+import { archiveEngineMaterial, ingestEngineMaterial, listEngineMaterials, type EngineMaterial } from "@/lib/engine-projects-client";
+import { findEngineProjectForWork, resolveEngineProjectForWork } from "@/lib/engine-work-project";
+import { createMaterialRequestGuard, ingestMaterialFiles, notifyMaterialChange, subscribeMaterialChanges, type MaterialFailure } from "@/lib/project-materials-lifecycle";
 
 export type IngestOutcome = {
-  /** Materials stored in (or already present in) the project. */
   addedIds: string[];
-  /** Stored materials the current tool can select. */
   eligibleIds: string[];
-  /** Files whose bytes were already in the project (idempotent re-ingest). */
   existing: number;
-  /** Files rejected by the engine (size, storage). */
   failed: number;
+  failures: MaterialFailure[];
 };
-
 export type ProjectMaterials = {
   materials: EngineMaterial[];
   loaded: boolean;
   busy: boolean;
   error: unknown;
+  failures: MaterialFailure[];
   reload: () => Promise<EngineMaterial[]>;
   ingest: (files: File[]) => Promise<IngestOutcome>;
   remove: (material: EngineMaterial) => Promise<boolean>;
 };
 
-export function useProjectMaterials(
-  work: Work,
-  filter: (material: EngineMaterial) => boolean,
-): ProjectMaterials {
+export function useProjectMaterials(work: Work, filter: (material: EngineMaterial) => boolean): ProjectMaterials {
   const [materials, setMaterials] = useState<EngineMaterial[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [failures, setFailures] = useState<MaterialFailure[]>([]);
   const workRef = useRef(work);
   workRef.current = work;
   const filterRef = useRef(filter);
   filterRef.current = filter;
+  const scope = useMemo(() => ({ guard: createMaterialRequestGuard(), live: true }), [work.id, work.projectId, work.engineConversationId]);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const active = () => scope.live && scopeRef.current === scope;
 
   const reload = useCallback(async (): Promise<EngineMaterial[]> => {
-    const projectId = await resolveEngineProjectForWork(workRef.current, "Materiali del lavoro");
-    const items = (await listEngineMaterials({ projectId })).filter(filterRef.current);
-    setMaterials(items);
-    setLoaded(true);
-    return items;
-  }, []);
+    const current = scope.guard.begin();
+    try {
+      const projectId = await findEngineProjectForWork(workRef.current);
+      const items = projectId ? (await listEngineMaterials({ projectId })).filter(filterRef.current) : [];
+      if (scope.live && scopeRef.current === scope && current()) {
+        setMaterials(items);
+        setLoaded(true);
+        setError(null);
+      }
+      return items;
+    } catch (cause) {
+      if (scope.live && scopeRef.current === scope && current()) setError(cause);
+      throw cause;
+    }
+  }, [scope]);
 
   useEffect(() => {
-    let live = true;
-    void reload().catch((cause: unknown) => {
-      if (live) setError(cause);
-    });
-    return () => {
-      live = false;
-    };
-  }, [reload, work.id, work.projectId]);
+    scope.live = true;
+    setMaterials([]);
+    setLoaded(false);
+    setBusy(false);
+    setError(null);
+    setFailures([]);
+    const refresh = () => { void reload().catch(() => { /* reload preserves the typed error */ }); };
+    const unsubscribe = subscribeMaterialChanges(refresh);
+    refresh();
+    return () => { scope.live = false; scope.guard.invalidate(); unsubscribe(); };
+  }, [reload, scope]);
 
   async function ingest(files: File[]): Promise<IngestOutcome> {
+    if (!files.length) return { addedIds: [], eligibleIds: [], existing: 0, failed: 0, failures: [] };
+    const targetWork = workRef.current;
     setBusy(true);
     setError(null);
+    setFailures([]);
     try {
-      const projectId = await resolveEngineProjectForWork(workRef.current, "Materiali del lavoro");
-      // Everything the person picked lands in the project (identical bytes
-      // return the existing material); per-file failures never abort the rest
-      // of a folder upload.
-      const addedIds: string[] = [];
-      let existing = 0;
-      let failed = 0;
-      for (const file of files) {
-        const relativePath =
-          "webkitRelativePath" in file && file.webkitRelativePath
-            ? String(file.webkitRelativePath)
-            : undefined;
-        try {
-          const added = await ingestEngineMaterial({
-            projectId,
-            file,
-            ...(relativePath ? { relativePath } : {}),
-          });
-          addedIds.push(added.materialId);
-          if (!added.created) existing += 1;
-        } catch {
-          failed += 1;
-        }
+      const projectId = await resolveEngineProjectForWork(targetWork, "Materiali del lavoro");
+      const outcome = await ingestMaterialFiles(files, (file) => ingestEngineMaterial({
+        projectId, file,
+        ...(file.webkitRelativePath ? { relativePath: file.webkitRelativePath } : {}),
+      }));
+      if (active()) setFailures(outcome.failures);
+      // Notify even if the following refresh fails: persistence already succeeded.
+      if (outcome.addedIds.length) notifyMaterialChange(projectId);
+      let reloaded: EngineMaterial[] = [];
+      if (active()) {
+        try { reloaded = await reload(); } catch { /* preserve successes and reload's typed error */ }
       }
-      const reloaded = await reload();
-      const eligibleIds = addedIds.filter((id) => reloaded.some((m) => m.id === id));
-      return { addedIds, eligibleIds, existing, failed };
+      return { ...outcome, eligibleIds: outcome.addedIds.filter((id) => reloaded.some((m) => m.id === id)) };
     } catch (cause) {
-      setError(cause);
-      return { addedIds: [], eligibleIds: [], existing: 0, failed: files.length };
+      if (active()) setError(cause);
+      return { addedIds: [], eligibleIds: [], existing: 0, failed: files.length, failures: [] };
     } finally {
-      setBusy(false);
+      if (active()) setBusy(false);
     }
   }
 
@@ -104,19 +100,18 @@ export function useProjectMaterials(
     setBusy(true);
     setError(null);
     try {
-      await archiveEngineMaterial({
-        materialId: material.id,
-        expectedVersion: material.version,
-      });
-      await reload();
+      await archiveEngineMaterial({ materialId: material.id, expectedVersion: material.version });
+      notifyMaterialChange(material.project_id);
+      if (active()) {
+        try { await reload(); } catch { /* archive succeeded; reload preserves error */ }
+      }
       return true;
     } catch (cause) {
-      setError(cause);
+      if (active()) setError(cause);
       return false;
     } finally {
-      setBusy(false);
+      if (active()) setBusy(false);
     }
   }
-
-  return { materials, loaded, busy, error, reload, ingest, remove };
+  return { materials, loaded, busy, error, failures, reload, ingest, remove };
 }

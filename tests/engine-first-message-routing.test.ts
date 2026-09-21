@@ -56,6 +56,38 @@ test("a confirmed agreement routes messages straight to chat without classificat
   }
 });
 
+test("a work request after a confirmed idle agreement proposes a supervised revision", async () => {
+  const mock = mockFetch([intakeList("confirmed"), classify("work_request")]);
+  try {
+    assert.deepEqual(
+      await routeEngineFirstMessage(work({ engineStatus: "draft", title: "Preparazione" }), "Ora confronta i due listini"),
+      { route: "propose" },
+    );
+  } finally { mock.restore(); }
+});
+
+test("a question after a confirmed idle agreement remains chat", async () => {
+  const mock = mockFetch([intakeList("confirmed"), classify("question")]);
+  try {
+    assert.deepEqual(await routeEngineFirstMessage(work({ engineStatus: "draft" }), "Quali file ti servono?"), { route: "chat" });
+    assert.equal(mock.seen.filter((url) => url.includes("/classify")).length, 1);
+  } finally { mock.restore(); }
+});
+
+test("a confirmed agreement with a plan or result cannot re-enter intake", async () => {
+  for (const state of [
+    { engineStatus: "review" },
+    { engineStatus: "draft", enginePlanRevision: 1 },
+    { engineStatus: "draft", engineArtifactVersion: 1 },
+  ]) {
+    const mock = mockFetch([intakeList("confirmed"), classify("work_request")]);
+    try {
+      assert.deepEqual(await routeEngineFirstMessage(work(state), "Confronta di nuovo"), { route: "chat" });
+      assert.equal(mock.seen.length, 1);
+    } finally { mock.restore(); }
+  }
+});
+
 test("an open question on a fresh work stays in the conversation", async () => {
   const mock = mockFetch([intakeList("failed"), classifyJson({ kind: "question", language: "en" })]);
   try {

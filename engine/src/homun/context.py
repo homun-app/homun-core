@@ -13,7 +13,8 @@ from homun.memory.mem0_port import build_memory_port
 from homun.memory.types import MemoryPort
 from homun.models.registry import ModelRegistry, build_default_registry
 from homun.storage.paths import default_db_path
-from homun.storage.sqlite import SqliteWorkspaceRepository
+from homun.storage.sqlite import SqliteWorkspaceRepository, _open_connection
+from homun.storage.encryption import configured_workspace_key
 
 DEFAULT_WORKSPACE_ID = "ws_local"
 
@@ -56,14 +57,16 @@ def create_context(
     db_path: Path | str | None = None,
     data_dir: Path | str | None = None,
     for_tests: bool = False,
+    encryption_key: bytes | None = None,
 ) -> EngineContext:
     path = Path(db_path) if db_path is not None else default_db_path(workspace_id)
     if data_dir is not None:
         root = Path(data_dir)
     else:
         root = path.parent
+    encryption_key = configured_workspace_key(encryption_key)
     with ExitStack() as resources:
-        repo = SqliteWorkspaceRepository(path, workspace_id)
+        repo = SqliteWorkspaceRepository(path, workspace_id, encryption_key=encryption_key)
         resources.callback(repo.close)
         store = repo.load()
         models = build_default_registry(root, for_tests=for_tests)
@@ -74,7 +77,7 @@ def create_context(
             durable_runtime=False,
             data_dir=root,
         )
-        memory_connection = sqlite3.connect(path, check_same_thread=False)
+        memory_connection = _open_connection(path, encryption_key)
         resources.callback(memory_connection.close)
         memory = build_memory_port(SqliteMemoryPort(memory_connection, workspace_id))
         ctx = EngineContext(

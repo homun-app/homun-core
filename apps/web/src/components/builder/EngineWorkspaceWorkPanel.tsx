@@ -1,5 +1,5 @@
 /** Compact, source-explicit summary of an engine-backed work. */
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Work } from "./conversation-types";
 import type { SpaceData, SpaceView } from "./ConversationSpace";
 import { EngineWorkObjectiveEditor } from "./EngineWorkObjectiveEditor";
@@ -8,8 +8,7 @@ import { engineWorkPanelMessage } from "@/lib/engine-project-projection";
 import { intakeConfirmLabel } from "@/lib/engine-intake-display";
 import { engineStatusLabel } from "@/lib/engine-work-status";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
-import { listEngineMaterials, type EngineMaterial } from "@/lib/engine-projects-client";
-import { listEngineConversations } from "@/lib/engine-domain-client";
+import { useProjectMaterials } from "@/hooks/useProjectMaterials";
 import "./engine-work-summary.css";
 
 export function EngineWorkspaceWorkPanel({
@@ -33,7 +32,8 @@ export function EngineWorkspaceWorkPanel({
   onOpenSpace: (view: SpaceView, initial?: string, selected?: string) => void;
   onApplyObjectivePatch?: ((objective: string) => Promise<void>) | undefined;
 }) {
-  const materials = useWorkMaterials(work);
+  const sources = useProjectMaterials(work, (material) => material.status === "active");
+  const materials = { items: sources.materials.slice(0, 5), count: sources.materials.length };
   const proposal = intake.proposal;
   const awaitingConfirmation = work.engineIntakePending && proposal;
   return (
@@ -145,43 +145,10 @@ export function EngineWorkspaceWorkPanel({
           <p>{engineWorkPanelMessage(work.engineStatus ?? "", proposal)}</p>
         )}
       </section>
+      <HomunErrorNotice error={sources.error} />
       {contributionPanel}
     </aside>
   );
-}
-
-function useWorkMaterials(work: Work) {
-  const [state, setState] = useState<{ items: EngineMaterial[]; count: number }>({
-    items: [],
-    count: 0,
-  });
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        // Read-only: never create a project just to list materials — that
-        // would change permission state between propose and confirm.
-        const conversation = work.engineConversationId
-          ? (await listEngineConversations()).find((c) => c.id === work.engineConversationId)
-          : undefined;
-        const projectId = work.projectId ?? conversation?.project_id ?? null;
-        if (!projectId) {
-          if (live) setState({ items: [], count: 0 });
-          return;
-        }
-        const items = (await listEngineMaterials({ projectId })).filter(
-          (material) => material.status === "active",
-        );
-        if (live) setState({ items: items.slice(0, 5), count: items.length });
-      } catch {
-        if (live) setState({ items: [], count: 0 });
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, [work.id, work.projectId, work.engineConversationId]);
-  return state;
 }
 
 function WorkTitleEditor({

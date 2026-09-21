@@ -19,6 +19,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+encryption = [
+  "sqlcipher3>=0.6.2,<0.7",
+]
 dev = [
   "pytest>=8.0.0",
   "httpx>=0.27.0",

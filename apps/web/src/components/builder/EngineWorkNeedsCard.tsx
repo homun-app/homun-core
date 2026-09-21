@@ -148,6 +148,12 @@ export function EngineWorkNeedsCard({
           void add(files);
         }}
       />
+      {sources.failures.map((failure, index) => (
+        <div key={`${failure.fileName}:${index}`}>
+          <span className="cw-hint">{failure.fileName}</span>
+          <HomunErrorNotice error={failure.error} />
+        </div>
+      ))}
       <HomunErrorNotice error={sources.error} />
     </section>
   );

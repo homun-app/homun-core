@@ -1,5 +1,6 @@
 /**
- * Short engine banner inside the workspace — product language, not debug dump.
+ * Operational notices inside the workspace: silent when healthy, typed errors
+ * when not. Simulation stays explicitly labelled and never mixes with engine.
  */
 
 import type { EngineFollowupNotice } from "@/lib/engine-domain-client";
@@ -27,41 +28,35 @@ export function ConversationEngineBanner({
   followups,
   onRefresh,
 }: Props) {
+  if (dataSourceSelected === "simulation") {
+    return (
+      <p className="cw-hint" aria-label="Fonte dati">
+        Fonte: simulazione — nessun dato reale è collegato.
+      </p>
+    );
+  }
   if (dataSourceSelected !== "engine") {
     return null;
   }
 
   const ready = backend === "engine" && !gateError;
-  const hasNotice = !ready || Boolean(error) || followups.length > 0;
+  // Healthy idle renders nothing: the conversation is the interface.
+  if (ready && !error && followups.length === 0) {
+    return null;
+  }
 
   return (
-    <section
-      className={`cw-engine-banner${hasNotice ? "" : " cw-engine-banner--quiet"}`}
-      aria-label="Stato lavori"
-    >
-      <details className="cw-engine-banner__details">
-        <summary>{ready ? "Dettagli lavori" : "Connessione non disponibile"}</summary>
-        <div className="cw-engine-banner__row">
-          <strong>{ready ? "I tuoi lavori" : "Connessione non disponibile"}</strong>
-          <span>
-            {ready
-              ? workCount === 0
-                ? "Nessun lavoro ancora — scrivi sotto per crearne uno"
-                : `${workCount} lavor${workCount === 1 ? "o" : "i"}`
-              : "Controlla che l'app sia avviata correttamente"}
-          </span>
-          <button
-            type="button"
-            className="cw-secondary"
-            disabled={busy || Boolean(gateError)}
-            onClick={onRefresh}
-          >
-            Aggiorna
-          </button>
-        </div>
-      </details>
+    <section className="cw-engine-banner" aria-label="Stato lavori" role={gateError ? "alert" : undefined}>
       {!ready && (
-        <p role="status">La connessione non è disponibile: il lavoro riprenderà quando sarà di nuovo accessibile.</p>
+        <>
+          <p role="status">
+            Connessione non disponibile: il lavoro riprenderà quando l'app sarà di nuovo
+            accessibile.
+          </p>
+          <button type="button" className="cw-secondary" disabled={busy} onClick={onRefresh}>
+            Riprova la connessione
+          </button>
+        </>
       )}
       {followups.map((notice) => (
         <div key={notice.commandId} className="cw-engine-banner__error">

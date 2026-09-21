@@ -13,6 +13,25 @@ import secrets
 import subprocess
 from pathlib import Path
 
+from homun.domain.errors import DomainError
+
+
+class EncryptionError(DomainError):
+    code = "workspace_encryption_error"
+
+
+def configured_workspace_key(key: bytes | None = None) -> bytes | None:
+    """Explicit opt-in only. Never create/replace keys during engine startup."""
+    if key is None and (filename := os.environ.get("HOMUN_WORKSPACE_KEY_FILE")):
+        try:
+            key = bytes.fromhex(Path(filename).expanduser().read_text().strip())
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise EncryptionError("Cannot read the configured workspace key file") from exc
+    if key is not None and (not isinstance(key, bytes) or len(key) != 32):
+        raise EncryptionError("Workspace key must contain exactly 32 bytes")
+    return key
+
+
 KEY_SIZE = 32  # bytes; SQLCipher 4 default key length
 KEYCHAIN_SERVICE = 'dev.homun.engine.workspace-key'
 
@@ -97,5 +116,5 @@ def load_or_create_key(data_dir: Path) -> bytes:
 
 
 def derive_database_key(master_key: bytes, purpose: str) -> bytes:
-    """Derive a purpose-specific key from the master (HKDF-SHA256, no logging)."""
+    """Derive a purpose-specific key from the master (PBKDF2-HMAC-SHA256 domain separation, no logging)."""
     return hashlib.pbkdf2_hmac('sha256', master_key, purpose.encode(), iterations=1, dklen=KEY_SIZE)
