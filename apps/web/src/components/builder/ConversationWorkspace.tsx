@@ -1245,23 +1245,8 @@ export function ConversationWorkspace() {
           panelOpen={panel}
           onTogglePanel={() => setPanel(!panel)}
         />
-        <ConversationEngineBanner
-        followups={engine.followups}
-          backend={engine.backend}
-          dataSourceSelected={engine.dataSource}
-          gateError={engine.gateError}
-          error={engine.error}
-          busy={engine.busy}
-          workCount={engine.works.length}
-          onRefresh={() => {
-            engine.clearError();
-            void engine.refresh().catch((cause: unknown) => {
-              setNotice(
-                cause instanceof Error ? cause.message : "Ricarica dominio non riuscita.",
-              );
-            });
-          }}
-        />
+        {/* Engine diagnostics live in Settings, not above the conversation.
+            Errors that block work surface through HomunErrorNotice. */}
         {space ? (
           <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined}
             engineMode={engine.backend === "engine"}

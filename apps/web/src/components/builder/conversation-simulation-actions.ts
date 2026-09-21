@@ -44,7 +44,7 @@ export function createSimulationActions({ work, scenario, works, scenarios, view
   }
   function simulate() {
     if (isEngineBackedWork(work)) {
-      setNotice("Simulazione disabilitata: questo lavoro è sul motore.");
+      setNotice("Simulazione non disponibile per questo lavoro.");
       return;
     }
     if (scenario && spaceData.removedPeople?.includes(scenario.agent)) {

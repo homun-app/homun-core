@@ -265,7 +265,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
         list.push({
           who: "agent",
           sender: "Homun",
-          text: "Patch applicata sul motore. Obiettivo/assegnazioni aggiornati.",
+          text: "Modifica applicata. Obiettivo e assegnazioni aggiornati.",
         });
         return { ...current, [work.id]: list };
       });
@@ -445,7 +445,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
           {
             who: "agent",
             sender: "Homun",
-            text: "Contributo ricevuto dal motore. I file sono in archivio materiali (hash + extract).",
+            text: "Contributo ricevuto. I file sono in archivio materiali.",
           },
         );
         return { ...current, [work.id]: list };

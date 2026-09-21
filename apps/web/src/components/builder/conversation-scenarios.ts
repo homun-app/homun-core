@@ -90,7 +90,7 @@ export const phaseText: Record<
 
 /** Chrome for Fonte=motore works — never reuse Marta/Vera demo scenarios. */
 export const engineHomunScenario: ConversationScenario = {
-  title: "Lavoro sul motore",
+  title: "Lavoro versionato",
   agent: "Homun",
   initial: "",
   role: "Motore locale",
@@ -98,7 +98,7 @@ export const engineHomunScenario: ConversationScenario = {
   icon: "H",
   input: "Obiettivo e vincoli del lavoro",
   help: "Descrivi cosa vuoi ottenere. Homun interpreta e propone piano o modifiche.",
-  outcome: "Un lavoro versionato sul dominio SQLite del motore.",
+  outcome: "Un lavoro versionato con storico completo.",
   steps: [],
   result: "",
   body: "",
