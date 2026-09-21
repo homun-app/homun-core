@@ -5,7 +5,6 @@ import { useWorkIntake } from "@/hooks/useWorkIntake";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { EngineMaterialRead } from "./EngineMaterialRead";
 import { EnginePriceComparison } from "./EnginePriceComparison";
-import { EngineToolChain } from "./EngineToolChain";
 import {
   briefChangeLines,
   isAgreementRevisable,
@@ -246,10 +245,7 @@ export function EngineWorkIntake({
         <EnginePriceComparison initiallyOpen work={work} onChanged={onChanged} />
       )}
       {confirmed && p.capability === "read_material" && (
-        <>
-          <EngineMaterialRead initiallyOpen work={work} onChanged={onChanged} />
-          <EngineToolChain work={work} onChanged={onChanged} />
-        </>
+        <EngineMaterialRead initiallyOpen work={work} onChanged={onChanged} />
       )}
     </>
   );

@@ -110,17 +110,14 @@ export function EngineToolChain({
             <strong>Propongo {chain.steps.length} letture</strong>
             <ol className="cw-chain-steps">
               {chain.steps.map((step, index) => (
-                <li key={step.proposal_id ?? index}>
-                  {step.materials[0]?.title} · v{step.materials[0]?.version} ·{" "}
-                  <span title={step.materials[0]?.sha256}>
-                    sha:{step.materials[0]?.sha256.slice(0, 8)}…
-                  </span>
+                <li key={step.proposal_id ?? index} title={`SHA-256: ${step.materials[0]?.sha256}`}>
+                  {step.materials[0]?.title} · v{step.materials[0]?.version}
                 </li>
               ))}
             </ol>
             <p className="cw-hint">
-              L’approvazione copre esattamente questi documenti con queste versioni: se uno cambia
-              prima dell’avvio, la proposta non è più valida.
+              L’approvazione copre esattamente questi documenti con queste versioni (passa il mouse
+              per l’impronta digitale): se uno cambia prima dell’avvio, la proposta non è più valida.
             </p>
             <button className="cw-primary" disabled={tool.busy} onClick={() => void tool.approve()}>
               Approva le {chain.steps.length} letture

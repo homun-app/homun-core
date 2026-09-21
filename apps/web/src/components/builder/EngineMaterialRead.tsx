@@ -1,12 +1,14 @@
-import { useState } from "react";
+/** Unified material reading: one card for single and multi-read, upload or pick. */
+import { useEffect, useState } from "react";
 import type { Work } from "./conversation-types";
-import { useMaterialRead } from "@/hooks/useMaterialRead";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
-import { EngineMaterialPicker } from "./EngineMaterialPicker";
-import { eligibleForRead } from "@/lib/engine-material-selection";
+import { useMaterialRead } from "@/hooks/useMaterialRead";
+import { useToolChain } from "@/hooks/useToolChain";
+import { eligibleForRead, materialOptionLabel } from "@/lib/engine-material-selection";
+import { resolveEngineProjectForWork } from "@/lib/engine-work-project";
+import { listEngineMaterials, type EngineMaterial } from "@/lib/engine-projects-client";
 import "./engine-material-read.css";
 
-/** Authorized material read: provenance-bound extract, approval before execution. */
 export function EngineMaterialRead({
   work,
   onChanged,
@@ -16,48 +18,139 @@ export function EngineMaterialRead({
   work: Work;
   onChanged: () => Promise<void>;
 }) {
+  const [materials, setMaterials] = useState<EngineMaterial[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
-  const [mode, setMode] = useState<"upload" | "pick">("upload");
-  const [picked, setPicked] = useState("");
-  const tool = useMaterialRead(work, onChanged);
-  const p = tool.proposal;
+  const [source, setSource] = useState<"project" | "upload">("project");
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const single = useMaterialRead(work, onChanged);
+  const chain = useToolChain(work, onChanged);
+  const p = single.proposal;
+  const c = chain.chain;
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const projectId = await resolveEngineProjectForWork(work, "Materiali del lavoro");
+        const items = (await listEngineMaterials({ projectId })).filter(eligibleForRead);
+        if (live) setMaterials(items);
+      } catch (cause) {
+        if (live) setLoadError(cause);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [work.id, work.projectId]);
+
+  const idle =
+    (!p || ["failed", "blocked"].includes(p.status)) &&
+    (!c || ["failed", "blocked"].includes(c.status));
+  const multi = selected.length > 1;
+
   return (
-    <section className="cw-price-tool" aria-label="Lettura materiale sul motore">
-      <details open={p !== null || initiallyOpen || undefined}>
-        <summary>Leggi un materiale</summary>
+    <section className="cw-price-tool" aria-label="Lettura materiali sul motore">
+      <details open={!idle || initiallyOpen || undefined}>
+        <summary>
+          {c && c.steps.length > 1
+            ? `Letture multiple (${c.steps.length})`
+            : "Leggi i materiali"}
+        </summary>
         <p>
-          Lettura locale con estratto limitato e provenienza (hash e versione). Il file resta nel
-          progetto; nessuna interpretazione automatica, nessun invio a servizi esterni.
+          Lettura locale con estratto limitato e provenienza. Seleziona uno o più documenti già nel
+          progetto, oppure carica un file. Nessuna interpretazione automatica, nessun invio a
+          servizi esterni.
         </p>
-        {(!p || ["failed", "blocked"].includes(p.status)) && (
+
+        {idle && (
           <>
             <div className="cs-actions">
               <button
                 type="button"
-                className={mode === "upload" ? "cw-secondary" : "cs-link"}
-                onClick={() => setMode("upload")}
+                className={source === "project" ? "cw-secondary" : "cs-link"}
+                onClick={() => setSource("project")}
               >
-                Carica un file
+                Materiali del progetto
               </button>
               <button
                 type="button"
-                className={mode === "pick" ? "cw-secondary" : "cs-link"}
-                onClick={() => setMode("pick")}
+                className={source === "upload" ? "cw-secondary" : "cs-link"}
+                onClick={() => setSource("upload")}
               >
-                Usa un materiale del progetto
+                Carica un file
               </button>
             </div>
-            {mode === "upload" ? (
+            {source === "project" ? (
+              <>
+                <ul className="cw-chain-picker">
+                  {materials.map((material) => (
+                    <li key={material.id} title={`SHA-256: ${material.content_hash}`}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(material.id)}
+                          disabled={single.busy || chain.busy}
+                          onChange={(event) => {
+                            single.newFiles();
+                            chain.newChain();
+                            setSelected((current) =>
+                              event.target.checked
+                                ? current.length >= 8
+                                  ? current
+                                  : [...current, material.id]
+                                : current.filter((id) => id !== material.id),
+                            );
+                          }}
+                        />
+                        {materialOptionLabel(material)}
+                      </label>
+                    </li>
+                  ))}
+                  {materials.length === 0 && (
+                    <li className="cw-hint">
+                      Nessun documento idoneo nel progetto: carica un file oppure usa la chat.
+                    </li>
+                  )}
+                </ul>
+                <p className="cw-hint">
+                  {selected.length === 0
+                    ? "Seleziona un documento per la lettura singola, o due o più per leggerli tutti con una sola approvazione."
+                    : multi
+                      ? `${selected.length} documenti selezionati: un'unica approvazione copre tutte le letture.`
+                      : "1 documento selezionato."}
+                </p>
+                {multi ? (
+                  <button
+                    type="button"
+                    className="cw-secondary"
+                    disabled={chain.busy || selected.length < 2}
+                    onClick={() => void chain.propose(selected)}
+                  >
+                    Prepara le {selected.length} letture
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="cw-secondary"
+                    disabled={single.busy || selected.length !== 1}
+                    onClick={() => void single.prepareFromMaterial(selected[0]!)}
+                  >
+                    Prepara la lettura
+                  </button>
+                )}
+              </>
+            ) : (
               <>
                 <label>
-                  Materiale da leggere
+                  File da leggere
                   <input
                     type="file"
                     accept=".txt,.md,.csv,.tsv,.json,.log,.pdf"
-                    disabled={tool.busy}
+                    disabled={single.busy}
                     onChange={(e) => {
                       setFile(e.target.files?.[0] ?? null);
-                      tool.newFiles();
+                      single.newFiles();
                     }}
                   />
                 </label>
@@ -65,34 +158,8 @@ export function EngineMaterialRead({
                 <button
                   type="button"
                   className="cw-secondary"
-                  disabled={tool.busy || !file}
-                  onClick={() => file && void tool.prepare(file)}
-                >
-                  Prepara la lettura
-                </button>
-              </>
-            ) : (
-              <>
-                <EngineMaterialPicker
-                  work={work}
-                  filter={eligibleForRead}
-                  label="Materiale da leggere"
-                  value={picked}
-                  disabled={tool.busy}
-                  onChange={(id) => {
-                    setPicked(id);
-                    tool.newFiles();
-                  }}
-                />
-                <p>
-                  Riferimento con versione e hash già registrati: nessun nuovo caricamento, la
-                  fonte esistente è riutilizzata così com'è.
-                </p>
-                <button
-                  type="button"
-                  className="cw-secondary"
-                  disabled={tool.busy || !picked}
-                  onClick={() => void tool.prepareFromMaterial(picked)}
+                  disabled={single.busy || !file}
+                  onClick={() => file && void single.prepare(file)}
                 >
                   Prepara la lettura
                 </button>
@@ -100,56 +167,111 @@ export function EngineMaterialRead({
             )}
           </>
         )}
-        {p && (
+
+        {/* Single-read proposal and states */}
+        {p && !multi && (
           <>
-            <p>
-              <strong>{p.material.title}</strong> · v{p.material.version}
-            </p>
             {p.status === "pending_approval" && (
               <>
                 <p>
-                  Produrrò un artifact di lettura con estratto limitato, hash e provenienza. Il
-                  materiale non viene modificato.
+                  <strong>{p.material.title}</strong> · v{p.material.version}
+                </p>
+                <p>
+                  Produrrò un artifact di lettura con estratto limitato e provenienza. Il materiale
+                  non viene modificato.
                 </p>
                 <button
                   className="cw-primary"
-                  disabled={tool.busy}
-                  onClick={() => void tool.approve()}
+                  disabled={single.busy}
+                  onClick={() => void single.approve()}
                 >
                   Approva ed esegui lettura
                 </button>
               </>
             )}
             {["queued", "running"].includes(p.status) && (
-              <p role="status">
-                Lettura approvata, elaborazione in corso. Puoi riaprire questa conversazione dopo
-                il riavvio.
-              </p>
+              <p role="status">Lettura approvata, elaborazione in corso.</p>
             )}
             {["failed", "blocked"].includes(p.status) && (
               <p role="alert">
-                Lettura non completata: {p.error_code ?? p.status}. Nessun artifact è stato
-                dichiarato pronto.
+                Lettura non completata: {p.error_code ?? p.status}. Nessun artifact dichiarato pronto.
               </p>
             )}
-            {p.status === "completed" && (
+            {p.status === "completed" && <ReadResult extract={p.extract ?? ""} />}
+          </>
+        )}
+
+        {/* Chain proposal and states */}
+        {c && c.steps.length > 1 && (
+          <>
+            {c.status === "pending_approval" && (
+              <>
+                <strong>Propongo {c.steps.length} letture</strong>
+                <ol className="cw-chain-steps">
+                  {c.steps.map((step, index) => (
+                    <li key={step.proposal_id ?? index} title={`SHA-256: ${step.materials[0]?.sha256}`}>
+                      {step.materials[0]?.title} · v{step.materials[0]?.version}
+                    </li>
+                  ))}
+                </ol>
+                <p className="cw-hint">
+                  Un'unica approvazione copre esattamente queste versioni (passa il mouse per
+                  l'impronta): se un documento cambia, la proposta non è più valida.
+                </p>
+                <button className="cw-primary" disabled={chain.busy} onClick={() => void chain.approve()}>
+                  Approva le {c.steps.length} letture
+                </button>
+              </>
+            )}
+            {["queued", "running"].includes(c.status) && (
+              <p role="status">Letture approvate, esecuzione in corso.</p>
+            )}
+            {c.status === "completed" && (
               <>
                 <p role="status">
-                  <strong>Artifact di lettura pronto per la tua verifica.</strong>
+                  <strong>{c.steps.length} letture completate.</strong>
                 </p>
-                <details>
-                  <summary>Leggi l’estratto</summary>
-                  <div className="cw-read-extract">
-                    <pre>{p.extract ?? ""}</pre>
-                  </div>
-                </details>
+                <ol className="cw-chain-steps cw-chain-done">
+                  {c.steps.map((step, index) => (
+                    <li key={step.proposal_id ?? index}>✓ {step.materials[0]?.title}</li>
+                  ))}
+                </ol>
               </>
+            )}
+            {["failed", "blocked"].includes(c.status) && (
+              <p role="alert">
+                Catena non completata ({c.error_code ?? c.status}): le letture già ultimate restano
+                in revisione, le altre non sono state eseguite.
+              </p>
             )}
           </>
         )}
-        {tool.busy && <p role="status">Preparazione in corso…</p>}
-        <HomunErrorNotice error={tool.error} />
+
+        {single.busy && <p role="status">Preparazione in corso…</p>}
+        {chain.busy && <p role="status">Preparazione delle letture…</p>}
+        <HomunErrorNotice error={single.error ?? chain.error ?? loadError} />
       </details>
     </section>
+  );
+}
+
+/** Expandable extract with a clear label, not a wall of text. */
+function ReadResult({ extract }: { extract: string }) {
+  const [open, setOpen] = useState(false);
+  if (!extract) return null;
+  return (
+    <>
+      <p role="status">
+        <strong>Artifact di lettura pronto per la tua verifica.</strong>
+      </p>
+      <button type="button" className="cs-link" onClick={() => setOpen(!open)}>
+        {open ? "Nascondi l'estratto" : "Leggi l'estratto"}
+      </button>
+      {open && (
+        <div className="cw-read-extract">
+          <pre>{extract}</pre>
+        </div>
+      )}
+    </>
   );
 }
