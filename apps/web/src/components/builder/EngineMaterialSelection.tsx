@@ -52,17 +52,17 @@ export function EngineMaterialSelection({
 
   async function add(files: File[]) {
     if (!files.length) return;
-    const { addedIds, eligibleIds, skipped } = await sources.ingest(files, uploadExtensions);
-    if (!addedIds.length && !skipped) return;
+    const { addedIds, eligibleIds, failed } = await sources.ingest(files);
+    if (!addedIds.length && !failed) return;
     // Fresh uploads that pass the tool's eligibility become the selection,
     // keeping earlier picks only when there is room for them.
     const merged = [...selected.filter((id) => !eligibleIds.includes(id)), ...eligibleIds];
     onSelectionChange(merged.length > maxSelected ? eligibleIds.slice(0, maxSelected) : merged);
     const parts: string[] = [];
     if (eligibleIds.length) parts.push(`${eligibleIds.length} file aggiunti al progetto e selezionati.`);
-    const rejected = addedIds.length - eligibleIds.length;
-    if (rejected) parts.push(`${rejected} caricati ma non idonei a questo strumento.`);
-    if (skipped) parts.push(`${skipped} ignorati (formato non previsto).`);
+    const stored = addedIds.length - eligibleIds.length;
+    if (stored) parts.push(`${stored} archiviati nel progetto ma non usati da questo strumento.`);
+    if (failed) parts.push(`${failed} non caricati per un errore.`);
     setNotice(parts.join(" "));
   }
 

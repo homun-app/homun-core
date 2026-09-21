@@ -7,20 +7,13 @@ import type { EngineMaterial } from "./engine-projects-client.ts";
 
 const READABLE_EXTENSIONS = [".txt", ".md", ".csv", ".tsv", ".json", ".log", ".pdf"];
 
-/** What each tool accepts on upload — also drives the folder filter. */
+/** What each tool can use — also hints the single-file picker via `accept`. */
 export const READ_UPLOAD_EXTENSIONS: readonly string[] = READABLE_EXTENSIONS;
 export const COMPARISON_UPLOAD_EXTENSIONS: readonly string[] = [".csv"];
 
 function hasExtension(name: string | null | undefined, extensions: readonly string[]): boolean {
   const lower = (name ?? "").toLowerCase();
   return extensions.some((ext) => lower.endsWith(ext));
-}
-
-export function fileMatchesUploadExtensions(
-  name: string,
-  extensions: readonly string[],
-): boolean {
-  return hasExtension(name, extensions);
 }
 
 function isManagedFile(material: EngineMaterial): boolean {
