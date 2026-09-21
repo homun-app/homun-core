@@ -2,7 +2,7 @@
  * Pure work-status and notification helpers for the simulated workspace.
  */
 
-import { engineStatusLabel } from "../../lib/engine-work-status.ts";
+import { engineDraftStatusLabel, engineStatusLabel } from "../../lib/engine-work-status.ts";
 import { isHumanMember, type MemberProfile } from "./conversation-members.ts";
 import { phaseText, scenarioForWork, type ConversationScenario } from "./conversation-scenarios.ts";
 import type { Work } from "./conversation-types.ts";
@@ -33,6 +33,7 @@ export function workspaceWorkStatus(
 ): string {
   if (w.source === "engine") {
     if (w.engineIntakePending) return "In attesa della tua conferma";
+    if (w.engineStatus === "draft") return engineDraftStatusLabel(Boolean(w.engineIntakeConfirmed));
     if (w.engineStatus) return engineStatusLabel(w.engineStatus);
   }
   return workStatusLabel(w, scenarios, profiles);

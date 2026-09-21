@@ -47,8 +47,14 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { ConversationEngineBanner } from "./ConversationEngineBanner";
 import { useChatAutoScroll } from "@/hooks/useChatAutoScroll";
 import { useEngineWorkspace } from "@/hooks/useEngineWorkspace";
+import { useWorkDestinationScroll, type WorkDestination } from "@/hooks/useWorkDestinationScroll";
 import { isEngineBackedWork } from "@/lib/conversation-engine-bridge";
 import { parseConversationNavigation } from "@/lib/conversation-navigation";
+import {
+  parsePlanInsert,
+  parsePlanReorder,
+  stripTrailingMention,
+} from "@/lib/conversation-plan-commands";
 
 import { projectWorkspaceData } from "@/lib/engine-project-projection";
 export type { Work } from "./conversation-types";
@@ -188,11 +194,7 @@ export function ConversationWorkspace() {
       setSeenResults((current) => current.filter((key) => !key.endsWith(`:${active}`)));
     setWorks((all) => all.map((w) => (w.id === active ? { ...w, ...change } : w)));
   }
-  const [destination, setDestination] = useState<{
-    id: string;
-    selector: string;
-    stamp: number;
-  } | null>(null);
+  const [destination, setDestination] = useState<WorkDestination>(null);
   function open(id: string | null, selector = "") {
     if (window.innerWidth <= 800) setSidebarOpen(false);
     if (id) setDestination({ id, selector, stamp: Date.now() });
@@ -211,25 +213,14 @@ export function ConversationWorkspace() {
   // Anchored follow while reading at the bottom; an own send always follows.
   const [ownSendSeq, bumpOwnSend] = useReducer((count: number) => count + 1, 0);
   useChatAutoScroll(history, { activeId: active, messages: work?.messages ?? [], ownSendSeq });
-  useEffect(() => {
-    if (!destination || active !== destination.id || space) return;
-    const frame = requestAnimationFrame(() => {
-      const selector =
-        destination.selector ||
-        (work?.request?.status === "pending"
-          ? "[data-chat-request]"
-          : work?.phase === "review" || work?.phase === "approved"
-            ? "[data-chat-delivery]"
-            : ".cw-message:last-of-type");
-      const element = history.current?.querySelector<HTMLElement>(selector);
-      if (element) {
-        element.scrollIntoView({ block: "start", behavior: "instant" });
-        element.tabIndex = -1;
-        element.focus({ preventScroll: true });
-      }
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [destination, active, space, work?.request?.status, work?.phase]);
+  // Deep-link landing (pending request, delivery or newest message) on open.
+  useWorkDestinationScroll(history, {
+    destination,
+    active,
+    spaceOpen: Boolean(space),
+    requestStatus: work?.request?.status,
+    phase: work?.phase,
+  });
   function create(
     index: number,
     text?: string,
@@ -687,6 +678,14 @@ export function ConversationWorkspace() {
         setNotice(engine.gateError ? "App locale non pronta: impossibile salvare." : "Per il confronto usa i due campi file nella scheda Confronta due listini della conversazione. Gli allegati non sono stati inviati.");
         return;
       }
+      // One turn at a time, said out loud: a second send would silently abort
+      // the turn in flight (single-flight engine contract).
+      if (engine.busy) {
+        setNotice(
+          "Homun sta ancora completando il turno precedente: attendi la risposta oppure premi Annulla.",
+        );
+        return;
+      }
       if (work && isEngineBackedWork(work)) {
         bumpOwnSend();
         void engine
@@ -707,20 +706,20 @@ export function ConversationWorkspace() {
     }
 
     if (work?.catalogPlan && work.phase !== "approved" && /^sposta\s/i.test(text)) {
-      const match = text.trim().match(/^sposta\s+(.+?)\s+(prima|dopo)\s+(?:di\s+)?(.+)$/i);
+      const reorder = parsePlanReorder(text);
       const plan = work.catalogPlan;
-      if (match) {
+      if (reorder) {
         const from = plan.steps.findIndex((s) =>
-          s.title.toLowerCase().includes(match[1]!.toLowerCase()),
+          s.title.toLowerCase().includes(reorder.itemTitle.toLowerCase()),
         );
         const target = plan.steps.findIndex((s) =>
-          s.title.toLowerCase().includes(match[3]!.toLowerCase()),
+          s.title.toLowerCase().includes(reorder.anchorTitle.toLowerCase()),
         );
         if (from >= plan.completed && target >= plan.completed && from !== target) {
           const steps = plan.steps.filter((_, i) => i !== from);
           const to =
             steps.findIndex((s) => s.id === plan.steps[target]!.id) +
-            (match[2]!.toLowerCase() === "dopo" ? 1 : 0);
+            (reorder.relation === "dopo" ? 1 : 0);
           steps.splice(to, 0, plan.steps[from]!);
           setPlanEdit({ workId: work.id, plan: { ...plan, steps } });
           patch({
@@ -748,18 +747,16 @@ export function ConversationWorkspace() {
       work.phase !== "approved" &&
       /^(aggiungi|inserisci)\b/i.test(text.trim())
     ) {
-      const match = text
-        .trim()
-        .match(/^(?:aggiungi|inserisci)\s+(.+?)(?:\s+(prima|dopo)\s+(?:di\s+)?(.+))?$/i);
-      if (match) {
+      const insert = parsePlanInsert(text);
+      if (insert) {
         const names = [...new Set([...spacePeople, ...Object.keys(spaceData.profiles || {})])];
         const agent = names.find((n) => text.toLowerCase().includes("@" + n.toLowerCase())) || "";
-        const title = match[1]!.replace(/\s+(?:con\s+)?@[^@]+$/, "").trim();
-        const anchor = (match[3] || "").replace(/\s+(?:con\s+)?@[^@]+$/, "").toLowerCase();
+        const title = stripTrailingMention(insert.rawTitle);
+        const anchor = insert.rawAnchor ? stripTrailingMention(insert.rawAnchor).toLowerCase() : "";
         const index = anchor
           ? work.catalogPlan.steps.findIndex((s) => s.title.toLowerCase().includes(anchor))
           : work.catalogPlan.steps.length;
-        const position = index + (match[2]?.toLowerCase() === "dopo" ? 1 : 0);
+        const position = index + (insert.relation === "dopo" ? 1 : 0);
         if (index < 0 || position < work.catalogPlan.completed) {
           setNotice(
             "Indica un passaggio futuro usando il suo titolo, oppure inseriscilo con + nel piano.",

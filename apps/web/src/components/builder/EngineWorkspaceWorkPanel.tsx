@@ -6,7 +6,7 @@ import { EngineWorkObjectiveEditor } from "./EngineWorkObjectiveEditor";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { engineWorkPanelMessage } from "@/lib/engine-project-projection";
 import { intakeConfirmLabel } from "@/lib/engine-intake-display";
-import { engineStatusLabel } from "@/lib/engine-work-status";
+import { engineDraftStatusLabel, engineStatusLabel } from "@/lib/engine-work-status";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { useProjectMaterials } from "@/hooks/useProjectMaterials";
 import "./engine-work-summary.css";
@@ -41,7 +41,11 @@ export function EngineWorkspaceWorkPanel({
       <div className="cw-panel-top">
         <span className="cw-overline">IL LAVORO, ADESSO</span>
         <span className={`cw-status ${work.phase}`}>
-          {awaitingConfirmation ? "In attesa della tua conferma" : engineStatusLabel(work.engineStatus)}
+          {awaitingConfirmation
+            ? "In attesa della tua conferma"
+            : work.engineStatus === "draft"
+              ? engineDraftStatusLabel(Boolean(work.engineIntakeConfirmed))
+              : engineStatusLabel(work.engineStatus)}
         </span>
       </div>
       <h2 title={work.title}>{work.title}</h2>

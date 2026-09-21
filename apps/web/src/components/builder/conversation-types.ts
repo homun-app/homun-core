@@ -80,6 +80,8 @@ export type Work = {
   engineObjective?: string;
   /** A brief awaits the person's confirmation; proposal drives the display. */
   engineIntakePending?: boolean;
+  /** Brief already confirmed while the work is still a draft (preparation ongoing). */
+  engineIntakeConfirmed?: boolean;
   /** Objective text comes from the unconfirmed proposal (read-only display). */
   engineObjectiveProposed?: boolean;
   /** Collaborator named by the unconfirmed proposal. */

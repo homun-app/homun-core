@@ -129,9 +129,12 @@ test("manual renames and agreed values are never overwritten by the preview", ()
   assert.equal(next.title, "Il mio titolo");
   assert.equal(next.engineObjective, "Obiettivo concordato");
   assert.equal(next.engineObjectiveProposed, undefined);
-  const confirmed = applyIntakePreview(draftWork(), proposal({ status: "confirmed" }));
+  const confirmed = applyIntakePreview({ ...draftWork(), engineStatus: "draft" }, proposal({ status: "confirmed" }));
   assert.equal(confirmed.title, PLACEHOLDER_WORK_TITLE);
   assert.equal(confirmed.engineIntakePending, undefined);
+  // An agreed draft is preparation, not a stale proposal: the status chip
+  // must be able to tell the two apart.
+  assert.equal(confirmed.engineIntakeConfirmed, true);
 });
 
 test("confirm label names the decision the person is making", () => {

@@ -188,7 +188,33 @@ Secondo passaggio (dopo la segnalazione delle regressioni), stesso ambiente:
   Accessibilità (poi riavvio di ZCode) perché io possa guidare l'app nativa
   come utente.
 
+## Terzo passaggio: residui di stabilità e design multi-fase
+
+Dopo la consegna delle correzioni, con il via di Fabio («procedi»):
+
+- **Secondo invio esplicitamente rifiutato durante un turno in volo.** Prima,
+  un secondo messaggio abortiva silenziosamente il primo (contratto
+  single-flight del motore). Ora l'invio viene rifiutato con un avviso onesto
+  («attendi la risposta oppure premi Annulla»): verificato in GUI (secondo
+  invio non consegnato, primo turno completato).
+- **Etichetta di stato onesta per le bozze accordate.** Un lavoro in `draft`
+  con accordo confermato mostrava «Da concordare»; ora «Concordato · in
+  preparazione» (flag `engineIntakeConfirmed` dalla proiezione intake,
+  helper `engineDraftStatusLabel`, usato da pannello e lista lavori).
+  Verificato in GUI su un lavoro di lettura appena confermato. Limite: il
+  flag è proiettato solo sul lavoro attivo (le altre bozze nella sidebar
+  continuano a mostrare lo stato motore nudo).
+- **Spec del piano multi-fase** scritta e in attesa di validazione:
+  `docs/superpowers/specs/2026-09-21-piano-multi-fase-design.md` (percorso
+  della persona, prima fetta raccolta→confronto, tre decisioni aperte per
+  Fabio). Nessun codice su quel perimetro.
+- Estrazioni per il budget architettura (sceso a 1431, mai alzato): parser
+  dei comandi di piano simulati in `lib/conversation-plan-commands.ts`,
+  atterraggio deep-link in `hooks/useWorkDestinationScroll.ts`.
+
 ## File toccati
+
+
 
 - Nuovi: `apps/web/src/lib/chat-autoscroll-policy.ts`,
   `apps/web/src/hooks/useChatAutoScroll.ts`,
@@ -200,10 +226,12 @@ Secondo passaggio (dopo la segnalazione delle regressioni), stesso ambiente:
   `engine/src/homun/models/json_payload.py` (estrattore condiviso),
   `tests/chat-autoscroll-policy.test.ts`, `tests/engine-conflict-recovery.test.ts`.
 - Modificati: `ConversationWorkspace.tsx` (hook di scroll + segnale own-send +
-  nota che si chiude al successo + navigazione estratta),
-  `ConversationWorkspaceChatStage.tsx` (render dell'attesa),
-  `conversation-types.ts` (`AgentWait`), `useEngineWorkspace.ts` (fasi di attesa
-  e messaggio preservato sull'errore), i tre hook tool, le tre schede tool
-  (nota guidata), `engine-status-bar.css` (blocco rimosso, foglio morto),
-  `engine/src/homun/models/interpret.py` e `intake.py` (estrattore condiviso),
-  `tools/architecture-baseline.json` (budget abbassato 1442 → 1434).
+  nota che si chiude al successo + gate invio durante turno in volo +
+  navigazione estratta), `ConversationWorkspaceChatStage.tsx` (render
+  dell'attesa), `conversation-types.ts` (`AgentWait`, `engineIntakeConfirmed`),
+  `useEngineWorkspace.ts` (fasi di attesa e messaggio preservato sull'errore),
+  i tre hook tool, le tre schede tool (nota guidata), `engine-work-status.ts`
+  + pannello/lista lavori (etichetta bozze accordate), `engine-status-bar.css`
+  (blocco rimosso, foglio morto), `engine/src/homun/models/interpret.py` e
+  `intake.py` (estrattore condiviso), `tools/architecture-baseline.json`
+  (budget abbassato 1442 → 1431).

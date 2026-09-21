@@ -6,7 +6,7 @@
     "apps/web/src/components/builder/ConversationMaterials.tsx": 965,
     "apps/web/src/components/builder/ConversationProjectsSettingsSection.tsx": 694,
     "apps/web/src/components/builder/ConversationSpace.tsx": 1024,
-    "apps/web/src/components/builder/ConversationWorkspace.tsx": 1434,
+    "apps/web/src/components/builder/ConversationWorkspace.tsx": 1431,
     "apps/web/src/components/builder/StudioDocuments.tsx": 541,
     "apps/web/src/components/builder/StudioPlanningSimulation.tsx": 535,
     "apps/web/src/components/builder/StudioProcedures.tsx": 664,

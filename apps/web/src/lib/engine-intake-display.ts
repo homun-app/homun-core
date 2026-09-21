@@ -93,7 +93,14 @@ export function intakeConfirmLabel(
  * domain record keeps its placeholders; confirm writes the agreed values.
  */
 export function applyIntakePreview(work: Work, proposal: WorkIntake): Work {
-  if (!isIntakeAwaitingUser(proposal)) return work;
+  if (!isIntakeAwaitingUser(proposal)) {
+    // A confirmed brief on a draft work means agreed work in preparation:
+    // status chips must not call it "to be agreed" anymore.
+    if (proposal.status === "confirmed" && work.engineStatus === "draft") {
+      return { ...work, engineIntakeConfirmed: true };
+    }
+    return work;
+  }
   const next: Work = { ...work, engineIntakePending: true };
   if (work.title === PLACEHOLDER_WORK_TITLE) next.title = proposal.title;
   if (!work.engineObjective || work.engineObjective === PLACEHOLDER_WORK_OBJECTIVE) {
