@@ -61,7 +61,10 @@ function message(over: Partial<ConversationMessage>): ConversationMessage {
 test("the overlay is dropped only when no streamed turn is in flight", () => {
   assert.equal(canDropOverlay(undefined), true);
   assert.equal(canDropOverlay([message({ who: "you", text: "richiesta" })]), true);
-  assert.equal(canDropOverlay([message({ partial: true, text: "Homun sta elaborando…" })]), false);
+  assert.equal(
+    canDropOverlay([message({ partial: true, text: "", wait: { phase: "reading", startedAt: 0 } })]),
+    false,
+  );
   assert.equal(
     canDropOverlay([message({ who: "you" }), message({ partial: true }), message({ who: "you" })]),
     false,

@@ -2,6 +2,7 @@
 import { useState } from "react";
 import type { Work } from "./conversation-types";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
+import { HomunGuidanceNotice } from "@/components/HomunGuidanceNotice";
 import { useMaterialRead } from "@/hooks/useMaterialRead";
 import { useToolChain } from "@/hooks/useToolChain";
 import {
@@ -172,6 +173,7 @@ export function EngineMaterialRead({
 
         {single.busy && <p role="status">Preparazione in corso…</p>}
         {chain.busy && <p role="status">Preparazione delle letture…</p>}
+        <HomunGuidanceNotice message={single.recovery ?? chain.recovery} />
         <HomunErrorNotice error={single.error ?? chain.error} />
       </details>
     </section>

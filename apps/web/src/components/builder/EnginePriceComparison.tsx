@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { Work } from "./conversation-types";
 import { usePriceComparison } from "@/hooks/usePriceComparison";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
+import { HomunGuidanceNotice } from "@/components/HomunGuidanceNotice";
 import { EngineMaterialSelection } from "./EngineMaterialSelection";
 import {
   COMPARISON_UPLOAD_EXTENSIONS,
@@ -150,6 +151,7 @@ export function EnginePriceComparison({
           </>
         )}
         {tool.busy && <p role="status">Preparazione in corso…</p>}
+        <HomunGuidanceNotice message={tool.recovery} />
         <HomunErrorNotice error={tool.error} />
       </details>
     </section>

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { Work } from "./conversation-types";
 import { useToolChain } from "@/hooks/useToolChain";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
+import { HomunGuidanceNotice } from "@/components/HomunGuidanceNotice";
 import { eligibleForRead, materialOptionLabel } from "@/lib/engine-material-selection";
 import { resolveEngineProjectForWork } from "@/lib/engine-work-project";
 import { listEngineMaterials, type EngineMaterial } from "@/lib/engine-projects-client";
@@ -158,6 +159,7 @@ export function EngineToolChain({
           </p>
         )}
         {tool.busy && <p role="status">Preparazione in corso…</p>}
+        <HomunGuidanceNotice message={tool.recovery} />
         <HomunErrorNotice error={tool.error ?? loadError} />
       </details>
     </section>

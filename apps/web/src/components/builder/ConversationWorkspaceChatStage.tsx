@@ -6,6 +6,7 @@
 import { EngineWorkIntake } from "./EngineWorkIntake";
 import { Check, Sparkles, X } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
+import { ConversationAgentWait } from "./ConversationAgentWait";
 import { ConversationAvatar } from "./ConversationAvatar";
 import type { CatalogPlan } from "./ConversationCatalogPlan";
 import { isHumanMember, memberProfile } from "./conversation-members";
@@ -150,7 +151,11 @@ export function ConversationWorkspaceChatStage({
                   <small>
                     {m.sender || (m.who === "you" ? work.requester || "Tu" : scenario!.agent)}
                   </small>
-                  <p className={m.partial ? "cw-message-partial" : undefined}>{m.text}</p>
+                  {m.wait ? (
+                    <ConversationAgentWait phase={m.wait.phase} startedAt={m.wait.startedAt} />
+                  ) : (
+                    <p className={m.partial ? "cw-message-partial" : undefined}>{m.text}</p>
+                  )}
                   {engineMode &&
                     m.who === "agent" &&
                     !m.partial &&

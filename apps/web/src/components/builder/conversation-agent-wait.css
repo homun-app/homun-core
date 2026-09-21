@@ -1,0 +1,49 @@
+/* In-transcript wait state for a model turn (phase + elapsed). */
+.cw-agent-wait {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding-left: 1.1rem;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.cw-agent-wait-label {
+  font-style: italic;
+  opacity: 0.85;
+}
+.cw-agent-wait-label::after {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #829077;
+  animation: cw-agent-wait-pulse 1.4s ease-in-out infinite;
+}
+.cw-agent-wait-elapsed {
+  font-size: 11px;
+  color: #829077;
+  font-variant-numeric: tabular-nums;
+}
+.cw-agent-wait-note {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: #829077;
+}
+@keyframes cw-agent-wait-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cw-agent-wait-label::after {
+    animation: none;
+  }
+}

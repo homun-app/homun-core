@@ -1,6 +1,6 @@
 # Roadmap Homun
 
-Aggiornata al 20 settembre 2026: percorsi motore reali e simulazione convivono esplicitamente. Lo [stato verificato](docs/STATO.md) e l’[ultima consegna](docs/research/2026-09-20-confini-delega.md) definiscono il perimetro provato; le funzioni del prototipo non diventano automaticamente funzionalità motore.
+Aggiornata al 21 settembre 2026: percorsi motore reali e simulazione convivono esplicitamente. Lo [stato verificato](docs/STATO.md) e l’[ultima consegna](docs/research/2026-09-21-stabilita-conversazione.md) definiscono il perimetro provato; le funzioni del prototipo non diventano automaticamente funzionalità motore.
 
 ## Prototipo UX (simulato)
 
@@ -40,6 +40,7 @@ Aggiornata al 20 settembre 2026: percorsi motore reali e simulazione convivono e
 - [x] Primo lavoro reale end-to-end: confronto CSV deterministico, approvazione, report e riavvio
 - [x] Intake conversazionale: sintesi distinta, proposta agente/nuovo profilo, conferma e riepilogo compatto
 - [x] Stabilità strutturale del brief nelle riformulazioni: campi modificati dichiarati, conservazione engine-side, diff esplicito e lettura non interrotta dai refresh
+- [x] Stabilità della conversazione: scroll ancorato a chi legge (policy testata), attese del modello oneste nel transcript (fasi + tempo), 409 a versione stantia con recupero guidato e proposta stantia ritirata
 - [x] Distinzione domanda/lavoro: classificazione backend senza stato, una domanda resta in chat senza creare lavori o collaboratori
 - [x] Registro unico delle capacità: fonte singola per vocabolario, versione tool, limiti ed effetti; disponibilità interrogabile per attore; intake alimentato dal catalogo reale
 - [x] Prompt esterni al codice e multilingua: file nel pacchetto con varianti it/en, store con fallback, lingua per workspace (`HOMUN_LANGUAGE`) e per richiesta, rilevamento automatico in classificazione

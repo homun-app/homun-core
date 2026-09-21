@@ -8,6 +8,7 @@ import {
   prepareReadFromMaterial,
   type MaterialRead,
 } from "@/lib/engine-material-read-client";
+import { useConflictRecovery } from "./useConflictRecovery";
 
 export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
   const [reads, setReads] = useState<MaterialRead[]>([]);
@@ -19,6 +20,14 @@ export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
   const operation = useRef(crypto.randomUUID());
   const approval = useRef(crypto.randomUUID());
   const finished = useRef<string | null>(null);
+  const newFiles = () => {
+    operation.current = crypto.randomUUID();
+    approval.current = crypto.randomUUID();
+  };
+  const conflict = useConflictRecovery({
+    refresh: () => callback.current(),
+    renewOperation: newFiles,
+  });
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -26,8 +35,9 @@ export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
       try {
         const items = await listMaterialReads(work.id);
         if (!live) return;
-        const next = items.at(-1) ?? null;
-        setReads(items);
+        const visible = items.filter((item) => !conflict.isRejected(item.id));
+        const next = visible.at(-1) ?? null;
+        setReads(visible);
         setProposal(next);
         if (next?.status === "completed" && finished.current !== next.id) {
           finished.current = next.id;
@@ -51,11 +61,12 @@ export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
   async function prepare(file: File) {
     setBusy(true);
     setError(null);
+    conflict.clear();
     try {
       setProposal(await prepareMaterialRead(work, file, operation.current));
       await callback.current();
     } catch (cause) {
-      setError(cause);
+      if (!(await conflict.handle(cause))) setError(cause);
     } finally {
       setBusy(false);
     }
@@ -63,11 +74,12 @@ export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
   async function prepareFromMaterial(materialId: string) {
     setBusy(true);
     setError(null);
+    conflict.clear();
     try {
       setProposal(await prepareReadFromMaterial(work, materialId, operation.current));
       await callback.current();
     } catch (cause) {
-      setError(cause);
+      if (!(await conflict.handle(cause))) setError(cause);
     } finally {
       setBusy(false);
     }
@@ -76,11 +88,17 @@ export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
     if (!proposal) return;
     setBusy(true);
     setError(null);
+    conflict.clear();
     try {
       setProposal(await approveMaterialRead(work.id, proposal, approval.current));
       await callback.current();
     } catch (cause) {
-      setError(cause);
+      if (await conflict.handle(cause, "approve", proposal.id)) {
+        // The rejected proposal is permanently unapprovable: back to selection.
+        setProposal(null);
+      } else {
+        setError(cause);
+      }
     } finally {
       setBusy(false);
     }
@@ -90,12 +108,10 @@ export function useMaterialRead(work: Work, onChanged: () => Promise<void>) {
     reads,
     busy,
     error,
+    recovery: conflict.recovery,
     prepare,
     prepareFromMaterial,
     approve,
-    newFiles: () => {
-      operation.current = crypto.randomUUID();
-      approval.current = crypto.randomUUID();
-    },
+    newFiles,
   };
 }

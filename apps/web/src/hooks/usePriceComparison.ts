@@ -8,6 +8,7 @@ import {
   preparePriceComparison,
   type PriceComparison,
 } from "@/lib/engine-price-comparison-client";
+import { useConflictRecovery } from "./useConflictRecovery";
 export function usePriceComparison(work: Work, onChanged: () => Promise<void>) {
   const [proposal, setProposal] = useState<PriceComparison | null>(null);
   const [busy, setBusy] = useState(false);
@@ -17,6 +18,14 @@ export function usePriceComparison(work: Work, onChanged: () => Promise<void>) {
   const operation = useRef(crypto.randomUUID());
   const approval = useRef(crypto.randomUUID());
   const finished = useRef<string | null>(null);
+  const newFiles = () => {
+    operation.current = crypto.randomUUID();
+    approval.current = crypto.randomUUID();
+  };
+  const conflict = useConflictRecovery({
+    refresh: () => callback.current(),
+    renewOperation: newFiles,
+  });
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -24,7 +33,8 @@ export function usePriceComparison(work: Work, onChanged: () => Promise<void>) {
       try {
         const items = await listPriceComparisons(work.id);
         if (!live) return;
-        const next = items.at(-1) ?? null;
+        const next =
+          items.filter((item) => !conflict.isRejected(item.id)).at(-1) ?? null;
         setProposal(next);
         if (next?.status === "completed" && finished.current !== next.id) {
           finished.current = next.id;
@@ -48,11 +58,12 @@ export function usePriceComparison(work: Work, onChanged: () => Promise<void>) {
   async function prepare(left: File, right: File) {
     setBusy(true);
     setError(null);
+    conflict.clear();
     try {
       setProposal(await preparePriceComparison(work, left, right, operation.current));
       await callback.current();
     } catch (cause) {
-      setError(cause);
+      if (!(await conflict.handle(cause))) setError(cause);
     } finally {
       setBusy(false);
     }
@@ -60,11 +71,12 @@ export function usePriceComparison(work: Work, onChanged: () => Promise<void>) {
   async function prepareFromMaterials(leftId: string, rightId: string) {
     setBusy(true);
     setError(null);
+    conflict.clear();
     try {
       setProposal(await prepareComparisonFromMaterials(work, leftId, rightId, operation.current));
       await callback.current();
     } catch (cause) {
-      setError(cause);
+      if (!(await conflict.handle(cause))) setError(cause);
     } finally {
       setBusy(false);
     }
@@ -73,11 +85,17 @@ export function usePriceComparison(work: Work, onChanged: () => Promise<void>) {
     if (!proposal) return;
     setBusy(true);
     setError(null);
+    conflict.clear();
     try {
       setProposal(await approvePriceComparison(work.id, proposal, approval.current));
       await callback.current();
     } catch (cause) {
-      setError(cause);
+      if (await conflict.handle(cause, "approve", proposal.id)) {
+        // The rejected proposal is permanently unapprovable: back to selection.
+        setProposal(null);
+      } else {
+        setError(cause);
+      }
     } finally {
       setBusy(false);
     }
@@ -86,12 +104,10 @@ export function usePriceComparison(work: Work, onChanged: () => Promise<void>) {
     proposal,
     busy,
     error,
+    recovery: conflict.recovery,
     prepare,
     prepareFromMaterials,
     approve,
-    newFiles: () => {
-      operation.current = crypto.randomUUID();
-      approval.current = crypto.randomUUID();
-    },
+    newFiles,
   };
 }

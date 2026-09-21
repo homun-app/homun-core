@@ -39,7 +39,6 @@ import { createIntakeConversation } from "@/lib/engine-intake-creation";
 import { proposeWorkIntake } from "@/lib/engine-intake-client";
 import { applyIntakePreview } from "@/lib/engine-intake-display";
 import { routeEngineFirstMessage, type FirstMessageRoute } from "@/lib/engine-first-message-routing";
-const THINKING_TEXT = "Homun sta elaborando…";
 export type EngineWorkspaceState = {
   dataSource: EngineDataSource;
   backend: "simulation" | "engine";
@@ -167,12 +166,19 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     }
     const signal = beginRequest();
     const prior = messageOverlay[work.id] ?? work.messages;
+    const startedAt = Date.now();
     setMessageOverlay((current) => ({
       ...current,
       [work.id]: [
         ...(current[work.id] ?? work.messages),
         { who: "you", sender: "Fabio", text },
-        { who: "agent", sender: "Homun", text: THINKING_TEXT, partial: true },
+        {
+          who: "agent",
+          sender: "Homun",
+          text: "",
+          partial: true,
+          wait: { phase: "reading", startedAt },
+        },
       ],
     }));
     try {
@@ -185,17 +191,28 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
         return { route: "propose" as const };
       })) as FirstMessageRoute;
       if (routed.route === "propose") {
-        // The thinking placeholder's job ends here: the durable answer is the
-        // proposal card, and the persisted user message comes back via transcript.
+        // The wait stays visible through synthesis: an honest phase instead of
+        // a mute gap between the message and the agreement card.
+        setMessageOverlay((current) => ({
+          ...current,
+          [work.id]: (current[work.id] ?? work.messages).map((message) =>
+            message.who === "agent" && message.partial && message.wait
+              ? { ...message, wait: { phase: "preparing", startedAt } }
+              : message,
+          ),
+        }));
+        await proposeWorkIntake(work.id, text, work.revision, crypto.randomUUID(), signal, routed.language);
+        bumpIntakeSeq();
+        await refresh();
+        // The request is durable (the engine posts it before synthesis) and
+        // the agreement card owns the outcome: drop only the wait, let the
+        // transcript reload replace the rest.
         setMessageOverlay((current) => ({
           ...current,
           [work.id]: (current[work.id] ?? work.messages).filter(
             (m) => !(m.who === "agent" && m.partial),
           ),
         }));
-        await proposeWorkIntake(work.id, text, work.revision, crypto.randomUUID(), signal, routed.language);
-        bumpIntakeSeq();
-        await refresh();
         return;
       }
       let streamed = "";
@@ -240,9 +257,19 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
         }));
         return;
       }
+      // The turn did not complete: keep the person's words visible with an
+      // honest outcome note instead of letting the message vanish.
       setMessageOverlay((current) => ({
         ...current,
-        [work.id]: prior,
+        [work.id]: [
+          ...prior,
+          { who: "you", sender: "Fabio", text },
+          {
+            who: "agent",
+            sender: "Homun",
+            text: "L'elaborazione non è andata a buon fine e nessuna risposta è stata applicata. Riprova quando vuoi.",
+          },
+        ],
       }));
       setError(cause);
       throw cause;

@@ -11,6 +11,15 @@ import type { SpaceData, SpaceView } from "./ConversationSpace";
 
 export type Phase = "proposal" | "waiting" | "ready" | "review" | "approved";
 
+/** Honest in-flight model phases shown inside the transcript (never fake progress). */
+export type AgentWaitPhase = "reading" | "preparing";
+
+export type AgentWait = {
+  phase: AgentWaitPhase;
+  /** Epoch ms when the wait started; drives the elapsed counter. */
+  startedAt: number;
+};
+
 export type ConversationMessage = {
   engineMessageId?: string;
   sender?: string;
@@ -18,6 +27,8 @@ export type ConversationMessage = {
   text: string;
   /** F3.5: in-flight / incomplete assistant turn (not yet final). */
   partial?: boolean;
+  /** In-flight wait state: shown instead of text until the turn resolves. */
+  wait?: AgentWait;
   /** F3.5a: user explicitly promoted this turn to approved memory. */
   memorySaved?: boolean;
   /** F3.4: pending patch preview attached to an assistant turn (engine only). */

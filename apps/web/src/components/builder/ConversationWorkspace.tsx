@@ -45,6 +45,7 @@ import { useConversationPrototypeStorage } from "./useConversationPrototypeStora
 import { type Phase, type Work } from "./conversation-types";
 import { useEffect, useRef, useState } from "react";
 import { ConversationEngineBanner } from "./ConversationEngineBanner";
+import { useChatAutoScroll } from "@/hooks/useChatAutoScroll";
 import { useEngineWorkspace } from "@/hooks/useEngineWorkspace";
 import { isEngineBackedWork } from "@/lib/conversation-engine-bridge";
 
@@ -206,15 +207,9 @@ export function ConversationWorkspace() {
     setNotice("");
     setPanel(true);
   }
-  useEffect(() => {
-    history.current?.scrollTo({
-      top: history.current.scrollHeight,
-      behavior:
-        preferences.motion && !window.matchMedia("(prefers-reduced-motion: reduce)").matches
-          ? "smooth"
-          : "instant",
-    });
-  }, [work?.messages.length, active, preferences.motion]);
+  // Follow the newest content only while the reader is anchored to the
+  // bottom; uploads and refreshes never interrupt someone reading above.
+  useChatAutoScroll(history, { activeId: active, messages: work?.messages ?? [] });
   useEffect(() => {
     if (!destination || active !== destination.id || space) return;
     const frame = requestAnimationFrame(() => {

@@ -103,6 +103,12 @@
   font-weight: 600;
 }
 
+.homun-guidance-notice {
+  margin: 0.35rem 0 0;
+  color: oklch(0.42 0.08 145);
+  font-weight: 600;
+}
+
 /* Keep healthy connection chrome to one quiet line. */
 .engine-status-bar {
   display: flex;

@@ -7,6 +7,7 @@ import {
   proposeToolChain,
   type ToolChain,
 } from "@/lib/engine-tool-chain-client";
+import { useConflictRecovery } from "./useConflictRecovery";
 
 export function useToolChain(work: Work, onChanged: () => Promise<void>) {
   const [chain, setChain] = useState<ToolChain | null>(null);
@@ -17,6 +18,14 @@ export function useToolChain(work: Work, onChanged: () => Promise<void>) {
   const operation = useRef(crypto.randomUUID());
   const approval = useRef(crypto.randomUUID());
   const finished = useRef<string | null>(null);
+  const newChain = () => {
+    operation.current = crypto.randomUUID();
+    approval.current = crypto.randomUUID();
+  };
+  const conflict = useConflictRecovery({
+    refresh: () => callback.current(),
+    renewOperation: newChain,
+  });
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -24,7 +33,7 @@ export function useToolChain(work: Work, onChanged: () => Promise<void>) {
       try {
         const items = await listToolChains(work.id);
         if (!live) return;
-        const next = items.at(-1) ?? null;
+        const next = items.filter((item) => !conflict.isRejected(item.id)).at(-1) ?? null;
         setChain(next);
         if (next?.status === "completed" && finished.current !== next.id) {
           finished.current = next.id;
@@ -46,11 +55,12 @@ export function useToolChain(work: Work, onChanged: () => Promise<void>) {
     if (busy || materialIds.length < 2) return;
     setBusy(true);
     setError(null);
+    conflict.clear();
     try {
       setChain(await proposeToolChain(work, materialIds, operation.current));
       await callback.current();
     } catch (cause) {
-      setError(cause);
+      if (!(await conflict.handle(cause))) setError(cause);
     } finally {
       setBusy(false);
     }
@@ -59,11 +69,17 @@ export function useToolChain(work: Work, onChanged: () => Promise<void>) {
     if (!chain || busy) return;
     setBusy(true);
     setError(null);
+    conflict.clear();
     try {
       setChain(await approveToolChain(work.id, chain, approval.current));
       await callback.current();
     } catch (cause) {
-      setError(cause);
+      if (await conflict.handle(cause, "approve", chain.id)) {
+        // The rejected chain is permanently unapprovable: back to selection.
+        setChain(null);
+      } else {
+        setError(cause);
+      }
     } finally {
       setBusy(false);
     }
@@ -72,11 +88,9 @@ export function useToolChain(work: Work, onChanged: () => Promise<void>) {
     chain,
     busy,
     error,
+    recovery: conflict.recovery,
     propose,
     approve,
-    newChain: () => {
-      operation.current = crypto.randomUUID();
-      approval.current = crypto.randomUUID();
-    },
+    newChain,
   };
 }
