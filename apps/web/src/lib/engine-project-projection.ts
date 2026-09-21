@@ -16,6 +16,7 @@ export function projectWorkspaceData(
 
 export function engineWorkPanelMessage(status: string): string {
   switch (status) {
+    case 'draft': return 'Homun sta preparando la proposta, oppure è in attesa della tua conferma. Controlla la scheda nella conversazione.';
     case 'running': return 'Esecuzione in corso sul motore. Lo stato e il risultato si aggiornano nella conversazione.';
     case 'review': return 'Il report è pronto per la revisione umana. Apri il report nella conversazione per leggere i dettagli e scaricare i risultati.';
     case 'completed': return 'Lavoro completato sul motore. I risultati registrati restano disponibili nella conversazione.';

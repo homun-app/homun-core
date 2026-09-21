@@ -103,3 +103,10 @@
   background: #fafbf7;
   font: inherit;
 }
+.cw-engine-summary__hint {
+  font-size: 11px;
+  color: #829079;
+  font-style: italic;
+  line-height: 1.5;
+  margin: 4px 0 0;
+}

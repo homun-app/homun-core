@@ -10,7 +10,7 @@ import { listEngineConversations } from "@/lib/engine-domain-client";
 import "./engine-work-summary.css";
 
 const statusLabels: Record<string, string> = {
-  draft: "Da definire",
+  draft: "Da concordare",
   ready: "Pronto",
   running: "In corso",
   review: "Da rivedere",
