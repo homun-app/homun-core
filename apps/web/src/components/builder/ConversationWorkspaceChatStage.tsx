@@ -277,7 +277,7 @@ export function ConversationWorkspaceChatStage({
             onSend={onSend}
             references={mentionRefs}
           />
-          {historyLoading && <p className="cw-hint" role="status">Caricamento storico dal motore…</p>}
+          {historyLoading && <p className="cw-hint" role="status">Caricamento conversazione…</p>}
           {engineMode && engineBusy && onCancelInFlight && (
             <p className="cw-hint cw-engine-busy" role="status">
               Homun sta elaborando…{" "}
