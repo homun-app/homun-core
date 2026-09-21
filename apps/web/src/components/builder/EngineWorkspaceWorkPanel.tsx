@@ -6,7 +6,7 @@ import { EngineWorkObjectiveEditor } from "./EngineWorkObjectiveEditor";
 import { engineWorkPanelMessage } from "@/lib/engine-project-projection";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { listEngineMaterials, type EngineMaterial } from "@/lib/engine-projects-client";
-import { resolveEngineProjectForWork } from "@/lib/engine-work-project";
+import { listEngineConversations } from "@/lib/engine-domain-client";
 import "./engine-work-summary.css";
 
 const statusLabels: Record<string, string> = {
@@ -110,7 +110,6 @@ export function EngineWorkspaceWorkPanel({
         <p>{engineWorkPanelMessage(work.engineStatus ?? "")}</p>
       </section>
       {contributionPanel}
-      <p className="cw-engine-summary__source">Fonte: motore</p>
     </aside>
   );
 }
@@ -124,7 +123,16 @@ function useWorkMaterials(work: Work) {
     let live = true;
     (async () => {
       try {
-        const projectId = await resolveEngineProjectForWork(work, work.title);
+        // Read-only: never create a project just to list materials — that
+        // would change permission state between propose and confirm.
+        const conversation = work.engineConversationId
+          ? (await listEngineConversations()).find((c) => c.id === work.engineConversationId)
+          : undefined;
+        const projectId = work.projectId ?? conversation?.project_id ?? null;
+        if (!projectId) {
+          if (live) setState({ items: [], count: 0 });
+          return;
+        }
         const items = (await listEngineMaterials({ projectId })).filter(
           (material) => material.status === "active",
         );
@@ -136,7 +144,7 @@ function useWorkMaterials(work: Work) {
     return () => {
       live = false;
     };
-  }, [work.id, work.projectId, work.title]);
+  }, [work.id, work.projectId, work.engineConversationId]);
   return state;
 }
 

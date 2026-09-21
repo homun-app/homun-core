@@ -299,7 +299,7 @@ export function ConversationWorkspaceChatStage({
               <Sparkles size={12} /> Scrivi naturalmente. Usa @ per un collaboratore.
             </span>
             <span title={engineMode ? "Conversazione salvata nel motore locale" : storageStatus}>
-              {engineMode ? "Fonte: motore · archivio locale" : `Fonte: simulazione · ${storageStatus}`}
+              {engineMode ? "Archivio locale" : `Simulazione · ${storageStatus}`}
             </span>
           </div>
         </div>

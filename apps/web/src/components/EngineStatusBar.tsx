@@ -3,7 +3,8 @@ import { useEngineStatus } from "@/hooks/useEngineStatus";
 import { assertEngineReadyForDomain } from "@/lib/engine-client";
 
 /**
- * One-line product status. Diagnostics stay under developer options.
+ * Minimal production status: connection only, no source selector.
+ * The engine is the only data source; diagnostics stay under developer options.
  */
 export function EngineStatusBar() {
   const status = useEngineStatus();
@@ -37,10 +38,7 @@ export function EngineStatusBar() {
           className={`engine-status-bar__dot engine-status-bar__dot--${status.connection}`}
           aria-hidden
         />
-        <span>
-          Fonte: <strong>{status.dataSource === "engine" ? "motore" : "simulazione"}</strong> ·{" "}
-          {connectionLabel}
-        </span>
+        <span>{connectionLabel}</span>
       </div>
       <details className="engine-status-bar__dev">
         <summary>Dettagli tecnici</summary>
@@ -54,22 +52,6 @@ export function EngineStatusBar() {
             : ""}
           {status.error ? ` · ${status.error}` : ""}
         </p>
-        <label className="engine-status-bar__source">
-          Fonte dati
-          <select
-            value={status.dataSource}
-            onChange={(event) => {
-              const value = event.target.value;
-              status.setDataSource(value === "simulation" ? "simulation" : "engine");
-            }}
-          >
-            <option value="engine">motore</option>
-            <option value="simulation">simulazione (deprecata)</option>
-          </select>
-        </label>
-        {offlineHint && status.dataSource === "engine" ? (
-          <p className="engine-status-bar__hint">{offlineHint}</p>
-        ) : null}
       </details>
       <HomunErrorNotice error={gateError} className="engine-status-bar__error" />
     </div>
