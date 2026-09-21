@@ -42,6 +42,17 @@ export function eligibleForComparison(material: EngineMaterial): boolean {
   );
 }
 
+/** Files a preparation-phase work can collect before an executable agreement. */
+export function eligibleForPreparation(material: EngineMaterial): boolean {
+  return (
+    material.status === "active" &&
+    isManagedFile(material) &&
+    (material.byte_size ?? 0) > 0 &&
+    (material.byte_size ?? 0) <= 2 * 1024 * 1024 &&
+    hasExtension(material.origin_name ?? material.title, READABLE_EXTENSIONS)
+  );
+}
+
 export function materialOptionLabel(material: EngineMaterial): string {
   const name = material.origin_name ?? material.title;
   const size = material.byte_size != null ? `${material.byte_size} B` : "dimensione n/d";

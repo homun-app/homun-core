@@ -5,6 +5,7 @@ import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { EngineMaterialRead } from "./EngineMaterialRead";
 import { EnginePriceComparison } from "./EnginePriceComparison";
+import { EngineWorkNeedsCard } from "./EngineWorkNeedsCard";
 import {
   briefChangeLines,
   intakeConfirmLabel,
@@ -191,14 +192,16 @@ export function EngineWorkIntake({
                 Il titolo è stato rinominato dopo la conferma di questo accordo.
               </p>
             )}
-            {confirmed && work.engineStatus === 'draft' && (
-              <p className="cw-intake-note">
-                {p.capability === "compare_csv"
-                  ? "Il lavoro è concordato. Aggiungi i due listini qui sotto; ti mostrerò l’azione da approvare prima di eseguirla."
-                  : p.capability === "read_material"
-                    ? "Il lavoro è concordato. Carica qui sotto il materiale da leggere; ti mostrerò l’azione da approvare prima di eseguirla."
-                    : "Il riepilogo è confermato. Concordiamo in chat i prossimi passi: nessuna esecuzione è stata avviata."}
-              </p>
+            {confirmed && work.engineStatus === "draft" && (
+              p.capability === "general" ? (
+                <EngineWorkNeedsCard work={work} items={p.missing_information} onChanged={onChanged} />
+              ) : (
+                <p className="cw-intake-note">
+                  {p.capability === "compare_csv"
+                    ? "Il lavoro è concordato. Aggiungi i due listini qui sotto; ti mostrerò l’azione da approvare prima di eseguirla."
+                    : "Il lavoro è concordato. Carica qui sotto il materiale da leggere; ti mostrerò l’azione da approvare prima di eseguirla."}
+                </p>
+              )
             )}
             {confirmed && revisable && <button className="cs-link" disabled={intake.busy} onClick={() => setEditing(!editing)}>Rivedi l’accordo</button>}
             {confirmed && !revisable && work.engineStatus === 'draft' && (

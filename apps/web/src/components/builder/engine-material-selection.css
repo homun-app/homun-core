@@ -78,3 +78,10 @@
   margin: 8px 0;
   flex-wrap: wrap;
 }
+
+.cw-needs-card .cw-needs-list {
+  margin: 8px 0;
+  padding-left: 1.1rem;
+  font-size: 13px;
+  line-height: 1.7;
+}
