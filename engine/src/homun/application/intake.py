@@ -85,7 +85,8 @@ def propose(ctx, actor, work_id, body):
                       '_permissions':permission_snapshot(store,actor,work)}
             proposal['digest']=digest(proposal)
             save(store,actor,body['command_id'],PROPOSAL_TYPE,fingerprint,proposal)
-            agents=[{'id':a.id,'name':a.name,'role':a.role,'instructions':a.instructions,'revision':a.revision}
+            agents=[{'id':a.id,'name':a.name,'role':a.role,'instructions':a.instructions,'revision':a.revision,
+                     'capabilities':a.capabilities}
                     for a in store.agents.values() if a.status=='active']
             # Ground the collaborator recommendation in what the engine can really run.
             capabilities=capability_catalog(store,actor)
@@ -188,9 +189,9 @@ def confirm(ctx,actor,work_id,proposal_id,body):
                     raise ValidationError('Explicit creation confirmation is required')
                 profile = dict(proposal['new_agent'])
                 # The intake brief's identity fields flow into the agent profile.
-                for field in ('responsibility','specializations','method','tone'):
+                for field in ('responsibility','specializations','method','tone','capabilities'):
                     if field not in profile:
-                        profile[field] = '' if field != 'specializations' else []
+                        profile[field] = [] if field in ('specializations','capabilities') else ''
                 created=service.apply(actor,body['command_id']+':agent','agent.create',profile)
                 owner=created['agent_id']
             elif body.get('create_agent',False):

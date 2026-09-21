@@ -28,6 +28,7 @@ export type EngineAgentProfile = {
   method?: string;
   tone?: string;
   autonomy_mode?: string;
+  capabilities?: string[];
   created_at?: string;
   updated_at?: string;
 };

@@ -1263,6 +1263,14 @@
       "NewAgent": {
         "additionalProperties": false,
         "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Capabilities",
+            "type": "array"
+          },
           "instructions": {
             "maxLength": 2000,
             "minLength": 1,

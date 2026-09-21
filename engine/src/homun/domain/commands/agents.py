@@ -57,6 +57,27 @@ def _parse_specializations(raw: Any) -> list[str]:
     return items
 
 
+def _parse_capabilities(raw: Any) -> list[str]:
+    """Capability ids must exist in the registry; declarations grant nothing."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValidationError("capabilities must be a list")
+    from homun.domain.capabilities import REGISTRY
+    items = []
+    for item in raw:
+        text = str(item).strip()
+        if not text:
+            continue
+        if text not in REGISTRY:
+            raise ValidationError(f"Unknown capability: {text}")
+        if text not in items:
+            items.append(text)
+        if len(items) >= 8:
+            break
+    return items
+
+
 def _identity_from_payload(payload: dict[str, Any], agent: AgentProfile, *, create: bool) -> None:
     """Apply professional identity fields; absent keys leave existing values."""
     if create or "responsibility" in payload:
@@ -69,6 +90,8 @@ def _identity_from_payload(payload: dict[str, Any], agent: AgentProfile, *, crea
         agent.tone = str(payload.get("tone") or "").strip()[:120]
     if create or "autonomy_mode" in payload:
         agent.autonomy_mode = _parse_autonomy(payload.get("autonomy_mode"))
+    if create or "capabilities" in payload:
+        agent.capabilities = _parse_capabilities(payload.get("capabilities"))
 
 
 def _agent_create(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:

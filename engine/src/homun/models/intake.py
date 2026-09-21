@@ -15,6 +15,7 @@ class NewAgent(BaseModel):
     specializations: list[str] = Field(default_factory=list, max_length=12)
     method: str = Field(default='', max_length=500)
     tone: str = Field(default='', max_length=120)
+    capabilities: list[str] = Field(default_factory=list, max_length=8)
 
 BriefField = Literal['title', 'objective', 'output', 'constraints', 'capability', 'staffing']
 """Parts of a brief the model may declare as intentionally changed by a clarification."""
@@ -150,6 +151,20 @@ def synthesize(registry, text, agents, *, previous_brief=None, latest_request=No
             raise ValueError('Executable work requires a collaborator proposal')
     if brief.suggested_agent_id and brief.new_agent:
         raise ValueError('Choose existing agent or new profile')
+    if brief.suggested_agent_id:
+        # Engine-side validation: the recommended agent must have the required
+        # capability in its structural link, not just a plausible-sounding role.
+        from homun.domain.capabilities import REGISTRY as _registry
+        selected = next((a for a in agents if a['id'] == brief.suggested_agent_id), None)
+        if selected is None:
+            raise ValueError('Suggested agent does not exist in active roster')
+        linked = selected.get('capabilities') or []
+        if brief.capability in _registry and _registry[brief.capability].kind == 'executable':
+            matching = [a for a in agents if brief.capability in (a.get('capabilities') or [])]
+            if matching and brief.suggested_agent_id not in [a['id'] for a in matching]:
+                # The model recommended someone without the capability link while
+                # a linked candidate exists: prefer the linked one.
+                brief.suggested_agent_id = matching[0]['id']
     return brief
 
 

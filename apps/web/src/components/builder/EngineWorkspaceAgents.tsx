@@ -2,6 +2,12 @@ import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import { ConversationAvatar } from "./ConversationAvatar";
 import "./engine-agents.css";
 
+const CAPABILITY_LABELS: Record<string, string> = {
+  compare_csv: "Confronto CSV",
+  read_material: "Lettura materiale",
+  general: "Coordinamento",
+};
+
 const AUTONOMY_LABELS: Record<string, string> = {
   supervised: "Sotto supervisione",
   autonomous: "Consegna autonoma",
@@ -43,6 +49,18 @@ export function EngineWorkspaceAgents({ agents }: { agents: EngineAgentProfile[]
               <p className="cw-agent-responsibility">
                 <strong>Responsabilità:</strong> {agent.responsibility}
               </p>
+            )}
+            {agent.capabilities && agent.capabilities.length > 0 && (
+              <div className="cw-agent-capabilities">
+                <strong>Può eseguire</strong>
+                <div className="cw-agent-caps-row">
+                  {agent.capabilities.map((cap) => (
+                    <span key={cap} className="cw-agent-cap-chip">
+                      {CAPABILITY_LABELS[cap] ?? cap}
+                    </span>
+                  ))}
+                </div>
+              </div>
             )}
             {agent.specializations && agent.specializations.length > 0 && (
               <div className="cw-agent-specializations">

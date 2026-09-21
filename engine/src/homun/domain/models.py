@@ -46,6 +46,10 @@ class AgentProfile(BaseModel):
     method: str = ""
     tone: str = ""
     autonomy_mode: str = "supervised"  # supervised | autonomous
+    # Structural link to the capability registry: what this collaborator is
+    # known to be able to execute. Declarations never grant authorization —
+    # grants and policy decide access per project.
+    capabilities: list[str] = Field(default_factory=list, max_length=8)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

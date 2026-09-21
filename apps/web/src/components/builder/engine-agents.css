@@ -56,6 +56,29 @@
   display: block;
   margin-bottom: 2px;
 }
+.cw-agent-capabilities {
+  display: grid;
+  gap: 4px;
+}
+.cw-agent-capabilities strong {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #687a64;
+}
+.cw-agent-caps-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cw-agent-cap-chip {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 99px;
+  background: color-mix(in srgb, #3d8b5f 10%, transparent);
+  border: 1px solid color-mix(in srgb, #3d8b5f 20%, transparent);
+  color: #2d6b47;
+  font-weight: 500;
+}
 .cw-agent-specializations {
   display: flex;
   flex-wrap: wrap;
