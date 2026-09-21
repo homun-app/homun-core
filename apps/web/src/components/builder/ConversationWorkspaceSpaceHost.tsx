@@ -139,6 +139,13 @@ export function ConversationWorkspaceSpaceHost({
           needsYou: pending.some((p) => p.id === w.id),
           project: spaceData.projects.find((p) => p.id === w.projectId)?.name || "",
           unavailable: !!spaceData.removedPeople?.includes(scenarioForWork(w, scenarios).agent),
+          ...(w.engineIntakePending
+            ? {
+                nextStep:
+                  "Homun ha preparato la proposta: confermala nella conversazione per affidare il lavoro.",
+                openLabel: "Apri la proposta",
+              }
+            : {}),
         }))}
         onOpen={onOpenWork}
         onDue={(id, due) =>

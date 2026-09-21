@@ -32,10 +32,12 @@ import { isHomunClientError } from "@/lib/homun-errors";
 import { currentTranscriptActions } from "@/lib/engine-transcript-client";
 import { useEngineWorkspaceSnapshot } from "./useEngineWorkspaceSnapshot";
 import { useEngineTranscript } from "./useEngineTranscript";
+import { useWorkIntake, type WorkIntakeState } from "./useWorkIntake";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import { renameEngineWork } from "@/lib/engine-work-naming";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
 import { proposeWorkIntake } from "@/lib/engine-intake-client";
+import { applyIntakePreview } from "@/lib/engine-intake-display";
 import { routeEngineFirstMessage, type FirstMessageRoute } from "@/lib/engine-first-message-routing";
 const THINKING_TEXT = "Homun sta elaborando…";
 export type EngineWorkspaceState = {
@@ -47,6 +49,7 @@ export type EngineWorkspaceState = {
   loaded: boolean;
   historyLoading: boolean;
   works: Work[];
+  intake: WorkIntakeState;
   projects: EngineProject[];
   agents: EngineAgentProfile[];
   followups: Array<EngineFollowupNotice & { conversationTitle: string }>;
@@ -95,7 +98,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
 
   const {history: transcript, loading: historyLoading} = useEngineTranscript(engineReady, activeWorkId, rawWorks, messageOverlay, setMessageOverlay, setError, transcriptSeq);
 
-  const works = useMemo(
+  const baseWorks = useMemo(
     () =>
       rawWorks.map((raw) => {
         const record = parseEngineWorkRecord(raw);
@@ -108,6 +111,20 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
       }),
     [rawWorks, agents, messageOverlay, transcript, activeWorkId],
   );
+
+  // Single owner of the active work's brief: the chat card, the right panel
+  // and the works projection below all read this instance.
+  const [intakeSeq, bumpIntakeSeq] = useReducer((count: number) => count + 1, 0);
+  const activeBaseWork = activeWorkId ? baseWorks.find((w) => w.id === activeWorkId) ?? null : null;
+  const intake = useWorkIntake(backend === "engine" ? activeBaseWork : null, refresh, intakeSeq);
+
+  // While a brief awaits confirmation its proposal drives what the person
+  // sees — sidebar title, panel objective, proposed collaborator.
+  const works = useMemo(() => {
+    const proposal = intake.proposal;
+    if (!proposal || proposal.work_id !== activeWorkId) return baseWorks;
+    return baseWorks.map((w) => (w.id === proposal.work_id ? applyIntakePreview(w, proposal) : w));
+  }, [baseWorks, intake.proposal, activeWorkId]);
 
   function beginRequest(): AbortSignal {
     abortRef.current?.abort();
@@ -177,6 +194,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
           ),
         }));
         await proposeWorkIntake(work.id, text, work.revision, crypto.randomUUID(), signal, routed.language);
+        bumpIntakeSeq();
         await refresh();
         return;
       }
@@ -469,6 +487,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     historyLoading,
     busy,
     works,
+    intake,
     projects, agents,
     refresh,
     renameWork: async (work, title) => { await renameEngineWork(work.id, title, work.revision); await refresh(); },

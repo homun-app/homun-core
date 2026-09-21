@@ -14,7 +14,22 @@ export function projectWorkspaceData(
   })) };
 }
 
-export function engineWorkPanelMessage(status: string): string {
+/** What the panel tells the person to do next, in product language. */
+export function engineWorkPanelMessage(
+  status: string,
+  intake?: { status: string; capability?: string } | null,
+): string {
+  if (intake?.status === 'pending_confirmation')
+    return 'Homun ha preparato una proposta in chat: confermala per affidare il lavoro.';
+  if (intake?.status === 'failed')
+    return 'La proposta non è stata completata: riprendila dalla conversazione.';
+  if (status === 'draft' && intake?.status === 'confirmed') {
+    if (intake.capability === 'compare_csv')
+      return 'Accordo confermato: aggiungi i due listini nella conversazione e Homun preparerà l’azione da approvare.';
+    if (intake.capability === 'read_material')
+      return 'Accordo confermato: carica il materiale nella conversazione e Homun preparerà l’azione da approvare.';
+    return 'Il riepilogo è confermato: i prossimi passi si concordano in chat.';
+  }
   switch (status) {
     case 'draft': return 'Homun sta preparando la proposta, oppure è in attesa della tua conferma. Controlla la scheda nella conversazione.';
     case 'running': return 'Esecuzione in corso. Lo stato e il risultato si aggiornano nella conversazione.';

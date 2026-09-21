@@ -18,7 +18,16 @@ test('real work states never offer simulated delivery or approval', () => {
   assert.match(engineWorkPanelMessage('failed'), /non.*completata/);
   for (const state of ['draft', 'ready', 'running', 'review', 'completed', 'failed', 'paused']) {
     assert.doesNotMatch(engineWorkPanelMessage(state), /simula|dimostrativa|Approva bozza/i);
+    assert.doesNotMatch(engineWorkPanelMessage(state, { status: 'pending_confirmation', capability: 'compare_csv' }), /simula|dimostrativa|Approva bozza/i);
   }
+});
+
+test('a pending brief tells the person to confirm; a confirmed brief names its material need', () => {
+  assert.match(engineWorkPanelMessage('draft', { status: 'pending_confirmation' }), /confermala per affidare/i);
+  assert.match(engineWorkPanelMessage('draft', { status: 'failed' }), /non è stata completata/i);
+  assert.match(engineWorkPanelMessage('draft', { status: 'confirmed', capability: 'compare_csv' }), /aggiungi i due listini/i);
+  assert.match(engineWorkPanelMessage('draft', { status: 'confirmed', capability: 'read_material' }), /carica il materiale/i);
+  assert.match(engineWorkPanelMessage('draft', { status: 'confirmed', capability: 'general' }), /prossimi passi si concordano in chat/i);
 });
 
 test('project inventory read carries actor identity and surfaces denial without demo fallback', async () => {

@@ -93,7 +93,7 @@ export const engineHomunScenario: ConversationScenario = {
   title: "Lavoro versionato",
   agent: "Homun",
   initial: "",
-  role: "Motore locale",
+  role: "Coordinatore del lavoro",
   color: "sage",
   icon: "H",
   input: "Obiettivo e vincoli del lavoro",

@@ -13,6 +13,7 @@ import type { ConversationScenario } from "./conversation-scenarios";
 import type { SpaceData } from "./ConversationSpace";
 import { ConversationWorkspaceWelcome } from "./ConversationWorkspaceWelcome";
 import type { Work } from "./conversation-types";
+import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { StudioChatInput } from "./StudioChatInput";
 import { WorkPatchPreviewCard } from "./WorkPatchPreviewCard";
 
@@ -41,6 +42,7 @@ type Props = {
   onSend: (text: string, attachments: File[]) => void;
   onClearNotice: () => void;
   engineMode?: boolean;
+  engineIntake?: WorkIntakeState | undefined;
   onRefreshEngine: () => Promise<void>;
   engineBusy?: boolean;
   historyLoading?: boolean;
@@ -74,6 +76,7 @@ export function ConversationWorkspaceChatStage({
   onCancelPlanEdit,
   onSend,
   onClearNotice,
+  engineIntake,
   onRefreshEngine,
   engineMode = false,
   engineBusy = false,
@@ -261,7 +264,9 @@ export function ConversationWorkspaceChatStage({
               )}
             </>
           )}
-          {engineMode && work?.source === "engine" && <EngineWorkIntake key={work.id} work={work} onChanged={onRefreshEngine} />}
+          {engineMode && work?.source === "engine" && engineIntake && (
+            <EngineWorkIntake key={work.id} work={work} intake={engineIntake} onChanged={onRefreshEngine} />
+          )}
         </div>
         <div className="cw-composer">
           {assignee && (
@@ -298,7 +303,7 @@ export function ConversationWorkspaceChatStage({
             <span>
               <Sparkles size={12} /> Scrivi naturalmente. Usa @ per un collaboratore.
             </span>
-            <span title={engineMode ? "Conversazione salvata nel motore locale" : storageStatus}>
+            <span title={engineMode ? "Conversazione salvata nell'archivio locale" : storageStatus}>
               {engineMode ? "Archivio locale" : `Simulazione · ${storageStatus}`}
             </span>
           </div>

@@ -67,6 +67,12 @@ export type Work = {
   engineContributionRequestId?: string;
   /** Current objective from engine domain (Fonte=motore). */
   engineObjective?: string;
+  /** A brief awaits the person's confirmation; proposal drives the display. */
+  engineIntakePending?: boolean;
+  /** Objective text comes from the unconfirmed proposal (read-only display). */
+  engineObjectiveProposed?: boolean;
+  /** Collaborator named by the unconfirmed proposal. */
+  engineProposedAgentName?: string;
   id: string;
   scenario: number;
   title: string;

@@ -156,7 +156,7 @@ export function ConversationMemorySettingsSection({ actorId, projectId = null }:
     return (
       <>
         <h3>Memoria</h3>
-        <p>Collega il motore locale per salvare ricordi approvati.</p>
+        <p>Collega l’app locale per salvare ricordi approvati.</p>
       </>
     );
   }
@@ -165,7 +165,7 @@ export function ConversationMemorySettingsSection({ actorId, projectId = null }:
     return (
       <>
         <h3>Memoria</h3>
-        <p>Il motore non espone ancora la capability memoria.</p>
+        <p>La memoria non è ancora disponibile in questa versione.</p>
       </>
     );
   }

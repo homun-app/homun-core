@@ -9,6 +9,10 @@ export type TaskSummary = {
   project: string;
   unavailable: boolean;
   needsYou: boolean;
+  /** What the person owes next, when the work is blocked on them. */
+  nextStep?: string | undefined;
+  /** Label for the opening action when the next step is explicit. */
+  openLabel?: string | undefined;
 };
 export function ConversationTasks({
   onReveal,
@@ -216,18 +220,22 @@ export function ConversationTasks({
             <p className="cw-hint">
               {item.unavailable
                 ? "L’agente è stato eliminato. Lo storico è disponibile."
-                : item.phase === "waiting"
-                  ? "Il lavoro aspetta un tuo contributo. Apri la conversazione per vedere cosa serve e fornirlo."
-                  : item.phase === "review"
-                    ? "Il risultato è pronto. Aprilo nella conversazione per verificarlo e dare indicazioni."
-                    : "Apri la conversazione per vedere materiali, passaggi e prossima azione."}
+                : item.nextStep
+                  ? item.nextStep
+                  : item.phase === "waiting"
+                    ? "Il lavoro aspetta un tuo contributo. Apri la conversazione per vedere cosa serve e fornirlo."
+                    : item.phase === "review"
+                      ? "Il risultato è pronto. Aprilo nella conversazione per verificarlo e dare indicazioni."
+                      : "Apri la conversazione per vedere materiali, passaggi e prossima azione."}
             </p>
             <button className="cw-primary" onClick={() => onOpen(item.id)}>
-              {item.phase === "waiting"
-                ? "Fornisci il contributo"
-                : item.phase === "review"
-                  ? "Verifica il risultato"
-                  : "Apri conversazione"}{" "}
+              {item.openLabel
+                ? item.openLabel
+                : item.phase === "waiting"
+                  ? "Fornisci il contributo"
+                  : item.phase === "review"
+                    ? "Verifica il risultato"
+                    : "Apri conversazione"}{" "}
               ↗
             </button>
           </>
@@ -235,7 +243,7 @@ export function ConversationTasks({
           <>
             <h2>Cosa richiede attenzione?</h2>
             <p className="cw-hint">
-              {items.filter((i) => i.phase === "waiting").length} richieste di contributo ·{" "}
+              {items.filter((i) => i.needsYou).length} attendono te ·{" "}
               {items.filter((i) => i.phase === "review").length} risultati da verificare.
             </p>
             <p className="cw-hint">

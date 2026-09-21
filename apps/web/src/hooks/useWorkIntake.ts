@@ -7,7 +7,25 @@ import {
   proposeWorkIntake,
   type WorkIntake,
 } from "@/lib/engine-intake-client";
-export function useWorkIntake(work: Work, onChanged: () => Promise<void>) {
+
+export type WorkIntakeState = {
+  proposal: WorkIntake | null;
+  loaded: boolean;
+  busy: boolean;
+  error: unknown;
+  confirm: () => Promise<void>;
+  refine: (text: string) => Promise<boolean>;
+};
+
+/**
+ * Single owner of a work's latest brief: chat card, right panel and sidebar
+ * projection all read this instance. Null work (simulation mode) idles.
+ */
+export function useWorkIntake(
+  work: Work | null,
+  onChanged: () => Promise<void>,
+  reloadSeq = 0,
+): WorkIntakeState {
   const [proposal, setProposal] = useState<WorkIntake | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -15,23 +33,34 @@ export function useWorkIntake(work: Work, onChanged: () => Promise<void>) {
   const callback = useRef(onChanged);
   callback.current = onChanged;
   const approval = useRef(crypto.randomUUID());
+  const workId = work?.id ?? null;
   const refresh = useCallback(
     async (signal?: AbortSignal) => {
-      const list = await listWorkIntakes(work.id, signal);
+      if (!workId) return null;
+      const list = await listWorkIntakes(workId, signal);
       if (!signal?.aborted) {
         setProposal(list.at(-1) ?? null);
         setLoaded(true);
       }
       return list.at(-1) ?? null;
     },
-    [work.id],
+    [workId],
   );
+  // A work switch must never flash the previous work's brief.
   useEffect(() => {
-    const controller = new AbortController();
+    approval.current = crypto.randomUUID();
+    setProposal(null);
     setError(null);
-    // This hook is keyed by work ID in the chat stage. Refresh an existing
-    // agreement in place: unmounting its tool resets completion tracking and
-    // causes completion -> inventory -> transcript -> intake refresh loops.
+  }, [workId]);
+  useEffect(() => {
+    if (!workId) {
+      setLoaded(true);
+      return;
+    }
+    const controller = new AbortController();
+    // Refresh an existing agreement in place: resetting state here would make
+    // the brief flash on every message; unmounting instead would reset
+    // completion tracking and cause intake refresh loops.
     let timer: ReturnType<typeof setTimeout> | undefined;
     let remaining = 60;
     async function read() {
@@ -56,14 +85,14 @@ export function useWorkIntake(work: Work, onChanged: () => Promise<void>) {
       controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [refresh, work.revision, work.messages.length]);
+  }, [refresh, workId, work?.revision, work?.messages.length, reloadSeq]);
   async function confirm() {
     if (!proposal || busy) return;
     setBusy(true);
     setError(null);
     try {
       setProposal(
-        await confirmWorkIntake(work.id, proposal, approval.current, Boolean(proposal.new_agent)),
+        await confirmWorkIntake(proposal.work_id, proposal, approval.current, Boolean(proposal.new_agent)),
       );
       await callback.current();
     } catch (cause) {
@@ -73,7 +102,7 @@ export function useWorkIntake(work: Work, onChanged: () => Promise<void>) {
         setProposal(null);
         setError(null);
         try {
-          const list = await listWorkIntakes(work.id);
+          const list = await listWorkIntakes(proposal.work_id);
           setProposal(list.at(-1) ?? null);
         } catch {
           setError(cause);
@@ -86,7 +115,7 @@ export function useWorkIntake(work: Work, onChanged: () => Promise<void>) {
     }
   }
   async function refine(text: string) {
-    if (busy) return false;
+    if (!work || busy) return false;
     setBusy(true);
     setError(null);
     try {

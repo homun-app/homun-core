@@ -2,7 +2,12 @@
  * Pure presentation helpers for versioned intake briefs (Fonte=motore).
  * The engine computes the diff; these functions only translate it to Italian.
  */
-import type { WorkIntakeChange } from "./engine-intake-client.ts";
+import type { Work } from "@/components/builder/conversation-types";
+import type { WorkIntake, WorkIntakeChange } from "./engine-intake-client.ts";
+
+/** Placeholder values the domain uses until an agreement is confirmed. */
+export const PLACEHOLDER_WORK_TITLE = "Nuova richiesta";
+export const PLACEHOLDER_WORK_OBJECTIVE = "Obiettivo da concordare";
 
 const FIELD_LABELS: Record<string, string> = {
   title: "Titolo",
@@ -63,4 +68,39 @@ export function isAgreementRevisable(work: {
     !work.enginePlanRevision &&
     !work.engineArtifactVersion
   );
+}
+
+/** The one action the person owes while a brief awaits their decision. */
+export function isIntakeAwaitingUser(
+  proposal: Pick<WorkIntake, "status"> | null | undefined,
+): boolean {
+  return proposal?.status === "pending_confirmation";
+}
+
+/** Same label everywhere an intake can be confirmed: chat card, panel, tasks. */
+export function intakeConfirmLabel(
+  proposal: Pick<WorkIntake, "new_agent" | "suggested_agent"> | null | undefined,
+): string {
+  if (!proposal) return "Conferma la proposta";
+  if (proposal.new_agent) return "Crea il collaboratore e affida";
+  if (proposal.suggested_agent) return "Conferma e affida";
+  return "Conferma il riepilogo";
+}
+
+/**
+ * Display projection while a brief awaits confirmation: the proposal drives
+ * title, objective and proposed collaborator until the person decides. The
+ * domain record keeps its placeholders; confirm writes the agreed values.
+ */
+export function applyIntakePreview(work: Work, proposal: WorkIntake): Work {
+  if (!isIntakeAwaitingUser(proposal)) return work;
+  const next: Work = { ...work, engineIntakePending: true };
+  if (work.title === PLACEHOLDER_WORK_TITLE) next.title = proposal.title;
+  if (!work.engineObjective || work.engineObjective === PLACEHOLDER_WORK_OBJECTIVE) {
+    next.engineObjective = proposal.objective;
+    next.engineObjectiveProposed = true;
+  }
+  const agent = proposal.suggested_agent ?? proposal.new_agent;
+  if (agent) next.engineProposedAgentName = agent.name;
+  return next;
 }

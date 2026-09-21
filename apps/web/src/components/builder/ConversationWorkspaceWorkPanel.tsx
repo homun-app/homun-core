@@ -23,6 +23,7 @@ import { initialScenarios, type ConversationScenario } from "./conversation-scen
 import type { ConversationMaterial } from "./ConversationMaterials";
 import { spacePeople, type SpaceData, type SpaceView } from "./ConversationSpace";
 import type { Work } from "./conversation-types";
+import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { EngineWorkspaceWorkPanel } from "./EngineWorkspaceWorkPanel";
 
 type Props = {
@@ -51,6 +52,7 @@ type Props = {
   uploadRef: RefObject<HTMLInputElement | null>;
   directoryRef: RefObject<HTMLInputElement | null>;
   engineBusy?: boolean;
+  engineIntake?: WorkIntakeState | undefined;
   onRename?: ((title: string) => Promise<void>) | undefined;
   onApplyObjectivePatch?: ((nextObjective: string) => Promise<void>) | undefined;
 };
@@ -81,9 +83,32 @@ export function ConversationWorkspaceWorkPanel({
   uploadRef,
   directoryRef,
   engineBusy = false,
+  engineIntake,
   onApplyObjectivePatch, onRename,
 }: Props) {
-  if (work.source === "engine") return <EngineWorkspaceWorkPanel ownerName={work.engineOwnerName} onRename={onRename} work={work} spaceData={spaceData} busy={engineBusy} contributionPanel={contributionPanel} onOpenSpace={onOpenSpace} onApplyObjectivePatch={onApplyObjectivePatch} />;
+  if (work.source === "engine")
+    return (
+      <EngineWorkspaceWorkPanel
+        ownerName={work.engineOwnerName}
+        onRename={onRename}
+        work={work}
+        spaceData={spaceData}
+        busy={engineBusy}
+        intake={
+          engineIntake ?? {
+            proposal: null,
+            loaded: true,
+            busy: false,
+            error: null,
+            confirm: async () => {},
+            refine: async () => false,
+          }
+        }
+        contributionPanel={contributionPanel}
+        onOpenSpace={onOpenSpace}
+        onApplyObjectivePatch={onApplyObjectivePatch}
+      />
+    );
 
   const humanSupervisors = [
     ...new Set(["Fabio", "Giulia", ...Object.keys(spaceData.profiles || {})]),

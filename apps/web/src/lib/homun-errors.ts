@@ -105,7 +105,7 @@ export function homunErrorUserMessage(error: unknown): string {
   if (isHomunClientError(error)) {
     switch (error.code) {
       case "engine_unavailable":
-        return "Motore non raggiungibile. Avvialo o riprova.";
+        return "App locale non raggiungibile. Avviala o riprova.";
       case "request_timeout":
         return "Il motore non ha risposto in tempo. Riprova.";
       case "request_cancelled":

@@ -49,6 +49,7 @@ import { useEngineWorkspace } from "@/hooks/useEngineWorkspace";
 import { isEngineBackedWork } from "@/lib/conversation-engine-bridge";
 
 import { projectWorkspaceData } from "@/lib/engine-project-projection";
+import { engineStatusLabel } from "@/lib/engine-work-status";
 export type { Work } from "./conversation-types";
 const demoMode = resolveDemoMode();
 const { storageKey } = demoMode;
@@ -166,13 +167,16 @@ export function ConversationWorkspace() {
   }, [engine.backend, engine.loaded, engine.works, works, active]);
 
   function workStatus(w: Work) {
-    if (w.source === "engine" && w.engineStatus) {
-      return `Motore · ${w.engineStatus}`;
+    if (w.source === "engine") {
+      if (w.engineIntakePending) return "In attesa della tua conferma";
+      if (w.engineStatus) return engineStatusLabel(w.engineStatus);
     }
     return workStatusLabel(w, scenarios, spaceData.profiles);
   }
   const pending = (engine.backend === "engine" ? engine.works : works).filter((w) =>
-    isPendingForViewer(w, viewer, scenarios, spaceData.profiles),
+    w.source === "engine" && w.engineIntakePending
+      ? true
+      : isPendingForViewer(w, viewer, scenarios, spaceData.profiles),
   );
   const completedNotices = (engine.backend === "engine" ? engine.works : works).filter((w) =>
     isCompletedNoticeForViewer(w, viewer, preferences.resultNotifications, seenResults),
@@ -246,7 +250,7 @@ export function ConversationWorkspace() {
   ) {
     if (engine.backend === "engine") {
       if (engine.gateError) {
-        setNotice("Motore non pronto: impossibile creare sul dominio.");
+        setNotice("App locale non pronta: impossibile creare il lavoro.");
         return;
       }
       const s = override || scenarios[index]!;
@@ -697,7 +701,7 @@ export function ConversationWorkspace() {
 
     if (engine.backend === "engine") {
       if (engine.gateError || attachments.length) {
-        setNotice(engine.gateError ? "Motore non pronto: impossibile scrivere sul dominio." : "Per il confronto usa i due campi file nella scheda Confronta due listini della conversazione. Gli allegati non sono stati inviati.");
+        setNotice(engine.gateError ? "App locale non pronta: impossibile salvare." : "Per il confronto usa i due campi file nella scheda Confronta due listini della conversazione. Gli allegati non sono stati inviati.");
         return;
       }
       if (work && isEngineBackedWork(work)) {
@@ -1338,7 +1342,7 @@ export function ConversationWorkspace() {
             onCancelPlanEdit={() => setPlanEdit(null)}
             onSend={send}
             onClearNotice={() => setNotice("")}
-            engineMode={engine.backend === "engine"} onRefreshEngine={engine.refresh}
+            engineMode={engine.backend === "engine"} engineIntake={engine.intake} onRefreshEngine={engine.refresh}
             engineBusy={engine.busy}
             historyLoading={engine.historyLoading}
             onConfirmPatch={(messageIndex) => {
@@ -1383,6 +1387,7 @@ export function ConversationWorkspace() {
                   onFilesChange={setFiles}
                   onPreview={() => setPreview(true)}
                   engineBusy={engine.busy} onRename={work.source === "engine" ? (title) => engine.renameWork(work, title) : undefined}
+                  engineIntake={engine.intake}
                   {...(work.source === "engine"
                     ? {
                         onApplyObjectivePatch: (next: string) =>

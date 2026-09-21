@@ -1,24 +1,27 @@
 /** One conversation path: agree the brief, then expose its available capability. */
 import { useState } from "react";
 import type { Work } from "./conversation-types";
-import { useWorkIntake } from "@/hooks/useWorkIntake";
+import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { EngineMaterialRead } from "./EngineMaterialRead";
 import { EnginePriceComparison } from "./EnginePriceComparison";
 import {
   briefChangeLines,
+  intakeConfirmLabel,
   isAgreementRevisable,
+  PLACEHOLDER_WORK_TITLE,
   preservedFieldLabels,
 } from "@/lib/engine-intake-display";
 import "./engine-work-intake.css";
 export function EngineWorkIntake({
   work,
+  intake,
   onChanged,
 }: {
   work: Work;
+  intake: WorkIntakeState;
   onChanged: () => Promise<void>;
 }) {
-  const intake = useWorkIntake(work, onChanged);
   const [editing, setEditing] = useState(false);
   const [clarification, setClarification] = useState("");
   const p = intake.proposal;
@@ -31,7 +34,7 @@ export function EngineWorkIntake({
   if (intake.error && !p) return <HomunErrorNotice error={intake.error} />;
   // Legacy work keeps its existing tool and results; it is never silently reassigned.
   if (!p)
-    return work.title === "Nuova richiesta" ? (
+    return work.title === PLACEHOLDER_WORK_TITLE ? (
       <section className="cw-intake-card">
         {work.messages.length > 0 ? (
           <p>
@@ -166,11 +169,7 @@ export function EngineWorkIntake({
                   disabled={intake.busy}
                   onClick={() => void intake.confirm()}
                 >
-                  {p.new_agent
-                    ? "Crea il collaboratore e affida"
-                    : p.suggested_agent
-                      ? "Conferma e affida"
-                      : "Conferma il riepilogo"}
+                  {intakeConfirmLabel(p)}
                 </button>
                 <button
                   className="cs-link"
