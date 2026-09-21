@@ -11,6 +11,10 @@ class NewAgent(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     role: str = Field(min_length=1, max_length=180)
     instructions: str = Field(min_length=1, max_length=2000)
+    responsibility: str = Field(default='', max_length=500)
+    specializations: list[str] = Field(default_factory=list, max_length=12)
+    method: str = Field(default='', max_length=500)
+    tone: str = Field(default='', max_length=120)
 
 BriefField = Literal['title', 'objective', 'output', 'constraints', 'capability', 'staffing']
 """Parts of a brief the model may declare as intentionally changed by a clarification."""

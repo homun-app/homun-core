@@ -24,6 +24,13 @@ class Actor(BaseModel):
 
 
 class AgentProfile(BaseModel):
+    """A collaborator with professional identity — never just a text blob.
+
+    The structured fields (responsibility, specializations, method, tone,
+    autonomy_mode) are what the UI, the intake recommendation and the
+    capability registry consume. Instructions remain the free-form operating
+    manual; they do not grant permissions.
+    """
     id: str
     workspace_id: str
     name: str
@@ -33,6 +40,12 @@ class AgentProfile(BaseModel):
     instructions: str = ""
     preferred_connection_id: str | None = None
     status: str = "active"  # draft | active | paused | retired
+    # Professional identity (structured, queryable, versioned).
+    responsibility: str = ""
+    specializations: list[str] = Field(default_factory=list, max_length=12)
+    method: str = ""
+    tone: str = ""
+    autonomy_mode: str = "supervised"  # supervised | autonomous
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

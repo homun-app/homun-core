@@ -186,7 +186,12 @@ def confirm(ctx,actor,work_id,proposal_id,body):
             if proposal['new_agent']:
                 if not body.get('create_agent',False):
                     raise ValidationError('Explicit creation confirmation is required')
-                created=service.apply(actor,body['command_id']+':agent','agent.create',proposal['new_agent'])
+                profile = dict(proposal['new_agent'])
+                # The intake brief's identity fields flow into the agent profile.
+                for field in ('responsibility','specializations','method','tone'):
+                    if field not in profile:
+                        profile[field] = '' if field != 'specializations' else []
+                created=service.apply(actor,body['command_id']+':agent','agent.create',profile)
                 owner=created['agent_id']
             elif body.get('create_agent',False):
                 raise ValidationError('No new profile was proposed')

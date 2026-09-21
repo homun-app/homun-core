@@ -22,6 +22,12 @@ export type EngineAgentProfile = {
   instructions: string;
   preferred_connection_id?: string | null;
   status: string;
+  // Professional identity (structured, versioned).
+  responsibility?: string;
+  specializations?: string[];
+  method?: string;
+  tone?: string;
+  autonomy_mode?: string;
   created_at?: string;
   updated_at?: string;
 };

@@ -60,10 +60,19 @@ export function EngineWorkspaceWorkPanel({
         busy={busy}
         onPreviewApply={onApplyObjectivePatch}
       />
+      {!work.engineObjective && (
+        <p className="cw-engine-summary__hint">
+          L'obiettivo arriva dalla proposta di lavoro in chat: Homun la sta preparando o è in attesa
+          della tua conferma.
+        </p>
+      )}
       <dl className="cw-engine-summary__facts">
         <div>
           <dt>Responsabile</dt>
-          <dd>{ownerName || "Da confermare"}</dd>
+          <dd>
+            {ownerName || "Homun"}
+            {!ownerName && <span className="cw-engine-summary__hint"> coordina finché non confermi un collaboratore</span>}
+          </dd>
         </div>
         {work.projectId && (
           <div>

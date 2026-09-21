@@ -1269,16 +1269,42 @@
             "title": "Instructions",
             "type": "string"
           },
+          "method": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Method",
+            "type": "string"
+          },
           "name": {
             "maxLength": 80,
             "minLength": 1,
             "title": "Name",
             "type": "string"
           },
+          "responsibility": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Responsibility",
+            "type": "string"
+          },
           "role": {
             "maxLength": 180,
             "minLength": 1,
             "title": "Role",
+            "type": "string"
+          },
+          "specializations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 12,
+            "title": "Specializations",
+            "type": "array"
+          },
+          "tone": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Tone",
             "type": "string"
           }
         },

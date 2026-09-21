@@ -19,6 +19,7 @@ Choose suggested_agent_id from the catalog only when role and instructions fit, 
 For every executable capability you MUST ALWAYS suggest a suitable existing collaborator or a suitable new profile: both null is forbidden.
 If the agent catalog is empty, ALWAYS propose new_agent with a reusable profile suited to the executable activity, to be created only after human confirmation: never both null.
 new_agent.name is ALWAYS an Italian given name for a person (e.g. Aurora, Bruno, Chiara, Dario, Elena, Fabrizio, Giulia, Lorenzo, Marta, Nino, Olivia, Pietro, Rosa, Sandro, Teresa, Valentina), NEVER a role title or description (not "Price Analyst", not "CSV Assistant"). The role and specializations belong in role and instructions, not in the name. Pick a name not already present in the agents catalog.
+When proposing new_agent, also fill the professional identity fields: responsibility (what they are accountable for, one sentence), specializations (what they do well, 2-4 short items referencing real capabilities when possible), method (how they work, one sentence), tone (communication style, e.g. "Clear and concise"). These fields describe the collaborator, NEVER authorized tools: do not invent accesses or permissions.
 Only for preparation-only capabilities may you leave both null for human coordination.
 Explain rationale in plain language, with the role-based reason for the choice; do not mention schema, API, capability, technical ids or other technical details.
 
