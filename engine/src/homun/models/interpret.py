@@ -7,10 +7,10 @@ JSON-in-prompt parsing so local models remain usable.
 from __future__ import annotations
 
 import json
-import re
 from typing import TYPE_CHECKING, Any
 
 from homun.domain.ids import new_id
+from homun.models.json_payload import extract_json_payload
 from homun.models.interpretation import MessageInterpretation, RosterEntry
 from homun.models.conversation_context import ConversationContext, context_notice
 from homun.models.prompt_store import prompts_for
@@ -29,20 +29,10 @@ if TYPE_CHECKING:
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
-        stripped = re.sub(r"\s*```$", "", stripped)
-    try:
-        parsed = json.loads(stripped)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"\{[\s\S]*\}", stripped)
-    if not match:
-        raise ValueError("No JSON object found in model output")
-    parsed = json.loads(match.group(0))
+    # Same failure the intake parser already survived: thinking models wrap
+    # JSON in prose or append commentary. Reuse the tolerant extractor instead
+    # of a greedy brace regex that swallows the trailing output.
+    parsed = json.loads(extract_json_payload(text))
     if not isinstance(parsed, dict):
         raise ValueError("Model JSON was not an object")
     return parsed

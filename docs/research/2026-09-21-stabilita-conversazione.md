@@ -3,7 +3,42 @@
 > Seconda tranche del 21 settembre: chiude la priorità 2 del prompt di ripresa
 > («scroll che salta durante i caricamenti, attese mute di 30-90s senza stato
 > di avanzamento onesto») e la priorità 3 («409 su prepare con versione stantia
-> senza recupero guidato»). Solo frontend: nessun modulo del motore toccato.
+> senza recupero guidato»). Solo frontend nella prima consegna; la segnalazione
+> di regressioni da parte di Fabio ha portato alla correzione di due difetti
+> della tranche stessa e di una regressione motore preesistente (parser
+> dell'interpretazione severo con i modelli «thinking»).
+
+## Regressioni segnalate e corrette (secondo passaggio)
+
+1. **Invio durante la lettura sopra non seguiva il messaggio (introdotta dalla
+   tranche).** Il "il proprio messaggio segue sempre" dipendeva da
+   `lastIsOwn` letto dall'ultimo messaggio, ma nel percorso motore dopo il
+   messaggio dell'utente viene aggiunta la bubble di attesa (agente): il
+   segnale non risultava mai vero e chi leggeva sopra vedeva un pulsante
+   «morto». Corretto con un evento esplicito `own-send` nella policy (testato):
+   la shell segnala ogni invio in uscita e la vista si riaggancia al fondo;
+   il follow poi cessa appena il lettore scorre di nuovo via.
+2. **Nota guidata senza stile (introdotta dalla tranche).** La classe era finita
+   in `engine-status-bar.css`, foglio non più importato dalla rimozione di
+   EngineStatusBar: creato `homun-notices.css` vivo, importato dai componenti
+   condivisi `HomunErrorNotice`/`HomunGuidanceNotice`.
+3. **Messaggi in lavori confermati che fallivano intermittenti con
+   `provider_unavailable` (regressione motore preesistente, colpita dal modello
+   reale).** Il parser dell'interpretazione (`models/interpret.py`) usava un
+   fallback regex greedy (dalla prima `{` all'ultima `}`) che ingoiava la prosa
+   in coda dei modelli thinking (glm-5.3-flash:cloud) e falliva con
+   «Extra data»; l'intake aveva già l'estrattore tollerante dal commit 1b762d2.
+   L'estrattore è stato estratto in `models/json_payload.py` condiviso e usato
+   da entrambi, con test di regressione che riproduce l'output osservato.
+   Verificato: lo stesso comando stream che falliva ora completa (fasi → token
+   → result) e in GUI la risposta arriva.
+4. **Nota di fallimento che restava dopo un invio riuscito.** L'avviso
+   «Invio al motore non riuscito» non si puliva più: ora un turno completato la
+   chiude.
+
+Il budget architettura di `ConversationWorkspace.tsx` è sceso ancora
+(1442 → 1434, mai alzato): il parser dei comandi di navigazione testuali è
+diventato il modulo puro `lib/conversation-navigation.ts`.
 
 ## Cosa è cambiato
 
@@ -73,14 +108,13 @@ sui tre hook tool (`usePriceComparison`, `useMaterialRead`, `useToolChain`):
 
 Separate per tipo, come da metodo:
 
-- **Test automatici (fake/deterministici):** frontend 192 superati (183
-  precedenti + 6 della policy autoscroll + 3 del recupero 409, incluso il
-  messaggio differenziato approve/prepare); typecheck pulito; build web e
-  prototipo riuscite; controllo architettura 0 errori — il budget legacy di
-  `ConversationWorkspace.tsx` è stato **abbassato** da 1442 a 1437 righe in
-  `tools/architecture-baseline.json` (mai alzato).
-- **Motore:** suite invariata e verde **453 superati, 1 saltato** (nessun file
-  del motore modificato in questa tranche).
+- **Test automatici (fake/deterministici):** frontend 193 superati (183
+  precedenti + 6 della policy autoscroll + 3 del recupero 409 + 1 own-send);
+  typecheck pulito; build web e prototipo riuscite; controllo architettura
+  0 errori — il budget legacy di `ConversationWorkspace.tsx` è **sceso** da
+  1442 a 1434 righe in `tools/architecture-baseline.json` (mai alzato).
+- **Motore:** 454 superati, 1 saltato (453 precedenti + il test di regressione
+  del parser interpret che riproduce l'output «JSON + prosa + secondo blocco»).
 - **Modello reale + GUI (browser su profilo usa-e-getta, motore 8767 con
   `HOMUN_DATA_DIR` temporaneo, app servita via proxy same-origin 4187 per
   evitare il fix CORS del motore; il profilo reale su 8765 non è mai stato
@@ -108,10 +142,30 @@ Separate per tipo, come da metodo:
     fino a 80 s (nota dei 45 s comparuta), risposta in streaming ancorata al
     risultato («4 aumenti di prezzo»), nessun lavoro o collaboratore creato.
 
+Secondo passaggio (dopo la segnalazione delle regressioni), stesso ambiente:
+
+  - invio durante lettura sopra (scroll a 0): la vista è tornata esattamente al
+    fondo (top 1918 con fondo 1918) mostrando messaggio e bubble di attesa;
+  - la domanda che falliva con `provider_unavailable` (output thinking con
+    prosa) ora risponde: probe API dello stesso comando stream (fasi → 7 token
+    → result, nessun errore) e invio GUI riuscito («3 SKU nuovi»);
+  - verifica visiva della bubble di attesa tramite screenshot (allineamento e
+    tipografia coerenti con gli altri messaggi, nota di errore ben visibile
+    quando presente).
+- **Pacchetto:** ricostruito nel secondo passaggio
+  (`dist/desktop/2026-09-21T17-02-12-831Z`, nome UTC — 19:02 locali) con motore
+  e web aggiornati; test desktop **8/8** con motore incorporato. Avvio nativo
+  verificato a livello processo su profilo temporaneo (`HOMUN_DESKTOP_DATA_DIR`):
+  processo Electron e motore incorporato attivi con dati dedicati; il profilo
+  reale non è mai stato toccato.
+
 ## Limiti rimasti
 
 - Il follow durante lo streaming è istantaneo, non animato (scelta: la
   smooth ripetuta per token è la causa del salto che si voleva eliminare).
+- Il contatore dei secondi della bubble di attesa può rallentare quando la
+  finestra è in background (throttling dei timer del browser): torna a scorrere
+  alla prima interazione; il tempo mostrato resta onesto.
 - L'upload di file nel browser in-app resta non automatizzabile (file chooser
   non supportato): il percorso 409 è stato verificato con i materiali di
   progetto, non con upload diretti.
@@ -119,15 +173,20 @@ Separate per tipo, come da metodo:
   reload completo la proposta stantia riappare nell'elenco finché non viene
   superata da una più recente (approvarla di nuovo produce lo stesso recupero
   guidato, verificato).
+- Un secondo invio mentre un turno è in volo interrompe il primo (abort
+  single-flight preesistente): il comportamento è conservato, non risolto in
+  questa tranche.
 - Il pannello destro mostra «Da concordare» per un lavoro in bozza con accordo
   confermato: etichetta preesistente dello stato `draft`, non toccata in
   questa tranche (da raffinare con il piano multi-fase).
 - Nessun test mount/unmount React dedicato per l'ancoraggio dello scroll: la
   policy è testata come modulo puro e il comportamento verificato in GUI; il
   debito resta registrato come per il ciclo di refresh.
-- Il pacchetto desktop non è stato ricostruito (tranne frontend-only): la
-  build di riferimento resta `dist/desktop/2026-09-21T08-01-10-928Z`, che non
-  incorpora queste modifiche web.
+- **Verifica nativa con computer use bloccata da permesso**: l'helper
+  «ZCode Computer Use.app» non ha l'accesso Accessibilità in questa sessione;
+  serve il consenso in Strumenti di sistema → Privacy e sicurezza →
+  Accessibilità (poi riavvio di ZCode) perché io possa guidare l'app nativa
+  come utente.
 
 ## File toccati
 
@@ -136,11 +195,15 @@ Separate per tipo, come da metodo:
   `apps/web/src/components/builder/ConversationAgentWait.tsx` (+ css),
   `apps/web/src/lib/engine-conflict-recovery.ts`,
   `apps/web/src/hooks/useConflictRecovery.ts`,
-  `apps/web/src/components/HomunGuidanceNotice.tsx`,
+  `apps/web/src/components/HomunGuidanceNotice.tsx` (+ `homun-notices.css`),
+  `apps/web/src/lib/conversation-navigation.ts` (estrazione),
+  `engine/src/homun/models/json_payload.py` (estrattore condiviso),
   `tests/chat-autoscroll-policy.test.ts`, `tests/engine-conflict-recovery.test.ts`.
-- Modificati: `ConversationWorkspace.tsx` (effetto scroll sostituito dall'hook),
+- Modificati: `ConversationWorkspace.tsx` (hook di scroll + segnale own-send +
+  nota che si chiude al successo + navigazione estratta),
   `ConversationWorkspaceChatStage.tsx` (render dell'attesa),
   `conversation-types.ts` (`AgentWait`), `useEngineWorkspace.ts` (fasi di attesa
   e messaggio preservato sull'errore), i tre hook tool, le tre schede tool
-  (nota guidata), `engine-status-bar.css`, `tools/architecture-baseline.json`
-  (budget abbassato).
+  (nota guidata), `engine-status-bar.css` (blocco rimosso, foglio morto),
+  `engine/src/homun/models/interpret.py` e `intake.py` (estrattore condiviso),
+  `tools/architecture-baseline.json` (budget abbassato 1442 → 1434).

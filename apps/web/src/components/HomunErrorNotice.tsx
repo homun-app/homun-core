@@ -4,6 +4,7 @@
  */
 
 import { homunErrorUserMessage, isHomunClientError } from "@/lib/homun-errors";
+import "./homun-notices.css";
 
 type Props = {
   error: unknown;

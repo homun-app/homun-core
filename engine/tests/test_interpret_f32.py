@@ -210,3 +210,22 @@ def test_interpret_retries_once_on_runtime_error(tmp_path: Path, monkeypatch) ->
     assert len(attempts) == 2
     assert attempts[0].status == "error"
     assert attempts[1].status == "ok"
+
+
+def test_interpret_parser_survives_thinking_model_prose() -> None:
+    """Regression (21 Sep 2026): glm thinking output wrapped JSON in prose and a
+    second block; the greedy brace regex swallowed it and every message in a
+    confirmed work failed with provider_unavailable."""
+    from homun.models.interpret import _extract_json_object
+
+    text = (
+        'Ecco la risposta in JSON.\n\n```json\n{"kind": "reply", "text": "4 aumenti"}\n```\n\n'
+        'Nota: ho escluso gli SKU sotto i 5 euro {vincolo} e ho riportato solo le anomalie.\n\n'
+        '{"second": "blocco ignorato"}'
+    )
+    parsed = _extract_json_object(text)
+    assert parsed == {"kind": "reply", "text": "4 aumenti"}
+
+    # The exact shape that failed live: object first, prose with braces after.
+    trailing = '{"kind": "reply", "text": "ok"}\n\nSpiegazione {dettaglio} del metodo.'
+    assert _extract_json_object(trailing) == {"kind": "reply", "text": "ok"}

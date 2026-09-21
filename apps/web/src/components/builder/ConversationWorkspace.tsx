@@ -43,11 +43,12 @@ import {
 } from "./conversation-work-status";
 import { useConversationPrototypeStorage } from "./useConversationPrototypeStorage";
 import { type Phase, type Work } from "./conversation-types";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { ConversationEngineBanner } from "./ConversationEngineBanner";
 import { useChatAutoScroll } from "@/hooks/useChatAutoScroll";
 import { useEngineWorkspace } from "@/hooks/useEngineWorkspace";
 import { isEngineBackedWork } from "@/lib/conversation-engine-bridge";
+import { parseConversationNavigation } from "@/lib/conversation-navigation";
 
 import { projectWorkspaceData } from "@/lib/engine-project-projection";
 export type { Work } from "./conversation-types";
@@ -207,9 +208,9 @@ export function ConversationWorkspace() {
     setNotice("");
     setPanel(true);
   }
-  // Follow the newest content only while the reader is anchored to the
-  // bottom; uploads and refreshes never interrupt someone reading above.
-  useChatAutoScroll(history, { activeId: active, messages: work?.messages ?? [] });
+  // Anchored follow while reading at the bottom; an own send always follows.
+  const [ownSendSeq, bumpOwnSend] = useReducer((count: number) => count + 1, 0);
+  useChatAutoScroll(history, { activeId: active, messages: work?.messages ?? [], ownSendSeq });
   useEffect(() => {
     if (!destination || active !== destination.id || space) return;
     const frame = requestAnimationFrame(() => {
@@ -674,16 +675,10 @@ export function ConversationWorkspace() {
     return create(index, text, attachments, projectId, spec);
   }
   function send(text: string, attachments: File[]) {
-    const navigation = text
-      .trim()
-      .toLowerCase()
-      .match(
-        /^(?:apri|mostra|vai a|gestisci)\s+(?:(?:le|la|i|il|ai|alle)\s+)?(impostazioni|compiti|materiali|squadra|progetti|plugin|automazioni)$/,
-      );
-    if (navigation && !attachments.length) {
-      const page = navigation[1]!;
-      if (page === "impostazioni") setSettings(true);
-      else openSpace((page.charAt(0).toUpperCase() + page.slice(1)) as SpaceView);
+    const navigation = !attachments.length ? parseConversationNavigation(text) : null;
+    if (navigation) {
+      if (navigation.target === "settings") setSettings(true);
+      else openSpace(navigation.view);
       return;
     }
 
@@ -693,9 +688,11 @@ export function ConversationWorkspace() {
         return;
       }
       if (work && isEngineBackedWork(work)) {
-        void engine.postMessage(work, text).catch(() => {
-          setNotice("Invio al motore non riuscito. Controlla il banner errori.");
-        });
+        bumpOwnSend();
+        void engine
+          .postMessage(work, text)
+          .then(() => setNotice(""))
+          .catch(() => setNotice("Invio al motore non riuscito. Controlla il banner errori."));
         return;
       }
       void engine.createWork("Nuova richiesta", text).then((created) => {

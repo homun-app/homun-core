@@ -98,30 +98,9 @@ def _model_capabilities(capabilities):
 
 
 def _extract_json_payload(text):
-    """Code fences first; thinking models may prepend or append prose.
-
-    Scans every opening brace and returns the first complete JSON object,
-    ignoring anything the model wrote after it (a second block, commentary).
-    """
-    raw = text.strip()
-    if raw.startswith('```'):
-        raw = raw.split('\n',1)[1].rsplit('```',1)[0].strip()
-    try:
-        json.loads(raw)
-        return raw
-    except ValueError:
-        pass
-    decoder = json.JSONDecoder()
-    for start, char in enumerate(raw):
-        if char != '{':
-            continue
-        try:
-            value, end = decoder.raw_decode(raw, start)
-        except ValueError:
-            continue
-        if isinstance(value, dict) and value:
-            return raw[start:end]
-    raise ValueError('No JSON object found in model response')
+    """Tolerant extraction shared with the interpret parser (see json_payload)."""
+    from homun.models.json_payload import extract_json_payload
+    return extract_json_payload(text)
 
 
 def synthesize(registry, text, agents, *, previous_brief=None, latest_request=None, capabilities=None, language=None, usage_out=None):

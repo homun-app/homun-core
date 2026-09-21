@@ -18,7 +18,8 @@ export type ScrollAnchorState = {
 
 export type ScrollAnchorEvent =
   | { kind: "work" }
-  | { kind: "content"; pinned: boolean; lastIsOwn: boolean };
+  | { kind: "content"; pinned: boolean; lastIsOwn: boolean }
+  | { kind: "own-send" };
 
 export type ScrollAction = "none" | "jump" | "follow";
 
@@ -34,6 +35,17 @@ export function nextScrollAnchor(
   state: ScrollAnchorState,
   event: ScrollAnchorEvent,
 ): { state: ScrollAnchorState; action: ScrollAction } {
+  if (event.kind === "own-send") {
+    // The person just acted: bring their message into view and re-anchor, so
+    // the incoming reply is followed until they scroll away again. Without
+    // this, an engine send while reading above would look like a dead button
+    // (the wait bubble follows the user message, so content alone can't tell
+    // the two apart).
+    return {
+      state: { pinned: true, awaitingContent: false },
+      action: "follow",
+    };
+  }
   if (event.kind === "work") {
     return {
       state: { pinned: true, awaitingContent: true },

@@ -4,6 +4,8 @@
  * Distinct from HomunErrorNotice on purpose: nothing failed just now.
  */
 
+import "./homun-notices.css";
+
 type Props = {
   message: string | null;
   className?: string;

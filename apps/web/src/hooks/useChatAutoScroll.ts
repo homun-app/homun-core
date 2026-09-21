@@ -17,9 +17,11 @@ export function useChatAutoScroll(
   options: {
     activeId: string | null;
     messages: ConversationMessage[];
+    /** Bumped by the shell on every outgoing send: an own message always follows. */
+    ownSendSeq: number;
   },
 ): void {
-  const { activeId, messages } = options;
+  const { activeId, messages, ownSendSeq } = options;
   const anchor = useRef(INITIAL_SCROLL_ANCHOR);
   const last = messages.at(-1);
   // Length + tail-growth signature: streaming updates text without new rows.
@@ -34,6 +36,17 @@ export function useChatAutoScroll(
     element.addEventListener("scroll", onScroll, { passive: true });
     return () => element.removeEventListener("scroll", onScroll);
   }, [ref]);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || ownSendSeq === 0) return;
+    const result = nextScrollAnchor(anchor.current, { kind: "own-send" });
+    anchor.current = result.state;
+    const frame = requestAnimationFrame(() => {
+      element.scrollTo({ top: element.scrollHeight, behavior: "instant" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [ownSendSeq, ref]);
 
   useEffect(() => {
     const element = ref.current;

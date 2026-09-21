@@ -57,6 +57,19 @@ test("the reader's own outgoing message always follows", () => {
   assert.equal(result.state.pinned, true);
 });
 
+test("an own-send event follows even with a wait bubble after the message", () => {
+  // Engine sends append an agent wait bubble after the user message, so the
+  // content signature alone cannot detect the send: the explicit own-send
+  // event must re-anchor from anywhere.
+  const result = nextScrollAnchor(from({ pinned: false }), { kind: "own-send" });
+  assert.equal(result.action, "follow");
+  assert.equal(result.state.pinned, true);
+  // Re-anchored: the streamed reply is followed while the reader stays put…
+  assert.equal(nextScrollAnchor(result.state, content(true)).action, "follow");
+  // …and stops again as soon as the reader scrolls away.
+  assert.equal(nextScrollAnchor(result.state, content(false)).action, "none");
+});
+
 test("scrolling back to the bottom re-anchors following", () => {
   let state = from({ pinned: false });
   state = nextScrollAnchor(state, content(false)).state;

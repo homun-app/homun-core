@@ -1,0 +1,13 @@
+/* Shared inline notices (error + guidance) for Homun UI surfaces. */
+
+.homun-error-notice {
+  margin: 0.35rem 0 0;
+  color: oklch(0.48 0.16 25);
+  font-weight: 600;
+}
+
+.homun-guidance-notice {
+  margin: 0.35rem 0 0;
+  color: oklch(0.42 0.08 145);
+  font-weight: 600;
+}
