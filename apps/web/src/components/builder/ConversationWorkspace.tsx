@@ -181,7 +181,7 @@ export function ConversationWorkspace() {
   function patch(change: Partial<Work>) {
     if (isEngineBackedWork(work)) {
       setNotice(
-        "Questo lavoro è sul motore: le modifiche di simulazione non si applicano. Usa la chat per registrare messaggi.",
+        "Le modifiche di simulazione non si applicano a questo lavoro. Usa la chat.",
       );
       return;
     }
@@ -256,7 +256,7 @@ export function ConversationWorkspace() {
       void engine.createWork(title, objective).then((created) => {
         if (created) {
           open(created.id);
-          setNotice(`Creato sul motore · ${created.id}`);
+          setNotice(`Lavoro creato · ${created.id}`);
         }
       });
       return;
@@ -464,7 +464,7 @@ export function ConversationWorkspace() {
   }
   function deliver(text = contribution, attachments = files) {
     if (isEngineBackedWork(work)) {
-      setNotice("Consegna simulata disabilitata: questo lavoro è sul motore.");
+      setNotice("Consegna simulata non disponibile per questo lavoro.");
       return;
     }
     if (scenario && spaceData.removedPeople?.includes(scenario.agent)) {
@@ -530,9 +530,9 @@ export function ConversationWorkspace() {
           projects={[]}
           current=""
           onRename={() =>
-            setNotice("Rinomina sul motore non ancora disponibile in F2.4.")
+            setNotice("Rinomina non ancora disponibile.")
           }
-          onMove={() => setNotice("Spostamento progetto non disponibile sul motore in F2.4.")}
+          onMove={() => setNotice("Spostamento progetto non ancora disponibile.")}
           onCreate={() => setNotice("Promozione a progetto non ancora collegata al motore.")}
           onRepeat={() => setNotice("Automazioni motore: non in questo slice.")}
         />
@@ -649,7 +649,7 @@ export function ConversationWorkspace() {
       void engine.createWork("Nuova richiesta", text).then((created) => {
         if (created) {
           open(created.id);
-          setNotice(`Creato sul motore per ${name} · ${created.id}`);
+          setNotice(`Lavoro creato per ${name} · ${created.id}`);
         }
       });
       return undefined;
@@ -711,7 +711,7 @@ export function ConversationWorkspace() {
           open(created.id);
           setNotice("");
         } else {
-          setNotice("Creazione sul motore non riuscita. Controlla motore e modello in Impostazioni.");
+          setNotice("Creazione non riuscita. Controlla le impostazioni dei modelli.");
         }
       });
       return;

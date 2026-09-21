@@ -14,7 +14,7 @@ test('engine project navigation uses only authoritative inventory, including aft
 
 test('real work states never offer simulated delivery or approval', () => {
   assert.match(engineWorkPanelMessage('running'), /esecuzione/i);
-  assert.match(engineWorkPanelMessage('review'), /report.*conversazione/);
+  assert.match(engineWorkPanelMessage('review'), /risultato.*conversazione/i);
   assert.match(engineWorkPanelMessage('failed'), /non.*completata/);
   for (const state of ['draft', 'ready', 'running', 'review', 'completed', 'failed', 'paused']) {
     assert.doesNotMatch(engineWorkPanelMessage(state), /simula|dimostrativa|Approva bozza/i);

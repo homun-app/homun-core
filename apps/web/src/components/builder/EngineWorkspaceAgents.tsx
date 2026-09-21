@@ -17,11 +17,11 @@ const AUTONOMY_LABELS: Record<string, string> = {
 export function EngineWorkspaceAgents({ agents }: { agents: EngineAgentProfile[] }) {
   const active = agents.filter((agent) => agent.status === "active");
   return (
-    <section className="cw-workspace cw-agents-panel" aria-label="Collaboratori del motore">
+    <section className="cw-workspace cw-agents-panel" aria-label="Collaboratori">
       <div className="cw-panel-top">
         <h2>La tua squadra</h2>
         <span className="cw-hint">
-          Fonte: motore · {active.length} {active.length === 1 ? "collaboratore" : "collaboratori"}
+          {active.length} {active.length === 1 ? "collaboratore" : "collaboratori"}
         </span>
       </div>
       <p className="cw-hint">

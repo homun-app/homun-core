@@ -50,7 +50,7 @@ export function EngineMaterialRead({
   const multi = selected.length > 1;
 
   return (
-    <section className="cw-price-tool" aria-label="Lettura materiali sul motore">
+    <section className="cw-price-tool" aria-label="Lettura materiali">
       <details open={!idle || initiallyOpen || undefined}>
         <summary>
           {c && c.steps.length > 1

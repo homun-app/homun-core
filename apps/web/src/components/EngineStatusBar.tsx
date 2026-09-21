@@ -29,7 +29,7 @@ export function EngineStatusBar() {
   }
 
   const offlineHint =
-    status.connection === "absent" ? "Avvia il motore con npm run engine:dev" : null;
+    status.connection === "absent" ? "Connessione non disponibile" : null;
 
   return (
     <div className="engine-status-bar" role="status" aria-live="polite">

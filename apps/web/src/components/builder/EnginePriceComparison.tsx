@@ -36,7 +36,7 @@ export function EnginePriceComparison({
   const tool = usePriceComparison(work, onChanged);
   const p = tool.proposal;
   return (
-    <section className="cw-price-tool" aria-label="Confronto listini sul motore">
+    <section className="cw-price-tool" aria-label="Confronto listini">
       <details open={p !== null || initiallyOpen || undefined}>
         <summary>Confronta due listini</summary>
         <p>

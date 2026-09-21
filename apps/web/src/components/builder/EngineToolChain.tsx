@@ -52,7 +52,7 @@ export function EngineToolChain({
   const pending = chain?.status === "pending_approval";
 
   return (
-    <section className="cw-price-tool" aria-label="Letture multiple sul motore">
+    <section className="cw-price-tool" aria-label="Letture multiple">
       <details open={chain != null || initiallyOpen || undefined}>
         <summary>Leggi più materiali in una volta</summary>
         <p>

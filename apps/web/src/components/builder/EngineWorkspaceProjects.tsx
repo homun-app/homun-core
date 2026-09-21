@@ -10,8 +10,8 @@ export function EngineWorkspaceProjects({ projects, works, selected, onProject, 
   onWork: (id: string) => void;
 }) {
   const visible = selected ? projects.filter(project => project.id === selected) : projects;
-  return <section className="cw-workspace" aria-label="Progetti del motore">
-    <div className="cw-panel-top"><h2>Progetti</h2><span className="cw-hint">Fonte: motore</span></div>
+  return <section className="cw-workspace" aria-label="Progetti">
+    <div className="cw-panel-top"><h2>Progetti</h2></div>
     {selected && <button className="cs-link" onClick={() => onProject('')}>Tutti i progetti</button>}
     {!visible.length && <p>Nessun progetto disponibile.</p>}
     {visible.map(project => <section key={project.id}>

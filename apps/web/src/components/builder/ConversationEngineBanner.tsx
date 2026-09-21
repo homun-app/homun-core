@@ -37,18 +37,18 @@ export function ConversationEngineBanner({
   return (
     <section
       className={`cw-engine-banner${hasNotice ? "" : " cw-engine-banner--quiet"}`}
-      aria-label="Stato lavori motore"
+      aria-label="Stato lavori"
     >
       <details className="cw-engine-banner__details">
-        <summary>{ready ? "Dettagli lavori" : "Motore non pronto"}</summary>
+        <summary>{ready ? "Dettagli lavori" : "Connessione non disponibile"}</summary>
         <div className="cw-engine-banner__row">
-          <strong>{ready ? "Lavori sul motore" : "Motore non pronto"}</strong>
+          <strong>{ready ? "I tuoi lavori" : "Connessione non disponibile"}</strong>
           <span>
             {ready
               ? workCount === 0
                 ? "Nessun lavoro ancora — scrivi sotto per crearne uno"
                 : `${workCount} lavor${workCount === 1 ? "o" : "i"}`
-              : "Controlla che il motore sia avviato"}
+              : "Controlla che l'app sia avviata correttamente"}
           </span>
           <button
             type="button"
@@ -61,7 +61,7 @@ export function ConversationEngineBanner({
         </div>
       </details>
       {!ready && (
-        <p role="status">Il motore non è pronto: il lavoro riprenderà quando sarà disponibile.</p>
+        <p role="status">La connessione non è disponibile: il lavoro riprenderà quando sarà di nuovo accessibile.</p>
       )}
       {followups.map((notice) => (
         <div key={notice.commandId} className="cw-engine-banner__error">
