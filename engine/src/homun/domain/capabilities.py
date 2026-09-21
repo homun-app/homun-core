@@ -60,7 +60,7 @@ COMPARE_CSV = CapabilitySpec(
             'max_attempts': MAX_COMPARISON_ATTEMPTS},
     timeout_seconds=300,
     fallback_collaborator={
-        'name': 'Analista dei listini',
+        'name': 'Aurora',
         'role': 'Confronto deterministico dei listini caricati',
         'instructions': ('Confronta i due listini assegnati usando solo gli strumenti autorizzati dal motore '
                          'e consegna report e CSV delle differenze per la revisione umana. Non inviare nulla '

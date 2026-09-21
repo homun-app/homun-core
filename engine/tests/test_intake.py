@@ -257,7 +257,7 @@ def test_empty_roster_still_proposes_a_confirmable_collaborator(setup):
     ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps(brief))
     p=propose(ctx,actor,wid,{'command_id':'i','text':'Confronta listini','expected_version':1})
     assert p['status']=='pending_confirmation'
-    assert p['new_agent'] and p['new_agent']['name']=='Analista dei listini'
+    assert p['new_agent'] and p['new_agent']['name']=='Aurora'
     body={'command_id':'ok','digest':p['digest'],'expected_version':1,'create_agent':False}
     with pytest.raises(ValidationError): confirm(ctx,actor,wid,p['id'],body)
     body['create_agent']=True
