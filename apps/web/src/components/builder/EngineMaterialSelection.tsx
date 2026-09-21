@@ -1,16 +1,20 @@
 /**
  * One management surface for tool sources: eligible project materials with
- * inline ingestion (single files or a whole folder). Uploads land in the
- * project first, then the person selects — no separate upload mode.
+ * inline ingestion (single files or a whole folder) and removal. Uploads land
+ * in the project first, then the person selects — no separate upload mode.
  */
 import { useRef, useState } from "react";
 import type { Work } from "./conversation-types";
 import type { EngineMaterial } from "@/lib/engine-projects-client";
-import { materialOptionLabel } from "@/lib/engine-material-selection";
 import { useProjectMaterials } from "@/hooks/useProjectMaterials";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import "./engine-tool-chain.css";
 import "./engine-material-selection.css";
+
+function sizeLabel(bytes: number | null | undefined): string {
+  if (bytes == null) return "dimensione n/d";
+  return bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
+}
 
 export function EngineMaterialSelection({
   work,
@@ -74,15 +78,26 @@ export function EngineMaterialSelection({
     setNotice(parts.join(" "));
   }
 
+  async function removeMaterial(material: EngineMaterial) {
+    const name = material.origin_name ?? material.title;
+    if (!window.confirm(`Rimuovere «${name}» dal progetto? Non sarà più selezionabile.`)) return;
+    const ok = await sources.remove(material);
+    if (ok) {
+      onSelectionChange(selected.filter((id) => id !== material.id));
+      setNotice(`«${name}» rimosso dal progetto.`);
+    }
+  }
+
   return (
     <div className="cw-material-selection">
-      <ul className="cw-chain-picker">
+      <ul className="cw-chain-picker cw-material-list">
         {sources.materials.map((material) => {
           const index = selected.indexOf(material.id);
           const checked = index >= 0;
           const role = checked && orderedRoles?.[index] ? orderedRoles[index] : undefined;
+          const name = material.origin_name ?? material.title;
           return (
-            <li key={material.id} title={`SHA-256: ${material.content_hash}`}>
+            <li key={material.id} className="cw-material-row" title={`SHA-256: ${material.content_hash}`}>
               <label>
                 <input
                   type="checkbox"
@@ -90,9 +105,24 @@ export function EngineMaterialSelection({
                   disabled={disabled || sources.busy || (!checked && full)}
                   onChange={(event) => toggle(material.id, event.target.checked)}
                 />
-                <span>{materialOptionLabel(material)}</span>
-                {role && <em className="cw-material-role">{role}</em>}
+                <span className="cw-material-row__text">
+                  <span className="cw-material-row__name">{name}</span>
+                  <small className="cw-material-row__meta">
+                    v{material.version} · {sizeLabel(material.byte_size)}
+                    {material.extract_status === "extracted" ? "" : " · testo non estraibile"}
+                  </small>
+                </span>
               </label>
+              {role && <em className="cw-material-role">{role}</em>}
+              <button
+                type="button"
+                className="cw-material-remove"
+                aria-label={`Rimuovi ${name} dal progetto`}
+                disabled={disabled || sources.busy}
+                onClick={() => void removeMaterial(material)}
+              >
+                Rimuovi
+              </button>
             </li>
           );
         })}
@@ -122,7 +152,7 @@ export function EngineMaterialSelection({
         </button>
         {sources.busy && (
           <span role="status" className="cw-hint">
-            Caricamento nel progetto…
+            Aggiornamento materiali…
           </span>
         )}
       </div>

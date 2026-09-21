@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Work } from "@/components/builder/conversation-types";
 import {
+  archiveEngineMaterial,
   ingestEngineMaterial,
   listEngineMaterials,
   type EngineMaterial,
@@ -26,6 +27,7 @@ export type ProjectMaterials = {
   error: unknown;
   reload: () => Promise<EngineMaterial[]>;
   ingest: (files: File[]) => Promise<IngestOutcome>;
+  remove: (material: EngineMaterial) => Promise<boolean>;
 };
 
 export function useProjectMaterials(
@@ -98,5 +100,23 @@ export function useProjectMaterials(
     }
   }
 
-  return { materials, loaded, busy, error, reload, ingest };
+  async function remove(material: EngineMaterial): Promise<boolean> {
+    setBusy(true);
+    setError(null);
+    try {
+      await archiveEngineMaterial({
+        materialId: material.id,
+        expectedVersion: material.version,
+      });
+      await reload();
+      return true;
+    } catch (cause) {
+      setError(cause);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return { materials, loaded, busy, error, reload, ingest, remove };
 }

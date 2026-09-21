@@ -1,9 +1,41 @@
-.cw-material-add {
+/* Material rows: name and metadata readable at a glance, actions on the right. */
+.cw-material-list li.cw-material-row {
   display: flex;
-  gap: 8px;
   align-items: center;
-  margin: 8px 0;
-  flex-wrap: wrap;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.cw-material-list li.cw-material-row:last-child {
+  border-bottom: none;
+}
+
+.cw-material-row label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.cw-material-row__text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.cw-material-row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cw-material-row__meta {
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  font-size: 11px;
 }
 
 .cw-material-role {
@@ -15,4 +47,34 @@
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
   opacity: 0.85;
+  white-space: nowrap;
+}
+
+.cw-material-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.cw-material-remove:hover:not(:disabled) {
+  color: inherit;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.cw-material-remove:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.cw-material-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0;
+  flex-wrap: wrap;
 }
