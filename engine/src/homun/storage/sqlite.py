@@ -13,6 +13,17 @@ from homun.storage.documents import ENTITY_TYPES, write_delta
 from homun.storage.schema import initialize
 
 
+def _open_connection(path: Path, encryption_key: bytes | None = None) -> sqlite3.Connection:
+    """Open a workspace connection; SQLCipher when a key is provided."""
+    if encryption_key is not None:
+        import sqlcipher3
+        conn = sqlcipher3.connect(str(path), check_same_thread=False)
+        # Set the key before any schema access; hex literal form.
+        conn.execute("PRAGMA key = \"x'" + encryption_key.hex() + "'\"")
+        return conn
+    return sqlite3.connect(path, check_same_thread=False)
+
+
 class SqliteWorkspaceRepository:
     """A no-op save neither writes rows nor advances the persisted generation.
 
@@ -20,12 +31,13 @@ class SqliteWorkspaceRepository:
     Delta comparison currently reads all documents; writes scale with changes.
     """
 
-    def __init__(self, path: Path, workspace_id: str) -> None:
+    def __init__(self, path: Path, workspace_id: str, *,
+                 encryption_key: bytes | None = None) -> None:
         self.path = path
         self.workspace_id = workspace_id
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
-        self._conn = sqlite3.connect(path, check_same_thread=False)
+        self._conn = _open_connection(path, encryption_key)
         try:
             initialize(self._conn, workspace_id)
             self._conn.execute("PRAGMA journal_mode=WAL")
