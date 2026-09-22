@@ -1229,7 +1229,7 @@ export function ConversationWorkspace() {
         {/* Engine diagnostics live in Settings, not above the conversation.
             Errors that block work surface through HomunErrorNotice. */}
         {space ? (
-          <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined} engineTeams={engine.backend === "engine" ? engine.teams : undefined} engineRoutines={engine.backend === "engine" ? engine.routines : undefined}
+          <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined} engineTeams={engine.backend === "engine" ? engine.teams : undefined} engineRoutines={engine.backend === "engine" ? engine.routines : undefined} onUpdateRoutine={engine.backend === "engine" ? (r, ch) => engine.updateRoutine(r.id, r.revision, ch) : undefined} onSkipNextRoutine={engine.backend === "engine" ? (r) => engine.routineAction(r.id, "skip_next", r.revision) : undefined}
             engineMode={engine.backend === "engine"} onRefreshEngine={engine.backend === "engine" ? engine.refresh : undefined}
             space={space}
             spaceInitial={spaceInitial}

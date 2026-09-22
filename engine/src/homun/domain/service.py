@@ -46,7 +46,7 @@ from homun.domain.commands.reviews import _work_review
 from homun.domain.commands.work import _work_pause
 from homun.domain.commands.work import _work_cancel
 from homun.domain.commands.work import _work_set_due
-from homun.domain.commands.routines import _routine_create, _routine_pause, _routine_resume, _routine_stop
+from homun.domain.commands.routines import _routine_create, _routine_pause, _routine_resume, _routine_stop, _routine_skip_next, _routine_update
 from homun.domain.commands.conversations import append_engine_message
 from homun.domain.commands.projects import ensure_project_for_work
 from homun.domain.commands.materials import register_prepared_material
@@ -94,6 +94,8 @@ HANDLERS = {
     "routine.pause": _routine_pause,
     "routine.resume": _routine_resume,
     "routine.stop": _routine_stop,
+    "routine.update": _routine_update,
+    "routine.skip_next": _routine_skip_next,
 }
 
 

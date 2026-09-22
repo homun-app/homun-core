@@ -129,3 +129,61 @@ def test_cron_preview_endpoint(client):
     bad = client.get("/v1/workspaces/ws_local/routines/preview",
                      params={"cron": "garbage"})
     assert bad.status_code == 400 and bad.json()["detail"]["code"] == "validation_error"
+
+
+def test_routine_update_revises_template_and_cron_versioned(client):
+    actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
+    conv_id, agent_id = _seed_routine_base(actor)
+    from homun.context import get_context
+    from homun.application import routine_runs
+    ctx = get_context()
+    with ctx.repository.transaction() as store:
+        ctx.service.for_store(store).apply(actor, "cr", "routine.create", {
+            "name": "R", "cron": "0 9 * * 1", "conversation_id": conv_id,
+            "template": _template(agent_id),
+        })
+    routine_id = next(iter(ctx.repository.load().routines))
+    revised_template = _template(agent_id)
+    revised_template["title"] = "Confronto listini — edizione rivista"
+    with ctx.repository.transaction() as store:
+        ctx.service.for_store(store).apply(actor, "u", "routine.update", {
+            "routine_id": routine_id, "expected_version": 1,
+            "name": "Settimanale rivista", "cron": "0 8 * * 2",
+            "template": revised_template,
+        })
+    run = routine_runs.run_recurrence(ctx, actor, routine_id, "2026-09-29T06:00:00+00:00")
+    assert run and run["status"] == "ready"
+    store = ctx.repository.load()
+    work = store.works[run["work_id"]]
+    assert work.title == "Confronto listini — edizione rivista"
+    assert store.routines[routine_id].cron == "0 8 * * 2"
+
+
+def test_skip_next_consumes_occurrence_without_running(client):
+    actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
+    conv_id, agent_id = _seed_routine_base(actor)
+    from homun.context import get_context
+    from homun.application import routine_runs
+    ctx = get_context()
+    with ctx.repository.transaction() as store:
+        ctx.service.for_store(store).apply(actor, "cr", "routine.create", {
+            "name": "R", "cron": "0 9 * * 1", "conversation_id": conv_id,
+            "template": _template(agent_id),
+        })
+    routine_id = next(iter(ctx.repository.load().routines))
+    from homun.application.routines import next_occurrence as app_next
+    skip_until = app_next("0 9 * * 1", "Europe/Rome")
+    from homun.application import routines as app_routines
+    app_routines.routine_action(ctx, actor, "skip_next", {
+        "command_id": "sk", "routine_id": routine_id, "expected_version": 1})
+    store = ctx.repository.load()
+    assert store.routines[routine_id].skip_until == skip_until
+    # un'occorrenza prima del skip_until non crea lavoro
+    assert routine_runs.run_recurrence(ctx, actor, routine_id, skip_until) is None
+    # l'occorrenza successiva (dopo skip_until) corre
+    from datetime import datetime
+    from dbos._scheduler import croniter
+    after = datetime.fromisoformat(skip_until)
+    nxt = croniter("0 9 * * 1", after).get_next(datetime).astimezone(after.tzinfo).isoformat()
+    run = routine_runs.run_recurrence(ctx, actor, routine_id, nxt)
+    assert run and run["status"] == "ready"

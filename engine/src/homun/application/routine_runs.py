@@ -17,8 +17,16 @@ def run_recurrence(ctx, actor, routine_id: str, scheduled_for: str) -> dict[str,
             routine = store.routines.get(routine_id)
             if routine is None or routine.status != "active":
                 return None
-            if routine.last_scheduled_for and routine.last_scheduled_for >= scheduled_for:
+            from datetime import datetime
+
+            def _parse(value: str):
+                return datetime.fromisoformat(value)
+
+            moment = _parse(scheduled_for)
+            if routine.last_scheduled_for and moment <= _parse(routine.last_scheduled_for):
                 return None  # already fired (idempotency on replay/recovery)
+            if routine.skip_until and moment <= _parse(routine.skip_until):
+                return None  # the person skipped this occurrence: consumed, not run
             template = routine.template
             service = ctx.service.for_store(store)
             work = service.apply(actor, f"routine:{routine_id}:{scheduled_for}:work", "work.create", {

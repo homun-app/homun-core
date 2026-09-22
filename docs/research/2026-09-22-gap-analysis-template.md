@@ -1,6 +1,11 @@
 # Gap analysis — template originale vs prodotto attuale (2026-09-22)
 
 > Domanda: «cosa manca realmente rispetto al progetto finale?»
+> **Stato finale 22/9**: punti 1–7 completati; resta MCP/skill (design a
+> parte) e i rinvii espliciti (firma, cifratura, identità — decisione del
+> titolare). Le viste Studio del template non sono montate nel percorso
+> prodotto: la voce «Fonte nelle viste Studio» dell'audit è priva di
+> oggetto.
 > Metodo: inventario componente-per-componente di `prototypes/reference` (il template)
 > vs `apps/web`, verifica del collegamento al motore (Fonte) di ogni superficie,
 > incrocio con i comandi effettivamente registrati nel motore (`domain/service.py`)

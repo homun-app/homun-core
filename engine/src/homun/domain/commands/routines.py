@@ -113,3 +113,70 @@ def _routine_resume(ctx: CommandContext, actor: Actor, command_id: str, payload:
 
 def _routine_stop(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     return _routine_transition(ctx, actor, command_id, payload, "stopped")
+
+
+def _routine_update(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Versioned model revision: future recurrences use the new template."""
+    routine = ctx.store.routines.get(str(payload.get("routine_id") or ""))
+    if routine is None:
+        from homun.domain.errors import NotFoundError
+        raise NotFoundError("Routine not found")
+    ctx._require_expected_version(routine.revision, payload.get("expected_version"))
+    if routine.status == "stopped":
+        raise ValidationError("A stopped routine cannot be revised")
+    changed_cron = False
+    if "name" in payload:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise ValidationError("Routine name is required")
+        routine.name = name[:80]
+    if "cron" in payload:
+        routine.cron = validate_cron(str(payload.get("cron") or ""))
+        changed_cron = True
+    if "cron_timezone" in payload:
+        tz = str(payload.get("cron_timezone") or "UTC")
+        from zoneinfo import ZoneInfo
+        try:
+            ZoneInfo(tz)
+        except Exception:
+            raise ValidationError("unknown cron_timezone") from None
+        routine.cron_timezone = tz
+        changed_cron = True
+    if "template" in payload:
+        routine.template = _validate_template(payload.get("template") or {}, ctx.store)
+    routine.revision += 1
+    routine.updated_at = utc_now()
+    ctx._emit(
+        actor=actor, command_id=command_id, aggregate_id=routine.id,
+        aggregate_type="routine", aggregate_version=routine.revision,
+        event_type="routine.updated",
+        payload={"name": routine.name, "cron": routine.cron, "changed_cron": changed_cron},
+    )
+    return {"routine_id": routine.id, "status": routine.status,
+            "revision": routine.revision, "changed_cron": changed_cron}
+
+
+
+def _routine_skip_next(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Consume the next scheduled occurrence without running it."""
+    routine = ctx.store.routines.get(str(payload.get("routine_id") or ""))
+    if routine is None:
+        from homun.domain.errors import NotFoundError
+        raise NotFoundError("Routine not found")
+    ctx._require_expected_version(routine.revision, payload.get("expected_version"))
+    if routine.status != "active":
+        raise ValidationError("Only an active routine can skip its next occurrence")
+    skip_until = str(payload.get("skip_until") or "").strip()
+    if not skip_until:
+        raise ValidationError("skip_until is required (computed by the caller)")
+    routine.skip_until = skip_until
+    routine.revision += 1
+    routine.updated_at = utc_now()
+    ctx._emit(
+        actor=actor, command_id=command_id, aggregate_id=routine.id,
+        aggregate_type="routine", aggregate_version=routine.revision,
+        event_type="routine.skip_next",
+        payload={"skip_until": routine.skip_until},
+    )
+    return {"routine_id": routine.id, "skip_until": routine.skip_until,
+            "revision": routine.revision}

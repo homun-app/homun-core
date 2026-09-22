@@ -27,6 +27,15 @@ class RoutineActionRequest(BaseModel):
     expected_version: int = Field(ge=1)
 
 
+class RoutineUpdateRequest(BaseModel):
+    command_id: str = Field(min_length=1, max_length=160)
+    expected_version: int = Field(ge=1)
+    name: str | None = Field(default=None, max_length=80)
+    cron: str | None = Field(default=None, max_length=120)
+    cron_timezone: str | None = Field(default=None, max_length=60)
+    template: dict[str, Any] | None = None
+
+
 @router.get("/routines")
 def list_routines(workspace_id: str,
                   x_homun_actor_id: str | None = Header(default=None),
@@ -79,6 +88,26 @@ def _action(workspace_id: str, routine_id: str, action: str, body: RoutineAction
         return routines.routine_action(ctx, actor, action, payload)
     except DomainError as exc:
         raise _http_error(exc) from exc
+
+
+@router.post("/routines/{routine_id}/update")
+def update_routine(workspace_id: str, routine_id: str, body: RoutineUpdateRequest,
+                   x_homun_actor_id: str | None = Header(default=None),
+                   x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    payload = {k: v for k, v in body.model_dump().items() if v is not None}
+    payload["routine_id"] = routine_id
+    try:
+        return routines.routine_action(ctx, actor, "update", payload)
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/routines/{routine_id}/skip_next")
+def skip_next_routine(workspace_id: str, routine_id: str, body: RoutineActionRequest,
+                      x_homun_actor_id: str | None = Header(default=None),
+                      x_homun_actor_name: str | None = Header(default=None)):
+    return _action(workspace_id, routine_id, "skip_next", body, x_homun_actor_id, x_homun_actor_name)
 
 
 @router.get("/routines/preview")

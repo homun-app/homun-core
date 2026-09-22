@@ -25,6 +25,7 @@ export type EngineRoutine = {
   status: "active" | "paused" | "stopped";
   last_run_work_id: string | null;
   last_scheduled_for: string | null;
+  skip_until: string | null;
   revision: number;
 };
 
@@ -72,15 +73,57 @@ export async function createEngineRoutine(input: {
 
 export async function routineEngineAction(input: {
   routineId: string;
-  action: "pause" | "resume" | "stop";
+  action: "pause" | "resume" | "stop" | "skip_next";
   expectedVersion: number;
   actor?: EngineActor;
 }): Promise<void> {
-  await postEngineCommand({
-    type: `routine.${input.action}`,
-    payload: { routine_id: input.routineId, expected_version: input.expectedVersion },
-    actor: input.actor ?? defaultLocalActor(),
-  });
+  // Dedicated routes (not the generic command endpoint): they pair the domain
+  // transition with its DBOS schedule twin and compute skip_until server-side.
+  const response = await routinesFetch(
+    `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/routines/${encodeURIComponent(input.routineId)}/${input.action}`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-Homun-Actor-Id": (input.actor ?? defaultLocalActor()).id,
+      },
+      body: JSON.stringify({ command_id: crypto.randomUUID(), expected_version: input.expectedVersion }),
+    },
+    ENGINE_DEFAULT_BASE_URL,
+  );
+  if (!response.ok) throw new Error(`Routine action failed: HTTP ${response.status}`);
+}
+
+export async function updateEngineRoutine(input: {
+  routineId: string;
+  expectedVersion: number;
+  name?: string;
+  cron?: string;
+  template?: EngineRoutine["template"];
+  actor?: EngineActor;
+}): Promise<void> {
+  const body: Record<string, unknown> = {
+    command_id: crypto.randomUUID(),
+    expected_version: input.expectedVersion,
+  };
+  if (input.name !== undefined) body["name"] = input.name;
+  if (input.cron !== undefined) body["cron"] = input.cron;
+  if (input.template !== undefined) body["template"] = input.template;
+  const response = await routinesFetch(
+    `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/routines/${encodeURIComponent(input.routineId)}/update`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-Homun-Actor-Id": (input.actor ?? defaultLocalActor()).id,
+      },
+      body: JSON.stringify(body),
+    },
+    ENGINE_DEFAULT_BASE_URL,
+  );
+  if (!response.ok) throw new Error(`Routine update failed: HTTP ${response.status}`);
 }
 
 export async function previewEngineCron(

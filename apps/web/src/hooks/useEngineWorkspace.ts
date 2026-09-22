@@ -38,7 +38,7 @@ import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import type { EngineTeam } from "@/lib/engine-projects-client";
 import { renameEngineWork } from "@/lib/engine-work-naming";
 import { closeEngineWork, reviseEnginePlan, setEngineWorkBudget, setEngineWorkDue, startEngineWork, submitEngineArtifact } from "@/lib/engine-work-lifecycle";
-import { createEngineRoutine, routineEngineAction, type EngineRoutine } from "@/lib/engine-routines-client";
+import { createEngineRoutine, routineEngineAction, updateEngineRoutine, type EngineRoutine } from "@/lib/engine-routines-client";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
 import { proposeWorkIntake } from "@/lib/engine-intake-client";
 import { applyIntakePreview } from "@/lib/engine-intake-display";
@@ -66,7 +66,8 @@ export type EngineWorkspaceState = {
   setWorkBudget: (work: Work, modelAttempts: number) => Promise<void>;
   setDue: (work: Work, dueDate: string | null) => Promise<void>;
   createRoutine: (input: { name: string; cron: string; conversationId: string; template: EngineRoutine["template"] }) => Promise<void>;
-  routineAction: (routineId: string, action: "pause" | "resume" | "stop", expectedVersion: number) => Promise<void>;
+  routineAction: (routineId: string, action: "pause" | "resume" | "stop" | "skip_next", expectedVersion: number) => Promise<void>;
+  updateRoutine: (routineId: string, expectedVersion: number, changes: { name?: string; cron?: string }) => Promise<void>;
   revisePlan: (work: Work, action: { insertAfterStepId?: string | null; newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string }; removeStepId?: string }) => Promise<void>;
   createWork: (title: string, objective: string, draftOnly?: boolean) => Promise<Work | null>;
   postMessage: (work: Work, text: string) => Promise<void>;
@@ -568,6 +569,10 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     },
     routineAction: async (routineId, action, expectedVersion) => {
       await routineEngineAction({ routineId, action, expectedVersion });
+      await refresh();
+    },
+    updateRoutine: async (routineId, expectedVersion, changes) => {
+      await updateEngineRoutine({ routineId, expectedVersion, ...changes });
       await refresh();
     },
     revisePlan: async (work, action) => {

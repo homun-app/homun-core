@@ -33,7 +33,7 @@ def public(routine) -> dict[str, Any]:
         "conversation_id": routine.conversation_id,
         "template": deepcopy(routine.template),
         "status": routine.status, "last_run_work_id": routine.last_run_work_id,
-        "last_scheduled_for": routine.last_scheduled_for,
+        "last_scheduled_for": routine.last_scheduled_for, "skip_until": routine.skip_until,
         "revision": routine.revision,
     }
 
@@ -44,6 +44,20 @@ def _schedule_name(routine_id: str) -> str:
 
 def _schedule_context(routine_id: str) -> dict[str, Any]:
     return {"routine_id": routine_id}
+
+
+def next_occurrence(cron: str, cron_timezone: str) -> str:
+    """The next ISO occurrence strictly after now, in the routine's timezone."""
+    from dbos._scheduler import croniter
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from homun.domain.errors import ValidationError as _ValidationError
+    zone = ZoneInfo(cron_timezone)
+    try:
+        iterator = croniter(cron, datetime.now(zone))
+        return iterator.get_next(datetime).astimezone(zone).isoformat()
+    except Exception as exc:
+        raise _ValidationError(f"invalid cron: {exc}") from exc
 
 
 def deep_validate_cron(cron: str) -> str:
@@ -93,7 +107,11 @@ def _register_schedule(routine_id: str, cron: str, cron_timezone: str) -> None:
 
 
 def routine_action(ctx, actor, action: str, body) -> dict[str, Any]:
-    """pause/resume/stop: the domain transition plus the DBOS schedule twin."""
+    """pause/resume/stop/update/skip_next: domain transition + schedule twin.
+
+    A cron change recreates the schedule under the same name; every other
+    mutation keeps it and lets reconcile converge any drift.
+    """
     from dbos import DBOS
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
@@ -101,11 +119,17 @@ def routine_action(ctx, actor, action: str, body) -> dict[str, Any]:
             if routine is None:
                 raise NotFoundError("Routine not found")
             name = _schedule_name(routine.id)
+            old_cron = (routine.cron, routine.cron_timezone)
+            payload = {"routine_id": routine.id, "expected_version": body["expected_version"]}
+            for key in ("name", "cron", "cron_timezone", "template"):
+                if body.get(key) is not None:
+                    payload[key] = body[key]
+            if action == "skip_next":
+                deep_validate_cron(routine.cron)
+                payload["skip_until"] = next_occurrence(routine.cron, routine.cron_timezone)
             service = ctx.service.for_store(store)
-            result = service.apply(actor, body["command_id"], f"routine.{action}", {
-                "routine_id": routine.id,
-                "expected_version": body["expected_version"],
-            })
+            result = service.apply(actor, body["command_id"], f"routine.{action}", payload)
+            new_cron = (store.routines[routine.id].cron, store.routines[routine.id].cron_timezone)
         ctx.service.store = store
     try:
         if action == "pause":
@@ -114,6 +138,10 @@ def routine_action(ctx, actor, action: str, body) -> dict[str, Any]:
             DBOS.resume_schedule(name)
         elif action == "stop":
             DBOS.delete_schedule(name)
+        elif action == "update" and new_cron != old_cron:
+            # A changed cadence needs a fresh schedule definition.
+            DBOS.delete_schedule(name)
+            _register_schedule(routine.id, new_cron[0], new_cron[1])
     finally:
         # Domain state is the truth; any drift converges on the next runtime
         # tick, not just at startup.

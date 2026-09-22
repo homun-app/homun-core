@@ -1,6 +1,10 @@
 # Stato verificato di Homun 2
 
-Aggiornato il 21 settembre 2026 dopo la tranche «stabilità della conversazione»: scroll che non interrompe la lettura (policy pura + hook di ancoraggio al fondo), attese del modello oneste nel transcript (fasi vere + secondi trascorsi) e recupero guidato dai 409 a versione stantia sulle azioni dei tool. Questo è il riferimento sintetico corrente; i rapporti in `research/` conservano prove e limiti delle singole tranche. I numeri sotto provengono dall'ultima verifica, non da esecuzioni ripetute durante l'aggiornamento documentale.
+Aggiornato il 22 settembre 2026 dopo la tranche «fondazioni prodotto» (audit UX
+D1–D12, piani multi-fase con strumenti reali e chiusura con esito, gestione
+agenti/team, impostazioni ristrutturate con suggerimenti modelli, budget e
+scadenze per lavoro, revisione piano da UI, libreria Documenti, routine a
+motore). Tranche precedente (21 settembre 2026): scroll che non interrompe la lettura (policy pura + hook di ancoraggio al fondo), attese del modello oneste nel transcript (fasi vere + secondi trascorsi) e recupero guidato dai 409 a versione stantia sulle azioni dei tool. Questo è il riferimento sintetico corrente; i rapporti in `research/` conservano prove e limiti delle singole tranche. I numeri sotto provengono dall'ultima verifica, non da esecuzioni ripetute durante l'aggiornamento documentale.
 
 ## Funziona nel perimetro verificato
 
@@ -75,3 +79,34 @@ La [specifica di passaggio](handoff/2026-09-19-ripresa-sviluppo-homun.md) resta 
 
 I rapporti precedenti sono fotografie storiche: i conteggi di test, gli hash dei pacchetti e i problemi allora aperti non vanno letti come stato corrente. Non cancellare queste prove né sostituirne i risultati con numeri di altre esecuzioni.
 
+
+## Fondazioni prodotto (verificato il 22/9)
+
+- **Piani multi-fase end-to-end:** l'intake può dichiarare fasi (`plan_steps`,
+  validate: capacità del registro, assegnatari risolvibili); la conferma
+  pubblica il piano accettato (lavoro Pronto); i materiali attesi pronti
+  fanno proporre il passo dal lavoro stesso (annuncio una-tantum); le fasi
+  eseguibili girano sui tool reali (confronto/lettura) senza secondo piano;
+  l'approvazione di una fase intermedia avanza, l'ultima chiude con esito
+  («Completato», risultato in archivio, nessun invio esterno).
+- **Gestione agenti e team:** schede Squadra modificabili (identità,
+  autonomia, capacità, connessione modello per collaboratore) e team con
+  coordinatore (creazione, modifica, archiviazione) sui comandi versionati.
+- **Impostazioni ristrutturate:** Modelli (collegamento) separato da Budget e
+  routing; Persone e accessi lite; Plugin e capacità dal catalogo reale con
+  prontezza; Automazioni oneste. Suggerimenti modelli per attività dal
+  catalogo locale reale (euristiche dichiarate, non benchmark) con collegamento
+  in un clic.
+- **Budget, scadenze, revisione piano, documenti:** budget per lavoro con
+  contatori onesti e limite esplicito; scadenze reali (`work.set_due`) con
+  avviso scaduto e conteggi giornata in Compiti; aggiunta/rimozione fasi da
+  UI (le completate restano storia); libreria Documenti (ricerca, filtro
+  progetto, download) su tutti gli artefatti approvati.
+- **Routine a motore:** entità Routine + comandi versionati
+  (create/pause/resume/stop/update/skip_next); ricorrenze DBOS cron che
+  creano lavori supervisionati dal modello (idempotenti per istante, guard
+  sullo stato di dominio a ogni scatto); «Rendi ripetibile» dai lavori
+  completati con cadenza in linguaggio naturale e anteprima delle prossime
+  esecuzioni; spazio Automazioni con pausa/riprendi/salta/termina/modifica.
+- **Superfici verificate:** web (percorsi end-to-end ripercorsi dal vivo) e
+  shell Electron (percorso guida A→Z dopo il flag di accessibilità).

@@ -193,3 +193,19 @@ Fuori dalla fetta 1 (prossimi passi): revisione del modello (versioni),
 salta-prossima, regime autonomo per routine, budget mensile di routine,
 creazione da zero, bacheca cronologia ricorrenze, recupero una-tantum alla
 riapertura (oggi protegge l'idempotità per istante).
+
+## 9. Fetta 2 (22/9, fatto)
+
+- `routine.update`: revisione versionata di nome, cadenza e template; il cambio
+  cron ricrea lo schedule sotto lo stesso nome; le ricorrenze future usano la
+  nuova versione (test: titolo della ricorrenza dopo revisione).
+- `routine.skip_next`: salta la prossima occorrenza (`skip_until` calcolato
+  server-side con croniter nel fuso della routine); `run_recurrence` consuma
+  senza eseguire le occorrenze fino a `skip_until` compreso (confronto
+  cosciente del fuso). Test completo: skip consuma, la successiva corre.
+- UI: «Modifica» (nome + cadenza con la stessa traduzione NL→cron) e «Salta
+  la prossima» nello spazio Automazioni; le azioni passano dalle route
+  dedicate (gemella schedule + calcolo server-side), non dal generico comandi.
+- Verificato dal vivo: skip → `skip_until 2026-09-28T09:00+02:00` a
+  revisione 4; cadenza cambiata in «ogni martedì alle 8» → cron 0 8 * * 2 a
+  revisione 5.

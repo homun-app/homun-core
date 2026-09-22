@@ -68,10 +68,12 @@ type Props = {
   onRemoveMaterial: (id: string) => void;
   onLinkMaterial: (id: string, workId: string) => void;
   onRefreshEngine?: (() => Promise<void>) | undefined;
+  onUpdateRoutine?: ((routine: EngineRoutine, changes: { name: string; cron: string }) => Promise<void>) | undefined;
+  onSkipNextRoutine?: ((routine: EngineRoutine) => Promise<void>) | undefined;
 };
 
 export function ConversationWorkspaceSpaceHost({
-  engineMode = false, engineAgents, engineTeams, engineRoutines, onRefreshEngine,
+  engineMode = false, engineAgents, engineTeams, engineRoutines, onRefreshEngine, onUpdateRoutine, onSkipNextRoutine,
   space,
   spaceInitial,
   spaceSelected,
@@ -171,7 +173,14 @@ export function ConversationWorkspaceSpaceHost({
   }
 
   if (engineMode && space === "Automazioni")
-    return <EngineRoutines routines={engineRoutines ?? []} onChanged={onRefreshEngine} />;
+    return (
+      <EngineRoutines
+        routines={engineRoutines ?? []}
+        onChanged={onRefreshEngine}
+        onUpdate={onUpdateRoutine}
+        onSkipNext={onSkipNextRoutine}
+      />
+    );
   if (space === "Documenti") {
     return <EngineDocuments projects={spaceData.projects.map((p) => ({ id: p.id, name: p.name }))} />;
   }

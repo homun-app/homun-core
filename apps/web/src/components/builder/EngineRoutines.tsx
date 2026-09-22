@@ -19,11 +19,13 @@ function describeCron(cron: string): string {
 export function EngineRoutines({
   routines,
   onChanged,
-  onCreate,
+  onUpdate,
+  onSkipNext,
 }: {
   routines: EngineRoutine[];
   onChanged?: (() => Promise<void>) | undefined;
-  onCreate?: ((input: { name: string; cron: string; conversationId?: string }) => Promise<void>) | undefined;
+  onUpdate?: ((routine: EngineRoutine, changes: { name: string; cron: string }) => Promise<void>) | undefined;
+  onSkipNext?: ((routine: EngineRoutine) => Promise<void>) | undefined;
 }) {
   const refresh = onChanged ?? (async () => {});
   const [actionError, setActionError] = useState<unknown>(null);
@@ -69,9 +71,16 @@ export function EngineRoutines({
             </p>
             <div className="cs-actions">
               {routine.status === "active" && (
-                <button type="button" className="cw-secondary" onClick={() => void act(routine, "pause")}>
-                  Ferma per ora
-                </button>
+                <>
+                  {onSkipNext && (
+                    <button type="button" className="cs-link" onClick={() => void onSkipNext(routine).catch(setActionError)}>
+                      Salta la prossima
+                    </button>
+                  )}
+                  <button type="button" className="cw-secondary" onClick={() => void act(routine, "pause")}>
+                    Ferma per ora
+                  </button>
+                </>
               )}
               {routine.status === "paused" && (
                 <button type="button" className="cw-secondary" onClick={() => void act(routine, "resume")}>
@@ -82,6 +91,9 @@ export function EngineRoutines({
                 <button type="button" className="cs-link" onClick={() => void act(routine, "stop")}>
                   Termina routine
                 </button>
+              )}
+              {onUpdate && routine.status !== "stopped" && (
+                <RoutineInlineEditor routine={routine} onSave={(changes) => onUpdate(routine, changes)} />
               )}
             </div>
           </article>
@@ -175,6 +187,65 @@ export function EngineRoutineCreator({
       </div>
       {saving && <p role="status">Salvataggio in corso…</p>}
       <HomunErrorNotice error={error ?? previewError} />
+    </form>
+  );
+}
+
+
+/** Inline edit of name and cadence; the model revision is versioned. */
+function RoutineInlineEditor({
+  routine,
+  onSave,
+}: {
+  routine: EngineRoutine;
+  onSave: (changes: { name: string; cron: string }) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(routine.name);
+  const [phrase, setPhrase] = useState(describeCron(routine.cron));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const cron = cadenceToCron(phrase) ?? (/^[\d*,/-]+( [\d*,/-]+){4}$/.test(phrase) ? phrase : null);
+  if (!open)
+    return (
+      <button type="button" className="cs-link" onClick={() => setOpen(true)}>
+        Modifica
+      </button>
+    );
+  return (
+    <form className="cw-routine-edit" aria-label={`Modifica ${routine.name}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!cron || saving) return;
+        setSaving(true);
+        setError(null);
+        onSave({ name: name.trim(), cron })
+          .then(() => setOpen(false))
+          .catch(setError)
+          .finally(() => setSaving(false));
+      }}>
+      <label>
+        Nome
+        <input value={name} maxLength={80} disabled={saving} onChange={(e) => setName(e.target.value)} />
+      </label>
+      <label>
+        Quando
+        <input value={phrase} maxLength={120} disabled={saving} onChange={(e) => setPhrase(e.target.value)} />
+      </label>
+      {!cron && (
+        <p className="cw-hint" role="alert">
+          Cadence non riconosciuta: «ogni martedì alle 8» oppure un cron a 5 campi.
+        </p>
+      )}
+      <div className="cs-actions">
+        <button className="cw-secondary" disabled={saving || !cron || !name.trim()}>
+          {saving ? "Salvo…" : "Salva revisione"}
+        </button>
+        <button type="button" className="cs-link" disabled={saving} onClick={() => setOpen(false)}>
+          Annulla
+        </button>
+      </div>
+      <HomunErrorNotice error={error} />
     </form>
   );
 }

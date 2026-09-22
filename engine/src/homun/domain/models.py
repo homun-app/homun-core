@@ -233,6 +233,8 @@ class Routine(BaseModel):
     last_run_work_id: str | None = None
     last_scheduled_for: str | None = None
     """ISO datetime of the last fired occurrence (recovery idempotency)."""
+    skip_until: str | None = None
+    """ISO datetime: occurrences strictly before it are consumed without running."""
     revision: int = 1
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
