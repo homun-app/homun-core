@@ -41,7 +41,13 @@ export function useEngineWorkspaceSnapshot(
         listEngineAgents(),
       ]);
       if (current !== generation.current) return;
-      setRawWorks(items);
+      // A work linked to a project only through its conversation still gets
+      // the project's materials: mirror the engine's work_project_ids rule.
+      setRawWorks(items.map((work) =>
+        work["project_id"] == null
+          ? { ...work, project_id: conversations.find((c) => c.id === work["primary_conversation_id"])?.project_id ?? null }
+          : work,
+      ));
       setProjects(currentProjects);
       setAgents(currentAgents);
       setFollowups(

@@ -141,3 +141,57 @@ def test_contribution_resolves_its_phase_and_announces_next(setup):
     assert plan.steps[0].status.value == 'succeeded' and plan.steps[1].status.value == 'pending'
     texts = [m.text for m in store.messages.values() if m.conversation_id == conv['conversation_id']]
     assert any('Fase «Raccolta» registrata' in t and '«Confronto»' in t for t in texts)
+
+
+def test_phased_general_work_admits_comparison_on_its_phase(setup):
+    """A 'general' agreement with a compare_csv phase prepares and runs the real
+    comparison on that phase: no second plan, the approval is the phase's go."""
+    import json
+    from types import SimpleNamespace
+    from homun.application.material_ingest import ingest_file
+    from homun.application.intake import propose as intake_propose, confirm as intake_confirm
+    from homun.application.price_comparisons import propose as cmp_propose, approve as cmp_approve
+    from homun.application.price_comparison_execution import execute as cmp_execute
+    ctx, actor = setup
+    project = ctx.service.apply(actor, 'pp', 'project.create', {'name': 'P'})['project_id']
+    ctx.persist()
+    materials = [ingest_file(ctx, actor, command_id=f'ing{i}', project_id=project,
+                             filename=f'list-{i}.csv', data=f'sku,name,price,currency\nA,Alpha,{10+i},EUR\n'.encode())['material_id'] for i in range(2)]
+    conv = ctx.service.apply(actor, 'cc', 'conversation.create', {'title': 'L', 'project_id': project})
+    work = ctx.service.apply(actor, 'ww', 'work.create', {'conversation_id': conv['conversation_id'], 'title': 'L', 'objective': 'Confrontare.'})
+    agent = ctx.service.apply(actor, 'aa', 'agent.create', {'name': 'Ada', 'role': 'X', 'instructions': 'Y'})
+    ctx.persist()
+    brief = {'title': 'T', 'objective': 'O', 'output': 'R', 'constraints': [], 'missing_information': [],
+             'suggested_agent_id': agent['agent_id'], 'new_agent': None, 'rationale': 'r', 'capability': 'general',
+             'plan_steps': [{'title': 'Raccolta', 'capability': 'general', 'assignee': ''},
+                            {'title': 'Confronto', 'capability': 'compare_csv', 'assignee': ''}]}
+    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
+    p = intake_propose(ctx, actor, work['work_id'], {'command_id': 'i', 'text': 'due fasi', 'expected_version': 1})
+    intake_confirm(ctx, actor, work['work_id'], 'i', {'command_id': 'ok', 'digest': p['digest'], 'expected_version': 1, 'create_agent': False})
+    wid = work['work_id']
+    store = ctx.service.store
+    assert store.works[wid].current_plan_revision == 1  # il piano delle fasi
+    # completa la fase umana via contributo, come nel flusso reale
+    started = ctx.service.apply(actor, 's', 'work.start', {'work_id': wid, 'expected_version': store.works[wid].version})
+    asked = ctx.service.apply(actor, 'rc', 'work.request_contribution',
+                              {'work_id': wid, 'expected_version': started['version'],
+                               'step_id': store.plans[store.plan_key(wid, 1)].steps[0].id, 'to_actor_id': actor.id, 'need': 'i listini'})
+    request = next(r for r in ctx.service.store.contributions.values() if r.work_id == wid and r.status == 'pending')
+    ctx.service.apply(actor, 'pc', 'work.provide_contribution', {'request_id': request.id, 'expected_version': asked['version'], 'text': 'pronti'})
+    ctx.persist()
+    store = ctx.service.store
+    cmp_p = cmp_propose(ctx, actor, wid, {'command_id': 'cp', 'left_material_id': materials[0],
+                                          'right_material_id': materials[1], 'expected_version': store.works[wid].version})
+    assert store.works[wid].current_plan_revision == 1  # nessun secondo piano
+    assert cmp_p['expected_version'] == store.works[wid].version
+    cmp_approve(ctx, actor, wid, cmp_p['id'], {'command_id': 'ca', 'digest': cmp_p['digest'], 'expected_version': cmp_p['expected_version']})
+    store = ctx.service.store
+    assert store.works[wid].status.value == 'running'
+    plan = store.plans[store.plan_key(wid, 1)]
+    assert plan.steps[0].status.value == 'succeeded' and plan.steps[1].status.value == 'running'
+    cmp_execute(ctx, cmp_p['id'])
+    store = ctx.service.store
+    assert store.works[wid].status.value == 'review'
+    plan = store.plans[store.plan_key(wid, store.works[wid].current_plan_revision)]
+    assert plan.steps[1].status.value == 'succeeded'
+    assert len(store.artifacts) == 1

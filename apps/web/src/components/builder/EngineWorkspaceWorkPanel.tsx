@@ -186,12 +186,17 @@ function FinalDeliverySection({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const steps = work.enginePlan;
+  // Deliverable when every earlier phase succeeded and what's left is the final
+  // human phase (still waiting or already running): delivering is the go.
+  const last = steps?.[steps.length - 1];
+  const earlierDone = !!steps?.length && steps.slice(0, -1).every((step) => step.status === "succeeded");
+  const finalHuman = !!last && last.capability === "general"
+    && (last.status === "pending" || last.status === "running");
   const deliverable =
     !!onSubmitArtifact &&
-    work.engineStatus === "ready" &&
-    !!steps?.length &&
-    steps.every((step) => step.status === "succeeded") &&
-    !work.engineArtifactVersion;
+    earlierDone &&
+    finalHuman &&
+    (work.engineStatus === "ready" || work.engineStatus === "running");
   if (!deliverable) return null;
   return (
     <section className="cw-engine-summary__delivery" aria-label="Consegna del risultato">

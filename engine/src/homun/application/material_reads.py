@@ -59,7 +59,10 @@ def propose(ctx, actor, work_id, body):
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             work = require_work_access(store, actor, work_id)
-            require_confirmed_intake(store, work_id, capability='read_material')
+            from homun.application.phase_execution import (
+                propose_pin_version, require_confirmed_intake_for_tool,
+            )
+            require_confirmed_intake_for_tool(store, work_id, capability='read_material')
             material, _ = _source(ctx, store, actor, body['material_id'])
             if store.materials[material['id']].extract_status not in {'extracted', 'none'}:
                 raise ValidationError('Material has no readable text extract')
@@ -81,14 +84,14 @@ def propose(ctx, actor, work_id, body):
                     raise ConflictError('This work already has an active material read')
                 prior.update(status='blocked', error_code='read_proposal_obsolete')
             service = ctx.service.for_store(store)
-            plan = service.apply(actor, f"{body['command_id']}:plan", 'plan.propose', {
-                'work_id': work_id, 'expected_version': body['expected_version'],
-                'steps': [{'title': 'Leggi il materiale autorizzato', 'assignee_id': work.owner_id,
-                           'output_expected': 'Artifact di lettura con estratto e provenienza'}],
-            })
+            pinned = propose_pin_version(
+                service, store, actor, work, 'read_material', body['command_id'], body['expected_version'],
+                {'title': 'Leggi il materiale autorizzato', 'assignee_id': work.owner_id,
+                 'output_expected': 'Artifact di lettura con estratto e provenienza'},
+            )
             proposal = {
                 'id': body['command_id'], 'status': 'pending_approval', 'work_id': work_id,
-                'expected_version': plan['version'], 'tool_version': READ_MATERIAL.tool_version,
+                'expected_version': pinned, 'tool_version': READ_MATERIAL.tool_version,
                 'material': material,
                 'limits': {'max_extract_characters': READ_MATERIAL.limits['max_extract_characters'],
                            'max_attempts': READ_MATERIAL.limits['max_attempts']},
@@ -119,10 +122,8 @@ def approve(ctx, actor, work_id, proposal_id, body):
             if work.version != proposal['expected_version']:
                 raise ConflictError('Work changed; create a new proposal')
             service = ctx.service.for_store(store)
-            service.apply(actor, f"{body['command_id']}:accept", 'plan.accept', {
-                'work_id': work_id, 'expected_version': work.version})
-            service.apply(actor, f"{body['command_id']}:start", 'work.start', {
-                'work_id': work_id, 'expected_version': work.version, 'durable': False})
+            from homun.application.phase_execution import approve_starts_phase
+            approve_starts_phase(service, store, actor, work, 'read_material', body['command_id'])
             proposal.update(status='queued', _actor=actor.model_dump(mode='json'),
                             _run_version=work.version, _workflow_id=f"read:{actor.workspace_id}:{proposal_id}")
             save(store, actor, body['command_id'], 'material_read.approve', fingerprint, {'proposal_id': proposal_id})

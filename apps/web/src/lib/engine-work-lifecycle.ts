@@ -22,12 +22,14 @@ export async function closeEngineWork(
 export async function startEngineWork(
   workId: string,
   expectedVersion: number,
-): Promise<void> {
-  await postEngineCommand({
+): Promise<{ status: string; version: number }> {
+  const response = await postEngineCommand({
     type: "work.start",
     payload: { work_id: workId, expected_version: expectedVersion, durable: false },
     actor: defaultLocalActor(),
   });
+  const result = response.result as { status?: unknown; version?: unknown };
+  return { status: String(result.status ?? ""), version: Number(result.version ?? expectedVersion) };
 }
 
 /**

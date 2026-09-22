@@ -225,3 +225,31 @@ web 193 verdi, `npm run check` verde, budget architettura rispettato.
 Nota: il lavoro dimostrativo «Confronto listini marzo-giugno» (completato, con
 progetto e materiali) è lasciato volutamente nell'archivio reale come esempio
 visibile; si rimuove su richiesta.
+
+## 11. Fetta 3: le fasi eseguibili viaggiano coi loro strumenti reali (2026-09-22)
+
+Motore (`application/phase_execution.py`, condiviso da confronto e lettura):
+- Un accordo «general» con una fase `compare_csv`/`read_material` **ammette lo
+  strumento su quella fase** (la capability dell'intake non forza più il lavoro
+  intero); il tool non crea un secondo piano monofase: la scala delle fasi È il
+  piano, la proposta si aggancia alla versione corrente.
+- **L'approvazione dello strumento è il via della fase** (work.start del passo,
+  quando il lavoro è ancora Pronto); l'esecuzione reale consegna l'artefatto
+  della fase e la revisione umana avanza come nella fetta 2.
+
+Web:
+- La UI dello strumento giusto compare sulla fase corrente (`PhaseTool` in
+  chat): selezione CSV → prepara → «Approva ed esegui confronto» → report.
+- Proprietà della revisione per provenienza: l'artefatto lo revisiona la fase
+  che lo ha prodotto (il tool per il report del confronto; la card generica per
+  le consegne umane); i report sostituiti lo dicono esplicitamente.
+- «Consegna il risultato» dell'ultima fase umana la avvia e la chiude
+  (Pronto → In corso → In revisione → Completato).
+- Un lavoro collegato al progetto solo via conversazione vede i materiali
+  (stessa regola `work_project_ids` del motore, nelgi snapshot web).
+
+Verifica dal vivo: proposta con fasi (confronto + sintesi), Aurora creata,
+progetto da conversazione, due CSV → seleziona → prepara → «Approva ed esegui
+confronto» → esecuzione reale («1 aumento, 1 nuovo, 1 rimosso…») → approvazione
+che avanza alla sintesi → consegna → «Lavoro completato». Suite: motore 466,
+web 193, `npm run check` verde.

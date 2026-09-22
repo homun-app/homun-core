@@ -145,7 +145,11 @@ export function EnginePriceComparison({
                     <MessageResponse>{p.report_markdown ?? ""}</MessageResponse>
                   </div>
                 </details>
-                <EngineResultReview key={p.artifact_id} work={work} artifactId={p.artifact_id} onChanged={onChanged} />
+                {(!work.engineLatestArtifact || work.engineLatestArtifact.id === p.artifact_id) ? (
+                  <EngineResultReview key={p.artifact_id} work={work} artifactId={p.artifact_id} onChanged={onChanged} />
+                ) : (
+                  <p className="cw-hint">Questo report è stato sostituito da una consegna più recente del lavoro.</p>
+                )}
               </>
             )}
           </>

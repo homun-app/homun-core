@@ -237,9 +237,11 @@ export function EngineWorkIntake({
                 </p>
               )
             )}
-            {confirmed && work.engineStatus === "review" && work.engineLatestArtifact && (
+            {confirmed && work.engineStatus === "review" && work.engineLatestArtifact
+              && lastSucceededCapability(work) === "general" && (
               <EngineArtifactReviewInline work={work} onChanged={onChanged} />
             )}
+            {confirmed && <PhaseTool work={work} onChanged={onChanged} />}
             {confirmed && revisable && <button className="cs-link" disabled={intake.busy} onClick={() => setEditing(!editing)}>Rivedi l’accordo</button>}
             {confirmed && !revisable && work.engineStatus === 'draft' && (
               <p className="cw-intake-note">
@@ -320,4 +322,32 @@ function EngineArtifactReview({ work, onChanged }: {
       <EngineResultReview work={work} artifactId={artifact.id} onChanged={onChanged} />
     </section>
   );
+}
+
+/** Capability of the phase that produced the current artifact: its review owner. */
+function lastSucceededCapability(work: Parameters<typeof EngineWorkIntake>[0]["work"]): string | null {
+  const succeeded = work.enginePlan?.filter((step) => step.status === "succeeded") ?? [];
+  return succeeded.length ? succeeded[succeeded.length - 1]!.capability : null;
+}
+
+/** Capability of the phase in play: the running one, else the first waiting. */
+function currentPhaseCapability(work: Parameters<typeof EngineWorkIntake>[0]["work"]): string {
+  const steps = work.enginePlan;
+  if (!steps?.length) return "general";
+  const running = steps.find((step) => step.status === "running");
+  const current = running ?? steps.find((step) => step.status === "pending");
+  return current?.capability ?? "general";
+}
+
+/** The dedicated tool flow drives its phase: comparison or authorized read. */
+function PhaseTool({ work, onChanged }: {
+  work: Parameters<typeof EngineWorkIntake>[0]["work"];
+  onChanged: () => Promise<void>;
+}) {
+  const capability = currentPhaseCapability(work);
+  if (capability === "compare_csv")
+    return <EnginePriceComparison work={work} onChanged={onChanged} />;
+  if (capability === "read_material")
+    return <EngineMaterialRead work={work} onChanged={onChanged} />;
+  return null;
 }

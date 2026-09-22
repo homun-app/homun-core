@@ -538,7 +538,13 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     renameWork: async (work, title) => { await renameEngineWork(work.id, title, work.revision); await refresh(); },
     closeWork: async (work) => { await closeEngineWork(work.id, work.revision); await refresh(); },
     startWork: async (work) => { await startEngineWork(work.id, work.revision); await refresh(); },
-    submitArtifact: async (work, title, content) => { await submitEngineArtifact(work.id, work.revision, title, content); await refresh(); },
+    submitArtifact: async (work, title, content) => {
+      let version = work.revision;
+      // The final human phase starts by being delivered: READY → RUNNING → REVIEW.
+      if (work.engineStatus === "ready") version = (await startEngineWork(work.id, version)).version;
+      await submitEngineArtifact(work.id, version, title, content);
+      await refresh();
+    },
     createWork,
     postMessage,
     confirmPatch,
