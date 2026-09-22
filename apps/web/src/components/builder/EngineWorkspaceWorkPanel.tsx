@@ -25,6 +25,7 @@ export function EngineWorkspaceWorkPanel({
   onStartWork,
   onSubmitArtifact,
   onSetBudget,
+  onSetDue,
   onRevisePlan,
   agents,
   agentNames,
@@ -42,6 +43,7 @@ export function EngineWorkspaceWorkPanel({
   onStartWork?: (() => Promise<void>) | undefined;
   onSubmitArtifact?: ((title: string, content: string) => Promise<void>) | undefined;
   onSetBudget?: ((modelAttempts: number) => Promise<void>) | undefined;
+  onSetDue?: ((dueDate: string | null) => Promise<void>) | undefined;
   onRevisePlan?: ((action: {
     insertAfterStepId?: string | null;
     newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string };
@@ -177,6 +179,7 @@ export function EngineWorkspaceWorkPanel({
         agents={agents ?? []}
       />
       <FinalDeliverySection work={work} busy={busy} onSubmitArtifact={onSubmitArtifact} />
+      <WorkDueSection work={work} busy={busy} onSetDue={onSetDue} />
       <WorkBudgetSection work={work} busy={busy} onSetBudget={onSetBudget} />
       <CloseWorkSection work={work} busy={busy} onCloseWork={onCloseWork} />
       <HomunErrorNotice error={sources.error} />
@@ -627,6 +630,54 @@ function WorkTitleEditor({
   );
 }
 
+/** The person's deadline for a work; overdue is said out loud. */
+function WorkDueSection({
+  work,
+  busy,
+  onSetDue,
+}: {
+  work: Work;
+  busy: boolean;
+  onSetDue?: ((dueDate: string | null) => Promise<void>) | undefined;
+}) {
+  const [draft, setDraft] = useState(work.engineDue ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  if (!onSetDue) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const overdue = !!work.engineDue && work.engineDue < today && !["completed", "cancelled"].includes(work.engineStatus ?? "");
+  const changed = draft !== (work.engineDue ?? "");
+  return (
+    <section className="cw-engine-summary__due" aria-label="Scadenza">
+      <h3>Scadenza</h3>
+      {overdue && (
+        <p className="cw-hint" role="alert">
+          Scaduto il {work.engineDue}: decidi se rinnovarla o chiudere il lavoro.
+        </p>
+      )}
+      <div className="cs-actions">
+        <label>
+          Entro il
+          <input type="date" value={draft} disabled={busy || saving}
+            onChange={(event) => setDraft(event.target.value)} />
+        </label>
+        <button type="button" className="cw-secondary" disabled={busy || saving || !changed}
+          onClick={() => {
+            setSaving(true);
+            setError(null);
+            onSetDue(draft || null)
+              .catch(setError)
+              .finally(() => setSaving(false));
+          }}>
+          {saving ? "Sto salvando…" : draft ? "Salva scadenza" : "Togli scadenza"}
+        </button>
+      </div>
+      {saving && <p role="status">Salvataggio in corso…</p>}
+      <HomunErrorNotice error={error} />
+    </section>
+  );
+}
+
 /** Per-work model budget: honest counters, explicit changes only. */
 function WorkBudgetSection({
   work,
@@ -636,6 +687,7 @@ function WorkBudgetSection({
   work: Work;
   busy: boolean;
   onSetBudget?: ((modelAttempts: number) => Promise<void>) | undefined;
+  onSetDue?: ((dueDate: string | null) => Promise<void>) | undefined;
 }) {
   const budget = work.engineBudget;
   const [draft, setDraft] = useState(String(budget?.caps.model_attempts ?? 40));

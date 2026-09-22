@@ -205,6 +205,8 @@ class Work(BaseModel):
     reviewer_id: str | None = None
     current_plan_revision: int = 0
     current_artifact_version: int = 0
+    due_date: str | None = None
+    """ISO date (YYYY-MM-DD) the person set; None means no deadline."""
     archived: bool = False
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

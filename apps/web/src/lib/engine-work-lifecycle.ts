@@ -95,3 +95,16 @@ export async function reviseEnginePlan(input: {
     actor: defaultLocalActor(),
   });
 }
+
+/** Sets or clears the person's deadline for a work (ISO date or null). */
+export async function setEngineWorkDue(
+  workId: string,
+  expectedVersion: number,
+  dueDate: string | null,
+): Promise<void> {
+  await postEngineCommand({
+    type: "work.set_due",
+    payload: { work_id: workId, expected_version: expectedVersion, due_date: dueDate },
+    actor: defaultLocalActor(),
+  });
+}

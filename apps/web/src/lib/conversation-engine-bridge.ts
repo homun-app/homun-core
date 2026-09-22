@@ -32,6 +32,7 @@ export type EngineWorkRecord = {
   current_plan_revision: number;
   current_artifact_version: number;
   intake_confirmed?: boolean;
+  due_date?: string | null;
   plan?: Array<{
     id: string;
     title: string;
@@ -99,6 +100,11 @@ export function parseEngineWorkRecord(raw: Record<string, unknown>): EngineWorkR
   }
   if (raw["intake_confirmed"] === true) {
     record.intake_confirmed = true;
+  }
+  if (typeof raw["due_date"] === "string") {
+    record.due_date = raw["due_date"];
+  } else if ("due_date" in raw) {
+    record.due_date = null;
   }
   const plan = raw["plan"];
   if (plan && typeof plan === "object") {
@@ -213,6 +219,7 @@ export function engineWorkToUiWork(
     engineIntakeConfirmed: record.intake_confirmed ?? false,
     enginePlan: record.plan as Work["enginePlan"],
     engineLatestArtifact: record.latest_artifact,
+    engineDue: record.due_date,
     engineBudget: record.budget,
     enginePlanRevision: record.current_plan_revision,
     engineArtifactVersion: record.current_artifact_version,

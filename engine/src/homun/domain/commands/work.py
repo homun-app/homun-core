@@ -108,3 +108,28 @@ def _work_cancel(ctx: CommandContext, actor: Actor, command_id: str, payload: di
         result["runtime_error"] = "runtime_cancellation_uncertain"
     return result
 
+
+
+def _work_set_due(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Set or clear the person's deadline for a work (ISO date or None)."""
+    work = ctx.get_work(str(payload.get("work_id", "")))
+    ctx._require_expected_version(work.version, payload.get("expected_version"))
+    raw = payload.get("due_date")
+    if raw in (None, ""):
+        due = None
+    else:
+        due = str(raw).strip()
+        from datetime import date as _date
+        try:
+            _date.fromisoformat(due)
+        except ValueError:
+            raise ValidationError("due_date must be an ISO date (YYYY-MM-DD)") from None
+    work.due_date = due
+    work.version += 1
+    work.updated_at = utc_now()
+    ctx._emit(
+        actor=actor, command_id=command_id, aggregate_id=work.id, aggregate_type="work",
+        aggregate_version=work.version, event_type="work.due_set",
+        payload={"due_date": due},
+    )
+    return {"work_id": work.id, "due_date": due, "version": work.version}

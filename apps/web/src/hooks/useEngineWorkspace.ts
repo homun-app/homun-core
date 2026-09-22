@@ -37,7 +37,7 @@ import { useWorkIntake, type WorkIntakeState } from "./useWorkIntake";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import type { EngineTeam } from "@/lib/engine-projects-client";
 import { renameEngineWork } from "@/lib/engine-work-naming";
-import { closeEngineWork, reviseEnginePlan, setEngineWorkBudget, startEngineWork, submitEngineArtifact } from "@/lib/engine-work-lifecycle";
+import { closeEngineWork, reviseEnginePlan, setEngineWorkBudget, setEngineWorkDue, startEngineWork, submitEngineArtifact } from "@/lib/engine-work-lifecycle";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
 import { proposeWorkIntake } from "@/lib/engine-intake-client";
 import { applyIntakePreview } from "@/lib/engine-intake-display";
@@ -62,6 +62,7 @@ export type EngineWorkspaceState = {
   startWork: (work: Work) => Promise<void>;
   submitArtifact: (work: Work, title: string, content: string) => Promise<void>;
   setWorkBudget: (work: Work, modelAttempts: number) => Promise<void>;
+  setDue: (work: Work, dueDate: string | null) => Promise<void>;
   revisePlan: (work: Work, action: { insertAfterStepId?: string | null; newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string }; removeStepId?: string }) => Promise<void>;
   createWork: (title: string, objective: string, draftOnly?: boolean) => Promise<Work | null>;
   postMessage: (work: Work, text: string) => Promise<void>;
@@ -551,6 +552,10 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     },
     setWorkBudget: async (work, modelAttempts) => {
       await setEngineWorkBudget(work.id, work.engineBudget?.version ?? 1, modelAttempts);
+      await refresh();
+    },
+    setDue: async (work, dueDate) => {
+      await setEngineWorkDue(work.id, work.revision, dueDate);
       await refresh();
     },
     revisePlan: async (work, action) => {

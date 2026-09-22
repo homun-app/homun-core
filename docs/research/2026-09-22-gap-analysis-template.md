@@ -95,6 +95,18 @@
   apertura con contenuto e **Scarica** in Markdown. Verificato dal vivo
   (ricerca «sintesi», apertura e download del documento listini).
 
+## Avanzamento punto 7b (22/9, fatto) — Scadenze e Oggi
+
+- Motore: `Work.due_date` (data ISO o null) + comando `work.set_due`
+  validato; la lista lavori la espone (test di route: set, formato rifiutato,
+  cancellazione).
+- Web: sezione **Scadenza** nel pannello del lavoro (input data, salvataggio
+  esplicito, avviso «Scaduto il …» per lavori attivi oltre termine); la vista
+  **Compiti** somma la giornata: «N attendono te · M risultati da verificare ·
+  X scaduti · Y in scadenza oggi», e le righe/kanban/calendario usano la
+  scadenza reale del motore. Verificato dal vivo (scadenza 30/09 sul rinnovo,
+  scadenza di oggi sull'altro lavoro con conteggio «1 in scadenza oggi»).
+
 ## Cosa NON manca (verificato, per non inseguire fantasmi)
 
 - Componentistica del template: tutta presente (`comm` componente-per-componente = 0 file solo-template).

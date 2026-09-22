@@ -88,6 +88,8 @@ export type Work = {
   enginePlan?: EnginePlanStepProjection[] | undefined;
   /** Current artifact version awaiting (or having received) human review. */
   engineLatestArtifact?: { id: string; version: number; title: string; content: string } | undefined;
+  /** ISO date the person set as deadline (engine works). */
+  engineDue?: string | null | undefined;
   /** Per-work model budget (attempts/tokens caps with spend counters). */
   engineBudget?: {
     version: number;

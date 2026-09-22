@@ -145,6 +145,7 @@ export function ConversationWorkspaceSpaceHost({
         onMove={onMoveWork}
         items={visibleWorks.map((w) => ({
           ...w,
+          due: w.engineDue ?? w.due,
           agent: scenarioForWork(w, scenarios).agent,
           status: workStatus(w),
           needsYou: pending.some((p) => p.id === w.id),

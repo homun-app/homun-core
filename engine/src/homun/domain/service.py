@@ -45,6 +45,7 @@ from homun.domain.commands.reviews import _work_submit_artifact
 from homun.domain.commands.reviews import _work_review
 from homun.domain.commands.work import _work_pause
 from homun.domain.commands.work import _work_cancel
+from homun.domain.commands.work import _work_set_due
 from homun.domain.commands.conversations import append_engine_message
 from homun.domain.commands.projects import ensure_project_for_work
 from homun.domain.commands.materials import register_prepared_material
@@ -87,6 +88,7 @@ HANDLERS = {
     "work.review": _work_review,
     "work.pause": _work_pause,
     "work.cancel": _work_cancel,
+    "work.set_due": _work_set_due,
 }
 
 

@@ -244,7 +244,16 @@ export function ConversationTasks({
             <h2>Cosa richiede attenzione?</h2>
             <p className="cw-hint">
               {items.filter((i) => i.needsYou).length} attendono te ·{" "}
-              {items.filter((i) => i.phase === "review").length} risultati da verificare.
+              {items.filter((i) => i.phase === "review").length} risultati da verificare
+              {(() => {
+                const today = new Date().toISOString().slice(0, 10);
+                const overdue = items.filter((i) => i.due && i.due.slice(0, 10) < today && !["approved"].includes(i.phase)).length;
+                const todayDue = items.filter((i) => i.due && i.due.slice(0, 10) === today).length;
+                const bits = [];
+                if (overdue) bits.push(`${overdue} scadut${overdue === 1 ? "o" : "i"}`);
+                if (todayDue) bits.push(`${todayDue} in scadenza oggi`);
+                return bits.length ? ` · ${bits.join(" · ")}` : "";
+              })()}
             </p>
             <p className="cw-hint">
               Seleziona un compito. Lo stato segue il lavoro nella chat: una consegna e una verifica
