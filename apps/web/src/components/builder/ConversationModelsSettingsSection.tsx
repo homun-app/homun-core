@@ -29,7 +29,16 @@ type Props = {
   ) => void;
 };
 
-export function ConversationModelsSettingsSection({ draft, onChange }: Props) {
+export function ConversationModelsSettingsSection(props: Props) {
+  return (
+    <ConversationModelsConnectionSection onExecution={props.onChange.bind(null, "execution")} />
+  );
+}
+
+/** Connection to the engine's model providers; the active link rules execution. */
+export function ConversationModelsConnectionSection({ onExecution }: {
+  onExecution?: (value: ConversationPreferences["execution"]) => void;
+}) {
   const status = useEngineStatus();
   const engineReady = status.connection === "connected" && status.capabilities?.features.models;
   const [providers, setProviders] = useState<ModelProviderInfo[]>([]);
@@ -148,7 +157,7 @@ export function ConversationModelsSettingsSection({ draft, onChange }: Props) {
                   setInfo(null);
                   void applyOllamaPreset({ model: ollamaModel.trim() })
                     .then(async (preset) => {
-                      onChange("execution", "local");
+                      onExecution?.("local");
                       setInfo(
                         `Collegato a ${preset.base_url} · modello ${preset.default_model}`,
                       );
@@ -244,7 +253,7 @@ export function ConversationModelsSettingsSection({ draft, onChange }: Props) {
                 })
                   .then(() => setActiveModelProvider("openai_compatible"))
                   .then(async () => {
-                    onChange("execution", "cloud");
+                    onExecution?.("cloud");
                     setApiKey("");
                     setInfo("Credenziali cloud salvate e provider attivato.");
                     await refresh();
@@ -351,7 +360,14 @@ export function ConversationModelsSettingsSection({ draft, onChange }: Props) {
           {info ? <p className="cv-settings-note">{info}</p> : null}
         </>
       )}
+    </>
+  );
+}
 
+/** Space-level routing and budget preferences; saved in this browser. */
+export function ConversationBudgetSettingsSection({ draft, onChange }: Props) {
+  return (
+    <>
       <h3>Preferenze di routing e budget</h3>
       <p>
         Preferenze di spazio salvate nel browser. Non sostituiscono il provider attivo sul motore.

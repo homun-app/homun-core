@@ -13,9 +13,19 @@ import {
   BookMarked,
   Bot,
   FolderKanban,
+  UsersRound,
+  Wallet,
+  Puzzle,
+  Zap,
 } from "lucide-react";
 import { ConversationSelect } from "./ConversationSelect";
-import { ConversationModelsSettingsSection } from "./ConversationModelsSettingsSection";
+import {
+  ConversationModelsSettingsSection,
+  ConversationBudgetSettingsSection,
+} from "./ConversationModelsSettingsSection";
+import { ConversationPeopleSettingsSection } from "./ConversationPeopleSettingsSection";
+import { ConversationCapabilitiesSettingsSection } from "./ConversationCapabilitiesSettingsSection";
+import { ConversationAutomationsSettingsSection } from "./ConversationAutomationsSettingsSection";
 import { ConversationMemorySettingsSection } from "./ConversationMemorySettingsSection";
 import { ConversationAgentsSettingsSection } from "./ConversationAgentsSettingsSection";
 import { ConversationProjectsSettingsSection } from "./ConversationProjectsSettingsSection";
@@ -23,12 +33,16 @@ import { type ConversationPreferences } from "./conversation-preferences";
 import "./conversation-settings.css";
 const sections = [
   { id: "space", label: "Spazio e profilo", icon: UserRound },
+  { id: "people", label: "Persone e accessi", icon: UsersRound },
   { id: "preferences", label: "Preferenze", icon: Settings2 },
   { id: "notifications", label: "Notifiche", icon: Bell },
-  { id: "models", label: "Modelli e budget", icon: Brain },
+  { id: "models", label: "Modelli", icon: Brain },
+  { id: "budget", label: "Budget e routing", icon: Wallet },
   { id: "agents", label: "Agenti", icon: Bot },
   { id: "projects", label: "Progetti", icon: FolderKanban },
   { id: "memory", label: "Memoria", icon: BookMarked },
+  { id: "plugins", label: "Plugin e capacità", icon: Puzzle },
+  { id: "automations", label: "Automazioni", icon: Zap },
   { id: "archive", label: "Archivio", icon: Archive },
   { id: "data", label: "Dati della demo", icon: Database },
   { id: "help", label: "Guida", icon: HelpCircle },
@@ -161,16 +175,7 @@ export function ConversationSettings({
                   onChange={(e) => change("company", e.target.value)}
                 />
               </label>
-              <div className="cv-settings-card">
-                <strong>Persone, agenti e accessi</strong>
-                <p>
-                  Invita una persona o modifica ruoli, curriculum e specializzazioni dalla squadra.
-                  Gli inviti e gli accessi sono simulati.
-                </p>
-                <button className="cw-secondary" onClick={() => navigate("Squadra")}>
-                  Gestisci squadra <ArrowUpRight size={14} />
-                </button>
-              </div>
+              
             </>
           )}
           {section === "preferences" && (
@@ -244,6 +249,12 @@ export function ConversationSettings({
           {section === "models" && (
             <ConversationModelsSettingsSection draft={draft} onChange={change} />
           )}
+          {section === "budget" && (
+            <ConversationBudgetSettingsSection draft={draft} onChange={change} />
+          )}
+          {section === "people" && <ConversationPeopleSettingsSection />}
+          {section === "plugins" && <ConversationCapabilitiesSettingsSection />}
+          {section === "automations" && <ConversationAutomationsSettingsSection />}
           {section === "agents" && <ConversationAgentsSettingsSection actorId="person_fabio" />}
           {section === "projects" && (
             <ConversationProjectsSettingsSection actorId="person_fabio" />
