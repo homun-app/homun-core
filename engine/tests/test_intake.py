@@ -184,6 +184,29 @@ def test_http_contract_and_typed_conflict(setup):
         reset_context_for_tests(None)
 
 
+def test_works_list_reports_intake_confirmed_for_stable_labels(setup):
+    from fastapi.testclient import TestClient
+    from homun.context import reset_context_for_tests
+    from homun.app import create_app
+    from homun.application.intake import propose, confirm
+    ctx,actor,wid,brief=setup
+    reset_context_for_tests(ctx)
+    try:
+        with TestClient(create_app()) as client:
+            headers={'X-Homun-Actor-Id':actor.id}
+            def flag():
+                items=client.get('/v1/workspaces/ws_local/works',headers=headers).json()['items']
+                return next(item['intake_confirmed'] for item in items if item['id']==wid)
+            p=propose(ctx,actor,wid,{'command_id':'i','text':'Confronta listini','expected_version':1})
+            assert flag() is False
+            confirm(ctx,actor,wid,'i',{'command_id':'ok','digest':p['digest'],'expected_version':1,'create_agent':False})
+            # The list projection keeps the agreed label stable even when the
+            # client has not loaded the per-work intake state.
+            assert flag() is True
+    finally:
+        reset_context_for_tests(None)
+
+
 def test_completed_work_is_never_reassigned_or_reexecuted(setup):
     from homun.application.intake import propose
     from homun.domain.errors import ConflictError
@@ -398,6 +421,76 @@ def test_refinement_without_collaborator_keeps_anchor_staffing_actionable(setup)
     assert refined['changes']==[]
     confirm(ctx,actor,wid,'ii',{'command_id':'ok','digest':refined['digest'],'expected_version':1,'create_agent':False})
     assert ctx.repository.load().works[wid].owner_id==first['suggested_agent']['id']
+
+
+def test_undeclared_staffing_swap_keeps_standing_collaborator(setup):
+    from homun.application.intake import propose,confirm
+    ctx,actor,wid,brief=setup
+    # Guided path: the first proposal creates a new collaborator (Elena) and the
+    # person confirms; a later refinement that provides materials must not let
+    # the model invent a twin profile (Bruno) unless staffing is declared changed.
+    elena={'name':'Elena','role':'Coordinatore Preventivi','instructions':'Segue le richieste di preventivo'}
+    ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
+        'capability':'general','suggested_agent_id':None,'new_agent':elena}))
+    first=propose(ctx,actor,wid,{'command_id':'i','text':'Segui i preventivi e le risposte','expected_version':1})
+    confirm(ctx,actor,wid,'i',{'command_id':'ok','digest':first['digest'],'expected_version':1,'create_agent':True})
+    owner=ctx.repository.load().works[wid].owner_id
+    bruno={'name':'Bruno','role':'Coordinatore Preventivi','instructions':'Segue le richieste di preventivo'}
+    ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
+        'title':'Report preventivi attivi e scaduti','objective':'Elencare lo stato dei preventivi.',
+        'output':'Report con elenco preventivi.','capability':'general',
+        'suggested_agent_id':None,'new_agent':bruno,'changed_fields':['title','objective','output']}))
+    refined=propose(ctx,actor,wid,{'command_id':'ii','text':'Ecco i dati: prepara il report','expected_version':2})
+    assert refined['status']=='pending_confirmation'
+    assert refined['new_agent'] is None
+    assert refined['suggested_agent']['id']==owner
+    assert refined['suggested_agent']['name']=='Elena'
+    assert {c['field'] for c in refined['changes']}=={'title','objective','output'}
+    confirm(ctx,actor,wid,'ii',{'command_id':'ok2','digest':refined['digest'],'expected_version':2,'create_agent':False})
+    assert ctx.repository.load().works[wid].owner_id==owner
+
+
+def test_declared_staffing_swap_is_honored_after_new_agent_confirmation(setup):
+    from homun.application.intake import propose,confirm
+    ctx,actor,wid,brief=setup
+    elena={'name':'Elena','role':'Coordinatore Preventivi','instructions':'Segue le richieste di preventivo'}
+    ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
+        'capability':'general','suggested_agent_id':None,'new_agent':elena}))
+    first=propose(ctx,actor,wid,{'command_id':'i','text':'Segui i preventivi','expected_version':1})
+    confirm(ctx,actor,wid,'i',{'command_id':'ok','digest':first['digest'],'expected_version':1,'create_agent':True})
+    bruno={'name':'Bruno','role':'Coordinatore Preventivi senior','instructions':'Segue le richieste di preventivo'}
+    ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
+        'capability':'general','suggested_agent_id':None,'new_agent':bruno,
+        'changed_fields':['staffing']}))
+    refined=propose(ctx,actor,wid,{'command_id':'ii','text':'Affida il lavoro a un nuovo collaboratore','expected_version':2})
+    assert refined['new_agent'] is not None and refined['new_agent']['name']=='Bruno'
+    confirm(ctx,actor,wid,'ii',{'command_id':'ok2','digest':refined['digest'],'expected_version':2,'create_agent':True})
+    assert ctx.repository.load().works[wid].owner_id!=first['new_agent'] if first.get('new_agent') else True
+
+
+def test_same_name_new_agent_reproposal_is_reanchored_not_duplicated(setup):
+    from homun.application.intake import propose,confirm
+    ctx,actor,wid,brief=setup
+    # The model re-proposes the standing collaborator as a "new" profile with
+    # the same name and declares staffing changed: confirming would duplicate
+    # the roster entry, so the engine re-anchors the existing agent instead.
+    elena={'name':'Elena','role':'Coordinatore Preventivi','instructions':'Segue le richieste di preventivo'}
+    ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
+        'capability':'general','suggested_agent_id':None,'new_agent':elena}))
+    first=propose(ctx,actor,wid,{'command_id':'i','text':'Segui i preventivi','expected_version':1})
+    confirm(ctx,actor,wid,'i',{'command_id':'ok','digest':first['digest'],'expected_version':1,'create_agent':True})
+    owner=ctx.repository.load().works[wid].owner_id
+    elena_twin={'name':'Elena','role':'Coordinatore Preventivi','instructions':'Seguito preventivi e risposte'}
+    ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
+        'capability':'general','suggested_agent_id':None,'new_agent':elena_twin,
+        'changed_fields':['staffing']}))
+    refined=propose(ctx,actor,wid,{'command_id':'ii','text':'Ecco i dati, prepara il report','expected_version':2})
+    assert refined['new_agent'] is None
+    assert refined['suggested_agent']['id']==owner
+    confirm(ctx,actor,wid,'ii',{'command_id':'ok2','digest':refined['digest'],'expected_version':2,'create_agent':False})
+    store=ctx.repository.load()
+    assert store.works[wid].owner_id==owner
+    assert sum(1 for a in store.agents.values() if a.name.casefold()=='elena')==1
 
 
 def test_question_classification_persists_nothing(setup):

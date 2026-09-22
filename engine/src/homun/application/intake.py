@@ -131,7 +131,7 @@ def propose(ctx, actor, work_id, body):
                 values = brief.model_dump(exclude={'suggested_agent_id'})
             values['suggested_agent'] = {k: selected[k] for k in ('id', 'name', 'role', 'revision')} if selected else None
             if previous_brief:
-                values = preserve_staffing(values, previous_brief, agents)
+                values = preserve_staffing(values, previous_brief, agents, owner_id=work.owner_id)
             changes = brief_changes(previous_brief, values)
             error = None
         except (ValueError, TypeError):

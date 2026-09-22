@@ -30,6 +30,9 @@ def serve(args):
     app = create_app(session_token=token, allowed_origins=origins,
                      session_actor_id=os.environ.get('HOMUN_SESSION_ACTOR_ID', 'person_fabio'))
     sock = socket.socket(socket.AF_INET6 if args.host == '::1' else socket.AF_INET)
+    # A restart right after a stop hits TIME_WAIT remnants of the old listener;
+    # reuse keeps the dev loop (change code, restart) free of spurious binds.
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.bind((args.host, args.port))
         # Reserved socket, not a readiness claim. Parent polls authenticated health.

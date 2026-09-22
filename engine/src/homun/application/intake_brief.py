@@ -29,23 +29,60 @@ def stabilize(brief: IntakeBrief, anchor: dict) -> dict:
     return values
 
 
-def preserve_staffing(values: dict, anchor: dict, catalog: list[dict]) -> dict:
-    """Keep the anchor's collaborator when a CSV refinement proposes none.
+def _standing_agent(anchor: dict, catalog: list[dict], owner_id: str | None) -> dict | None:
+    """Resolve the standing collaborator of an agreement against the roster.
 
-    The staffing suggestion is normally fresh, but a carried-over compare_csv
-    brief without any collaborator could never be confirmed; preserving the
-    standing agreement's staffing keeps the proposal actionable. Existing
-    agents are re-resolved against the current catalog so revisions stay valid.
+    The anchor's suggested agent wins; a confirmed new_agent is found by name
+    (it exists in the roster since its confirmation); the work's confirmed
+    owner covers anchors whose staffing was stripped by older revisions.
     """
-    if values.get('capability') != 'compare_csv':
-        return values
-    if values.get('suggested_agent') or values.get('new_agent'):
-        return values
-    if anchor.get('suggested_agent'):
-        current = next((a for a in catalog if a['id'] == anchor['suggested_agent']['id']), None)
+    suggested = anchor.get('suggested_agent')
+    if suggested:
+        current = next((a for a in catalog if a['id'] == suggested['id']), None)
         if current:
-            values['suggested_agent'] = {k: current[k] for k in ('id', 'name', 'role', 'revision')}
+            return current
+    if anchor.get('new_agent'):
+        name = (anchor['new_agent'].get('name') or '').strip().casefold()
+        current = next((a for a in catalog if a['name'].strip().casefold() == name), None)
+        if current:
+            return current
+    if owner_id:
+        return next((a for a in catalog if a['id'] == owner_id), None)
+    return None
+
+
+def preserve_staffing(values: dict, anchor: dict, catalog: list[dict], owner_id: str | None = None) -> dict:
+    """Keep the standing collaborator unless the person explicitly swaps them.
+
+    The engine, not the model, protects agreement continuity: a refinement that
+    does not declare `staffing` in changed_fields cannot swap the responsible
+    collaborator, so a fresh suggestion (or an invented twin profile) gives way
+    to the standing one. An emptied suggestion also keeps the standing staffing
+    so the brief stays confirmable — for every capability, not just compare_csv.
+    Existing agents are re-resolved against the current catalog so revisions
+    stay valid.
+    """
+    standing = _standing_agent(anchor, catalog, owner_id)
+    declared = set(values.get('changed_fields') or [])
+    if values.get('suggested_agent') or values.get('new_agent'):
+        fresh_new = values.get('new_agent')
+        # A declared staffing change wins only when it is a real swap: a new
+        # profile repeating the standing collaborator's name is the same person
+        # re-proposed, and confirming it would duplicate the roster entry.
+        same_standing = (
+            isinstance(fresh_new, dict)
+            and standing is not None
+            and str(fresh_new.get('name') or '').strip().casefold()
+            == str(standing.get('name') or '').strip().casefold()
+        )
+        if standing is None or ('staffing' in declared and not same_standing):
             return values
+        values['suggested_agent'] = {k: standing[k] for k in ('id', 'name', 'role', 'revision')}
+        values['new_agent'] = None
+        return values
+    if standing is not None:
+        values['suggested_agent'] = {k: standing[k] for k in ('id', 'name', 'role', 'revision')}
+        return values
     if anchor.get('new_agent'):
         values['new_agent'] = anchor['new_agent']
     return values

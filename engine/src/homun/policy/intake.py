@@ -8,6 +8,17 @@ def latest_intake(store, work_id):
     return max(records,key=lambda record:record.created_at).result if records else None
 
 
+def has_confirmed_intake(store, work_id):
+    """True once any brief for the work has been confirmed (agreed preparation).
+
+    List projections use this to keep status labels stable even when the
+    per-work intake state is not loaded client-side.
+    """
+    return any(record.type == 'intake.propose' and record.result['work_id'] == work_id
+               and record.result['status'] == 'confirmed'
+               for record in store.commands.values())
+
+
 def require_confirmed_intake(store, work_id, capability=None):
     proposal = latest_intake(store, work_id)
     if proposal and (proposal['status'] != 'confirmed'

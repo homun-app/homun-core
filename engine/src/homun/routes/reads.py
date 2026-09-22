@@ -5,6 +5,7 @@ from homun.context import get_context
 from homun.application.conversation_messages import conversation_message_page
 from homun.domain.errors import NotFoundError, PermissionDeniedError
 from homun.policy.work import require_work_access
+from homun.policy.intake import has_confirmed_intake
 from homun.policy.read import can_read_work, readable_event_page
 from homun.routes.domain_support import _actor_from_headers, _http_error
 from homun.runtime import bridge as runtime_bridge
@@ -36,6 +37,7 @@ def list_works(
         )
         if pending is not None:
             payload["pending_contribution"] = pending.model_dump(mode="json")
+        payload["intake_confirmed"] = has_confirmed_intake(ctx.service.store, work.id)
         items.append(payload)
     return {"items": items}
 
@@ -58,8 +60,10 @@ def get_work(
     plan = ctx.service.current_plan(work)
     budget = ctx.service.store.work_budgets.get(work_id)
     from homun.application.budgets import public as budget_public
+    work_payload = work.model_dump(mode="json")
+    work_payload["intake_confirmed"] = has_confirmed_intake(ctx.service.store, work.id)
     return {
-        "work": work.model_dump(mode="json"),
+        "work": work_payload,
         "plan": plan.model_dump(mode="json") if plan else None,
         "budget": budget_public(budget) if budget else None,
     }

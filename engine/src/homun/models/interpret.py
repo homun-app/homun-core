@@ -220,12 +220,10 @@ def format_interpretation_for_chat(interp: MessageInterpretation) -> str:
     if interp.kind == "clarification":
         base = interp.text or "Serve un chiarimento."
         if interp.mentions:
+            # Product language only: internal ids never reach the person.
             opts = "; ".join(
                 f"{m.raw}: "
-                + (
-                    ", ".join(f"{c.display_name} ({c.id})" for c in m.candidates)
-                    or "nessun candidato"
-                )
+                + (", ".join(c.display_name for c in m.candidates) or "nessun candidato")
                 for m in interp.mentions
             )
             return f"{base}\nCandidati: {opts}"
