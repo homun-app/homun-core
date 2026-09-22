@@ -58,6 +58,13 @@ type Props = {
   onCloseWork?: (() => Promise<void>) | undefined;
   onStartWork?: (() => Promise<void>) | undefined;
   onSubmitArtifact?: ((title: string, content: string) => Promise<void>) | undefined;
+  onSetBudget?: ((modelAttempts: number) => Promise<void>) | undefined;
+  onRevisePlan?: ((action: {
+    insertAfterStepId?: string | null;
+    newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string };
+    removeStepId?: string;
+  }) => Promise<void>) | undefined;
+  agents?: Array<{ id: string; name: string; status: string }> | undefined;
   agentNames?: Record<string, string> | undefined;
 };
 
@@ -88,7 +95,8 @@ export function ConversationWorkspaceWorkPanel({
   directoryRef,
   engineBusy = false,
   engineIntake,
-  onApplyObjectivePatch, onRename, onCloseWork, onStartWork, onSubmitArtifact, agentNames,
+  onApplyObjectivePatch, onRename, onCloseWork, onStartWork, onSubmitArtifact,
+  onSetBudget, onRevisePlan, agents, agentNames,
 }: Props) {
   if (work.source === "engine")
     return (
@@ -114,6 +122,9 @@ export function ConversationWorkspaceWorkPanel({
         onCloseWork={onCloseWork}
         onStartWork={onStartWork}
         onSubmitArtifact={onSubmitArtifact}
+        onSetBudget={onSetBudget}
+        onRevisePlan={onRevisePlan}
+        agents={agents}
         agentNames={agentNames}
       />
     );

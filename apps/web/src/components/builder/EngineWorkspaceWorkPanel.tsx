@@ -24,6 +24,9 @@ export function EngineWorkspaceWorkPanel({
   onCloseWork,
   onStartWork,
   onSubmitArtifact,
+  onSetBudget,
+  onRevisePlan,
+  agents,
   agentNames,
 }: {
   work: Work;
@@ -38,6 +41,13 @@ export function EngineWorkspaceWorkPanel({
   onCloseWork?: (() => Promise<void>) | undefined;
   onStartWork?: (() => Promise<void>) | undefined;
   onSubmitArtifact?: ((title: string, content: string) => Promise<void>) | undefined;
+  onSetBudget?: ((modelAttempts: number) => Promise<void>) | undefined;
+  onRevisePlan?: ((action: {
+    insertAfterStepId?: string | null;
+    newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string };
+    removeStepId?: string;
+  }) => Promise<void>) | undefined;
+  agents?: Array<{ id: string; name: string; status: string }> | undefined;
   agentNames?: Record<string, string> | undefined;
 }) {
   const sources = useProjectMaterials(work, (material) => material.status === "active");
@@ -163,8 +173,11 @@ export function EngineWorkspaceWorkPanel({
         busy={busy}
         materialsCount={sources.materials.length}
         onStartWork={onStartWork}
+        onRevisePlan={onRevisePlan}
+        agents={agents ?? []}
       />
       <FinalDeliverySection work={work} busy={busy} onSubmitArtifact={onSubmitArtifact} />
+      <WorkBudgetSection work={work} busy={busy} onSetBudget={onSetBudget} />
       <CloseWorkSection work={work} busy={busy} onCloseWork={onCloseWork} />
       <HomunErrorNotice error={sources.error} />
       {contributionPanel}
@@ -254,12 +267,20 @@ function PhaseLadder({
   busy,
   materialsCount,
   onStartWork,
+  onRevisePlan,
+  agents,
 }: {
   work: Work;
   agentNames?: Record<string, string> | undefined;
   busy: boolean;
   materialsCount: number;
   onStartWork?: (() => Promise<void>) | undefined;
+  onRevisePlan?: ((action: {
+    insertAfterStepId?: string | null;
+    newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string };
+    removeStepId?: string;
+  }) => Promise<void>) | undefined;
+  agents: Array<{ id: string; name: string; status: string }>;
 }) {
   const steps = work.enginePlan;
   if (!steps?.length) return null;
@@ -311,7 +332,151 @@ function PhaseLadder({
           </p>
         )
       )}
+      <PhaseReviseControls
+        work={work}
+        busy={busy}
+        steps={steps}
+        agents={agents}
+        onRevisePlan={onRevisePlan}
+      />
     </section>
+  );
+}
+
+/** Add or remove pending phases; succeeded phases are history and stay. */
+function PhaseReviseControls({
+  work,
+  busy,
+  steps,
+  agents,
+  onRevisePlan,
+}: {
+  work: Work;
+  busy: boolean;
+  steps: NonNullable<Work["enginePlan"]>;
+  agents: Array<{ id: string; name: string; status: string }>;
+  onRevisePlan?: ((action: {
+    insertAfterStepId?: string | null;
+    newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string };
+    removeStepId?: string;
+  }) => Promise<void>) | undefined;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [title, setTitle] = useState("");
+  const [assigneeId, setAssigneeId] = useState("");
+  const [capability, setCapability] = useState("general");
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  if (!onRevisePlan) return null;
+  const revisable = ["draft", "ready", "running", "review", "paused"].includes(work.engineStatus ?? "");
+  if (!revisable) return null;
+  const pendingSteps = steps.filter((step) => step.status === "pending");
+  const activeAgents = agents.filter((agent) => agent.status === "active");
+
+  type ReviseAction = {
+    insertAfterStepId?: string | null;
+    newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string };
+    removeStepId?: string;
+  };
+  async function run(action: ReviseAction) {
+    if (saving || !onRevisePlan) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onRevisePlan(action);
+      setTitle("");
+      setAssigneeId("");
+      setCapability("general");
+      setAdding(false);
+      setRemovingId(null);
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="cw-engine-summary__revise" aria-label="Modifica fasi">
+      {removingId ? (
+        <div className="cs-actions">
+          <button type="button" className="cw-secondary" disabled={saving}
+            onClick={() => void run({ removeStepId: removingId })}>
+            {saving ? "Sto rimuovendo…" : "Sì, rimuovi la fase"}
+          </button>
+          <button type="button" className="cs-link" disabled={saving} onClick={() => setRemovingId(null)}>
+            Annulla
+          </button>
+        </div>
+      ) : adding ? (
+        <form
+          className="cw-phase-add"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (title.trim() && assigneeId) {
+              void run({
+                insertAfterStepId: steps[steps.length - 1]?.id ?? null,
+                newStep: { title: title.trim(), assigneeId, capability },
+              });
+            }
+          }}
+        >
+          <label>
+            Nuova fase
+            <input value={title} maxLength={120} disabled={saving}
+              onChange={(event) => setTitle(event.target.value)} placeholder="Es. Rileggere la sintesi" />
+          </label>
+          <div className="cw-agent-editor__row">
+            <label>
+              Chi la esegue
+              <select aria-label="Assegnatario della nuova fase" value={assigneeId} disabled={saving}
+                onChange={(event) => setAssigneeId(event.target.value)}>
+                <option value="">Scegli…</option>
+                {activeAgents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>{agent.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Tipo
+              <select aria-label="Tipo della nuova fase" value={capability} disabled={saving}
+                onChange={(event) => setCapability(event.target.value)}>
+                <option value="general">Passaggio umano</option>
+                <option value="compare_csv">Confronto CSV</option>
+                <option value="read_material">Lettura materiale</option>
+              </select>
+            </label>
+          </div>
+          <div className="cs-actions">
+            <button className="cw-secondary" disabled={saving || !title.trim() || !assigneeId}>
+              {saving ? "Aggiungo…" : "Aggiungi fase"}
+            </button>
+            <button type="button" className="cs-link" disabled={saving} onClick={() => setAdding(false)}>
+              Annulla
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="cs-actions">
+          <button type="button" className="cs-link" disabled={busy || saving}
+            onClick={() => setAdding(true)}>
+            + Aggiungi una fase
+          </button>
+          {pendingSteps.length > 1 && (
+            <button type="button" className="cs-link" disabled={busy || saving}
+              onClick={() => setRemovingId(pendingSteps[pendingSteps.length - 1]!.id)}>
+              Rimuovi l’ultima fase in attesa
+            </button>
+          )}
+        </div>
+      )}
+      <p className="cw-engine-summary__hint">
+        Le fasi completate restano nella storia del lavoro: non si cancellano.
+      </p>
+      {saving && <p role="status">Modifica fasi in corso…</p>}
+      <HomunErrorNotice error={error} />
+    </div>
   );
 }
 
@@ -459,5 +624,66 @@ function WorkTitleEditor({
       </div>
       <HomunErrorNotice error={error} />
     </form>
+  );
+}
+
+/** Per-work model budget: honest counters, explicit changes only. */
+function WorkBudgetSection({
+  work,
+  busy,
+  onSetBudget,
+}: {
+  work: Work;
+  busy: boolean;
+  onSetBudget?: ((modelAttempts: number) => Promise<void>) | undefined;
+}) {
+  const budget = work.engineBudget;
+  const [draft, setDraft] = useState(String(budget?.caps.model_attempts ?? 40));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  if (!budget && !onSetBudget) return null;
+  const attempts = budget?.caps.model_attempts ?? 40;
+  const spent = budget?.spent.attempts ?? 0;
+  const parsed = Number(draft);
+  const changed = Number.isInteger(parsed) && parsed >= 1 && parsed <= 100000 && parsed !== attempts;
+  return (
+    <section className="cw-engine-summary__budget" aria-label="Budget del lavoro">
+      <h3>Budget del lavoro</h3>
+      <p className="cw-engine-summary__hint">
+        Tentativi del modello usati dal lavoro: {spent} di {attempts}. Il limite si alza solo
+        da qui, mai in automatico.
+      </p>
+      {onSetBudget && (
+        <div className="cs-actions">
+          <label>
+            Limite tentativi
+            <input
+              type="number"
+              min={1}
+              max={100000}
+              value={draft}
+              disabled={busy || saving}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="cw-secondary"
+            disabled={busy || saving || !changed}
+            onClick={() => {
+              setSaving(true);
+              setError(null);
+              onSetBudget(parsed)
+                .catch(setError)
+                .finally(() => setSaving(false));
+            }}
+          >
+            {saving ? "Sto salvando…" : "Aggiorna limite"}
+          </button>
+        </div>
+      )}
+      {saving && <p role="status">Aggiornamento in corso…</p>}
+      <HomunErrorNotice error={error} />
+    </section>
   );
 }

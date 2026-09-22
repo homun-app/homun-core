@@ -1365,9 +1365,9 @@ export function ConversationWorkspace() {
                   onFilesChange={setFiles}
                   onPreview={() => setPreview(true)}
                   engineBusy={engine.busy} onRename={work.source === "engine" ? (title) => engine.renameWork(work, title) : undefined}
-                  engineIntake={engine.intake} onCloseWork={work.source === "engine" ? () => engine.closeWork(work) : undefined}
-                  onStartWork={work.source === "engine" ? () => engine.startWork(work) : undefined} onSubmitArtifact={work.source === "engine" ? (title, content) => engine.submitArtifact(work, title, content) : undefined}
-                  agentNames={Object.fromEntries(engine.agents.map((agent) => [agent.id, agent.name]))}
+                  engineIntake={engine.intake} onCloseWork={work.source === "engine" ? () => engine.closeWork(work) : undefined} onStartWork={work.source === "engine" ? () => engine.startWork(work) : undefined} onSubmitArtifact={work.source === "engine" ? (title, content) => engine.submitArtifact(work, title, content) : undefined}
+                  onSetBudget={work.source === "engine" ? (n) => engine.setWorkBudget(work, n) : undefined} onRevisePlan={work.source === "engine" ? (action) => engine.revisePlan(work, action) : undefined}
+                  agents={engine.agents.map((agent) => ({ id: agent.id, name: agent.name, status: agent.status }))} agentNames={Object.fromEntries(engine.agents.map((agent) => [agent.id, agent.name]))}
                   {...(work.source === "engine"
                     ? {
                         onApplyObjectivePatch: (next: string) =>

@@ -46,6 +46,11 @@ export type EngineWorkRecord = {
     title: string;
     content: string;
   };
+  budget?: {
+    version: number;
+    caps: { model_attempts: number; input_tokens: number | null; output_tokens: number | null };
+    spent: { attempts: number; input_tokens: number; output_tokens: number };
+  };
   pending_contribution?: {
     id: string;
     to_actor_id: string;
@@ -111,6 +116,25 @@ export function parseEngineWorkRecord(raw: Record<string, unknown>): EngineWorkR
         };
       });
     }
+  }
+  const budget = raw["budget"];
+  if (budget && typeof budget === "object") {
+    const b = budget as Record<string, unknown>;
+    const caps = (b["caps"] ?? {}) as Record<string, unknown>;
+    const spent = (b["spent"] ?? {}) as Record<string, unknown>;
+    record.budget = {
+      version: typeof b["version"] === "number" ? b["version"] : 1,
+      caps: {
+        model_attempts: typeof caps["model_attempts"] === "number" ? caps["model_attempts"] : 40,
+        input_tokens: typeof caps["input_tokens"] === "number" ? caps["input_tokens"] : null,
+        output_tokens: typeof caps["output_tokens"] === "number" ? caps["output_tokens"] : null,
+      },
+      spent: {
+        attempts: typeof spent["attempts"] === "number" ? spent["attempts"] : 0,
+        input_tokens: typeof spent["input_tokens"] === "number" ? spent["input_tokens"] : 0,
+        output_tokens: typeof spent["output_tokens"] === "number" ? spent["output_tokens"] : 0,
+      },
+    };
   }
   const artifact = raw["latest_artifact"];
   if (artifact && typeof artifact === "object") {
@@ -189,6 +213,7 @@ export function engineWorkToUiWork(
     engineIntakeConfirmed: record.intake_confirmed ?? false,
     enginePlan: record.plan as Work["enginePlan"],
     engineLatestArtifact: record.latest_artifact,
+    engineBudget: record.budget,
     enginePlanRevision: record.current_plan_revision,
     engineArtifactVersion: record.current_artifact_version,
     requester: "Fabio",

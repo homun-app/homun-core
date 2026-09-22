@@ -73,6 +73,18 @@
 5. **Liberia documenti** motore (raccolta artefatti con ricerca/filtri).
 6. **Vista Oggi motore** con scadenze vere sul lavoro/fase.
 
+## Avanzamento punti 4 e 5 (22/9, fatto)
+
+- **4 — `work.set_budget` esposto**: il pannello del lavoro ha «Budget del lavoro»
+  con contatori onesti («tentativi usati X di Y; il limite si alza solo da qui»)
+  e aggiornamento esplicito del limite. La lista lavori espone il budget.
+  Verificato dal vivo (limite 40→12, persistito a revisione 8).
+- **5 — `plan.revise` da UI**: nella scala fasi, «+ Aggiungi una fase» (titolo,
+  assegnatario reale della squadra, tipo) e «Rimuovi l'ultima fase in attesa»
+  con conferma; le fasi completate restano storia. Verificato dal vivo
+  (aggiunta «Rileggere la sintesi con Aurora» → revisione 3 → rimozione).
+  Nascosti sui lavori completati o senza piano.
+
 ## Cosa NON manca (verificato, per non inseguire fantasmi)
 
 - Componentistica del template: tutta presente (`comm` componente-per-componente = 0 file solo-template).

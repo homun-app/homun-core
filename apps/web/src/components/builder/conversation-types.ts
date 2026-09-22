@@ -88,6 +88,12 @@ export type Work = {
   enginePlan?: EnginePlanStepProjection[] | undefined;
   /** Current artifact version awaiting (or having received) human review. */
   engineLatestArtifact?: { id: string; version: number; title: string; content: string } | undefined;
+  /** Per-work model budget (attempts/tokens caps with spend counters). */
+  engineBudget?: {
+    version: number;
+    caps: { model_attempts: number; input_tokens: number | null; output_tokens: number | null };
+    spent: { attempts: number; input_tokens: number; output_tokens: number };
+  } | undefined;
   /** Pending contribution request id (Fonte=motore). */
   engineContributionRequestId?: string;
   /** Current objective from engine domain (Fonte=motore). */

@@ -48,3 +48,50 @@ export async function submitEngineArtifact(
     actor: defaultLocalActor(),
   });
 }
+
+/** Raises or lowers the per-work model budget; only an explicit human act. */
+export async function setEngineWorkBudget(
+  workId: string,
+  expectedVersion: number,
+  modelAttempts: number,
+): Promise<void> {
+  await postEngineCommand({
+    type: "work.set_budget",
+    payload: {
+      work_id: workId,
+      expected_version: expectedVersion,
+      caps: { model_attempts: modelAttempts },
+    },
+    actor: defaultLocalActor(),
+  });
+}
+
+/** Adds or removes a plan phase; succeeded phases are historical and stay. */
+export async function reviseEnginePlan(input: {
+  workId: string;
+  expectedVersion: number;
+  insertAfterStepId?: string | null;
+  newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string };
+  removeStepId?: string;
+}): Promise<void> {
+  await postEngineCommand({
+    type: "plan.revise",
+    payload: {
+      work_id: input.workId,
+      expected_version: input.expectedVersion,
+      ...(input.newStep
+        ? {
+            new_step: {
+              title: input.newStep.title,
+              assignee_id: input.newStep.assigneeId,
+              ...(input.newStep.capability ? { capability: input.newStep.capability } : {}),
+              ...(input.newStep.outputExpected ? { output_expected: input.newStep.outputExpected } : {}),
+            },
+            ...(input.insertAfterStepId ? { insert_after_step_id: input.insertAfterStepId } : {}),
+          }
+        : {}),
+      ...(input.removeStepId ? { remove_step_id: input.removeStepId } : {}),
+    },
+    actor: defaultLocalActor(),
+  });
+}

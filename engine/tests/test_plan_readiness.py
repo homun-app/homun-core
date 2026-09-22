@@ -195,3 +195,4 @@ def test_phased_general_work_admits_comparison_on_its_phase(setup):
     plan = store.plans[store.plan_key(wid, store.works[wid].current_plan_revision)]
     assert plan.steps[1].status.value == 'succeeded'
     assert len(store.artifacts) == 1
+

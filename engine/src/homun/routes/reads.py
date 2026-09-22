@@ -43,6 +43,10 @@ def list_works(
             # Compact current plan so clients can render the phase ladder without
             # a per-work roundtrip.
             payload["plan"] = plan.model_dump(mode="json")
+        budget = ctx.service.store.work_budgets.get(work.id)
+        if budget is not None:
+            from homun.application.budgets import public as budget_public
+            payload["budget"] = budget_public(budget)
         if work.current_artifact_version:
             artifact = next((a for a in ctx.service.store.artifacts.values()
                              if a.work_id == work.id and a.version == work.current_artifact_version), None)
