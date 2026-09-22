@@ -70,7 +70,14 @@ def _work_review(ctx: CommandContext, actor: Actor, command_id: str, payload: di
     decision = str(payload.get("decision", ""))
     if decision not in {"approve", "request_changes"}:
         raise ValidationError("decision must be approve or request_changes")
-    if decision == "approve":
+    plan = ctx.current_plan(work)
+    pending_steps = [s for s in plan.steps if s.status == StepStatus.PENDING] if plan else []
+    if decision == "approve" and pending_steps:
+        # A verified intermediate phase advances the work, it does not conclude
+        # it: the next phase waits for the person's explicit go, like the first.
+        assert_work_transition(work.status, WorkStatus.READY)
+        work.status = WorkStatus.READY
+    elif decision == "approve":
         assert_work_transition(work.status, WorkStatus.COMPLETED)
         work.status = WorkStatus.COMPLETED
     else:
@@ -87,6 +94,7 @@ def _work_review(ctx: CommandContext, actor: Actor, command_id: str, payload: di
     ctx.store.reviews[review.id] = review
     work.version += 1
     work.updated_at = utc_now()
+    advanced = decision == "approve" and bool(pending_steps)
     ctx._emit(
         actor=actor,
         command_id=command_id,
@@ -94,8 +102,27 @@ def _work_review(ctx: CommandContext, actor: Actor, command_id: str, payload: di
         aggregate_type="work",
         aggregate_version=work.version,
         event_type="review.recorded",
-        payload={"review_id": review.id, "decision": decision},
+        payload={"review_id": review.id, "decision": decision,
+                 **({"advanced_to_step": pending_steps[0].id} if advanced else {})},
     )
+    if decision == "approve":
+        from homun.domain.commands.conversations import append_engine_message
+        if advanced:
+            append_engine_message(
+                ctx, actor=actor, command_id=f"{command_id}:phase",
+                conversation_id=work.primary_conversation_id, author_id="homun_engine",
+                text=(f"Fase verificata e completata. Prossima: «{pending_steps[0].title}». "
+                      "L'avvio è nel riepilogo del lavoro: nulla parte senza il tuo via."),
+                event_payload={"work_id": work.id, "next_step_id": pending_steps[0].id},
+            )
+        else:
+            append_engine_message(
+                ctx, actor=actor, command_id=f"{command_id}:done",
+                conversation_id=work.primary_conversation_id, author_id="homun_engine",
+                text=(f"Lavoro completato: «{work.title}». Il risultato verificato resta "
+                      "nella conversazione; nessun invio esterno."),
+                event_payload={"work_id": work.id, "artifact_id": artifact.id},
+            )
     return {
         "review_id": review.id,
         "status": work.status,

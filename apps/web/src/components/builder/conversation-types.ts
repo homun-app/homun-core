@@ -86,6 +86,8 @@ export type Work = {
   engineArtifactVersion?: number;
   /** Accepted plan steps (phase ladder) from the engine works list. */
   enginePlan?: EnginePlanStepProjection[] | undefined;
+  /** Current artifact version awaiting (or having received) human review. */
+  engineLatestArtifact?: { id: string; version: number; title: string; content: string } | undefined;
   /** Pending contribution request id (Fonte=motore). */
   engineContributionRequestId?: string;
   /** Current objective from engine domain (Fonte=motore). */

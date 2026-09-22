@@ -26,18 +26,32 @@ export function EngineResultReview({ work, artifactId, onChanged }: {
     finally { setBusy(false); }
   }
   if (!artifactId) return null;
-  if (work.engineStatus === "completed" || recorded === "approve")
+  if (work.engineStatus === "completed" || recorded === "approve") {
+    const next = work.enginePlan?.find((step) => step.status === "pending");
+    if (next)
+      return (
+        <>
+          <p role="status">Fase verificata: il lavoro passa a «{next.title}».</p>
+          <HomunErrorNotice error={error} />
+        </>
+      );
     return <p role="status">Risultato approvato: lavoro completato.</p>;
+  }
   if (work.engineStatus === "ready" || recorded === "request_changes")
     return <><p role="status">Correzioni richieste. Seleziona i materiali aggiornati e prepara una nuova proposta da approvare.</p><HomunErrorNotice error={error} /></>;
   if (work.engineStatus !== "review") return null;
+  const nextPhase = work.enginePlan?.find((step) => step.status === "pending");
   return <div className="cw-result-review" aria-label="Revisione del risultato">
-    <p className="cw-hint">Verifica tutti gli output prima di concludere. Le correzioni riaprono il lavoro; la nuova esecuzione richiede una nuova proposta e approvazione.</p>
+    <p className="cw-hint">{nextPhase
+      ? `Verifica l'esito di questa fase: approvandola il lavoro passerà a «${nextPhase.title}», che partirà solo con il tuo via.`
+      : "Verifica tutti gli output prima di concludere. Le correzioni riaprono il lavoro; la nuova esecuzione richiede una nuova proposta e approvazione."}</p>
     <label>Correzioni richieste
       <textarea className="cw-input" value={comment} disabled={busy} onChange={(event) => setComment(event.target.value)} placeholder="Descrivi cosa correggere nei materiali o nel risultato" />
     </label>
     <div className="cs-actions">
-      <button className="cw-primary" disabled={busy || recorded !== null} onClick={() => void review("approve")}>Approva il risultato e concludi il lavoro</button>
+      <button className="cw-primary" disabled={busy || recorded !== null} onClick={() => void review("approve")}>
+        {nextPhase ? `Approva e passa a «${nextPhase.title}»` : "Approva il risultato e concludi il lavoro"}
+      </button>
       <button className="cw-secondary" disabled={busy || recorded !== null || !comment.trim()} onClick={() => void review("request_changes")}>Richiedi correzioni</button>
     </div>
     <HomunErrorNotice error={error} />

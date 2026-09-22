@@ -158,6 +158,13 @@ def _work_provide_contribution(
     request.response_text = text
     request.response_material_ids = material_ids
     request.resolved_at = utc_now()
+    # The contribution satisfied its phase: record it on the plan so the ladder
+    # stays truthful, then tell the person what comes next.
+    plan = ctx.current_plan(work)
+    step = next((s for s in plan.steps if s.id == request.step_id), None) if plan else None
+    if step is not None and step.status == StepStatus.RUNNING:
+        step.status = StepStatus.SUCCEEDED
+    pending_steps = [s for s in plan.steps if s.status == StepStatus.PENDING] if plan else []
     work.status = WorkStatus.READY
     work.version += 1
     work.updated_at = utc_now()
@@ -168,8 +175,27 @@ def _work_provide_contribution(
         aggregate_type="work",
         aggregate_version=work.version,
         event_type="contribution.resolved",
-        payload={"request_id": request.id, "material_ids": material_ids},
+        payload={"request_id": request.id, "material_ids": material_ids,
+                 "step_id": request.step_id},
     )
+    if step is not None and step.status == StepStatus.SUCCEEDED:
+        from homun.domain.commands.conversations import append_engine_message
+        if pending_steps:
+            append_engine_message(
+                ctx, actor=actor, command_id=f"{command_id}:phase",
+                conversation_id=work.primary_conversation_id, author_id="homun_engine",
+                text=(f"Fase «{step.title}» registrata. Prossima: «{pending_steps[0].title}»: "
+                      "l'avvio è nel riepilogo del lavoro."),
+                event_payload={"work_id": work.id, "next_step_id": pending_steps[0].id},
+            )
+        else:
+            append_engine_message(
+                ctx, actor=actor, command_id=f"{command_id}:phase",
+                conversation_id=work.primary_conversation_id, author_id="homun_engine",
+                text=(f"Fase «{step.title}» registrata: tutte le fasi hanno il loro input. "
+                      "Consegna il risultato dal riepilogo del lavoro per la verifica finale."),
+                event_payload={"work_id": work.id, "step_id": step.id},
+            )
     result: dict[str, Any] = {
         "request_id": request.id,
         "status": work.status,

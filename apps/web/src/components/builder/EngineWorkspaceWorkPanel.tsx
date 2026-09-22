@@ -23,6 +23,7 @@ export function EngineWorkspaceWorkPanel({
   onApplyObjectivePatch,
   onCloseWork,
   onStartWork,
+  onSubmitArtifact,
   agentNames,
 }: {
   work: Work;
@@ -36,6 +37,7 @@ export function EngineWorkspaceWorkPanel({
   onApplyObjectivePatch?: ((objective: string) => Promise<void>) | undefined;
   onCloseWork?: (() => Promise<void>) | undefined;
   onStartWork?: (() => Promise<void>) | undefined;
+  onSubmitArtifact?: ((title: string, content: string) => Promise<void>) | undefined;
   agentNames?: Record<string, string> | undefined;
 }) {
   const sources = useProjectMaterials(work, (material) => material.status === "active");
@@ -162,10 +164,70 @@ export function EngineWorkspaceWorkPanel({
         materialsCount={sources.materials.length}
         onStartWork={onStartWork}
       />
+      <FinalDeliverySection work={work} busy={busy} onSubmitArtifact={onSubmitArtifact} />
       <CloseWorkSection work={work} busy={busy} onCloseWork={onCloseWork} />
       <HomunErrorNotice error={sources.error} />
       {contributionPanel}
     </aside>
+  );
+}
+
+/** Last phase done, result not delivered yet: the person hands over the outcome. */
+function FinalDeliverySection({
+  work,
+  busy,
+  onSubmitArtifact,
+}: {
+  work: Work;
+  busy: boolean;
+  onSubmitArtifact?: ((title: string, content: string) => Promise<void>) | undefined;
+}) {
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const steps = work.enginePlan;
+  const deliverable =
+    !!onSubmitArtifact &&
+    work.engineStatus === "ready" &&
+    !!steps?.length &&
+    steps.every((step) => step.status === "succeeded") &&
+    !work.engineArtifactVersion;
+  if (!deliverable) return null;
+  return (
+    <section className="cw-engine-summary__delivery" aria-label="Consegna del risultato">
+      <h3>Consegna il risultato</h3>
+      <p className="cw-engine-summary__hint">
+        Tutte le fasi hanno il loro esito: consegna il risultato finale per la verifica.
+        Dopo l'approvazione il lavoro risulta completato.
+      </p>
+      <textarea
+        className="cw-input"
+        aria-label="Risultato finale del lavoro"
+        placeholder="Incolla o scrivi qui il risultato finale (riepilogo, bozza, report)…"
+        value={draft}
+        maxLength={20000}
+        disabled={busy || sending}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <div className="cs-actions">
+        <button
+          className="cw-primary"
+          disabled={busy || sending || draft.trim().length < 1}
+          onClick={() => {
+            setSending(true);
+            setError(null);
+            onSubmitArtifact!(work.title, draft.trim())
+              .then(() => setDraft(""))
+              .catch(setError)
+              .finally(() => setSending(false));
+          }}
+        >
+          {sending ? "Sto consegnando…" : "Consegna per la verifica"}
+        </button>
+      </div>
+      {sending && <p role="status">Consegna in corso…</p>}
+      <HomunErrorNotice error={error} />
+    </section>
   );
 }
 

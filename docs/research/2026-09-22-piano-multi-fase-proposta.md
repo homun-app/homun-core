@@ -194,3 +194,34 @@ Fuori dalla fetta 1 (prossimi passi): esecuzione delle fasi oltre il primo
 `work.start` (collegamento ai flussi lettura/confronto esistenti), avanzamento
 automatico al passo successivo, riordino/revisione del piano da UI, chiusura
 «con esito» dell'ultima fase, budget per fase.
+
+## 10. Fetta 2: avanzamento delle fasi e chiusura con esito (2026-09-22)
+
+Motore:
+- `work.review` (approve) con fasi ancora in attesa **avanza** invece di completare:
+  il lavoro torna Pronto, la fase successiva parte solo con il nuovo via esplicito;
+  messaggio onesto in chat («Fase verificata e completata. Prossima: «X»…»).
+  L'approve dell'ultima fase resta COMPLETED con messaggio di chiusura
+  («Lavoro completato: … nessun invio esterno») — il gap D7 dell'audit è chiuso.
+- `work.provide_contribution` segna la propria fase come riuscita e annuncia la
+  successiva (o invita alla consegna finale se è l'ultima).
+- La lista lavori espone anche l'artefatto corrente (`latest_artifact`).
+
+Web:
+- Card «RISULTATO DA VERIFICARE» generica in chat per qualsiasi lavoro in
+  revisione (titolo, contenuto, azioni di revisione) — non più solo per il
+  confronto CSV.
+- Etichette di revisione consapevoli delle fasi: «Approva e passa a «X»» vs
+  «Approva il risultato e concludi il lavoro».
+- Pannello: «Consegna il risultato» quando tutte le fasi hanno esito e manca
+  l'artefatto finale (textarea → `work.submit_artifact` → revisione → completato).
+
+Verifica dal vivo (profilo reale, provider Ollama): raccolta avviata → esito fase 1
+in revisione → «Approva e passa a «Confronto prezzi e SKU»» → messaggio di
+avanzamento → Avvia fase 2 → sintesi in revisione → «Approva il risultato e
+concludi» → **Completato** con risultato in archivio. Suite: motore 465 verdi,
+web 193 verdi, `npm run check` verde, budget architettura rispettato.
+
+Nota: il lavoro dimostrativo «Confronto listini marzo-giugno» (completato, con
+progetto e materiali) è lasciato volutamente nell'archivio reale come esempio
+visibile; si rimuove su richiesta.

@@ -29,3 +29,20 @@ export async function startEngineWork(
     actor: defaultLocalActor(),
   });
 }
+
+/**
+ * Delivers the final result of the work (engine transition to REVIEW):
+ * the human review that follows is the honest closure with an outcome.
+ */
+export async function submitEngineArtifact(
+  workId: string,
+  expectedVersion: number,
+  title: string,
+  content: string,
+): Promise<void> {
+  await postEngineCommand({
+    type: "work.submit_artifact",
+    payload: { work_id: workId, expected_version: expectedVersion, title, content },
+    actor: defaultLocalActor(),
+  });
+}

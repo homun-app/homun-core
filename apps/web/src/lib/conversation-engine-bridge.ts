@@ -40,6 +40,12 @@ export type EngineWorkRecord = {
     capability: string;
     output_expected: string;
   }>;
+  latest_artifact?: {
+    id: string;
+    version: number;
+    title: string;
+    content: string;
+  };
   pending_contribution?: {
     id: string;
     to_actor_id: string;
@@ -105,6 +111,16 @@ export function parseEngineWorkRecord(raw: Record<string, unknown>): EngineWorkR
         };
       });
     }
+  }
+  const artifact = raw["latest_artifact"];
+  if (artifact && typeof artifact === "object") {
+    const a = artifact as Record<string, unknown>;
+    record.latest_artifact = {
+      id: String(a["id"] ?? ""),
+      version: typeof a["version"] === "number" ? a["version"] : 0,
+      title: String(a["title"] ?? ""),
+      content: String(a["content"] ?? ""),
+    };
   }
   return record;
 }
@@ -172,6 +188,7 @@ export function engineWorkToUiWork(
     engineObjective: record.objective,
     engineIntakeConfirmed: record.intake_confirmed ?? false,
     enginePlan: record.plan as Work["enginePlan"],
+    engineLatestArtifact: record.latest_artifact,
     enginePlanRevision: record.current_plan_revision,
     engineArtifactVersion: record.current_artifact_version,
     requester: "Fabio",

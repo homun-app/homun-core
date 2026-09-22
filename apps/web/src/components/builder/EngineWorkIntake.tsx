@@ -5,6 +5,7 @@ import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { EngineMaterialRead } from "./EngineMaterialRead";
 import { EnginePriceComparison } from "./EnginePriceComparison";
+import { EngineResultReview } from "./EngineResultReview";
 import { EngineWorkNeedsCard } from "./EngineWorkNeedsCard";
 import {
   briefChangeLines,
@@ -47,6 +48,8 @@ export function EngineWorkIntake({
           <p>La richiesta non è stata elaborata. Scrivila nuovamente nella chat per riprovare.</p>
         )}
       </section>
+    ) : work.engineStatus === "review" && work.engineLatestArtifact ? (
+      <EngineArtifactReview work={work} onChanged={onChanged} />
     ) : (
       <EnginePriceComparison work={work} onChanged={onChanged} />
     );
@@ -234,6 +237,9 @@ export function EngineWorkIntake({
                 </p>
               )
             )}
+            {confirmed && work.engineStatus === "review" && work.engineLatestArtifact && (
+              <EngineArtifactReviewInline work={work} onChanged={onChanged} />
+            )}
             {confirmed && revisable && <button className="cs-link" disabled={intake.busy} onClick={() => setEditing(!editing)}>Rivedi l’accordo</button>}
             {confirmed && !revisable && work.engineStatus === 'draft' && (
               <p className="cw-intake-note">
@@ -281,5 +287,37 @@ export function EngineWorkIntake({
         <EngineMaterialRead initiallyOpen work={work} onChanged={onChanged} />
       )}
     </>
+  );
+}
+
+/** Result awaiting human review for any capability: artifact plus the review action. */
+function EngineArtifactReviewInline({ work, onChanged }: {
+  work: Parameters<typeof EngineWorkIntake>[0]["work"];
+  onChanged: () => Promise<void>;
+}) {
+  const artifact = work.engineLatestArtifact!;
+  return (
+    <section className="cw-intake-phase-result" aria-label="Risultato da verificare">
+      <div className="cw-intake-eyebrow">RISULTATO DA VERIFICARE</div>
+      <h4>{artifact.title}</h4>
+      <pre className="cw-intake-artifact">{artifact.content}</pre>
+      <EngineResultReview work={work} artifactId={artifact.id} onChanged={onChanged} />
+    </section>
+  );
+}
+
+/** Result awaiting human review for any capability: artifact plus the review action. */
+function EngineArtifactReview({ work, onChanged }: {
+  work: Parameters<typeof EngineWorkIntake>[0]["work"];
+  onChanged: () => Promise<void>;
+}) {
+  const artifact = work.engineLatestArtifact!;
+  return (
+    <section className="cw-intake-card" aria-label="Risultato da verificare">
+      <div className="cw-intake-eyebrow">RISULTATO DA VERIFICARE</div>
+      <h3>{artifact.title}</h3>
+      <pre className="cw-intake-artifact">{artifact.content}</pre>
+      <EngineResultReview work={work} artifactId={artifact.id} onChanged={onChanged} />
+    </section>
   );
 }

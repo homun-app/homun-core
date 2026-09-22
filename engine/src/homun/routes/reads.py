@@ -43,6 +43,13 @@ def list_works(
             # Compact current plan so clients can render the phase ladder without
             # a per-work roundtrip.
             payload["plan"] = plan.model_dump(mode="json")
+        if work.current_artifact_version:
+            artifact = next((a for a in ctx.service.store.artifacts.values()
+                             if a.work_id == work.id and a.version == work.current_artifact_version), None)
+            if artifact is not None:
+                # The result awaiting (or having received) human review.
+                payload["latest_artifact"] = {"id": artifact.id, "version": artifact.version,
+                                              "title": artifact.title, "content": artifact.content}
         items.append(payload)
     return {"items": items}
 

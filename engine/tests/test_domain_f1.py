@@ -470,7 +470,7 @@ def test_transition_table_rejects(
                 "content": "c",
             },
         )
-        done = service.apply(
+        reviewed = service.apply(
             fabio,
             "r",
             "work.review",
@@ -481,6 +481,40 @@ def test_transition_table_rejects(
                 "decision": "approve",
             },
         )
+        # Multi-step plans advance phase by phase: approving an intermediate
+        # phase returns the work to ready for the person's next explicit go.
+        round_ = 0
+        while reviewed["status"] == WorkStatus.READY:
+            started_again = service.apply(
+                fabio,
+                f"s{round_}",
+                "work.start",
+                {"work_id": seeded["work_id"], "expected_version": reviewed["version"]},
+            )
+            art_again = service.apply(
+                fabio,
+                f"a{round_}",
+                "work.submit_artifact",
+                {
+                    "work_id": seeded["work_id"],
+                    "expected_version": started_again["version"],
+                    "title": "t",
+                    "content": "c",
+                },
+            )
+            reviewed = service.apply(
+                fabio,
+                f"r{round_}",
+                "work.review",
+                {
+                    "work_id": seeded["work_id"],
+                    "expected_version": art_again["version"],
+                    "artifact_version_id": art_again["artifact_id"],
+                    "decision": "approve",
+                },
+            )
+            round_ += 1
+        done = reviewed
         assert done["status"] == WorkStatus.COMPLETED
         with pytest.raises(InvalidTransitionError):
             service.apply(
