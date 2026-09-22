@@ -119,6 +119,12 @@ export async function updateEngineAgent(input: {
   preferredConnectionId?: string | null;
   status?: string;
   avatar?: string | null;
+  responsibility?: string;
+  specializations?: string[];
+  method?: string;
+  tone?: string;
+  autonomyMode?: string;
+  capabilities?: string[];
   actor?: EngineActor;
   workspaceId?: string;
 }): Promise<{ revision: number }> {
@@ -134,6 +140,12 @@ export async function updateEngineAgent(input: {
   }
   if (input.status !== undefined) payload["status"] = input.status;
   if (input.avatar !== undefined) payload["avatar"] = input.avatar;
+  if (input.responsibility !== undefined) payload["responsibility"] = input.responsibility;
+  if (input.specializations !== undefined) payload["specializations"] = input.specializations;
+  if (input.method !== undefined) payload["method"] = input.method;
+  if (input.tone !== undefined) payload["tone"] = input.tone;
+  if (input.autonomyMode !== undefined) payload["autonomy_mode"] = input.autonomyMode;
+  if (input.capabilities !== undefined) payload["capabilities"] = input.capabilities;
   const result = await postEngineCommand({
     type: "agent.update",
     payload,

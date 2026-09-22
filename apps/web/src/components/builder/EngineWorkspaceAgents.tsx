@@ -13,8 +13,15 @@ const AUTONOMY_LABELS: Record<string, string> = {
   autonomous: "Consegna autonoma",
 };
 
-/** Rich agent cards: identity, specializations, autonomy — not raw instructions. */
-export function EngineWorkspaceAgents({ agents }: { agents: EngineAgentProfile[] }) {
+import { useState } from "react";
+import { EngineAgentEditor } from "./EngineAgentEditor";
+
+/** Rich agent cards: identity, specializations, autonomy — editable, with their own model. */
+export function EngineWorkspaceAgents({ agents, onChanged }: {
+  agents: EngineAgentProfile[];
+  onChanged?: (() => Promise<void>) | undefined;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
   const active = agents.filter((agent) => agent.status === "active");
   return (
     <section className="cw-workspace cw-agents-panel" aria-label="Collaboratori">
@@ -85,7 +92,24 @@ export function EngineWorkspaceAgents({ agents }: { agents: EngineAgentProfile[]
                 <summary>Istruzioni operative</summary>
                 <p>{agent.instructions}</p>
               </details>
+              {onChanged && (
+                <button
+                  type="button"
+                  className="cs-link"
+                  onClick={() => setEditingId(editingId === agent.id ? null : agent.id)}
+                >
+                  {editingId === agent.id ? "Chiudi modifica" : "Modifica"}
+                </button>
+              )}
             </footer>
+            {editingId === agent.id && (
+              <EngineAgentEditor
+                key={`${agent.id}:${agent.revision}`}
+                agent={agent}
+                onChanged={onChanged ?? (async () => {})}
+                onClose={() => setEditingId(null)}
+              />
+            )}
           </article>
         ))}
       </div>

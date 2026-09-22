@@ -1230,7 +1230,7 @@ export function ConversationWorkspace() {
             Errors that block work surface through HomunErrorNotice. */}
         {space ? (
           <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined}
-            engineMode={engine.backend === "engine"}
+            engineMode={engine.backend === "engine"} onRefreshEngine={engine.backend === "engine" ? engine.refresh : undefined}
             space={space}
             spaceInitial={spaceInitial}
             spaceSelected={spaceSelected}

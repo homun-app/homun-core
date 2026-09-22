@@ -48,6 +48,12 @@
    confronto, lettura, sintesi; per dimensione lavoro), una sezione
    «Modelli consigliati» in Impostazioni e la scelta per-lavoro al momento
    dell'affidamento, sempre revocabile.
+   **Legame agente↔modello (verificato il 22/9)**: `AgentProfile.preferred_connection_id`
+   esiste ed è validato da `agent.update`; `registry.complete` accetta
+   `connection_id`; ma interpret/intake **non lo usano mai** (chiamano il
+   provider attivo del workspace) e dall'app non si può impostare. Il legame
+   è quindi: dati ✓, esecuzione ✗, UI ✗, suggerimento ✗. Ogni agente con il
+   suo modello diventa il perno della sezione Modelli nella scheda agente.
 2. **Ristrutturazione Impostazioni**: sezioni mancanti rispetto al prodotto
    finale — Persone (lite), Plugin/MCP (anche solo onesta «non ancora»),
    Automazioni, Squadra/team; la sezione Modelli va divisa in
@@ -77,6 +83,16 @@
 1. **Gestione agenti e team su motore** — comandi già pronti e testati: è UI
    pura (modifica profilo, autonomia, connessione preferita; team con
    coordinatore). Riempie il buco più visibile del prodotto.
+   **Avanzamento 22/9 (punto 1a fatto)**: la scheda agente in Squadra è ora
+   modificabile (ruolo, istruzioni, identità professionale, autonomia,
+   capacità) con il **selettore «Modello per questo collaboratore»** sulle
+   connessioni reali del motore (`preferred_connection_id`, persistito e
+   revisionato). Verificato dal vivo su Aurora. Il punto 1b (team con
+   coordinatore) resta da fare.
+   Nota di onestà: il collegamento per agente è **dormiente nell'esecuzione**
+   perché oggi tutto il lavoro col modello è del coordinatore (interpret,
+   intake); le fasi eseguibili sono deterministiche. Diventa operativo con la
+   fetta «sintesi a motore» (il modello dell'agente fa la sua fase di sintesi).
 2. **Ristrutturazione Impostazioni** con le sezioni mancanti (anche oneste
    «non ancora disponibili») e la scissione Collegamento/Preferenze modelli.
 3. **Suggerimento modelli per attività** — dipende da (2) per la casa giusta;

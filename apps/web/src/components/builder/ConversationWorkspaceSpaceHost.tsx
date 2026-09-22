@@ -60,10 +60,11 @@ type Props = {
   onUpdateMaterial: (item: ConversationMaterial) => void;
   onRemoveMaterial: (id: string) => void;
   onLinkMaterial: (id: string, workId: string) => void;
+  onRefreshEngine?: (() => Promise<void>) | undefined;
 };
 
 export function ConversationWorkspaceSpaceHost({
-  engineMode = false, engineAgents,
+  engineMode = false, engineAgents, onRefreshEngine,
   space,
   spaceInitial,
   spaceSelected,
@@ -93,7 +94,8 @@ export function ConversationWorkspaceSpaceHost({
   onRemoveMaterial,
   onLinkMaterial,
 }: Props) {
-  if (engineMode && space === "Squadra") return <EngineWorkspaceAgents agents={engineAgents ?? []} />;
+  if (engineMode && space === "Squadra")
+    return <EngineWorkspaceAgents agents={engineAgents ?? []} onChanged={onRefreshEngine} />;
   if (engineMode && space === "Progetti") return <EngineWorkspaceProjects projects={spaceData.projects} works={visibleWorks} selected={spaceSelected} onProject={(id) => onOpenSpace("Progetti", "", id)} onWork={onOpenWork} />;
 
   if (space === "Nuovo collaboratore") {
