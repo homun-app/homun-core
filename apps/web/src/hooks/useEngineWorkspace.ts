@@ -35,6 +35,7 @@ import { useEngineWorkspaceSnapshot } from "./useEngineWorkspaceSnapshot";
 import { useEngineTranscript } from "./useEngineTranscript";
 import { useWorkIntake, type WorkIntakeState } from "./useWorkIntake";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
+import type { EngineTeam } from "@/lib/engine-projects-client";
 import { renameEngineWork } from "@/lib/engine-work-naming";
 import { closeEngineWork, startEngineWork, submitEngineArtifact } from "@/lib/engine-work-lifecycle";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
@@ -53,6 +54,7 @@ export type EngineWorkspaceState = {
   intake: WorkIntakeState;
   projects: EngineProject[];
   agents: EngineAgentProfile[];
+  teams: EngineTeam[];
   followups: Array<EngineFollowupNotice & { conversationTitle: string }>;
   refresh: () => Promise<void>;
   renameWork: (work: Work, title: string) => Promise<void>;
@@ -90,7 +92,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
   const gateError = mode.gateError;
   const engineReady = mode.engineReady;
 
-  const {rawWorks, projects, agents, followups, loaded, refresh: refreshSnapshot} = useEngineWorkspaceSnapshot(engineReady, () => setMessageOverlay({}), setError);
+  const {rawWorks, projects, agents, teams, followups, loaded, refresh: refreshSnapshot} = useEngineWorkspaceSnapshot(engineReady, () => setMessageOverlay({}), setError);
 
   // Explicit transcript reloads: actions that may have persisted messages bump
   // the sequence; a plain inventory refresh re-render never interrupts reading.
@@ -533,7 +535,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     busy,
     works,
     intake,
-    projects, agents,
+    projects, agents, teams,
     refresh,
     renameWork: async (work, title) => { await renameEngineWork(work.id, title, work.revision); await refresh(); },
     closeWork: async (work) => { await closeEngineWork(work.id, work.revision); await refresh(); },

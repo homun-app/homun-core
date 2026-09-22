@@ -23,9 +23,12 @@ import { EngineWorkspaceProjects } from "./EngineWorkspaceProjects";
 type ScenarioState = (ConversationScenario & { custom?: boolean })[];
 
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
+import type { EngineTeam } from "@/lib/engine-projects-client";
 import { EngineWorkspaceAgents } from "./EngineWorkspaceAgents";
+import { EngineWorkspaceTeams } from "./EngineWorkspaceTeams";
 type Props = {
   engineAgents?: EngineAgentProfile[] | undefined;
+  engineTeams?: EngineTeam[] | undefined;
   engineMode?: boolean;
   space: SpaceView;
   spaceInitial: string;
@@ -64,7 +67,7 @@ type Props = {
 };
 
 export function ConversationWorkspaceSpaceHost({
-  engineMode = false, engineAgents, onRefreshEngine,
+  engineMode = false, engineAgents, engineTeams, onRefreshEngine,
   space,
   spaceInitial,
   spaceSelected,
@@ -95,7 +98,12 @@ export function ConversationWorkspaceSpaceHost({
   onLinkMaterial,
 }: Props) {
   if (engineMode && space === "Squadra")
-    return <EngineWorkspaceAgents agents={engineAgents ?? []} onChanged={onRefreshEngine} />;
+    return (
+      <>
+        <EngineWorkspaceAgents agents={engineAgents ?? []} onChanged={onRefreshEngine} />
+        <EngineWorkspaceTeams teams={engineTeams ?? []} agents={engineAgents ?? []} onChanged={onRefreshEngine} />
+      </>
+    );
   if (engineMode && space === "Progetti") return <EngineWorkspaceProjects projects={spaceData.projects} works={visibleWorks} selected={spaceSelected} onProject={(id) => onOpenSpace("Progetti", "", id)} onWork={onOpenWork} />;
 
   if (space === "Nuovo collaboratore") {

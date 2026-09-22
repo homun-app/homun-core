@@ -87,8 +87,12 @@
    modificabile (ruolo, istruzioni, identità professionale, autonomia,
    capacità) con il **selettore «Modello per questo collaboratore»** sulle
    connessioni reali del motore (`preferred_connection_id`, persistito e
-   revisionato). Verificato dal vivo su Aurora. Il punto 1b (team con
-   coordinatore) resta da fare.
+   revisionato). Verificato dal vivo su Aurora.
+   **Punto 1b fatto (22/9)**: nello spazio Squadra ora si creano, modificano
+   (membri e coordinatore, regola onesta «coordinatore fra i membri») e
+   archiviano team sui comandi versionati esistenti. Verificato dal vivo
+   (team «Analisi listini», coordinatore Aurora→Bruno, archiviazione a
+   revisione 3). **Il punto 1 della proposta è completato.**
    Nota di onestà: il collegamento per agente è **dormiente nell'esecuzione**
    perché oggi tutto il lavoro col modello è del coordinatore (interpret,
    intake); le fasi eseguibili sono deterministiche. Diventa operativo con la
