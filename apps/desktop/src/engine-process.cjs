@@ -14,7 +14,7 @@ async function startEngine({ executable, args = [], dataDir, cwd, timeout = 2000
   let baseUrl, exited = false, failed = false, buffer = '';
   child.once('error', () => { failed = true; });
   child.once('exit', () => { exited = true; });
-  child.stderr.on('data', () => {}); // Provider/storage diagnostics must not leak into renderer.
+  child.stderr.on('data', c => { if (process.env.HOMUN_ENGINE_DEBUG_LOG) require('node:fs').appendFileSync(process.env.HOMUN_ENGINE_DEBUG_LOG, c); }); // Provider/storage diagnostics must not leak into renderer.
   child.stdout.on('data', chunk => {
     buffer = (buffer + chunk).slice(-8192);
     let end;

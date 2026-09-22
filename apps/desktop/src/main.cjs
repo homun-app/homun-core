@@ -22,6 +22,10 @@ app.on('before-quit', event => { event.preventDefault(); void shutdown(); });
 app.on('window-all-closed', () => app.quit());
 if (!app.requestSingleInstanceLock()) app.exit();
 else app.whenReady().then(async () => {
+  // Expose the web content to accessibility: without this macOS lists only the
+  // native window chrome, and assistive technology (or automated QA) cannot
+  // reach buttons and fields inside the page.
+  app.setAccessibilitySupportEnabled(true);
   const root = path.resolve(__dirname, '../../..');
   const dataDir = process.env.HOMUN_DESKTOP_DATA_DIR || path.join(app.getPath('userData'), 'engine');
   const bundled = path.join(process.resourcesPath, 'engine', 'homun-engine');
