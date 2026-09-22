@@ -53,6 +53,32 @@ def classify_message(ctx, actor, work_id, text):
         work_budgets.reconcile_unknown(ctx, actor, work_id, reservation)
         raise
 
+def _plan_step_assignee_names_valid(steps, agents, collaborator_name):
+    """Fresh phases must name people who can actually take them: an active roster
+    collaborator or the brief's own proposed one. An empty name is the default
+    (the brief's collaborator takes the phase); anything else unresolvable is
+    an invalid brief."""
+    if not steps:
+        return True
+    roster = {agent['name'].strip().casefold() for agent in agents}
+    collaborator = (collaborator_name or '').strip().casefold()
+    for step in steps:
+        name = (step.get('assignee', '') if isinstance(step, dict) else step.assignee)
+        name = str(name).strip().casefold()
+        if name and name not in roster and name != collaborator:
+            return False
+    return True
+
+
+def _resolve_plan_assignee(store, name, fallback_agent_id):
+    wanted = str(name or '').strip().casefold()
+    if wanted:
+        for agent in store.agents.values():
+            if agent.status == 'active' and agent.name.strip().casefold() == wanted:
+                return agent.id
+    return fallback_agent_id
+
+
 def propose(ctx, actor, work_id, body):
     payload={**body,'work_id':work_id}
     with ctx.repository.locked():
@@ -125,6 +151,13 @@ def propose(ctx, actor, work_id, body):
             selected = next((a for a in agents if a['id'] == brief.suggested_agent_id), None)
             if brief.suggested_agent_id and not selected:
                 raise ValueError('Suggested agent does not exist in active roster')
+            collaborator_name = None
+            if selected:
+                collaborator_name = selected['name']
+            elif brief.new_agent:
+                collaborator_name = brief.new_agent.name
+            if not _plan_step_assignee_names_valid(brief.plan_steps, agents, collaborator_name):
+                raise ValueError('Plan step assignee is not a roster collaborator')
             if previous_brief:
                 values = stabilize(brief, previous_brief)
             else:
@@ -210,6 +243,26 @@ def confirm(ctx,actor,work_id,proposal_id,body):
             work.version+=1; work.updated_at=utc_now()
             service._context._emit(actor=actor,command_id=body['command_id'],aggregate_id=work.id,aggregate_type='work',aggregate_version=work.version,event_type='work.intake_confirmed',payload={'proposal_id':proposal_id,'owner_id':owner})
             proposal['status']='confirmed'
+            if proposal.get('plan_steps'):
+                # The confirmed agreement declared phases: publish them as the
+                # accepted plan (chained steps). One ack covers both; the plan
+                # becomes the honest contract the panel ladder shows.
+                from homun.domain.ids import new_id as _new_id
+                chained=[]
+                for draft in proposal['plan_steps']:
+                    assignee_id=_resolve_plan_assignee(store, draft.get('assignee',''), owner)
+                    if not assignee_id:
+                        raise ConflictError('Plan phase has no collaborator')
+                    chained.append({'id':_new_id('step'),
+                                    'title':draft.get('title',''),
+                                    'assignee_id':assignee_id,
+                                    'depends_on':[chained[-1]['id']] if chained else [],
+                                    'output_expected':draft.get('output_expected',''),
+                                    'capability':draft.get('capability','general')})
+                proposed=service.apply(actor,body['command_id']+':plan','plan.propose',
+                                       {'work_id':work_id,'steps':chained,'expected_version':work.version})
+                service.apply(actor,body['command_id']+':plan_accept','plan.accept',
+                              {'work_id':work_id,'expected_version':proposed['version']})
             save(store,actor,body['command_id'],'intake.confirm',fingerprint,{'proposal_id':proposal_id})
         ctx.service.store=store
     return deepcopy(public(proposal))

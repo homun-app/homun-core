@@ -144,6 +144,8 @@ class PlanStep(BaseModel):
     status: StepStatus = StepStatus.PENDING
     depends_on: list[str] = Field(default_factory=list)
     output_expected: str = ""
+    capability: str = "general"
+    """Registry capability this step runs with; drives readiness and execution routing."""
 
 
 class PlanRevision(BaseModel):

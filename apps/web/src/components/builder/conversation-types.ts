@@ -11,6 +11,16 @@ import type { SpaceData, SpaceView } from "./ConversationSpace";
 
 export type Phase = "proposal" | "waiting" | "ready" | "review" | "approved";
 
+/** Engine plan step projected for the phase ladder (Fonte=motore). */
+export type EnginePlanStepProjection = {
+  id: string;
+  title: string;
+  assignee_id: string;
+  status: "pending" | "running" | "waiting_input" | "waiting_approval" | "succeeded" | "failed" | "cancelled" | "superseded";
+  capability: string;
+  output_expected: string;
+};
+
 /** Honest in-flight model phases shown inside the transcript (never fake progress). */
 export type AgentWaitPhase = "reading" | "preparing";
 
@@ -74,6 +84,8 @@ export type Work = {
   /** Engine plan/artifact revision counters (Fonte=motore); 0 = none yet. */
   enginePlanRevision?: number;
   engineArtifactVersion?: number;
+  /** Accepted plan steps (phase ladder) from the engine works list. */
+  enginePlan?: EnginePlanStepProjection[] | undefined;
   /** Pending contribution request id (Fonte=motore). */
   engineContributionRequestId?: string;
   /** Current objective from engine domain (Fonte=motore). */

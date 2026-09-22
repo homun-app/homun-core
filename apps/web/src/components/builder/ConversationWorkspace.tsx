@@ -695,8 +695,7 @@ export function ConversationWorkspace() {
           .catch(() => setNotice("Invio al motore non riuscito. Controlla il banner errori."));
         return;
       }
-      // First message of a new work: open immediately, then postMessage routes
-      // it with the echoed message and the staged honest waits.
+      // First message of a new work: open immediately, then postMessage routes it.
       sendEngineFirstMessage(engine, text, open, setNotice, bumpOwnSend);
       return;
     }
@@ -1366,8 +1365,9 @@ export function ConversationWorkspace() {
                   onFilesChange={setFiles}
                   onPreview={() => setPreview(true)}
                   engineBusy={engine.busy} onRename={work.source === "engine" ? (title) => engine.renameWork(work, title) : undefined}
-                  engineIntake={engine.intake}
-                  onCloseWork={work.source === "engine" ? () => engine.closeWork(work) : undefined}
+                  engineIntake={engine.intake} onCloseWork={work.source === "engine" ? () => engine.closeWork(work) : undefined}
+                  onStartWork={work.source === "engine" ? () => engine.startWork(work) : undefined}
+                  agentNames={Object.fromEntries(engine.agents.map((agent) => [agent.id, agent.name]))}
                   {...(work.source === "engine"
                     ? {
                         onApplyObjectivePatch: (next: string) =>

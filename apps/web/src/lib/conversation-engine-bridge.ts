@@ -32,6 +32,14 @@ export type EngineWorkRecord = {
   current_plan_revision: number;
   current_artifact_version: number;
   intake_confirmed?: boolean;
+  plan?: Array<{
+    id: string;
+    title: string;
+    assignee_id: string;
+    status: string;
+    capability: string;
+    output_expected: string;
+  }>;
   pending_contribution?: {
     id: string;
     to_actor_id: string;
@@ -80,6 +88,23 @@ export function parseEngineWorkRecord(raw: Record<string, unknown>): EngineWorkR
   }
   if (raw["intake_confirmed"] === true) {
     record.intake_confirmed = true;
+  }
+  const plan = raw["plan"];
+  if (plan && typeof plan === "object") {
+    const steps = (plan as Record<string, unknown>)["steps"];
+    if (Array.isArray(steps)) {
+      record.plan = steps.map((step) => {
+        const s = step as Record<string, unknown>;
+        return {
+          id: String(s["id"] ?? ""),
+          title: String(s["title"] ?? ""),
+          assignee_id: String(s["assignee_id"] ?? ""),
+          status: String(s["status"] ?? "pending"),
+          capability: String(s["capability"] ?? "general"),
+          output_expected: String(s["output_expected"] ?? ""),
+        };
+      });
+    }
   }
   return record;
 }
@@ -146,6 +171,7 @@ export function engineWorkToUiWork(
     engineStatus: record.status,
     engineObjective: record.objective,
     engineIntakeConfirmed: record.intake_confirmed ?? false,
+    enginePlan: record.plan as Work["enginePlan"],
     enginePlanRevision: record.current_plan_revision,
     engineArtifactVersion: record.current_artifact_version,
     requester: "Fabio",

@@ -7,6 +7,13 @@ export type WorkIntakeChange = {
   from_value?: string | string[] | null;
   to_value?: string | string[] | null;
 };
+export type WorkIntakePlanStep = {
+  title: string;
+  capability: "compare_csv" | "read_material" | "general";
+  expected_materials: string[];
+  output_expected: string;
+  assignee: string;
+};
 export type WorkIntake = {
   id: string;
   work_id: string;
@@ -27,6 +34,8 @@ export type WorkIntake = {
   changed_fields?: string[];
   changes?: WorkIntakeChange[];
   error_code?: string;
+  /** Declared phases (raccolta → confronto → sintesi); older proposals lack them. */
+  plan_steps?: WorkIntakePlanStep[];
 };
 async function request<T>(
   workId: string,

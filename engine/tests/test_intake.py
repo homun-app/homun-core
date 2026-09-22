@@ -493,6 +493,59 @@ def test_same_name_new_agent_reproposal_is_reanchored_not_duplicated(setup):
     assert sum(1 for a in store.agents.values() if a.name.casefold()=='elena')==1
 
 
+def test_confirm_with_plan_steps_creates_accepted_chained_plan(setup):
+    from homun.application.intake import propose,confirm
+    ctx,actor,wid,brief=setup
+    ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
+        'plan_steps':[
+            {'title':'Raccogliere i listini','capability':'general',
+             'expected_materials':['Listino marzo','Listino giugno'],
+             'output_expected':'Listini nel progetto','assignee':'Ada'},
+            {'title':'Confrontare i listini','capability':'compare_csv',
+             'expected_materials':[],'output_expected':'Report differenze','assignee':'Ada'},
+        ]}))
+    p=propose(ctx,actor,wid,{'command_id':'i','text':'Confronta i listini con raccolta','expected_version':1})
+    assert len(p['plan_steps'])==2
+    confirm(ctx,actor,wid,'i',{'command_id':'ok','digest':p['digest'],'expected_version':1,'create_agent':False})
+    store=ctx.repository.load()
+    work=store.works[wid]
+    assert work.status.value=='ready'
+    plan=store.plans[store.plan_key(wid,work.current_plan_revision)]
+    assert plan.revision==1 and len(plan.steps)==2
+    assert plan.steps[0].capability=='general' and plan.steps[1].capability=='compare_csv'
+    assert plan.steps[1].depends_on==[plan.steps[0].id]
+    assert plan.steps[0].assignee_id==brief['suggested_agent_id']
+
+
+def test_plan_step_with_unknown_assignee_fails_honestly(setup):
+    from homun.application.intake import propose
+    ctx,actor,wid,brief=setup
+    ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
+        'plan_steps':[{'title':'Fase X','capability':'general','assignee':'Nessuno'}]}))
+    p=propose(ctx,actor,wid,{'command_id':'i','text':'Confronta listini','expected_version':1})
+    assert p['status']=='failed' and p['error_code']=='intake_invalid_response'
+
+
+def test_clarification_can_add_plan_steps_to_a_phaseless_brief(setup):
+    from homun.application.intake import propose,confirm
+    ctx,actor,wid,brief=setup
+    first=propose(ctx,actor,wid,{'command_id':'i','text':'Confronta i listini','expected_version':1})
+    assert first['plan_steps']==[]
+    ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
+        'plan_steps':[{'title':'Raccogliere i listini','capability':'general','assignee':''},
+                      {'title':'Confrontare i listini','capability':'compare_csv','assignee':''}],
+        'changed_fields':['plan_steps']}))
+    refined=propose(ctx,actor,wid,{'command_id':'ii','text':'Suddividi in fasi: raccolta e confronto','expected_version':1})
+    assert refined['status']=='pending_confirmation'
+    assert len(refined['plan_steps'])==2
+    confirm(ctx,actor,wid,'ii',{'command_id':'ok','digest':refined['digest'],'expected_version':1,'create_agent':False})
+    store=ctx.repository.load()
+    work=store.works[wid]
+    assert work.status.value=='ready'
+    plan=store.plans[store.plan_key(wid,work.current_plan_revision)]
+    assert len(plan.steps)==2 and plan.steps[0].assignee_id==brief['suggested_agent_id']
+
+
 def test_question_classification_persists_nothing(setup):
     from homun.application.intake import classify_message
     ctx,actor,wid,brief=setup

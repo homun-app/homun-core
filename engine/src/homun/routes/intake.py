@@ -28,6 +28,13 @@ class SuggestedAgent(BaseModel):
     role: str
     revision: int
 
+class PlanStepPayload(BaseModel):
+    title: str
+    capability: Literal['compare_csv', 'read_material', 'general'] = 'general'
+    expected_materials: list[str] = Field(default_factory=list)
+    output_expected: str = ''
+    assignee: str = ''
+
 class BriefChange(BaseModel):
     field: str
     from_value: str | list[str] | None = None
@@ -51,6 +58,7 @@ class IntakeProposal(BaseModel):
     original_request: str
     changed_fields: list[str] = Field(default_factory=list)
     changes: list[BriefChange] = Field(default_factory=list)
+    plan_steps: list[PlanStepPayload] = Field(default_factory=list)
     error_code: str | None = None
 
 class IntakeList(BaseModel):

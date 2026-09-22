@@ -82,7 +82,7 @@ test("missing values and long text stay readable", () => {
 test("preserved fields are everything the engine did not change", () => {
   assert.deepEqual(
     preservedFieldLabels([{ field: "staffing", from_value: "Ada", to_value: "Bruno" }]),
-    ["Titolo", "Obiettivo", "Risultato atteso", "Vincoli", "Attività"],
+    ["Titolo", "Obiettivo", "Risultato atteso", "Vincoli", "Attività", "Fasi"],
   );
   assert.deepEqual(preservedFieldLabels([]), [
     "Titolo",
@@ -91,6 +91,7 @@ test("preserved fields are everything the engine did not change", () => {
     "Vincoli",
     "Attività",
     "Collaboratore",
+    "Fasi",
   ]);
   assert.deepEqual(preservedFieldLabels(undefined), [
     "Titolo",
@@ -99,6 +100,7 @@ test("preserved fields are everything the engine did not change", () => {
     "Vincoli",
     "Attività",
     "Collaboratore",
+    "Fasi",
   ]);
 });
 

@@ -14,3 +14,18 @@ export async function closeEngineWork(
     actor: defaultLocalActor(),
   });
 }
+
+/**
+ * Starts the accepted plan's first pending step (engine transition to RUNNING).
+ * Supervised by design: only the person triggers it, never the engine.
+ */
+export async function startEngineWork(
+  workId: string,
+  expectedVersion: number,
+): Promise<void> {
+  await postEngineCommand({
+    type: "work.start",
+    payload: { work_id: workId, expected_version: expectedVersion, durable: false },
+    actor: defaultLocalActor(),
+  });
+}

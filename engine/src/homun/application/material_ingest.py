@@ -48,10 +48,17 @@ def ingest_file(ctx, actor, *, command_id, project_id, filename, data,
                 result = service.register_prepared_material(actor, command_id, payload)
                 _, created = publish(ctx.data_dir, data, digest)
             ctx.service.store = store
-            return result
         except BaseException:
             if created:
                 # The transaction has rolled back. Never remove shared originals.
                 # Failure to reload leaves the orphan for startup recovery.
                 collect_unreferenced(ctx.data_dir, _references(ctx.repository.load()))
             raise
+        # The material is durably stored; a failed announcement must not turn the
+        # honest success into a lie. The panel keeps live readiness either way.
+        from homun.application.plan_readiness import announce_ready_steps
+        try:
+            announce_ready_steps(ctx, actor, project_id=project_id, command_id=command_id)
+        except Exception:
+            pass
+        return result

@@ -36,7 +36,7 @@ import { useEngineTranscript } from "./useEngineTranscript";
 import { useWorkIntake, type WorkIntakeState } from "./useWorkIntake";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import { renameEngineWork } from "@/lib/engine-work-naming";
-import { closeEngineWork } from "@/lib/engine-work-lifecycle";
+import { closeEngineWork, startEngineWork } from "@/lib/engine-work-lifecycle";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
 import { proposeWorkIntake } from "@/lib/engine-intake-client";
 import { applyIntakePreview } from "@/lib/engine-intake-display";
@@ -57,6 +57,7 @@ export type EngineWorkspaceState = {
   refresh: () => Promise<void>;
   renameWork: (work: Work, title: string) => Promise<void>;
   closeWork: (work: Work) => Promise<void>;
+  startWork: (work: Work) => Promise<void>;
   createWork: (title: string, objective: string, draftOnly?: boolean) => Promise<Work | null>;
   postMessage: (work: Work, text: string) => Promise<void>;
   confirmPatch: (work: Work, messageIndex: number) => Promise<void>;
@@ -535,6 +536,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     refresh,
     renameWork: async (work, title) => { await renameEngineWork(work.id, title, work.revision); await refresh(); },
     closeWork: async (work) => { await closeEngineWork(work.id, work.revision); await refresh(); },
+    startWork: async (work) => { await startEngineWork(work.id, work.revision); await refresh(); },
     createWork,
     postMessage,
     confirmPatch,

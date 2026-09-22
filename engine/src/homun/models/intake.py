@@ -17,10 +17,10 @@ class NewAgent(BaseModel):
     tone: str = Field(default='', max_length=120)
     capabilities: list[str] = Field(default_factory=list, max_length=8)
 
-BriefField = Literal['title', 'objective', 'output', 'constraints', 'capability', 'staffing']
+BriefField = Literal['title', 'objective', 'output', 'constraints', 'capability', 'staffing', 'plan_steps']
 """Parts of a brief the model may declare as intentionally changed by a clarification."""
 
-_BRIEF_FIELDS = {'title', 'objective', 'output', 'constraints', 'capability', 'staffing'}
+_BRIEF_FIELDS = {'title', 'objective', 'output', 'constraints', 'capability', 'staffing', 'plan_steps'}
 
 RequestKind = Literal['work_request', 'question']
 """A message either asks for a durable work result or just asks / chats."""
@@ -30,6 +30,31 @@ class RequestClassification(BaseModel):
     kind: RequestKind
     language: str | None = Field(default=None, max_length=8)
     """Detected language of the request (ISO code such as 'en'); routing aid only."""
+
+
+class PlanStepDraft(BaseModel):
+    """One phase the model may declare for a multi-phase work (slice F1).
+
+    Tolerant on shape (small local models wrap labels in strings or add
+    descriptive keys) and strict on meaning: capability stays a registry id
+    and assignee must resolve to a real person.
+    """
+    model_config = ConfigDict(extra='ignore')
+    title: str = Field(min_length=1, max_length=120)
+    capability: Literal['compare_csv', 'read_material', 'general'] = 'general'
+    expected_materials: list[str] = Field(default_factory=list, max_length=6)
+    """Human labels of what this phase waits for; display only, never matched to files."""
+    output_expected: str = Field(default='', max_length=300)
+    assignee: str = Field(default='', max_length=80)
+    """Display name of an active roster collaborator, or of the brief's proposed one."""
+
+    @field_validator('expected_materials', mode='before')
+    @classmethod
+    def _coerce_labels(cls, value):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return [stripped] if stripped else []
+        return value
 
 
 class IntakeBrief(BaseModel):
@@ -44,6 +69,8 @@ class IntakeBrief(BaseModel):
     rationale: str = Field(min_length=1, max_length=1000)
     capability: Literal['compare_csv', 'read_material', 'general'] = 'general'
     changed_fields: list[BriefField] = Field(default_factory=list, max_length=6)
+    plan_steps: list[PlanStepDraft] = Field(default_factory=list, max_length=5)
+    """Optional phases (raccolta → confronto → sintesi); the engine validates them."""
 
     @field_validator('changed_fields', mode='before')
     @classmethod
@@ -114,13 +141,24 @@ def synthesize(registry, text, agents, *, previous_brief=None, latest_request=No
         catalog=_capability_catalog_lines(catalog, template.language))
     payload = json.dumps({'request':text,'latest_request':latest_request or text,'previous_brief':previous_brief,
                           'agents':agents,'capabilities':catalog or [spec.public() for spec in REGISTRY.values()]},ensure_ascii=False)
-    result = registry.complete([ChatMessage(role='system',content=system),
-                                ChatMessage(role='user',content=payload)])
-    usage = getattr(result, 'usage', None)
-    if usage_out is not None and usage is not None:
-        usage_out.append(usage)
-    raw = _extract_json_payload(result.text)
-    brief = IntakeBrief.model_validate_json(raw)
+    messages = [ChatMessage(role='system',content=system),
+                ChatMessage(role='user',content=payload)]
+    # Small local models sometimes wrap the schema in prose or drift from it:
+    # one strict retry (billed and ledgered like any attempt) keeps the brief
+    # durable instead of failing the whole proposal on a formatting hiccup.
+    from pydantic import ValidationError as _ValidationError
+    for attempt in range(2):
+        result = registry.complete(messages if attempt == 0 else
+                                   messages + [ChatMessage(role='user',content='La risposta precedente non era JSON valido per lo schema. Restituisci SOLO il JSON valido, senza testo attorno.')])
+        usage = getattr(result, 'usage', None)
+        if usage_out is not None and usage is not None:
+            usage_out.append(usage)
+        try:
+            brief = IntakeBrief.model_validate_json(_extract_json_payload(result.text))
+            break
+        except (_ValidationError, ValueError):
+            if attempt:
+                raise
     if any(len(item)>500 for item in brief.constraints + brief.missing_information):
         raise ValueError('Intake list item too long')
     spec = require_capability(brief.capability)

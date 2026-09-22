@@ -38,6 +38,11 @@ def list_works(
         if pending is not None:
             payload["pending_contribution"] = pending.model_dump(mode="json")
         payload["intake_confirmed"] = has_confirmed_intake(ctx.service.store, work.id)
+        plan = ctx.service.current_plan(work)
+        if plan is not None:
+            # Compact current plan so clients can render the phase ladder without
+            # a per-work roundtrip.
+            payload["plan"] = plan.model_dump(mode="json")
         items.append(payload)
     return {"items": items}
 

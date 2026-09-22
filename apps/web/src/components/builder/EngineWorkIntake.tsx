@@ -130,6 +130,37 @@ export function EngineWorkIntake({
                 </dd>
               </div>
             </dl>
+            {(p.plan_steps?.length ?? 0) > 0 && (
+              <div className="cw-intake-phases">
+                <strong>Fasi del lavoro</strong>
+                <ol>
+                  {p.plan_steps!.map((step, index) => (
+                    <li key={step.title + index}>
+                      <span>
+                        {step.title}
+                        {step.output_expected && <small> · {step.output_expected}</small>}
+                      </span>
+                      <small>
+                        {step.capability === "compare_csv"
+                          ? "Confronto CSV"
+                          : step.capability === "read_material"
+                            ? "Lettura materiale"
+                            : "Passaggio umano"}{" "}
+                        · {step.assignee || agent?.name || "Homun"}
+                        {(step.expected_materials?.length ?? 0) > 0 && (
+                          <> · attende: {step.expected_materials.join(", ")}</>
+                        )}
+                      </small>
+                    </li>
+                  ))}
+                </ol>
+                <p className="cw-intake-note">
+                  {confirmed
+                    ? "Le fasi sono l'accordo accettato: ogni avvio te lo chiederò esplicitamente."
+                    : "Confermando l'accordo confermi anche le fasi: ogni avvio te lo chiederò comunque esplicitamente."}
+                </p>
+              </div>
+            )}
             <p>{p.rationale}</p>
             {!confirmed && p.new_agent && (
               <p className="cw-intake-note">

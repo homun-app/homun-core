@@ -16,6 +16,7 @@ const FIELD_LABELS: Record<string, string> = {
   constraints: "Vincoli",
   capability: "Attività",
   staffing: "Collaboratore",
+  plan_steps: "Fasi",
 };
 
 const CAPABILITY_LABELS: Record<string, string> = {
@@ -49,7 +50,7 @@ export function briefChangeLines(changes: WorkIntakeChange[] | undefined): strin
 /** Names of the agreement fields that stayed identical to the previous brief. */
 export function preservedFieldLabels(changes: WorkIntakeChange[] | undefined): string[] {
   const changed = new Set((changes ?? []).map((change) => change.field));
-  return ["title", "objective", "output", "constraints", "capability", "staffing"]
+  return ["title", "objective", "output", "constraints", "capability", "staffing", "plan_steps"]
     .filter((field) => !changed.has(field))
     .map((field) => FIELD_LABELS[field] ?? field);
 }

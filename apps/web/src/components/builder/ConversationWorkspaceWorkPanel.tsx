@@ -56,6 +56,8 @@ type Props = {
   onRename?: ((title: string) => Promise<void>) | undefined;
   onApplyObjectivePatch?: ((nextObjective: string) => Promise<void>) | undefined;
   onCloseWork?: (() => Promise<void>) | undefined;
+  onStartWork?: (() => Promise<void>) | undefined;
+  agentNames?: Record<string, string> | undefined;
 };
 
 export function ConversationWorkspaceWorkPanel({
@@ -85,7 +87,7 @@ export function ConversationWorkspaceWorkPanel({
   directoryRef,
   engineBusy = false,
   engineIntake,
-  onApplyObjectivePatch, onRename, onCloseWork,
+  onApplyObjectivePatch, onRename, onCloseWork, onStartWork, agentNames,
 }: Props) {
   if (work.source === "engine")
     return (
@@ -109,6 +111,8 @@ export function ConversationWorkspaceWorkPanel({
         onOpenSpace={onOpenSpace}
         onApplyObjectivePatch={onApplyObjectivePatch}
         onCloseWork={onCloseWork}
+        onStartWork={onStartWork}
+        agentNames={agentNames}
       />
     );
 

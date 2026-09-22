@@ -8,7 +8,7 @@ even when the model returns different text for them.
 """
 from homun.models.intake import IntakeBrief
 
-PRESERVED_FIELDS = ('title', 'objective', 'output', 'constraints', 'capability')
+PRESERVED_FIELDS = ('title', 'objective', 'output', 'constraints', 'capability', 'plan_steps')
 
 
 def staffing_label(brief: dict) -> str | None:

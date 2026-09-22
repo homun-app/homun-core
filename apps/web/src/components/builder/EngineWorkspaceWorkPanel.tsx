@@ -22,6 +22,8 @@ export function EngineWorkspaceWorkPanel({
   onOpenSpace,
   onApplyObjectivePatch,
   onCloseWork,
+  onStartWork,
+  agentNames,
 }: {
   work: Work;
   spaceData: SpaceData;
@@ -33,6 +35,8 @@ export function EngineWorkspaceWorkPanel({
   onOpenSpace: (view: SpaceView, initial?: string, selected?: string) => void;
   onApplyObjectivePatch?: ((objective: string) => Promise<void>) | undefined;
   onCloseWork?: (() => Promise<void>) | undefined;
+  onStartWork?: (() => Promise<void>) | undefined;
+  agentNames?: Record<string, string> | undefined;
 }) {
   const sources = useProjectMaterials(work, (material) => material.status === "active");
   const materials = { items: sources.materials.slice(0, 5), count: sources.materials.length };
@@ -151,10 +155,96 @@ export function EngineWorkspaceWorkPanel({
           <p>{engineWorkPanelMessage(work.engineStatus ?? "", proposal)}</p>
         )}
       </section>
+      <PhaseLadder
+        work={work}
+        agentNames={agentNames}
+        busy={busy}
+        materialsCount={sources.materials.length}
+        onStartWork={onStartWork}
+      />
       <CloseWorkSection work={work} busy={busy} onCloseWork={onCloseWork} />
       <HomunErrorNotice error={sources.error} />
       {contributionPanel}
     </aside>
+  );
+}
+
+const STEP_STATUS_LABELS: Record<string, string> = {
+  pending: "In attesa",
+  running: "In corso",
+  waiting_input: "Tocca a te",
+  waiting_approval: "Da approvare",
+  succeeded: "Completata",
+  failed: "Non riuscita",
+  cancelled: "Annullata",
+  superseded: "Sostituita",
+};
+
+/** The accepted plan as a ladder of phases with their people and statuses. */
+function PhaseLadder({
+  work,
+  agentNames,
+  busy,
+  materialsCount,
+  onStartWork,
+}: {
+  work: Work;
+  agentNames?: Record<string, string> | undefined;
+  busy: boolean;
+  materialsCount: number;
+  onStartWork?: (() => Promise<void>) | undefined;
+}) {
+  const steps = work.enginePlan;
+  if (!steps?.length) return null;
+  const firstPending = steps.find((step) => step.status === "pending");
+  const startable =
+    !!onStartWork &&
+    work.engineStatus === "ready" &&
+    !!firstPending &&
+    (firstPending.capability !== "compare_csv" || materialsCount >= 2) &&
+    (firstPending.capability !== "read_material" || materialsCount >= 1);
+  return (
+    <section className="cw-engine-summary__phases" aria-label="Fasi del lavoro">
+      <h3>Fasi del lavoro</h3>
+      <ol>
+        {steps.map((step, index) => (
+          <li key={step.id} data-status={step.status}>
+            <span>
+              {index + 1}. {step.title}
+            </span>
+            <small>
+              {STEP_STATUS_LABELS[step.status] ?? step.status} ·{" "}
+              {agentNames?.[step.assignee_id] ?? "Collaboratore"}
+            </small>
+          </li>
+        ))}
+      </ol>
+      {startable && firstPending ? (
+        <div className="cs-actions">
+          <button
+            className="cw-primary"
+            disabled={busy}
+            onClick={() => void onStartWork!()}
+          >
+            Avvia: {firstPending.title}
+          </button>
+          <p className="cw-engine-summary__hint">
+            Nessuna esecuzione senza il tuo via: il passaggio parte solo adesso.
+          </p>
+        </div>
+      ) : (
+        work.engineStatus === "ready" &&
+        firstPending && (
+          <p className="cw-engine-summary__hint">
+            {firstPending.capability === "compare_csv"
+              ? `Servono due CSV nel progetto per la fase «${firstPending.title}»: ora ne hai ${materialsCount}.`
+              : firstPending.capability === "read_material"
+                ? `Serve almeno un materiale nel progetto per la fase «${firstPending.title}»: ora ne hai ${materialsCount}.`
+                : `La fase «${firstPending.title}» parte con il tuo via: chiedi un contributo o avvia dalla chat.`}
+          </p>
+        )
+      )}
+    </section>
   );
 }
 

@@ -34,6 +34,7 @@ def _plan_propose(ctx: CommandContext, actor: Actor, command_id: str, payload: d
                 assignee_id=assignee_id,
                 depends_on=[str(x) for x in item.get("depends_on", [])],
                 output_expected=str(item.get("output_expected", "")),
+                capability=str(item.get("capability", "general")) or "general",
             )
         )
     revision_number = work.current_plan_revision + 1
