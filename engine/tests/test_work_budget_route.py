@@ -48,3 +48,29 @@ def test_works_list_reports_budget_and_set_budget_updates_caps(client):
     entry = next(w for w in items if w["id"] == wid)
     assert entry["budget"]["caps"]["model_attempts"] == 12
     assert entry["budget"]["spent"]["attempts"] >= 0
+
+
+def test_documents_library_lists_reviewed_artifacts_actor_scoped(client):
+    tc, = client,
+    actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
+    from homun.context import get_context
+    ctx = get_context()
+    conv = ctx.service.apply(actor, "dc", "conversation.create", {"title": "D"})
+    work = ctx.service.apply(actor, "dw", "work.create",
+                             {"conversation_id": conv["conversation_id"], "title": "Lavoro documento", "objective": "O"})
+    wid = work["work_id"]
+    ctx.persist()
+    ctx.service.apply(actor, "dp", "plan.propose", {"work_id": wid, "expected_version": 1, "steps": [
+        {"title": "Consegna", "assignee_id": actor.id}]})
+    ctx.service.apply(actor, "dpa", "plan.accept", {"work_id": wid, "expected_version": 2})
+    started = ctx.service.apply(actor, "da", "work.start", {"work_id": wid, "expected_version": 3})
+    ctx.service.apply(actor, "ds", "work.submit_artifact",
+                      {"work_id": wid, "expected_version": started["version"],
+                       "title": "Esito verificato", "content": "contenuto del documento"})
+    ctx.persist()
+    items = tc.get("/v1/workspaces/ws_local/artifacts",
+                   headers={"X-Homun-Actor-Id": actor.id}).json()["items"]
+    entry = next(a for a in items if a["work_id"] == wid)
+    assert entry["title"] == "Esito verificato"
+    assert entry["work_title"] == "Lavoro documento"
+    assert entry["content"] == "contenuto del documento"

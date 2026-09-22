@@ -85,6 +85,16 @@
   (aggiunta «Rileggere la sintesi con Aurora» → revisione 3 → rimozione).
   Nascosti sui lavori completati o senza piano.
 
+## Avanzamento punto 7a (22/9, fatto) — Documenti
+
+- Motore: `GET /v1/workspaces/{id}/artifacts` — la libreria actor-scoped di
+  tutti i risultati verificati (con titolo del lavoro e progetto), test di
+  route incluso.
+- Web: nuovo spazio **Documenti** nella sidebar (contatore = risultati
+  verificati): ricerca per titolo/lavoro/contenuto, filtro per progetto,
+  apertura con contenuto e **Scarica** in Markdown. Verificato dal vivo
+  (ricerca «sintesi», apertura e download del documento listini).
+
 ## Cosa NON manca (verificato, per non inseguire fantasmi)
 
 - Componentistica del template: tutta presente (`comm` componente-per-componente = 0 file solo-template).

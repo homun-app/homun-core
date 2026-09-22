@@ -1,0 +1,11 @@
+/* Documents library. */
+.cw-documents { display: grid; gap: 12px; }
+.cw-documents__filters { display: flex; gap: 10px; align-items: center; }
+.cw-documents__filters label { display: flex; align-items: center; gap: 6px; flex: 1; }
+.cw-documents__filters input { flex: 1; }
+.cw-documents__list { display: grid; gap: 10px; }
+.cw-document { display: grid; gap: 8px; }
+.cw-document header { display: flex; align-items: center; gap: 8px; }
+.cw-document header small { margin-left: auto; }
+.cw-document__content { white-space: pre-wrap; max-height: 320px; overflow: auto; margin: 0; }
+.cw-documents__empty { font-size: 14px; }

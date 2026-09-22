@@ -46,6 +46,7 @@ export type SpaceView =
   | "Automazioni"
   | "Plugin"
   | "Materiali"
+  | "Documenti"
   | "Compiti"
   | "Nuovo collaboratore";
 export type SpaceWork = {
@@ -78,7 +79,7 @@ export function ConversationSpace({
   onCreateMember: () => void;
   onAssign: (name: string) => void;
   onReveal: () => void;
-  view: "Squadra" | "Progetti" | "Automazioni";
+  view: "Squadra" | "Progetti" | "Automazioni" | "Documenti";
   data: SpaceData;
   onChange: (data: SpaceData) => void;
   works: SpaceWork[];
@@ -282,11 +283,10 @@ export function ConversationSpace({
     setDraft("");
     setFeedback("Confermato. Lo ritrovi qui e nella ricerca globale.");
   }
-  const examples: Record<"Squadra" | "Progetti" | "Automazioni", string> = {
-    Squadra: "Crea il team “Commerciale” con Marta, Vera e Giulia. Marta coordina.",
-    Progetti: "Crea il progetto “Lancio catalogo”: preparare il catalogo e studiare il mercato.",
+  const examples: Record<"Squadra" | "Progetti" | "Automazioni" | "Documenti", string> = {
+    Squadra: "Crea il team “Commerciale” con Marta, Vera e Giulia. Marta coordina.", Progetti: "Crea il progetto “Lancio catalogo”: preparare il catalogo e studiare il mercato.",
     Automazioni: "Ripeti questo lavoro ogni lunedì alle 9 e chiedimi di verificare il risultato.",
-  };
+    Documenti: "Raccogli i risultati verificati dei lavori e ritrovali quando servono."};
   return (
     <div className="cw-stage with-panel cs-stage">
       <section className="cw-conversation">

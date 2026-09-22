@@ -58,6 +58,32 @@ def list_works(
     return {"items": items}
 
 
+@router.get("/artifacts")
+def list_artifacts(
+    workspace_id: str,
+    x_homun_actor_id: str | None = Header(default=None),
+    x_homun_actor_name: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Every reviewed result the actor may read: the documents library."""
+    ctx = get_context().snapshot()
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Unknown workspace"})
+    actor = _actor_from_headers(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    items = []
+    for artifact in sorted(ctx.service.store.artifacts.values(), key=lambda a: a.created_at, reverse=True):
+        try:
+            work = require_work_access(ctx.service.store, actor, artifact.work_id, 'read')
+        except (NotFoundError, PermissionDeniedError):
+            continue
+        items.append({
+            "id": artifact.id, "version": artifact.version, "work_id": artifact.work_id,
+            "work_title": work.title, "project_id": work.project_id,
+            "title": artifact.title, "content": artifact.content,
+            "created_at": artifact.created_at.isoformat(),
+        })
+    return {"items": items}
+
+
 @router.get("/works/{work_id}")
 def get_work(
     workspace_id: str,

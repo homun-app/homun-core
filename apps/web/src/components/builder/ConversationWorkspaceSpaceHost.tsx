@@ -26,6 +26,7 @@ import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import type { EngineTeam } from "@/lib/engine-projects-client";
 import { EngineWorkspaceAgents } from "./EngineWorkspaceAgents";
 import { EngineWorkspaceTeams } from "./EngineWorkspaceTeams";
+import { EngineDocuments } from "./EngineDocuments";
 type Props = {
   engineAgents?: EngineAgentProfile[] | undefined;
   engineTeams?: EngineTeam[] | undefined;
@@ -165,6 +166,9 @@ export function ConversationWorkspaceSpaceHost({
     );
   }
 
+  if (space === "Documenti") {
+    return <EngineDocuments projects={spaceData.projects.map((p) => ({ id: p.id, name: p.name }))} />;
+  }
   if (space === "Materiali") {
     return (
       <ConversationMaterials

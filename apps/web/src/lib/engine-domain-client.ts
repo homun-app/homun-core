@@ -297,3 +297,33 @@ export async function listEngineWorks(
 export function defaultLocalActor(): EngineActor {
   return { id: "person_fabio", displayName: "Fabio" };
 }
+
+export type EngineArtifact = {
+  id: string;
+  version: number;
+  work_id: string;
+  work_title: string;
+  project_id: string | null;
+  title: string;
+  content: string;
+  created_at: string;
+};
+
+/** The documents library: every reviewed result the actor may read. */
+export async function listEngineArtifacts(
+  workspaceId: string = DEFAULT_WORKSPACE_ID,
+  baseUrl: string = ENGINE_DEFAULT_BASE_URL,
+  actor: EngineActor = defaultLocalActor(),
+): Promise<EngineArtifact[]> {
+  const response = await domainFetch(
+    `/v1/workspaces/${workspaceId}/artifacts`,
+    { method: "GET", headers: { Accept: "application/json", "X-Homun-Actor-Id": actor.id } },
+    baseUrl,
+    15_000,
+  );
+  if (!response.ok) {
+    await readError(response, `List artifacts failed with HTTP ${response.status}`);
+  }
+  const body = (await response.json()) as { items: EngineArtifact[] };
+  return body.items ?? [];
+}

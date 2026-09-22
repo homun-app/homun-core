@@ -40,7 +40,7 @@ type Props = {
   onOpenSettings: () => void;
 };
 
-const SPACE_LINKS: SpaceView[] = ["Compiti", "Materiali", "Automazioni", "Plugin"];
+const SPACE_LINKS: SpaceView[] = ["Compiti", "Materiali", "Documenti", "Automazioni", "Plugin"];
 
 function spaceLinkCount(
   view: SpaceView,
@@ -57,6 +57,8 @@ function spaceLinkCount(
       return spaceData.routines.length;
     case "Materiali":
       return libraryCount;
+    case "Documenti":
+      return visibleWorks.filter((w) => w.source === "engine" && w.engineLatestArtifact).length;
     case "Compiti":
       return visibleWorks.length;
     case "Plugin":
