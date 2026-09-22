@@ -258,6 +258,38 @@ def apply_ollama_preset(body: OllamaPresetRequest) -> dict[str, Any]:
     }
 
 
+@router.get("/recommendations")
+def model_recommendations() -> dict[str, Any]:
+    """Suggested models per task, from the real local catalog (heuristic, honest)."""
+    from homun.application.model_recommendations import OLLAMA_BASE, recommendations_from_tags
+
+    request = Request(
+        f"{OLLAMA_BASE}/api/tags",
+        method="GET",
+        headers={"Accept": "application/json"},
+    )
+    tags: list[dict] = []
+    try:
+        with urlopen(request, timeout=3.0) as response:
+            parsed = json.loads(response.read().decode("utf-8"))
+        raw_models = parsed.get("models") if isinstance(parsed, dict) else None
+        if isinstance(raw_models, list):
+            tags = [item for item in raw_models if isinstance(item, dict)]
+    except (URLError, OSError, json.JSONDecodeError):
+        pass
+    connections = get_context().models.list_connections()
+    active = next((c for c in connections if c.active), None)
+    default_model = active.model_id if active else None
+    cloud_model = None
+    if active and active.base_url and "11434" not in active.base_url:
+        cloud_model = default_model
+    return recommendations_from_tags(
+        tags,
+        active_model=default_model,
+        cloud_model=cloud_model,
+    )
+
+
 @router.get("/ollama/tags")
 def list_ollama_tags() -> dict[str, Any]:
     """List models from the local Ollama daemon (for Settings picker)."""

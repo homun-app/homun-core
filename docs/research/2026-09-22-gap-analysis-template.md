@@ -48,6 +48,12 @@
    confronto, lettura, sintesi; per dimensione lavoro), una sezione
    «Modelli consigliati» in Impostazioni e la scelta per-lavoro al momento
    dell'affidamento, sempre revocabile.
+   **Avanzamento 22/9**: `GET /v1/models/recommendations` (motore) +
+   sezione «Consigliati per attività» in Impostazioni → Modelli: euristiche
+   deterministiche sul catalogo Ollama reale (taglia e dove gira), ordinate
+   per attività (interpretazione → piccoli e veloci; sintesi → grandi),
+   con motivo visibile, «Attivo ora» e azione «Usa per lo spazio». Ogni
+   suggerimento dichiara cosa è: catalogo, non benchmark.
    **Legame agente↔modello (verificato il 22/9)**: `AgentProfile.preferred_connection_id`
    esiste ed è validato da `agent.update`; `registry.complete` accetta
    `connection_id`; ma interpret/intake **non lo usano mai** (chiamano il

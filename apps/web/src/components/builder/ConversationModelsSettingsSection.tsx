@@ -9,6 +9,7 @@ import { useEngineStatus } from "@/hooks/useEngineStatus";
 import {
   applyOllamaPreset,
   listModelProviders,
+  listModelRecommendations,
   listOllamaTags,
   listUsageAttempts,
   postModelChat,
@@ -16,6 +17,7 @@ import {
   setOpenAICompatibleCredentials,
   verifyModelProvider,
   type ModelProviderInfo,
+  type ModelRecommendationTask,
   type UsageAttemptRow,
 } from "@/lib/engine-models-client";
 import { ConversationSelect } from "./ConversationSelect";
@@ -360,6 +362,86 @@ export function ConversationModelsConnectionSection({ onExecution }: {
           {info ? <p className="cv-settings-note">{info}</p> : null}
         </>
       )}
+
+      <ModelRecommendations
+        onLinked={async (model) => {
+          setBusy(true);
+          setError(null);
+          setInfo(null);
+          try {
+            const preset = await applyOllamaPreset({ model });
+            onExecution?.("local");
+            setInfo(`Collegato a ${preset.base_url} · modello ${preset.default_model}`);
+            await refresh();
+          } catch (cause) {
+            setError(cause);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
+    </>
+  );
+}
+
+/** Per-task model suggestions from the engine, with the person's final word. */
+function ModelRecommendations({ onLinked }: { onLinked: (model: string) => Promise<void> }) {
+  const [tasks, setTasks] = useState<ModelRecommendationTask[] | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [linking, setLinking] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    listModelRecommendations()
+      .then((items) => { if (active) setTasks(items); })
+      .catch((cause) => { if (active) setError(cause); });
+    return () => { active = false; };
+  }, []);
+
+  const FIT_LABELS: Record<string, string> = { best: "Consigliato", good: "Adatto", fair: "Sufficiente" };
+
+  return (
+    <>
+      <h3>Consigliati per attività</h3>
+      <p>
+        Suggerimenti da catalogo locale reale (taglia e dove gira), non benchmark: l'ultima
+        parola resta tua. Il modello attivo vale per lo spazio; ogni collaboratore può avere
+        il suo dalla sua scheda in Squadra.
+      </p>
+      {tasks === null && !error && <p role="status">Chiedo i suggerimenti al motore…</p>}
+      {tasks?.map((task) => (
+        <div className="cv-settings-card" key={task.id}>
+          <strong>{task.label}</strong>
+          <p>{task.hint}</p>
+          {task.suggestions.length === 0 && <p>Nessun modello locale adatto: valuta un collegamento cloud.</p>}
+          {task.suggestions.map((s) => (
+            <p className="cv-model-suggestion" key={task.id + s.model}>
+              <span>
+                <strong>{s.model}</strong>{" "}
+                <small>
+                  {FIT_LABELS[s.fit] ?? s.fit} · {s.params ?? (s.source === "cloud" ? "cloud" : "?")}
+                  {s.size_gb ? ` · ${s.size_gb} GB` : ""} — {s.why}
+                </small>
+              </span>
+              {s.active ? (
+                <small>Attivo ora</small>
+              ) : s.source === "ollama" ? (
+                <button
+                  className="cw-secondary"
+                  disabled={linking !== null}
+                  onClick={() => {
+                    setLinking(s.model);
+                    onLinked(s.model).finally(() => setLinking(null));
+                  }}
+                >
+                  {linking === s.model ? "Collego…" : "Usa per lo spazio"}
+                </button>
+              ) : null}
+            </p>
+          ))}
+        </div>
+      ))}
+      <HomunErrorNotice error={error} />
     </>
   );
 }

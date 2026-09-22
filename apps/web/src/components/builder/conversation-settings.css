@@ -478,3 +478,6 @@
 
 .cv-people-row { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; }
 .cv-people-row small { display: block; }
+
+.cv-model-suggestion { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 6px 0 0; }
+.cv-model-suggestion small { display: block; }

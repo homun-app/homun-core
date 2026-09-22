@@ -274,3 +274,36 @@ export async function listUsageAttempts(
   const body = (await response.json()) as { items: UsageAttemptRow[] };
   return body.items ?? [];
 }
+
+export type ModelSuggestion = {
+  model: string;
+  source: "ollama" | "cloud";
+  params: string | null;
+  size_gb: number | null;
+  fit: "best" | "good" | "fair";
+  why: string;
+  active: boolean;
+};
+
+export type ModelRecommendationTask = {
+  id: string;
+  label: string;
+  hint: string;
+  suggestions: ModelSuggestion[];
+};
+
+/** Heuristic per-task suggestions from the engine over the real local catalog. */
+export async function listModelRecommendations(
+  baseUrl: string = ENGINE_DEFAULT_BASE_URL,
+): Promise<ModelRecommendationTask[]> {
+  const response = await modelsFetch(
+    "/v1/models/recommendations",
+    { headers: { Accept: "application/json" } },
+    baseUrl,
+  );
+  if (!response.ok) {
+    await readError(response, `Model recommendations failed with HTTP ${response.status}`);
+  }
+  const body = (await response.json()) as { tasks: ModelRecommendationTask[] };
+  return body.tasks ?? [];
+}
