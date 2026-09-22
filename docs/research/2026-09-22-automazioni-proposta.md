@@ -151,3 +151,45 @@ bacheca cronologia ricorrenze.
    o vuoi subito anche «crea routine da zero» in Automazioni?
 5. Le ricorrenze non riuscite: la routine prosegue (con avviso) come proposto,
    o preferisci la pausa automatica dopo N fallimenti?
+
+## 8. Fetta 1: com'è stata realizzata (2026-09-22)
+
+Motore:
+- `Routine` (entità persistita) + comandi versionati `routine.create/pause/
+  resume/stop`; template validato (titolo, obiettivo, fasi con assegnatari
+  attivi); transizioni active↔paused→stopped.
+- Ricorrenza: workflow DBOS `routine_recurrence_workflow` + schedule cron per
+  routine (`create_schedule`, fuso esplicito). `run_recurrence` crea il lavoro
+  dal template (piano accettato, `origin_routine_id` + `scheduled_for` sul
+  lavoro), posta il messaggio onesto («aspetta il tuo via») ed è
+  **idempotente per istante** (replay/recovery non duplicano).
+- **Invarianti di sicurezza**: a ogni scatto il workflow controlla lo stato
+  di dominio — una routine in pausa o terminata non crea nulla anche se lo
+  schedule fosse driftato; una attiva senza schedule non scatta finché il
+  reconcile non la reinnesta. Lo schedule è un trigger best-effort;
+  l'autorità è il dominio. `reconcile_routine_schedules` allinea tutto
+  all'avvio e a ogni mutazione (flag consumato dalla pump del runtime).
+  Nota onesta: con DBOS+SQLite le scritture schedule del processo vivo
+  convergono al riavvio; il guard nel workflow rende il drift innocuo.
+- Route: `GET/POST /routines`, `POST /routines/{id}/pause|resume|stop`,
+  `GET /routines/preview` (prossime 3 occorrenze, cron rifiutato con 400).
+  Test: validazioni, ricorrenza supervisionata idempotente, pausa/resume/stop,
+  preview.
+
+Web:
+- Pannello del lavoro **completato**: «**Rendi ripetibile**» con cadenza in
+  linguaggio naturale («ogni lunedì alle 9») tradotta in cron
+  (`cadence-language.ts`), anteprima delle prossime 3 esecuzioni dal motore,
+  conferma esplicita.
+- Spazio **Automazioni** in modalità motore: elenco con cadenza leggibile,
+  stato attiva/in pausa/terminata, «Ferma per ora»/«Riprendi»/«Termina
+  routine»; contatore attive nella sidebar.
+- Verificato dal vivo: routine «Confronto e sintesi Listini fornitori» creata
+  dal pannello (cron 0 9 * * 1), ricorrenza innescata via trigger DBOS →
+  lavoro nuovo Pronto con 2 fasi + messaggio in chat; pausa e ripresa
+  dall'UI con convergenza dello schedule al reconcile.
+
+Fuori dalla fetta 1 (prossimi passi): revisione del modello (versioni),
+salta-prossima, regime autonomo per routine, budget mensile di routine,
+creazione da zero, bacheca cronologia ricorrenze, recupero una-tantum alla
+riapertura (oggi protegge l'idempotità per istante).

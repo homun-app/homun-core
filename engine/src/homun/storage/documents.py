@@ -17,6 +17,7 @@ ENTITY_TYPES = {
     "artifact": ("artifacts", models.ArtifactVersion),
     "review": ("reviews", models.Review),
     "work_budget": ("work_budgets", models.WorkBudget),
+    "routine": ("routines", models.Routine),
 }
 
 

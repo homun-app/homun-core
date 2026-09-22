@@ -1183,7 +1183,7 @@ export function ConversationWorkspace() {
         space={space}
         onOpenSpace={openSpace}
         spaceData={displaySpaceData}
-        libraryCount={engine.backend === "engine" ? null : library.length}
+        libraryCount={engine.backend === "engine" ? null : library.length} routineCount={engine.backend === "engine" ? engine.routines.filter((r) => r.status === "active").length : null}
         visibleWorks={visibleWorks}
         works={engine.backend === "engine" ? engine.works : works}
         scenarios={scenarios}
@@ -1229,7 +1229,7 @@ export function ConversationWorkspace() {
         {/* Engine diagnostics live in Settings, not above the conversation.
             Errors that block work surface through HomunErrorNotice. */}
         {space ? (
-          <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined} engineTeams={engine.backend === "engine" ? engine.teams : undefined}
+          <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined} engineTeams={engine.backend === "engine" ? engine.teams : undefined} engineRoutines={engine.backend === "engine" ? engine.routines : undefined}
             engineMode={engine.backend === "engine"} onRefreshEngine={engine.backend === "engine" ? engine.refresh : undefined}
             space={space}
             spaceInitial={spaceInitial}
@@ -1366,7 +1366,7 @@ export function ConversationWorkspace() {
                   onPreview={() => setPreview(true)}
                   engineBusy={engine.busy} onRename={work.source === "engine" ? (title) => engine.renameWork(work, title) : undefined}
                   engineIntake={engine.intake} onCloseWork={work.source === "engine" ? () => engine.closeWork(work) : undefined} onStartWork={work.source === "engine" ? () => engine.startWork(work) : undefined} onSubmitArtifact={work.source === "engine" ? (title, content) => engine.submitArtifact(work, title, content) : undefined}
-                  onSetBudget={work.source === "engine" ? (n) => engine.setWorkBudget(work, n) : undefined} onSetDue={work.source === "engine" ? (d) => engine.setDue(work, d) : undefined} onRevisePlan={work.source === "engine" ? (action) => engine.revisePlan(work, action) : undefined}
+                  onSetBudget={work.source === "engine" ? (n) => engine.setWorkBudget(work, n) : undefined} onSetDue={work.source === "engine" ? (d) => engine.setDue(work, d) : undefined} onCreateRoutine={work.source === "engine" && work.engineStatus === "completed" ? ({ name, cron }) => engine.createRoutine({ name, cron, conversationId: work.engineConversationId ?? "", template: { title: work.title, objective: work.engineObjective ?? work.title, plan_steps: (work.enginePlan ?? []).map((step) => ({ title: step.title, assignee_id: step.assignee_id, capability: step.capability, output_expected: step.output_expected })) } }) : undefined} onRevisePlan={work.source === "engine" ? (action) => engine.revisePlan(work, action) : undefined}
                   agents={engine.agents.map((agent) => ({ id: agent.id, name: agent.name, status: agent.status }))} agentNames={Object.fromEntries(engine.agents.map((agent) => [agent.id, agent.name]))}
                   {...(work.source === "engine"
                     ? {

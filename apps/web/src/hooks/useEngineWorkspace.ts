@@ -38,6 +38,7 @@ import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import type { EngineTeam } from "@/lib/engine-projects-client";
 import { renameEngineWork } from "@/lib/engine-work-naming";
 import { closeEngineWork, reviseEnginePlan, setEngineWorkBudget, setEngineWorkDue, startEngineWork, submitEngineArtifact } from "@/lib/engine-work-lifecycle";
+import { createEngineRoutine, routineEngineAction, type EngineRoutine } from "@/lib/engine-routines-client";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
 import { proposeWorkIntake } from "@/lib/engine-intake-client";
 import { applyIntakePreview } from "@/lib/engine-intake-display";
@@ -55,6 +56,7 @@ export type EngineWorkspaceState = {
   projects: EngineProject[];
   agents: EngineAgentProfile[];
   teams: EngineTeam[];
+  routines: EngineRoutine[];
   followups: Array<EngineFollowupNotice & { conversationTitle: string }>;
   refresh: () => Promise<void>;
   renameWork: (work: Work, title: string) => Promise<void>;
@@ -63,6 +65,8 @@ export type EngineWorkspaceState = {
   submitArtifact: (work: Work, title: string, content: string) => Promise<void>;
   setWorkBudget: (work: Work, modelAttempts: number) => Promise<void>;
   setDue: (work: Work, dueDate: string | null) => Promise<void>;
+  createRoutine: (input: { name: string; cron: string; conversationId: string; template: EngineRoutine["template"] }) => Promise<void>;
+  routineAction: (routineId: string, action: "pause" | "resume" | "stop", expectedVersion: number) => Promise<void>;
   revisePlan: (work: Work, action: { insertAfterStepId?: string | null; newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string }; removeStepId?: string }) => Promise<void>;
   createWork: (title: string, objective: string, draftOnly?: boolean) => Promise<Work | null>;
   postMessage: (work: Work, text: string) => Promise<void>;
@@ -95,7 +99,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
   const gateError = mode.gateError;
   const engineReady = mode.engineReady;
 
-  const {rawWorks, projects, agents, teams, followups, loaded, refresh: refreshSnapshot} = useEngineWorkspaceSnapshot(engineReady, () => setMessageOverlay({}), setError);
+  const {rawWorks, projects, agents, teams, routines, followups, loaded, refresh: refreshSnapshot} = useEngineWorkspaceSnapshot(engineReady, () => setMessageOverlay({}), setError);
 
   // Explicit transcript reloads: actions that may have persisted messages bump
   // the sequence; a plain inventory refresh re-render never interrupts reading.
@@ -538,7 +542,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     busy,
     works,
     intake,
-    projects, agents, teams,
+    projects, agents, teams, routines,
     refresh,
     renameWork: async (work, title) => { await renameEngineWork(work.id, title, work.revision); await refresh(); },
     closeWork: async (work) => { await closeEngineWork(work.id, work.revision); await refresh(); },
@@ -556,6 +560,14 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     },
     setDue: async (work, dueDate) => {
       await setEngineWorkDue(work.id, work.revision, dueDate);
+      await refresh();
+    },
+    createRoutine: async (input) => {
+      await createEngineRoutine(input);
+      await refresh();
+    },
+    routineAction: async (routineId, action, expectedVersion) => {
+      await routineEngineAction({ routineId, action, expectedVersion });
       await refresh();
     },
     revisePlan: async (work, action) => {

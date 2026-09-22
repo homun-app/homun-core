@@ -207,7 +207,33 @@ class Work(BaseModel):
     current_artifact_version: int = 0
     due_date: str | None = None
     """ISO date (YYYY-MM-DD) the person set; None means no deadline."""
+    origin_routine_id: str | None = None
+    """Set when a routine created this work; the diary keeps the history."""
+    scheduled_for: str | None = None
+    """ISO datetime of the routine occurrence that created this work."""
+
     archived: bool = False
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class Routine(BaseModel):
+    """Recurring work template: the automation repeats the assignment, never the approval."""
+    id: str
+    workspace_id: str
+    name: str
+    cron: str
+    """5-field cron expression, local to cron_timezone."""
+    cron_timezone: str = "UTC"
+    conversation_id: str
+    """The routine's diary: every recurrence lands here."""
+    template: dict[str, Any] = Field(default_factory=dict)
+    """Work template: title, objective, plan_steps (title/assignee_id/capability/output_expected)."""
+    status: str = "active"  # active | paused | stopped
+    last_run_work_id: str | None = None
+    last_scheduled_for: str | None = None
+    """ISO datetime of the last fired occurrence (recovery idempotency)."""
+    revision: int = 1
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

@@ -24,6 +24,7 @@ type Props = {
   onOpenSpace: (view: SpaceView, initial?: string, selected?: string) => void;
   spaceData: SpaceData;
   libraryCount: number | null;
+  routineCount?: number | null;
   visibleWorks: Work[];
   works: Work[];
   scenarios: ConversationScenario[];
@@ -46,6 +47,7 @@ function spaceLinkCount(
   view: SpaceView,
   spaceData: SpaceData,
   libraryCount: number | null,
+  routineCount: number | null,
   visibleWorks: Work[],
 ): number | null {
   switch (view) {
@@ -54,7 +56,7 @@ function spaceLinkCount(
     case "Progetti":
       return spaceData.projects.length;
     case "Automazioni":
-      return spaceData.routines.length;
+      return routineCount ?? spaceData.routines.length;
     case "Materiali":
       return libraryCount;
     case "Documenti":
@@ -82,6 +84,7 @@ export function ConversationWorkspaceSidebar({
   onOpenSpace,
   spaceData,
   libraryCount,
+  routineCount = null,
   visibleWorks,
   works,
   scenarios,
@@ -132,7 +135,7 @@ export function ConversationWorkspaceSidebar({
           {SPACE_LINKS.map((v) => (
             <button className={space === v ? "active" : ""} key={v} onClick={() => onOpenSpace(v)}>
               {v}
-              {!(v === "Materiali" && libraryCount === null) && <span>{spaceLinkCount(v, spaceData, libraryCount, visibleWorks)}</span>}
+              {!(v === "Materiali" && libraryCount === null) && <span>{spaceLinkCount(v, spaceData, libraryCount, routineCount, visibleWorks)}</span>}
             </button>
           ))}
         </div>

@@ -6,6 +6,7 @@ import {
   type EngineFollowupNotice,
 } from "@/lib/engine-domain-client";
 import { listEngineProjects, listEngineTeams, type EngineProject, type EngineTeam } from "@/lib/engine-projects-client";
+import { listEngineRoutines, type EngineRoutine } from "@/lib/engine-routines-client";
 import { listEngineAgents, type EngineAgentProfile } from "@/lib/engine-agents-client";
 export function useEngineWorkspaceSnapshot(
   ready: boolean,
@@ -19,6 +20,7 @@ export function useEngineWorkspaceSnapshot(
     Array<EngineFollowupNotice & { conversationTitle: string }>
   >([]);
   const [teams, setTeams] = useState<EngineTeam[]>([]);
+  const [routines, setRoutines] = useState<EngineRoutine[]>([]);
   const [loaded, setLoaded] = useState(false);
   const generation = useRef(0);
   const clearRef = useRef(clearOverlay);
@@ -31,17 +33,19 @@ export function useEngineWorkspaceSnapshot(
       setProjects([]);
       setAgents([]);
       setTeams([]);
+      setRoutines([]);
       setFollowups([]);
       clearRef.current();
       return;
     }
     try {
-      const [items, conversations, currentProjects, currentAgents, currentTeams] = await Promise.all([
+      const [items, conversations, currentProjects, currentAgents, currentTeams, currentRoutines] = await Promise.all([
         listEngineWorks(),
         listEngineConversations(),
         listEngineProjects(),
         listEngineAgents(),
         listEngineTeams(),
+        listEngineRoutines(),
       ]);
       if (current !== generation.current) return;
       // A work linked to a project only through its conversation still gets
@@ -54,6 +58,7 @@ export function useEngineWorkspaceSnapshot(
       setProjects(currentProjects);
       setAgents(currentAgents);
       setTeams(currentTeams.filter((team) => team.status !== "archived"));
+      setRoutines(currentRoutines.filter((r) => r.status !== "stopped"));
       setFollowups(
         conversations.flatMap((conversation) =>
           conversation.followups.map((notice) => ({
@@ -67,6 +72,7 @@ export function useEngineWorkspaceSnapshot(
         setRawWorks([]);
         setProjects([]);
         setTeams([]);
+      setRoutines([]);
       setAgents([]);
         setFollowups([]);
         clearRef.current();
@@ -83,5 +89,5 @@ export function useEngineWorkspaceSnapshot(
       generation.current++;
     };
   }, [refresh]);
-  return { rawWorks, projects, agents, teams, followups, loaded, refresh };
+  return { rawWorks, projects, agents, teams, routines, followups, loaded, refresh };
 }

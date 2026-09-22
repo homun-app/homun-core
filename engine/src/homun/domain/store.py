@@ -38,6 +38,7 @@ class WorkspaceStore:
         self.outbox: dict[str, RuntimeIntent] = {}
         self.outbox: dict[str, RuntimeIntent] = {}
         self.runs: dict[str, Run] = {}
+        self.routines: dict[str, Routine] = {}
         self.plans: dict[str, PlanRevision] = {}  # key: f"{work_id}:{revision}"
         self.contributions: dict[str, ContributionRequest] = {}
         self.artifacts: dict[str, ArtifactVersion] = {}

@@ -10,10 +10,15 @@ async def runtime_lifespan(ctx):
         dbos_app.configure_dbos(ctx.data_dir)
         from homun.runtime.workflows import work_run as _work_run_wf  # noqa: F401
         from homun.runtime.workflows import material_read, price_comparison, tool_chain
+        from homun.runtime.workflows import routine_recurrence as _routine_wf  # noqa: F401
         price_comparison.bind_context(ctx)
         material_read.bind_context(ctx)
         tool_chain.bind_context(ctx)
         dbos_app.launch_dbos()
+        from homun.application.routines import reconcile_routine_schedules
+        repaired = reconcile_routine_schedules(ctx)
+        if repaired:
+            logging.getLogger(__name__).info("Routine schedules repaired: %d", len(repaired))
 
     # DBOS must own its event loop so destroy cancels durable async waits before
     # closing its database. Adopting the ASGI loop prevents that cleanup.
@@ -31,12 +36,19 @@ async def runtime_lifespan(ctx):
         logging.getLogger(__name__).info("Budget recovery charged %d stale reservations as unknown", recovered)
     stop = asyncio.Event()
 
+    from homun.application.routines import reconcile_routine_schedules, take_schedule_sync_request
+
     async def pump():
         while not stop.is_set():
             try:
                 await asyncio.to_thread(deliver_pending, ctx)
             except Exception:
                 logging.getLogger(__name__).exception("Runtime delivery pass failed")
+            try:
+                if take_schedule_sync_request():
+                    await asyncio.to_thread(reconcile_routine_schedules, ctx)
+            except Exception:
+                logging.getLogger(__name__).exception("Routine schedule sync failed")
             try:
                 await asyncio.wait_for(stop.wait(), timeout=0.5)
             except TimeoutError:

@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import type { Work } from "./conversation-types";
 import type { SpaceData, SpaceView } from "./ConversationSpace";
 import { EngineWorkObjectiveEditor } from "./EngineWorkObjectiveEditor";
+import { EngineRoutineCreator } from "./EngineRoutines";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { engineWorkPanelMessage } from "@/lib/engine-project-projection";
 import { intakeConfirmLabel } from "@/lib/engine-intake-display";
@@ -24,6 +25,7 @@ export function EngineWorkspaceWorkPanel({
   onCloseWork,
   onStartWork,
   onSubmitArtifact,
+  onCreateRoutine,
   onSetBudget,
   onSetDue,
   onRevisePlan,
@@ -42,6 +44,7 @@ export function EngineWorkspaceWorkPanel({
   onCloseWork?: (() => Promise<void>) | undefined;
   onStartWork?: (() => Promise<void>) | undefined;
   onSubmitArtifact?: ((title: string, content: string) => Promise<void>) | undefined;
+  onCreateRoutine?: ((input: { name: string; cron: string }) => Promise<void>) | undefined;
   onSetBudget?: ((modelAttempts: number) => Promise<void>) | undefined;
   onSetDue?: ((dueDate: string | null) => Promise<void>) | undefined;
   onRevisePlan?: ((action: {
@@ -179,6 +182,9 @@ export function EngineWorkspaceWorkPanel({
         agents={agents ?? []}
       />
       <FinalDeliverySection work={work} busy={busy} onSubmitArtifact={onSubmitArtifact} />
+      {work.engineStatus === "completed" && onCreateRoutine && (
+        <EngineRoutineCreator defaultName={work.title} onCreateRoutine={onCreateRoutine} />
+      )}
       <WorkDueSection work={work} busy={busy} onSetDue={onSetDue} />
       <WorkBudgetSection work={work} busy={busy} onSetBudget={onSetBudget} />
       <CloseWorkSection work={work} busy={busy} onCloseWork={onCloseWork} />

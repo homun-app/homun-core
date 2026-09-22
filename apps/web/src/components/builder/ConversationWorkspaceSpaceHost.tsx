@@ -27,9 +27,12 @@ import type { EngineTeam } from "@/lib/engine-projects-client";
 import { EngineWorkspaceAgents } from "./EngineWorkspaceAgents";
 import { EngineWorkspaceTeams } from "./EngineWorkspaceTeams";
 import { EngineDocuments } from "./EngineDocuments";
+import { EngineRoutines } from "./EngineRoutines";
+import type { EngineRoutine } from "@/lib/engine-routines-client";
 type Props = {
   engineAgents?: EngineAgentProfile[] | undefined;
   engineTeams?: EngineTeam[] | undefined;
+  engineRoutines?: EngineRoutine[] | undefined;
   engineMode?: boolean;
   space: SpaceView;
   spaceInitial: string;
@@ -68,7 +71,7 @@ type Props = {
 };
 
 export function ConversationWorkspaceSpaceHost({
-  engineMode = false, engineAgents, engineTeams, onRefreshEngine,
+  engineMode = false, engineAgents, engineTeams, engineRoutines, onRefreshEngine,
   space,
   spaceInitial,
   spaceSelected,
@@ -167,6 +170,8 @@ export function ConversationWorkspaceSpaceHost({
     );
   }
 
+  if (engineMode && space === "Automazioni")
+    return <EngineRoutines routines={engineRoutines ?? []} onChanged={onRefreshEngine} />;
   if (space === "Documenti") {
     return <EngineDocuments projects={spaceData.projects.map((p) => ({ id: p.id, name: p.name }))} />;
   }

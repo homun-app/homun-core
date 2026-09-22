@@ -58,6 +58,7 @@ type Props = {
   onCloseWork?: (() => Promise<void>) | undefined;
   onStartWork?: (() => Promise<void>) | undefined;
   onSubmitArtifact?: ((title: string, content: string) => Promise<void>) | undefined;
+  onCreateRoutine?: ((input: { name: string; cron: string }) => Promise<void>) | undefined;
   onSetBudget?: ((modelAttempts: number) => Promise<void>) | undefined;
   onSetDue?: ((dueDate: string | null) => Promise<void>) | undefined;
   onRevisePlan?: ((action: {
@@ -97,7 +98,7 @@ export function ConversationWorkspaceWorkPanel({
   engineBusy = false,
   engineIntake,
   onApplyObjectivePatch, onRename, onCloseWork, onStartWork, onSubmitArtifact,
-  onSetBudget, onSetDue, onRevisePlan, agents, agentNames,
+  onCreateRoutine, onSetBudget, onSetDue, onRevisePlan, agents, agentNames,
 }: Props) {
   if (work.source === "engine")
     return (
@@ -123,6 +124,7 @@ export function ConversationWorkspaceWorkPanel({
         onCloseWork={onCloseWork}
         onStartWork={onStartWork}
         onSubmitArtifact={onSubmitArtifact}
+        onCreateRoutine={onCreateRoutine}
         onSetBudget={onSetBudget}
         onSetDue={onSetDue}
         onRevisePlan={onRevisePlan}
