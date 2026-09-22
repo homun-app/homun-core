@@ -48,11 +48,15 @@ export function useEngineTranscript(
     if (plan.clearFirst) {
       // Switching work must drop cached content immediately (permissions may differ).
       setHistory(null);
-      setOverlay((current) => {
-        const nextOverlay = { ...current };
-        delete nextOverlay[activeId!];
-        return nextOverlay;
-      });
+      // An in-flight turn on the work being opened keeps its overlay: the
+      // switch-clear must not erase a just-sent echo while the turn runs.
+      if (canDropOverlay(overlayRef.current[activeId!])) {
+        setOverlay((current) => {
+          const nextOverlay = { ...current };
+          delete nextOverlay[activeId!];
+          return nextOverlay;
+        });
+      }
     }
     void loadEngineTranscript(conversationId as string, controller.signal)
       .then((messages) => {

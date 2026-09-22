@@ -37,7 +37,7 @@ export function engineWorkPanelMessage(
     case 'completed': return 'Lavoro completato. I risultati restano disponibili nella conversazione.';
     case 'failed': return 'Esecuzione non completata. Controlla l’errore nella conversazione.';
     case 'paused': return 'Lavoro in pausa.';
-    case 'cancelled': return 'Lavoro annullato.';
+    case 'cancelled': return 'Lavoro chiuso senza eseguirlo: l’accordo resta nello storico della conversazione.';
     case 'waiting_input': return 'In attesa del tuo contributo nella conversazione.';
     default: return 'Le proposte e le approvazioni disponibili sono nella conversazione.';
   }

@@ -99,18 +99,22 @@ export function ConversationWorkspaceTopbar({
           >
             <Settings2 size={18} />
           </button>
-          {engineMode ? <span className="cw-viewer">Sessione locale · {defaultLocalActor().displayName}</span> : <label className="cw-viewer">
-            Vista demo{" "}
-            <ConversationSelectField
-              aria-label="Vista utente demo"
-              value={viewer}
-              onChange={(e) => onViewerChange(e.target.value)}
-            >
-              {humanViewers.map((n) => (
-                <option key={n}>{n}</option>
-              ))}
-            </ConversationSelectField>
-          </label>}
+          {engineMode ? (
+            <span className="cw-viewer">Fonte: motore · Sessione locale · {defaultLocalActor().displayName}</span>
+          ) : (
+            <label className="cw-viewer">
+              Fonte: simulazione · Vista demo{" "}
+              <ConversationSelectField
+                aria-label="Vista utente demo"
+                value={viewer}
+                onChange={(e) => onViewerChange(e.target.value)}
+              >
+                {humanViewers.map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
+              </ConversationSelectField>
+            </label>
+          )}
           <button
             className="cw-icon"
             aria-label={`Notifiche${notificationCount ? ` · ${notificationCount} aggiornamenti` : ""}`}

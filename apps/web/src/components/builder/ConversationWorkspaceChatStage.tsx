@@ -17,6 +17,7 @@ import type { Work } from "./conversation-types";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { StudioChatInput } from "./StudioChatInput";
 import { WorkPatchPreviewCard } from "./WorkPatchPreviewCard";
+import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 
 type Props = {
   work: Work | undefined;
@@ -43,6 +44,7 @@ type Props = {
   onSend: (text: string, attachments: File[]) => void;
   onClearNotice: () => void;
   engineMode?: boolean;
+  engineAgents?: EngineAgentProfile[] | undefined;
   engineIntake?: WorkIntakeState | undefined;
   onRefreshEngine: () => Promise<void>;
   engineBusy?: boolean;
@@ -80,6 +82,7 @@ export function ConversationWorkspaceChatStage({
   engineIntake,
   onRefreshEngine,
   engineMode = false,
+  engineAgents,
   engineBusy = false,
   historyLoading = false,
   onConfirmPatch,
@@ -87,19 +90,32 @@ export function ConversationWorkspaceChatStage({
   onSaveMemory,
   onCancelInFlight,
 }: Props) {
-  const mentionRefs = scenarios
-    .filter(
-      (s, i) =>
-        memberProfile(s.agent, spaceData.profiles).invitation !== "pending" &&
-        scenarios.findIndex((a) => a.agent === s.agent) === i &&
-        !spaceData.removedPeople?.includes(s.agent),
-    )
-    .map((s) => ({
-      id: s.agent,
-      name: s.agent,
-      kind: "member" as const,
-      description: s.role,
-    }));
+  const mentionRefs = [
+    ...scenarios
+      .filter(
+        (s, i) =>
+          memberProfile(s.agent, spaceData.profiles).invitation !== "pending" &&
+          scenarios.findIndex((a) => a.agent === s.agent) === i &&
+          !spaceData.removedPeople?.includes(s.agent),
+      )
+      .map((s) => ({
+        id: s.agent,
+        name: s.agent,
+        kind: "member" as const,
+        description: s.role,
+      })),
+    // Engine roster members are mentionable too: the squad the person built
+    // with the motor must answer @ even when no demo scenario carries them.
+    ...(engineAgents ?? [])
+      .filter((agent) => agent.status === "active")
+      .filter((agent) => !scenarios.some((s) => s.agent === agent.name))
+      .map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        kind: "member" as const,
+        description: agent.role,
+      })),
+  ];
 
   return (
     <div className={`cw-stage ${work && panelOpen ? "with-panel" : ""}`}>
@@ -261,9 +277,11 @@ export function ConversationWorkspaceChatStage({
               {work.phase === "approved" && (
                 <div className="cw-closed">
                   <Check size={17} />{" "}
-                  {work.autoDelivered
-                    ? "Risultato consegnato in autonomia."
-                    : "Risultato approvato."}{" "}
+                  {work.source === "engine" && work.engineStatus === "cancelled"
+                    ? "Lavoro chiuso senza eseguirlo."
+                    : work.autoDelivered
+                      ? "Risultato consegnato in autonomia."
+                      : "Risultato approvato."}{" "}
                   Nessun invio esterno.
                 </div>
               )}
@@ -290,7 +308,8 @@ export function ConversationWorkspaceChatStage({
           {historyLoading && <p className="cw-hint" role="status">Caricamento conversazione…</p>}
           {engineMode && engineBusy && onCancelInFlight && (
             <p className="cw-hint cw-engine-busy" role="status">
-              Homun sta elaborando…{" "}
+              Homun sta aspettando la risposta del modello: la conversazione mostra i passaggi
+              e il tempo trascorso.{" "}
               <button type="button" className="cs-link" onClick={onCancelInFlight}>
                 Annulla
               </button>

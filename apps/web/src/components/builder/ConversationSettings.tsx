@@ -54,7 +54,7 @@ export function ConversationSettings({
   onRestore: (id: string) => void;
   archived: { id: string; title: string }[];
   storageStatus: string;
-  counts: { works: number; projects: number; materials: number };
+  counts: { works: number; projects: number; materials: number | null };
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [section, setSection] = useState("space");
@@ -281,7 +281,7 @@ export function ConversationSettings({
                   <strong>{counts.projects}</strong> progetti
                 </span>
                 <span>
-                  <strong>{counts.materials}</strong> materiali
+                  <strong>{counts.materials ?? "nei progetti"}</strong> materiali
                 </span>
               </div>
               <p>

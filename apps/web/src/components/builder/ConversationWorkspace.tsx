@@ -49,6 +49,7 @@ import { useChatAutoScroll } from "@/hooks/useChatAutoScroll";
 import { useEngineWorkspace } from "@/hooks/useEngineWorkspace";
 import { useWorkDestinationScroll, type WorkDestination } from "@/hooks/useWorkDestinationScroll";
 import { isEngineBackedWork } from "@/lib/conversation-engine-bridge";
+import { sendEngineFirstMessage } from "@/lib/engine-first-send";
 import { parseConversationNavigation } from "@/lib/conversation-navigation";
 import {
   parsePlanInsert,
@@ -694,14 +695,9 @@ export function ConversationWorkspace() {
           .catch(() => setNotice("Invio al motore non riuscito. Controlla il banner errori."));
         return;
       }
-      void engine.createWork("Nuova richiesta", text).then((created) => {
-        if (created) {
-          open(created.id);
-          setNotice("");
-        } else {
-          setNotice("Creazione non riuscita. Controlla le impostazioni dei modelli.");
-        }
-      });
+      // First message of a new work: open immediately, then postMessage routes
+      // it with the echoed message and the staged honest waits.
+      sendEngineFirstMessage(engine, text, open, setNotice, bumpOwnSend);
       return;
     }
 
@@ -1135,9 +1131,9 @@ export function ConversationWorkspace() {
           onClose={() => setSettings(false)}
           storageStatus={storageStatus}
           counts={{
-            works: works.filter((w) => !w.coordinatedBy).length,
-            projects: spaceData.projects.length,
-            materials: library.length,
+            works: visibleWorks.filter((w) => !w.coordinatedBy).length,
+            projects: displaySpaceData.projects.length,
+            materials: engine.backend === "engine" ? null : library.length,
           }}
           archived={works.filter((w) => w.archived && !w.coordinatedBy)}
           onRestore={(id) =>
@@ -1325,6 +1321,7 @@ export function ConversationWorkspace() {
             onSend={send}
             onClearNotice={() => setNotice("")}
             engineMode={engine.backend === "engine"} engineIntake={engine.intake} onRefreshEngine={engine.refresh}
+            engineAgents={engine.backend === "engine" ? engine.agents : undefined}
             engineBusy={engine.busy}
             historyLoading={engine.historyLoading}
             onConfirmPatch={(messageIndex) => {
@@ -1370,6 +1367,7 @@ export function ConversationWorkspace() {
                   onPreview={() => setPreview(true)}
                   engineBusy={engine.busy} onRename={work.source === "engine" ? (title) => engine.renameWork(work, title) : undefined}
                   engineIntake={engine.intake}
+                  onCloseWork={work.source === "engine" ? () => engine.closeWork(work) : undefined}
                   {...(work.source === "engine"
                     ? {
                         onApplyObjectivePatch: (next: string) =>

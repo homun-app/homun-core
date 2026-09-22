@@ -21,6 +21,7 @@ export function EngineWorkspaceWorkPanel({
   onRename,
   onOpenSpace,
   onApplyObjectivePatch,
+  onCloseWork,
 }: {
   work: Work;
   spaceData: SpaceData;
@@ -31,6 +32,7 @@ export function EngineWorkspaceWorkPanel({
   onRename?: ((title: string) => Promise<void>) | undefined;
   onOpenSpace: (view: SpaceView, initial?: string, selected?: string) => void;
   onApplyObjectivePatch?: ((objective: string) => Promise<void>) | undefined;
+  onCloseWork?: (() => Promise<void>) | undefined;
 }) {
   const sources = useProjectMaterials(work, (material) => material.status === "active");
   const materials = { items: sources.materials.slice(0, 5), count: sources.materials.length };
@@ -149,9 +151,85 @@ export function EngineWorkspaceWorkPanel({
           <p>{engineWorkPanelMessage(work.engineStatus ?? "", proposal)}</p>
         )}
       </section>
+      <CloseWorkSection work={work} busy={busy} onCloseWork={onCloseWork} />
       <HomunErrorNotice error={sources.error} />
       {contributionPanel}
     </aside>
+  );
+}
+
+/** States where the person may end an agreed work without executing it. */
+const CLOSABLE_ENGINE_STATUSES = new Set(["ready", "paused", "waiting_input", "failed"]);
+
+function CloseWorkSection({
+  work,
+  busy,
+  onCloseWork,
+}: {
+  work: Work;
+  busy: boolean;
+  onCloseWork?: (() => Promise<void>) | undefined;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const awaitingConfirmation = work.engineIntakePending;
+  const agreedDraft = work.engineStatus === "draft" && work.engineIntakeConfirmed;
+  const closable =
+    !awaitingConfirmation && (agreedDraft || CLOSABLE_ENGINE_STATUSES.has(work.engineStatus ?? ""));
+  if (!onCloseWork || !closable) return null;
+  if (!confirming)
+    return (
+      <section className="cw-engine-summary__close">
+        <button
+          type="button"
+          className="cs-link"
+          disabled={busy || closing}
+          onClick={() => {
+            setError(null);
+            setConfirming(true);
+          }}
+        >
+          Chiudi il lavoro
+        </button>
+        <p className="cw-engine-summary__hint">
+          Nessuna esecuzione: l'accordo resta nello storico della conversazione.
+        </p>
+      </section>
+    );
+  return (
+    <section className="cw-engine-summary__close" aria-label="Conferma chiusura del lavoro">
+      <p className="cw-engine-summary__hint">
+        Chiudere il lavoro senza eseguirlo? L'accordo e la conversazione restano salvati.
+      </p>
+      <div className="cs-actions">
+        <button
+          type="button"
+          className="cw-secondary"
+          disabled={busy || closing}
+          onClick={() => {
+            setClosing(true);
+            setError(null);
+            onCloseWork()
+              .then(() => setConfirming(false))
+              .catch(setError)
+              .finally(() => setClosing(false));
+          }}
+        >
+          {closing ? "Sto chiudendo…" : "Sì, chiudi"}
+        </button>
+        <button
+          type="button"
+          className="cs-link"
+          disabled={closing}
+          onClick={() => setConfirming(false)}
+        >
+          Annulla
+        </button>
+      </div>
+      {closing && <p role="status">Chiusura in corso…</p>}
+      <HomunErrorNotice error={error} />
+    </section>
   );
 }
 

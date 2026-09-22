@@ -96,9 +96,11 @@ export function useWorkIntake(
       );
       await callback.current();
     } catch (cause) {
-      // A 404 after an engine restart means the cached proposal no longer
-      // exists: refresh the intake list instead of showing a dead-end error.
-      if (isHomunClientError(cause) && cause.code === "not_found") {
+      // A 404 after an engine restart or a 409 on a stale expected_version mean
+      // the cached proposal is dead: refresh the intake list instead of showing
+      // a dead-end error. The fresh proposal is the guided recovery — the person
+      // confirms again on current data.
+      if (isHomunClientError(cause) && (cause.code === "not_found" || cause.code === "version_conflict")) {
         setProposal(null);
         setError(null);
         try {

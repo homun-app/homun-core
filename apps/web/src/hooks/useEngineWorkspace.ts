@@ -9,6 +9,7 @@ import { resolveWorkspaceMode } from "@/lib/engine-client";
 import {
   assistantFromPosted,
   applyEngineWorkPatch,
+  createEngineConversationAndWork,
   engineWorkToUiWork,
   parseEngineWorkRecord,
   postEngineConversationMessage,
@@ -35,6 +36,7 @@ import { useEngineTranscript } from "./useEngineTranscript";
 import { useWorkIntake, type WorkIntakeState } from "./useWorkIntake";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import { renameEngineWork } from "@/lib/engine-work-naming";
+import { closeEngineWork } from "@/lib/engine-work-lifecycle";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
 import { proposeWorkIntake } from "@/lib/engine-intake-client";
 import { applyIntakePreview } from "@/lib/engine-intake-display";
@@ -54,7 +56,8 @@ export type EngineWorkspaceState = {
   followups: Array<EngineFollowupNotice & { conversationTitle: string }>;
   refresh: () => Promise<void>;
   renameWork: (work: Work, title: string) => Promise<void>;
-  createWork: (title: string, objective: string) => Promise<Work | null>;
+  closeWork: (work: Work) => Promise<void>;
+  createWork: (title: string, objective: string, draftOnly?: boolean) => Promise<Work | null>;
   postMessage: (work: Work, text: string) => Promise<void>;
   confirmPatch: (work: Work, messageIndex: number) => Promise<void>;
   discardPatch: (work: Work, messageIndex: number) => void;
@@ -147,11 +150,24 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     setBusy(false);
   }
 
-  async function createWork(_title: string, objective: string): Promise<Work | null> {
+  async function createWork(_title: string, objective: string, draftOnly = false): Promise<Work | null> {
     if (backend !== "engine" || !engineReady) return null;
     const signal = beginRequest();
     try {
-      const record = await createIntakeConversation(objective, signal, setError);
+      // draftOnly hands the first message to postMessage instead: the
+      // conversation opens immediately with the echoed message and the honest
+      // staged wait, rather than staying on the hero through a mute interpret.
+      const record = draftOnly
+        ? parseEngineWorkRecord(
+            (
+              await createEngineConversationAndWork({
+                title: "Nuova richiesta",
+                objective: "Obiettivo da concordare",
+                actor: defaultLocalActor(),
+              })
+            ).record as unknown as Record<string, unknown>,
+          )
+        : await createIntakeConversation(objective, signal, setError);
       await refresh();
       return engineWorkToUiWork(record, []);
     } catch (cause) {
@@ -518,6 +534,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     projects, agents,
     refresh,
     renameWork: async (work, title) => { await renameEngineWork(work.id, title, work.revision); await refresh(); },
+    closeWork: async (work) => { await closeEngineWork(work.id, work.revision); await refresh(); },
     createWork,
     postMessage,
     confirmPatch,

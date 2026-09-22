@@ -119,7 +119,7 @@ export function homunErrorUserMessage(error: unknown): string {
       case "storage_unavailable":
         return "Il salvataggio non è disponibile. Verifica lo stato del motore e riprova.";
       case "version_conflict":
-        return "Qualcun altro ha aggiornato lo stesso oggetto. Ricarica e riprova.";
+        return "I dati sono cambiati mentre agivi (per esempio è arrivato un nuovo messaggio o un'altra finestra ha aggiornato il lavoro). Ricarica e riprova.";
       case "permission_denied":
       case "unauthorized":
         return "Non hai i permessi per questa azione.";

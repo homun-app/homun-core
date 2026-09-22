@@ -31,6 +31,7 @@ export type EngineWorkRecord = {
   reviewer_id?: string | null;
   current_plan_revision: number;
   current_artifact_version: number;
+  intake_confirmed?: boolean;
   pending_contribution?: {
     id: string;
     to_actor_id: string;
@@ -76,6 +77,9 @@ export function parseEngineWorkRecord(raw: Record<string, unknown>): EngineWorkR
       status: String(p["status"] ?? "pending"),
       step_id: String(p["step_id"] ?? ""),
     };
+  }
+  if (raw["intake_confirmed"] === true) {
+    record.intake_confirmed = true;
   }
   return record;
 }
@@ -141,6 +145,7 @@ export function engineWorkToUiWork(
     engineConversationId: record.primary_conversation_id,
     engineStatus: record.status,
     engineObjective: record.objective,
+    engineIntakeConfirmed: record.intake_confirmed ?? false,
     enginePlanRevision: record.current_plan_revision,
     engineArtifactVersion: record.current_artifact_version,
     requester: "Fabio",
