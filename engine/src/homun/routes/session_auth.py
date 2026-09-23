@@ -23,6 +23,10 @@ class SessionAuthMiddleware:
         elif scope['method'] == 'OPTIONS' and origin:
             # CORS middleware answers preflight; no handler or data is reached.
             return await self.app(scope, receive, send)
+        elif scope['path'] in {'/v1/contribution-portal/read', '/v1/contribution-portal/respond'} and scope['method'] == 'POST':
+            # These exact routes authenticate a scoped invitation themselves.
+            # They ignore actor headers and never accept the desktop token.
+            return await self.app(scope, receive, send)
         elif not secrets.compare_digest(headers.get(b'authorization', b''), ('Bearer '+self.token).encode()):
             response = JSONResponse(status_code=401, content={'detail': {'code': 'session_required', 'message': 'A valid local session is required'}})
         else:

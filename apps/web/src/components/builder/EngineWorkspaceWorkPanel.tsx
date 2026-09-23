@@ -1,3 +1,5 @@
+import { EngineAskPerson } from "./EngineAskPerson";
+import { EngineContributionInvitations } from "./EngineContributionInvitations";
 /** Compact, source-explicit summary of an engine-backed work. */
 import { useState, type ReactNode } from "react";
 import type { Work } from "./conversation-types";
@@ -194,6 +196,8 @@ export function EngineWorkspaceWorkPanel({
       <CloseWorkSection work={work} busy={busy} onCloseWork={onCloseWork} />
       <HomunErrorNotice error={sources.error} />
       {contributionPanel}
+      {work.engineStatus === "running" && <EngineAskPerson work={work} />}
+      {work.engineStatus === "waiting_input" && <EngineContributionInvitations workId={work.id} />}
     </aside>
   );
 }
