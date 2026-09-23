@@ -107,15 +107,9 @@ class ToolRegistry:
             raise DomainValidationError('Search requires a text query and integer limit')
         if limit <= 0:
             return []
-        terms = query.casefold().split()
-        results = []
+        from homun.tools.search import ranked
+        entries = []
         for name in sorted(self._entries):
             entry = self._entries[name]
-            definition = json.loads(entry.definition_json)
-            metadata = json.loads(entry.metadata_json)
-            haystack = ' '.join((name, metadata['toolset'], definition['description'])).casefold()
-            if all(term in haystack for term in terms):
-                results.append({**definition, **metadata})
-                if len(results) >= min(limit, 100):
-                    break
-        return results
+            entries.append({**json.loads(entry.definition_json), **json.loads(entry.metadata_json)})
+        return ranked(entries, query, min(limit, 100))

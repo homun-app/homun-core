@@ -68,3 +68,8 @@ application/agent_results.py adapts complete-result storage and 40/60 head/tail
 previews from tools/tool_result_storage.py and tools/tool_output_truncate.py at
 the pinned commit. Homun uses private per-run SQLite JSON, SHA-256 references,
 scoped paged retrieval and retained error flags instead of host spill paths.
+
+tools/search.py derives BM25 scoring, rarest-query-token admission and minimum
+answerable-term coverage from tools/tool_search_catalog.py at the pinned commit.
+Homun adds deterministic name tie-breaking and Unicode tokenization, and indexes
+only the approved run registry. English stemming and deferred bridge not included.

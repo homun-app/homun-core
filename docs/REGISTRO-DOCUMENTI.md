@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **205**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **206**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -217,3 +217,5 @@ Documenti censiti: **205**. Punto di ingresso: [indice](README.md).
 
 | [docs/superpowers/plans/2026-09-23-agent-result-storage.md](superpowers/plans/2026-09-23-agent-result-storage.md) | Risultati voluminosi durevoli e consultazione a pagine |
 | [docs/research/2026-09-23-agent-results-verifica.md](research/2026-09-23-agent-results-verifica.md) | Verifica risultati voluminosi con Ollama e MCP |
+
+| [docs/research/2026-09-23-tool-search-ranking.md](research/2026-09-23-tool-search-ranking.md) | Ricerca BM25 del catalogo approvato e limiti del bridge |

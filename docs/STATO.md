@@ -83,6 +83,10 @@ Una verifica del sorgente non aggiorna l'app installata.
 
 ## Evidenze della tranche corrente
 
+Ricerca catalogo BM25: 47 test mirati passati, nessun errore architetturale.
+Bridge differito ancora da implementare.
+[Verifica e prossimo passo](research/2026-09-23-tool-search-ranking.md).
+
 Risultati voluminosi: **805 test engine passati, 1 saltato**, più 7 controlli
 finali; test web, typecheck/build e OpenAPI allineati, architettura 0 errori.
 Ollama + stdio reali: risultato integrale salvato, ripresa da SQLite, ricerca
