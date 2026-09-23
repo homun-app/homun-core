@@ -69,6 +69,9 @@ def parse_response(response, *, ollama=False):
 
 def _parse_response(response, *, ollama=False):
     choice = response if ollama else response['choices'][0]
+    from homun.models.repetition import is_runaway_repetition, RepetitionError
+    if is_runaway_repetition(choice['message'].get('content')):
+        raise RepetitionError()
     reason = choice.get('done_reason' if ollama else 'finish_reason')
     if reason not in {'stop', 'tool_calls'}:
         raise ValueError(f'Incomplete agent response: {reason}')

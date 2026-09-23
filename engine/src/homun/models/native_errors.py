@@ -31,10 +31,12 @@ OVERFLOW = 'agent_model_overflow'
 EMPTY = 'agent_model_empty_response'
 TRUNCATED = 'agent_model_truncated'
 MALFORMED = 'agent_model_malformed'
+REPETITION = 'agent_model_repetition'
 
 RETRYABLE_CODES = frozenset({NETWORK, TIMEOUT, RATE_LIMITED, SERVER, EMPTY, MALFORMED})
 
 _LABELS = {
+    REPETITION: 'Model output entered a repetition loop',
     NETWORK: 'Provider unreachable', TIMEOUT: 'Model call timed out',
     RATE_LIMITED: 'Provider rate limit', SERVER: 'Provider server error',
     AUTH: 'Provider rejected credentials', QUOTA: 'Provider quota or billing exhausted',
@@ -212,7 +214,10 @@ def classify_response(exc, *, usage=None) -> NativeModelError:
     """
     text = sanitize(exc)
     lowered = text.lower()
-    if lowered.startswith('incomplete agent response'):
+    from homun.models.repetition import RepetitionError
+    if isinstance(exc, RepetitionError):
+        code = REPETITION
+    elif lowered.startswith('incomplete agent response'):
         reason = text.split(':', 1)[-1].strip().lower()
         code = INVALID_REQUEST if 'filter' in reason else TRUNCATED
     elif 'neither tools nor a final answer' in lowered:

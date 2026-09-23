@@ -1,0 +1,35 @@
+{
+  "injected_http_repetition": {
+    "code": "agent_model_repetition",
+    "usage": {
+      "id": "usage_vaD93lBIoLoRqg",
+      "provider_id": "openai_compatible",
+      "model_id": "gpt-4o-mini",
+      "created_at": "2026-09-23T20:46:18.113797Z",
+      "input_tokens": 17,
+      "output_tokens": 600,
+      "estimated_cost": null,
+      "currency": null,
+      "status": "error",
+      "error_code": "agent_model_repetition",
+      "notes": ""
+    },
+    "requests": 1
+  },
+  "real_ollama_normal": {
+    "content": "1. Definire chiaramente gli obiettivi specifici della riunione prima di convocare i partecipanti per evitare confusione inutile durante lo svolgimento dell'incontro stesso.\n2. Invitare solo le persone strettamente necessarie al raggiungimento degli scopi prefissati per garantire un massimo rispetto del tempo disponibile da parte di tutti.\n3. Stabilire un orario preciso e inviarlo con anticipo a ciascun partecipante affinché possano organizzare il loro personale calendario senza imprevisti improvvisati.\n4. Preparare una bozza dettagliata dell'ordine del giorno che includa i punti chiave da trattare per facilitare la comprensione generale di tutti i presenti immediatamente.\n5. Assegnare un moderatore responsabile di gestire il flusso della discussione e mantenere l'attenzione dei partecipanti sui temi principali trattati durante l'incontro.\n6. Utilizzare strumenti digitali o supporti visivi come proiezioni per illustrare meglio le informazioni complesse che devono essere comunicate a tutti i presenti.\n7. Prevedere un tempo dedicato alla sintesi finale dove verranno riassunti gli accordi presi e le azioni concrete da intraprendere dopo la chiusura della riunione stessa.\n8. Seguire scrupolosamente il programma stabilito rispettando rigorosamente i tempi assegnati a ogni punto per non dilungarsi troppo su argomenti secondari o irrilevanti.",
+    "usage": {
+      "id": "usage_hAP0koFvhA3zzQ",
+      "provider_id": "openai_compatible",
+      "model_id": "qwen3.5:4b",
+      "created_at": "2026-09-23T20:46:30.973851Z",
+      "input_tokens": 40,
+      "output_tokens": 272,
+      "estimated_cost": null,
+      "currency": null,
+      "status": "ok",
+      "error_code": null,
+      "notes": ""
+    }
+  }
+}

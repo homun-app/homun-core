@@ -83,6 +83,11 @@ Una verifica del sorgente non aggiorna l'app installata.
 
 ## Evidenze della tranche corrente
 
+Guardia ripetizioni: **843 test engine passati, 1 saltato**, più 46 controlli
+finali. Errore tipizzato senza artifact o retry; consumi reali conservati.
+Verifica HTTP iniettata e risposta normale Ollama reale; streaming ancora aperto.
+[Prove e limiti](research/2026-09-23-agent-repetition-verifica.md).
+
 Bridge MCP differito: **828 test engine passati, 1 saltato**, più 58 controlli
 finali; architettura senza errori e OpenAPI invariato. Ollama/stdio reali:
 ricerca → descrizione → chiamata approvata → ripresa dopo riavvio. Dati corretti,

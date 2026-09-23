@@ -79,3 +79,10 @@ search/describe/call bridge from tools/tool_search.py and tool_search_validation
 at the pinned commit. Homun defers selected MCP schemas, pins bridge contracts
 per run, keeps canonical wrapper IDs, and resolves each action through its own
 approval/receipt flow. Native ordered rounds replace opaque bridge batches.
+
+models/repetition.py derives conservative repetition detection from
+agent/repetition_guard.py at the pinned commit. Homun retains the minimum
+length/repeat/dominance thresholds and distinct-line safeguard, but counts only
+nonoverlapping windows to avoid false positives on a single long separator.
+Native responses fail with a typed nonretryable code before history/tool dispatch,
+while provider-reported usage remains charged.

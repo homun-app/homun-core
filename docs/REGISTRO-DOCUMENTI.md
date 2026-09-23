@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **208**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **209**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -222,3 +222,5 @@ Documenti censiti: **208**. Punto di ingresso: [indice](README.md).
 
 | [docs/superpowers/plans/2026-09-23-deferred-tool-bridge.md](superpowers/plans/2026-09-23-deferred-tool-bridge.md) | Bridge differito degli strumenti MCP |
 | [docs/research/2026-09-23-agent-bridge-verifica.md](research/2026-09-23-agent-bridge-verifica.md) | Verifica ricerca descrizione e chiamata differita |
+
+| [docs/research/2026-09-23-agent-repetition-verifica.md](research/2026-09-23-agent-repetition-verifica.md) | Guardia delle risposte ripetitive e consumi preservati |
