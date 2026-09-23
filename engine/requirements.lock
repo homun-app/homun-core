@@ -730,6 +730,7 @@ httpx2==2.13.0 \
     --hash=sha256:fc12720cedf72faa26cca6b4ca394e05c894e7d7933fc45cafe767960804e49a
     # via
     #   -c engine/requirements.lock
+    #   homun-engine (engine/pyproject.toml)
     #   anthropic
     #   fastmcp-slim
     #   genai-prices
@@ -955,6 +956,7 @@ mcp==2.2.0 \
     --hash=sha256:bde982589473a060ae145e3406e9a5333fe538c97229ba841f5a7f92be004f81
     # via
     #   -c engine/requirements.lock
+    #   homun-engine (engine/pyproject.toml)
     #   fastmcp-slim
 mcp-types==2.2.0 \
     --hash=sha256:d3ed53703ddd10d9c6399f29d322bb66f3f67ab41348ac8556ba23e07fedefad \

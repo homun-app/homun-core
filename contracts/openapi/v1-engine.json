@@ -2382,6 +2382,21 @@
             "title": "Tool Version",
             "type": "string"
           },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools"
+          },
           "turns": {
             "title": "Turns",
             "type": "integer"

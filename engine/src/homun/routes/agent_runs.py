@@ -35,6 +35,7 @@ class RunView(BaseModel):
     team: dict | None = None
     person: dict | None = None
     limits: dict
+    tools: list[dict] | None = None
     tool_version: str
     assignee_id: str
     executor_name: str

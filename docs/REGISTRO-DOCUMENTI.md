@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **193**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **195**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -204,3 +204,5 @@ Documenti censiti: **193**. Punto di ingresso: [indice](README.md).
 | [docs/superpowers/plans/2026-09-23-agent-recovery.md](superpowers/plans/2026-09-23-agent-recovery.md) | Piano recupero provider |
 | [docs/research/2026-09-23-agent-overflow-verifica.md](research/2026-09-23-agent-overflow-verifica.md) | Compattazione dopo overflow e prova ibrida |
 | [docs/superpowers/plans/2026-09-23-agent-overflow.md](superpowers/plans/2026-09-23-agent-overflow.md) | Piano recupero da overflow |
+| [docs/research/2026-09-23-agent-registry-verifica.md](research/2026-09-23-agent-registry-verifica.md) | Registro strumenti, prova Ollama e trasporto MCP |
+| [docs/superpowers/plans/2026-09-23-agent-tool-registry.md](superpowers/plans/2026-09-23-agent-tool-registry.md) | Piano registro strumenti e prerequisito MCP |

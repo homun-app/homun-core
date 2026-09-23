@@ -1,6 +1,6 @@
 # Stato verificato di Homun 2
 
-Aggiornato il 23 settembre 2026 con controlli persistenti e compattazione del contesto
+Aggiornato il 23 settembre 2026 con registro strumenti e trasporto MCP
 del nucleo nativo. Lo stato precedente e i rapporti datati conservano le prove storiche.
 Una verifica del sorgente non aggiorna l'app installata.
 
@@ -59,7 +59,16 @@ Una verifica del sorgente non aggiorna l'app installata.
   senza aumentare l'output o ripetere richieste identiche.
   [Prova ibrida e limiti](research/2026-09-23-agent-overflow-verifica.md).
 
+- Registro strumenti condiviso da modello, ricerca, validazione e dispatch;
+  manifest fissato all’approvazione. Trasporto MCP con handshake, sessioni,
+  descrittori e risposte strutturate. Il collegamento MCP al ciclo adattivo resta
+  aperto. [Prove e limiti](research/2026-09-23-agent-registry-verifica.md).
+
 ## Evidenze della tranche corrente
+
+Registro e MCP: **759 test engine passati, 1 saltato**, **216 test web passati**,
+typecheck e OpenAPI allineati, architettura 0 errori. Prova Ollama reale
+ricerca → lettura → artifact riuscita. H07/H36 restano parziali.
 
 Overflow: **729 test engine passati, 1 saltato**, OpenAPI allineato, architettura
 0 errori. Fixture con HTTP400 iniettato e riepilogo/finale Ollama reali riuscita:

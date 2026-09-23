@@ -8,8 +8,8 @@ from homun.application.agent_run_failures import fail  # re-exported for callers
 from homun.application.agent_runs import authority, lookup
 from homun.application.agent_control_history import consume_steering
 from homun.application.agent_context import prepare as prepare_context, ContextPreparationDeferred
-from homun.application.agent_tools import catalog, run_tool
-from homun.application.agent_team import tool_definition
+from homun.application.agent_tools import run_tool
+from homun.application.agent_tool_registry import registry_for
 from homun.application.agent_consultation import consult
 from homun.application.agent_usage import charge
 from homun.domain.errors import DomainError, ValidationError
@@ -63,8 +63,8 @@ def _decision(ctx, run):
     if run.get('_decision'):
         return AgentDecision.model_validate(run['_decision'])
     actor = Actor.model_validate(run['_actor'])
-    tools = catalog() + tool_definition(run.get('team'), run['assignee_id'])
-    messages = prepare_context(ctx,run,tools+[agent_native.QUESTION]) if agent_native.enabled(run) else None
+    tools = registry_for(run).definitions()
+    messages = prepare_context(ctx,run,tools) if agent_native.enabled(run) else None
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             current = lookup(store, run['id'])
@@ -81,7 +81,7 @@ def _decision(ctx, run):
         purpose='agent_run.decide', accounting_actor_id=run['assignee_id'])
     try:
         if agent_native.enabled(run):
-            result = ctx.models.complete_tools(messages, tools=tools + [agent_native.QUESTION],
+            result = ctx.models.complete_tools(messages, tools=tools,
                                                connection_id=run['connection_id'], **run.get('_context_policy',{}))
             agent_native.append_round(run, result.message)
             decision = agent_native.decision(run)
@@ -142,8 +142,8 @@ def advance(ctx, run_id, *, epoch=None):
             if not _dispatch_allowed(ctx, actor, run):
                 return 'superseded'
             try:
-                observation = (consult(ctx, actor, run, decision.arguments) if decision.tool == 'consult_collaborator'
-                               else run_tool(ctx, actor, run['materials'], decision.tool, decision.arguments))
+                observation = registry_for(run, material_executor=run_tool, collaborator_executor=consult).dispatch(
+                    decision.tool, decision.arguments, ctx=ctx, actor=actor, run=run)
             except ValidationError as exc:
                 # Malformed arguments/readability are observations the model can correct.
                 observation = {'error_code': exc.code, 'message': exc.message}

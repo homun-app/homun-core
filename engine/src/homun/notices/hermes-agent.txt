@@ -53,3 +53,8 @@ application/agent_run_failures.py keeps the shared terminal-failure fence.
 Overflow recovery: application/agent_overflow.py and the forced context plan adapt
 agent/turn_overflow.py at the same pinned Hermes commit. Homun retains explicit
 window/output pins and durable authority/budget/control checks.
+
+Tool registry: tools/registry.py and application/agent_tool_registry.py adapt
+the single-entry schema/handler/toolset design of Hermes tools/registry.py at
+the same pinned commit. Homun builds immutable per-run contracts and validates
+manifest hashes before model/tool IO; discovery grants no additional authority.

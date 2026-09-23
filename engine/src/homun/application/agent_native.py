@@ -4,13 +4,10 @@ Like Hermes, persist an assistant round before executing its calls. Unlike a
 request-time reconstruction, pending calls survive input and process restarts.
 """
 import json
-from homun.models.agent_turn import AgentDecision, ToolDefinition
+from homun.models.agent_turn import AgentDecision
 from homun.models.native_turn import NativeMessage
 
-PROTOCOL = 'native-tools-v1'
-QUESTION = ToolDefinition(name='request_user_input', description='Ask for required information unavailable through tools. Execution waits for the authorized human response.',
-    input_schema={'type':'object', 'properties':{'question':{'type':'string','minLength':1,'maxLength':16000}},
-                  'required':['question'],'additionalProperties':False})
+from homun.application.agent_tool_contracts import PROTOCOL, QUESTION
 
 
 def enabled(run):
@@ -31,10 +28,9 @@ def decision(run):
     call = pending(run)
     if call:
         if call.name == QUESTION.name:
-            question = call.arguments.get('question')
-            if not isinstance(question, str) or not question.strip() or set(call.arguments) != {'question'}:
-                raise ValueError('Invalid human question')
-            return AgentDecision(kind='ask', message=question)
+            from homun.application.agent_tool_registry import registry_for
+            args = registry_for(run).validate(call.name, call.arguments)
+            return AgentDecision(kind='ask', message=args['question'])
         return AgentDecision(kind='tool', tool=call.name, arguments=call.arguments, message=f'Use {call.name}')
     return AgentDecision(kind='finish', message=history(run)[-1].content)
 

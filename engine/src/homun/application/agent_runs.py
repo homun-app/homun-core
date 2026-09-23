@@ -57,6 +57,8 @@ def authority(ctx, store, actor, run, *, approve=False, running=False):
     if approve or running:
         if actor.kind != 'person' or actor.id not in {work.owner_id, work.reviewer_id}:
             raise PermissionDeniedError('Only the human owner or reviewer can authorize the run')
+    from homun.application.agent_tool_registry import registry_for
+    registry_for(run)
     validate_sources(ctx, store, actor, run['materials'])
     validate_team(store, run.get('team'))
     if run.get('person'):
@@ -165,6 +167,9 @@ def propose(ctx, actor, work_id, body):
                 run['_context_policy'] = {'context_window': connection.context_window,
                                           'max_output_tokens': connection.max_output_tokens}
                 run['_messages'] = [m.model_dump() for m in initial_messages(run['_objective'], run['_instructions'])]
+            from homun.application.agent_tool_registry import registry_for
+            run['_registry_version'] = 1
+            run['tools'] = registry_for(run).manifest()
             run['digest'] = hashlib.sha256(json.dumps(run, sort_keys=True).encode()).hexdigest()
             save(store, actor, run['id'], PROPOSAL_TYPE, fingerprint, run)
         ctx.service.store = store

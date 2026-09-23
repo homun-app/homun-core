@@ -8,6 +8,7 @@ export type AgentRun = {
   id: string; work_id: string; digest: string; expected_version: number;
   status: 'pending_approval' | 'queued' | 'running' | 'waiting_input' | 'completed' | 'failed' | 'blocked' | 'paused' | 'cancelled';
   tool_version: string;
+  tools?: { name: string; toolset: string; version: string; schema_hash: string; definition_hash: string; kind: 'tool' | 'ask'; replay: 'read_only' | 'model' | 'never' }[];
   team?: { id: string; name: string; members: {id: string; name: string; role: string}[] };
   person?: { id: string; name: string };
   history_redacted?: boolean;

@@ -31,6 +31,10 @@ _DESCRIPTIONS = {
 }
 
 
+def arguments_model(name):
+    return _SCHEMAS[name]
+
+
 def catalog():
     return [ToolDefinition(name=name, description=_DESCRIPTIONS[name],
                            input_schema=schema.model_json_schema())

@@ -13,15 +13,17 @@ from homun.domain.models import Actor
 ECHO_SERVER = textwrap.dedent("""
     import json, sys
     tools = [
-        {"name": "list_issues", "description": "elenco"},
-        {"name": "create_issue", "description": "crea"},
-        {"name": "delete_customer", "description": "distruttivo"},
+        {"name": "list_issues", "description": "elenco", "inputSchema": {"type": "object"}},
+        {"name": "create_issue", "description": "crea", "inputSchema": {"type": "object"}},
+        {"name": "delete_customer", "description": "distruttivo", "inputSchema": {"type": "object"}},
     ]
     for line in sys.stdin:
         line = line.strip()
         if not line:
             continue
         req = json.loads(line)
+        if "id" not in req:
+            continue
         if req.get("method") == "initialize":
             reply = {"jsonrpc": "2.0", "id": req["id"], "result": {
                 "protocolVersion": "2025-06-18",
@@ -144,13 +146,15 @@ def test_external_tool_proposal_flow_e2e(client, tmp_path):
         import json, sys
         for line in sys.stdin:
             req = json.loads(line.strip())
+            if "id" not in req:
+                continue
             if req.get("method") == "initialize":
                 reply = {"jsonrpc": "2.0", "id": req["id"], "result": {
                     "protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
                     "serverInfo": {"name": "echo-call", "version": "1.0"}}}
             elif req.get("method") == "tools/list":
                 reply = {"jsonrpc": "2.0", "id": req["id"], "result": {"tools": [
-                    {"name": "list_issues", "description": "elenco"}]}}
+                    {"name": "list_issues", "description": "elenco", "inputSchema": {"type": "object"}}]}}
             elif req.get("method") == "tools/call":
                 args = req["params"]["arguments"]
                 reply = {"jsonrpc": "2.0", "id": req["id"], "result": {
