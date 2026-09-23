@@ -204,3 +204,46 @@ export async function listEngineToolCalls(workId: string): Promise<ExternalToolC
   if (!response.ok) throw new Error(`List tool calls failed: HTTP ${response.status}`);
   return ((await response.json()) as { items: ExternalToolCall[] }).items ?? [];
 }
+
+export type CatalogEntry = {
+  id: string;
+  name: string;
+  description: string;
+  transport: "stdio" | "http";
+  command: string;
+  args_prefix: string[];
+  needs_path: string | null;
+  tools_include: string[];
+  tools_exclude: string[];
+  source: string;
+  notes: string;
+};
+
+export async function listEngineCatalog(): Promise<CatalogEntry[]> {
+  const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/catalog`,
+    { method: "GET", headers: jsonHeaders });
+  if (!response.ok) throw new Error(`Catalog failed: HTTP ${response.status}`);
+  return ((await response.json()) as { items: CatalogEntry[] }).items ?? [];
+}
+
+export async function declareCatalogEntry(input: {
+  entry: CatalogEntry;
+  path?: string | undefined;
+}): Promise<{ server_id: string }> {
+  const args = [...input.entry.args_prefix];
+  if (input.entry.needs_path && input.path?.trim()) {
+    if (input.entry.args_prefix.length > 0 && input.entry.args_prefix[input.entry.args_prefix.length - 1]?.startsWith("--")) {
+      args.push(input.path.trim());
+    } else {
+      args.push(input.path.trim());
+    }
+  }
+  return createEngineServer({
+    name: input.entry.name,
+    transport: input.entry.transport,
+    command: input.entry.command,
+    args,
+    toolsInclude: input.entry.tools_include,
+    toolsExclude: input.entry.tools_exclude,
+  });
+}

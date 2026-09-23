@@ -2,11 +2,14 @@
 import { useEffect, useState } from "react";
 import {
   createEngineServer,
+  declareCatalogEntry,
+  listEngineCatalog,
   listEngineServers,
   listEngineSkills,
   probeEngineServer,
   removeEngineServer,
   skillEngineAction,
+  type CatalogEntry,
   type ExternalServer,
   type ProbeResult,
   type Skill,
@@ -32,6 +35,7 @@ export function ConversationMcpSettingsSection() {
 
   return (
     <>
+      <CatalogSection declaredNames={new Set((servers ?? []).map((s) => s.name))} onChanged={reload} />
       <h3>Server MCP</h3>
       <p>
         Collega strumenti esterni (file, database, GitHub…): dichiari il server, decidi
@@ -276,5 +280,83 @@ export function ConversationSkillsSettingsSection() {
       ))}
       <HomunErrorNotice error={error} />
     </>
+  );
+}
+
+
+/** Repo-vetted entries, inert until declared; source always visible first. */
+function CatalogSection({ declaredNames, onChanged }: {
+  declaredNames: Set<string>;
+  onChanged: () => void;
+}) {
+  const [entries, setEntries] = useState<CatalogEntry[] | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [paths, setPaths] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    listEngineCatalog()
+      .then((items) => { if (active) setEntries(items); })
+      .catch((cause) => { if (active) setError(cause); });
+    return () => { active = false; };
+  }, []);
+
+  async function declare(entry: CatalogEntry) {
+    setBusyId(entry.id);
+    setError(null);
+    try {
+      await declareCatalogEntry({ entry, path: paths[entry.id] });
+      onChanged();
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section aria-label="Catalogo curato" className="cv-mcp-catalog">
+      <h4>Catalogo curato</h4>
+      <p className="cv-settings-note">
+        Voci verificate in questo repository, inerti finché non le dichiari tu:
+        il comando è sempre visibile prima di qualunque esecuzione.
+      </p>
+      {entries === null && !error && <p role="status">Leggo il catalogo…</p>}
+      {entries?.map((entry) => {
+        const declared = declaredNames.has(entry.name);
+        return (
+          <div className="cv-settings-card" key={entry.id}>
+            <strong>{entry.name}</strong>
+            <p>{entry.description}</p>
+            <p className="cv-settings-note">
+              <code>{entry.command} {entry.args_prefix.join(" ")}</code>
+              {entry.tools_include.length > 0 && ` · strumenti: ${entry.tools_include.join(", ")}`}
+              {entry.tools_exclude.length > 0 && ` · esclusi: ${entry.tools_exclude.join(", ")}`}
+              {` · sorgente: ${entry.source}`}
+            </p>
+            {entry.needs_path && (
+              <label>
+                {entry.needs_path}
+                <input value={paths[entry.id] ?? ""} disabled={busyId === entry.id || declared}
+                       onChange={(e) => setPaths((p) => ({ ...p, [entry.id]: e.target.value }))} />
+              </label>
+            )}
+            <div className="cs-actions">
+              {declared ? (
+                <small>Dichiarato</small>
+              ) : (
+                <button type="button" className="cw-secondary"
+                        disabled={busyId === entry.id || (!!entry.needs_path && !(paths[entry.id] ?? "").trim())}
+                        onClick={() => void declare(entry)}>
+                  {busyId === entry.id ? "Dichiaro…" : "Dichiara"}
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      <HomunErrorNotice error={error} />
+    </section>
   );
 }

@@ -213,3 +213,36 @@ def test_external_tool_rejects_non_matching_digest_and_disabled_tool(client, tmp
         "tool": "delete_customer", "arguments": {},
     })
     assert outside.status_code == 400
+
+
+def test_catalog_lists_vetted_entries_with_visible_source(client):
+    tc, _ = client
+    items = tc.get("/v1/workspaces/ws_local/mcp/catalog", headers=H).json()["items"]
+    assert len(items) >= 4
+    for entry in items:
+        assert entry["name"] and entry["source"]
+        assert entry["command"] or entry["transport"] == "http"
+        assert isinstance(entry["tools_include"], list)
+    fs = next(e for e in items if e["id"] == "filesystem")
+    assert fs["needs_path"] and "server-filesystem" in fs["command"] + " ".join(fs["args_prefix"])
+
+
+def test_declaring_from_catalog_creates_inert_declaration(client, tmp_path):
+    """Catalog -> declaration path: the person's click, not an install side-effect."""
+    tc, _ = client
+    from homun.context import get_context
+    ctx = get_context()
+    actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
+    entry = next(e for e in tc.get("/v1/workspaces/ws_local/mcp/catalog", headers=H).json()["items"]
+                 if e["id"] == "git")
+    args = [*entry["args_prefix"], "/tmp/repo-di-prova"]
+    created = tc.post("/v1/workspaces/ws_local/mcp/servers", headers=H, json={
+        "command_id": "cat1", "name": entry["name"], "transport": entry["transport"],
+        "command": entry["command"], "args": args,
+        "tools_include": entry["tools_include"],
+    }).json()
+    assert created["status"] == "enabled"
+    store = ctx.repository.load()
+    server = store.external_servers[created["server_id"]]
+    assert server.args[-1] == "/tmp/repo-di-prova"
+    assert "write_query" not in server.tools_include

@@ -9,6 +9,7 @@ from homun.domain.errors import DomainError
 from homun.routes.domain_support import _actor_from_headers, _http_error
 from homun.routes.price_comparisons import request_context
 from homun.application import external_tools
+from homun.application.mcp_catalog import catalog_public
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["mcp", "skills"])
 
@@ -38,6 +39,15 @@ def _server_public(server) -> dict[str, Any]:
         "tools_include": server.tools_include, "tools_exclude": server.tools_exclude,
         "status": server.status, "revision": server.revision,
     }
+
+
+@router.get("/mcp/catalog")
+def get_catalog(workspace_id: str):
+    """Curated, repo-vetted declarations; inert until the person declares one."""
+    ctx = get_context().snapshot()
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Unknown workspace"})
+    return {"items": catalog_public()}
 
 
 @router.get("/mcp/servers")

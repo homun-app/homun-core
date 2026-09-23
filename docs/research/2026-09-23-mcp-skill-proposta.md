@@ -93,3 +93,22 @@ Web:
   revisione. Verificato dal vivo: echo server → list_issues con
   `{"stato":"aperto"}` → «Strumento eseguito: il risultato è in revisione
   nella conversazione», lavoro in REVIEW con artifact a motore.
+
+## Realizzazione fetta 2b — catalogo curato (23/09/2026, verificato dal vivo)
+
+- **Catalogo nel repository** (`application/mcp_catalog.py`): cinque voci
+  verificate (filesystem, git, fetch, sqlite, memory) con trasporto, comando,
+  prefisso argomenti, allowlist/esclusioni e **sorgente sempre visibile**
+  (npm/pypi). La presenza nel catalogo è vetting, non installazione: la voce
+  resta inerte finché la persona non la dichiara. Le esclusioni sono parte
+  del contratto (sqlite ammette read ma esclude `write_query`).
+- **Route** `GET /mcp/catalog` (sola lettura, forma pubblica senza campi
+  interni). **Web**: sezione «Catalogo curato» in cima a Plugin e capacità —
+  comando e sorgente visibili prima di qualunque esecuzione, campo percorso
+  obbligatorio per le voci che lo richiedono (Dichiara disabilitato finché
+  è vuoto), bottone «Dichiara» → dichiarazione normale sotto «Server MCP»,
+  stato «Dichiarato» per le voci già presenti.
+- Verificato dal vivo: fetch dichiarato dal catalogo → appare sotto Server
+  MCP con «strumenti ammessi: fetch»; le voci con percorso restano
+  disabilitate senza percorso. Probe/meccanica di esecuzione già coperti
+  dalle fette 1–2 (suite 488 verdi, +2 test catalogo).
