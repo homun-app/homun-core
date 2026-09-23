@@ -64,7 +64,15 @@ Una verifica del sorgente non aggiorna l'app installata.
   descrittori e risposte strutturate. Il collegamento MCP al ciclo adattivo resta
   aperto. [Prove e limiti](research/2026-09-23-agent-registry-verifica.md).
 
+- Chiamate MCP supervisionate con intento e ricevuta durevoli: ripresa della
+  pubblicazione senza nuova chiamata, esiti incerti visibili, approvazione legata
+  alla configurazione server e al lavoro. [Prove e limiti](research/2026-09-23-external-receipts-verifica.md).
+
 ## Evidenze della tranche corrente
+
+Ricevute esterne: **768 test engine passati, 1 saltato**, poi **47 test mirati**
+dopo la correzione finale; 216 test web, typecheck e build riusciti. Una vera
+chiamata stdio resta singola dopo ricreazione del contesto e ripresa pubblicazione.
 
 Registro e MCP: **759 test engine passati, 1 saltato**, **216 test web passati**,
 typecheck e OpenAPI allineati, architettura 0 errori. Prova Ollama reale

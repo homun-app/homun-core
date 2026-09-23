@@ -143,7 +143,7 @@ export async function skillEngineAction(input: {
 
 export type ExternalToolCall = {
   id: string;
-  status: "pending_approval" | "running" | "completed" | "failed";
+  status: "pending_approval" | "running" | "completed" | "failed" | "publication_pending" | "outcome_unknown" | "tool_error" | "blocked";
   work_id: string;
   server_id: string;
   server_name: string;

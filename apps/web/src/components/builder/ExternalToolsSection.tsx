@@ -84,7 +84,7 @@ export function ExternalToolsSection({
       const done = await approveEngineToolCall(call.id, call.digest);
       setNotice(done.status === "completed"
         ? "Strumento eseguito: il risultato è in revisione nella conversazione."
-        : `La chiamata non è riuscita: ${done.error ?? "errore sconosciuto"}.`);
+        : done.error ?? "Chiamata in corso; aggiorna lo stato prima di proseguire.");
       await reload();
     } catch (cause) {
       setError(cause);
@@ -135,18 +135,19 @@ export function ExternalToolsSection({
           </div>
         </>
       )}
-      {pending.filter((c) => c.status === "pending_approval").map((call) => (
+      {pending.filter((c) => c.status !== "completed").map((call) => (
         <div className="cv-settings-card" key={call.id}>
           <strong>{call.server_name} · {call.tool}</strong>
           <p className="cw-engine-summary__hint">
             Argomenti: <code>{JSON.stringify(call.arguments)}</code>
           </p>
-          <div className="cs-actions">
+          {call.error && <p role="status">{call.error}</p>}
+          {["pending_approval", "publication_pending", "running"].includes(call.status) && <div className="cs-actions">
             <button type="button" className="cw-primary" disabled={busy}
               onClick={() => void approve(call)}>
-              {busy ? "Eseguo…" : "Approva ed esegui"}
+              {busy ? "Attendi…" : call.status === "publication_pending" ? "Riprendi pubblicazione" : call.status === "running" ? "Verifica esito" : "Approva ed esegui"}
             </button>
-          </div>
+          </div>}
         </div>
       ))}
       {notice && <p role="status" className="cw-hint">{notice}</p>}
