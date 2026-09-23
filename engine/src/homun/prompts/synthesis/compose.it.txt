@@ -1,4 +1,4 @@
-Sei {{agent_name}}, collaboratore di Homun, e stai eseguendo la fase «{{step_title}}» del lavoro che ti è stato affidato.
+Sei {{agent_name}}, e stai eseguendo la fase «{{step_title}}» del lavoro che ti è stato affidato.
 Identità professionale: {{agent_identity}}
 Istruzioni operative del tuo profilo: {{agent_instructions}}
 

@@ -79,7 +79,7 @@ def _running_authority(ctx, store, proposal):
 def _connection(ctx, agent):
     """The agent's preferred connection when it exists; honest fallback otherwise."""
     from homun.domain.errors import NotFoundError
-    if agent.preferred_connection_id:
+    if agent and agent.preferred_connection_id:
         try:
             ctx.models.get_connection(agent.preferred_connection_id)
             return agent.preferred_connection_id, 'collaboratore'
@@ -89,6 +89,8 @@ def _connection(ctx, agent):
 
 
 def _identity_lines(agent):
+    if agent is None:
+        return 'Homun esegue direttamente il lavoro concordato sotto supervisione umana.'
     parts = []
     if agent.responsibility:
         parts.append(f"Responsabilità: {agent.responsibility}")
@@ -133,15 +135,17 @@ def compose(ctx, proposal):
 
     store = ctx.repository.load()
     actor, work = _running_authority(ctx, store, proposal)
-    agent = store.agents[proposal['assignee_id']]
+    from homun.application.executor import resolve_executor
+    agent = resolve_executor(store, proposal['assignee_id'], human_owner_id=work.owner_id)
+    executor_name = agent.name if agent else 'Homun'
     brief = latest_intake(store, work.id) or {}
     from homun.application.phase_execution import phase_plan_step
     step = phase_plan_step(store, work, 'synthesize')
     template = ctx.models.prompts.get('synthesis/compose', proposal.get('language'))
     system = template.render(
-        agent_name=agent.name,
+        agent_name=executor_name,
         agent_identity=_identity_lines(agent),
-        agent_instructions=agent.instructions or 'Nessuna istruzione aggiuntiva.',
+        agent_instructions=(agent.instructions if agent else '') or 'Nessuna istruzione aggiuntiva.',
         step_title=proposal['step_title'],
         output_expected=(step.output_expected if step is not None and step.output_expected
                          else brief.get('output') or 'La bozza concordata del lavoro'),
@@ -152,7 +156,7 @@ def compose(ctx, proposal):
     )
     connection_id, connection_kind = _connection(ctx, agent)
     reservation = work_budgets.reserve(ctx, actor, work.id, BudgetCounters(attempts=1),
-                                       purpose='synthesis.compose', accounting_actor_id=agent.id)
+                                       purpose='synthesis.compose', accounting_actor_id=proposal['assignee_id'])
     usage_before = len(ctx.models.usage)
     try:
         result = ctx.models.complete(
@@ -188,7 +192,7 @@ def compose(ctx, proposal):
     if truncated:
         text = text[:limit] + '\n\n[… bozza interrotta al limite di caratteri]'
     model_id = getattr(usage_entry, 'model_id', None) or _provider_default(ctx, connection_id)
-    provenance = (f"> Sintesi di {agent.name} · modello {model_id} · connessione "
+    provenance = (f"> Sintesi di {executor_name} · modello {model_id} · connessione "
                   f"{'del collaboratore' if connection_kind == 'collaboratore' else 'attiva dello spazio (nessuna dedicata)'}"
                   f" · materiali: {len(proposal['materials'])}"
                   + (f" · procedure: {len(proposal.get('skills') or [])}" if proposal.get('skills') else "")

@@ -76,6 +76,8 @@ def _resolve_plan_assignee(store, name, fallback_agent_id):
         for agent in store.agents.values():
             if agent.status == 'active' and agent.name.strip().casefold() == wanted:
                 return agent.id
+    if wanted:
+        raise ConflictError('Plan phase collaborator is no longer active')
     return fallback_agent_id
 
 
@@ -213,10 +215,10 @@ def confirm(ctx,actor,work_id,proposal_id,body):
             idle(work)
             if proposal['status']!='pending_confirmation' or work.version!=proposal['expected_version']:
                 raise ConflictError('Proposal or work changed; propose again')
-            if require_capability(proposal['capability']).kind == 'executable' and not (selected or proposal['new_agent']):
-                raise ValidationError('Propose a collaborator before confirming CSV work')
             service=ctx.service.for_store(store)
             owner=selected['id'] if selected else work.owner_id
+            if not (selected or proposal['new_agent']) and 'staffing' in proposal.get('changed_fields', []):
+                owner = work.reviewer_id or actor.id
             if proposal['new_agent']:
                 if not body.get('create_agent',False):
                     raise ValidationError('Explicit creation confirmation is required')

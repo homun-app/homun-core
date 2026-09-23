@@ -22,7 +22,7 @@ const FIELD_LABELS: Record<string, string> = {
 const CAPABILITY_LABELS: Record<string, string> = {
   compare_csv: "Confronto CSV",
   read_material: "Lettura materiale",
-  synthesize: "Sintesi scritta (modello del collaboratore)",
+  synthesize: "Sintesi scritta da revisionare",
   general: "Preparazione",
 };
 
@@ -86,7 +86,7 @@ export function intakeConfirmLabel(
   if (!proposal) return "Conferma la proposta";
   if (proposal.new_agent) return "Crea il collaboratore e affida";
   if (proposal.suggested_agent) return "Conferma e affida";
-  return "Conferma il riepilogo";
+  return "Conferma il lavoro con Homun";
 }
 
 /**
@@ -110,6 +110,6 @@ export function applyIntakePreview(work: Work, proposal: WorkIntake): Work {
     next.engineObjectiveProposed = true;
   }
   const agent = proposal.suggested_agent ?? proposal.new_agent;
-  if (agent) next.engineProposedAgentName = agent.name;
+  next.engineProposedAgentName = agent?.name ?? "Homun";
   return next;
 }

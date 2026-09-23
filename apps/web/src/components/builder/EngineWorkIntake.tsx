@@ -121,7 +121,7 @@ export function EngineWorkIntake({
               </div>
             )}
             <dl className="cw-intake-facts">
-              <div><dt>Attività prevista</dt><dd>{p.capability === 'compare_csv' ? 'Confronto prezzi fra due CSV' : p.capability === 'read_material' ? 'Lettura autorizzata di un materiale' : p.capability === 'synthesize' ? 'Sintesi scritta dal modello del collaboratore, bozza in revisione' : 'Preparazione del lavoro, senza esecuzione automatica'}</dd></div>
+              <div><dt>Attività prevista</dt><dd>{p.capability === 'compare_csv' ? 'Confronto prezzi fra due CSV' : p.capability === 'read_material' ? 'Lettura autorizzata di un materiale' : p.capability === 'synthesize' ? 'Sintesi scritta da Homun o dal collaboratore scelto, bozza in revisione' : 'Preparazione del lavoro, senza esecuzione automatica'}</dd></div>
               <div>
                 <dt>Risultato atteso</dt>
                 <dd>{p.output}</dd>
@@ -129,7 +129,7 @@ export function EngineWorkIntake({
               <div>
                 <dt>{confirmed ? "Responsabile" : "Ti propongo"}</dt>
                 <dd>
-                  <strong>{agent?.name ?? "Nessun collaboratore selezionato"}</strong>
+                  <strong>{agent?.name ?? "Homun"}</strong>
                   {agent && <span>{agent.role}</span>}
                 </dd>
               </div>

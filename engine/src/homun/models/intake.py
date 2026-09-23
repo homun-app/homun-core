@@ -175,19 +175,7 @@ def synthesize(registry, text, agents, *, previous_brief=None, latest_request=No
                 raise
     if any(len(item)>500 for item in brief.constraints + brief.missing_information):
         raise ValueError('Intake list item too long')
-    spec = require_capability(brief.capability)
-    if spec.kind == 'executable' and not (brief.suggested_agent_id or brief.new_agent):
-        if not agents and spec.fallback_collaborator:
-            # Empty roster on a first-run workspace: the engine, not the model,
-            # guarantees that executable work always carries a confirmable
-            # collaborator proposal. Nothing is created before human confirmation.
-            brief.new_agent = NewAgent.model_validate(spec.fallback_collaborator)
-        elif len(agents) == 1:
-            # A single candidate leaves no recommendation to invent; the person
-            # still confirms the assignment explicitly.
-            brief.suggested_agent_id = agents[0]['id']
-        else:
-            raise ValueError('Executable work requires a collaborator proposal')
+    require_capability(brief.capability)
     if brief.suggested_agent_id and brief.new_agent:
         raise ValueError('Choose existing agent or new profile')
     if brief.suggested_agent_id:

@@ -145,9 +145,15 @@ test("confirm label names the decision the person is making", () => {
     intakeConfirmLabel(proposal({ new_agent: null, suggested_agent: { id: "a", name: "Ada", role: "R", revision: 1 } })),
     "Conferma e affida",
   );
-  assert.equal(intakeConfirmLabel(proposal({ new_agent: null })), "Conferma il riepilogo");
+  assert.equal(intakeConfirmLabel(proposal({ new_agent: null })), "Conferma il lavoro con Homun");
   assert.equal(intakeConfirmLabel(null), "Conferma la proposta");
   assert.equal(isIntakeAwaitingUser(proposal()), true);
   assert.equal(isIntakeAwaitingUser(proposal({ status: "confirmed" })), false);
   assert.equal(isIntakeAwaitingUser(null), false);
+});
+
+
+test("direct intake names Homun even after a delegated preview", () => {
+  const next = applyIntakePreview({ ...draftWork(), engineProposedAgentName: "Ada" }, proposal({ new_agent: null, suggested_agent: null }));
+  assert.equal(next.engineProposedAgentName, "Homun");
 });

@@ -38,13 +38,13 @@ def confirm_intake(ctx, actor, work, *, capability='synthesize', plan_steps=None
         'title': 'Catalogo prodotti Acme', 'objective': 'Preparare il catalogo per Acme dai listini.',
         'output': 'Bozza di catalogo in Markdown', 'constraints': ['prezzi dai listini caricati'],
         'missing_information': [], 'suggested_agent_id': None,
-        'new_agent': {'name': agent_name, 'role': 'Redazione di cataloghi', 'instructions': 'Redige cataloghi dai listini'},
+        'new_agent': {'name': agent_name, 'role': 'Redazione di cataloghi', 'instructions': 'Redige cataloghi dai listini'} if agent_name else None,
         'rationale': 'Redazione documentale', 'capability': capability,
         'plan_steps': plan_steps or [],
     }))
     p = intake_propose(ctx, actor, work, {'command_id': 'intake', 'text': 'Prepara il catalogo per Acme', 'expected_version': 1})
     intake_confirm(ctx, actor, work, p['id'], {'command_id': 'staff', 'digest': p['digest'],
-                                               'expected_version': p['expected_version'], 'create_agent': True})
+                                               'expected_version': p['expected_version'], 'create_agent': bool(agent_name)})
     return ctx.repository.load().works[work].version
 
 
@@ -391,3 +391,58 @@ def test_partial_usage_preserves_known_tokens_and_unknown_attempt(setup, known_a
     assert not after.pending
     with pytest.raises(BudgetExhaustedError):
         budgets.reserve(ctx, actor, work, BudgetCounters(attempts=1), accounting_actor_id=agent_id)
+
+
+@pytest.mark.parametrize('phased', [False, True])
+def test_homun_direct_synthesis_publishes_review_without_profile(setup, phased):
+    ctx, actor, work, material = setup
+    version = confirm_intake(ctx, actor, work, agent_name=None,
+        plan_steps=[{'title':'Scrivi catalogo', 'capability':'synthesize', 'assignee':''}] if phased else None)
+    seen = {}
+    def complete(messages, **kwargs):
+        seen.update(kwargs)
+        seen['prompt'] = messages[0].content
+        return SimpleNamespace(text='Catalogo dai materiali approvati')
+    ctx.models.complete = complete
+    p = propose(ctx, actor, work, {'command_id':'synth', 'material_ids':[material], 'expected_version':version})
+    approve(ctx, actor, work, p['id'], confirmation(p))
+    execute(ctx, p['id'])
+    execute(ctx, p['id'])
+    store = ctx.repository.load()
+    assert store.works[work].status == 'review'
+    assert store.works[work].owner_id == actor.id
+    assert not store.agents and len(store.artifacts) == 1
+    assert next(iter(store.artifacts.values())).content.startswith('> Sintesi di Homun')
+    assert seen['connection_id'] is None
+    assert 'Homun' in seen['prompt']
+    assert not store.work_budgets[work].pending
+
+
+@pytest.mark.parametrize('stage', ['proposal', 'approval', 'execution', 'publication'])
+def test_inactive_explicit_assignee_never_falls_back_to_homun(setup, stage):
+    from homun.domain.errors import ValidationError
+    ctx, actor, work, material = setup
+    version = confirm_intake(ctx, actor, work)
+    def retire():
+        with ctx.repository.transaction() as store:
+            store.agents[store.works[work].owner_id].status = 'retired'
+    if stage == 'proposal':
+        retire()
+        with pytest.raises(ValidationError):
+            propose(ctx, actor, work, {'command_id':'synth', 'expected_version':version})
+        return
+    p = propose(ctx, actor, work, {'command_id':'synth', 'expected_version':version})
+    if stage == 'approval':
+        retire()
+        with pytest.raises(ValidationError):
+            approve(ctx, actor, work, p['id'], confirmation(p))
+        return
+    approve(ctx, actor, work, p['id'], confirmation(p))
+    if stage == 'execution':
+        retire()
+    def complete(*a, **k):
+        retire()
+        return SimpleNamespace(text='Draft')
+    ctx.models.complete = complete
+    execute(ctx, p['id'])
+    assert not ctx.repository.load().artifacts

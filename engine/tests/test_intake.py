@@ -247,59 +247,27 @@ def test_generic_commands_cannot_bypass_unconfirmed_intake(setup,command,payload
     assert not ctx.service.store.plans and not ctx.service.store.runs
 
 
-def test_csv_intake_requires_explicit_collaborator_proposal(setup):
-    from homun.application.intake import propose
-    ctx,actor,wid,brief=setup
-    ctx.service.apply(actor,'second','agent.create',{'name':'Bice','role':'Analisi dati','instructions':'Confronta dati'})
-    ctx.persist()
-    brief['suggested_agent_id']=None
-    brief['new_agent']=None
-    p=propose(ctx,actor,wid,{'command_id':'i','text':'Chi può confrontare i listini?','expected_version':1})
-    assert p['status']=='failed' and p['error_code']=='intake_invalid_response'
-    assert ctx.repository.load().works[wid].owner_id==actor.id
-
-
-def test_single_active_agent_fills_the_collaborator_proposal(setup):
-    from homun.application.intake import propose
-    ctx,actor,wid,brief=setup
-    brief['suggested_agent_id']=None
-    ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps(brief))
-    p=propose(ctx,actor,wid,{'command_id':'i','text':'Confronta i listini','expected_version':1})
-    assert p['status']=='pending_confirmation'
-    assert p['suggested_agent'] and p['suggested_agent']['name']=='Ada'
-
-
-def test_empty_roster_still_proposes_a_confirmable_collaborator(setup):
-    from homun.application.intake import propose,confirm
-    from homun.domain.errors import ValidationError
-    ctx,actor,wid,brief=setup
-    with ctx.repository.transaction() as store:
-        for agent in store.agents.values():
-            agent.status='retired'
-    brief['suggested_agent_id']=None
-    ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps(brief))
-    p=propose(ctx,actor,wid,{'command_id':'i','text':'Confronta listini','expected_version':1})
-    assert p['status']=='pending_confirmation'
-    assert p['new_agent'] and p['new_agent']['name']=='Aurora'
-    body={'command_id':'ok','digest':p['digest'],'expected_version':1,'create_agent':False}
-    with pytest.raises(ValidationError): confirm(ctx,actor,wid,p['id'],body)
-    body['create_agent']=True
-    assert confirm(ctx,actor,wid,p['id'],body)['status']=='confirmed'
-    store=ctx.repository.load()
-    assert len(store.agents)==2 and not store.grants
-    assert store.works[wid].owner_id!=actor.id
-
-
-def test_older_csv_proposal_without_collaborator_cannot_be_confirmed(setup):
-    from homun.application.intake import propose,confirm
-    from homun.domain.errors import ValidationError
-    ctx,actor,wid,brief=setup
-    p=propose(ctx,actor,wid,{'command_id':'i','text':'Confronta listini','expected_version':1})
-    # A persisted pre-validation proposal must not become an assignment bypass.
-    ctx.service.store.commands['i'].result['suggested_agent']=None
-    ctx.persist()
-    with pytest.raises(ValidationError):
-        confirm(ctx,actor,wid,'i',{'command_id':'ok','digest':p['digest'],'expected_version':1,'create_agent':False})
+@pytest.mark.parametrize('roster', ['empty', 'single', 'multiple'])
+def test_direct_intake_preserves_human_owner_without_creating_agent(setup, roster):
+    from homun.application.intake import propose, confirm
+    ctx, actor, wid, brief = setup
+    if roster == 'empty':
+        with ctx.repository.transaction() as store:
+            for agent in store.agents.values():
+                agent.status = 'retired'
+    elif roster == 'multiple':
+        ctx.service.apply(actor, 'second', 'agent.create', {'name':'Bice', 'role':'Analisi', 'instructions':'Analizza'})
+        ctx.persist()
+    before = set(ctx.repository.load().agents)
+    brief.update(suggested_agent_id=None, new_agent=None)
+    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
+    p = propose(ctx, actor, wid, {'command_id':'i', 'text':'Confronta i listini', 'expected_version':1})
+    assert p['status'] == 'pending_confirmation'
+    assert p['suggested_agent'] is None and p['new_agent'] is None
+    assert confirm(ctx, actor, wid, p['id'], {'command_id':'ok', 'digest':p['digest'], 'expected_version':1})['status'] == 'confirmed'
+    store = ctx.repository.load()
+    assert set(store.agents) == before
+    assert store.works[wid].owner_id == actor.id
 
 
 def test_clarification_model_receives_prior_task_context(setup):
@@ -413,7 +381,7 @@ def test_refinement_without_collaborator_keeps_anchor_staffing_actionable(setup)
     first=propose(ctx,actor,wid,{'command_id':'i','text':'Confronta i listini','expected_version':1})
     ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
         'capability':'general','suggested_agent_id':None,'new_agent':None,
-        'changed_fields':['staffing']}))
+        'changed_fields':[]}))
     refined=propose(ctx,actor,wid,{'command_id':'ii','text':'Aggiorna la proposta','expected_version':1})
     assert refined['status']=='pending_confirmation'
     assert refined['capability']=='compare_csv'
@@ -608,3 +576,28 @@ def test_classify_http_contract_keeps_routing_stateless(setup):
             assert bad.status_code==503 and bad.json()['detail']['code']=='intake_invalid_response'
     finally:
         reset_context_for_tests(None)
+
+
+def test_direct_agreement_refinement_does_not_invent_a_collaborator(setup):
+    from homun.application.intake import propose, confirm
+    ctx, actor, wid, brief = setup
+    brief.update(suggested_agent_id=None, new_agent=None)
+    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
+    p = propose(ctx, actor, wid, {'command_id':'direct', 'text':'Confronta listini', 'expected_version':1})
+    confirm(ctx, actor, wid, p['id'], {'command_id':'confirm', 'digest':p['digest'], 'expected_version':1})
+    brief.update(suggested_agent_id=next(iter(ctx.repository.load().agents)), changed_fields=['output'], output='Report breve')
+    p = propose(ctx, actor, wid, {'command_id':'refine', 'text':'Report breve', 'expected_version':2})
+    assert p['suggested_agent'] is None and p['new_agent'] is None
+
+
+def test_explicit_return_to_homun_keeps_confirming_human_owner(setup):
+    from homun.application.intake import propose, confirm
+    ctx, actor, wid, brief = setup
+    p = propose(ctx, actor, wid, {'command_id':'delegated', 'text':'Confronta listini', 'expected_version':1})
+    confirm(ctx, actor, wid, p['id'], {'command_id':'confirm', 'digest':p['digest'], 'expected_version':1})
+    brief.update(suggested_agent_id=None, new_agent=None, changed_fields=['staffing'])
+    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
+    p = propose(ctx, actor, wid, {'command_id':'direct', 'text':'Occupatene direttamente Homun', 'expected_version':2})
+    assert p['suggested_agent'] is None and p['new_agent'] is None
+    confirm(ctx, actor, wid, p['id'], {'command_id':'confirm-direct', 'digest':p['digest'], 'expected_version':2})
+    assert ctx.repository.load().works[wid].owner_id == actor.id

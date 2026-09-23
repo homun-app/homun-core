@@ -64,6 +64,12 @@ def preserve_staffing(values: dict, anchor: dict, catalog: list[dict], owner_id:
     """
     standing = _standing_agent(anchor, catalog, owner_id)
     declared = set(values.get('changed_fields') or [])
+    if 'staffing' in declared and not (values.get('suggested_agent') or values.get('new_agent')):
+        return values  # An explicit return to direct Homun execution.
+    if 'staffing' not in declared and not standing and not (anchor.get('suggested_agent') or anchor.get('new_agent')):
+        values['suggested_agent'] = None
+        values['new_agent'] = None
+        return values
     if values.get('suggested_agent') or values.get('new_agent'):
         fresh_new = values.get('new_agent')
         # A declared staffing change wins only when it is a real swap: a new

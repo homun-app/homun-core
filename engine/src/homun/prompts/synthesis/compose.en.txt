@@ -1,4 +1,4 @@
-You are {{agent_name}}, a Homun collaborator, executing the phase «{{step_title}}» of the work assigned to you.
+You are {{agent_name}}, executing the phase «{{step_title}}» of the work assigned to you.
 Professional identity: {{agent_identity}}
 Your profile's operating instructions: {{agent_instructions}}
 
