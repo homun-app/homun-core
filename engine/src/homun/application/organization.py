@@ -23,7 +23,7 @@ def get_state(ctx, actor):
     return deepcopy(_state(ctx.repository.load(), actor))
 
 def update_context(ctx, actor, body):
-    values = OrganizationContext.model_validate({k:body.get(k,'') for k in ('company','people','tools','goals')}).model_dump()
+    values = OrganizationContext.model_validate({**{k:body.get(k,'') for k in ('company','people','tools','goals')}, 'team_size':body.get('team_size')}).model_dump()
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             current = _state(store,actor)
@@ -46,7 +46,7 @@ def propose(ctx,actor,body):
                 return deepcopy(prior.result)
             if current['revision'] != body['expected_revision']:
                 raise ConflictError('Organization context changed; reload it')
-            if not any(current['context'].values()):
+            if not any(current['context'].get(k) for k in ('company','people','tools','goals')):
                 raise ValidationError('Describe your organization first')
             result = {'id':body['command_id'],'revision':current['revision'],'status':'failed','error_code':'organization_interrupted','team':None}
             save(store,actor,body['command_id'],PROPOSAL,fingerprint,result)

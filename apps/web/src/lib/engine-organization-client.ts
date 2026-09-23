@@ -1,7 +1,7 @@
 import { ENGINE_DEFAULT_BASE_URL } from './engine-client.ts';
 import { DEFAULT_WORKSPACE_ID, defaultLocalActor, domainFetch } from './engine-domain-client.ts';
 import { homunErrorFromHttp } from './homun-errors.ts';
-export type OrganizationContext = { company: string; people: string; tools: string; goals: string };
+export type OrganizationContext = { company: string; people: string; tools: string; goals: string; team_size?: number | null };
 export type OrganizationProposal = {
   id: string; revision: number; status: 'pending_confirmation' | 'confirmed' | 'failed'; error_code: string | null;
   team: null | { name: string; description: string; questions: string[]; limitations: string[];

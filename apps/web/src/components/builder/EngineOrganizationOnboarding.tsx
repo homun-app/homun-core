@@ -4,7 +4,7 @@ import { organizationRequest, type OrganizationContext, type OrganizationState, 
 import { HomunClientError } from '@/lib/homun-errors';
 import './engine-organization.css';
 
-const labels: Record<keyof OrganizationContext, string> = {
+const labels: Record<Exclude<keyof OrganizationContext, "team_size">, string> = {
   company: 'Di cosa si occupa la tua azienda?', people: 'Persone e responsabilità',
   tools: 'Strumenti che usate oggi', goals: 'Difficoltà e obiettivi da migliorare',
 };
@@ -54,16 +54,22 @@ function OrganizationEditor({ onChanged }: { onChanged?: (() => Promise<void>) |
   return <div className="organization-editor">
     <h2>Una squadra per il tuo lavoro</h2>
     <p>Fonte: motore · Facoltativo. Descrivi il contesto, rivedi la proposta e scegli se creare i collaboratori.</p>
-    <p>Le persone descritte restano contesto: inviti e collaborazione con altre persone arriveranno in seguito.</p>
+    <p>Le persone descritte restano contesto. Nei lavori puoi chiedere un contributo a una persona e creare un invito limitato alla sua richiesta.</p>
     <HomunErrorNotice error={error} />
     {!draft ? <p>Caricamento del contesto…</p> : <>
-      {(Object.keys(labels) as (keyof OrganizationContext)[]).map(key => <label key={key}>
+      {(Object.keys(labels) as (Exclude<keyof OrganizationContext, "team_size">)[]).map(key => <label key={key}>
         {labels[key]}<textarea rows={3} maxLength={key === 'company' || key === 'goals' ? 6000 : 4000}
           disabled={busy} value={draft[key]} onChange={e => { setDraft({ ...draft, [key]: e.target.value }); setSaved(false); }} />
       </label>)}
+      <label>Numero di collaboratori
+        <select disabled={busy} value={draft.team_size ?? ''} onChange={e => { setDraft({ ...draft, team_size: e.target.value ? Number(e.target.value) : null }); setSaved(false); }}>
+          <option value="">Proponi la squadra minima utile</option>
+          {[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </label>
       <div className="organization-actions">
         <button type="button" className="cw-secondary" disabled={busy} onClick={() => void act('save')}>Salva contesto</button>
-        <button type="button" className="cw-secondary" disabled={busy || !Object.values(draft).some(v => v.trim())} onClick={() => void act('propose')}>
+        <button type="button" className="cw-secondary" disabled={busy || !Object.values(draft).some(v => typeof v === "string" && v.trim())} onClick={() => void act('propose')}>
           {busy ? 'Attendi…' : 'Proponi la squadra'}
         </button>
       </div>

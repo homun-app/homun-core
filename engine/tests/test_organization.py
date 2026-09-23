@@ -129,3 +129,23 @@ def test_proposal_text_items_are_bounded(setup, field):
     target[field] = ['x'*601]
     with pytest.raises(ValidationError):
         TeamProposal.model_validate(proposal)
+
+def test_explicit_team_size_persists_and_wrong_model_count_is_rejected(setup):
+    from homun.application.organization import update_context, propose, get_state
+    ctx,actor,_ = setup
+    update_context(ctx,actor,dict(command_id='context',expected_revision=0,company='Services',team_size=2))
+    assert get_state(ctx,actor)['context']['team_size'] == 2
+    assert propose(ctx,actor,dict(command_id='proposal',expected_revision=1))['error_code'] == 'organization_invalid_response'
+
+@pytest.mark.parametrize('count',[0,7])
+def test_invalid_explicit_team_size_rejected(count):
+    from homun.models.organization import OrganizationContext
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        OrganizationContext(team_size=count)
+
+def test_explicit_team_size_accepts_exact_model_count(setup):
+    from homun.models.organization import generate
+    ctx,_,proposal = setup
+    proposal['agents'].append({**proposal['agents'][0], 'name':'Bruno','role':'Documentazione'})
+    assert len(generate(ctx.models,{'company':'Services','team_size':2})['agents']) == 2
