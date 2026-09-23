@@ -1,10 +1,11 @@
 /** Supervised model synthesis: the assignee's model writes the phase draft. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Work } from "./conversation-types";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { HomunGuidanceNotice } from "@/components/HomunGuidanceNotice";
 import { useSynthesis } from "@/hooks/useSynthesis";
 import { eligibleForRead, READ_UPLOAD_EXTENSIONS } from "@/lib/engine-material-selection";
+import { listEngineSkills } from "@/lib/engine-mcp-client";
 import { EngineMaterialSelection } from "./EngineMaterialSelection";
 
 export function EngineSynthesis({
@@ -17,9 +18,25 @@ export function EngineSynthesis({
   onChanged: () => Promise<void>;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
+  const [skills, setSkills] = useState<{ id: string; name: string; description: string }[]>([]);
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const synth = useSynthesis(work, onChanged);
   const p = synth.proposal;
   const idle = !p || ["failed", "blocked"].includes(p.status);
+
+  useEffect(() => {
+    let live = true;
+    listEngineSkills()
+      .then((items) => {
+        if (live) setSkills(items.filter((s) => s.status === "approved"));
+      })
+      .catch(() => {
+        if (live) setSkills([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   return (
     <section className="cw-price-tool" aria-label="Sintesi del collaboratore">
@@ -51,11 +68,40 @@ export function EngineSynthesis({
                 ? "Senza materiali la bozza nasce da obiettivo e vincoli dichiarati."
                 : `${selected.length} ${selected.length === 1 ? "documento selezionato" : "documenti selezionati"}: fino a 24.000 caratteri di contesto, bozza entro 8.000.`}
             </p>
+            {skills.length > 0 && (
+              <fieldset className="cv-settings-card" aria-label="Procedure approvate">
+                <legend>Procedure da seguire (facoltative, al massimo 3)</legend>
+                {skills.map((skill) => (
+                  <label key={skill.id}>
+                    <input
+                      type="checkbox"
+                      checked={selectedSkills.includes(skill.id)}
+                      disabled={synth.busy}
+                      onChange={(event) => {
+                        synth.renew();
+                        setSelectedSkills((current) =>
+                          event.target.checked
+                            ? current.length >= 3
+                              ? current
+                              : [...current, skill.id]
+                            : current.filter((id) => id !== skill.id),
+                        );
+                      }}
+                    />{" "}
+                    {skill.name} — {skill.description}
+                  </label>
+                ))}
+                <p className="cw-hint">
+                  Il corpo della procedura selezionata entra nel contesto del modello e resta
+                  citato nella provenienza della bozza.
+                </p>
+              </fieldset>
+            )}
             <button
               type="button"
               className="cw-secondary"
               disabled={synth.busy}
-              onClick={() => void synth.prepare(selected)}
+              onClick={() => void synth.prepare(selected, selectedSkills)}
             >
               Prepara la sintesi
             </button>
@@ -68,6 +114,7 @@ export function EngineSynthesis({
               <strong>{p.step_title}</strong> · {p.materials.length === 0
                 ? "nessun materiale: obiettivo e vincoli"
                 : p.materials.map((m) => m.title).join(", ")}
+              {p.skills?.length ? ` · procedure: ${p.skills.map((s) => s.name).join(", ")}` : ""}
             </p>
             <p className="cw-hint">
               Scriverà la bozza il modello del collaboratore assegnato (o la connessione attiva

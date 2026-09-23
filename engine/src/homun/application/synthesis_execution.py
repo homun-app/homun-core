@@ -148,7 +148,7 @@ def compose(ctx, proposal):
         objective=work.objective,
         constraints='; '.join(brief.get('constraints') or []) or 'nessuno dichiarato',
         materials=_materials_block(ctx, store, actor, proposal),
-        skills=_skills_block(),
+        skills=_skills_block(store, proposal),
     )
     connection_id, connection_kind = _connection(ctx, agent)
     reservation = work_budgets.reserve(ctx, actor, work.id, BudgetCounters(attempts=1),
@@ -181,17 +181,36 @@ def compose(ctx, proposal):
     model_id = getattr(usage_entry, 'model_id', None) or _provider_default(ctx, connection_id)
     provenance = (f"> Sintesi di {agent.name} · modello {model_id} · connessione "
                   f"{'del collaboratore' if connection_kind == 'collaboratore' else 'attiva dello spazio (nessuna dedicata)'}"
-                  f" · materiali: {len(proposal['materials'])} · bozza in revisione: nessun invio esterno.")
+                  f" · materiali: {len(proposal['materials'])}"
+                  + (f" · procedure: {len(proposal.get('skills') or [])}" if proposal.get('skills') else "")
+                  + " · bozza in revisione: nessun invio esterno.")
     return provenance + '\n\n' + text, {'model_id': model_id, 'connection': connection_kind,
                                         'truncated': truncated, 'connection_id': connection_id}
 
 
-def _skills_block():
+def _skills_block(store, proposal):
+    """Selected procedure bodies (L1); without selection the L0 name index stays."""
+    from homun.domain.capabilities import SYNTHESIZE
+    selected = proposal.get('skills') or []
+    if selected:
+        limit = SYNTHESIZE.limits['max_skill_characters']
+        blocks = []
+        for binding in selected:
+            skill = store.skills.get(binding['id'])
+            if skill is None or skill.status != 'approved':
+                continue
+            body = skill.body[:limit]
+            if len(skill.body) > limit:
+                body += '\n[… procedura troncata al limite di caratteri]'
+            blocks.append(f"### {skill.name} (procedura approvata, revisione {skill.revision})\n{body}")
+        if blocks:
+            return '\n\n'.join(blocks)
     from homun.models.intake import approved_skills_index
     skills = approved_skills_index()
     if not skills:
         return 'nessuna procedura approvata'
-    return '\n'.join(f"- {s['name']}: {s['description']}" for s in skills)
+    return ('nessuna selezionata; procedure approvate note (solo nomi):\n'
+            + '\n'.join(f"- {s['name']}: {s['description']}" for s in skills))
 
 
 def _provider_default(ctx, connection_id):

@@ -178,3 +178,57 @@ def test_compose_without_materials_is_allowed(setup):
     execute(ctx, p['id'])
     artifact = next(iter(ctx.repository.load().artifacts.values()))
     assert artifact.content.startswith('> Sintesi di Redattrice')
+
+
+def approved_skill(ctx, actor, *, name='Catalogo Acme — metodo', body=None, status='approved'):
+    result = ctx.service.apply(actor, 'skill-create', 'skill.create', {
+        'name': name, 'description': 'Metodo di redazione del catalogo',
+        'body': body or 'Sezioni fisse: prodotti, variazioni, note. Prezzi sempre dai listini con fonte per riga.',
+        'author_type': 'person', 'status': status})
+    ctx.persist()
+    return result['skill_id']
+
+
+def test_selected_procedure_body_reaches_the_model_and_provenance(setup):
+    ctx, actor, work, material = setup
+    version = confirm_intake(ctx, actor, work)
+    skill_id = approved_skill(ctx, actor)
+    seen = {}
+    original = ctx.models.complete
+
+    def spy(messages, **kw):
+        seen['system'] = messages[0].content
+        return original(messages, **kw)
+    ctx.models.complete = spy
+    p = propose(ctx, actor, work, {'command_id': 'synth', 'material_ids': [material],
+                                   'skill_ids': [skill_id], 'expected_version': version})
+    assert p['skills'] == [{'id': skill_id, 'name': 'Catalogo Acme — metodo', 'revision': 1}]
+    approve(ctx, actor, work, p['id'], confirmation(p))
+    execute(ctx, p['id'])
+    assert 'Sezioni fisse: prodotti, variazioni, note' in seen['system']
+    assert 'procedura approvata, revisione 1' in seen['system']
+    artifact = next(iter(ctx.repository.load().artifacts.values()))
+    assert '· procedure: 1' in artifact.content
+
+
+def test_staged_procedure_cannot_guide_synthesis(setup):
+    ctx, actor, work, material = setup
+    version = confirm_intake(ctx, actor, work)
+    skill_id = approved_skill(ctx, actor, status='staged')
+    with pytest.raises(Exception) as exc:
+        propose(ctx, actor, work, {'command_id': 'synth', 'material_ids': [material],
+                                   'skill_ids': [skill_id], 'expected_version': version})
+    assert 'approved' in str(exc.value)
+
+
+def test_revised_procedure_invalidates_approval(setup):
+    ctx, actor, work, material = setup
+    version = confirm_intake(ctx, actor, work)
+    skill_id = approved_skill(ctx, actor)
+    p = propose(ctx, actor, work, {'command_id': 'synth', 'material_ids': [material],
+                                   'skill_ids': [skill_id], 'expected_version': version})
+    ctx.service.apply(actor, 'skill-patch', 'skill.patch', {
+        'skill_id': skill_id, 'expected_version': 1, 'body': 'Metodo cambiato.'})
+    ctx.persist()
+    with pytest.raises(ConflictError):
+        approve(ctx, actor, work, p['id'], confirmation(p))

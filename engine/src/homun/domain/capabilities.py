@@ -101,6 +101,8 @@ READ_MATERIAL = CapabilitySpec(
 )
 
 MAX_SYNTHESIS_MATERIALS = 6
+MAX_SYNTHESIS_SKILLS = 3
+MAX_SYNTHESIS_SKILL_CHARACTERS = 2500
 MAX_SYNTHESIS_BYTES = 2 * 1024 * 1024
 MAX_SYNTHESIS_CONTEXT_CHARACTERS = 24000
 MAX_SYNTHESIS_OUTPUT_CHARACTERS = 8000
@@ -117,6 +119,8 @@ SYNTHESIZE = CapabilitySpec(
     prerequisites=('Intake confermato con capability synthesize',
                    'Lettura del progetto contenente i materiali, da parte di chi propone e di chi approva'),
     limits={'max_materials': MAX_SYNTHESIS_MATERIALS,
+            'max_skills': MAX_SYNTHESIS_SKILLS,
+            'max_skill_characters': MAX_SYNTHESIS_SKILL_CHARACTERS,
             'max_bytes_per_material': MAX_SYNTHESIS_BYTES,
             'max_context_characters': MAX_SYNTHESIS_CONTEXT_CHARACTERS,
             'max_output_characters': MAX_SYNTHESIS_OUTPUT_CHARACTERS,

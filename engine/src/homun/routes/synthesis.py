@@ -14,6 +14,7 @@ router = APIRouter(prefix='/v1/workspaces/{workspace_id}', tags=['synthesis'])
 class SynthesisRequest(BaseModel):
     command_id: str = Field(min_length=1, max_length=160)
     material_ids: list[str] = Field(default_factory=list, max_length=6)
+    skill_ids: list[str] = Field(default_factory=list, max_length=3)
     expected_version: int = Field(ge=1)
     language: str | None = Field(default=None, max_length=8)
 
@@ -32,6 +33,7 @@ class SynthesisProposal(BaseModel):
     digest: str
     tool_version: str
     materials: list[dict]
+    skills: list[dict]
     assignee_id: str
     step_title: str
     limits: dict

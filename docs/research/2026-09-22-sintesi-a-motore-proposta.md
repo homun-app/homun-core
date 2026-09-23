@@ -136,3 +136,23 @@ questo senso (it + en), senza gonfiare le promesse: la sintesi produce una
   «Lavoro completato». Budget del lavoro conteggiato.
 - Fix collaterali: lista fasi del pannello ora impila titolo e stato
   (span/small inline facevano collassare la riga), bug pre-esistente.
+
+## 9. Realizzazione — procedure L1 nella sintesi (22/09/2026, verificata dal vivo)
+
+- La proposta di sintesi accetta `skill_ids` (massimo 3, solo procedure
+  **approvate**): il binding {id, nome, revisione} entra nel digest e
+  l'approvazione verifica che la revisione non sia cambiata (stesso
+  contratto dei materiali). Il corpo della procedura (fino a 2.500
+  caratteri) entra nel prompt di composizione; senza selezione resta
+  l'indice L0 dei soli nomi, con divieto di inventarne il contenuto.
+- Provenienza dell'artifact: «· procedure: N» quando guidata. Prompt
+  aggiornato (it+en): la procedura inclusa va seguita nel metodo e citata
+  come fonte di metodo.
+- Web: campo «Procedure da seguire (facoltative, al massimo 3)» nella
+  sezione Sintesi, con nota che il corpo entra nel contesto del modello;
+  la proposta in attesa elenca le procedure selezionate.
+- Verificato dal vivo (modello reale): sintesi senza materiali con
+  «Catalogo prodotti — metodo di redazione» selezionata → la bozza segue
+  le sezioni fisse del metodo e, senza dati, dichiara «Dati non
+  disponibili» senza inventare prezzi. Provenienza con «procedure: 1».
+  Suite: motore 499, web 193.

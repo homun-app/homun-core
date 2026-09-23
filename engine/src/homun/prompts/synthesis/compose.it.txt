@@ -9,7 +9,7 @@ Vincoli dichiarati dalla persona: {{constraints}}
 Materiali del lavoro (fonti autorizzate, con provenienza):
 {{materials}}
 
-Procedure approvate disponibili (citate per nome solo se le usi davvero):
+Procedure approvate dalla persona (se il corpo completo è riportato, seguilo nel metodo e citalo come fonte di metodo; se sono solo nomi, non inventarne il contenuto):
 {{skills}}
 
 Regole ferree:

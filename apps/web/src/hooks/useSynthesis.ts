@@ -57,12 +57,12 @@ export function useSynthesis(work: Work, onChanged: () => Promise<void>) {
       if (timer) clearTimeout(timer);
     };
   }, [work.id, work.revision, proposal?.status]);
-  async function prepare(materialIds: string[]) {
+  async function prepare(materialIds: string[], skillIds: string[] = []) {
     setBusy(true);
     setError(null);
     conflict.clear();
     try {
-      setProposal(await prepareSynthesis(work, materialIds, operation.current));
+      setProposal(await prepareSynthesis(work, materialIds, operation.current, skillIds));
       await callback.current();
     } catch (cause) {
       if (!(await conflict.handle(cause))) setError(cause);

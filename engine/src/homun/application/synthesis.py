@@ -53,9 +53,22 @@ def authority(store, actor, proposal, *, approval=False, needed='write'):
 
 def digest(proposal):
     bound = {key: proposal[key] for key in ('id', 'work_id', 'expected_version', 'tool_version',
-                                            'materials', 'assignee_id', 'limits')}
+                                            'materials', 'skills', 'assignee_id', 'limits')}
     bound['action'] = 'synthesize_and_submit_draft'
     return hashlib.sha256(json.dumps(bound, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def _skill_bindings(store, skill_ids):
+    """Approved procedures the person selected; the body travels at compose time."""
+    bindings = []
+    for skill_id in dict.fromkeys(skill_ids or []):
+        skill = store.skills.get(skill_id)
+        if skill is None:
+            raise NotFoundError('Skill not found')
+        if skill.status != 'approved':
+            raise ValidationError('Only approved procedures can guide a synthesis')
+        bindings.append({'id': skill.id, 'name': skill.name, 'revision': skill.revision})
+    return bindings
 
 
 def synthesis_assignee(store, work):
@@ -91,6 +104,10 @@ def propose(ctx, actor, work_id, body):
                 if store.materials[binding['id']].extract_status not in {'extracted', 'none'}:
                     raise ValidationError('Material has no readable text extract')
                 bindings.append(binding)
+            skill_ids = list(dict.fromkeys(body.get('skill_ids') or []))
+            if len(skill_ids) > SYNTHESIZE.limits['max_skills']:
+                raise ValidationError('Too many procedures for one synthesis')
+            skills = _skill_bindings(store, skill_ids)
             agent, step = synthesis_assignee(store, work)
             if agent is None or agent.status != 'active':
                 raise ValidationError('Synthesis requires an active assigned collaborator')
@@ -114,10 +131,12 @@ def propose(ctx, actor, work_id, body):
             proposal = {
                 'id': body['command_id'], 'status': 'pending_approval', 'work_id': work_id,
                 'expected_version': pinned, 'tool_version': SYNTHESIZE.tool_version,
-                'materials': bindings, 'assignee_id': agent.id,
+                'materials': bindings, 'skills': skills, 'assignee_id': agent.id,
                 'step_title': step.title if step is not None else work.title,
                 'language': (body.get('language') or None),
                 'limits': {'max_materials': SYNTHESIZE.limits['max_materials'],
+                           'max_skills': SYNTHESIZE.limits['max_skills'],
+                           'max_skill_characters': SYNTHESIZE.limits['max_skill_characters'],
                            'max_context_characters': SYNTHESIZE.limits['max_context_characters'],
                            'max_output_characters': SYNTHESIZE.limits['max_output_characters'],
                            'max_attempts': SYNTHESIZE.limits['max_attempts']},
@@ -138,6 +157,10 @@ def approve(ctx, actor, work_id, proposal_id, body):
             record, fingerprint = cached(store, actor, body['command_id'], 'synthesis.approve', payload)
             if body['digest'] != proposal['digest'] or body['expected_version'] != proposal['expected_version']:
                 raise ConflictError('Approval does not match the proposed action and revision')
+            for binding in proposal['skills']:
+                skill = store.skills.get(binding['id'])
+                if skill is None or skill.status != 'approved' or skill.revision != binding['revision']:
+                    raise ConflictError('Skill changed; create a new proposal')
             if record:
                 return deepcopy(public(proposal))
             if proposal['status'] != 'pending_approval':

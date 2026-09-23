@@ -5,6 +5,7 @@ import { homunErrorFromHttp } from "./homun-errors.ts";
 import type { Work } from "../components/builder/conversation-types.ts";
 
 type Source = { id: string; title: string; sha256: string; version: number };
+type SkillBinding = { id: string; name: string; revision: number };
 
 export type SynthesisProposal = {
   id: string;
@@ -14,6 +15,7 @@ export type SynthesisProposal = {
   status: "pending_approval" | "queued" | "running" | "completed" | "failed" | "blocked";
   tool_version: string;
   materials: Source[];
+  skills: SkillBinding[];
   assignee_id: string;
   step_title: string;
   limits: {
@@ -73,6 +75,7 @@ export async function prepareSynthesis(
   work: Work,
   materialIds: string[],
   operationId: string,
+  skillIds: string[] = [],
 ): Promise<SynthesisProposal> {
   // A lost POST response must recover the durable proposal before reading a newer revision.
   const existing = (await listSyntheses(work.id)).find((item) => item.id === operationId);
@@ -82,6 +85,7 @@ export async function prepareSynthesis(
   return request(work.id, "", {
     command_id: operationId,
     material_ids: materialIds,
+    skill_ids: skillIds,
     expected_version: current["version"],
   });
 }

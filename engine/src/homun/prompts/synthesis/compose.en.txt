@@ -9,7 +9,7 @@ Constraints declared by the person: {{constraints}}
 Work materials (authorized sources, with provenance):
 {{materials}}
 
-Approved procedures available (cite by name only if you actually use them):
+Person-approved procedures (when the full body is included, follow its method and cite it as the method source; when only names are listed, do not invent their content):
 {{skills}}
 
 Hard rules:
