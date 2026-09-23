@@ -978,6 +978,7 @@
             "enum": [
               "compare_csv",
               "read_material",
+              "synthesize",
               "general"
             ],
             "title": "Capability",
@@ -1055,6 +1056,13 @@
           "output": {
             "title": "Output",
             "type": "string"
+          },
+          "plan_steps": {
+            "items": {
+              "$ref": "#/components/schemas/PlanStepPayload"
+            },
+            "title": "Plan Steps",
+            "type": "array"
           },
           "rationale": {
             "title": "Rationale",
@@ -1335,6 +1343,47 @@
         "title": "OllamaPresetRequest",
         "type": "object"
       },
+      "PlanStepPayload": {
+        "properties": {
+          "assignee": {
+            "default": "",
+            "title": "Assignee",
+            "type": "string"
+          },
+          "capability": {
+            "default": "general",
+            "enum": [
+              "compare_csv",
+              "read_material",
+              "synthesize",
+              "general"
+            ],
+            "title": "Capability",
+            "type": "string"
+          },
+          "expected_materials": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Expected Materials",
+            "type": "array"
+          },
+          "output_expected": {
+            "default": "",
+            "title": "Output Expected",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "PlanStepPayload",
+        "type": "object"
+      },
       "ProposalRequest": {
         "properties": {
           "command_id": {
@@ -1565,6 +1614,316 @@
         "title": "RosterEntry",
         "type": "object"
       },
+      "RoutineActionRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command_id",
+          "expected_version"
+        ],
+        "title": "RoutineActionRequest",
+        "type": "object"
+      },
+      "RoutineCreateRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "conversation_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "cron": {
+            "maxLength": 120,
+            "minLength": 9,
+            "title": "Cron",
+            "type": "string"
+          },
+          "cron_timezone": {
+            "default": "Europe/Rome",
+            "maxLength": 60,
+            "title": "Cron Timezone",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 80,
+            "title": "Name",
+            "type": "string"
+          },
+          "template": {
+            "additionalProperties": true,
+            "title": "Template",
+            "type": "object"
+          }
+        },
+        "required": [
+          "command_id",
+          "cron",
+          "conversation_id",
+          "template"
+        ],
+        "title": "RoutineCreateRequest",
+        "type": "object"
+      },
+      "RoutineUpdateRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "cron": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron"
+          },
+          "cron_timezone": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Timezone"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          }
+        },
+        "required": [
+          "command_id",
+          "expected_version"
+        ],
+        "title": "RoutineUpdateRequest",
+        "type": "object"
+      },
+      "ServerActionRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command_id",
+          "expected_version"
+        ],
+        "title": "ServerActionRequest",
+        "type": "object"
+      },
+      "ServerCreateRequest": {
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Args",
+            "type": "array"
+          },
+          "command": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Command",
+            "type": "string"
+          },
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Env",
+            "type": "object"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Headers",
+            "type": "object"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "tools_exclude": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Tools Exclude",
+            "type": "array"
+          },
+          "tools_include": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Tools Include",
+            "type": "array"
+          },
+          "transport": {
+            "default": "stdio",
+            "maxLength": 10,
+            "title": "Transport",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id",
+          "name"
+        ],
+        "title": "ServerCreateRequest",
+        "type": "object"
+      },
+      "SkillActionRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command_id",
+          "expected_version"
+        ],
+        "title": "SkillActionRequest",
+        "type": "object"
+      },
+      "SkillCreateRequest": {
+        "properties": {
+          "author_type": {
+            "default": "person",
+            "maxLength": 10,
+            "title": "Author Type",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "maxLength": 20000,
+            "title": "Body",
+            "type": "string"
+          },
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "default": "staged",
+            "maxLength": 10,
+            "title": "Status",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 12,
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "command_id",
+          "name"
+        ],
+        "title": "SkillCreateRequest",
+        "type": "object"
+      },
       "SuggestedAgent": {
         "properties": {
           "id": {
@@ -1591,6 +1950,264 @@
           "revision"
         ],
         "title": "SuggestedAgent",
+        "type": "object"
+      },
+      "SynthesisApprovalRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command_id",
+          "digest",
+          "expected_version"
+        ],
+        "title": "SynthesisApprovalRequest",
+        "type": "object"
+      },
+      "SynthesisList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SynthesisProposal"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "SynthesisList",
+        "type": "object"
+      },
+      "SynthesisProposal": {
+        "properties": {
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Id"
+          },
+          "assignee_id": {
+            "title": "Assignee Id",
+            "type": "string"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "expected_version": {
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "limits": {
+            "additionalProperties": true,
+            "title": "Limits",
+            "type": "object"
+          },
+          "materials": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Materials",
+            "type": "array"
+          },
+          "skills": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "step_title": {
+            "title": "Step Title",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "tool_version": {
+            "title": "Tool Version",
+            "type": "string"
+          },
+          "work_id": {
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "work_id",
+          "expected_version",
+          "digest",
+          "tool_version",
+          "materials",
+          "skills",
+          "assignee_id",
+          "step_title",
+          "limits"
+        ],
+        "title": "SynthesisProposal",
+        "type": "object"
+      },
+      "SynthesisRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "maxLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "material_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 6,
+            "title": "Material Ids",
+            "type": "array"
+          },
+          "skill_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Skill Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "command_id",
+          "expected_version"
+        ],
+        "title": "SynthesisRequest",
+        "type": "object"
+      },
+      "ToolApproveRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id",
+          "digest"
+        ],
+        "title": "ToolApproveRequest",
+        "type": "object"
+      },
+      "ToolProposeRequest": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "server_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Server Id",
+            "type": "string"
+          },
+          "tool": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Tool",
+            "type": "string"
+          },
+          "work_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id",
+          "work_id",
+          "server_id",
+          "tool"
+        ],
+        "title": "ToolProposeRequest",
         "type": "object"
       },
       "ValidationError": {
@@ -2143,6 +2760,30 @@
         ]
       }
     },
+    "/v1/models/recommendations": {
+      "get": {
+        "description": "Suggested models per task, from the real local catalog (heuristic, honest).",
+        "operationId": "model_recommendations_v1_models_recommendations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Model Recommendations V1 Models Recommendations Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Model Recommendations",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/v1/models/usage": {
       "get": {
         "operationId": "list_usage_v1_models_usage_get",
@@ -2326,6 +2967,83 @@
           }
         },
         "summary": "Get Agent",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/artifacts": {
+      "get": {
+        "description": "Every reviewed result the actor may read: the documents library.",
+        "operationId": "list_artifacts_v1_workspaces__workspace_id__artifacts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Artifacts V1 Workspaces  Workspace Id  Artifacts Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Artifacts",
         "tags": [
           "domain"
         ]
@@ -3288,6 +4006,552 @@
         ]
       }
     },
+    "/v1/workspaces/{workspace_id}/mcp/catalog": {
+      "get": {
+        "description": "Curated, repo-vetted declarations; inert until the person declares one.",
+        "operationId": "get_catalog_v1_workspaces__workspace_id__mcp_catalog_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Catalog",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/mcp/servers": {
+      "get": {
+        "operationId": "list_servers_v1_workspaces__workspace_id__mcp_servers_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Servers",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      },
+      "post": {
+        "operationId": "create_server_v1_workspaces__workspace_id__mcp_servers_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Server",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/mcp/servers/{server_id}/remove": {
+      "post": {
+        "operationId": "remove_server_v1_workspaces__workspace_id__mcp_servers__server_id__remove_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Server",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/mcp/servers/{server_id}/test": {
+      "post": {
+        "description": "Probe: initialize + tools/list. Discovers the real surface; executes nothing.",
+        "operationId": "test_server_v1_workspaces__workspace_id__mcp_servers__server_id__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Server",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/mcp/tools/propose": {
+      "post": {
+        "operationId": "propose_tool_call_v1_workspaces__workspace_id__mcp_tools_propose_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolProposeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Propose Tool Call",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/mcp/tools/{proposal_id}/approve": {
+      "post": {
+        "operationId": "approve_tool_call_v1_workspaces__workspace_id__mcp_tools__proposal_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolApproveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Tool Call",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      }
+    },
     "/v1/workspaces/{workspace_id}/memories": {
       "get": {
         "operationId": "list_memories_v1_workspaces__workspace_id__memories_get",
@@ -4089,6 +5353,673 @@
         ]
       }
     },
+    "/v1/workspaces/{workspace_id}/routines": {
+      "get": {
+        "operationId": "list_routines_v1_workspaces__workspace_id__routines_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Routines",
+        "tags": [
+          "routines"
+        ]
+      },
+      "post": {
+        "operationId": "create_routine_v1_workspaces__workspace_id__routines_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Routine",
+        "tags": [
+          "routines"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/routines/preview": {
+      "get": {
+        "description": "Next three occurrences of a cron in its timezone; invalid cron is a 400.",
+        "operationId": "preview_cron_v1_workspaces__workspace_id__routines_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cron",
+            "required": true,
+            "schema": {
+              "title": "Cron",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tz",
+            "required": false,
+            "schema": {
+              "default": "Europe/Rome",
+              "title": "Tz",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Cron",
+        "tags": [
+          "routines"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/routines/{routine_id}/pause": {
+      "post": {
+        "operationId": "pause_routine_v1_workspaces__workspace_id__routines__routine_id__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "routine_id",
+            "required": true,
+            "schema": {
+              "title": "Routine Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pause Routine",
+        "tags": [
+          "routines"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/routines/{routine_id}/resume": {
+      "post": {
+        "operationId": "resume_routine_v1_workspaces__workspace_id__routines__routine_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "routine_id",
+            "required": true,
+            "schema": {
+              "title": "Routine Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume Routine",
+        "tags": [
+          "routines"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/routines/{routine_id}/skip_next": {
+      "post": {
+        "operationId": "skip_next_routine_v1_workspaces__workspace_id__routines__routine_id__skip_next_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "routine_id",
+            "required": true,
+            "schema": {
+              "title": "Routine Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Skip Next Routine",
+        "tags": [
+          "routines"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/routines/{routine_id}/stop": {
+      "post": {
+        "operationId": "stop_routine_v1_workspaces__workspace_id__routines__routine_id__stop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "routine_id",
+            "required": true,
+            "schema": {
+              "title": "Routine Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Routine",
+        "tags": [
+          "routines"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/routines/{routine_id}/update": {
+      "post": {
+        "operationId": "update_routine_v1_workspaces__workspace_id__routines__routine_id__update_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "routine_id",
+            "required": true,
+            "schema": {
+              "title": "Routine Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Routine",
+        "tags": [
+          "routines"
+        ]
+      }
+    },
     "/v1/workspaces/{workspace_id}/runs/{run_id}": {
       "get": {
         "operationId": "get_run_v1_workspaces__workspace_id__runs__run_id__get",
@@ -4171,6 +6102,436 @@
         "summary": "Get Run",
         "tags": [
           "domain"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/skills": {
+      "get": {
+        "operationId": "list_skills_v1_workspaces__workspace_id__skills_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Skills",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      },
+      "post": {
+        "operationId": "create_skill_v1_workspaces__workspace_id__skills_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Skill",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/skills/{skill_id}/approve": {
+      "post": {
+        "operationId": "approve_skill_v1_workspaces__workspace_id__skills__skill_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "title": "Skill Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Skill",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/skills/{skill_id}/archive": {
+      "post": {
+        "operationId": "archive_skill_v1_workspaces__workspace_id__skills__skill_id__archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "title": "Skill Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Archive Skill",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/skills/{skill_id}/reject": {
+      "post": {
+        "operationId": "reject_skill_v1_workspaces__workspace_id__skills__skill_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "title": "Skill Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Skill",
+        "tags": [
+          "mcp",
+          "skills"
         ]
       }
     },
@@ -5078,6 +7439,88 @@
         ]
       }
     },
+    "/v1/workspaces/{workspace_id}/works/{work_id}/mcp/tools": {
+      "get": {
+        "operationId": "list_tool_calls_v1_workspaces__workspace_id__works__work_id__mcp_tools_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tool Calls",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      }
+    },
     "/v1/workspaces/{workspace_id}/works/{work_id}/price-comparisons": {
       "get": {
         "operationId": "get_proposals_v1_workspaces__workspace_id__works__work_id__price_comparisons_get",
@@ -5436,6 +7879,282 @@
         "summary": "Get Work Run",
         "tags": [
           "domain"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/works/{work_id}/syntheses": {
+      "get": {
+        "operationId": "get_syntheses_v1_workspaces__workspace_id__works__work_id__syntheses_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SynthesisList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Syntheses",
+        "tags": [
+          "synthesis"
+        ]
+      },
+      "post": {
+        "operationId": "create_synthesis_v1_workspaces__workspace_id__works__work_id__syntheses_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SynthesisRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SynthesisProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Synthesis",
+        "tags": [
+          "synthesis"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/works/{work_id}/syntheses/{proposal_id}/approve": {
+      "post": {
+        "operationId": "approve_synthesis_v1_workspaces__workspace_id__works__work_id__syntheses__proposal_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SynthesisApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SynthesisProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Synthesis",
+        "tags": [
+          "synthesis"
         ]
       }
     },
