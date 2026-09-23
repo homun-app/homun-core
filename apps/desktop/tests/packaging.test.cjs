@@ -13,7 +13,7 @@ test('packaging stages only shell and explicit runtime assets, never workspace s
     for (const name of ['package-lock.json', 'engine/requirements.lock', 'engine/requirements-packaging.lock']) await fs.writeFile(path.join(root,name), 'lock');
     await fs.writeFile(path.join(root, '.env'), 'DO_NOT_SHIP=secret');
     await fs.writeFile(path.join(root, 'engine/secrets.json'), 'DO_NOT_SHIP');
-    for (const name of ['main.cjs','preload.cjs','engine-process.cjs','protocol.cjs']) await fs.writeFile(path.join(root, 'apps/desktop/src', name), 'shell');
+    for (const name of ['main.cjs','preload.cjs','engine-process.cjs','protocol.cjs','updater.cjs']) await fs.writeFile(path.join(root, 'apps/desktop/src', name), 'shell');
     await fs.writeFile(path.join(root, 'apps/desktop/src/secrets.json'), 'DO_NOT_SHIP');
     await fs.writeFile(path.join(root, 'runtime/homun-engine'), 'binary');
     await fs.writeFile(path.join(root, 'web/index.html'), 'web');
@@ -30,7 +30,7 @@ test('packaging stages only shell and explicit runtime assets, never workspace s
     assert.deepEqual((await fs.readdir(result.engine)).sort(), ['build-receipt.json', 'homun-engine']);
     assert.deepEqual(await fs.readdir(result.web), ['index.html']);
     assert.equal(JSON.parse(await fs.readFile(result.receiptPath)).signedForDistribution, false);
-    assert.equal((await fs.readdir(path.join(result.appDir, 'src'))).length, 4);
+    assert.equal((await fs.readdir(path.join(result.appDir, 'src'))).length, 5);
     const restage = () => stageApp({ sourceRoot: root, stage: path.join(root, 'other-stage'), engineDir: path.join(root, 'runtime'), webDir: path.join(root, 'web') });
     await fs.writeFile(path.join(root, 'runtime/homun-engine'), 'changed');
     await assert.rejects(restage(), /Engine artifact changed/);

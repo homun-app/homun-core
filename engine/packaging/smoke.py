@@ -20,6 +20,12 @@ def running(binary, root, principal='synthetic-smoke'):
     env = {'PATH': '/nonexistent', 'HOME': str(root), 'TMPDIR': str(root),
            'HOMUN_DATA_DIR': str(root / 'data'), 'HOMUN_SESSION_TOKEN': token,
            'HOMUN_SESSION_ACTOR_ID': principal}
+    # The smoke exercises the conversational interpret path, which needs a model
+    # provider. CI runners have no Ollama: pin the deterministic fake provider
+    # in the throwaway profile so the smoke stays offline and reproducible.
+    data_dir = root / 'data'
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / 'models.json').write_text(json.dumps({'active_provider_id': 'fake'}), encoding='utf-8')
     log_path = root / 'engine.log'
     with log_path.open('w') as log:
         process = subprocess.Popen([str(binary), 'serve', '--port', '0'], cwd=root,
