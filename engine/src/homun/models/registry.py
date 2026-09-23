@@ -326,6 +326,11 @@ def build_default_registry(data_dir: Path, *, for_tests: bool = False) -> ModelR
     if for_tests:
         return ModelRegistry(data_dir=data_dir, secrets=secrets, active_provider_id="fake")
     registry = ModelRegistry(data_dir=data_dir, secrets=secrets, active_provider_id=None)
+    if registry.config_path.exists() and registry.active_provider_id == "fake":
+        # An explicit configuration that selects the deterministic fake provider
+        # is respected as written (offline/CI profiles); it used to be silently
+        # replaced by the Ollama preset.
+        return registry
     # Product default: local Ollama. Fake remains available for explicit switch / CI.
     if registry.active_provider_id == "fake":
         registry.apply_ollama_preset()
