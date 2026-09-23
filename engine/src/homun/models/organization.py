@@ -1,8 +1,11 @@
 """Bounded company context and grounded team suggestions; never executes tools."""
 import json
+from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from homun.domain.capabilities import REGISTRY
 from homun.models.types import ChatMessage
+
+BoundedNote = Annotated[str, Field(min_length=1, max_length=600)]
 
 class OrganizationContext(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
@@ -17,7 +20,7 @@ class ProposedAgent(BaseModel):
     role: str = Field(min_length=1, max_length=180)
     instructions: str = Field(min_length=1, max_length=2000)
     capabilities: list[str] = Field(default_factory=list, max_length=8)
-    tools_required: list[str] = Field(default_factory=list, max_length=8)
+    tools_required: list[BoundedNote] = Field(default_factory=list, max_length=8)
 
     @field_validator('capabilities')
     @classmethod
@@ -31,8 +34,8 @@ class TeamProposal(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(max_length=1000)
     agents: list[ProposedAgent] = Field(min_length=1, max_length=6)
-    questions: list[str] = Field(default_factory=list, max_length=8)
-    limitations: list[str] = Field(default_factory=list, max_length=8)
+    questions: list[BoundedNote] = Field(default_factory=list, max_length=8)
+    limitations: list[BoundedNote] = Field(default_factory=list, max_length=8)
 
 def generate(registry, context):
     system = ('Proponi una squadra AI supervisionata in base al contesto aziendale. '

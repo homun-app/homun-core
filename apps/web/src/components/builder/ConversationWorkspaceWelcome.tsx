@@ -21,6 +21,7 @@ type Props = {
   spaceData: SpaceData;
   onCreateExample: (index: number) => void;
   engineMode?: boolean;
+  onRefreshEngine?: (() => Promise<void>) | undefined;
 };
 
 export function ConversationWorkspaceWelcome({
@@ -29,6 +30,7 @@ export function ConversationWorkspaceWelcome({
   spaceData,
   onCreateExample,
   engineMode = false,
+  onRefreshEngine,
 }: Props) {
   if (engineMode) {
     return (
@@ -46,7 +48,7 @@ export function ConversationWorkspaceWelcome({
         <span className="cw-example-note">
           Esempio: «Prepara il catalogo prodotti per il cliente entro venerdì».
         </span>
-        <EngineOrganizationOnboarding />
+        <EngineOrganizationOnboarding onChanged={onRefreshEngine} />
       </div>
     );
   }

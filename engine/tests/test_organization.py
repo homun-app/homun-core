@@ -119,3 +119,13 @@ def test_routes_preserve_actor_boundary_and_validate_context(setup):
         assert client.get(path,headers=headers).json()['context']['company'] == 'Company'
         assert client.get('/v1/workspaces/other/organization',headers=headers).status_code == 404
         assert client.post(path+'/context',headers=headers,json=dict(command_id='too-long',expected_revision=1,company='x'*6001)).status_code == 422
+
+@pytest.mark.parametrize('field', ['questions', 'limitations', 'tools_required'])
+def test_proposal_text_items_are_bounded(setup, field):
+    from homun.models.organization import TeamProposal
+    from pydantic import ValidationError
+    _,_,proposal = setup
+    target = proposal['agents'][0] if field == 'tools_required' else proposal
+    target[field] = ['x'*601]
+    with pytest.raises(ValidationError):
+        TeamProposal.model_validate(proposal)

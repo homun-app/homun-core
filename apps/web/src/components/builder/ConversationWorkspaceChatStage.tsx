@@ -156,6 +156,7 @@ export function ConversationWorkspaceChatStage({
               spaceData={spaceData}
               onCreateExample={onCreateExample}
               engineMode={engineMode}
+              onRefreshEngine={onRefreshEngine}
             />
           ) : (
             <>
