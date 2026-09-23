@@ -82,24 +82,37 @@ def test_work_set_due_persists_and_validates(client):
     from homun.context import get_context
     from homun.domain.errors import DomainError
     ctx = get_context()
-    conv = ctx.service.apply(actor, "sc", "conversation.create", {"title": "S"})
-    work = ctx.service.apply(actor, "sw", "work.create",
-                             {"conversation_id": conv["conversation_id"], "title": "Con scadenza", "objective": "O"})
-    wid = work["work_id"]
-    ctx.persist()
-    ctx.service.apply(actor, "sd", "work.set_due", {"work_id": wid, "expected_version": 1, "due_date": "2026-09-30"})
-    ctx.persist()
+    # Atomic transaction, not bare applies + persist: the app's runtime pump may
+    # rebind ctx.service.store between statements, dropping unsaved in-memory
+    # writes (a real race observed on CI runners).
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            service = ctx.service.for_store(store)
+            conv = service.apply(actor, "sc", "conversation.create", {"title": "S"})
+            work = service.apply(actor, "sw", "work.create",
+                                 {"conversation_id": conv["conversation_id"], "title": "Con scadenza", "objective": "O"})
+            wid = work["work_id"]
+            service.apply(actor, "sd", "work.set_due",
+                          {"work_id": wid, "expected_version": 1, "due_date": "2026-09-30"})
+        ctx.service.store = store
     items = tc.get("/v1/workspaces/ws_local/works",
                    headers={"X-Homun-Actor-Id": actor.id}).json()["items"]
     entry = next(w for w in items if w["id"] == wid)
     assert entry["due_date"] == "2026-09-30"
-    try:
-        ctx.service.apply(actor, "sdx", "work.set_due", {"work_id": wid, "expected_version": 2, "due_date": "31/09/2026"})
-        raise AssertionError("data invalida accettata")
-    except Exception as exc:
-        assert isinstance(exc, DomainError)
-    ctx.service.apply(actor, "sdc", "work.set_due", {"work_id": wid, "expected_version": 2, "due_date": None})
-    ctx.persist()
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            service = ctx.service.for_store(store)
+            try:
+                service.apply(actor, "sdx", "work.set_due",
+                              {"work_id": wid, "expected_version": 2, "due_date": "31/09/2026"})
+                raise AssertionError("data invalida accettata")
+            except AssertionError:
+                raise
+            except Exception as exc:
+                assert isinstance(exc, DomainError)
+            service.apply(actor, "sdc", "work.set_due",
+                          {"work_id": wid, "expected_version": 2, "due_date": None})
+        ctx.service.store = store
     items = tc.get("/v1/workspaces/ws_local/works",
                    headers={"X-Homun-Actor-Id": actor.id}).json()["items"]
     entry = next(w for w in items if w["id"] == wid)

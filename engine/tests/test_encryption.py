@@ -13,6 +13,7 @@ requires_sqlcipher = pytest.mark.skipif(
     reason='optional homun-engine[encryption] extra not installed')
 
 
+@requires_sqlcipher
 def test_encrypted_database_unreadable_without_key(tmp_path):
     key = load_or_create_key(tmp_path)
     repo = SqliteWorkspaceRepository(tmp_path / 'enc.db', 'ws_test', encryption_key=key)
@@ -23,6 +24,7 @@ def test_encrypted_database_unreadable_without_key(tmp_path):
     conn.close()
 
 
+@requires_sqlcipher
 def test_encrypted_database_works_with_key(tmp_path):
     key = load_or_create_key(tmp_path)
     repo = SqliteWorkspaceRepository(tmp_path / 'enc.db', 'ws_test', encryption_key=key)
@@ -39,6 +41,7 @@ def test_encrypted_database_works_with_key(tmp_path):
     repo2.close()
 
 
+@requires_sqlcipher
 def test_wrong_key_rejected(tmp_path):
     key1 = load_or_create_key(tmp_path)
     repo = SqliteWorkspaceRepository(tmp_path / 'enc.db', 'ws_test', encryption_key=key1)
@@ -114,6 +117,7 @@ def test_opt_in_does_not_migrate_plaintext_database(tmp_path):
     create_context(db_path=path, for_tests=True).close()
 
 
+@requires_sqlcipher
 def test_key_file_configuration_is_explicit_and_never_regenerated(tmp_path, monkeypatch):
     from homun.context import create_context
     from homun.storage.encryption import EncryptionError
@@ -128,6 +132,7 @@ def test_key_file_configuration_is_explicit_and_never_regenerated(tmp_path, monk
         conn.execute('SELECT * FROM sqlite_master').fetchall()
 
 
+@requires_sqlcipher
 def test_encrypted_backup_restore_preserves_encryption(tmp_path):
     from homun.context import create_context
     from homun.storage.backup import create_backup, restore_backup, verify_backup, BackupError
