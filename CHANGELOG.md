@@ -9,33 +9,41 @@ each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 
 ## [Unreleased]
 
+## [0.2.1000] — 2026-09-23
+
+Updates become visible: the app now says which version it runs and lets you check for updates on demand.
+
+## Improvements
+- **The installed version is now visible in Settings → Guide, with a "Check for updates now" action.** The automatic check still runs at startup and nothing is ever installed without consent; the new card makes "already up to date" distinguishable from "cannot tell".
+- **Release notes are written in English.**
+
 ## [0.2.1] — 2026-09-23
 
-Pulizia dell'esperienza per chi installa da zero: via ogni traccia dell'ambiente di sviluppo.
+A clean first-run experience: every trace of the development environment is gone from shipped builds.
 
 ## Fixes
-- **Identità neutra per il primo avvio.** Un nuovo utente si chiama «Tu» (modificabile in Impostazioni), non più con l'identità demo dello sviluppo.
-- **Rimossi i riferimenti di sviluppo dall'interfaccia**: il link «Versione precedente» nella barra laterale, l'indicatore tecnico nell'intestazione, l'etichetta «PROTOTIPO», la sezione e i link dei dati demo (restano solo nell'ambiente di sviluppo), e le diciture fuorvianti «Archivio locale» e «Catalogo dimostrativo».
+- **Neutral identity on first launch.** A new user is named "Tu" (editable in Settings), no longer the development demo identity.
+- **Removed development references from the interface**: the "Previous version" link in the sidebar, the technical indicator in the header, the "PROTOTYPE" label, the demo-data section and links (development builds only), and the misleading "Local archive" and "demo catalog" wordings.
 
 ## [0.2.0] — 2026-09-22
 
-La nuova generazione di Homun: lo stesso assistente che delega lavoro reale ai collaboratori, ricostruito su un motore conversazionale locale con approvazione umana esplicita per ogni esecuzione.
+The new generation of Homun: the same assistant that delegates real work to collaborators, rebuilt on a local conversational engine with explicit human approval for every execution.
 
 ## Highlights
-- **Il collaboratore scrive il lavoro con il suo modello.** Le fasi di sintesi producono bozze vere (cataloghi, relazioni) a partire da materiali, vincoli e procedure approvate, sempre consegnate in revisione alla persona; ogni modello usato è dichiarato nell'artifact.
-- **Niente più esecuzioni silenziose.** Confronto CSV, lettura materiali, chiamate a strumenti MCP e sintesi nascono come proposte con digest che approvi tu: il motore non esegue nulla senza un tuo via esplicito.
-- **Lavori multi-fase dall'accordo all'esito.** L'intake conversazionale propone obiettivo, collaboratore e fasi; ogni fase avanza con la tua verifica e il lavoro si chiude con un risultato revisionato.
-- **Ogni collaboratore ha il suo modello.** La connessione preferita per agente è scelta dalla sua scheda e usata davvero dalla sua fase di sintesi, con fallback dichiarato.
-- **Le procedure imparate guidano il lavoro.** I messaggi dell'agente diventano procedure approvate («Salva come procedura») e il loro corpo entra nel contesto delle sintesi successive.
-- **Automazioni a motore.** Routine ricorrenti su scheduler durevole con pausa, ripresa, salta-prossima e revisione del modello; ogni ricorrenza resta supervisionata.
-- **Strumenti esterni MCP con catalogo curato.** Server dichiarati con allowlist e probe onesto, esecuzione supervisionata con risultato in revisione; voci verificate nel repository, inerti finché non le dichiari.
+- **Collaborators write real work with their own model.** Synthesis phases produce actual drafts (catalogs, reports) from materials, constraints and approved procedures, always delivered for human review; every model used is declared in the artifact.
+- **No more silent executions.** CSV comparison, material reading, MCP tool calls and synthesis all start as digest-bound proposals you approve: the engine never runs anything without your explicit go.
+- **Multi-phase work from agreement to outcome.** Conversational intake proposes objective, collaborator and phases; each phase advances with your verification and the work closes with a reviewed result.
+- **Every collaborator has its own model.** The per-agent preferred connection is chosen from the agent card and actually used by that agent's synthesis phase, with a declared fallback.
+- **Learned procedures guide the work.** Agent messages become approved procedures ("Save as procedure") and their body enters the context of later syntheses.
+- **Engine-driven automations.** Recurring routines on a durable scheduler with pause, resume, skip-next and template revision; every recurrence stays supervised.
+- **External MCP tools with a curated catalog.** Servers declared with allowlists and honest probing, supervised execution with results in review; vetted entries live in the repository, inert until you declare them.
 
 ## Improvements
-- **Impostazioni complete**: persone, modelli con consigli per attività, budget e routing, agenti, team, plugin, skill, automazioni, memoria, archivio.
-- **Budget per lavoro**: tentativi e token contati per ogni lavoro, con riserve atomiche ed esaurimento tipizzato che si alza solo esplicitamente.
-- **Documenti e scadenze**: libreria degli artifact del motore e vista scadenze collegata ai lavori.
-- **Motore Python locale autonomo**: bundle verificato da receipt con dipendenze hash-lockate, incluso nell'app; nessun servizio esterno richiesto.
-- **Sicurezza dell'app**: fuses di hardening, sandbox, context isolation, CSP e proxy delle API con token mai nel renderer.
+- **Complete Settings**: people, models with per-activity recommendations, budget and routing, agents, teams, plugins, skills, automations, memory, archive.
+- **Per-work budget**: attempts and tokens counted per work, with atomic reservations and typed exhaustion that only rises explicitly.
+- **Documents and deadlines**: the engine artifact library and a deadlines view linked to works.
+- **Standalone local Python engine**: receipt-verified bundle with hash-locked dependencies, bundled with the app; no external service required.
+- **App hardening**: Electron fuses, sandbox, context isolation, CSP and an API proxy that keeps tokens out of the renderer.
 
 ## Fixes
-- **Aggiornamenti non firmati impossibili**: la pipeline di rilascio rifiuta una release macOS senza firma e notarizzazione invece di pubblicarla nel feed di aggiornamento.
+- **Unsigned updates are impossible**: the release pipeline refuses to publish a macOS release without signing and notarization instead of shipping it to the update feed.

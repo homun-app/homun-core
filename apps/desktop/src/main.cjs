@@ -46,13 +46,18 @@ else app.whenReady().then(async () => {
   engine.child.once('exit', () => { if (!stopping) window.setTitle('Homun — motore arrestato'); });
   await window.loadURL('homun://app/');
   const smoke = process.argv.includes('--smoke');
-  if (app.isPackaged && process.platform === 'darwin' && !smoke) {
-    try { require('./updater.cjs').initUpdater(); } catch (error) { console.error('updater init failed:', error.message); }
+  if (app.isPackaged && process.platform === 'darwin') {
+    try {
+      const updater = require('./updater.cjs');
+      updater.registerUpdaterIpc();
+      // The smoke skips the feed check (offline reproducibility), not the API.
+      if (!smoke) updater.initUpdater();
+    } catch (error) { console.error('updater init failed:', error.message); }
   }
   if (process.argv.includes('--smoke')) {
     const result = await window.webContents.executeJavaScript(`(async () => ({
       title: document.title, rendered: document.getElementById('root').childElementCount > 0,
-      nodeHidden: typeof window.require === 'undefined', sessionHidden: !('token' in window.homunDesktop),
+      nodeHidden: typeof window.require === 'undefined', sessionHidden: !('token' in window.homunDesktop), updateApi: typeof window.homunDesktop.updateCheck === 'function',
       health: await fetch(window.homunDesktop.engineBaseUrl+'/v1/health').then(r=>r.status)
     }))()`);
     result.unauthenticated = (await fetch(engine.baseUrl + '/v1/health')).status;
@@ -62,7 +67,7 @@ else app.whenReady().then(async () => {
       result.syntheticRoundtrip = safeStorage.decryptString(safeStorage.encryptString(synthetic)) === synthetic;
     }
     console.log('HOMUN_DESKTOP_SMOKE ' + JSON.stringify(result));
-    if (!result.rendered || result.health !== 200 || !result.nodeHidden || !result.sessionHidden || result.unauthenticated !== 401) process.exitCode = 1;
+    if (!result.rendered || result.health !== 200 || !result.nodeHidden || !result.sessionHidden || result.unauthenticated !== 401 || !result.updateApi) process.exitCode = 1;
     if (process.env.HOMUN_DESKTOP_SCREENSHOT) await require('node:fs/promises').writeFile(process.env.HOMUN_DESKTOP_SCREENSHOT, (await window.capturePage()).toPNG());
     app.quit();
   }

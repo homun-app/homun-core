@@ -6,7 +6,13 @@
 import { HomunClientError } from "./homun-errors.ts";
 
 declare global {
-  interface Window { homunDesktop?: Readonly<{ engineBaseUrl: string }> }
+  interface Window {
+    homunDesktop?: Readonly<{
+      engineBaseUrl: string;
+      updateStatus?: () => Promise<{ current: string }>;
+      updateCheck?: () => Promise<{ current: string; available: boolean; version: string | null; error?: string }>;
+    }>;
+  }
 }
 export const ENGINE_DEFAULT_BASE_URL =
   typeof window !== "undefined" && window.homunDesktop

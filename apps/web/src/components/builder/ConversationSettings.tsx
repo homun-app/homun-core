@@ -19,6 +19,7 @@ import {
   Puzzle,
   Zap,
 } from "lucide-react";
+import { ConversationUpdateStatus } from "./ConversationUpdateStatus";
 import { ConversationSelect } from "./ConversationSelect";
 import {
   ConversationModelsSettingsSection,
@@ -345,6 +346,7 @@ export function ConversationSettings({
           )}
           {section === "help" && (
             <>
+              <ConversationUpdateStatus />
               <h3>Da una richiesta a un risultato</h3>
               <ol className="cv-settings-guide">
                 <li>
