@@ -65,7 +65,18 @@ def preserve_staffing(values: dict, anchor: dict, catalog: list[dict], owner_id:
     standing = _standing_agent(anchor, catalog, owner_id)
     declared = set(values.get('changed_fields') or [])
     if 'staffing' in declared and not (values.get('suggested_agent') or values.get('new_agent')):
-        return values  # An explicit return to direct Homun execution.
+        # A staffing-only return to Homun also moves inherited assignments of
+        # the former collaborator. Keep the anchor immutable and preserve any
+        # independently assigned phases or explicitly revised phase plan.
+        previous_name = (staffing_label(anchor) or (standing or {}).get('name') or '').strip().casefold()
+        if previous_name and 'plan_steps' not in declared:
+            values['plan_steps'] = [
+                {**step, 'assignee': ''}
+                if str(step.get('assignee') or '').strip().casefold() == previous_name else dict(step)
+                for step in values.get('plan_steps', [])
+            ]
+        return values
+
     if 'staffing' not in declared and not standing and not (anchor.get('suggested_agent') or anchor.get('new_agent')):
         values['suggested_agent'] = None
         values['new_agent'] = None
