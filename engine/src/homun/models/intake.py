@@ -130,6 +130,18 @@ def _extract_json_payload(text):
     return extract_json_payload(text)
 
 
+def _approved_skills_index() -> list:
+    """L0 skill index for the model: name and description of approved skills only."""
+    from homun.context import get_context
+    try:
+        store = get_context().repository.load()
+    except Exception:
+        return []
+    return [{'name': s.name, 'description': s.description}
+            for s in sorted(store.skills.values(), key=lambda s: s.name)
+            if s.status == 'approved'][:40]
+
+
 def synthesize(registry, text, agents, *, previous_brief=None, latest_request=None, capabilities=None, language=None, usage_out=None):
     catalog = _model_capabilities(capabilities)
     # Language selection is structural: a known language picks its template, an
@@ -139,8 +151,10 @@ def synthesize(registry, text, agents, *, previous_brief=None, latest_request=No
     system = template.render(
         schema=json.dumps(IntakeBrief.model_json_schema(), ensure_ascii=False),
         catalog=_capability_catalog_lines(catalog, template.language))
+    skills = _approved_skills_index()
     payload = json.dumps({'request':text,'latest_request':latest_request or text,'previous_brief':previous_brief,
-                          'agents':agents,'capabilities':catalog or [spec.public() for spec in REGISTRY.values()]},ensure_ascii=False)
+                          'agents':agents,'skills':skills,
+                          'capabilities':catalog or [spec.public() for spec in REGISTRY.values()]},ensure_ascii=False)
     messages = [ChatMessage(role='system',content=system),
                 ChatMessage(role='user',content=payload)]
     # Small local models sometimes wrap the schema in prose or drift from it:

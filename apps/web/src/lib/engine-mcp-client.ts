@@ -140,3 +140,67 @@ export async function skillEngineAction(input: {
     actor: defaultLocalActor(),
   });
 }
+
+export type ExternalToolCall = {
+  id: string;
+  status: "pending_approval" | "running" | "completed" | "failed";
+  work_id: string;
+  server_id: string;
+  server_name: string;
+  tool: string;
+  arguments: Record<string, unknown>;
+  digest: string;
+  artifact_id?: string | null;
+  error?: string | null;
+};
+
+export async function proposeEngineToolCall(input: {
+  workId: string;
+  serverId: string;
+  tool: string;
+  argsJson: string;
+}): Promise<ExternalToolCall> {
+  let arguments_: Record<string, unknown> = {};
+  if (input.argsJson.trim()) {
+    arguments_ = JSON.parse(input.argsJson) as Record<string, unknown>;
+  }
+  const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/tools/propose`, {
+    method: "POST",
+    headers: { ...jsonHeaders },
+    body: JSON.stringify({
+      command_id: crypto.randomUUID(),
+      work_id: input.workId,
+      server_id: input.serverId,
+      tool: input.tool,
+      arguments: arguments_,
+    }),
+  });
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => null)) as { detail?: { message?: string } } | null;
+    throw new Error(detail?.detail?.message ?? `Propose failed: HTTP ${response.status}`);
+  }
+  return (await response.json()) as ExternalToolCall;
+}
+
+export async function approveEngineToolCall(proposalId: string, digest: string): Promise<ExternalToolCall> {
+  const response = await mcpFetch(
+    `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/tools/${encodeURIComponent(proposalId)}/approve`,
+    {
+      method: "POST",
+      headers: { ...jsonHeaders },
+      body: JSON.stringify({ command_id: crypto.randomUUID(), digest }),
+    });
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => null)) as { detail?: { message?: string } } | null;
+    throw new Error(detail?.detail?.message ?? `Approve failed: HTTP ${response.status}`);
+  }
+  return (await response.json()) as ExternalToolCall;
+}
+
+export async function listEngineToolCalls(workId: string): Promise<ExternalToolCall[]> {
+  const response = await mcpFetch(
+    `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/works/${encodeURIComponent(workId)}/mcp/tools`,
+    { method: "GET", headers: jsonHeaders });
+  if (!response.ok) throw new Error(`List tool calls failed: HTTP ${response.status}`);
+  return ((await response.json()) as { items: ExternalToolCall[] }).items ?? [];
+}

@@ -134,3 +134,82 @@ def test_skill_description_cap_and_archived_immutable(client):
     again = tc.post(f"/v1/workspaces/ws_local/skills/{created['skill_id']}/approve", headers=H,
                     json={"command_id": "aa", "expected_version": archived["revision"]})
     assert again.status_code == 400
+
+
+def test_external_tool_proposal_flow_e2e(client, tmp_path):
+    """propose → approve (person) → execution → artifact ready for review."""
+    from pathlib import Path as _Path
+    echo_call = _Path(tmp_path) / "echo_call_mcp.py"
+    echo_call.write_text(textwrap.dedent("""
+        import json, sys
+        for line in sys.stdin:
+            req = json.loads(line.strip())
+            if req.get("method") == "initialize":
+                reply = {"jsonrpc": "2.0", "id": req["id"], "result": {
+                    "protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "echo-call", "version": "1.0"}}}
+            elif req.get("method") == "tools/list":
+                reply = {"jsonrpc": "2.0", "id": req["id"], "result": {"tools": [
+                    {"name": "list_issues", "description": "elenco"}]}}
+            elif req.get("method") == "tools/call":
+                args = req["params"]["arguments"]
+                reply = {"jsonrpc": "2.0", "id": req["id"], "result": {
+                    "content": [{"type": "text", "text": f"3 aperte, filtro={args.get('stato')}"}], "isError": False}}
+            else:
+                reply = {"jsonrpc": "2.0", "id": req["id"], "error": {"code": -32601, "message": "no"}}
+            sys.stdout.write(json.dumps(reply) + "\\n"); sys.stdout.flush()
+    """), encoding="utf-8")
+    tc, _ = client
+    # lavoro su cui registrare la chiamata
+    from homun.context import get_context
+    ctx = get_context()
+    actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
+    conv = ctx.service.apply(actor, "cc", "conversation.create", {"title": "T"})
+    work = ctx.service.apply(actor, "ww", "work.create",
+                             {"conversation_id": conv["conversation_id"], "title": "T", "objective": "O"})
+    wid = work["work_id"]
+    ctx.persist()
+    server_id = _create_server(tc, str(echo_call), tools_include=["list_issues"])
+    proposal = tc.post("/v1/workspaces/ws_local/mcp/tools/propose", headers=H, json={
+        "command_id": "p1", "work_id": wid, "server_id": server_id,
+        "tool": "list_issues", "arguments": {"stato": "aperto"},
+    }).json()
+    assert proposal["status"] == "pending_approval"
+    digest_value = proposal["digest"]
+    approved = tc.post(f"/v1/workspaces/ws_local/mcp/tools/{proposal['id']}/approve", headers=H,
+                       json={"command_id": "a1", "digest": digest_value}).json()
+    assert approved["status"] == "completed", approved
+    assert approved.get("artifact_id")
+    store = ctx.repository.load()
+    from homun.domain.states import WorkStatus
+    assert store.works[wid].status == WorkStatus.REVIEW
+    artifacts = [a for a in store.artifacts.values() if a.work_id == wid]
+    assert any("3 aperte" in a.content for a in artifacts)
+    messages = [m.text for m in store.messages.values() if m.conversation_id == conv["conversation_id"]]
+    assert any("Strumento esterno completato" in t for t in messages)
+
+
+def test_external_tool_rejects_non_matching_digest_and_disabled_tool(client, tmp_path):
+    from pathlib import Path as _Path
+    tc, script = client
+    from homun.context import get_context
+    ctx = get_context()
+    actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
+    conv = ctx.service.apply(actor, "cc2", "conversation.create", {"title": "T"})
+    work = ctx.service.apply(actor, "ww2", "work.create",
+                             {"conversation_id": conv["conversation_id"], "title": "T", "objective": "O"})
+    ctx.persist()
+    server_id = _create_server(tc, script)
+    bad_digest = tc.post("/v1/workspaces/ws_local/mcp/tools/propose", headers=H, json={
+        "command_id": "p2", "work_id": work["work_id"], "server_id": server_id,
+        "tool": "list_issues", "arguments": {},
+    }).json()
+    rejected = tc.post(f"/v1/workspaces/ws_local/mcp/tools/{bad_digest['id']}/approve", headers=H,
+                       json={"command_id": "a2", "digest": "forged"})
+    assert rejected.status_code == 400
+    # strumento fuori allowlist
+    outside = tc.post("/v1/workspaces/ws_local/mcp/tools/propose", headers=H, json={
+        "command_id": "p3", "work_id": work["work_id"], "server_id": server_id,
+        "tool": "delete_customer", "arguments": {},
+    })
+    assert outside.status_code == 400

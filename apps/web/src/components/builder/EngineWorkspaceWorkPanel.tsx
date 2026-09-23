@@ -4,6 +4,7 @@ import type { Work } from "./conversation-types";
 import type { SpaceData, SpaceView } from "./ConversationSpace";
 import { EngineWorkObjectiveEditor } from "./EngineWorkObjectiveEditor";
 import { EngineRoutineCreator } from "./EngineRoutines";
+import { ExternalToolsSection } from "./ExternalToolsSection";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { engineWorkPanelMessage } from "@/lib/engine-project-projection";
 import { intakeConfirmLabel } from "@/lib/engine-intake-display";
@@ -181,6 +182,9 @@ export function EngineWorkspaceWorkPanel({
         onRevisePlan={onRevisePlan}
         agents={agents ?? []}
       />
+      {work.source === "engine" && work.id && (
+        <ExternalToolsSection workId={work.id} runnable={!awaitingConfirmation && work.engineStatus !== "completed" && work.engineStatus !== "cancelled" && work.engineStatus !== "review"} />
+      )}
       <FinalDeliverySection work={work} busy={busy} onSubmitArtifact={onSubmitArtifact} />
       {work.engineStatus === "completed" && onCreateRoutine && (
         <EngineRoutineCreator defaultName={work.title} onCreateRoutine={onCreateRoutine} />

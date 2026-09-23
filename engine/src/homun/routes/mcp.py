@@ -8,6 +8,7 @@ from homun.context import get_context
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _actor_from_headers, _http_error
 from homun.routes.price_comparisons import request_context
+from homun.application import external_tools
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["mcp", "skills"])
 
@@ -116,6 +117,19 @@ def test_server(workspace_id: str, server_id: str,
         ) from exc
 
 
+class ToolProposeRequest(BaseModel):
+    command_id: str = Field(min_length=1, max_length=160)
+    work_id: str = Field(min_length=1, max_length=80)
+    server_id: str = Field(min_length=1, max_length=80)
+    tool: str = Field(min_length=1, max_length=120)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolApproveRequest(BaseModel):
+    command_id: str = Field(min_length=1, max_length=160)
+    digest: str
+
+
 class SkillCreateRequest(BaseModel):
     command_id: str = Field(min_length=1, max_length=160)
     name: str = Field(min_length=1, max_length=80)
@@ -129,6 +143,39 @@ class SkillCreateRequest(BaseModel):
 class SkillActionRequest(BaseModel):
     command_id: str = Field(min_length=1, max_length=160)
     expected_version: int = Field(ge=1)
+
+
+@router.get("/works/{work_id}/mcp/tools")
+def list_tool_calls(workspace_id: str, work_id: str,
+                    x_homun_actor_id: str | None = Header(default=None),
+                    x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        return external_tools.list_for_work(ctx, actor, work_id)
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/mcp/tools/propose")
+def propose_tool_call(workspace_id: str, body: ToolProposeRequest,
+                      x_homun_actor_id: str | None = Header(default=None),
+                      x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        return external_tools.propose(ctx, actor, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/mcp/tools/{proposal_id}/approve")
+def approve_tool_call(workspace_id: str, proposal_id: str, body: ToolApproveRequest,
+                      x_homun_actor_id: str | None = Header(default=None),
+                      x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        return external_tools.approve(ctx, actor, proposal_id, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc
 
 
 @router.get("/skills")

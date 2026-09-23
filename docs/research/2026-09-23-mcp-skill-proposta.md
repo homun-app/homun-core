@@ -69,3 +69,27 @@ Web:
 - Verificato dal vivo: server «Echo di prova» dichiarato con allowlist →
   probe reale «Collegato a echo-live: 2 strumenti ammessi su 3 scoperti»;
   messaggio agente salvato come procedura → staged → approvato (rev 2).
+
+## Realizzazione fetta 2 (23/09/2026, verificato dal vivo)
+
+- **Esecuzione supervisionata degli strumenti MCP**: `call_tool` nel client
+  (initialize + `tools/call` in un roundtrip fresco, allowlist onorata anche
+  in esecuzione, testo del risultato per la revisione) e flusso applicativo
+  propose → approve → execute: proposta durabile `external_tool.call`
+  (digest che lega l'approvazione a server+strumento+argomenti esatti),
+  approvazione **solo persona**, esecuzione fuori transazione, artifact
+  tramite `work.submit_artifact` (con bootstrap piano+start per lavori in
+  bozza) e messaggio onesto in chat. Un solo strumento attivo per lavoro.
+- Route: `POST /mcp/tools/propose`, `POST /mcp/tools/{id}/approve`,
+  `GET /works/{id}/mcp/tools`. Test e2e (server echo che risponde a
+  tools/call): artifact con il testo dello strumento, lavoro in REVIEW,
+  digest alterato rifiutato, strumento fuori allowlist rifiutato.
+- **Skill nel contesto del modello (L0)**: il payload dell'intake ora include
+  l'indice delle sole skill approvate (nome+descrizione, max 40); il prompt
+  cita in rationale le procedure pertinenti senza inventarne altre.
+- **Web**: sezione «Strumenti esterni (MCP)» nel pannello del lavoro —
+  scelta server (probe reale per gli strumenti), argomenti JSON, «Prepara la
+  proposta» (non esegue) e «Approva ed esegui» che porta il risultato in
+  revisione. Verificato dal vivo: echo server → list_issues con
+  `{"stato":"aperto"}` → «Strumento eseguito: il risultato è in revisione
+  nella conversazione», lavoro in REVIEW con artifact a motore.

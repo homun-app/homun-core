@@ -119,3 +119,30 @@ def probe_server(server: ExternalServer) -> dict[str, Any]:
         "tools": filtered_tools(server, discovered),
         "tool_count_total": len(discovered),
     }
+
+
+def call_tool(server: ExternalServer, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Supervised execution: initialize + tools/call, one fresh roundtrip.
+
+    The subprocess never outlives the call; the declared allowlist is honored
+    (include wins) and the result text is returned for human review.
+    """
+    if server.status != "enabled":
+        raise RuntimeError("Server is disabled")
+    if not filtered_tools(server, [{"name": tool_name}]):
+        raise RuntimeError(f"Tool {tool_name!r} is not in the declared allowlist")
+    init = _request("initialize", {
+        "protocolVersion": MCP_PROTOCOL_VERSION,
+        "capabilities": {},
+        "clientInfo": {"name": "homun-engine", "version": "0.1.0"},
+    }, 1)
+    call = _request("tools/call", {"name": tool_name, "arguments": arguments}, 2)
+    roundtrip = _stdio_roundtrip if server.transport == "stdio" else _http_roundtrip
+    replies = roundtrip(server, [init, call])
+    call_reply = replies.get(2) or {}
+    if "error" in call_reply:
+        raise RuntimeError(f"tools/call failed: {call_reply['error']}")
+    result = call_reply.get("result") or {}
+    content = result.get("content") or []
+    texts = [str(item.get("text") or "") for item in content if isinstance(item, dict)]
+    return {"text": "\n".join(t for t in texts if t), "is_error": bool(result.get("isError"))}
