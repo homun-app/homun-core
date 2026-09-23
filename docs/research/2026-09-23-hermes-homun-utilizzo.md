@@ -7,6 +7,11 @@ in questa analisi, i racconti non sono misure indipendenti né rappresentano
 tutta la comunità. Per Homun usiamo codice, prove del consolidamento e rapporti
 datati; non abbiamo ripetuto qui tutti i percorsi con modelli reali.
 
+> Aggiornamento successivo: questo confronto conserva lo snapshot `8b7658b2`.
+> Uso diretto, ciclo adattivo sui materiali, onboarding e contributi sono stati
+> aggiunti nella [tranche operativa](2026-09-23-homun-operativo-verifica.md).
+> L’aggiunta non certifica parità di strumenti o qualità con Hermes.
+
 ## La differenza da valutare
 
 **Ipotesi di prodotto:** Homun può rendere semplice affidare e verificare un

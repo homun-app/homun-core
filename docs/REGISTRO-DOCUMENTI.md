@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **173**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **178**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -184,3 +184,8 @@ Documenti censiti: **173**. Punto di ingresso: [indice](README.md).
 | [experiments/engine/f0_2_runtime/README.md](../experiments/engine/f0_2_runtime/README.md) | Fotografia storica |
 | [roadmap.md](../roadmap.md) | Riferimento corrente |
 | [docs/research/2026-09-23-visione-prodotto-gap.md](research/2026-09-23-visione-prodotto-gap.md) | Analisi statica corrente e priorita proposte |
+| [docs/plans/2026-09-23-contribution-invitations.md](plans/2026-09-23-contribution-invitations.md) | Ricerca o evidenza datata; perimetro nel documento |
+| [docs/plans/2026-09-23-organization-onboarding.md](plans/2026-09-23-organization-onboarding.md) | Ricerca o evidenza datata; perimetro nel documento |
+| [docs/research/2026-09-23-homun-operativo-verifica.md](research/2026-09-23-homun-operativo-verifica.md) | Ricerca o evidenza datata; perimetro nel documento |
+| [docs/superpowers/plans/2026-09-23-homun-operativo.md](superpowers/plans/2026-09-23-homun-operativo.md) | Piano o specifica datata; perimetro nel rapporto operativo |
+| [docs/superpowers/specs/2026-09-23-homun-operativo-design.md](superpowers/specs/2026-09-23-homun-operativo-design.md) | Piano o specifica datata; perimetro nel rapporto operativo |

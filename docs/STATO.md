@@ -1,16 +1,15 @@
 # Stato verificato di Homun 2
 
-Aggiornato il 23 settembre 2026, dopo il consolidamento del sorgente `0.2.1001`
-a partire da `e5155baf`, integrato su `main` nel commit `8b7658b2`. Questo documento descrive lo stato corrente; lo
-[stato precedente](STATO-2026-09-22.md) e i rapporti in `research/` conservano
-le prove storiche. Una verifica del sorgente non aggiorna l'app installata.
+Aggiornato il 23 settembre 2026 con la tranche operativa successiva ad
+`a2d420c8`. Lo stato precedente e i rapporti datati conservano le prove storiche.
+Una verifica del sorgente non aggiorna l'app installata.
 
 ## Capacità presenti
 
 - Motore Python persistente con comandi versionati, autorizzazioni, materiali,
   artifact, piani, budget, outbox e workflow DBOS.
 - Chat supervisionata: domanda oppure proposta di lavoro, accordo confermato,
-  collaboratore assegnato, piano per fasi, approvazione degli effetti e revisione
+  Homun diretto o collaboratore scelto, piano per fasi, approvazione degli effetti e revisione
   umana dei risultati. `general` indica preparazione, non esecuzione generica.
 - Confronto CSV deterministico, lettura materiali e sintesi con il modello del
   collaboratore. Le fonti della sintesi vengono rivalidate all'approvazione,
@@ -30,12 +29,21 @@ le prove storiche. Una verifica del sorgente non aggiorna l'app installata.
   pipeline di release e updater presenti; il controllo manuale offre un solo
   dialogo per l'evento di aggiornamento.
 
+- Uso diretto senza creazione obbligatoria di bot; `agent_run` esegue un ciclo
+  adattivo su materiali autorizzati, con osservazioni persistite e chiarimenti.
+- Onboarding aziendale opzionale, proposta di squadra confermata, contesto usato
+  nelle richieste successive e consultazioni dei collaboratori nel lavoro.
+- Destinatari nominativi e portale temporaneo per contributi testuali; una risposta
+  può far riprendere il ciclo adattivo. Identità dichiarata, non account verificato.
+
 ## Evidenze della tranche corrente
 
-Le prove e i limiti sono descritti nel
-[rapporto di consolidamento](research/2026-09-23-consolidamento-verifica.md).
-I risultati di modelli reali e pacchetti delle tranche precedenti rimangono
-nei rispettivi rapporti e non sono stati ripetuti automaticamente qui.
+Il [rapporto operativo](research/2026-09-23-homun-operativo-verifica.md) distingue
+prove automatiche, modello locale reale e limiti. Suite: 608 motore passati e 1
+saltato, 211 web, 11 desktop; typecheck/build web e prototipo, OpenAPI e architettura
+allineati (0 errori, 35 avvisi). La prova browser usa un profilo sintetico separato.
+Il [consolidamento precedente](research/2026-09-23-consolidamento-verifica.md)
+resta una fotografia distinta.
 
 ## Limiti ancora aperti
 
@@ -60,23 +68,14 @@ nei rispettivi rapporti e non sono stati ripetuti automaticamente qui.
 
 ## Prossimo passo: uso reale e UX
 
-La [verifica della visione rispetto al codice](research/2026-09-23-visione-prodotto-gap.md)
-riporta l'analisi ai due ingressi richiesti: usare subito Homun e costruire la
-propria squadra. Mancano ancora il ciclo adattivo generalista con strumenti,
-l'onboarding aziendale e la collaborazione operativa tra identità distinte.
-Team e coordinatore persistiti non certificano delega autonoma o collaborazione
-multipersona. Il confronto listini rimane una prova tecnica circoscritta.
+I due ingressi — richiesta diretta e squadra aziendale — sono presenti nel
+perimetro del rapporto operativo. Il ciclo resta limitato ai materiali selezionati:
+web, shell, MCP generici, agenti pronti e collaborazione distribuita sono aperti.
+Il confronto listini è una fixture tecnica, non il posizionamento.
 
-Ripercorrere primo avvio, domanda semplice, lavoro con materiali, collaborazione,
-revisione e ricorrenza. Per ogni scenario esplicitare obiettivo dell'utente,
-passaggi richiesti, decisioni da confermare, risultato atteso e recupero dagli
-errori. Confrontare chat, Compiti, Materiali e Documenti sulla stessa attività;
-poi proporre interventi piccoli e verificabili. L'obiettivo è capire come si
-porta a termine un lavoro, prima di ridisegnare le schermate.
-
-La [guida d'uso](USO-HOMUN.md), la [matrice requisiti](specifications/STATO-IMPLEMENTAZIONE.md)
-e il [confronto con Hermes](research/2026-09-23-hermes-homun-utilizzo.md) preparano
-la discussione UX. L'integrazione su main è stata riverificata: 201 test frontend,
-11 desktop e 534 motore + inventario complessivi (1 saltato), build/typecheck,
-OpenAPI e architettura allineati. I risultati originari della tranche restano
-nel rapporto, distinti dalla verifica di merge.
+La [guida](USO-HOMUN.md), la [matrice requisiti](specifications/STATO-IMPLEMENTAZIONE.md)
+e gli scenari del [rapporto](research/2026-09-23-homun-operativo-verifica.md)
+preparano l'analisi UX: ridurre passaggi, chiarire responsabilità e rendere semplice
+riprendere il lavoro. La qualità va misurata con utenti del target, non dedotta
+dai test. Il [confronto Hermes](research/2026-09-23-hermes-homun-utilizzo.md)
+conserva lo snapshot di ricerca e rinvia alle implementazioni successive.

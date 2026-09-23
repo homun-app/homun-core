@@ -1,8 +1,10 @@
 # Documentazione Homun 2
 
-Aggiornamento: 23 settembre 2026, consolidamento integrato in `main` (`8b7658b2`).
+Aggiornamento: 23 settembre 2026, consolidamento e tranche operativa.
 
 ## Da dove iniziare
+
+- [Tranche operativa](research/2026-09-23-homun-operativo-verifica.md): uso diretto, squadra, contributi, prove e limiti.
 
 - [Visione e distanza dal codice](research/2026-09-23-visione-prodotto-gap.md): uso diretto, onboarding aziendale e squadra persone–bot; priorità proposte.
 

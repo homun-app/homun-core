@@ -34,7 +34,9 @@ La separazione dei sorgenti permette di evolvere la nuova app conservando il rif
 
 ## Stato reale — 23 settembre 2026
 
-Il consolidamento `8b7658b2` è integrato su `main`. Homun dispone di chat con
+Dopo il consolidamento, la [tranche operativa](docs/research/2026-09-23-homun-operativo-verifica.md)
+aggiunge uso diretto senza bot obbligatorio, onboarding aziendale, ciclo adattivo
+sui materiali, consultazioni AI e contributi umani circoscritti. Sono presenti
 accordo supervisionato, collaboratori e team, piani per fasi, materiali,
 confronto CSV, lettura, sintesi, procedure approvate, budget e scadenze,
 risultati revisionabili e routine. Materiali, Plugin e Compiti laterali usano

@@ -9,6 +9,11 @@ each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 
 ## [Unreleased]
 
+## Highlights
+- **Work directly with Homun without creating a specialist bot.** Optional company onboarding proposes a small team for recurring responsibilities.
+- **Adaptive work over approved materials.** Homun can read, search, consult selected AI teammates, request clarification and deliver a reviewable result with persisted progress.
+- **Scoped human contributions.** Named recipients can answer one request through an expiring, revocable link; an adaptive run can resume from that answer. Reachable hosting remains a prerequisite.
+
 ## Fixes
 - **Materials and Plugins use the engine from the sidebar.** Files, previews, archival and capability settings share the persisted engine state; denied access clears stale previews.
 - **Task deadlines persist from the Tasks view**, with saving feedback and typed errors.

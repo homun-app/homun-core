@@ -1,14 +1,14 @@
 # Requisiti e implementazione — 23 settembre 2026
 
-Mappa del sorgente dopo `8b7658b2`. Integra la specifica v1 senza riscriverne i
+Mappa del sorgente con la tranche operativa del 23 settembre. Integra la specifica v1 senza riscriverne i
 requisiti né approvare proposte rimaste aperte. “Presente” indica codice e prove
 nel perimetro dei rapporti, non certificazione dell'intera visione.
 
 | Area delle specifiche | Presente | Parziale o da verificare |
 | --- | --- | --- |
 | 01 — Prodotto e dati | Domanda/lavoro, accordo, piani, progetti, file, risultati revisionabili | Qualità semantica, accessibilità e comprensibilità su utenti del target |
-| 02 — Agenti ed esecuzioni | Profili, team, modello per collaboratore, tool locali, sintesi, budget/allocazioni, procedure approvate | Autonomia per competenza, apprendimento valutato, equivalenza di garanzie sui tool MCP |
-| 03 — Impostazioni e permessi | Connessioni, impostazioni, grant progetto, cataloghi reali e gestione routine | Identità multiutente esterne, politica completa di retention e recupero chiavi |
+| 02 — Agenti ed esecuzioni | Uso diretto, onboarding aziendale, profili/team, consultazioni AI, ciclo adattivo su materiali, sintesi, budget e procedure | Autonomia per competenza, apprendimento valutato, equivalenza di garanzie sui tool MCP |
+| 03 — Impostazioni e permessi | Connessioni, impostazioni, grant progetto, cataloghi reali e gestione routine | Portale di contributo con identità dichiarata presente; account verificati, identità multiutente esterne, politica completa di retention e recupero chiavi |
 | 04 — API e rete | Motore locale/API, sessione del launcher, contratto OpenAPI generato, Electron | Pairing, tunnel, trasferimenti e collaborazione fra installazioni; client Flutter |
 | 05 — Accettazione | Suite e casi sintetici, prove GUI circoscritte, inventario packaging | Pilot 2–5 persone, benchmark UX, Mac pulito, upgrade/rollback completo |
 

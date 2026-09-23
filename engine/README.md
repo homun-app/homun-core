@@ -1,6 +1,6 @@
 # Motore Python
 
-Stato e verifiche complessive: [stato corrente](../docs/STATO.md). Il motore include intake supervisionato, piani per fasi, confronto CSV, lettura, sintesi, procedure approvate, budget/allocazioni, MCP e routine. Il [consolidamento del 23/9](../docs/research/2026-09-23-consolidamento-verifica.md) corregge recupero catene, fonti e consumi della sintesi, riconciliazione cron; i rapporti precedenti restano prove datate.
+Stato e verifiche complessive: [stato corrente](../docs/STATO.md). La [tranche operativa](../docs/research/2026-09-23-homun-operativo-verifica.md) aggiunge esecutore Homun senza profilo obbligatorio, `agent_run` su materiali, contesto aziendale/team e portale di contributo circoscritto. Il motore include intake supervisionato, piani per fasi, confronto CSV, lettura, sintesi, procedure approvate, budget/allocazioni, MCP e routine. Il [consolidamento del 23/9](../docs/research/2026-09-23-consolidamento-verifica.md) corregge recupero catene, fonti e consumi della sintesi, riconciliazione cron; i rapporti precedenti restano prove datate.
 
 **Runtime adottato (D-RUN-01):** Pydantic AI + DBOS.
 **Dominio F1+F2:** comandi versionati persistiti su **SQLite (WAL)**; HTTP locale.

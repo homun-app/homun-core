@@ -56,9 +56,12 @@ capacità attuali, prove e limiti. I percorsi simulati restano espliciti.
 - [ ] Contratto di recupero degli effetti MCP esterni
 - [x] Guida d'uso e confronto documentato Hermes/Homun, con capacità e testimonianze distinte
 - [x] [Analisi visione/codice](docs/research/2026-09-23-visione-prodotto-gap.md): uso diretto e squadra aziendale
-- [ ] Disegno UX dei due ingressi: chat operativa e onboarding aziendale; definire il primo percorso completo
-- [ ] Ciclo generalista adattivo con strumenti, osservazioni e ripresa persistente
-- [ ] Coordinamento operativo e contributo di colleghi con identità distinte
+- [x] Uso diretto senza profilo artificiale e onboarding opzionale con contesto/squadra persistenti
+- [x] Ciclo adattivo limitato ai materiali autorizzati: decisioni, strumenti, chiarimenti, ripresa e revisione
+- [x] Consultazione dei collaboratori del team e portale di contributo umano circoscritto
+- [ ] Analisi UX con utenti: meno passaggi, proposta di squadra comprensibile, continuità del lavoro
+- [ ] Estensione del ciclo a web/MCP con contratti di recupero degli effetti
+- [ ] Account umani verificati e collaborazione tra installazioni
 
 ## Consolidamento delle fondamenta — aggiornato al 19 settembre 2026
 
