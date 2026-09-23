@@ -250,23 +250,35 @@ class ModelRegistry:
 
     def complete_tools(self, messages, *, tools, connection_id=None, context_window=None, max_output_tokens=8192):
         from homun.domain.errors import ValidationError
+        from homun.models.native_errors import NativeModelError
         from homun.models.native_transport import complete_tools
         pid = connection_id or self.active_provider_id
         provider = self._providers.get(pid)
         if not isinstance(provider, OpenAICompatibleProvider):
             raise ValidationError('Native tools require an OpenAI-compatible connection')
-        result = complete_tools(provider, messages, tools=tools, context_window=context_window,
-                                max_output_tokens=max_output_tokens)
+        try:
+            result = complete_tools(provider, messages, tools=tools, context_window=context_window,
+                                    max_output_tokens=max_output_tokens)
+        except NativeModelError as exc:
+            if isinstance(exc.usage, UsageEntry):
+                self.usage.append(exc.usage)
+            raise
         self.usage.append(result.usage)
         return result
 
     def complete_summary(self, messages, *, connection_id=None, context_window=None, max_output_tokens=8192):
+        from homun.models.native_errors import NativeModelError
         from homun.models.native_transport import complete_summary
         provider = self._providers.get(connection_id or self.active_provider_id)
         if not isinstance(provider, OpenAICompatibleProvider):
             raise ValidationError('Native summaries require an OpenAI-compatible connection')
-        result = complete_summary(provider, messages, context_window=context_window,
-                                  max_output_tokens=max_output_tokens)
+        try:
+            result = complete_summary(provider, messages, context_window=context_window,
+                                      max_output_tokens=max_output_tokens)
+        except NativeModelError as exc:
+            if isinstance(exc.usage, UsageEntry):
+                self.usage.append(exc.usage)
+            raise
         self.usage.append(result.usage)
         return result
 

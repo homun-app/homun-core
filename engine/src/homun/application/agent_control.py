@@ -1,5 +1,5 @@
 """Durable owner controls for native runs; no network calls inside transactions."""
-from homun.application import agent_native
+from homun.application import agent_native, agent_recovery
 from homun.application.agent_control_history import close_pending, redirect_history
 from homun.application.agent_runs import authority, lookup, public, public_for
 from homun.application.price_comparisons import cached, save
@@ -22,6 +22,8 @@ def _fence(run,actor,*,preserve_active=False):
     run['_workflow_id']=f'agent:{actor.workspace_id}:{run["id"]}:{run["_epoch"]}'
     run.pop('_lease_token',None)
     run.pop('_lease_until',None)
+    # A new control generation fences any unresolved retry; it starts fresh.
+    agent_recovery.interrupt(run)
     if not preserve_active:
         run.pop('_active_call_id',None)
 

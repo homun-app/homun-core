@@ -97,16 +97,20 @@ def test_summary_has_no_tools_and_records_usage_once(tmp_path,monkeypatch,ollama
     assert [usage.id for usage in models.usage] == [result.usage.id]
 
 
-@pytest.mark.parametrize('message,reason', [({'content':'truncated'},'length'),
-    ({'thinking':'hidden reasoning'},'stop'),
-    ({'content':'', 'tool_calls':[{'id':'call', 'function':{'name':'read','arguments':'{}'}}]},'tool_calls')])
-def test_summary_rejects_truncation_reasoning_and_toolcalls(tmp_path,monkeypatch,message,reason):
+@pytest.mark.parametrize('message,reason,code', [({'content':'truncated'},'length','agent_model_truncated'),
+    ({'thinking':'hidden reasoning'},'stop','agent_model_empty_response'),
+    ({'content':'', 'tool_calls':[{'id':'call', 'function':{'name':'read','arguments':'{}'}}]},'tool_calls','agent_model_malformed')])
+def test_summary_rejects_truncation_reasoning_and_toolcalls(tmp_path,monkeypatch,message,reason,code):
+    from homun.models.native_errors import NativeModelError
     models = registry(tmp_path)
     wire(models,monkeypatch,False,message,reason)
-    with pytest.raises(ValueError):
+    with pytest.raises(NativeModelError) as caught:
         models.complete_summary([NativeMessage(role='user',content='Summarize')],
             connection_id='openai_compatible',context_window=16384,max_output_tokens=1024)
-    assert models.usage == []
+    assert caught.value.code==code
+    # The rejected reply still charges its reported counters honestly.
+    assert len(models.usage)==1 and models.usage[0].status=='error'
+    assert models.usage[0].input_tokens==12 and models.usage[0].output_tokens==8
 
 
 def test_http_connection_update_preserves_omitted_pins(tmp_path,monkeypatch):

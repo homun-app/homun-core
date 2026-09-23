@@ -3,7 +3,8 @@ import json
 from copy import deepcopy
 from datetime import datetime, timedelta
 from uuid import uuid4
-from homun.application import budgets, agent_native
+from homun.application import budgets, agent_native, agent_recovery
+from homun.application.agent_run_failures import fail  # re-exported for callers
 from homun.application.agent_runs import authority, lookup
 from homun.application.agent_control_history import consume_steering
 from homun.application.agent_context import prepare as prepare_context, ContextPreparationDeferred
@@ -12,43 +13,18 @@ from homun.application.agent_team import tool_definition
 from homun.application.agent_consultation import consult
 from homun.application.agent_usage import charge
 from homun.domain.errors import DomainError, ValidationError
-from homun.domain.ids import new_id
-from homun.domain.models import Actor, BudgetCounters, DomainEvent, utc_now
-from homun.domain.states import WorkStatus
+from homun.domain.models import Actor, BudgetCounters, utc_now
 from homun.models.agent_turn import AgentDecision, decide
+from homun.models.native_errors import NativeModelError
 
 LEASE_SECONDS = 180
 
 
-def fail(ctx, run_id, code, *, token=None, blocked=False, epoch=None, expected_steering=None):
-    with ctx.repository.locked():
-        with ctx.repository.transaction() as store:
-            run = lookup(store, run_id)
-            if epoch is not None and run['_epoch'] != epoch:
-                return 'superseded'
-            if run['status'] not in {'queued', 'running', 'waiting_input'}:
-                return run['status']
-            if token is not None and run.get('_lease_token') != token:
-                return run['status']
-            if expected_steering is not None and run.get('_steering',[]) != expected_steering:
-                # Terminal failures obey the same human-input fence as successful results.
-                run.pop('_lease_token',None)
-                run.pop('_lease_until',None)
-            else:
-                run.update(status='blocked' if blocked else 'failed', error_code=code)
-                run.pop('_lease_token', None)
-                run.pop('_lease_until', None)
-                work = store.works[run['work_id']]
-                if work.status == WorkStatus.RUNNING and work.version == run.get('_run_version'):
-                    work.status = WorkStatus.FAILED
-                    work.version += 1
-                    work.updated_at = utc_now()
-                    store.events.append(DomainEvent(event_id=new_id('evt'), workspace_id=store.workspace_id,
-                        aggregate_id=work.id, aggregate_type='work', aggregate_version=work.version,
-                        sequence=store.next_sequence(), type='work.agent_run_failed', actor_id='homun_engine',
-                        command_id=run_id, payload={'error_code': code}))
-        ctx.service.store = store
-    return run['status']
+class _ModelFailure(Exception):
+    """A native model call failed after its honest budget charge."""
+
+    def __init__(self, error):
+        self.error = error
 
 
 def _claim(ctx, run_id, epoch=None):
@@ -59,6 +35,8 @@ def _claim(ctx, run_id, epoch=None):
                 return 'superseded', None
             if run['status'] not in {'queued', 'running'}:
                 return run['status'], None
+            if agent_recovery.waiting(run):
+                return 'busy', None
             until = run.get('_lease_until')
             if until and datetime.fromisoformat(until) > utc_now():
                 return 'busy', None
@@ -108,6 +86,9 @@ def _decision(ctx, run):
             decision, result = decide(ctx.models, objective=run['_objective'], tools=tools,
                 observations=run['observations'], connection_id=run['connection_id'],
                 instructions=run['_instructions'])
+    except NativeModelError as exc:
+        charge(ctx, actor, run, reservation, exc.usage)
+        raise _ModelFailure(exc) from exc
     except Exception:
         budgets.reconcile_unknown(ctx, actor, run['work_id'], reservation)
         raise
@@ -121,6 +102,7 @@ def _decision(ctx, run):
             current['_decision'] = decision.model_dump()
             if agent_native.enabled(run):
                 current['_messages'] = run['_messages']
+            agent_recovery.accept(current, 'decide')
         ctx.service.store = store
     return decision
 
@@ -142,6 +124,7 @@ def advance(ctx, run_id, *, epoch=None):
     """Execute at most one decision. Reads may replay; publication is transactional."""
     token = None
     expected_steering = None
+    run = None
     try:
         status, run = _claim(ctx, run_id, epoch)
         if run is None:
@@ -210,10 +193,21 @@ def advance(ctx, run_id, *, epoch=None):
         return status
     except ContextPreparationDeferred:
         return ctx.repository.load().commands[run_id].result['status']
+    except _ModelFailure as held:
+        if not held.error.retryable:
+            return fail(ctx, run_id, held.error.code, token=token, epoch=epoch,
+                        expected_steering=expected_steering)
+        outcome = agent_recovery.schedule(ctx, Actor.model_validate(run['_actor']), run, held.error,
+                                          phase='decide', expected_steering=expected_steering)
+        if outcome in {'waiting', 'fenced'}:
+            return ctx.repository.load().commands[run_id].result['status']
+        return outcome
     except DomainError as exc:
         return fail(ctx, run_id, exc.code, token=token,
                     blocked=exc.code in {'permission_denied', 'version_conflict', 'not_found'}, epoch=epoch,
                     expected_steering=expected_steering)
+    except NativeModelError as exc:
+        return fail(ctx, run_id, exc.code, token=token, epoch=epoch, expected_steering=expected_steering)
     except (ValueError, TypeError):
         return fail(ctx, run_id, 'agent_run_invalid_decision', token=token, epoch=epoch, expected_steering=expected_steering)
     except RuntimeError:

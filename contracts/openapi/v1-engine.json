@@ -2339,6 +2339,18 @@
             ],
             "title": "Person"
           },
+          "recovery": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery"
+          },
           "request_id": {
             "anyOf": [
               {

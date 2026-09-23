@@ -48,9 +48,22 @@ Una verifica del sorgente non aggiorna l'app installata.
   limiti del modello espliciti e consumo del riepilogo separato dalla decisione.
   [Prova Ollama e limiti](research/2026-09-23-agent-context-verifica.md).
 
+- Recupero durevole dai guasti del provider (H06, prima tranche): errori nativi
+  tipizzati e sanitizzati, consumi estratti prima della validazione, tre
+  tentativi persistenti per fase con backoff base2+jitter o Retry-After (tetto
+  600 s), attese senza lease visibili in API, strumenti committati mai ripetuti.
+  [Prove reali Ollama e limiti](research/2026-09-23-agent-recovery-verifica.md).
+
 ## Evidenze della tranche corrente
 
-Contesto: **688 test engine passati, 1 saltato**; typecheck e OpenAPI allineati.
+Recupero provider: **701 test engine passati, 1 saltato**; typecheck e OpenAPI
+allineati (campo opzionale `recovery`), architettura 0 errori. Prova reale:
+rifiuto di connessione autentico convertito in attesa persistente poi riuscita
+su Ollama `qwen3.5:4b` con budget onesto; 404 reale classificato fallimento
+permanente tipizzato. Refresh credenziali, fallback, continuazione dei
+troncamenti e overflow restano aperti.
+
+Contesto: 688 test engine passati, 1 saltato; typecheck e OpenAPI allineati.
 Prova Ollama di compattazione riuscita, con sei righe corrette nell'artifact in
 revisione e cronologia originale conservata. [Rapporto](research/2026-09-23-agent-context-verifica.md).
 

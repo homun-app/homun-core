@@ -1,0 +1,79 @@
+{
+ "scenarios": [
+  {
+   "name": "A: connection refused then real Ollama retry",
+   "steps": [
+    {
+     "step": "failing_advance",
+     "status": "running"
+    },
+    {
+     "step": "after_failure",
+     "status": "running",
+     "recovery": {
+      "phase": "decide",
+      "status": "waiting",
+      "attempts": 1,
+      "error_code": "agent_model_network"
+     },
+     "wait_seconds": 2.1,
+     "lease_held": false
+    },
+    {
+     "step": "advance_while_waiting",
+     "status": "busy"
+    },
+    {
+     "step": "after_real_retry",
+     "statuses": [
+      "running",
+      "completed"
+     ],
+     "final_status": "completed",
+     "recovery": {
+      "phase": "decide",
+      "status": "recovered",
+      "attempts": 0
+     },
+     "model_attempts": 3,
+     "turns": 2,
+     "budget": {
+      "spent": {
+       "attempts": 2,
+       "input_tokens": 1980,
+       "output_tokens": 79
+      },
+      "unknown": {
+       "attempts": 1,
+       "input_tokens": 0,
+       "output_tokens": 0
+      }
+     }
+    },
+    {
+     "step": "artifact",
+     "count": 1,
+     "title": "Risultato · Nota consegna",
+     "has_delivery_date": true
+    }
+   ]
+  },
+  {
+   "name": "B: real Ollama 404 nonexistent model",
+   "steps": [
+    {
+     "step": "advance",
+     "status": "failed"
+    },
+    {
+     "step": "result",
+     "status": "failed",
+     "error_code": "agent_model_invalid_request",
+     "recovery": null,
+     "lease_held": false,
+     "work_status": "failed"
+    }
+   ]
+  }
+ ]
+}

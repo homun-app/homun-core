@@ -41,6 +41,7 @@ class RunView(BaseModel):
     connection_id: str
     observations: list[dict]
     context: dict | None = None
+    recovery: dict | None = None
     turns: int
     model_attempts: int
     history_redacted: bool = False

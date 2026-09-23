@@ -1,11 +1,12 @@
 """Budgeted context checkpoint preparation; canonical run history is never replaced."""
-from homun.application import agent_native, budgets
+from homun.application import agent_native, agent_recovery, budgets
 from homun.application.agent_runs import authority, lookup
 from homun.application.agent_usage import charge
 from homun.domain.errors import ValidationError
 from homun.domain.models import Actor, BudgetCounters, utc_now
 from homun.models.context_plan import plan_context, build_checkpoint, project_checkpoint
 from homun.models.context_summary import ContextSummaryError, summary_request, summary_text
+from homun.models.native_errors import NativeModelError
 
 
 class ContextPreparationDeferred(Exception):
@@ -65,6 +66,17 @@ def prepare(ctx,run,tools):
     try:
         result=ctx.models.complete_summary(request,connection_id=run['connection_id'],
             context_window=policy['context_window'],max_output_tokens=output_tokens)
+    except NativeModelError as exc:
+        charge(ctx,actor,run,reservation,exc.usage)
+        if not exc.retryable:
+            _defer_if_stale(ctx,run)
+            raise ContextSummaryError('Context summary generation failed; history was retained') from exc
+        outcome=agent_recovery.schedule(ctx,actor,run,exc,phase='summary',
+            expected_steering=run.get('_steering',[]))
+        if outcome not in {'waiting','fenced'}:
+            raise ContextSummaryError('Context summary generation failed; history was retained') from exc
+        # The wait holds no lease; the workflow's busy path resumes preparation when due.
+        raise ContextPreparationDeferred() from exc
     except Exception as exc:
         budgets.reconcile_unknown(ctx,actor,run['work_id'],reservation)
         _defer_if_stale(ctx,run)
@@ -87,6 +99,7 @@ def prepare(ctx,run,tools):
             else:
                 authority(ctx,store,actor,current,running=True)
                 current['_context_checkpoint']=candidate
+                agent_recovery.accept(current,'summary')
                 current['context']={'compactions':candidate['generation'],
                     'estimated_input_tokens':candidate['estimated_after'],
                     'context_window':policy['context_window'],'estimate_is_usage':False}

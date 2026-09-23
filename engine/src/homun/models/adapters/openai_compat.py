@@ -129,20 +129,32 @@ class OpenAICompatModelAdapter:
         return result
 
     def complete_tools(self, messages, *, tools, connection_id=None, context_window=None, max_output_tokens=8192):
+        from homun.models.native_errors import NativeModelError
         from homun.models.native_transport import complete_tools
         if connection_id is not None:
             self.get_connection(connection_id)
-        result = complete_tools(self._provider, messages, tools=tools, context_window=context_window,
-                                max_output_tokens=max_output_tokens)
+        try:
+            result = complete_tools(self._provider, messages, tools=tools, context_window=context_window,
+                                    max_output_tokens=max_output_tokens)
+        except NativeModelError as exc:
+            if isinstance(exc.usage, UsageEntry):
+                self.usage.append(exc.usage)
+            raise
         self.usage.append(result.usage)
         return result
 
     def complete_summary(self, messages, *, connection_id=None, context_window=None, max_output_tokens=8192):
+        from homun.models.native_errors import NativeModelError
         from homun.models.native_transport import complete_summary
         if connection_id is not None:
             self.get_connection(connection_id)
-        result = complete_summary(self._provider, messages, context_window=context_window,
-                                  max_output_tokens=max_output_tokens)
+        try:
+            result = complete_summary(self._provider, messages, context_window=context_window,
+                                      max_output_tokens=max_output_tokens)
+        except NativeModelError as exc:
+            if isinstance(exc.usage, UsageEntry):
+                self.usage.append(exc.usage)
+            raise
         self.usage.append(result.usage)
         return result
 

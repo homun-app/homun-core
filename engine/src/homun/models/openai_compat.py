@@ -27,6 +27,22 @@ def assistant_text_from_message(message: dict[str, Any]) -> str:
     return ""
 
 
+def _transport_failure(exc: Exception, message: str) -> RuntimeError:
+    """RuntimeError with structured hints for native error classification.
+
+    Type and message stay identical to the legacy raise so non-native callers
+    see no behavior change; ``status_code``/``headers``/``reason`` let the
+    native transport classify without parsing strings apart.
+    """
+    failure = RuntimeError(message)
+    if isinstance(exc, HTTPError):
+        failure.status_code = exc.code  # type: ignore[attr-defined]
+        failure.headers = exc.headers  # type: ignore[attr-defined]
+    elif isinstance(exc, URLError):
+        failure.reason = exc.reason  # type: ignore[attr-defined]
+    return failure
+
+
 class OpenAICompatibleProvider:
     """Talks to OpenAI-compatible /v1/chat/completions (also Ollama-compatible gateways)."""
 
@@ -309,9 +325,9 @@ class OpenAICompatibleProvider:
                     yield piece, usage_bits
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {exc.code}: {detail[:300]}") from exc
+            raise _transport_failure(exc, f"HTTP {exc.code}: {detail[:300]}") from exc
         except URLError as exc:
-            raise RuntimeError(str(exc.reason)) from exc
+            raise _transport_failure(exc, str(exc.reason)) from exc
 
     def _iter_ollama_stream(
         self, model: str, chat_messages: list[dict[str, str]]
@@ -364,9 +380,9 @@ class OpenAICompatibleProvider:
                     yield piece, usage_bits
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {exc.code}: {detail[:300]}") from exc
+            raise _transport_failure(exc, f"HTTP {exc.code}: {detail[:300]}") from exc
         except URLError as exc:
-            raise RuntimeError(str(exc.reason)) from exc
+            raise _transport_failure(exc, str(exc.reason)) from exc
 
     def _post_ollama_chat(self, body: dict[str, Any]) -> dict[str, Any]:
         root = self._ollama_native_root()
@@ -394,9 +410,9 @@ class OpenAICompatibleProvider:
                 raw = response.read().decode("utf-8")
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {exc.code}: {detail[:300]}") from exc
+            raise _transport_failure(exc, f"HTTP {exc.code}: {detail[:300]}") from exc
         except URLError as exc:
-            raise RuntimeError(str(exc.reason)) from exc
+            raise _transport_failure(exc, str(exc.reason)) from exc
         parsed = json.loads(raw)
         if not isinstance(parsed, dict):
             raise RuntimeError("Provider returned non-object JSON")

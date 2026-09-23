@@ -208,16 +208,34 @@ def test_empty_tool_round_cannot_become_final_answer():
             'message':{'content':'I will now read the document.','tool_calls':[]}}]})
 
 
-@pytest.mark.parametrize('response', [[], {'choices':[{'finish_reason':'stop','message':{'content':'Done'}}], 'usage':['invalid']}])
-def test_malformed_transport_response_records_durable_failure(setup, monkeypatch, response):
+def test_malformed_transport_envelope_exhausts_durable_retries(setup, monkeypatch):
+    from homun.models.native_errors import NativeModelError
     ctx,actor,work,material=setup
     p=native_start(ctx,actor,work,material)
     provider=ctx.models._providers['openai_compatible']
     monkeypatch.setattr(provider,'_api_key',lambda:'test-key')
     monkeypatch.setattr(provider,'_ollama_native_root',lambda:None)
-    monkeypatch.setattr(provider,'_post',lambda *a,**k:response)
+    monkeypatch.setattr(provider,'_post',lambda *a,**k:[])
+    for attempt in range(2):
+        assert advance(ctx,p['id'])=='running'
+        with ctx.repository.transaction() as store:
+            store.commands[p['id']].result['recovery']['next_attempt_at']='2000-01-01T00:00:00+00:00'
     assert advance(ctx,p['id'])=='failed'
     run=ctx.repository.load().commands[p['id']].result
-    assert run['error_code']=='agent_run_invalid_decision'
+    assert run['error_code']=='agent_model_malformed'
+    assert run['recovery']['status']=='exhausted' and run['recovery']['attempts']==3
     assert '_lease_token' not in run
     assert not ctx.repository.load().artifacts
+
+
+def test_malformed_usage_metadata_keeps_call_and_counts_unknown(setup, monkeypatch):
+    ctx,actor,work,material=setup
+    p=native_start(ctx,actor,work,material)
+    provider=ctx.models._providers['openai_compatible']
+    monkeypatch.setattr(provider,'_api_key',lambda:'test-key')
+    monkeypatch.setattr(provider,'_ollama_native_root',lambda:None)
+    monkeypatch.setattr(provider,'_post',lambda *a,**k:{'choices':[{'finish_reason':'stop','message':{'content':'Done'}}],'usage':['invalid']})
+    assert advance(ctx,p['id'])=='completed'
+    budget=ctx.repository.load().work_budgets[work]
+    assert budget.spent.attempts==0 and budget.unknown.attempts==1
+    assert budget.spent.input_tokens==0 and budget.spent.output_tokens==0

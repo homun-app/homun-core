@@ -39,3 +39,13 @@ context_plan.py derives rough multilingual token estimation and closed-exchange
 context planning from agent/model_metadata.py and agent/context_compressor.py.
 context_summary.py adapts the structured checkpoint prompt from the latter.
 Homun preserves canonical history and stores separate hash-validated projections.
+
+models/native_errors.py adapts the failure taxonomy of agent/error_classifier.py
+and the Retry-After/jittered base-2 backoff of agent/retry_utils.py and
+agent/turn_recovery.py (compute_error_backoff): statuses and well-known body
+patterns map to a smaller Homun code set, raw provider bodies are never stored,
+and provider-reported usage is carried on the typed failure when present.
+application/agent_recovery.py adapts the retry placement of
+agent/turn_api_error.py (three total attempts per phase, waits outside any
+lease/transaction, corrections surviving backoff) onto Homun durable runs;
+application/agent_run_failures.py keeps the shared terminal-failure fence.
