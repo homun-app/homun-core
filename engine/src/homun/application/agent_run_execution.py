@@ -169,10 +169,14 @@ def advance(ctx, run_id, *, epoch=None):
                 service = ctx.service.for_store(store)
                 # A correction arriving during generation must precede publication.
                 deferred = decision.kind == 'finish' and current.get('_steering') and agent_native.enabled(current)
-                if not deferred:
+                from homun.application.agent_liveness import defer as defer_stall
+                stalled = decision.kind == 'finish' and not deferred and defer_stall(current, decision)
+                if not deferred and not stalled:
                     current['turns'] += 1
                 if deferred:
                     consume_steering(current)
+                elif stalled:
+                    pass
                 elif decision.kind == 'tool':
                     if agent_native.enabled(current):
                         observation = agent_native.append_result(current, observation)

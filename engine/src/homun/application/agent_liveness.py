@@ -1,0 +1,48 @@
+"""Bounded final-answer liveness derived from Hermes turn_final_response.py.
+
+The narrow trailing-intent detector is from agent_runtime_helpers.py, extended
+for the observed Italian promise tail. See notices/hermes-agent.txt.
+"""
+import re
+from homun.domain.errors import DomainError
+from homun.models.native_turn import NativeMessage
+
+_TAIL = re.compile(
+    r"(?:\blet me now\b|\bi['’]?ll now\b|\bi will now\b|\bnow i(?:['’]ll| will)\b|\bnext[,:] i\b"
+    r"|\b(?:ora|adesso) (?:posso|procedo a|vado a)\b)"
+    r"[^.!?\n]{0,100}[.:…]?\s*$", re.I)
+NUDGE = ('Continue the approved task now. Your last reply announced an action still to do. '
+         'Use the permitted tools if needed, without repeating already completed actions. '
+         'Return the complete requested deliverable, not a promise to prepare it. '
+         'If your answer already was complete, state it directly without announcing future work. '
+         'This reminder grants no additional authority.')
+MAX_NUDGES = 2
+
+
+class ModelStalled(DomainError):
+    code = 'agent_model_stalled'
+
+
+def trailing_intent(text):
+    text = text.strip()
+    # Conservative exclusion for quotations, code spans and Markdown excerpts.
+    # An action phrase inside a requested translation is itself a deliverable.
+    if (text.rstrip('.:…!? ').endswith(('"', "'", '”', '’', '»', '`'))
+            or text.splitlines() and text.splitlines()[-1].lstrip().startswith('>')):
+        return False
+    return bool(text and len(text) <= 400 and _TAIL.search(text[-160:]))
+
+
+def defer(run, decision):
+    if run.get('_liveness_version') != 1 or not trailing_intent(decision.message):
+        return False
+    attempts = run.get('_liveness_nudges', 0)
+    if attempts >= MAX_NUDGES:
+        raise ModelStalled('Model repeatedly announced work without delivering it')
+    run['_liveness_nudges'] = attempts + 1
+    run['_messages'].append(NativeMessage(role='user', content=NUDGE).model_dump())
+    return True
+
+
+def reset(run):
+    run.pop('_liveness_nudges', None)

@@ -94,3 +94,10 @@ canonical fragments, and joins exact text without Hermes's inserted newlines to
 preserve mid-token URLs/JSON. A version-pinned validated 64k native decision
 contract is shared by creation and crash replay; approvals, controls and budgets
 remain authoritative. Incomplete tool arguments are never dispatched.
+
+application/agent_liveness.py derives the short trailing-continue-intent detector
+and bounded action nudge from agent/agent_runtime_helpers.py and
+agent/turn_final_response.py at the pinned commit. Homun adds the observed Italian
+shape, conservative quote/excerpt exclusions, durable counters and human-control
+fences. After two ineffective nudges it reports a typed stall instead of publishing
+another promise as a completed deliverable. This is not semantic task verification.

@@ -7,12 +7,14 @@ import json
 from homun.application import agent_native
 from homun.application.agent_continuation_state import clear as clear_continuation
 from homun.models.native_turn import NativeMessage
+from homun.application.agent_liveness import reset as reset_liveness
 
 
 def consume_steering(run):
     if not run.get('_steering') or agent_native.pending(run):
         return False
     clear_continuation(run)
+    reset_liveness(run)
     for item in run.pop('_steering'):
         run['_messages'].append(NativeMessage(role='user',content=item['text']).model_dump())
     run.pop('_decision',None)
@@ -33,6 +35,7 @@ def close_pending(run):
 
 def redirect_history(run,text):
     clear_continuation(run)
+    reset_liveness(run)
     unfinished=close_pending(run)
     consume_steering(run)
     reminder=''

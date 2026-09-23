@@ -171,6 +171,7 @@ def propose(ctx, actor, work_id, body):
                 run['_result_storage_version'] = 1
                 run['_tool_bridge_version'] = 1
                 run['_continuation_version'] = 1
+                run['_liveness_version'] = 1
                 run['tool_version'] = 'adaptive-materials-native-v2'
                 run['_context_policy'] = {'context_window': connection.context_window,
                                           'max_output_tokens': connection.max_output_tokens}

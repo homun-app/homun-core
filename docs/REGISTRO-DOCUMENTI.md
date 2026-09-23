@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **211**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **213**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -227,3 +227,6 @@ Documenti censiti: **211**. Punto di ingresso: [indice](README.md).
 
 | [docs/superpowers/plans/2026-09-23-text-continuation.md](superpowers/plans/2026-09-23-text-continuation.md) | Continuazione durevole dei frammenti testuali |
 | [docs/research/2026-09-23-agent-continuation-verifica.md](research/2026-09-23-agent-continuation-verifica.md) | Verifica troncamento ripresa e consegna ricomposta |
+
+| [docs/superpowers/plans/2026-09-23-liveness.md](superpowers/plans/2026-09-23-liveness.md) | Recupero delle risposte con azione ancora da svolgere |
+| [docs/research/2026-09-23-agent-liveness-verifica.md](research/2026-09-23-agent-liveness-verifica.md) | Verifica stallo, invito a proseguire e consegna reale |

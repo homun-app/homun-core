@@ -83,6 +83,11 @@ Una verifica del sorgente non aggiorna l'app installata.
 
 ## Evidenze della tranche corrente
 
+Recupero promesse finali: **885 test engine passati, 1 saltato**, più 64 controlli
+finali. Ollama ha prodotto la nota dopo un invito automatico, senza ripetere
+MCP. Recupero limitato e persistente; non è verifica semantica del completamento.
+[Prove e limiti](research/2026-09-23-agent-liveness-verifica.md).
+
 Continuazione testuale: **870 test engine passati, 1 saltato**, più 63 controlli
 finali. Frammenti persistenti, consegna ricomposta una volta, controlli e budget
 rispettati. Troncamento HTTP iniettato → riavvio SQLite → seguito Ollama reale.
