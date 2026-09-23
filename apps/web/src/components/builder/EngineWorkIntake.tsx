@@ -4,6 +4,7 @@ import type { Work } from "./conversation-types";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { EngineMaterialRead } from "./EngineMaterialRead";
+import { EngineSynthesis } from "./EngineSynthesis";
 import { EnginePriceComparison } from "./EnginePriceComparison";
 import { EngineResultReview } from "./EngineResultReview";
 import { EngineWorkNeedsCard } from "./EngineWorkNeedsCard";
@@ -120,7 +121,7 @@ export function EngineWorkIntake({
               </div>
             )}
             <dl className="cw-intake-facts">
-              <div><dt>Attività prevista</dt><dd>{p.capability === 'compare_csv' ? 'Confronto prezzi fra due CSV' : p.capability === 'read_material' ? 'Lettura autorizzata di un materiale' : 'Preparazione del lavoro, senza esecuzione automatica'}</dd></div>
+              <div><dt>Attività prevista</dt><dd>{p.capability === 'compare_csv' ? 'Confronto prezzi fra due CSV' : p.capability === 'read_material' ? 'Lettura autorizzata di un materiale' : p.capability === 'synthesize' ? 'Sintesi scritta dal modello del collaboratore, bozza in revisione' : 'Preparazione del lavoro, senza esecuzione automatica'}</dd></div>
               <div>
                 <dt>Risultato atteso</dt>
                 <dd>{p.output}</dd>
@@ -288,6 +289,9 @@ export function EngineWorkIntake({
       {confirmed && p.capability === "read_material" && (
         <EngineMaterialRead initiallyOpen work={work} onChanged={onChanged} />
       )}
+      {confirmed && p.capability === "synthesize" && (
+        <EngineSynthesis initiallyOpen work={work} onChanged={onChanged} />
+      )}
     </>
   );
 }
@@ -349,5 +353,7 @@ function PhaseTool({ work, onChanged }: {
     return <EnginePriceComparison work={work} onChanged={onChanged} />;
   if (capability === "read_material")
     return <EngineMaterialRead work={work} onChanged={onChanged} />;
+  if (capability === "synthesize")
+    return <EngineSynthesis work={work} onChanged={onChanged} />;
   return null;
 }

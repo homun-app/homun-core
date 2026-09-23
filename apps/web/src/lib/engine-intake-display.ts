@@ -22,6 +22,7 @@ const FIELD_LABELS: Record<string, string> = {
 const CAPABILITY_LABELS: Record<string, string> = {
   compare_csv: "Confronto CSV",
   read_material: "Lettura materiale",
+  synthesize: "Sintesi scritta (modello del collaboratore)",
   general: "Preparazione",
 };
 

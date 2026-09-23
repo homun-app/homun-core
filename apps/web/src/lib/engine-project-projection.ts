@@ -28,6 +28,8 @@ export function engineWorkPanelMessage(
       return 'Accordo confermato: aggiungi i due listini nella conversazione e Homun preparerà l’azione da approvare.';
     if (intake.capability === 'read_material')
       return 'Accordo confermato: carica il materiale nella conversazione e Homun preparerà l’azione da approvare.';
+    if (intake.capability === 'synthesize')
+      return 'Accordo confermato: scegli i documenti per la sintesi nella sezione «Scrivi la sintesi» e approva l’esecuzione.';
     return 'Il riepilogo è confermato: i prossimi passi si concordano in chat.';
   }
   switch (status) {

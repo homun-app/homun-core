@@ -9,10 +9,11 @@ async def runtime_lifespan(ctx):
     def start_runtime():
         dbos_app.configure_dbos(ctx.data_dir)
         from homun.runtime.workflows import work_run as _work_run_wf  # noqa: F401
-        from homun.runtime.workflows import material_read, price_comparison, tool_chain
+        from homun.runtime.workflows import material_read, price_comparison, synthesis, tool_chain
         from homun.runtime.workflows import routine_recurrence as _routine_wf  # noqa: F401
         price_comparison.bind_context(ctx)
         material_read.bind_context(ctx)
+        synthesis.bind_context(ctx)
         tool_chain.bind_context(ctx)
         dbos_app.launch_dbos()
         from homun.application.routines import reconcile_routine_schedules

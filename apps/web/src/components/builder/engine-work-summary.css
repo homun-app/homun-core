@@ -110,3 +110,12 @@
   line-height: 1.5;
   margin: 4px 0 0;
 }
+
+.cw-engine-summary__phases li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cw-engine-summary__phases li small {
+  color: #687a59;
+}

@@ -458,6 +458,7 @@ function PhaseReviseControls({
                 <option value="general">Passaggio umano</option>
                 <option value="compare_csv">Confronto CSV</option>
                 <option value="read_material">Lettura materiale</option>
+                <option value="synthesize">Sintesi (modello del collaboratore)</option>
               </select>
             </label>
           </div>

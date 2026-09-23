@@ -96,7 +96,7 @@ def test_intake_synthesis_is_grounded_in_the_registered_catalog(setup):
     capabilities = capability_catalog(ctx.repository.load(), actor)
     synthesize(Capture(), 'Confronta i listini', [], capabilities=capabilities)
     user_payload = json.loads(seen[-1].content)
-    assert [item['id'] for item in user_payload['capabilities']] == ['compare_csv', 'read_material', 'general']
+    assert [item['id'] for item in user_payload['capabilities']] == ['compare_csv', 'read_material', 'synthesize', 'general']
     # Readiness stays queryable on the HTTP endpoint, never model-facing: it
     # made small models decline executable work before files were uploaded.
     # IO detail (inputs/effects/prerequisites) stays: it anchors the output

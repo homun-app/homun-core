@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from homun import __version__
 from homun import context as context_mod
 from homun.context import create_context, get_context, reset_context_for_tests
-from homun.routes import backup, capabilities, domain, health, material_reads, mcp, memory, models, price_comparisons, intake, routines, tool_chains
+from homun.routes import backup, capabilities, domain, health, material_reads, mcp, memory, models, price_comparisons, intake, routines, synthesis, tool_chains
 from homun.routes.errors import storage_error_handler
 
 DEFAULT_HOST = "127.0.0.1"
@@ -64,6 +64,7 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(domain.router)
     app.include_router(price_comparisons.router)
     app.include_router(material_reads.router)
+    app.include_router(synthesis.router)
     app.include_router(tool_chains.router)
     app.include_router(intake.router)
     app.include_router(capabilities.router)

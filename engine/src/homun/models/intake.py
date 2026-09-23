@@ -41,7 +41,7 @@ class PlanStepDraft(BaseModel):
     """
     model_config = ConfigDict(extra='ignore')
     title: str = Field(min_length=1, max_length=120)
-    capability: Literal['compare_csv', 'read_material', 'general'] = 'general'
+    capability: Literal['compare_csv', 'read_material', 'synthesize', 'general'] = 'general'
     expected_materials: list[str] = Field(default_factory=list, max_length=6)
     """Human labels of what this phase waits for; display only, never matched to files."""
     output_expected: str = Field(default='', max_length=300)
@@ -67,7 +67,7 @@ class IntakeBrief(BaseModel):
     suggested_agent_id: str | None = None
     new_agent: NewAgent | None = None
     rationale: str = Field(min_length=1, max_length=1000)
-    capability: Literal['compare_csv', 'read_material', 'general'] = 'general'
+    capability: Literal['compare_csv', 'read_material', 'synthesize', 'general'] = 'general'
     changed_fields: list[BriefField] = Field(default_factory=list, max_length=6)
     plan_steps: list[PlanStepDraft] = Field(default_factory=list, max_length=5)
     """Optional phases (raccolta → confronto → sintesi); the engine validates them."""
@@ -130,7 +130,7 @@ def _extract_json_payload(text):
     return extract_json_payload(text)
 
 
-def _approved_skills_index() -> list:
+def approved_skills_index() -> list:
     """L0 skill index for the model: name and description of approved skills only."""
     from homun.context import get_context
     try:
@@ -151,7 +151,7 @@ def synthesize(registry, text, agents, *, previous_brief=None, latest_request=No
     system = template.render(
         schema=json.dumps(IntakeBrief.model_json_schema(), ensure_ascii=False),
         catalog=_capability_catalog_lines(catalog, template.language))
-    skills = _approved_skills_index()
+    skills = approved_skills_index()
     payload = json.dumps({'request':text,'latest_request':latest_request or text,'previous_brief':previous_brief,
                           'agents':agents,'skills':skills,
                           'capabilities':catalog or [spec.public() for spec in REGISTRY.values()]},ensure_ascii=False)

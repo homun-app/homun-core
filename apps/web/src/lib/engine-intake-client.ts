@@ -9,7 +9,7 @@ export type WorkIntakeChange = {
 };
 export type WorkIntakePlanStep = {
   title: string;
-  capability: "compare_csv" | "read_material" | "general";
+  capability: "compare_csv" | "read_material" | "synthesize" | "general";
   expected_materials: string[];
   output_expected: string;
   assignee: string;
@@ -28,7 +28,7 @@ export type WorkIntake = {
   suggested_agent: { id: string; name: string; role: string; revision: number } | null;
   new_agent: { name: string; role: string; instructions: string } | null;
   rationale: string;
-  capability: "compare_csv" | "read_material" | "general";
+  capability: "compare_csv" | "read_material" | "synthesize" | "general";
   original_request: string;
   /** Fields the model declared as changed; older proposals may not carry them. */
   changed_fields?: string[];

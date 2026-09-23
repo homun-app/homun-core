@@ -100,8 +100,39 @@ READ_MATERIAL = CapabilitySpec(
     timeout_seconds=120,
 )
 
-REGISTRY: Mapping[str, CapabilitySpec] = {spec.id: spec for spec in (COMPARE_CSV, READ_MATERIAL, GENERAL)}
-TRANSPORT_IDS = ('compare_csv', 'read_material', 'general')
+MAX_SYNTHESIS_MATERIALS = 6
+MAX_SYNTHESIS_BYTES = 2 * 1024 * 1024
+MAX_SYNTHESIS_CONTEXT_CHARACTERS = 24000
+MAX_SYNTHESIS_OUTPUT_CHARACTERS = 8000
+MAX_SYNTHESIS_ATTEMPTS = 2
+
+SYNTHESIZE = CapabilitySpec(
+    id='synthesize',
+    kind='executable',
+    tool_version='model-synthesis-v1',
+    summary='Sintesi o redazione scritta dal modello del collaboratore assegnato, su obiettivo, materiali e procedure approvate.',
+    inputs=('Il lavoro con materiali attivi facoltativi (testo, CSV, PDF entro i limiti) e le procedure approvate pertinenti',),
+    outputs=('Artifact di sintesi in Markdown, in revisione umana',),
+    effects=('Chiama il modello del collaboratore assegnato a questa fase; produce un artifact nel lavoro e lo lascia in revisione umana; nessun invio esterno.',),
+    prerequisites=('Intake confermato con capability synthesize',
+                   'Lettura del progetto contenente i materiali, da parte di chi propone e di chi approva'),
+    limits={'max_materials': MAX_SYNTHESIS_MATERIALS,
+            'max_bytes_per_material': MAX_SYNTHESIS_BYTES,
+            'max_context_characters': MAX_SYNTHESIS_CONTEXT_CHARACTERS,
+            'max_output_characters': MAX_SYNTHESIS_OUTPUT_CHARACTERS,
+            'max_attempts': MAX_SYNTHESIS_ATTEMPTS},
+    timeout_seconds=300,
+    fallback_collaborator={
+        'name': 'Elena',
+        'role': 'Redazione di sintesi e documenti a partire dai materiali del lavoro',
+        'instructions': ('Scrivi la sintesi richiesta usando solo i materiali e le informazioni autorizzati del lavoro, '
+                         'con la tua connessione modello. Cita le fonti dei dati, dichiara i limiti di quello che non '
+                         'sai e consegna la bozza per la revisione umana. Non inviare nulla a servizi esterni.'),
+    },
+)
+
+REGISTRY: Mapping[str, CapabilitySpec] = {spec.id: spec for spec in (COMPARE_CSV, READ_MATERIAL, SYNTHESIZE, GENERAL)}
+TRANSPORT_IDS = ('compare_csv', 'read_material', 'synthesize', 'general')
 """Public capability ids accepted by the intake transport; keep in sync with REGISTRY."""
 
 
