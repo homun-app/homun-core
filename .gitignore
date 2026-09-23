@@ -54,3 +54,6 @@ coverage/
 # Local runtime spike: source is small but carries its own .venv and data
 experiments/**/.venv/
 experiments/**/.data/
+apps/desktop/.package/
+apps/desktop/dist-installers/
+apps/desktop/node_modules/

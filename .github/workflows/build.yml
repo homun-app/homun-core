@@ -1,0 +1,177 @@
+name: Build installers
+
+# Builds the macOS arm64 installer for Homun 2 (engine bundle + web app).
+# - Tag push (v*) -> build + SIGN + NOTARIZE and PUBLISH the installer and
+#   electron-updater metadata to a DRAFT release in the public `homun-releases`
+#   repo (that same release is the auto-update feed). Review the draft there
+#   and publish it.
+# - Manual dispatch / PR -> UNSIGNED, non-publishing artifact: pipeline
+#   validation without cutting a version.
+#
+# Security note: no untrusted github.event.* input is interpolated into run:
+# steps. The only ${{ }} expressions inside commands are secrets and static
+# matrix values -> no workflow-injection surface.
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read # publishing goes to homun-releases via RELEASES_TOKEN
+
+jobs:
+  build:
+    name: Build (macOS arm64)
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node (root web build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.12"
+
+      - name: Install uv
+        run: python -m pip install uv==0.10.0
+
+      - name: Build web app
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build isolated standalone engine
+        run: python tools/build_engine_bundle.py
+
+      - name: Frozen runtime smoke
+        run: python engine/packaging/smoke.py dist/engine/homun-engine
+
+      - name: Setup Node (desktop builder)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install desktop deps
+        working-directory: apps/desktop
+        run: npm ci
+
+      # On a release tag the git tag is the single source of truth for the
+      # version: stamp it into apps/desktop/package.json so the installers AND
+      # the latest*.yml auto-update metadata all match the tag.
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: apps/desktop
+        shell: bash
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+
+      - name: Stage verified release resources
+        working-directory: apps/desktop
+        run: npm run release:prepare
+
+      # Gate signing on a run-step output, not a job-level `env` expression
+      # (`${{ secrets.X != '' }}` in job env is unreliable for step `if` and
+      # shipped an unsigned v0.1.0 once). In a run step the secret is reliably
+      # available as an env var.
+      - name: Detect macOS signing creds
+        id: signing
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+        run: |
+          if [ -n "$MAC_CSC_LINK" ]; then
+            echo "has_cert=true" >> "$GITHUB_OUTPUT"
+            echo "Developer ID cert present (${#MAC_CSC_LINK} chars) -> signed + notarized build"
+          else
+            echo "has_cert=false" >> "$GITHUB_OUTPUT"
+            # Never publish an UNSIGNED build to the auto-update feed: on a release
+            # tag, refuse outright. Unsigned is only allowed for dispatch/PR runs,
+            # which don't publish anyway.
+            if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/v}" ]; then
+              echo "::error::Refusing to cut an UNSIGNED macOS release. Set MAC_CSC_LINK before tagging."
+              exit 1
+            fi
+            echo "No MAC_CSC_LINK secret -> unsigned build (dispatch only; will not publish)"
+          fi
+
+      - name: Build installer (signed + notarized)
+        if: steps.signing.outputs.has_cert == 'true' && startsWith(github.ref, 'refs/tags/v')
+        working-directory: apps/desktop
+        run: npx electron-builder --mac --publish always -c.mac.notarize=true
+        env:
+          # Only the signed mac build feeds the auto-update channel, so the
+          # publish token lives ONLY on this step and ONLY on tag runs.
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Build installer (unsigned — no cert or non-release build)
+        if: steps.signing.outputs.has_cert != 'true' || !startsWith(github.ref, 'refs/tags/v')
+        working-directory: apps/desktop
+        run: npx electron-builder --mac --publish never -c.mac.identity=null
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Verify packaged app
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          APP_PATH="$(find dist-installers -maxdepth 3 -type d -iname Homun.app -print -quit)"
+          test -n "$APP_PATH"
+          npm run release:verify -- "$APP_PATH" --expected-arch arm64
+
+      - name: Create installer checksums
+        working-directory: apps/desktop
+        run: npm run release:checksums -- --directory dist-installers --output "dist-installers/SHA256SUMS-mac.txt"
+
+      # The release notes come from CHANGELOG.md (single source of truth). The
+      # signed publish above created the draft release for this tag; the notes
+      # body is what electron-updater serves as the in-app "what's new".
+      # extract-release-notes exits non-zero if the tag has no CHANGELOG
+      # section: a release must never ship with empty notes.
+      - name: Set release notes from CHANGELOG.md
+        if: steps.signing.outputs.has_cert == 'true' && startsWith(github.ref, 'refs/tags/v')
+        working-directory: apps/desktop
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          node scripts/extract-release-notes.mjs "${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/release-notes.md"
+          gh release edit "$GITHUB_REF_NAME" \
+            --repo homun-app/homun-releases \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+
+      - name: Upload checksums to draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "dist-installers/SHA256SUMS-mac.txt" \
+            --repo homun-app/homun-releases \
+            --clobber
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: homun-macos-arm64
+          path: |
+            apps/desktop/dist-installers/*.dmg
+            apps/desktop/dist-installers/*.zip
+            apps/desktop/dist-installers/*.yml
+            apps/desktop/dist-installers/SHA256SUMS-*.txt
+          if-no-files-found: error

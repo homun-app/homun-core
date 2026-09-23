@@ -1,5 +1,6 @@
 {
   "name": "homun2",
+  "version": "0.2.0",
   "private": true,
   "sideEffects": false,
   "type": "module",

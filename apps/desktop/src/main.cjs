@@ -45,6 +45,10 @@ else app.whenReady().then(async () => {
   window.webContents.on('will-attach-webview', event => event.preventDefault());
   engine.child.once('exit', () => { if (!stopping) window.setTitle('Homun — motore arrestato'); });
   await window.loadURL('homun://app/');
+  const smoke = process.argv.includes('--smoke');
+  if (app.isPackaged && process.platform === 'darwin' && !smoke) {
+    try { require('./updater.cjs').initUpdater(); } catch (error) { console.error('updater init failed:', error.message); }
+  }
   if (process.argv.includes('--smoke')) {
     const result = await window.webContents.executeJavaScript(`(async () => ({
       title: document.title, rendered: document.getElementById('root').childElementCount > 0,

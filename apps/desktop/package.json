@@ -1,0 +1,75 @@
+{
+  "name": "homun-desktop",
+  "productName": "Homun",
+  "version": "0.2.0",
+  "description": "Homun local workspace",
+  "main": "src/main.cjs",
+  "private": true,
+  "scripts": {
+    "release:prepare": "node scripts/prepare-release.mjs",
+    "release:verify": "node scripts/verify-release.mjs",
+    "release:checksums": "node scripts/create-artifact-checksums.mjs"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "@electron/fuses": "^1.8.0",
+    "electron": "44.4.3",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "app.homun.desktop",
+    "productName": "Homun",
+    "executableName": "homun",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "afterPack": "./scripts/after-pack.mjs",
+    "publish": {
+      "provider": "github",
+      "owner": "homun-app",
+      "repo": "homun-releases"
+    },
+    "directories": {
+      "output": "dist-installers",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".package/web",
+        "to": "web"
+      },
+      {
+        "from": ".package/build-receipt.json",
+        "to": "build-receipt.json"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "writeUpdateInfo": false
+    }
+  }
+}

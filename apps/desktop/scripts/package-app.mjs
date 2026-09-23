@@ -52,16 +52,17 @@ export async function stageApp({ sourceRoot, stage, engineDir, webDir }) {
   }
   const engineReceiptHash = await verifyEngineInputs(sourceRoot, engineDir);
   const config = JSON.parse(await readFile(path.join(sourceRoot, 'package.json'), 'utf8'));
+  const appVersion = config.version || '0.2.0';
   const electronVersion = config.devDependencies.electron;
   if (!/^\d+\.\d+\.\d+$/.test(electronVersion)) throw new Error('Electron must be pinned exactly');
   const appDir = path.join(stage, 'app');
   await mkdir(appDir, { recursive: true });
   await mkdir(path.join(appDir, 'src'));
-  for (const name of ['main.cjs','preload.cjs','engine-process.cjs','protocol.cjs']) {
+  for (const name of ['main.cjs','preload.cjs','engine-process.cjs','protocol.cjs','updater.cjs']) {
     await cp(path.join(sourceRoot, 'apps/desktop/src', name), path.join(appDir, 'src', name));
   }
   await writeFile(path.join(appDir, 'package.json'), JSON.stringify({
-    name: 'homun-desktop', productName: 'Homun', version: '0.1.0',
+    name: 'homun-desktop', productName: 'Homun', version: appVersion,
     description: 'Homun local workspace', main: 'src/main.cjs', private: true,
   }, null, 2));
   const web = path.join(stage, 'web');
@@ -72,7 +73,7 @@ export async function stageApp({ sourceRoot, stage, engineDir, webDir }) {
   await cp(engineDir, engine, { recursive: true, verbatimSymlinks: true });
   if (await verifyEngineInputs(sourceRoot, engine) !== engineReceiptHash) throw new Error('Engine changed during staging');
   const receipt = {
-    format: 'homun-desktop-build', version: 1, appVersion: '0.1.0',
+    format: 'homun-desktop-build', version: 1, appVersion,
     electronVersion, platform: process.platform, arch: process.arch,
     signedForDistribution: false, notarized: false, engineReceiptHash,
     inputHashes: {},
@@ -93,7 +94,7 @@ export async function packageApp() {
     const output = path.join(root, 'dist/desktop', new Date().toISOString().replace(/[:.]/g, '-'));
     const bundles = await packager({
       dir: inputs.appDir, name: 'Homun', appBundleId: 'dev.homun.desktop',
-      appVersion: '0.1.0', electronVersion: inputs.electronVersion,
+      appVersion: JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version || '0.2.0', electronVersion: inputs.electronVersion,
       platform: 'darwin', arch: 'arm64', out: output, asar: true,
       prune: false, overwrite: false,
       extraResource: [inputs.web, inputs.receiptPath],
@@ -108,7 +109,7 @@ export async function packageApp() {
       if (await verifyEngineInputs(root, finalEngine) !== await verifyEngineInputs(root, inputs.engine)) throw new Error('Final application engine differs from staged engine');
       await verifyWebAssets(path.join(resources, 'web'));
     }
-    const archive = path.join(output, 'Homun-0.1.0-macos-arm64.zip');
+    const archive = path.join(output, `Homun-${JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version || '0.2.0'}-macos-arm64.zip`);
     await promisify(execFile)('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', path.join(bundles[0], 'Homun.app'), archive]);
     const hash = createHash('sha256');
     for await (const chunk of createReadStream(archive)) hash.update(chunk);
