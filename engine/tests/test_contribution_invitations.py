@@ -112,3 +112,29 @@ def test_named_recipient_persists_and_owner_requests_real_contribution(setup):
     result = request_contribution(ctx,owner,wid,{'command_id':'human-request','person_id':person['id'],'need':'Confermi?', 'expected_version':2,'step_id':'review'})
     assert ctx.repository.load().contributions[result['request_id']].to_actor_id == person['id']
     assert not ctx.repository.load().agents
+
+@pytest.mark.parametrize('kind', ['agent_run.propose', 'synthesis.propose', 'material_read.propose', 'price_comparison.propose', 'tool_chain.propose'])
+@pytest.mark.parametrize('status', ['queued','running'])
+def test_manual_request_cannot_interrupt_command_execution(setup,kind,status):
+    from homun.application.contribution_people import create_person, request_contribution
+    from homun.domain.models import CommandRecord
+    ctx,owner,rid,wid = setup
+    person = create_person(ctx,owner,{'command_id':'person','name':'Anna'})
+    with ctx.repository.transaction() as store:
+        store.works[wid].status = WorkStatus.RUNNING
+        store.commands['active-run'] = CommandRecord(command_id='active-run',type=kind,actor_id=owner.id,workspace_id=owner.workspace_id,request_fingerprint='test',result={'work_id':wid,'status':status})
+    with pytest.raises(ConflictError):
+        request_contribution(ctx,owner,wid,{'command_id':'manual','person_id':person['id'],'need':'Answer','expected_version':2,'step_id':'consultation'})
+    assert ctx.repository.load().works[wid].status == WorkStatus.RUNNING
+    assert len(ctx.repository.load().contributions) == 1
+
+def test_registered_recipient_cannot_be_relabelled_in_invitation(setup):
+    from homun.application.contribution_people import create_person
+    from homun.application.contribution_invitations import issue_invitation, read_invitation, list_invitations
+    ctx,owner,rid,wid = setup
+    person = create_person(ctx,owner,{'command_id':'person','name':'Anna'})
+    with ctx.repository.transaction() as store:
+        store.contributions[rid].to_actor_id = person['id']
+    invitation = issue_invitation(ctx,owner,rid,{'recipient_name':'Bob'})
+    assert read_invitation(ctx,invitation['token'])['recipient_name'] == 'Anna'
+    assert list_invitations(ctx,owner,wid)['requests'][0]['recipient_name'] == 'Anna'

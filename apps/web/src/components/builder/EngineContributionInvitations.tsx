@@ -11,10 +11,10 @@ export function EngineContributionInvitations({ workId }: { workId: string }) {
   const [copied,setCopied] = useState(false);
   const refresh = () => invitationRequest<InvitationList>(`/works/${encodeURIComponent(workId)}/contribution-invitations`).then(setData);
   useEffect(() => { void refresh().catch(setError); }, [workId]);
-  async function issue(requestId: string) {
+  async function issue(requestId: string, registeredName: string | null) {
     setBusy(true); setError(null); setLink(''); setCopied(false);
     try {
-      const value = await invitationRequest<ContributionInvitation>(`/contributions/${encodeURIComponent(requestId)}/invitation`, { recipient_name: name });
+      const value = await invitationRequest<ContributionInvitation>(`/contributions/${encodeURIComponent(requestId)}/invitation`, { recipient_name: registeredName || name });
       if (value.token) setLink(contributionLink(value.token,window.location.href));
       await refresh();
     } catch(e) { setError(e); } finally { setBusy(false); }
@@ -30,9 +30,9 @@ export function EngineContributionInvitations({ workId }: { workId: string }) {
     <p>Il motore è locale: la persona deve poter raggiungere questa pagina e il motore. Questo invito non pubblica il server e non invia messaggi.</p>
     <HomunErrorNotice error={error} />
     {data?.requests.map(request => <div key={request.id}>
-      <p>{request.need}</p><p>Destinatario: {request.recipient_id}</p>
-      <label>Nome della persona<input value={name} maxLength={120} onChange={e => setName(e.target.value)} /></label>
-      <button type="button" disabled={busy || !name.trim()} onClick={() => void issue(request.id)}>Crea un link di invito</button>
+      <p>{request.need}</p><p>Destinatario: {request.recipient_name || request.recipient_id}</p>
+      {!request.recipient_name && <label>Nome della persona<input value={name} maxLength={120} onChange={e => setName(e.target.value)} /></label>}
+      <button type="button" disabled={busy || (!request.recipient_name && !name.trim())} onClick={() => void issue(request.id,request.recipient_name)}>Crea un link di invito</button>
     </div>)}
     {link && <div><p>Conserva il link: sarà mostrato solo ora. Crearne un altro revoca quello precedente.</p>
       <textarea aria-label="Link di invito riservato" readOnly value={link} rows={3} />

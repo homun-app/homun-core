@@ -25,6 +25,10 @@ def _projects(store,work):
 def _public(value):
     return {k:deepcopy(v) for k,v in value.items() if k not in ('secret_hash','response','issuer_id','project_revisions')}
 
+def _recipient_name(store, recipient_id):
+    return next((record.result['name'] for record in store.commands.values()
+                 if record.type == 'person.define' and record.result.get('id') == recipient_id), None)
+
 def issue_invitation(ctx,actor,request_id,body):
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
@@ -36,7 +40,7 @@ def issue_invitation(ctx,actor,request_id,body):
                 raise ConflictError('Contribution request is no longer pending')
             if request.to_actor_id in store.agents or request.to_actor_id == actor.id:
                 raise ValidationError('Invitation requires a different human recipient')
-            name = str(body.get('recipient_name','')).strip()
+            name = _recipient_name(store,request.to_actor_id) or str(body.get('recipient_name','')).strip()
             if not name or len(name)>120:
                 raise ValidationError('Recipient name is required (maximum 120 characters)')
             # A replacement explicitly invalidates any old link, including one
@@ -58,7 +62,7 @@ def issue_invitation(ctx,actor,request_id,body):
 def list_invitations(ctx,actor,work_id):
     store = ctx.repository.load()
     _owner(store,actor,work_id)
-    return {'requests':[{'id':r.id,'need':r.need,'recipient_id':r.to_actor_id} for r in store.contributions.values()
+    return {'requests':[{'id':r.id,'need':r.need,'recipient_id':r.to_actor_id,'recipient_name':_recipient_name(store,r.to_actor_id)} for r in store.contributions.values()
                         if r.work_id == work_id and r.status == 'pending'],
             'invitations':[_public(r.result) for r in store.commands.values() if r.type == KIND and r.result['work_id'] == work_id]}
 

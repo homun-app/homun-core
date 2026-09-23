@@ -28,6 +28,7 @@ import { EngineWorkspaceWorkPanel } from "./EngineWorkspaceWorkPanel";
 
 type Props = {
   work: Work;
+  onRefreshEngine?: (() => Promise<void>) | undefined;
   scenario: ConversationScenario;
   viewer: string;
   spaceData: SpaceData;
@@ -98,11 +99,12 @@ export function ConversationWorkspaceWorkPanel({
   engineBusy = false,
   engineIntake,
   onApplyObjectivePatch, onRename, onCloseWork, onStartWork, onSubmitArtifact,
-  onCreateRoutine, onSetBudget, onSetDue, onRevisePlan, agents, agentNames,
+  onRefreshEngine, onCreateRoutine, onSetBudget, onSetDue, onRevisePlan, agents, agentNames,
 }: Props) {
   if (work.source === "engine")
     return (
       <EngineWorkspaceWorkPanel
+        onRefreshEngine={onRefreshEngine}
         ownerName={work.engineOwnerName}
         onRename={onRename}
         work={work}

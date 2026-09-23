@@ -2,7 +2,7 @@ import { ENGINE_DEFAULT_BASE_URL } from './engine-client.ts';
 import { DEFAULT_WORKSPACE_ID, defaultLocalActor, domainFetch } from './engine-domain-client.ts';
 import { homunErrorFromHttp } from './homun-errors.ts';
 export type ContributionInvitation = { id: string; request_id: string; recipient_name: string; status: string; expires_at: string; token?: string };
-export type InvitationList = { requests: { id: string; need: string; recipient_id: string }[]; invitations: ContributionInvitation[] };
+export type InvitationList = { requests: { id: string; need: string; recipient_id: string; recipient_name: string | null }[]; invitations: ContributionInvitation[] };
 export async function invitationRequest<T>(suffix: string, body?: unknown): Promise<T> {
   const response = await domainFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}${suffix}`, {
     method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-Homun-Actor-Id': defaultLocalActor().id },

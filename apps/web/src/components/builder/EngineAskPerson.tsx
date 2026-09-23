@@ -5,7 +5,7 @@ import { EngineContributionInvitations } from './EngineContributionInvitations';
 import type { Work } from './conversation-types';
 
 type Person = { id: string; name: string };
-export function EngineAskPerson({ work }: { work: Work }) {
+export function EngineAskPerson({ work, onChanged }: { work: Work; onChanged?: (() => Promise<void>) | undefined }) {
   const [people,setPeople] = useState<Person[]>([]);
   const [selected,setSelected] = useState('');
   const [name,setName] = useState('');
@@ -28,6 +28,7 @@ export function EngineAskPerson({ work }: { work: Work }) {
         step_id: `consultation:${crypto.randomUUID()}`,
       });
       setAsked(true);
+      await onChanged?.();
     } catch(e) { setError(e); } finally { setBusy(false); }
   }
   if (asked) return <EngineContributionInvitations workId={work.id} />;
