@@ -149,6 +149,7 @@ export type ExternalToolCall = {
   server_id: string;
   server_name: string;
   tool: string;
+  tool_description?: string;
   arguments: Record<string, unknown>;
   digest: string;
   artifact_id?: string | null;

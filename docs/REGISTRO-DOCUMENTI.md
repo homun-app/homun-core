@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **199**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **201**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -210,3 +210,5 @@ Documenti censiti: **199**. Punto di ingresso: [indice](README.md).
 | [docs/superpowers/plans/2026-09-23-external-receipts.md](superpowers/plans/2026-09-23-external-receipts.md) | Piano persistenza chiamate esterne |
 | [docs/research/2026-09-23-external-delivery-verifica.md](research/2026-09-23-external-delivery-verifica.md) | Riapprovazione consegna di ricevute persistite |
 | [docs/superpowers/plans/2026-09-23-external-delivery.md](superpowers/plans/2026-09-23-external-delivery.md) | Piano consenso separato alla consegna |
+| [docs/research/2026-09-23-mcp-contracts-verifica.md](research/2026-09-23-mcp-contracts-verifica.md) | Contratti MCP e preflight nella stessa sessione |
+| [docs/superpowers/plans/2026-09-23-mcp-contracts.md](superpowers/plans/2026-09-23-mcp-contracts.md) | Piano binding dei descrittori MCP |

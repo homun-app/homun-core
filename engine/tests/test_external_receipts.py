@@ -15,6 +15,7 @@ def setup(tmp_path, monkeypatch):
     with ctx.repository.transaction() as store:
         store.external_servers['srv']=ExternalServer(id='srv',workspace_id=ctx.workspace_id,name='S',command='fixture')
     ctx.service.store=store
+    monkeypatch.setattr(mcp_client,'probe_server',lambda *a:{'tool_descriptors':[{'name':'write','inputSchema':{'type':'object'}}]})
     calls=[]
     def call(*args):calls.append(args);return {'text':'done','is_error':False,'structured_content':{'count':1}}
     monkeypatch.setattr(mcp_client,'call_tool',call)

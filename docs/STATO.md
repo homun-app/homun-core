@@ -72,7 +72,15 @@ Una verifica del sorgente non aggiorna l'app installata.
   modificati: anteprima, consenso sulla versione corrente e artifact atomico,
   senza ripetere l’azione esterna. [Verifica](research/2026-09-23-external-delivery-verifica.md).
 
+- Proposte MCP legate al descrittore reale e argomenti validati con JSON Schema
+  locale. Prima della chiamata, discovery e confronto nella stessa sessione:
+  contratti cambiati bloccano senza inviare l’azione. [Prove](research/2026-09-23-mcp-contracts-verifica.md).
+
 ## Evidenze della tranche corrente
+
+Contratti MCP: **791 test engine passati, 1 saltato**, 216 test web; typecheck,
+build e OpenAPI allineati, architettura 0 errori. Fixture stdio: contratto valido
+una chiamata; descrizione mutata zero chiamate. Timeout prima/dopo invio distinti.
 
 Consegna riapprovata: **777 test engine passati, 1 saltato**, più 19 verifiche
 mirate con riapertura SQLite, lavoro cambiato e server rimosso. 216 test web,

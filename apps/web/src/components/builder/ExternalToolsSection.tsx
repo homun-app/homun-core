@@ -139,6 +139,7 @@ export function ExternalToolsSection({
       {pending.filter((c) => c.status !== "completed").map((call) => (
         <div className="cv-settings-card" key={call.id}>
           <strong>{call.server_name} · {call.tool}</strong>
+          {call.tool_description && <p>{call.tool_description}</p>}
           <p className="cw-engine-summary__hint">
             Argomenti: <code>{JSON.stringify(call.arguments)}</code>
           </p>

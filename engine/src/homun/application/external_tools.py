@@ -14,7 +14,7 @@ import hashlib
 
 def _digest(proposal: dict) -> str:
     """Binds the approval to the exact server/tool/arguments the person saw."""
-    bound = {k: proposal.get(k) for k in ("id", "work_id", "server_id", "tool", "arguments", "expected_version", "_server_hash")}
+    bound = {k: proposal.get(k) for k in ("id", "work_id", "server_id", "tool", "arguments", "expected_version", "_server_hash", "_tool_descriptor")}
     bound["action"] = "external_tool_call"
     return hashlib.sha256(json.dumps(bound, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
@@ -53,16 +53,40 @@ def propose(ctx, actor, body) -> dict[str, Any]:
     tool = str(body.get("tool") or "").strip()
     if not work_id or not server_id or not tool:
         raise ValidationError("work_id, server_id and tool are required")
-    raw_args = body.get("arguments") or {}
+    raw_args = body.get("arguments", {})
     if not isinstance(raw_args, dict):
         raise ValidationError("arguments must be a JSON object")
     arguments = {str(k): v for k, v in raw_args.items()}
+    from homun.application import mcp_client
+    from homun.application.mcp_contracts import select_descriptor, validate_arguments
+    initial = ctx.repository.load()
+    require_work_access(initial, actor, work_id)
+    prior = initial.commands.get(body['command_id'])
+    if prior is not None:
+        if (prior.type != PROPOSAL_TYPE or prior.actor_id != actor.id or
+                any(prior.result.get(k) != v for k,v in {'work_id':work_id,'server_id':server_id,'tool':tool,'arguments':arguments}.items())):
+            raise ConflictError('Command id already used for a different request')
+        return deepcopy(_record_public(prior))
+    initial_server = initial.external_servers.get(server_id)
+    if initial_server is None:
+        raise NotFoundError('External server not found')
+    if initial_server.status != 'enabled' or not mcp_client.filtered_tools(initial_server,[{'name':tool}]):
+        raise PermissionDeniedError('Tool is outside the enabled server surface')
+    discovered_hash = server_hash(initial_server)
+    try:
+        discovered = mcp_client.probe_server(initial_server)
+    except Exception as exc:
+        raise ValidationError('Cannot verify external tool schema; check the server') from exc
+    descriptor = select_descriptor(discovered.get('tool_descriptors',[]),tool)
+    validate_arguments(descriptor,arguments)
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             work = require_work_access(store, actor, work_id)
             server = store.external_servers.get(server_id)
             if server is None:
                 raise NotFoundError("External server not found")
+            if server_hash(server) != discovered_hash:
+                raise ConflictError("Server changed during discovery; create a new proposal")
             if server.status != "enabled":
                 raise ValidationError("Server is disabled")
             from homun.application.mcp_client import filtered_tools
@@ -83,7 +107,8 @@ def propose(ctx, actor, body) -> dict[str, Any]:
                     prior_server = store.external_servers.get(prior.get('server_id'))
                     if prior.get('status') in {'pending_approval', 'queued'} and (
                             prior.get('expected_version') != work.version or prior_server is None
-                            or prior_server.status != 'enabled' or prior.get('_server_hash') != server_hash(prior_server)):
+                            or prior_server.status != 'enabled' or prior.get('_server_hash') != server_hash(prior_server)
+                            or (prior.get('server_id') == server_id and prior.get('tool') == tool and prior.get('_tool_descriptor') != descriptor)):
                         prior.update(status='blocked', error='Proposta superata: lavoro o configurazione cambiati.')
                         continue
                     if (prior.get("server_id") == server_id and prior.get("tool") == tool
@@ -94,7 +119,8 @@ def propose(ctx, actor, body) -> dict[str, Any]:
                 "id": body["command_id"], "status": "pending_approval", "work_id": work_id,
                 "server_id": server_id, "server_name": server.name, "tool": tool,
                 "arguments": deepcopy(arguments), "expected_version": work.version,
-                "_server_hash": server_hash(server),
+                "_server_hash": server_hash(server), "_tool_descriptor": descriptor,
+                "tool_description": str(descriptor.get("description") or ""),
                 "created_by": actor.id, "created_at": utc_now().isoformat(),
             }
             result["digest"] = _digest(result)
@@ -129,7 +155,7 @@ def approve(ctx, actor, proposal_id: str, body) -> dict[str, Any]:
                     proposal.update(status='outcome_unknown', error='Esito esterno incerto: verificare sul servizio prima di una nuova azione.')
             elif status in {'pending_approval', 'queued'}:
                 server = store.external_servers.get(proposal['server_id'])
-                if not proposal.get('_server_hash'):
+                if not proposal.get('_server_hash') or not proposal.get('_tool_descriptor'):
                     proposal.update(status='blocked', error='Proposta precedente: creare una nuova approvazione con configurazione verificata.')
                 else:
                     if server is None or server.status != 'enabled' or server_hash(server) != proposal['_server_hash']:
@@ -148,7 +174,13 @@ def approve(ctx, actor, proposal_id: str, body) -> dict[str, Any]:
         ctx.service.store = store
     if dispatch:
         try:
-            outcome = mcp_client.call_tool(server, snapshot['tool'], deepcopy(snapshot['arguments']))
+            outcome = mcp_client.call_tool(server, snapshot['tool'], deepcopy(snapshot['arguments']), snapshot['_tool_descriptor'])
+        except mcp_client.MCPPreflightError:
+            with ctx.repository.locked():
+                with ctx.repository.transaction() as store:
+                    _lookup(store,proposal_id).result.update(status="blocked",
+                        error="Contratto dello strumento cambiato o non valido: crea una nuova proposta.")
+                ctx.service.store=store
         except Exception:
             with ctx.repository.locked():
                 with ctx.repository.transaction() as store:
