@@ -101,6 +101,32 @@ immediato e visibile, lavoro failed, nessun recovery schedulato.
   dello streaming su frame vuoti restano da portare.
 - L'aumento dell'uso dei tentativi è limitato da `max_model_attempts` del run:
   tre per fase di recovery, il tetto globale resta 12.
-- Nessuna UI nuova: lo stato di recupero è visibile via API (`recovery` in
-  `RunView`) ma non ancora reso nei pannelli. L'app installata e il remoto non
-  sono aggiornati.
+- Lo stato di recupero è ora reso anche nel pannello di controllo del lavoro;
+  l'app installata e il remoto non sono aggiornati.
+
+
+## Rafforzamento dopo interruzione del processo
+
+La prima tranche contava i fallimenti dopo la risposta: un arresto durante IO
+consumava il budget globale ma non lo slot di recovery. Ora il contatore per fase
+è persistito prima della chiamata. Tre arresti simulati con ricreazione del
+contesto non consentono una quarta chiamata, sia per decisione sia per riepilogo.
+
+Lo steering interrompe subito l'attesa e una risposta fallita del turno precedente
+non la ripristina. Rimane un marcatore del nuovo formato anche dopo i controlli:
+una correzione seguita da crash non viene scambiata per uno stato legacy.
+La migrazione legge il lease scaduto prima di sostituirlo; quando manca l'identità
+della fase usa conservativamente il contatore globale, senza presumere che una
+richiesta senza risultato non sia mai partita. Può quindi esaurire prima il limite
+per un vecchio stato ambiguo, ma non concede chiamate aggiuntive non dimostrate.
+
+Metadati di consumo negativi, frazionari, non finiti, booleani o testuali diventano
+sconosciuti; gli altri contatori validi della stessa risposta restano disponibili.
+La UI del lavoro mostra l'attesa e il prossimo tentativo con pausa/correzione/stop.
+Typecheck, 216 test web e build web passati; resta l'avviso sui chunk oltre500kB.
+I test di crash sono simulazioni controllate, non un nuovo test live del provider.
+
+Suite completa: 718 passati e 1 saltato prima dell'ultimo marcatore di migrazione;
+verifica finale mirata dopo la correzione: 62 passati. Revisione indipendente
+conclusa senza rilievi residui sulla modifica. OpenAPI allineato e architettura
+0 errori / 35 avvisi preesistenti.

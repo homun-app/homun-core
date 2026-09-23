@@ -15,6 +15,7 @@ each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 - **Scoped human contributions.** Named recipients can answer one request through an expiring, revocable link; an adaptive run can resume from that answer. Reachable hosting remains a prerequisite.
 
 ## Fixes
+- **Model retries remain bounded after a crash.** Corrections interrupt stale waits immediately, and malformed usage counters cannot reduce recorded spending.
 - **Materials and Plugins use the engine from the sidebar.** Files, previews, archival and capability settings share the persisted engine state; denied access clears stale previews.
 - **Task deadlines persist from the Tasks view**, with saving feedback and typed errors.
 - **Tool chains resume after artifact publication without duplicating results**, preserving DBOS journal step order.

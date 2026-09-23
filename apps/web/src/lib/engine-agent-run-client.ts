@@ -11,6 +11,7 @@ export type AgentRun = {
   team?: { id: string; name: string; members: {id: string; name: string; role: string}[] };
   person?: { id: string; name: string };
   history_redacted?: boolean;
+  recovery?: { status: 'waiting' | 'recovered' | 'interrupted' | 'exhausted'; phase: string; attempts: number; error_code?: string; next_attempt_at?: string };
   executor_name: string; connection_id: string; turns: number;
   materials: { id: string; title: string; version: number; sha256: string }[];
   limits: { max_turns: number };

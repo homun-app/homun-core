@@ -60,6 +60,7 @@ def control_in_store(ctx,store,actor,work_id,run_id,body,*,echo=True):
         if action=='steer':
             if len(run.get('_steering',[]))>=20:
                 raise ValidationError('Too many pending corrections; wait for the next round')
+            agent_recovery.interrupt(run)
             run.setdefault('_steering',[]).append({'text':text,'command_id':body['command_id'],'actor_id':actor.id})
         else:
             redirect_history(run,text)

@@ -39,7 +39,7 @@ def usage_from_response(response, *, provider_id, model_id, ollama) -> UsageEntr
         raw_input, raw_output = usage.get('prompt_tokens'), usage.get('completion_tokens')
 
     def counter(value):
-        return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+        return value if type(value) is int and value >= 0 else None
 
     input_tokens, output_tokens = counter(raw_input), counter(raw_output)
     return UsageEntry(id=new_id('usage'), provider_id=provider_id, model_id=model_id,

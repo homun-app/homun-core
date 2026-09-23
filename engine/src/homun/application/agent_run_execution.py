@@ -47,6 +47,7 @@ def _claim(ctx, run_id, epoch=None):
             if len(json.dumps(run['observations'])) > run['limits']['max_observation_characters']:
                 raise ValidationError('Adaptive run reached its observation limit')
             if agent_native.enabled(run):
+                agent_recovery.migrate_inflight(run)
                 consume_steering(run)
             token = uuid4().hex
             run.update(status='running', _lease_token=token,
@@ -72,6 +73,8 @@ def _decision(ctx, run):
                 raise ValidationError('Run lease changed')
             if current['model_attempts'] >= current['limits']['max_model_attempts']:
                 raise ValidationError('Adaptive run reached its model attempt limit')
+            if agent_native.enabled(current):
+                agent_recovery.begin(current, 'decide')
             current['model_attempts'] += 1
         ctx.service.store = store
     reservation = budgets.reserve(ctx, actor, run['work_id'], BudgetCounters(attempts=1),

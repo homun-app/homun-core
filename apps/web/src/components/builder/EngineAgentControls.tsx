@@ -44,6 +44,9 @@ export function EngineAgentControls({ workId, run, onUpdated }: {
   }
 
   return <section className="cw-agent-controls" aria-label="Controlla il lavoro">
+    {run.recovery?.status === 'waiting' && run.status === 'running' &&
+      <p role="status">Il servizio AI è temporaneamente indisponibile. Homun riproverà automaticamente
+        {' '}(tentativo {Math.min(run.recovery.attempts + 1, 3)} di 3). Puoi correggere le indicazioni o interrompere il lavoro.</p>}
     <div className="cw-agent-control-actions">
       {run.status !== 'waiting_input' && (run.status === 'paused'
         ? <button className="cw-secondary" disabled={busy} onClick={() => void send('resume')}>Riprendi</button>

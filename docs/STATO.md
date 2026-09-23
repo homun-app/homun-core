@@ -51,12 +51,14 @@ Una verifica del sorgente non aggiorna l'app installata.
 - Recupero durevole dai guasti del provider (H06, prima tranche): errori nativi
   tipizzati e sanitizzati, consumi estratti prima della validazione, tre
   tentativi persistenti per fase con backoff base2+jitter o Retry-After (tetto
-  600 s), attese senza lease visibili in API, strumenti committati mai ripetuti.
+  600 s), attese senza lease visibili in API, strumenti committati mai ripetuti. Contatori salvati prima dell'IO,
+  steering che interrompe le attese e stato di ritentativo nel pannello lavoro.
   [Prove reali Ollama e limiti](research/2026-09-23-agent-recovery-verifica.md).
 
 ## Evidenze della tranche corrente
 
-Recupero provider: **701 test engine passati, 1 saltato**; typecheck e OpenAPI
+Recupero provider: **718 test engine passati, 1 saltato**, più 62 verifiche
+mirate dopo l'ultima correzione della migrazione; typecheck e OpenAPI
 allineati (campo opzionale `recovery`), architettura 0 errori. Prova reale:
 rifiuto di connessione autentico convertito in attesa persistente poi riuscita
 su Ollama `qwen3.5:4b` con budget onesto; 404 reale classificato fallimento

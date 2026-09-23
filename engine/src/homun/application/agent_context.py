@@ -59,6 +59,7 @@ def prepare(ctx,run,tools):
                 raise ValidationError('Insufficient model attempts for compaction and continuation')
             budgets.check_capacity(store,actor,run['work_id'],BudgetCounters(attempts=2),
                                    accounting_actor_id=run['assignee_id'])
+            agent_recovery.begin(current,'summary')
             current['model_attempts']+=1
         ctx.service.store=store
     reservation=budgets.reserve(ctx,actor,run['work_id'],BudgetCounters(attempts=1),
