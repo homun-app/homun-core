@@ -93,10 +93,9 @@ immediato e visibile, lavoro failed, nessun recovery schedulato.
 - Refresh/rotazione credenziali e provider fallback (catene `auth`, `billing`,
   overload dedicato) non implementati: oggi 401/402/403/404 sono fallimenti
   permanenti tipizzati.
-- Continuazione dei troncamenti e recupero da overflow (compattazione forzata,
-  riduzione payload) non implementati: `agent_model_truncated` e
-  `agent_model_overflow` falliscono esplicitamente senza ampliare l'output
-  (le finestre Ollama di Homun sono più piccole dei 32k upstream).
+- Continuazione dei troncamenti e riduzione dei payload restano aperte.
+  Il successivo [recupero da overflow](2026-09-23-agent-overflow-verifica.md)
+  aggiunge compattazione forzata limitata, senza ampliare l'output.
 - Ripetitività (repetition guard), liveness/watchdog del turno e disattivazione
   dello streaming su frame vuoti restano da portare.
 - L'aumento dell'uso dei tentativi è limitato da `max_model_attempts` del run:

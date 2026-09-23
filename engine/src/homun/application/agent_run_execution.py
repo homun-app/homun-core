@@ -3,7 +3,7 @@ import json
 from copy import deepcopy
 from datetime import datetime, timedelta
 from uuid import uuid4
-from homun.application import budgets, agent_native, agent_recovery
+from homun.application import budgets, agent_native, agent_recovery, agent_overflow
 from homun.application.agent_run_failures import fail  # re-exported for callers
 from homun.application.agent_runs import authority, lookup
 from homun.application.agent_control_history import consume_steering
@@ -197,6 +197,9 @@ def advance(ctx, run_id, *, epoch=None):
     except ContextPreparationDeferred:
         return ctx.repository.load().commands[run_id].result['status']
     except _ModelFailure as held:
+        if held.error.code == 'agent_model_overflow' and agent_overflow.request_compaction(
+                ctx, run, expected_steering=expected_steering):
+            return ctx.repository.load().commands[run_id].result['status']
         if not held.error.retryable:
             return fail(ctx, run_id, held.error.code, token=token, epoch=epoch,
                         expected_steering=expected_steering)

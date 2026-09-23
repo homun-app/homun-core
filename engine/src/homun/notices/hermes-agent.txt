@@ -49,3 +49,7 @@ application/agent_recovery.py adapts the retry placement of
 agent/turn_api_error.py (three total attempts per phase, waits outside any
 lease/transaction, corrections surviving backoff) onto Homun durable runs;
 application/agent_run_failures.py keeps the shared terminal-failure fence.
+
+Overflow recovery: application/agent_overflow.py and the forced context plan adapt
+agent/turn_overflow.py at the same pinned Hermes commit. Homun retains explicit
+window/output pins and durable authority/budget/control checks.

@@ -140,7 +140,7 @@ def project_checkpoint(messages: list[NativeMessage], checkpoint: dict | None) -
 
 def plan_context(messages: list[NativeMessage], tools: list[ToolDefinition], *,
                  context_window: int | None, max_output_tokens: int,
-                 checkpoint: dict | None = None) -> ContextPlan:
+                 checkpoint: dict | None = None, force: bool = False) -> ContextPlan:
     """Plan an atomic prefix checkpoint; never run a model or mutate raw history.
 
     Latest corrections and at least one recent whole group are mandatory. Prefer
@@ -150,6 +150,8 @@ def plan_context(messages: list[NativeMessage], tools: list[ToolDefinition], *,
     projected = project_checkpoint(messages, checkpoint)
     before = _estimate(projected, tools)
     if context_window is None:
+        if force:
+            raise ContextPressureError('Overflow recovery requires a configured context window')
         return ContextPlan(projected, None, [], before, 0, 0)
     if type(context_window) is not int or context_window <= 0:
         raise ContextPressureError('Context window must be a positive integer or unknown')
@@ -159,7 +161,7 @@ def plan_context(messages: list[NativeMessage], tools: list[ToolDefinition], *,
     if limit <= 0:
         raise ContextPressureError('Output reservation leaves no input context')
     threshold = max(1, int(limit * .75))
-    if before < threshold:
+    if not force and before < threshold:
         return ContextPlan(projected, None, [], before, limit, threshold)
     head = _head(messages)
     previous_cut = checkpoint['prefix_length'] if checkpoint else head
@@ -190,12 +192,14 @@ def plan_context(messages: list[NativeMessage], tools: list[ToolDefinition], *,
             reserve = min(512, max(64, limit // 8))
             cut = next((c for c in fitting if _estimate(_project(messages, c, 'Earlier work.'), tools)
                         + reserve <= threshold), fitting[-1])
+            if force:
+                cut = fitting[-1]
             source = _copy(messages[previous_cut:cut])
             if checkpoint:
                 source.insert(0, NativeMessage(role='assistant', content=_REFERENCE + checkpoint['summary'] + _END))
             return ContextPlan(projected, cut, source, before, limit, threshold, _hash(messages[:cut]))
     # Being above the soft trigger is not itself a fatal provider overflow.
-    if before <= limit:
+    if not force and before <= limit:
         return ContextPlan(projected, None, [], before, limit, threshold)
     raise ContextPressureError('The protected objective, corrections, recent tools or tool schemas do not fit the context window')
 

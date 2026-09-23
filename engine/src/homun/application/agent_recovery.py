@@ -43,6 +43,14 @@ def migrate_inflight(run):
         run['_model_phase_attempts'] = {'summary': count, 'decide': count}
 
 
+def can_attempt(run, phase):
+    counters = run.get('_model_phase_attempts', {})
+    previous = run.get('recovery') or {}
+    legacy = (previous.get('attempts', 0)
+              if previous.get('phase') == phase and previous.get('status') == 'waiting' else 0)
+    return counters.get(phase, legacy) < TOTAL_ATTEMPTS
+
+
 def begin(run, phase):
     """Reserve a retry slot in the caller's transaction, before provider IO."""
     counters = run.setdefault('_model_phase_attempts', {})
@@ -66,6 +74,8 @@ def waiting(run, *, now=None) -> bool:
 def accept(run, phase):
     """Reset a phase's own counter once its output was accepted."""
     run.get('_model_phase_attempts', {}).pop(phase, None)
+    if phase == 'decide':
+        run.pop('_overflow_recoveries', None)
     recovery = run.get('recovery')
     if recovery and recovery.get('phase') == phase and recovery.get('status') != 'interrupted':
         recovery.update(status='recovered', attempts=0)
@@ -77,6 +87,8 @@ def interrupt(run):
     """Owner controls fence unresolved waits; the new generation retries fresh."""
     # Keep the format marker: a later crash must not trigger legacy migration.
     run['_model_phase_attempts'] = {}
+    run.pop('_force_context_compaction', None)
+    run.pop('_overflow_recoveries', None)
     recovery = run.get('recovery')
     if recovery and recovery.get('status') == 'waiting':
         run['recovery'] = interrupted(recovery)

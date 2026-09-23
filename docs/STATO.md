@@ -55,7 +55,15 @@ Una verifica del sorgente non aggiorna l'app installata.
   steering che interrompe le attese e stato di ritentativo nel pannello lavoro.
   [Prove reali Ollama e limiti](research/2026-09-23-agent-recovery-verifica.md).
 
+- Recupero da contesto eccessivo con compattazione forzata persistente e limitata,
+  senza aumentare l'output o ripetere richieste identiche.
+  [Prova ibrida e limiti](research/2026-09-23-agent-overflow-verifica.md).
+
 ## Evidenze della tranche corrente
+
+Overflow: **729 test engine passati, 1 saltato**, OpenAPI allineato, architettura
+0 errori. Fixture con HTTP400 iniettato e riepilogo/finale Ollama reali riuscita:
+contesto stimato 10780 → 5182, sei righe corrette e cronologia conservata.
 
 Recupero provider: **718 test engine passati, 1 saltato**, più 62 verifiche
 mirate dopo l'ultima correzione della migrazione; typecheck e OpenAPI
@@ -63,7 +71,7 @@ allineati (campo opzionale `recovery`), architettura 0 errori. Prova reale:
 rifiuto di connessione autentico convertito in attesa persistente poi riuscita
 su Ollama `qwen3.5:4b` con budget onesto; 404 reale classificato fallimento
 permanente tipizzato. Refresh credenziali, fallback, continuazione dei
-troncamenti e overflow restano aperti.
+troncamenti restano aperti; il recupero da overflow è ora parziale e limitato.
 
 Contesto: 688 test engine passati, 1 saltato; typecheck e OpenAPI allineati.
 Prova Ollama di compattazione riuscita, con sei righe corrette nell'artifact in

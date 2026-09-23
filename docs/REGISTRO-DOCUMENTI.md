@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **189**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **193**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -200,3 +200,7 @@ Documenti censiti: **189**. Punto di ingresso: [indice](README.md).
 | [docs/superpowers/plans/2026-09-23-agent-controls.md](superpowers/plans/2026-09-23-agent-controls.md) | Piano controlli di esecuzione |
 | [docs/research/2026-09-23-agent-context-verifica.md](research/2026-09-23-agent-context-verifica.md) | Contesto persistente, prova Ollama e limiti |
 | [docs/superpowers/plans/2026-09-23-agent-context.md](superpowers/plans/2026-09-23-agent-context.md) | Piano compattazione del contesto |
+| [docs/research/2026-09-23-agent-recovery-verifica.md](research/2026-09-23-agent-recovery-verifica.md) | Recupero provider, crash e steering |
+| [docs/superpowers/plans/2026-09-23-agent-recovery.md](superpowers/plans/2026-09-23-agent-recovery.md) | Piano recupero provider |
+| [docs/research/2026-09-23-agent-overflow-verifica.md](research/2026-09-23-agent-overflow-verifica.md) | Compattazione dopo overflow e prova ibrida |
+| [docs/superpowers/plans/2026-09-23-agent-overflow.md](superpowers/plans/2026-09-23-agent-overflow.md) | Piano recupero da overflow |

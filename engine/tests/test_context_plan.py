@@ -158,3 +158,24 @@ def test_unresolved_parallel_call_cannot_be_crossed_by_correction():
     rows.append(M(role='user', content='Correction before missing tool response'))
     with pytest.raises(ContextPressureError, match='unresolved'):
         plan_context(rows, [], context_window=4096, max_output_tokens=1024)
+
+
+def test_forced_compaction_reduces_history_below_normal_trigger():
+    from homun.models.native_turn import NativeMessage, ToolCall
+    messages=[NativeMessage(role='system',content='Instructions'),NativeMessage(role='user',content='Objective')]
+    for i in range(5):
+        messages.append(NativeMessage(role='assistant',tool_calls=[ToolCall(id=str(i),name='read',arguments={})]))
+        messages.append(NativeMessage(role='tool',tool_call_id=str(i),name='read',content='older result '*180))
+    normal=plan_context(messages,[],context_window=16384,max_output_tokens=2048)
+    assert normal.cut is None
+    forced=plan_context(messages,[],context_window=16384,max_output_tokens=2048,force=True)
+    assert forced.cut is not None
+    assert build_checkpoint(messages,forced,'Historical results reviewed.',[])['estimated_after']<forced.before_tokens*.95
+
+
+def test_forced_compaction_refuses_unknown_capacity_or_no_safe_prefix():
+    from homun.models.native_turn import NativeMessage
+    messages=[NativeMessage(role='system',content='Instructions'),NativeMessage(role='user',content='Objective')]
+    for window in (None,16384):
+        with pytest.raises(ContextPressureError):
+            plan_context(messages,[],context_window=window,max_output_tokens=2048,force=True)

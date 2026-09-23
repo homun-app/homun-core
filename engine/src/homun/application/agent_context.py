@@ -43,7 +43,8 @@ def prepare(ctx,run,tools):
     policy=run.get('_context_policy')
     if not policy:
         return messages
-    plan=plan_context(messages,tools,checkpoint=run.get('_context_checkpoint'),**policy)
+    plan=plan_context(messages,tools,checkpoint=run.get('_context_checkpoint'),
+                      force=bool(run.get('_force_context_compaction')),**policy)
     if plan.cut is None:
         return plan.messages
     actor=Actor.model_validate(run['_actor'])
@@ -55,6 +56,8 @@ def prepare(ctx,run,tools):
             if not _same_owner(current,run):
                 raise ContextPreparationDeferred()
             authority(ctx,store,actor,current,running=True)
+            if not agent_recovery.can_attempt(current,'decide'):
+                raise agent_recovery.RecoveryAttemptsExhausted('No acting attempt remains after compaction')
             if current['model_attempts']+2>current['limits']['max_model_attempts']:
                 raise ValidationError('Insufficient model attempts for compaction and continuation')
             budgets.check_capacity(store,actor,run['work_id'],BudgetCounters(attempts=2),
@@ -100,6 +103,7 @@ def prepare(ctx,run,tools):
             else:
                 authority(ctx,store,actor,current,running=True)
                 current['_context_checkpoint']=candidate
+                current.pop('_force_context_compaction',None)
                 agent_recovery.accept(current,'summary')
                 current['context']={'compactions':candidate['generation'],
                     'estimated_input_tokens':candidate['estimated_after'],

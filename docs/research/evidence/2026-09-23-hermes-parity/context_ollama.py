@@ -1,7 +1,8 @@
 """Hybrid fixture: real authorized file reads, then real Ollama compaction/final.
 
 Earlier tool choices are fixture-generated, not chosen by the model. No provider
-mock is used for compaction or final. Run from repo with PYTHONPATH=engine/src.
+mock is used for compaction or final. --overflow injects one explicit HTTP400
+from a local fixture before using Ollama. Run from repo with PYTHONPATH=engine/src.
 """
 import json
 from pathlib import Path
@@ -16,16 +17,21 @@ from homun.application.agent_native import append_round,append_result
 from homun.application.agent_run_execution import advance
 from homun.models.native_turn import NativeMessage,ToolCall
 
+overflow_mode='--overflow' in sys.argv[2:]
+http_fixture=None
 root=Path(tempfile.mkdtemp(prefix='homun-context-live-'))
 ctx=create_context(db_path=root/'ws.db',data_dir=root,for_tests=True)
 ctx.models.upsert_connection(connection_id='openai_compatible',kind='openai_compatible',display_name='Ollama',
-    model_id='qwen3.5:4b',base_url='http://127.0.0.1:11434/v1',context_window=12288,max_output_tokens=1536)
+    model_id='qwen3.5:4b',base_url='http://127.0.0.1:11434/v1',context_window=32768 if overflow_mode else 12288,max_output_tokens=1536)
 ctx.models.set_active('openai_compatible')
 # Observe genuine HTTP replies, including rejected/truncated output, without replacing the model.
 provider=ctx.models._providers['openai_compatible']
 post=provider._post_ollama_chat
 provider_replies=[]
 def observed_post(payload):
+    if overflow_mode and not provider_replies:
+        provider_replies.append({'fixture':'injected local HTTP400 context overflow','tools_present':'tools' in payload})
+        return provider._post_url(f'http://127.0.0.1:{http_fixture.server_port}/v1/chat/completions',payload,api_key='fixture')
     response=post(payload)
     message=response.get('message',{})
     provider_replies.append({'options':payload.get('options'),'tools_present':'tools' in payload,
@@ -59,6 +65,20 @@ for i,material in enumerate(materials):
         append_result(run,observation)
         run['observations'].append({'tool':'read_material','arguments':args,'message':'Fixture read','result':observation})
     ctx.service.store=store
+if overflow_mode:
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from threading import Thread
+    class OverflowHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get('Content-Length',0)))
+            body=b'{"error":{"code":"context_length_exceeded","message":"maximum context length exceeded"}}'
+            self.send_response(400)
+            self.send_header('Content-Type','application/json')
+            self.send_header('Content-Length',str(len(body)))
+            self.end_headers();self.wfile.write(body)
+        def log_message(self,*args):pass
+    http_fixture=HTTPServer(('127.0.0.1',0),OverflowHandler)
+    Thread(target=http_fixture.serve_forever,daemon=True).start()
 try:
     original=ctx.repository.load().commands['run'].result['_messages']
     statuses=[]
@@ -68,13 +88,21 @@ try:
     store=ctx.repository.load();run=store.commands['run'].result
     artifacts=[a.model_dump(mode='json') for a in store.artifacts.values()]
     evidence={'fixture':'real source reads with scripted choices; real local summary/final model',
-      'model':'qwen3.5:4b','statuses':statuses,'run':run,'artifacts':artifacts,
+      'injected_http_overflow':overflow_mode,'model':'qwen3.5:4b','statuses':statuses,'run':run,'artifacts':artifacts,
       'usage':[u.model_dump(mode='json') for u in ctx.models.usage],'provider_replies':provider_replies}
     Path(sys.argv[1]).write_text(json.dumps(evidence,ensure_ascii=False,indent=2))
     assert status=='completed',run.get('error_code')
+    if overflow_mode:
+        assert statuses[0]=='running' and run['model_attempts']==3
+        assert provider_replies[0]['tools_present'] is True
+        assert provider_replies[1]['tools_present'] is False
+        assert provider_replies[2]['tools_present'] is True
     assert run['_context_checkpoint']['estimated_after']<run['_context_checkpoint']['estimated_before']
     assert run['_messages'][:len(original)]==original
     assert all(code in artifacts[0]['content'] for code in codes),artifacts[0]['content']
     assert store.works[work].status=='review'
     print('PASS: historical checkpoint, canonical history retained, all six codes in reviewed artifact',flush=True)
-finally:ctx.close()
+finally:
+    ctx.close()
+    if http_fixture:
+        http_fixture.shutdown();http_fixture.server_close()
