@@ -71,6 +71,18 @@ def _skill_bindings(store, skill_ids):
     return bindings
 
 
+def validate_bindings(ctx, store, actor, proposal):
+    """The approved source identities remain fixed through publication."""
+    for expected in proposal['materials']:
+        actual, _ = _source(ctx, store, actor, expected['id'])
+        if actual != expected:
+            raise ConflictError('Synthesis material changed; create a new proposal')
+    for binding in proposal['skills']:
+        skill = store.skills.get(binding['id'])
+        if skill is None or skill.status != 'approved' or skill.revision != binding['revision']:
+            raise ConflictError('Skill changed; create a new proposal')
+
+
 def synthesis_assignee(store, work):
     """Who writes: the synthesize phase's assignee, else the work owner."""
     from homun.application.phase_execution import phase_plan_step
@@ -157,10 +169,7 @@ def approve(ctx, actor, work_id, proposal_id, body):
             record, fingerprint = cached(store, actor, body['command_id'], 'synthesis.approve', payload)
             if body['digest'] != proposal['digest'] or body['expected_version'] != proposal['expected_version']:
                 raise ConflictError('Approval does not match the proposed action and revision')
-            for binding in proposal['skills']:
-                skill = store.skills.get(binding['id'])
-                if skill is None or skill.status != 'approved' or skill.revision != binding['revision']:
-                    raise ConflictError('Skill changed; create a new proposal')
+            validate_bindings(ctx, store, actor, proposal)
             if record:
                 return deepcopy(public(proposal))
             if proposal['status'] != 'pending_approval':

@@ -135,7 +135,7 @@ export function ConversationWorkspaceSidebar({
           {SPACE_LINKS.map((v) => (
             <button className={space === v ? "active" : ""} key={v} onClick={() => onOpenSpace(v)}>
               {v}
-              {!(v === "Materiali" && libraryCount === null) && <span>{spaceLinkCount(v, spaceData, libraryCount, routineCount, visibleWorks)}</span>}
+              {!(v === "Materiali" && libraryCount === null || v === "Plugin" && engineAgents !== undefined) && <span>{spaceLinkCount(v, spaceData, libraryCount, routineCount, visibleWorks)}</span>}
             </button>
           ))}
         </div>

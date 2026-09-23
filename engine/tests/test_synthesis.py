@@ -160,6 +160,12 @@ def test_model_failure_is_honest(setup):
 def test_budget_counts_the_attempt(setup):
     ctx, actor, work, material = setup
     version = confirm_intake(ctx, actor, work)
+    from homun.models.types import UsageEntry
+    def complete(*a, **k):
+        ctx.models.usage.append(UsageEntry(id='synthesis-usage', provider_id='fake',
+            model_id='fake-model', input_tokens=12, output_tokens=8))
+        return SimpleNamespace(text='Draft with measured usage')
+    ctx.models.complete = complete
     p = propose(ctx, actor, work, {'command_id': 'synth', 'material_ids': [material], 'expected_version': version})
     approve(ctx, actor, work, p['id'], confirmation(p))
     execute(ctx, p['id'])
@@ -232,3 +238,156 @@ def test_revised_procedure_invalidates_approval(setup):
     ctx.persist()
     with pytest.raises(ConflictError):
         approve(ctx, actor, work, p['id'], confirmation(p))
+
+
+def test_exhausted_assignee_allocation_prevents_model_call(setup, monkeypatch):
+    from homun.domain.models import BudgetAllocation, BudgetCounters
+    ctx, actor, work, material = setup
+    version = confirm_intake(ctx, actor, work)
+    agent_id = _agent_id(ctx.repository.load(), 'Redattrice')
+    with ctx.repository.locked(), ctx.repository.transaction() as store:
+        store.work_budgets[work].allocations[agent_id] = BudgetAllocation(
+            actor_id=agent_id, model_attempts=1, spent=BudgetCounters(attempts=1))
+    p = propose(ctx, actor, work, {'command_id': 'synth', 'material_ids': [material], 'expected_version': version})
+    approve(ctx, actor, work, p['id'], confirmation(p))
+    calls = []
+    monkeypatch.setattr(ctx.models, 'complete', lambda *a, **k: (calls.append(True) or SimpleNamespace(text='Unexpected call')))
+    execute(ctx, p['id'])
+    store = ctx.repository.load()
+    assert not calls
+    assert not store.artifacts
+    assert store.commands[p['id']].result['status'] == 'failed'
+
+
+@pytest.mark.parametrize('stage', ['approval', 'execution', 'publication'])
+@pytest.mark.parametrize('changed', ['material', 'material_hash', 'skill_revision', 'skill_status'])
+def test_bound_sources_revalidated(setup, monkeypatch, stage, changed):
+    ctx, actor, work, material = setup
+    version = confirm_intake(ctx, actor, work)
+    skill_id = approved_skill(ctx, actor)
+    p = propose(ctx, actor, work, {'command_id': 'synth', 'material_ids': [material],
+                                 'skill_ids': [skill_id], 'expected_version': version})
+
+    def mutate():
+        if changed == 'material_hash':
+            import hashlib
+            with ctx.repository.locked(), ctx.repository.transaction() as store:
+                source = store.materials[material]
+                data = b'Replaced material content'
+                (ctx.data_dir / source.storage_relpath).write_bytes(data)
+                source.content_hash = hashlib.sha256(data).hexdigest()
+                source.byte_size = len(data)
+        elif changed == 'material':
+            ctx.service.apply(actor, 'change-material', 'material.update', {
+                'material_id': material, 'expected_version': 1, 'title': 'Changed'})
+            ctx.persist()
+        else:
+            with ctx.repository.locked(), ctx.repository.transaction() as store:
+                skill = store.skills[skill_id]
+                if changed == 'skill_revision':
+                    skill.revision += 1
+                    skill.body = 'Different instructions'
+                else:
+                    skill.status = 'staged'
+    if stage == 'approval':
+        mutate()
+        with pytest.raises(ConflictError):
+            approve(ctx, actor, work, p['id'], confirmation(p))
+        return
+    approve(ctx, actor, work, p['id'], confirmation(p))
+    calls = []
+    def complete(*a, **k):
+        calls.append(True)
+        if stage == 'publication':
+            mutate()
+        return SimpleNamespace(text='Draft')
+    monkeypatch.setattr(ctx.models, 'complete', complete)
+    if stage == 'execution':
+        mutate()
+    execute(ctx, p['id'])
+    execute(ctx, p['id'])
+    store = ctx.repository.load()
+    assert not store.artifacts
+    assert store.commands[p['id']].result['status'] == 'blocked'
+    assert len(calls) == (1 if stage == 'publication' else 0)
+
+
+def test_missing_model_usage_is_unknown_and_charged_to_assignee(setup):
+    from homun.domain.models import BudgetAllocation
+    ctx, actor, work, material = setup
+    version = confirm_intake(ctx, actor, work)
+    agent_id = _agent_id(ctx.repository.load(), 'Redattrice')
+    with ctx.repository.locked(), ctx.repository.transaction() as store:
+        store.work_budgets[work].allocations[agent_id] = BudgetAllocation(actor_id=agent_id, model_attempts=5)
+    before = ctx.repository.load().work_budgets[work].unknown.attempts
+    p = propose(ctx, actor, work, {'command_id': 'synth', 'material_ids': [material], 'expected_version': version})
+    approve(ctx, actor, work, p['id'], confirmation(p))
+    execute(ctx, p['id'])
+    budget = ctx.repository.load().work_budgets[work]
+    assert budget.unknown.attempts == before + 1
+    assert budget.allocations[agent_id].unknown.attempts == 1
+    assert budget.allocations[agent_id].spent.attempts == 0
+
+
+@pytest.mark.parametrize('scope', ['global', 'assignee'])
+@pytest.mark.parametrize('axis', ['input_tokens', 'output_tokens'])
+def test_exhausted_token_cap_stops_call_without_token_estimate(setup, monkeypatch, scope, axis):
+    from homun.domain.models import BudgetAllocation
+    ctx, actor, work, material = setup
+    version = confirm_intake(ctx, actor, work)
+    agent_id = _agent_id(ctx.repository.load(), 'Redattrice')
+    with ctx.repository.locked(), ctx.repository.transaction() as store:
+        budget = store.work_budgets[work]
+        if scope == 'global':
+            setattr(budget.caps, axis, 1)
+            setattr(budget.spent, axis, 1)
+        else:
+            allocation = BudgetAllocation(actor_id=agent_id, model_attempts=5)
+            setattr(allocation, axis, 1)
+            setattr(allocation.spent, axis, 1)
+            budget.allocations[agent_id] = allocation
+    p = propose(ctx, actor, work, {'command_id': 'synth', 'material_ids': [material], 'expected_version': version})
+    approve(ctx, actor, work, p['id'], confirmation(p))
+    calls = []
+    monkeypatch.setattr(ctx.models, 'complete', lambda *a, **k: (calls.append(True) or SimpleNamespace(text='Unexpected')))
+    execute(ctx, p['id'])
+    store = ctx.repository.load()
+    assert not calls
+    assert not store.artifacts
+    assert store.commands[p['id']].result['error_code'] == 'budget_exhausted'
+
+
+@pytest.mark.parametrize('known_axis', ['input_tokens', 'output_tokens'])
+@pytest.mark.parametrize('scope', ['global', 'assignee'])
+def test_partial_usage_preserves_known_tokens_and_unknown_attempt(setup, known_axis, scope):
+    from homun.application import budgets
+    from homun.domain.errors import BudgetExhaustedError
+    from homun.domain.models import BudgetAllocation, BudgetCounters
+    from homun.models.types import UsageEntry
+    ctx, actor, work, material = setup
+    version = confirm_intake(ctx, actor, work)
+    agent_id = _agent_id(ctx.repository.load(), 'Redattrice')
+    with ctx.repository.locked(), ctx.repository.transaction() as store:
+        budget = store.work_budgets[work]
+        allocation = BudgetAllocation(actor_id=agent_id, model_attempts=5)
+        budget.allocations[agent_id] = allocation
+        setattr(budget.caps if scope == 'global' else allocation, known_axis, 1000)
+    before = ctx.repository.load().work_budgets[work]
+    def complete(*a, **k):
+        ctx.models.usage.append(UsageEntry(id='partial', provider_id='fake', model_id='fake',
+                                           **{known_axis: 1000}))
+        return SimpleNamespace(text='Draft with partial reported usage')
+    ctx.models.complete = complete
+    p = propose(ctx, actor, work, {'command_id': 'synth', 'material_ids': [material], 'expected_version': version})
+    approve(ctx, actor, work, p['id'], confirmation(p))
+    execute(ctx, p['id'])
+    after = ctx.repository.load().work_budgets[work]
+    assert getattr(after.spent, known_axis) == getattr(before.spent, known_axis) + 1000
+    assert after.spent.attempts == before.spent.attempts
+    assert after.unknown.attempts == before.unknown.attempts + 1
+    assert getattr(after.allocations[agent_id].spent, known_axis) == 1000
+    assert after.allocations[agent_id].spent.attempts == 0
+    assert after.allocations[agent_id].unknown.attempts == 1
+    assert not after.pending
+    with pytest.raises(BudgetExhaustedError):
+        budgets.reserve(ctx, actor, work, BudgetCounters(attempts=1), accounting_actor_id=agent_id)

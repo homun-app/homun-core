@@ -153,33 +153,31 @@ def reconcile_routine_schedules(ctx) -> list[str]:
     """On startup, align DBOS schedules with routine domain state.
 
     Deleted schedules for stopped routines, paused threads for paused ones,
-    and re-registration for active ones whose schedule is missing (e.g. a
-    wiped dbos.sqlite) keep the two worlds from drifting apart.
+    and re-registration of missing or changed cadence/timezone definitions
+    keep the two worlds from drifting apart, including paused routines.
     """
     from dbos import DBOS
     from homun.runtime.workflows.routine_recurrence import routine_recurrence_workflow
     store = ctx.repository.load()
-    existing = {s["schedule_name"] for s in DBOS.list_schedules()}
+    existing = {s["schedule_name"]: s for s in DBOS.list_schedules()}
     repaired: list[str] = []
     for routine in store.routines.values():
         name = _schedule_name(routine.id)
+        schedule = existing.get(name)
         if routine.status == "stopped":
-            if name in existing:
+            if schedule is not None:
                 DBOS.delete_schedule(name)
             continue
-        if name not in existing:
-            if routine.status == "active":
-                DBOS.create_schedule(
-                    schedule_name=name,
-                    workflow_fn=routine_recurrence_workflow,
-                    schedule=routine.cron,
-                    context=_schedule_context(routine.id),
-                    cron_timezone=routine.cron_timezone,
-                )
-                repaired.append(routine.id)
-            continue
-        schedule = next((s for s in DBOS.list_schedules() if s["schedule_name"] == name), None)
-        if schedule is None:
+        drifted = schedule is not None and (
+            schedule.get("schedule") != routine.cron
+            or schedule.get("cron_timezone") != routine.cron_timezone)
+        if schedule is None or drifted:
+            if drifted:
+                DBOS.delete_schedule(name)
+            _register_schedule(routine.id, routine.cron, routine.cron_timezone)
+            if routine.status == "paused":
+                DBOS.pause_schedule(name)
+            repaired.append(routine.id)
             continue
         paused_in_dbos = schedule.get("status", "ACTIVE") != "ACTIVE"
         if routine.status == "paused" and not paused_in_dbos:

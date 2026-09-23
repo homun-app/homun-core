@@ -1,0 +1,23 @@
+/* Full workspace surfaces must not inherit the mobile detail-panel positioning. */
+.cw .cw-main > .cw-engine-library {
+  position: relative;
+  inset: auto;
+  width: auto;
+  flex: 1;
+  min-height: 0;
+  margin: 8px 20px 20px;
+  align-content: start;
+  box-shadow: none;
+}
+.cw-engine-library .cw-documents__filters {
+  flex-wrap: wrap;
+}
+.cw-engine-library .cw-documents__filters input {
+  min-width: 0;
+}
+.cw-engine-library .cw-document header {
+  flex-wrap: wrap;
+}
+.cw-engine-library .cw-document {
+  overflow-wrap: anywhere;
+}

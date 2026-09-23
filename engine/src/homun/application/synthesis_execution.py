@@ -1,5 +1,5 @@
 """Model-driven phase execution: compose the artifact, publish exactly once."""
-from homun.application.synthesis import PROPOSAL_TYPE, authority
+from homun.application.synthesis import PROPOSAL_TYPE, authority, validate_bindings
 from homun.domain.errors import DomainError, ValidationError
 from homun.domain.ids import new_id
 from homun.domain.models import Actor, DomainEvent, utc_now
@@ -28,7 +28,7 @@ def execute(ctx, proposal_id):
                 proposal = record.result
                 if record.type != PROPOSAL_TYPE or proposal['status'] not in {'queued', 'running'}:
                     return
-                actor, work = _running_authority(store, proposal)
+                actor, work = _running_authority(ctx, store, proposal)
                 if proposal['_attempts'] >= proposal['limits']['max_attempts']:
                     _record_failure(store, proposal, 'synthesis_attempt_budget_exhausted')
                     return
@@ -42,7 +42,7 @@ def execute(ctx, proposal_id):
                 proposal = store.commands[proposal_id].result
                 if proposal['status'] != 'running' or proposal['_attempts'] != attempt:
                     return
-                actor, work = _running_authority(store, proposal)
+                actor, work = _running_authority(ctx, store, proposal)
                 service = ctx.service.for_store(store)
                 result = service.apply(actor, f'{proposal_id}:artifact', 'work.submit_artifact', {
                     'work_id': work.id, 'expected_version': work.version,
@@ -66,12 +66,13 @@ def execute(ctx, proposal_id):
         fail(ctx, proposal_id, 'synthesis_model_error', attempt=attempt)
 
 
-def _running_authority(store, proposal):
+def _running_authority(ctx, store, proposal):
     from homun.domain.errors import ConflictError
     actor = Actor.model_validate(proposal['_actor'])
     work = authority(store, actor, proposal, approval=True)
     if work.version != proposal['_run_version'] or work.status != WorkStatus.RUNNING:
         raise ConflictError('Work changed after synthesis approval')
+    validate_bindings(ctx, store, actor, proposal)
     return actor, work
 
 
@@ -131,8 +132,7 @@ def compose(ctx, proposal):
     from homun.models.types import ChatMessage
 
     store = ctx.repository.load()
-    actor = Actor.model_validate(proposal['_actor'])
-    work = store.works[proposal['work_id']]
+    actor, work = _running_authority(ctx, store, proposal)
     agent = store.agents[proposal['assignee_id']]
     brief = latest_intake(store, work.id) or {}
     from homun.application.phase_execution import phase_plan_step
@@ -152,7 +152,7 @@ def compose(ctx, proposal):
     )
     connection_id, connection_kind = _connection(ctx, agent)
     reservation = work_budgets.reserve(ctx, actor, work.id, BudgetCounters(attempts=1),
-                                       purpose='synthesis.compose')
+                                       purpose='synthesis.compose', accounting_actor_id=agent.id)
     usage_before = len(ctx.models.usage)
     try:
         result = ctx.models.complete(
@@ -165,10 +165,19 @@ def compose(ctx, proposal):
                                            error_code='synthesis_model_error'))
         raise
     usage_entry = ctx.models.usage[-1] if len(ctx.models.usage) > usage_before else None
-    work_budgets.reconcile(ctx, actor, work.id, reservation, usage=BudgetCounters(
-        attempts=1,
-        input_tokens=(usage_entry.input_tokens if usage_entry else None) or 0,
-        output_tokens=(usage_entry.output_tokens if usage_entry else None) or 0))
+    usage = None
+    unknown_usage = None
+    if usage_entry is not None:
+        partial = usage_entry.input_tokens is None or usage_entry.output_tokens is None
+        usage = BudgetCounters(attempts=0 if partial else 1,
+                               input_tokens=usage_entry.input_tokens or 0,
+                               output_tokens=usage_entry.output_tokens or 0)
+        if partial:
+            # Keep reported axes charged; the unknown attempt signals that the
+            # zero counter on the missing axis is not a measured zero usage.
+            unknown_usage = BudgetCounters(attempts=1)
+    work_budgets.reconcile(ctx, actor, work.id, reservation, usage=usage,
+                           unknown_usage=unknown_usage)
     ctx.models.append_attempt(_attempt(proposal, connection_id,
                                        getattr(usage_entry, 'model_id', None), status='ok'))
     text = (result.text or '').strip()

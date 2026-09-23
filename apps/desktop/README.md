@@ -1,6 +1,6 @@
 # Desktop Electron
 
-Shell Electron 44.4.3 e candidato macOS arm64 autonomo con Python incorporato. La build locale non è ancora una release certificata. Vedi [artefatto e prove](../../docs/research/2026-09-19-conversational-intake-ux-verification.md).
+Shell Electron 44.4.3 e candidato macOS arm64 autonomo con Python incorporato. Il repository include pipeline di firma/notarizzazione e updater; la tranche del 23/9 verifica il codice senza ricertificare la release installata. Vedi [stato corrente](../../docs/STATO.md) e [prove del consolidamento](../../docs/research/2026-09-23-consolidamento-verifica.md).
 
 ```sh
 npm ci
@@ -51,3 +51,12 @@ blob o ricevute e non definisce recupero chiavi. Nessun segreto reale viene migr
 
 Riferimenti usati: [sicurezza Electron](https://www.electronjs.org/docs/latest/tutorial/security),
 [safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage).
+
+## Verifica updater del 23 settembre 2026
+
+Il dialogo di disponibilità ha un solo proprietario: l'evento `update-available`.
+`checkNow()` non ripropone il dialogo dopo la risposta del controllo. La suite
+`npm run desktop:test` include controllo automatico/manuale, assenza di update,
+errore e download già in corso, usando il modulo reale con Electron simulato.
+La CI esegue anche questi test. Non vengono scaricate o installate release;
+upgrade firmato completo, rollback e Mac pulito restano verifiche distinte.

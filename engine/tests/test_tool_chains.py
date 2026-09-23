@@ -136,3 +136,51 @@ def test_chain_survives_restart_dispatch(setup):
         record = store.commands[step['proposal_id']]
         assert record.result['status'] == 'queued'
         assert record.result['work_id'] == work
+
+
+@pytest.mark.parametrize('external_change', [False, 'cancelled', 'review_version'])
+def test_chain_recovers_after_publication_before_continuation(setup, external_change):
+    from homun.runtime.workflows.tool_chain import run_chain, run_chain_step_direct
+    from homun.domain.states import WorkStatus
+    ctx, actor, work, materials = setup
+    chain = propose(ctx, actor, work, {'command_id': 'ch', 'steps': steps(materials[:2]), 'expected_version': 2})
+    approve(ctx, actor, work, 'ch', {'command_id': 'ok', 'digest': chain['digest'], 'expected_version': 2})
+    first = chain['steps'][0]
+    run_chain_step_direct(ctx, first['capability'], first['proposal_id'])
+    if external_change:
+        with ctx.repository.locked(), ctx.repository.transaction() as store:
+            store.works[work].version += 1
+            if external_change == 'cancelled':
+                store.works[work].status = WorkStatus.CANCELLED
+    run_chain(ctx, chain['steps'])
+    run_chain(ctx, chain['steps'])
+    store = ctx.repository.load()
+    assert len(store.artifacts) == (1 if external_change else 2)
+    assert store.commands['ch'].result['status'] == ('failed' if external_change else 'completed')
+    if external_change == 'cancelled':
+        assert store.works[work].status == WorkStatus.CANCELLED
+
+
+@pytest.mark.parametrize('crash_after', [0, 1])
+def test_chain_replays_continuation_and_prior_completed_steps(setup, monkeypatch, crash_after):
+    from homun.runtime.workflows import tool_chain as wf
+    ctx, actor, work, materials = setup
+    chain = propose(ctx, actor, work, {'command_id': 'ch', 'steps': steps(materials), 'expected_version': 2})
+    approve(ctx, actor, work, 'ch', {'command_id': 'ok', 'digest': chain['digest'], 'expected_version': 2})
+    original = wf._continue_if_more_steps
+    def crash(ctx, steps, finished):
+        if finished == steps[crash_after]:
+            if crash_after == 0:
+                original(ctx, steps, finished)
+            raise KeyboardInterrupt('process terminated')
+        return original(ctx, steps, finished)
+    monkeypatch.setattr(wf, '_continue_if_more_steps', crash)
+    with pytest.raises(KeyboardInterrupt):
+        wf.run_chain(ctx, chain['steps'])
+    monkeypatch.setattr(wf, '_continue_if_more_steps', original)
+    wf.run_chain(ctx, chain['steps'])
+    wf.run_chain(ctx, chain['steps'])
+    store = ctx.repository.load()
+    assert store.commands['ch'].result['status'] == 'completed'
+    assert len(store.artifacts) == 3
+    assert len([e for e in store.events if e.type == 'work.chain_continued']) == 4

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 export type TaskSummary = {
   id: string;
   title: string;
@@ -24,9 +25,11 @@ export function ConversationTasks({
   onReveal: () => void;
   items: TaskSummary[];
   onOpen: (id: string) => void;
-  onDue: (id: string, date: string) => void;
+  onDue: (id: string, date: string) => void | Promise<void>;
   onMove: (id: string, phase: string) => string;
 }) {
+  const [savingDue, setSavingDue] = useState(false);
+  const [dueError, setDueError] = useState<unknown>(null);
   const [feedback, setFeedback] = useState("");
   const [view, setView] = useState("Elenco");
   const [focus, setFocus] = useState("Tutti");
@@ -214,9 +217,22 @@ export function ConversationTasks({
                 type="date"
                 aria-label="Scadenza compito"
                 value={item.due.slice(0, 10)}
-                onChange={(e) => onDue(item.id, e.target.value)}
+                disabled={savingDue}
+                onChange={async (e) => {
+                  setSavingDue(true);
+                  setDueError(null);
+                  try {
+                    await onDue(item.id, e.target.value);
+                  } catch (cause) {
+                    setDueError(cause);
+                  } finally {
+                    setSavingDue(false);
+                  }
+                }}
               />
             </label>
+            {savingDue && <p role="status">Salvo la scadenza…</p>}
+            <HomunErrorNotice error={dueError} />
             <p className="cw-hint">
               {item.unavailable
                 ? "L’agente è stato eliminato. Lo storico è disponibile."
@@ -247,7 +263,9 @@ export function ConversationTasks({
               {items.filter((i) => i.phase === "review").length} risultati da verificare
               {(() => {
                 const today = new Date().toISOString().slice(0, 10);
-                const overdue = items.filter((i) => i.due && i.due.slice(0, 10) < today && !["approved"].includes(i.phase)).length;
+                const overdue = items.filter(
+                  (i) => i.due && i.due.slice(0, 10) < today && !["approved"].includes(i.phase),
+                ).length;
                 const todayDue = items.filter((i) => i.due && i.due.slice(0, 10) === today).length;
                 const bits = [];
                 if (overdue) bits.push(`${overdue} scadut${overdue === 1 ? "o" : "i"}`);
