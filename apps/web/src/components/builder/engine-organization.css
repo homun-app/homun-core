@@ -1,0 +1,7 @@
+.organization-onboarding { margin: 1rem 0; text-align: left; }
+.organization-editor { max-width: 760px; padding: 1.25rem; border: 1px solid var(--border); border-radius: 12px; margin-top: 1rem; }
+.organization-editor label { display: grid; gap: .4rem; margin: 1rem 0; font-size: .9rem; }
+.organization-editor textarea { width: 100%; padding: .7rem; color: inherit; background: transparent; border: 1px solid var(--border); border-radius: 8px; resize: vertical; }
+.organization-editor p { font-size: .9rem; line-height: 1.5; }
+.organization-actions { display: flex; gap: .75rem; flex-wrap: wrap; }
+.organization-role { border-top: 1px solid var(--border); padding: .8rem 0; }

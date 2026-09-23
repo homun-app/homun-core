@@ -1,3 +1,4 @@
+import { EngineOrganizationOnboarding } from "./EngineOrganizationOnboarding";
 /**
  * Empty-state welcome for a new simulated conversation.
  */
@@ -45,6 +46,7 @@ export function ConversationWorkspaceWelcome({
         <span className="cw-example-note">
           Esempio: «Prepara il catalogo prodotti per il cliente entro venerdì».
         </span>
+        <EngineOrganizationOnboarding />
       </div>
     );
   }

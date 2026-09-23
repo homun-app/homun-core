@@ -1,3 +1,4 @@
+import { EngineOrganizationOnboarding } from "./EngineOrganizationOnboarding";
 /**
  * Space views host: tasks, materials, plugins, team/projects/automations, new member.
  * Keeps ConversationWorkspace as a thin router between space and conversation stages.
@@ -123,6 +124,7 @@ export function ConversationWorkspaceSpaceHost({
   if (engineMode && space === "Squadra")
     return (
       <>
+        <EngineOrganizationOnboarding onChanged={onRefreshEngine} />
         <EngineWorkspaceAgents agents={engineAgents ?? []} onChanged={onRefreshEngine} />
         <EngineWorkspaceTeams
           teams={engineTeams ?? []}
