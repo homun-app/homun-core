@@ -211,7 +211,6 @@ function FinalDeliverySection({
   onSubmitArtifact,
 }: {
   work: Work;
-  onRefreshEngine?: (() => Promise<void>) | undefined;
   busy: boolean;
   onSubmitArtifact?: ((title: string, content: string) => Promise<void>) | undefined;
 }) {
@@ -291,7 +290,6 @@ function PhaseLadder({
   agents,
 }: {
   work: Work;
-  onRefreshEngine?: (() => Promise<void>) | undefined;
   agentNames?: Record<string, string> | undefined;
   busy: boolean;
   materialsCount: number;
@@ -373,7 +371,6 @@ function PhaseReviseControls({
   onRevisePlan,
 }: {
   work: Work;
-  onRefreshEngine?: (() => Promise<void>) | undefined;
   busy: boolean;
   steps: NonNullable<Work["enginePlan"]>;
   agents: Array<{ id: string; name: string; status: string }>;
@@ -512,7 +509,6 @@ function CloseWorkSection({
   onCloseWork,
 }: {
   work: Work;
-  onRefreshEngine?: (() => Promise<void>) | undefined;
   busy: boolean;
   onCloseWork?: (() => Promise<void>) | undefined;
 }) {
@@ -658,7 +654,6 @@ function WorkDueSection({
   onSetDue,
 }: {
   work: Work;
-  onRefreshEngine?: (() => Promise<void>) | undefined;
   busy: boolean;
   onSetDue?: ((dueDate: string | null) => Promise<void>) | undefined;
 }) {
@@ -707,7 +702,6 @@ function WorkBudgetSection({
   onSetBudget,
 }: {
   work: Work;
-  onRefreshEngine?: (() => Promise<void>) | undefined;
   busy: boolean;
   onSetBudget?: ((modelAttempts: number) => Promise<void>) | undefined;
   onSetDue?: ((dueDate: string | null) => Promise<void>) | undefined;
