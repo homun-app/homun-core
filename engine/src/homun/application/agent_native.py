@@ -24,15 +24,23 @@ def pending(run):
     return next((c for m in messages for c in m.tool_calls if c.id not in answered), None)
 
 
+def decision_model(run):
+    if run.get('_continuation_version') == 1:
+        from homun.models.native_decision import ContinuationDecision
+        return ContinuationDecision
+    return AgentDecision
+
+
 def decision(run):
+    model = decision_model(run)
     call = pending(run)
     if call:
         if call.name == QUESTION.name:
             from homun.application.agent_tool_registry import registry_for
             args = registry_for(run).validate(call.name, call.arguments)
-            return AgentDecision(kind='ask', message=args['question'])
-        return AgentDecision(kind='tool', tool=call.name, arguments=call.arguments, message=f'Use {call.name}')
-    return AgentDecision(kind='finish', message=history(run)[-1].content)
+            return model(kind='ask', message=args['question'])
+        return model(kind='tool', tool=call.name, arguments=call.arguments, message=f'Use {call.name}')
+    return model(kind='finish', message=history(run)[-1].content)
 
 
 def append_round(run, message):

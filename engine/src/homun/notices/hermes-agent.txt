@@ -86,3 +86,11 @@ length/repeat/dominance thresholds and distinct-line safeguard, but counts only
 nonoverlapping windows to avoid false positives on a single long separator.
 Native responses fail with a typed nonretryable code before history/tool dispatch,
 while provider-reported usage remains charged.
+
+Text continuation: models/truncation.py and application/agent_continuation*.py
+adapt visible-fragment nudges and bounded continuation from agent/turn_truncation.py
+and conversation_loop.py. Homun durably accepts at most three nudges, retains raw
+canonical fragments, and joins exact text without Hermes's inserted newlines to
+preserve mid-token URLs/JSON. A version-pinned validated 64k native decision
+contract is shared by creation and crash replay; approvals, controls and budgets
+remain authoritative. Incomplete tool arguments are never dispatched.

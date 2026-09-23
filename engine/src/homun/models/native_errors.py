@@ -76,11 +76,12 @@ class NativeModelError(RuntimeError):
 
     ``usage`` carries the provider-reported counters extracted before response
     validation; unknown counters stay ``None`` — never zero. Raw provider
-    bodies are not stored on the exception.
+    bodies are not stored on the exception. A separately classified visible text
+    fragment may be carried explicitly for bounded application continuation.
     """
 
     def __init__(self, code, message='', *, retryable=None, retry_after_seconds=None,
-                 status_code=None, usage=None):
+                 status_code=None, usage=None, partial_text=None):
         if code not in _LABELS:
             raise ValueError(f'Unknown native model error code: {code}')
         self.code = code
@@ -89,6 +90,7 @@ class NativeModelError(RuntimeError):
                                     if retry_after_seconds is not None else None)
         self.status_code = status_code
         self.usage = usage
+        self.partial_text = partial_text if code == TRUNCATED else None
         super().__init__(sanitize(message) or _LABELS[code])
 
 
@@ -208,8 +210,8 @@ def classify_transport(exc) -> NativeModelError:
 def classify_response(exc, *, usage=None) -> NativeModelError:
     """Map a response-validation failure to a typed error, preserving usage.
 
-    Truncated and content-filtered replies are not retried here: continuation
-    is a separate tracked capability. Empty and malformed replies are retried,
+    Truncated and content-filtered replies are not retried here. Eligible visible
+    text is carried to the durable application continuation handler. Empty and malformed replies are retried,
     as Hermes empty-response and transient-parse handling does.
     """
     text = sanitize(exc)
@@ -228,4 +230,6 @@ def classify_response(exc, *, usage=None) -> NativeModelError:
     if usage is not None:
         error_usage = usage.model_copy(update={'status': 'error', 'error_code': code}) \
             if hasattr(usage, 'model_copy') else usage
-    return NativeModelError(code, text, usage=error_usage)
+    from homun.models.truncation import TruncatedTextError
+    partial = exc.partial_text if isinstance(exc, TruncatedTextError) else None
+    return NativeModelError(code, text, usage=error_usage, partial_text=partial)

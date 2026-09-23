@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **209**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **211**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -224,3 +224,6 @@ Documenti censiti: **209**. Punto di ingresso: [indice](README.md).
 | [docs/research/2026-09-23-agent-bridge-verifica.md](research/2026-09-23-agent-bridge-verifica.md) | Verifica ricerca descrizione e chiamata differita |
 
 | [docs/research/2026-09-23-agent-repetition-verifica.md](research/2026-09-23-agent-repetition-verifica.md) | Guardia delle risposte ripetitive e consumi preservati |
+
+| [docs/superpowers/plans/2026-09-23-text-continuation.md](superpowers/plans/2026-09-23-text-continuation.md) | Continuazione durevole dei frammenti testuali |
+| [docs/research/2026-09-23-agent-continuation-verifica.md](research/2026-09-23-agent-continuation-verifica.md) | Verifica troncamento ripresa e consegna ricomposta |

@@ -5,12 +5,14 @@ interrupted calls always get explicit results, never fabricated successful ones.
 """
 import json
 from homun.application import agent_native
+from homun.application.agent_continuation_state import clear as clear_continuation
 from homun.models.native_turn import NativeMessage
 
 
 def consume_steering(run):
     if not run.get('_steering') or agent_native.pending(run):
         return False
+    clear_continuation(run)
     for item in run.pop('_steering'):
         run['_messages'].append(NativeMessage(role='user',content=item['text']).model_dump())
     run.pop('_decision',None)
@@ -30,6 +32,7 @@ def close_pending(run):
 
 
 def redirect_history(run,text):
+    clear_continuation(run)
     unfinished=close_pending(run)
     consume_steering(run)
     reminder=''

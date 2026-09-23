@@ -73,6 +73,11 @@ def _parse_response(response, *, ollama=False):
     if is_runaway_repetition(choice['message'].get('content')):
         raise RepetitionError()
     reason = choice.get('done_reason' if ollama else 'finish_reason')
+    if reason == 'length':
+        from homun.models.truncation import continuable_text, TruncatedTextError
+        text = continuable_text(choice['message'])
+        if text is not None:
+            raise TruncatedTextError(text)
     if reason not in {'stop', 'tool_calls'}:
         raise ValueError(f'Incomplete agent response: {reason}')
     message = choice['message']

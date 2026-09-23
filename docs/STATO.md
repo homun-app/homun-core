@@ -83,6 +83,11 @@ Una verifica del sorgente non aggiorna l'app installata.
 
 ## Evidenze della tranche corrente
 
+Continuazione testuale: **870 test engine passati, 1 saltato**, più 63 controlli
+finali. Frammenti persistenti, consegna ricomposta una volta, controlli e budget
+rispettati. Troncamento HTTP iniettato → riavvio SQLite → seguito Ollama reale.
+[Prove e limiti](research/2026-09-23-agent-continuation-verifica.md).
+
 Guardia ripetizioni: **843 test engine passati, 1 saltato**, più 46 controlli
 finali. Errore tipizzato senza artifact o retry; consumi reali conservati.
 Verifica HTTP iniettata e risposta normale Ollama reale; streaming ancora aperto.

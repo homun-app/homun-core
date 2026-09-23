@@ -61,7 +61,7 @@ def _decision(ctx, run):
     if agent_native.enabled(run) and agent_native.pending(run):
         return agent_native.decision(run)
     if run.get('_decision'):
-        return AgentDecision.model_validate(run['_decision'])
+        return agent_native.decision_model(run).model_validate(run['_decision'])
     actor = Actor.model_validate(run['_actor'])
     from homun.application.agent_tool_bridge import visible_definitions
     tools = visible_definitions(run, registry_for(run))
@@ -80,12 +80,15 @@ def _decision(ctx, run):
         ctx.service.store = store
     reservation = budgets.reserve(ctx, actor, run['work_id'], BudgetCounters(attempts=1),
         purpose='agent_run.decide', accounting_actor_id=run['assignee_id'])
+    result = None
     try:
         if agent_native.enabled(run):
             result = ctx.models.complete_tools(messages, tools=tools,
                                                connection_id=run['connection_id'], **run.get('_context_policy',{}))
             agent_native.append_round(run, result.message)
             decision = agent_native.decision(run)
+            from homun.application.agent_continuation_state import complete_decision
+            decision = complete_decision(run, decision)
         else:
             decision, result = decide(ctx.models, objective=run['_objective'], tools=tools,
                 observations=run['observations'], connection_id=run['connection_id'],
@@ -94,7 +97,7 @@ def _decision(ctx, run):
         charge(ctx, actor, run, reservation, exc.usage)
         raise _ModelFailure(exc) from exc
     except Exception:
-        budgets.reconcile_unknown(ctx, actor, run['work_id'], reservation)
+        charge(ctx, actor, run, reservation, getattr(result, 'usage', None))
         raise
     charge(ctx, actor, run, reservation, getattr(result, 'usage', None))
     with ctx.repository.locked():
@@ -106,6 +109,7 @@ def _decision(ctx, run):
             current['_decision'] = decision.model_dump()
             if agent_native.enabled(run):
                 current['_messages'] = run['_messages']
+                current.pop('_continuation', None)
             agent_recovery.accept(current, 'decide')
         ctx.service.store = store
     return decision
@@ -206,6 +210,10 @@ def advance(ctx, run_id, *, epoch=None):
     except ContextPreparationDeferred:
         return ctx.repository.load().commands[run_id].result['status']
     except _ModelFailure as held:
+        if held.error.code == 'agent_model_truncated':
+            from homun.application.agent_continuation import request
+            if request(ctx, run, held.error, expected_steering=expected_steering):
+                return ctx.repository.load().commands[run_id].result['status']
         if held.error.code == 'agent_model_overflow' and agent_overflow.request_compaction(
                 ctx, run, expected_steering=expected_steering):
             return ctx.repository.load().commands[run_id].result['status']

@@ -39,6 +39,6 @@ dominante. Le soglie restano euristiche, non valutazione semantica del contenuto
 Il controllo avviene dopo la risposta HTTP completa: non interrompe lo streaming
 e non risparmia i token già generati. Non riconosce loop semantici, ripetizioni
 tra chiamate o stallo degli strumenti. Un testo volutamente molto ripetitivo
-può soddisfare l'euristica. La continuazione dei troncamenti utili, il fallback
-del provider e altre capacità H06 restano da implementare. Nessuna parità
+può soddisfare l'euristica. Aggiornamento: la [continuazione testuale](2026-09-23-agent-continuation-verifica.md)
+è ora verificata; fallback, strumenti troncati e altre capacità H06 restano aperti. Nessuna parità
 complessiva dichiarata; notice MIT aggiornata, nessun runtime Hermes.
