@@ -63,7 +63,8 @@ def _decision(ctx, run):
     if run.get('_decision'):
         return AgentDecision.model_validate(run['_decision'])
     actor = Actor.model_validate(run['_actor'])
-    tools = registry_for(run).definitions()
+    from homun.application.agent_tool_bridge import visible_definitions
+    tools = visible_definitions(run, registry_for(run))
     messages = prepare_context(ctx,run,tools) if agent_native.enabled(run) else None
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
@@ -142,6 +143,10 @@ def advance(ctx, run_id, *, epoch=None):
             if not _dispatch_allowed(ctx, actor, run):
                 return 'superseded'
             try:
+                if agent_native.enabled(run):
+                    from homun.application.agent_tool_bridge import resolve_call
+                    call = resolve_call(run, agent_native.pending(run))
+                    decision = decision.model_copy(update={'tool': call.name, 'arguments': call.arguments})
                 if any(b['name'] == decision.tool for b in run.get('_mcp_bindings', [])):
                     registry_for(run).validate(decision.tool, decision.arguments)
                     from homun.application.agent_external import stage

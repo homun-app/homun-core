@@ -73,3 +73,9 @@ tools/search.py derives BM25 scoring, rarest-query-token admission and minimum
 answerable-term coverage from tools/tool_search_catalog.py at the pinned commit.
 Homun adds deterministic name tie-breaking and Unicode tokenization, and indexes
 only the approved run registry. English stemming and deferred bridge not included.
+
+application/agent_tool_bridge.py derives progressive disclosure and the
+search/describe/call bridge from tools/tool_search.py and tool_search_validation.py
+at the pinned commit. Homun defers selected MCP schemas, pins bridge contracts
+per run, keeps canonical wrapper IDs, and resolves each action through its own
+approval/receipt flow. Native ordered rounds replace opaque bridge batches.

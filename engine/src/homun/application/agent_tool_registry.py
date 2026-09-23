@@ -19,7 +19,7 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None):
         registry.register(ToolEntry(definition, 'team', '1', Consultation,
             collaborator_executor, replay='model'))
     from homun.application.agent_mcp import entries
-    for entry in entries(run.get('_mcp_bindings', [])):
+    for entry in entries(run.get('_mcp_bindings', []), include_source=run.get('_tool_bridge_version') == 1):
         registry.register(entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
@@ -27,12 +27,23 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None):
     if run.get('_protocol') == PROTOCOL:
         registry.register(ToolEntry(QUESTION, 'human', '1',
             QuestionArguments, kind='ask', replay='never'))
+    if run.get('_tool_bridge_version') == 1 and run.get('_mcp_bindings'):
+        from homun.application.agent_tool_bridge import entries as bridge_entries
+        for bridge_entry in bridge_entries(run, registry):
+            registry.register(bridge_entry)
     if run.get('_registry_version') == 1:
         definition = ToolDefinition(name='tool_search',
             description='Find available tools in the approved catalog by name or description. Returns schemas without executing them.',
             input_schema=DiscoveryArguments.model_json_schema())
-        registry.register(ToolEntry(definition, 'discovery', '1', DiscoveryArguments,
-            lambda ctx, actor, current, args: {'tools': registry.search(args['query'], args['limit'])}))
+        version = '1'
+        excluded = ()
+        if run.get('_tool_bridge_version') == 1 and run.get('_mcp_bindings'):
+            from homun.application.agent_tool_bridge import search_description
+            definition.description = search_description(run)
+            version = '2'
+            excluded = ('tool_search', 'tool_describe', 'tool_call')
+        registry.register(ToolEntry(definition, 'discovery', version, DiscoveryArguments,
+            lambda ctx, actor, current, args: {'tools': registry.search(args['query'], args['limit'], exclude=excluded)}))
     if 'tools' in run:
         registry.validate_manifest(run['tools'])
     return registry

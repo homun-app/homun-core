@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **206**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **208**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -219,3 +219,6 @@ Documenti censiti: **206**. Punto di ingresso: [indice](README.md).
 | [docs/research/2026-09-23-agent-results-verifica.md](research/2026-09-23-agent-results-verifica.md) | Verifica risultati voluminosi con Ollama e MCP |
 
 | [docs/research/2026-09-23-tool-search-ranking.md](research/2026-09-23-tool-search-ranking.md) | Ricerca BM25 del catalogo approvato e limiti del bridge |
+
+| [docs/superpowers/plans/2026-09-23-deferred-tool-bridge.md](superpowers/plans/2026-09-23-deferred-tool-bridge.md) | Bridge differito degli strumenti MCP |
+| [docs/research/2026-09-23-agent-bridge-verifica.md](research/2026-09-23-agent-bridge-verifica.md) | Verifica ricerca descrizione e chiamata differita |

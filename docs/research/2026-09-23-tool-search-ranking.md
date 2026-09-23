@@ -21,7 +21,10 @@ parametri, assenza di corrispondenze spurie nei tipi schema, query lunghe,
 termini sconosciuti e determinismo indipendente dall'ordine di registrazione.
 Nessuna nuova prova con modello reale: è verifica dell'algoritmo e regressione.
 
-## Lavoro successivo per H07
+## Lavoro successivo per H07 (al momento di questa verifica)
+
+Aggiornamento: il [bridge MCP](2026-09-23-agent-bridge-verifica.md) è ora implementato;
+il testo seguente documenta il confine precedente.
 
 Hermes espone `tool_search`, `tool_describe` e `tool_call` al posto degli schemi
 differiti. Homun espone ancora tutti gli schemi e usa la ricerca come strumento

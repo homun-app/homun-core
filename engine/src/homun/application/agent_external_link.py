@@ -18,6 +18,9 @@ def validate_link(ctx,store,actor,proposal,*,staging=False):
     if not staging and run.get('external_request_id')!=proposal['id']:
         raise ConflictError('External action is no longer awaited')
     call=agent_native.pending(run)
+    if call is not None:
+        from homun.application.agent_tool_bridge import resolve_call
+        call=resolve_call(run,call)
     binding=next((b for b in run.get('_mcp_bindings',[]) if call and b['name']==call.name),None)
     if (call is None or call.id!=link['call_id'] or binding is None
             or binding['server_id']!=proposal['server_id'] or binding['tool']!=proposal['tool']

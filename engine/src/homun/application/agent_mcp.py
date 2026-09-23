@@ -52,7 +52,7 @@ def validate_bindings(store,bindings):
             raise ConflictError('Selected external server changed')
 
 
-def entries(bindings):
+def entries(bindings, *, include_source=False):
     for binding in bindings:
         descriptor=deepcopy(binding['descriptor'])
         def make_arguments(pinned):
@@ -63,5 +63,5 @@ def entries(bindings):
                     return self
             return Arguments
         yield ToolEntry(ToolDefinition(name=binding['name'],
-            description=f"{descriptor.get('description') or binding['tool']} Human approval is required before this external action.",
-            input_schema=descriptor['inputSchema']), 'mcp', '1', make_arguments(descriptor), replay='never')
+            description=(f"{binding['server_name']}: " if include_source else "") + f"{descriptor.get('description') or binding['tool']} Human approval is required before this external action.",
+            input_schema=descriptor['inputSchema']), 'mcp', '2' if include_source else '1', make_arguments(descriptor), replay='never')

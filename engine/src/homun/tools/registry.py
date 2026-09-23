@@ -101,7 +101,7 @@ class ToolRegistry:
             raise DomainValidationError(f'Tool has no dispatch handler: {name}')
         return entry.handler(ctx, actor, run, validated)
 
-    def search(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+    def search(self, query: str, limit: int = 5, *, exclude: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         """Search only this run's metadata; never probe or execute a tool."""
         if not isinstance(query, str) or not isinstance(limit, int) or isinstance(limit, bool):
             raise DomainValidationError('Search requires a text query and integer limit')
@@ -110,6 +110,8 @@ class ToolRegistry:
         from homun.tools.search import ranked
         entries = []
         for name in sorted(self._entries):
+            if name in exclude:
+                continue
             entry = self._entries[name]
             entries.append({**json.loads(entry.definition_json), **json.loads(entry.metadata_json)})
         return ranked(entries, query, min(limit, 100))

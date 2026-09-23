@@ -10,6 +10,7 @@ from homun.application.agent_run_execution import advance
 from homun.application.agent_external import resume_external
 
 large='--large' in sys.argv[2:]
+bridge='--bridge' in sys.argv[2:]
 root=Path(tempfile.mkdtemp(prefix='homun-agent-mcp-'))
 counter=root/'calls.txt';script=root/'mcp.py'
 server_source='''import json,sys
@@ -39,7 +40,7 @@ ctx.models.upsert_connection(connection_id='openai_compatible',kind='openai_comp
 ctx.models.set_active('openai_compatible')
 actor=Actor(id='person_a',workspace_id=ctx.workspace_id,display_name='Fixture reviewer')
 c=ctx.service.apply(actor,'c','conversation.create',{'title':'Ordine'})
-work=ctx.service.apply(actor,'w','work.create',{'conversation_id':c['conversation_id'],'title':'Ordine OR-93','objective':'Consulta il server ordini per OR-93 e prepara una nota italiana con codice, responsabile e data di consegna. Usa il risultato reale dello strumento; non chiedere informazioni gia recuperabili. Se il risultato e salvato e incompleto, usa read_tool_result e cerca la stringa owner per recuperare i dati centrali.'})['work_id']
+work=ctx.service.apply(actor,'w','work.create',{'conversation_id':c['conversation_id'],'title':'Ordine OR-93','objective':'Consulta il server ordini per OR-93 e prepara una nota italiana con codice, responsabile e data di consegna. Usa il risultato reale dello strumento; non chiedere informazioni gia recuperabili. Se il risultato e salvato e incompleto, usa read_tool_result e cerca la stringa owner per recuperare i dati centrali.' + (' Per questa verifica cerca lo strumento con tool_search, consulta il suo schema con tool_describe e poi usa tool_call.' if bridge else '')})['work_id']
 ctx.persist()
 with ctx.repository.transaction() as store:
     store.external_servers['orders']=ExternalServer(id='orders',workspace_id=ctx.workspace_id,name='Ordini',command=sys.executable,args=[str(script),str(counter)])
@@ -73,3 +74,7 @@ ctx.close()
 
 if large:
     assert any(o['tool']=='read_tool_result' for o in evidence['run']['observations'])
+
+if bridge:
+    observed=[o['tool'] for o in evidence['run']['observations']]
+    assert all(name in observed for name in ['tool_search','tool_describe','tool_call']), observed
