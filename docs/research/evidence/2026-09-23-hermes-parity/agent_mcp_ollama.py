@@ -9,9 +9,10 @@ from homun.application import agent_runs, external_tools
 from homun.application.agent_run_execution import advance
 from homun.application.agent_external import resume_external
 
+large='--large' in sys.argv[2:]
 root=Path(tempfile.mkdtemp(prefix='homun-agent-mcp-'))
 counter=root/'calls.txt';script=root/'mcp.py'
-script.write_text('''import json,sys
+server_source='''import json,sys
 from pathlib import Path
 counter=Path(sys.argv[1])
 for line in sys.stdin:
@@ -29,13 +30,16 @@ for line in sys.stdin:
         result={'content':[{'type':'text','text':json.dumps({'code':code,'owner':'Marta','delivery':'8 ottobre 2026'})}],'isError':False}
     else:continue
     print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}),flush=True)
-''')
+'''
+if large:
+    server_source=server_source.replace("json.dumps({'code':code,'owner':'Marta','delivery':'8 ottobre 2026'})", "'x'*20000 + json.dumps({'code':code,'owner':'Marta','delivery':'8 ottobre 2026'}) + 'z'*20000")
+script.write_text(server_source)
 ctx=create_context(db_path=root/'ws.db',data_dir=root,for_tests=True)
 ctx.models.upsert_connection(connection_id='openai_compatible',kind='openai_compatible',display_name='Ollama',model_id='qwen3.5:4b',base_url='http://127.0.0.1:11434/v1',context_window=32768,max_output_tokens=1536)
 ctx.models.set_active('openai_compatible')
 actor=Actor(id='person_a',workspace_id=ctx.workspace_id,display_name='Fixture reviewer')
 c=ctx.service.apply(actor,'c','conversation.create',{'title':'Ordine'})
-work=ctx.service.apply(actor,'w','work.create',{'conversation_id':c['conversation_id'],'title':'Ordine OR-93','objective':'Consulta il server ordini per OR-93 e prepara una nota italiana con codice, responsabile e data di consegna. Usa il risultato reale dello strumento; non chiedere informazioni gia recuperabili.'})['work_id']
+work=ctx.service.apply(actor,'w','work.create',{'conversation_id':c['conversation_id'],'title':'Ordine OR-93','objective':'Consulta il server ordini per OR-93 e prepara una nota italiana con codice, responsabile e data di consegna. Usa il risultato reale dello strumento; non chiedere informazioni gia recuperabili. Se il risultato e salvato e incompleto, usa read_tool_result e cerca la stringa owner per recuperare i dati centrali.'})['work_id']
 ctx.persist()
 with ctx.repository.transaction() as store:
     store.external_servers['orders']=ExternalServer(id='orders',workspace_id=ctx.workspace_id,name='Ordini',command=sys.executable,args=[str(script),str(counter)])
@@ -66,3 +70,6 @@ assert status=='completed' and evidence['external_calls']==1 and restarted
 assert len(evidence['artifacts'])==1
 assert all(v in evidence['artifacts'][0]['content'] for v in ['OR-93','Marta','8 ottobre 2026'])
 ctx.close()
+
+if large:
+    assert any(o['tool']=='read_tool_result' for o in evidence['run']['observations'])

@@ -21,6 +21,9 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None):
     from homun.application.agent_mcp import entries
     for entry in entries(run.get('_mcp_bindings', [])):
         registry.register(entry)
+    if run.get('_result_storage_version') == 1:
+        from homun.application.agent_results import entry
+        registry.register(entry())
     if run.get('_protocol') == PROTOCOL:
         registry.register(ToolEntry(QUESTION, 'human', '1',
             QuestionArguments, kind='ask', replay='never'))

@@ -63,3 +63,8 @@ application/agent_mcp.py adapts namespacing and bounded hash-suffixed wire names
 from tools/mcp_tool_schema.py at the pinned commit. Homun hashes original server
 identity and tool name to prevent sanitized-name collisions. Native integration
 uses Homun approvals and durable receipts, without an upstream runtime.
+
+application/agent_results.py adapts complete-result storage and 40/60 head/tail
+previews from tools/tool_result_storage.py and tools/tool_output_truncate.py at
+the pinned commit. Homun uses private per-run SQLite JSON, SHA-256 references,
+scoped paged retrieval and retained error flags instead of host spill paths.

@@ -166,7 +166,7 @@ def advance(ctx, run_id, *, epoch=None):
                     consume_steering(current)
                 elif decision.kind == 'tool':
                     if agent_native.enabled(current):
-                        agent_native.append_result(current, observation)
+                        observation = agent_native.append_result(current, observation)
                     current['observations'].append({'tool': decision.tool, 'arguments': decision.arguments,
                                                     'message': decision.message, 'result': observation})
                 elif decision.kind == 'ask':

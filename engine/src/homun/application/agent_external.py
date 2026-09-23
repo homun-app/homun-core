@@ -55,7 +55,7 @@ def _resume_in_store(ctx,store,run_id):
     if call is None or call.id!=link['call_id'] or run['_epoch']!=link['epoch']:
         raise ConflictError('External receipt belongs to a superseded call')
     result=proposal.get('_receipt') or {'error_code':'external_preflight_blocked','message':proposal.get('error','External action blocked')}
-    agent_native.append_result(run,result)
+    result=agent_native.append_result(run,result)
     run['observations'].append({'tool':call.name,'arguments':call.arguments,'message':f'External result: {proposal["server_name"]} · {proposal["tool"]}','result':result})
     run['turns']+=1
     run.pop('_decision',None)

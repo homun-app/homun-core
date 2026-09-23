@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **203**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **205**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -214,3 +214,6 @@ Documenti censiti: **203**. Punto di ingresso: [indice](README.md).
 | [docs/superpowers/plans/2026-09-23-mcp-contracts.md](superpowers/plans/2026-09-23-mcp-contracts.md) | Piano binding dei descrittori MCP |
 | [docs/research/2026-09-23-agent-mcp-verifica.md](research/2026-09-23-agent-mcp-verifica.md) | Ciclo agente con MCP, consenso e ripresa reale |
 | [docs/superpowers/plans/2026-09-23-agent-mcp-bridge.md](superpowers/plans/2026-09-23-agent-mcp-bridge.md) | Piano collegamento MCP al ciclo nativo |
+
+| [docs/superpowers/plans/2026-09-23-agent-result-storage.md](superpowers/plans/2026-09-23-agent-result-storage.md) | Risultati voluminosi durevoli e consultazione a pagine |
+| [docs/research/2026-09-23-agent-results-verifica.md](research/2026-09-23-agent-results-verifica.md) | Verifica risultati voluminosi con Ollama e MCP |

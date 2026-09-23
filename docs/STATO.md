@@ -83,9 +83,11 @@ Una verifica del sorgente non aggiorna l'app installata.
 
 ## Evidenze della tranche corrente
 
-Ciclo MCP nativo: **800 test engine passati, 1 saltato**, più 9 controlli finali;
-220 test web, typecheck/build e OpenAPI allineati, architettura 0 errori. Ollama
-+ stdio reali: azione approvata, ripresa da SQLite e una sola consegna corretta.
+Risultati voluminosi: **805 test engine passati, 1 saltato**, più 7 controlli
+finali; test web, typecheck/build e OpenAPI allineati, architettura 0 errori.
+Ollama + stdio reali: risultato integrale salvato, ripresa da SQLite, ricerca
+del dato centrale e una sola chiamata esterna.
+[Prove e limiti](research/2026-09-23-agent-results-verifica.md).
 
 Contratti MCP: **791 test engine passati, 1 saltato**, 216 test web; typecheck,
 build e OpenAPI allineati, architettura 0 errori. Fixture stdio: contratto valido

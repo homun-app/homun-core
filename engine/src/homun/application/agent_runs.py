@@ -168,6 +168,7 @@ def propose(ctx, actor, work_id, body):
             connection = ctx.models.get_connection(connection_id)
             run['_protocol'] = agent_native.PROTOCOL if connection.kind == 'openai_compatible' else 'json-decision-v1'
             if agent_native.enabled(run):
+                run['_result_storage_version'] = 1
                 run['tool_version'] = 'adaptive-materials-native-v2'
                 run['_context_policy'] = {'context_window': connection.context_window,
                                           'max_output_tokens': connection.max_output_tokens}
@@ -240,9 +241,10 @@ def resume_waiting(ctx, run_id):
             service = ctx.service.for_store(store)
             service.apply(actor, f'{run_id}:resume:{run["_epoch"]}', 'work.start',
                           {'work_id': work.id, 'expected_version': work.version, 'durable': False})
+            result = {'question': request.need, 'text': request.response_text}
             if agent_native.enabled(run):
-                agent_native.append_result(run, {'question': request.need, 'text': request.response_text})
-            run['observations'].append({'tool': 'human_input', 'result': {'question': request.need, 'text': request.response_text}})
+                result = agent_native.append_result(run, result)
+            run['observations'].append({'tool': 'human_input', 'result': result})
             run['_epoch'] += 1
             run.update(status='queued', _run_version=work.version,
                        _workflow_id=f'agent:{actor.workspace_id}:{run_id}:{run["_epoch"]}')

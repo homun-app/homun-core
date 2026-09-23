@@ -51,5 +51,8 @@ def append_result(run, result):
     call = pending(run)
     if call is None:
         raise ValueError('No pending tool call for result')
+    from homun.application.agent_results import project
+    result = project(run, call.name, call.id, result)
     run['_messages'].append(NativeMessage(role='tool', name=call.name, tool_call_id=call.id,
         content=json.dumps(result, ensure_ascii=False)).model_dump())
+    return result
