@@ -1,4 +1,5 @@
 """Encryption at rest: SQLCipher workspace, key management, migration safety."""
+import importlib.util
 import sqlite3
 import pytest
 from pathlib import Path
@@ -6,6 +7,10 @@ from pathlib import Path
 from homun.domain.models import Work
 from homun.storage.encryption import load_or_create_key, derive_database_key
 from homun.storage.sqlite import SqliteWorkspaceRepository
+
+requires_sqlcipher = pytest.mark.skipif(
+    importlib.util.find_spec('sqlcipher3') is None,
+    reason='optional homun-engine[encryption] extra not installed')
 
 
 def test_encrypted_database_unreadable_without_key(tmp_path):
@@ -60,6 +65,7 @@ def test_derived_keys_differ_by_purpose():
     assert len(db_key) == 32 and len(blob_key) == 32
 
 
+@requires_sqlcipher
 def test_workspace_with_encryption_end_to_end(tmp_path):
     from homun.context import create_context
     from homun.domain.models import Actor
@@ -80,6 +86,7 @@ def test_workspace_with_encryption_end_to_end(tmp_path):
     ctx2.close()
 
 
+@requires_sqlcipher
 def test_context_database_is_encrypted_and_key_is_required(tmp_path):
     from homun.context import create_context
     path = tmp_path / 'workspace.db'
@@ -94,6 +101,7 @@ def test_context_database_is_encrypted_and_key_is_required(tmp_path):
             create_context(db_path=path, for_tests=True, encryption_key=key)
 
 
+@requires_sqlcipher
 def test_opt_in_does_not_migrate_plaintext_database(tmp_path):
     from homun.context import create_context
     from homun.storage.encryption import EncryptionError
