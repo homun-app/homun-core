@@ -1,12 +1,15 @@
 # Motore Python
 
-Stato e verifiche complessive: [stato corrente](../docs/STATO.md). Il motore include ora intake supervisionato e confronto CSV reale; i rapporti delle singole tranche restano prove datate.
+Stato e verifiche complessive: [stato corrente](../docs/STATO.md). Il motore include intake supervisionato, piani per fasi, confronto CSV, lettura, sintesi, procedure approvate, budget/allocazioni, MCP e routine. Il [consolidamento del 23/9](../docs/research/2026-09-23-consolidamento-verifica.md) corregge recupero catene, fonti e consumi della sintesi, riconciliazione cron; i rapporti precedenti restano prove datate.
 
 **Runtime adottato (D-RUN-01):** Pydantic AI + DBOS.
 **Dominio F1+F2:** comandi versionati persistiti su **SQLite (WAL)**; HTTP locale.
 
-La cifratura a riposo **non** è ancora attiva (D-CRYPTO-01). Non trattare il file
-SQLite come archivio sicuro per dati sensibili di produzione.
+Il default è SQLite non cifrato. Esiste opt-in SQLCipher tramite chiave esplicita
+(`HOMUN_WORKSPACE_KEY_FILE` o parametro del contesto) e driver opzionale; un
+archivio plaintext esistente richiede una migrazione esplicita. Questo non cifra
+originali, DBOS, backup e segreti dell’intero profilo e non chiude D-CRYPTO-01.
+La presenza di helper Keychain non dimostra il loro uso automatico allo startup.
 
 ## Sessione locale e recovery
 
@@ -105,8 +108,8 @@ npm run engine:dev
 - Memories (F3.5a): `GET/POST /v1/workspaces/ws_local/memories` (ledger SQLite). Optional Mem0 dual-write with `HOMUN_MEMORY_BACKEND=mem0` after `uv pip install -e ".[memory]"` (Ollama + Qdrant local — see Memoria section below). Status: `GET /v1/memory/status`.
 - Streaming (F3.5): `POST /v1/workspaces/ws_local/commands/stream` (SSE phase/token/result)
 - Override: `HOMUN_DATA_DIR=/path npm run engine:dev`
-- Secrets modelli: `<data-dir>/secrets/` file plaintext mode 0600 — **non** D-CRYPTO-01
-- **Default provider:** Ollama (`http://127.0.0.1:11434/v1`, modello `llama3.2`). Fake solo nei test (`for_tests`).
+- Secrets modelli: `<data-dir>/secrets.json` file plaintext mode 0600 — **non** D-CRYPTO-01
+- **Default provider:** Ollama (`http://127.0.0.1:11434/v1`, modello `qwen3.5:4b`). Fake nei test (`for_tests`) o in profili offline esplicitamente configurati; non fallback silenzioso in caso di errore.
 
 ## Memoria (F3.5a) — MemoryPort + Mem0 locale opzionale
 
@@ -160,7 +163,8 @@ claiming they were read. OCR is out of scope.
 curl -sS http://127.0.0.1:8765/v1/workspaces/ws_local/projects \
   -H 'X-Homun-Actor-Id: person_fabio'
 
-curl -sS http://127.0.0.1:8765/v1/workspaces/ws_local/teams
+curl -sS http://127.0.0.1:8765/v1/workspaces/ws_local/teams \
+  -H 'X-Homun-Actor-Id: person_fabio'
 
 # Create team
 curl -sS -X POST http://127.0.0.1:8765/v1/workspaces/ws_local/commands \

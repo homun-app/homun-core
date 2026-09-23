@@ -16,7 +16,7 @@ React per l'interfaccia, Electron per gli installabili, Python per il motore tra
 
 ## Limiti attuali
 
-Esistono un candidato .app/ZIP autonomo e workflow CI/build nel repository; questo non attesta un rilascio remoto. Firma Developer ID, notarizzazione, installazione su Mac pulito, aggiornamento e migrazione dal vecchio prodotto restano aperti. Il primo confronto CSV reale e la GUI sono provati: vedi [stato corrente](../STATO.md). Il repository `../app` non viene modificato. Il lock npm è la fonte per nuove installazioni; il vecchio lock Bun è conservato nel riferimento storico. Gli avvisi sulle dimensioni dei bundle vanno affrontati prima della distribuzione desktop.
+Sono presenti bundle autonomo, pipeline di firma/notarizzazione e updater. La loro presenza non attesta lo stato di una release remota; installazione su Mac pulito, upgrade e migrazione richiedono prove riferite alla specifica build. Il primo confronto CSV reale e la GUI sono provati: vedi [stato corrente](../STATO.md). Il repository `../app` non viene modificato. Il lock npm è la fonte per nuove installazioni; il vecchio lock Bun è conservato nel riferimento storico. Gli avvisi sulle dimensioni dei bundle vanno affrontati prima della distribuzione desktop.
 
 ## Verifica storica del bootstrap — 17 settembre 2026
 

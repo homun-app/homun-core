@@ -60,3 +60,5 @@ Il dialogo di disponibilità ha un solo proprietario: l'evento `update-available
 errore e download già in corso, usando il modulo reale con Electron simulato.
 La CI esegue anche questi test. Non vengono scaricate o installate release;
 upgrade firmato completo, rollback e Mac pulito restano verifiche distinte.
+
+Per provare il prodotto usare la [guida d’uso](../../docs/USO-HOMUN.md); per la prosecuzione del codice il [passaggio corrente](../../docs/handoff/2026-09-23-consolidamento-e-ux.md).

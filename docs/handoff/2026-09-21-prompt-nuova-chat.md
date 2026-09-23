@@ -1,5 +1,7 @@
 # Prompt di ripresa sviluppo Homun — 21 settembre 2026
 
+> Passaggio storico: per riprendere ora usare il [passaggio del 23 settembre](2026-09-23-consolidamento-e-ux.md). Le priorità e i branch riportati sotto appartengono alla fotografia originale.
+
 > Testo pensato per incollarlo come primo messaggio in una nuova chat con accesso al repository.
 
 ---

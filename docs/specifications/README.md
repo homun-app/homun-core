@@ -1,5 +1,7 @@
 # Homun — specifica di prodotto e motore v1
 
+> Aggiornamento di lettura, 23/9: questo pacchetto conserva i requisiti v1. La [matrice corrente](STATO-IMPLEMENTAZIONE.md) distingue realizzato, parziale e aperto senza trasformare proposte in decisioni. Per l'uso vedere la [guida](../USO-HOMUN.md).
+
 **Revisione:** 0.1 · 17 settembre 2026 · **Stato:** da analizzare con Fabio, non approvazione a implementare tutto.
 
 Questo pacchetto consolida la conversazione e la struttura del prototipo. In caso di differenza, queste specifiche aggiornano le proposte dei precedenti documenti del 17 settembre; nessuna scelta ancora aperta viene trasformata in una decisione dell'utente.

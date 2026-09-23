@@ -28,18 +28,33 @@ Usare npm e Node 24 o successivo. Installare con `npm ci`. `.npmrc` conserva la 
 - `npm run engine:test`: suite del motore, incluse persistenza, API, outbox e riavvio del runtime.
 - `npm run architecture:check`: confini dei moduli, cicli e limiti di crescita dei file.
 
-La barra in cima all’app web mostra se il motore è connesso. La simulazione è una fonte esplicita; selezionare «Fonte: motore» con processo spento o senza capability `domain` mostra un errore esplicito, senza ricaduta silenziosa sulla demo.
+Il percorso di produzione usa il motore. La diagnostica e gli errori rendono visibile la connessione; il selettore della simulazione è uno strumento di sviluppo, non il percorso di primo avvio. Un motore indisponibile non viene sostituito da dati demo.
 
 La separazione dei sorgenti permette di evolvere la nuova app conservando il riferimento UX. Le due versioni condividono per ora dipendenze e risorse pubbliche. I vecchi collegamenti ai sorgenti `src/` nella documentazione storica corrispondono ora a `prototypes/reference/src/`; il codice destinato alla nuova app è in `apps/web/src/`.
 
-## Stato reale
+## Stato reale — 23 settembre 2026
 
-La UI distingue esplicitamente simulazione e motore. Il motore dispone di dominio persistito, profili agenti, progetti, materiali, memoria approvata, interpretazione dei messaggi e runtime DBOS con outbox. La tranche del 19 settembre consolida comandi, transazioni e recovery: non costituisce ancora un prodotto pronto alla distribuzione.
+Il consolidamento `8b7658b2` è integrato su `main`. Homun dispone di chat con
+accordo supervisionato, collaboratori e team, piani per fasi, materiali,
+confronto CSV, lettura, sintesi, procedure approvate, budget e scadenze,
+risultati revisionabili e routine. Materiali, Plugin e Compiti laterali usano
+le operazioni persistenti del motore.
 
-Sono disponibili ingestione durevole, backup completo offline v2, recupero dei follow-up, contesto autorizzato e app Electron con motore incorporato. Il nuovo flusso propone titolo, obiettivo e collaboratore prima della conferma. Il confronto reale di due listini CSV è stato eseguito nella GUI fino al report e recuperato dopo riavvio senza duplicati. Questo non certifica un agente generalista completo.
+Partire dalla [guida d'uso](docs/USO-HOMUN.md), dallo
+[stato verificato](docs/STATO.md) e dal [passaggio corrente](docs/handoff/2026-09-23-consolidamento-e-ux.md).
+Il [confronto d'uso con Hermes](docs/research/2026-09-23-hermes-homun-utilizzo.md)
+prepara la discussione UX. L'[indice](docs/README.md) e il
+[registro documentale](docs/REGISTRO-DOCUMENTI.md) distinguono istruzioni correnti,
+requisiti e fotografie storiche.
 
-Restano aperti qualità delle riformulazioni, registro generale degli strumenti, budget aggregati, parità delle superfici UI, identità multiutente/peer, cifratura/Keychain e distribuzione firmata con prova su Mac pulito. Le dipendenze storiche Supabase/TanStack restano per il riferimento e non costituiscono una scelta per il nuovo backend.
+Restano aperti recupero degli effetti MCP esterni, identità fra installazioni,
+cifratura completa e recupero chiavi, qualità dei modelli sui casi del pilot,
+semplificazione dei percorsi e certificazione di upgrade/Mac pulito. Il lint
+conserva debito precedente; controlli e limiti sono nel rapporto di consolidamento.
 
-Partire dallo [stato verificato corrente](docs/STATO.md), dalla [specifica di passaggio](docs/handoff/2026-09-19-ripresa-sviluppo-homun.md) e dalle [ultime prove native](docs/research/2026-09-19-conversational-intake-ux-verification.md). L’[indice documentale](docs/README.md) distingue requisiti e rapporti storici.
-
-La versione esistente in `../app` resta indipendente. La sostituzione avverrà secondo `docs/development/transizione-homun.md`. Nessuna pubblicazione automatica è configurata. Rispettare le istruzioni Lovable di `AGENTS.md` senza riscrivere storia pubblicata.
+Il vecchio prodotto in `../app` resta indipendente; la migrazione segue
+[criteri dedicati](docs/development/transizione-homun.md). La pipeline di
+[release](docs/release.md) reagisce ai tag e pubblica draft: un commit locale
+non distribuisce una release. Il branch collegato a Lovable mantiene la sua
+storia; rispettare `AGENTS.md`. Le dipendenze del riferimento storico non
+costituiscono una scelta di backend per Homun 2.

@@ -96,3 +96,12 @@ richiesta con materiali, piano con collaboratori, revisione del risultato e
 ricorrenza. Per ciascuno: obiettivo, informazioni iniziali, decisioni umane,
 feedback, recupero dagli errori e risultato verificabile. Priorità alla coerenza
 fra chat, Compiti, Materiali e Documenti e alla comprensione di cosa fare dopo.
+
+## Integrazione successiva su main
+
+Commit `8b7658b2`, merge fast-forward su `main` il 23/9. Riverifica dalla directory
+principale: typecheck, 201 test frontend, build web/prototipo, 11 test desktop,
+533 test motore + 1 inventario passati (1 saltato), OpenAPI allineata,
+architettura 0 errori/35 avvisi. Nessun push, tag o aggiornamento dell'app.
+Il worktree sopra identifica la sede originale della tranche, non il punto
+da cui continuare: usare il [passaggio corrente](../handoff/2026-09-23-consolidamento-e-ux.md).

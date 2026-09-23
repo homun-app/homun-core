@@ -1,5 +1,7 @@
 # 05 — Accettazione, decisioni e realizzazione
 
+> Stato di implementazione al 23/9 nella [matrice corrente](STATO-IMPLEMENTAZIONE.md). Le prescrizioni e le prove datate sotto restano requisiti o fotografie della loro tranche, non certificazione del prodotto corrente.
+
 Stato: v0.1 da analizzare. [Indice](README.md).
 
 ## QA-01 — Matrice dei requisiti

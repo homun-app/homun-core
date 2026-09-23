@@ -1,7 +1,7 @@
 # Stato verificato di Homun 2
 
 Aggiornato il 23 settembre 2026, dopo il consolidamento del sorgente `0.2.1001`
-a partire da `e5155baf`. Questo documento descrive lo stato corrente; lo
+a partire da `e5155baf`, integrato su `main` nel commit `8b7658b2`. Questo documento descrive lo stato corrente; lo
 [stato precedente](STATO-2026-09-22.md) e i rapporti in `research/` conservano
 le prove storiche. Una verifica del sorgente non aggiorna l'app installata.
 
@@ -66,3 +66,10 @@ passaggi richiesti, decisioni da confermare, risultato atteso e recupero dagli
 errori. Confrontare chat, Compiti, Materiali e Documenti sulla stessa attività;
 poi proporre interventi piccoli e verificabili. L'obiettivo è capire come si
 porta a termine un lavoro, prima di ridisegnare le schermate.
+
+La [guida d'uso](USO-HOMUN.md), la [matrice requisiti](specifications/STATO-IMPLEMENTAZIONE.md)
+e il [confronto con Hermes](research/2026-09-23-hermes-homun-utilizzo.md) preparano
+la discussione UX. L'integrazione su main è stata riverificata: 201 test frontend,
+11 desktop e 534 motore + inventario complessivi (1 saltato), build/typecheck,
+OpenAPI e architettura allineati. I risultati originari della tranche restano
+nel rapporto, distinti dalla verifica di merge.

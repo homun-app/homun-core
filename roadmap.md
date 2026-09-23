@@ -54,7 +54,8 @@ capacità attuali, prove e limiti. I percorsi simulati restano espliciti.
 - [x] Routine cron supervisionate con pausa/riprendi/salta/termina e riconciliazione cadenza/fuso
 - [x] Materiali, Plugin e scadenze di Compiti collegati allo stato persistente del motore
 - [ ] Contratto di recupero degli effetti MCP esterni
-- [ ] Analisi UX e di utilizzo su scenari completi, prima di ulteriori ridisegni
+- [x] Guida d'uso e confronto documentato Hermes/Homun, con capacità e testimonianze distinte
+- [ ] Walkthrough UX con Fabio e prove sui tre casi prioritari; definire la prima semplificazione
 
 ## Consolidamento delle fondamenta — aggiornato al 19 settembre 2026
 
@@ -71,3 +72,5 @@ capacità attuali, prove e limiti. I percorsi simulati restano espliciti.
 
 Dettagli e limiti: [stato corrente](docs/STATO.md). La [prima consegna delle fondamenta](docs/research/2026-09-19-production-foundations-delivery.md) conserva le prove storiche di quella tranche.
 Le spunte attestano il perimetro provato; non certificano la release desktop o un agente autonomo completo.
+
+Base della discussione: [confronto d’uso](docs/research/2026-09-23-hermes-homun-utilizzo.md) e [guida Homun](docs/USO-HOMUN.md).

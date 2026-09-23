@@ -1,4 +1,6 @@
 # Motore Homun: affidabilità, formazione e verifica
+
+> Riferimento di visione. Al 23/9 lo stato reale è in [STATO](STATO.md), i percorsi attuali nella [guida d’uso](USO-HOMUN.md). Autonomia estesa e collaborazione remota qui descritte non sono dichiarazioni di funzionalità già consegnate.
 Data: 16 settembre 2026.
 Stato: indirizzi di prodotto raccolti con Fabio; requisiti e proposte per il futuro motore.
 Non descrive capacità già implementate e non sceglie runtime, modelli o framework.

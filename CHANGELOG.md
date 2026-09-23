@@ -9,6 +9,17 @@ each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 
 ## [Unreleased]
 
+## Fixes
+- **Materials and Plugins use the engine from the sidebar.** Files, previews, archival and capability settings share the persisted engine state; denied access clears stale previews.
+- **Task deadlines persist from the Tasks view**, with saving feedback and typed errors.
+- **Tool chains resume after artifact publication without duplicating results**, preserving DBOS journal step order.
+- **Synthesis respects the assigned collaborator's budget and approved sources**, preserving known token counts in partial usage reports and blocking further calls at exhausted limits.
+- **Routine recovery reconciles cron and timezone drift** while preserving pause state.
+- **Manual update checks offer the available version only once.**
+
+## Improvements
+- **Current usage and developer documentation**, with verified limits and a dated Hermes usage comparison.
+
 ## [0.2.1001] — 2026-09-23
 
 Updating becomes a visible, guided flow: you watch the download and choose when to restart.

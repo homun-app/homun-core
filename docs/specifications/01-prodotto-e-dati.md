@@ -1,5 +1,7 @@
 # 01 — Prodotto, flussi e dati
 
+> Stato di implementazione al 23/9 nella [matrice corrente](STATO-IMPLEMENTAZIONE.md). Le prescrizioni e le prove datate sotto restano requisiti o fotografie della loro tranche, non certificazione del prodotto corrente.
+
 Stato: specifica v0.1 da analizzare. [Indice e legenda](README.md).
 
 ## PR-01 — Esperienza principale

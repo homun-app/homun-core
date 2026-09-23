@@ -1,5 +1,7 @@
 # 02 — Agenti, esecuzioni e memoria
 
+> Stato di implementazione al 23/9 nella [matrice corrente](STATO-IMPLEMENTAZIONE.md). Le prescrizioni e le prove datate sotto restano requisiti o fotografie della loro tranche, non certificazione del prodotto corrente.
+
 Stato: v0.1. Runtime agenti/esecuzioni: **Pydantic AI + DBOS adottati** (D-RUN-01). Dettagli e fonti nella [scelta framework](../architecture/2026-09-17-scelta-framework.md) e nell'[ADR F0.2](../architecture/decisions/2026-09-17-f0-2-runtime-spike.md).
 
 ## AG-01 — Profilo del collaboratore
