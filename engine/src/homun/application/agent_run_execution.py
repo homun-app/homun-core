@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 from homun.application import budgets, agent_native
 from homun.application.agent_runs import authority, lookup
+from homun.application.agent_control_history import consume_steering
 from homun.application.agent_tools import catalog, run_tool
 from homun.application.agent_team import tool_definition
 from homun.application.agent_consultation import consult
@@ -18,10 +19,12 @@ from homun.models.agent_turn import AgentDecision, decide
 LEASE_SECONDS = 180
 
 
-def fail(ctx, run_id, code, *, token=None, blocked=False):
+def fail(ctx, run_id, code, *, token=None, blocked=False, epoch=None):
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             run = lookup(store, run_id)
+            if epoch is not None and run['_epoch'] != epoch:
+                return 'superseded'
             if run['status'] not in {'queued', 'running', 'waiting_input'}:
                 return run['status']
             if token is not None and run.get('_lease_token') != token:
@@ -42,10 +45,12 @@ def fail(ctx, run_id, code, *, token=None, blocked=False):
     return run['status']
 
 
-def _claim(ctx, run_id):
+def _claim(ctx, run_id, epoch=None):
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             run = lookup(store, run_id)
+            if epoch is not None and run['_epoch'] != epoch:
+                return 'superseded'
             if run['status'] not in {'queued', 'running'}:
                 return run['status'], None
             until = run.get('_lease_until')
@@ -57,6 +62,8 @@ def _claim(ctx, run_id):
                 raise ValidationError('Adaptive run reached its turn limit')
             if len(json.dumps(run['observations'])) > run['limits']['max_observation_characters']:
                 raise ValidationError('Adaptive run reached its observation limit')
+            if agent_native.enabled(run):
+                consume_steering(run)
             token = uuid4().hex
             run.update(status='running', _lease_token=token,
                        _lease_until=(utc_now() + timedelta(seconds=LEASE_SECONDS)).isoformat())
@@ -111,11 +118,24 @@ def _decision(ctx, run):
     return decision
 
 
-def advance(ctx, run_id):
+def _dispatch_allowed(ctx, actor, run):
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            current=lookup(store,run['id'])
+            if current.get('_lease_token') != run['_lease_token']:
+                return False
+            authority(ctx,store,actor,current,running=True)
+            if agent_native.enabled(current):
+                current['_active_call_id']=agent_native.pending(current).id
+        ctx.service.store=store
+    return True
+
+
+def advance(ctx, run_id, *, epoch=None):
     """Execute at most one decision. Reads may replay; publication is transactional."""
     token = None
     try:
-        status, run = _claim(ctx, run_id)
+        status, run = _claim(ctx, run_id, epoch)
         if run is None:
             return status
         token = run['_lease_token']
@@ -123,6 +143,8 @@ def advance(ctx, run_id):
         decision = _decision(ctx, run)
         observation = None
         if decision.kind == 'tool':
+            if not _dispatch_allowed(ctx, actor, run):
+                return 'superseded'
             try:
                 observation = (consult(ctx, actor, run, decision.arguments) if decision.tool == 'consult_collaborator'
                                else run_tool(ctx, actor, run['materials'], decision.tool, decision.arguments))
@@ -136,8 +158,13 @@ def advance(ctx, run_id):
                 if current.get('_lease_token') != token:
                     return current['status']
                 service = ctx.service.for_store(store)
-                current['turns'] += 1
-                if decision.kind == 'tool':
+                # A correction arriving during generation must precede publication.
+                deferred = decision.kind == 'finish' and current.get('_steering') and agent_native.enabled(current)
+                if not deferred:
+                    current['turns'] += 1
+                if deferred:
+                    consume_steering(current)
+                elif decision.kind == 'tool':
                     if agent_native.enabled(current):
                         agent_native.append_result(current, observation)
                     current['observations'].append({'tool': decision.tool, 'arguments': decision.arguments,
@@ -164,6 +191,7 @@ def advance(ctx, run_id):
                         conversation_id=work.primary_conversation_id, author_id='homun_engine',
                         text=f'{current["executor_name"]} ha preparato il risultato. Puoi verificarlo e chiedere modifiche.',
                         event_payload={'work_id': work.id, 'agent_run_id': run_id, 'artifact_id': result['artifact_id']})
+                current.pop('_active_call_id', None)
                 current.pop('_decision', None)
                 current.pop('_lease_token', None)
                 current.pop('_lease_until', None)
@@ -172,8 +200,8 @@ def advance(ctx, run_id):
         return status
     except DomainError as exc:
         return fail(ctx, run_id, exc.code, token=token,
-                    blocked=exc.code in {'permission_denied', 'version_conflict', 'not_found'})
+                    blocked=exc.code in {'permission_denied', 'version_conflict', 'not_found'}, epoch=epoch)
     except (ValueError, TypeError):
-        return fail(ctx, run_id, 'agent_run_invalid_decision', token=token)
+        return fail(ctx, run_id, 'agent_run_invalid_decision', token=token, epoch=epoch)
     except RuntimeError:
-        return fail(ctx, run_id, 'agent_run_model_error', token=token)
+        return fail(ctx, run_id, 'agent_run_model_error', token=token, epoch=epoch)

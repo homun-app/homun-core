@@ -19,13 +19,20 @@ from homun.policy.intake import latest_intake
 from homun.policy.work import require_work_access
 
 PROPOSAL_TYPE = 'agent_run.propose'
-ACTIVE = {'pending_approval', 'queued', 'running', 'waiting_input'}
+ACTIVE = {'pending_approval', 'queued', 'running', 'waiting_input', 'paused'}
 from homun.domain.capabilities import AGENT_RUN
 LIMITS = AGENT_RUN.limits
 
 
 def public(run):
     return deepcopy({k: v for k, v in run.items() if not k.startswith('_')})
+
+
+def public_for(store, actor, run):
+    item = public(run)
+    if not history_is_readable(store, actor, run):
+        item.update(materials=[], observations=[], history_redacted=True)
+    return item
 
 
 def lookup(store, run_id, work_id=None):
@@ -197,10 +204,7 @@ def list_runs(ctx, actor, work_id):
     items = []
     for record in store.commands.values():
         if record.type == PROPOSAL_TYPE and record.result['work_id'] == work_id:
-            item = public(record.result)
-            if not history_is_readable(store, actor, record.result):
-                item.update(materials=[], observations=[], history_redacted=True)
-            items.append(item)
+            items.append(public_for(store, actor, record.result))
     return {'items': items}
 
 

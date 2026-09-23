@@ -1,5 +1,7 @@
 # Motore Python
 
+I run nativi accettano correzioni dalla chat e controlli persistenti di pausa/ripresa/annullamento. [Contratto e verifiche](../docs/research/2026-09-23-agent-controls-verifica.md).
+
 I nuovi run adattivi OpenAI-compatible usano strumenti nativi e cronologia persistente. [Perimetro, attribuzione Hermes e verifiche](../docs/research/2026-09-23-owned-core-verifica.md). Il modello deve supportare tool calling; gli errori non attivano fallback al protocollo JSON.
 
 Stato e verifiche complessive: [stato corrente](../docs/STATO.md). La [tranche operativa](../docs/research/2026-09-23-homun-operativo-verifica.md) aggiunge esecutore Homun senza profilo obbligatorio, `agent_run` su materiali, contesto aziendale/team e portale di contributo circoscritto. Il motore include intake supervisionato, piani per fasi, confronto CSV, lettura, sintesi, procedure approvate, budget/allocazioni, MCP e routine. Il [consolidamento del 23/9](../docs/research/2026-09-23-consolidamento-verifica.md) corregge recupero catene, fonti e consumi della sintesi, riconciliazione cron; i rapporti precedenti restano prove datate.

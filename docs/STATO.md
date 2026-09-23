@@ -40,7 +40,17 @@ Una verifica del sorgente non aggiorna l'app installata.
   e ripresa delle chiamate pendenti dopo un contributo umano. Nucleo mantenuto in
   Homun, derivato dalla logica Hermes con attribuzione MIT; nessun runtime esterno.
 
+- Controlli nativi di pausa/ripresa/annullamento e correzioni dalla chat, con
+  invalidazione delle risposte superate, conservazione degli esiti incerti e
+  oscuramento delle fonti revocate. [Prove e limiti](research/2026-09-23-agent-controls-verifica.md).
+
 ## Evidenze della tranche corrente
+
+Controlli: 640 test engine passati e 1 saltato nella suite completa; ulteriori 32
+controlli mirati includono la migrazione delle invocazioni DBOS precedenti.
+Prova Ollama su due fonti con pausa/correzione/ripresa riuscita. Il percorso verso
+la [parità Hermes](research/2026-09-23-hermes-parity-matrix.md) resta aperto.
+
 
 Il [primo nucleo nativo](research/2026-09-23-owned-core-verifica.md) aggiunge
 verifiche di trasporto, ripresa, autorità e una prova Ollama reale. Suite completa

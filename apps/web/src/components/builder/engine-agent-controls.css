@@ -1,0 +1,26 @@
+.cw-agent-controls {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid currentColor;
+  border-color: color-mix(in srgb, currentColor 15%, transparent);
+}
+.cw-agent-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cw-agent-controls textarea {
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+  padding: 10px;
+  border: 1px solid #cbd3c5;
+  border-radius: 8px;
+  background: #fff;
+  color: #243027;
+  font: inherit;
+}
+.cw-agent-controls button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

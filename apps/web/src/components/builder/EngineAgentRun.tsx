@@ -9,6 +9,7 @@ import { HomunGuidanceNotice } from '@/components/HomunGuidanceNotice';
 import { listEngineTeams, type EngineTeam } from '@/lib/engine-projects-client';
 import { EngineRunRecipientPicker } from './EngineRunRecipientPicker';
 import { EngineMaterialSelection } from './EngineMaterialSelection';
+import { EngineAgentControls } from './EngineAgentControls';
 
 export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () => Promise<void> }) {
   const [selected, setSelected] = useState<string[]>([]);
@@ -60,6 +61,12 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       <button className="cw-primary" disabled={run.busy} onClick={() => void run.approve()}>Avvia il lavoro</button>
     </>}
     {p && ['queued','running'].includes(p.status) && <p role="status">{p.executor_name} sta lavorando · {p.turns} passaggi completati.</p>}
+    {p?.status === 'paused' && <p role="status">Lavoro in pausa. Puoi correggere le indicazioni o riprendere.</p>}
+    {p?.status === 'cancelled' && <p role="status">Esecuzione interrotta. Le attività già svolte restano consultabili.</p>}
+    {p && <EngineAgentControls key={p.id} workId={work.id} run={p} onUpdated={async updated => {
+      run.updateProposal(updated);
+      await onChanged();
+    }} />}
     {p?.history_redacted && <p>Lo storico delle fonti non è accessibile con i permessi attuali.</p>}
     {p?.observations.length ? <details><summary>Attività svolte</summary><ol>
       {p.observations.map((step, i) => <li key={i}>{step.message ?? (step.tool === 'human_input' ? 'Chiarimento ricevuto' : step.tool)}</li>)}

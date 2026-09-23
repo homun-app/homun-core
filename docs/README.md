@@ -22,6 +22,8 @@ Aggiornamento: 23 settembre 2026, consolidamento e tranche operativa.
 
 - [Primo nucleo Homun derivato da Hermes](research/2026-09-23-owned-core-verifica.md): cronologia nativa, strumenti persistenti e ripresa; perimetro e prove.
 
+- [Parità Hermes: matrice completa](research/2026-09-23-hermes-parity-matrix.md) e [controlli verificati](research/2026-09-23-agent-controls-verifica.md).
+
 ## Sviluppo e prodotto
 
 - [Specifiche](specifications/README.md): requisiti, proposte e decisioni; non elenco delle funzioni consegnate.

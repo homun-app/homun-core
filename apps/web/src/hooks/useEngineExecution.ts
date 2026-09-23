@@ -1,6 +1,7 @@
 /** Shared durable proposal/approval polling and conflict recovery. */
 import { useEffect, useRef, useState } from "react";
 import type { Work } from "@/components/builder/conversation-types";
+import { executionPolls, executionRefreshes } from "@/lib/engine-execution-status";
 import { useConflictRecovery } from "./useConflictRecovery";
 
 type Proposal = { id: string; status: string };
@@ -22,7 +23,7 @@ export function useEngineExecution<T extends Proposal, A extends unknown[]>(
   callback.current = onChanged;
   const operation = useRef(crypto.randomUUID());
   const approval = useRef(crypto.randomUUID());
-  const finished = useRef<string | null>(null);
+  const observed = useRef<{ id: string; status: string } | null>(null);
   const renew = () => {
     operation.current = crypto.randomUUID();
     approval.current = crypto.randomUUID();
@@ -42,12 +43,13 @@ export function useEngineExecution<T extends Proposal, A extends unknown[]>(
         const next = visible.at(-1) ?? null;
         setItems(visible);
         setProposal(next);
-        if (next && ["completed", "waiting_input", "failed", "blocked"].includes(next.status) && finished.current !== `${next.id}:${next.status}`) {
-          finished.current = `${next.id}:${next.status}`;
-          if (["completed", "failed", "blocked"].includes(next.status)) renew();
+        const previousStatus = observed.current?.id === next?.id ? observed.current?.status : undefined;
+        observed.current = next ? { id: next.id, status: next.status } : null;
+        if (next && executionRefreshes(next.status, previousStatus)) {
+          if (["completed", "cancelled", "failed", "blocked"].includes(next.status)) renew();
           await callback.current();
         }
-        if (next && ["queued", "running", "waiting_input"].includes(next.status))
+        if (live && next && executionPolls(next.status))
           timer = setTimeout(() => void read(), 1000);
       } catch (cause) {
         if (live) {
@@ -95,6 +97,7 @@ export function useEngineExecution<T extends Proposal, A extends unknown[]>(
   }
   return {
     proposal,
+    updateProposal: setProposal,
     items,
     busy,
     error,

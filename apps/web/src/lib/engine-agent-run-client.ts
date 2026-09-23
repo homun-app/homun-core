@@ -6,7 +6,8 @@ import type { Work } from '../components/builder/conversation-types.ts';
 
 export type AgentRun = {
   id: string; work_id: string; digest: string; expected_version: number;
-  status: 'pending_approval' | 'queued' | 'running' | 'waiting_input' | 'completed' | 'failed' | 'blocked';
+  status: 'pending_approval' | 'queued' | 'running' | 'waiting_input' | 'completed' | 'failed' | 'blocked' | 'paused' | 'cancelled';
+  tool_version: string;
   team?: { id: string; name: string; members: {id: string; name: string; role: string}[] };
   person?: { id: string; name: string };
   history_redacted?: boolean;
@@ -40,5 +41,23 @@ export async function prepareAgentRun(work: Work, materialIds: string[], command
 export function approveAgentRun(workId: string, run: AgentRun, commandId: string): Promise<AgentRun> {
   return request(workId, `/${encodeURIComponent(run.id)}/approve`, {
     command_id: commandId, expected_version: run.expected_version, digest: run.digest,
+  });
+}
+
+export type AgentControlAction = 'steer' | 'redirect' | 'pause' | 'resume' | 'cancel';
+/** Keep this operation for retries, including the pinned version after a lost response. */
+export type AgentControlOperation = { commandId: string; expectedVersion?: number };
+export async function controlAgentRun(
+  workId: string, runId: string, action: AgentControlAction,
+  operation: AgentControlOperation, text?: string,
+): Promise<AgentRun> {
+  if (operation.expectedVersion === undefined) {
+    const current = (await listEngineWorks()).find(w => w['id'] === workId);
+    if (!current) throw homunErrorFromHttp(404, {detail:'Lavoro non accessibile'}, 'Lavoro non accessibile');
+    operation.expectedVersion = current['version'] as number;
+  }
+  return request(workId, `/${encodeURIComponent(runId)}/control`, {
+    command_id: operation.commandId, expected_version: operation.expectedVersion,
+    action, ...(text !== undefined ? {text} : {}),
   });
 }

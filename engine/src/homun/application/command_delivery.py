@@ -87,6 +87,9 @@ def admit(ctx: EngineContext, actor: Actor, body: CommandRequest) -> Delivery:
             result = service.apply(actor, body.command_id, body.type, body.payload)
             record = store.commands[body.command_id]
             token = None
+            if body.type == 'conversation.post_message' and record.followup_status == 'none':
+                from homun.application.agent_chat_control import route_message
+                route_message(ctx,store,actor,body,result)
             if body.type == 'conversation.post_message' and record.followup_status == 'completed':
                 # Cached replies carry the same source authority as fresh replies.
                 authorized_conversation_work(store, actor, body.payload.get('conversation_id', ''))

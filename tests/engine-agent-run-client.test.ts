@@ -52,3 +52,60 @@ test('person creation reuses the supplied command id and returns the selectable 
     assert.deepEqual(await createPerson('Marta', 'stable-person'), {id:'person_marta', name:'Marta'});
   } finally { globalThis.fetch = old; }
 });
+
+test('control binds current work version and preserves its body after a lost response', async () => {
+  const { controlAgentRun } = await import('../apps/web/src/lib/engine-agent-run-client.ts');
+  assert.equal(typeof controlAgentRun, 'function');
+  const old = globalThis.fetch;
+  const operation = { commandId: 'stable-control' };
+  const bodies: unknown[] = [];
+  let reads = 0;
+  globalThis.fetch = async (url, init) => {
+    if (!init?.body) {
+      reads++;
+      return Response.json({items:[{id:'work/1', version:7}]});
+    }
+    assert.match(String(url), /works\/work%2F1\/agent-runs\/run%2F1\/control$/);
+    bodies.push(JSON.parse(String(init.body)));
+    if (bodies.length === 1) throw new TypeError('lost response');
+    return Response.json({id:'run/1', status:'paused'});
+  };
+  try {
+    await assert.rejects(controlAgentRun('work/1', 'run/1', 'pause', operation));
+    const result = await controlAgentRun('work/1', 'run/1', 'pause', operation);
+    assert.equal(result.status, 'paused');
+    assert.equal(reads, 1);
+    assert.deepEqual(bodies, [
+      {command_id:'stable-control',expected_version:7,action:'pause'},
+      {command_id:'stable-control',expected_version:7,action:'pause'},
+    ]);
+  } finally { globalThis.fetch = old; }
+});
+
+test('redirect sends correction and exposes typed authorization failures', async () => {
+  const { controlAgentRun } = await import('../apps/web/src/lib/engine-agent-run-client.ts');
+  assert.equal(typeof controlAgentRun, 'function');
+  const old = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    if (!init?.body) return Response.json({items:[{id:'w',version:9}]});
+    assert.deepEqual(JSON.parse(String(init.body)), {command_id:'redirect',expected_version:9,action:'redirect',text:'Ricalcola solo settembre'});
+    return Response.json({detail:{code:'permission_denied',message:'Only the owner may steer'}}, {status:403});
+  };
+  try {
+    await assert.rejects(controlAgentRun('w', 'r', 'redirect', {commandId:'redirect'}, 'Ricalcola solo settembre'),
+      (error: {code?: string}) => error.code === 'permission_denied');
+  } finally { globalThis.fetch = old; }
+});
+
+test('control does not POST when the work is no longer accessible', async () => {
+  const { controlAgentRun } = await import('../apps/web/src/lib/engine-agent-run-client.ts');
+  assert.equal(typeof controlAgentRun, 'function');
+  const old = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return Response.json({items:[]}); };
+  try {
+    await assert.rejects(controlAgentRun('w', 'r', 'cancel', {commandId:'cancel'}),
+      (error: {code?: string}) => error.code === 'not_found');
+    assert.equal(calls, 1);
+  } finally { globalThis.fetch = old; }
+});

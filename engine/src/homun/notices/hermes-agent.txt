@@ -30,3 +30,7 @@ agent/conversation_loop.py, agent/turn_request_assembly.py and agent/turn_tool_r
 Homun changes: scoped materials/tools, contribution-mediated questions, one pending
 call per durable advance, existing authority/budget/review controls. No upstream
 runtime dependency. This notice covers the derived portions, not all Homun code.
+
+agent_control_history.py adapts interruption checkpoints and user correction
+placement from agent/interrupt_control.py and conversation_loop.py. Homun uses
+durable epochs/leases and explicit unknown outcomes in its own SQLite workflow.

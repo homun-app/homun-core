@@ -1,7 +1,9 @@
 """Adaptive runs: selected sources, explicit scope approval, observable progress."""
+from typing import Literal
 from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
 from homun.application.agent_runs import approve, list_runs, propose
+from homun.application.agent_control import control
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _http_error
 from homun.routes.price_comparisons import request_context
@@ -79,5 +81,23 @@ def approve_run(workspace_id: str, work_id: str, run_id: str, body: RunApproval,
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
     try:
         return approve(ctx, actor, work_id, run_id, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+class RunControl(BaseModel):
+    command_id: str = Field(min_length=1, max_length=160)
+    expected_version: int = Field(ge=1)
+    action: Literal['steer','redirect','pause','resume','cancel']
+    text: str | None = Field(default=None, min_length=1, max_length=16000)
+
+
+@router.post('/works/{work_id}/agent-runs/{run_id}/control', response_model=RunView, response_model_exclude_none=True)
+def control_run(workspace_id: str, work_id: str, run_id: str, body: RunControl,
+                x_homun_actor_id: str | None = Header(default=None),
+                x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        return control(ctx, actor, work_id, run_id, body.model_dump(exclude_none=True))
     except DomainError as exc:
         raise _http_error(exc) from exc
