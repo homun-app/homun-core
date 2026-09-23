@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **187**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **189**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -198,3 +198,5 @@ Documenti censiti: **187**. Punto di ingresso: [indice](README.md).
 | [docs/research/2026-09-23-agent-controls-verifica.md](research/2026-09-23-agent-controls-verifica.md) | Controlli del ciclo nativo e verifiche |
 | [docs/superpowers/specs/2026-09-23-hermes-parity-design.md](superpowers/specs/2026-09-23-hermes-parity-design.md) | Disegno della parita del motore |
 | [docs/superpowers/plans/2026-09-23-agent-controls.md](superpowers/plans/2026-09-23-agent-controls.md) | Piano controlli di esecuzione |
+| [docs/research/2026-09-23-agent-context-verifica.md](research/2026-09-23-agent-context-verifica.md) | Contesto persistente, prova Ollama e limiti |
+| [docs/superpowers/plans/2026-09-23-agent-context.md](superpowers/plans/2026-09-23-agent-context.md) | Piano compattazione del contesto |

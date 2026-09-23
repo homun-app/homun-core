@@ -162,6 +162,8 @@ def propose(ctx, actor, work_id, body):
             run['_protocol'] = agent_native.PROTOCOL if connection.kind == 'openai_compatible' else 'json-decision-v1'
             if agent_native.enabled(run):
                 run['tool_version'] = 'adaptive-materials-native-v2'
+                run['_context_policy'] = {'context_window': connection.context_window,
+                                          'max_output_tokens': connection.max_output_tokens}
                 run['_messages'] = [m.model_dump() for m in initial_messages(run['_objective'], run['_instructions'])]
             run['digest'] = hashlib.sha256(json.dumps(run, sort_keys=True).encode()).hexdigest()
             save(store, actor, run['id'], PROPOSAL_TYPE, fingerprint, run)

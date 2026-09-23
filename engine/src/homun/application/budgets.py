@@ -85,15 +85,25 @@ def _settle_allocation(budget, reservation: BudgetReservation, *, usage: BudgetC
         allocation.unknown = _sum(allocation.unknown, reservation.estimate)
 
 
+def check_capacity(store, actor, work_id, estimate, *, accounting_actor_id=None):
+    """Check a multi-call operation before starting it; each call still reserves.
+
+    Caller must hold the repository transaction. This is admission against the
+    current caps, not a guarantee against subsequent user budget changes.
+    """
+    require_work_access(store, actor, work_id)
+    budget = ensure(store, work_id)
+    _admit(budget, estimate)
+    _admit_allocation(budget, accounting_actor_id or actor.id, estimate)
+    return budget
+
+
 def reserve(ctx, actor, work_id, estimate: BudgetCounters, *, purpose='', accounting_actor_id=None) -> str:
     """Authorize the caller; optionally charge the approved executor instead."""
     charged_actor_id = accounting_actor_id or actor.id
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
-            require_work_access(store, actor, work_id)
-            budget = ensure(store, work_id)
-            _admit(budget, estimate)
-            _admit_allocation(budget, charged_actor_id, estimate)
+            budget = check_capacity(store, actor, work_id, estimate, accounting_actor_id=charged_actor_id)
             reservation = BudgetReservation(id=new_id('res'), estimate=estimate,
                                             purpose=purpose, actor_id=charged_actor_id)
             budget.pending.append(reservation)

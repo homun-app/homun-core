@@ -1,7 +1,7 @@
 # Stato verificato di Homun 2
 
-Aggiornato il 23 settembre 2026 con il primo nucleo nativo successivo a
-`d264a5f6`. Lo stato precedente e i rapporti datati conservano le prove storiche.
+Aggiornato il 23 settembre 2026 con controlli persistenti e compattazione del contesto
+del nucleo nativo. Lo stato precedente e i rapporti datati conservano le prove storiche.
 Una verifica del sorgente non aggiorna l'app installata.
 
 ## Capacità presenti
@@ -44,7 +44,15 @@ Una verifica del sorgente non aggiorna l'app installata.
   invalidazione delle risposte superate, conservazione degli esiti incerti e
   oscuramento delle fonti revocate. [Prove e limiti](research/2026-09-23-agent-controls-verifica.md).
 
+- Checkpoint automatici del contesto senza cancellare la cronologia canonica,
+  limiti del modello espliciti e consumo del riepilogo separato dalla decisione.
+  [Prova Ollama e limiti](research/2026-09-23-agent-context-verifica.md).
+
 ## Evidenze della tranche corrente
+
+Contesto: **688 test engine passati, 1 saltato**; typecheck e OpenAPI allineati.
+Prova Ollama di compattazione riuscita, con sei righe corrette nell'artifact in
+revisione e cronologia originale conservata. [Rapporto](research/2026-09-23-agent-context-verifica.md).
 
 Controlli: 640 test engine passati e 1 saltato nella suite completa; ulteriori 32
 controlli mirati includono la migrazione delle invocazioni DBOS precedenti.

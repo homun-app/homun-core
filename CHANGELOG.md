@@ -23,6 +23,7 @@ each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 - **Manual update checks offer the available version only once.**
 
 ## Improvements
+- **Durable context checkpoints for native agent runs.** Automatic summaries preserve original history, recent corrections and complete tool rounds; configured model limits and separate usage accounting remain explicit.
 - **Pause, resume and redirect native agent work.** Chat corrections reach the active run; pending tools survive pause, stale responses cannot publish, and revoked source history remains hidden.
 - **Native agent tool rounds in the Homun engine**, with persisted call/result history and pending-call recovery after human input; Hermes-derived execution guidance includes MIT attribution.
 - **Current usage and developer documentation**, with verified limits and a dated Hermes usage comparison.

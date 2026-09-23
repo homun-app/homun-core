@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 from homun.context import get_context
 from homun.models.interpretation import RosterEntry
 from homun.models.types import ChatMessage
+from homun.models.port import Connection, ConnectionKind
+from homun.domain.errors import ValidationError
 from homun.routes.sse import sse_event
 
 router = APIRouter(prefix="/v1/models", tags=["models"])
@@ -24,6 +26,18 @@ class CredentialsRequest(BaseModel):
     api_key: str
     base_url: str | None = None
     default_model: str | None = None
+
+
+class ConnectionRequest(BaseModel):
+    connection_id: str | None = None
+    kind: ConnectionKind
+    display_name: str
+    model_id: str
+    base_url: str | None = None
+    pydantic_provider: str | None = None
+    api_key: str | None = None
+    context_window: int | None = Field(default=None, gt=0, strict=True)
+    max_output_tokens: int = Field(default=8192, gt=0, strict=True)
 
 
 class ActiveProviderRequest(BaseModel):
@@ -64,6 +78,19 @@ def list_connections() -> dict[str, Any]:
         "active_connection_id": ctx.models.active_provider_id,
         "items": [c.model_dump(mode="json") for c in ctx.models.list_connections()],
     }
+
+
+@router.post("/connections", response_model=Connection)
+def upsert_connection(body: ConnectionRequest) -> dict[str, Any]:
+    """Omitted context pins preserve saved values, including from older clients."""
+    fields = body.model_dump(exclude={'context_window', 'max_output_tokens'})
+    for name in ('context_window', 'max_output_tokens'):
+        if name in body.model_fields_set:
+            fields[name] = getattr(body, name)
+    try:
+        return get_context().models.upsert_connection(**fields).model_dump(mode='json')
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail={'code': exc.code, 'message': exc.message}) from exc
 
 
 @router.post("/chat")
@@ -139,7 +166,7 @@ def set_openai_credentials(body: CredentialsRequest) -> dict[str, Any]:
             base_url=body.base_url,
             default_model=body.default_model,
         )
-    except ValueError as exc:
+    except (ValueError, ValidationError) as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "validation_error", "message": str(exc)},

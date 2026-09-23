@@ -34,3 +34,8 @@ runtime dependency. This notice covers the derived portions, not all Homun code.
 agent_control_history.py adapts interruption checkpoints and user correction
 placement from agent/interrupt_control.py and conversation_loop.py. Homun uses
 durable epochs/leases and explicit unknown outcomes in its own SQLite workflow.
+
+context_plan.py derives rough multilingual token estimation and closed-exchange
+context planning from agent/model_metadata.py and agent/context_compressor.py.
+context_summary.py adapts the structured checkpoint prompt from the latter.
+Homun preserves canonical history and stores separate hash-validated projections.

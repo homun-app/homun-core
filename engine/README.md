@@ -1,5 +1,7 @@
 # Motore Python
 
+Il contesto dei run nativi usa checkpoint persistenti e limiti configurati: [contratto, prove e limiti](../docs/research/2026-09-23-agent-context-verifica.md).
+
 I run nativi accettano correzioni dalla chat e controlli persistenti di pausa/ripresa/annullamento. [Contratto e verifiche](../docs/research/2026-09-23-agent-controls-verifica.md).
 
 I nuovi run adattivi OpenAI-compatible usano strumenti nativi e cronologia persistente. [Perimetro, attribuzione Hermes e verifiche](../docs/research/2026-09-23-owned-core-verifica.md). Il modello deve supportare tool calling; gli errori non attivano fallback al protocollo JSON.

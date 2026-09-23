@@ -1,0 +1,32 @@
+{
+  "fixture_original_error": "agent_context_summary_failed",
+  "output_tokens": 512,
+  "cut": 10,
+  "clipped": [],
+  "estimated_summary_input": 6788,
+  "request_options": {
+    "temperature": 0,
+    "num_predict": 512,
+    "num_ctx": 8192
+  },
+  "tools_present": false,
+  "response": {
+    "model": "qwen3.5:4b",
+    "created_at": "2026-09-23T18:27:49.525136Z",
+    "done": true,
+    "done_reason": "length",
+    "total_duration": 21508050292,
+    "load_duration": 26134875,
+    "prompt_eval_count": 5102,
+    "prompt_eval_cached_count": 5098,
+    "prompt_eval_duration": 120025000,
+    "eval_count": 512,
+    "eval_duration": 21323724000
+  },
+  "message_content": "### Historical Task Snapshot\n*   **Objective**: Retrieve and summarize content from four distinct material files (`nota-1.txt` through `nota-4.txt`).\n*   **Scope**: Sequential reading of materials with a 6000-character limit per file.\n\n### Constraints & Preferences\n*   **Data Integrity**: Preserve identifiers (Codes, IDs, SHA256 hashes) and factual tool results exactly.\n*   **Omission Policy**: Text marked as omitted was not supplied; do not invent contents.\n*   **Tool Behavior**: All `read_material` calls executed successfully with no errors or interruptions reported in the logs.\n\n### Completed Actions\n1.  **Read `mat_jIsPDo0HH_0abQ` (`nota-1.txt`)**:\n    *   **Code**: HX-1Q9\n    *   **Responsible**: Ada\n    *   **Deadline**: 2 ottobre 2026\n    *   **Content**: Repetitive operational note (\"nota informativa ripetuta senza ulteriori vincoli\").\n    *   **Stats**: 5981 characters.\n\n2.  **Read `mat_G44A2wX3PSTYJg` (`nota-2.txt`)**:\n    *   **Code**: HX-2Q9\n    *   **Responsible**: Marta\n    *   **Deadline**: 3 ottobre 2026\n    *   **Content**: Repetitive operational note.\n    *   **Stats**: 5983 characters.\n\n3.  **Read `mat_UmUbdSPI69_q_A` (`nota-3.txt`)**:\n    *   **Code**: HX-3Q9\n    *   **Responsible**: Luca\n    *   **Deadline**: 4 ottobre 2026\n    *   **Content**: Repetitive operational note.\n    *   **Stats**: 5982 characters.\n\n4.  **Read `mat_Kk1YU6GdKL5JNw` (`nota-4.txt`)**:\n    *   **Code**: HX-4Q9\n    *   **Responsible**: Elena\n    *   **Deadline**: 5 ottobre 2026\n    *   **Content**: Repetitive operational note.\n    *   **Stats**: 5983 characters",
+  "thinking_characters": 0,
+  "tool_calls": null,
+  "result": "ValueError",
+  "error": "Incomplete agent response: length",
+  "registry_usage_entries": 0
+}

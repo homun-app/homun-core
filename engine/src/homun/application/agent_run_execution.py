@@ -6,6 +6,7 @@ from uuid import uuid4
 from homun.application import budgets, agent_native
 from homun.application.agent_runs import authority, lookup
 from homun.application.agent_control_history import consume_steering
+from homun.application.agent_context import prepare as prepare_context, ContextPreparationDeferred
 from homun.application.agent_tools import catalog, run_tool
 from homun.application.agent_team import tool_definition
 from homun.application.agent_consultation import consult
@@ -19,7 +20,7 @@ from homun.models.agent_turn import AgentDecision, decide
 LEASE_SECONDS = 180
 
 
-def fail(ctx, run_id, code, *, token=None, blocked=False, epoch=None):
+def fail(ctx, run_id, code, *, token=None, blocked=False, epoch=None, expected_steering=None):
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             run = lookup(store, run_id)
@@ -29,18 +30,23 @@ def fail(ctx, run_id, code, *, token=None, blocked=False, epoch=None):
                 return run['status']
             if token is not None and run.get('_lease_token') != token:
                 return run['status']
-            run.update(status='blocked' if blocked else 'failed', error_code=code)
-            run.pop('_lease_token', None)
-            run.pop('_lease_until', None)
-            work = store.works[run['work_id']]
-            if work.status == WorkStatus.RUNNING and work.version == run.get('_run_version'):
-                work.status = WorkStatus.FAILED
-                work.version += 1
-                work.updated_at = utc_now()
-                store.events.append(DomainEvent(event_id=new_id('evt'), workspace_id=store.workspace_id,
-                    aggregate_id=work.id, aggregate_type='work', aggregate_version=work.version,
-                    sequence=store.next_sequence(), type='work.agent_run_failed', actor_id='homun_engine',
-                    command_id=run_id, payload={'error_code': code}))
+            if expected_steering is not None and run.get('_steering',[]) != expected_steering:
+                # Terminal failures obey the same human-input fence as successful results.
+                run.pop('_lease_token',None)
+                run.pop('_lease_until',None)
+            else:
+                run.update(status='blocked' if blocked else 'failed', error_code=code)
+                run.pop('_lease_token', None)
+                run.pop('_lease_until', None)
+                work = store.works[run['work_id']]
+                if work.status == WorkStatus.RUNNING and work.version == run.get('_run_version'):
+                    work.status = WorkStatus.FAILED
+                    work.version += 1
+                    work.updated_at = utc_now()
+                    store.events.append(DomainEvent(event_id=new_id('evt'), workspace_id=store.workspace_id,
+                        aggregate_id=work.id, aggregate_type='work', aggregate_version=work.version,
+                        sequence=store.next_sequence(), type='work.agent_run_failed', actor_id='homun_engine',
+                        command_id=run_id, payload={'error_code': code}))
         ctx.service.store = store
     return run['status']
 
@@ -50,7 +56,7 @@ def _claim(ctx, run_id, epoch=None):
         with ctx.repository.transaction() as store:
             run = lookup(store, run_id)
             if epoch is not None and run['_epoch'] != epoch:
-                return 'superseded'
+                return 'superseded', None
             if run['status'] not in {'queued', 'running'}:
                 return run['status'], None
             until = run.get('_lease_until')
@@ -78,6 +84,8 @@ def _decision(ctx, run):
     if run.get('_decision'):
         return AgentDecision.model_validate(run['_decision'])
     actor = Actor.model_validate(run['_actor'])
+    tools = catalog() + tool_definition(run.get('team'), run['assignee_id'])
+    messages = prepare_context(ctx,run,tools+[agent_native.QUESTION]) if agent_native.enabled(run) else None
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             current = lookup(store, run['id'])
@@ -91,10 +99,9 @@ def _decision(ctx, run):
     reservation = budgets.reserve(ctx, actor, run['work_id'], BudgetCounters(attempts=1),
         purpose='agent_run.decide', accounting_actor_id=run['assignee_id'])
     try:
-        tools = catalog() + tool_definition(run.get('team'), run['assignee_id'])
         if agent_native.enabled(run):
-            result = ctx.models.complete_tools(agent_native.history(run), tools=tools + [agent_native.QUESTION],
-                                               connection_id=run['connection_id'])
+            result = ctx.models.complete_tools(messages, tools=tools + [agent_native.QUESTION],
+                                               connection_id=run['connection_id'], **run.get('_context_policy',{}))
             agent_native.append_round(run, result.message)
             decision = agent_native.decision(run)
         else:
@@ -134,11 +141,14 @@ def _dispatch_allowed(ctx, actor, run):
 def advance(ctx, run_id, *, epoch=None):
     """Execute at most one decision. Reads may replay; publication is transactional."""
     token = None
+    expected_steering = None
     try:
         status, run = _claim(ctx, run_id, epoch)
         if run is None:
             return status
         token = run['_lease_token']
+        if agent_native.enabled(run):
+            expected_steering = deepcopy(run.get('_steering',[]))
         actor = Actor.model_validate(run['_actor'])
         decision = _decision(ctx, run)
         observation = None
@@ -198,10 +208,13 @@ def advance(ctx, run_id, *, epoch=None):
                 status = current['status']
             ctx.service.store = store
         return status
+    except ContextPreparationDeferred:
+        return ctx.repository.load().commands[run_id].result['status']
     except DomainError as exc:
         return fail(ctx, run_id, exc.code, token=token,
-                    blocked=exc.code in {'permission_denied', 'version_conflict', 'not_found'}, epoch=epoch)
+                    blocked=exc.code in {'permission_denied', 'version_conflict', 'not_found'}, epoch=epoch,
+                    expected_steering=expected_steering)
     except (ValueError, TypeError):
-        return fail(ctx, run_id, 'agent_run_invalid_decision', token=token, epoch=epoch)
+        return fail(ctx, run_id, 'agent_run_invalid_decision', token=token, epoch=epoch, expected_steering=expected_steering)
     except RuntimeError:
-        return fail(ctx, run_id, 'agent_run_model_error', token=token, epoch=epoch)
+        return fail(ctx, run_id, 'agent_run_model_error', token=token, epoch=epoch, expected_steering=expected_steering)

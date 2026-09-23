@@ -16,7 +16,9 @@ from homun.models.interpret import run_interpret_with_retry
 from homun.models.interpretation import MessageInterpretation, RosterEntry
 from homun.models.conversation_context import ConversationContext
 from homun.models.openai_compat import SECRET_KEY, OpenAICompatibleProvider
-from homun.models.port import Connection, ConnectionKind
+from homun.models.port import (Connection, ConnectionKind, ContextLimits, UNSET_PIN, UnsetPin,
+                               effective_context_window)
+from pydantic import ValidationError as SchemaError
 from homun.models.prompt_store import PromptStore
 from homun.models.secrets import FileSecretStore, MemorySecretStore, SecretStore
 from homun.models.types import (
@@ -130,6 +132,7 @@ class ModelRegistry:
         active = self.active_provider_id
         out: list[Connection] = []
         for info in self.list_providers():
+            pins = self._config.get('openai_compatible', {}) if info.kind == 'openai_compatible' else {}
             out.append(
                 Connection(
                     id=info.id,
@@ -137,6 +140,8 @@ class ModelRegistry:
                     display_name=info.display_name,
                     model_id=info.default_model or info.id,
                     base_url=info.base_url,
+                    context_window=effective_context_window(info.base_url, pins.get('context_window')) if info.kind == 'openai_compatible' else None,
+                    max_output_tokens=pins.get('max_output_tokens', 8192),
                     configured=info.configured,
                     credential_present=info.credential_present,
                     active=info.id == active,
@@ -161,29 +166,40 @@ class ModelRegistry:
         base_url: str | None = None,
         pydantic_provider: str | None = None,
         api_key: str | None = None,
+        context_window: int | None | UnsetPin = UNSET_PIN,
+        max_output_tokens: int | UnsetPin = UNSET_PIN,
     ) -> Connection:
         del display_name, pydantic_provider
         if kind == "fake":
+            if context_window is not UNSET_PIN or max_output_tokens is not UNSET_PIN:
+                raise ValidationError('Native context pins require an OpenAI-compatible connection')
             cid = connection_id or "fake"
             if cid != "fake":
                 raise ValidationError("Built-in fake connection id must be 'fake'")
             return self.get_connection("fake")
         if kind == "openai_compatible":
+            openai_cfg = dict(self._config.get("openai_compatible") or {})
+            if base_url is not None and base_url.strip():
+                openai_cfg["base_url"] = base_url.strip().rstrip("/")
+            if model_id.strip():
+                openai_cfg["default_model"] = model_id.strip()
+            if context_window is not UNSET_PIN:
+                if context_window is None:
+                    openai_cfg.pop('context_window', None)
+                else:
+                    openai_cfg['context_window'] = context_window
+            if max_output_tokens is not UNSET_PIN:
+                openai_cfg['max_output_tokens'] = max_output_tokens
+            try:
+                ContextLimits(context_window=effective_context_window(openai_cfg.get('base_url'), openai_cfg.get('context_window')),
+                              max_output_tokens=openai_cfg.get('max_output_tokens', 8192))
+            except SchemaError as exc:
+                raise ValidationError('Invalid native context limits') from exc
             if api_key is not None and api_key.strip():
-                self.set_openai_credentials(
-                    api_key=api_key,
-                    base_url=base_url,
-                    default_model=model_id or None,
-                )
-            else:
-                openai_cfg = dict(self._config.get("openai_compatible") or {})
-                if base_url is not None and base_url.strip():
-                    openai_cfg["base_url"] = base_url.strip().rstrip("/")
-                if model_id.strip():
-                    openai_cfg["default_model"] = model_id.strip()
-                self._config["openai_compatible"] = openai_cfg
-                self._save_config()
-                self._rebuild_providers()
+                self.secrets.put(SECRET_KEY, api_key.strip())
+            self._config["openai_compatible"] = openai_cfg
+            self._save_config()
+            self._rebuild_providers()
             return self.get_connection("openai_compatible")
         if kind == "pydantic_ai":
             raise ValidationError(
@@ -202,15 +218,9 @@ class ModelRegistry:
         key = api_key.strip()
         if not key:
             raise ValueError("api_key is required")
-        self.secrets.put(SECRET_KEY, key)
-        openai_cfg = dict(self._config.get("openai_compatible") or {})
-        if base_url is not None and base_url.strip():
-            openai_cfg["base_url"] = base_url.strip().rstrip("/")
-        if default_model is not None and default_model.strip():
-            openai_cfg["default_model"] = default_model.strip()
-        self._config["openai_compatible"] = openai_cfg
-        self._save_config()
-        self._rebuild_providers()
+        self.upsert_connection(connection_id='openai_compatible', kind='openai_compatible',
+                               display_name='OpenAI-compatible', model_id=default_model or '',
+                               api_key=key, base_url=base_url)
 
     def clear_openai_credentials(self) -> None:
         self.secrets.delete(SECRET_KEY)
@@ -238,14 +248,25 @@ class ModelRegistry:
         self.usage.append(result.usage)
         return result
 
-    def complete_tools(self, messages, *, tools, connection_id=None):
+    def complete_tools(self, messages, *, tools, connection_id=None, context_window=None, max_output_tokens=8192):
         from homun.domain.errors import ValidationError
         from homun.models.native_transport import complete_tools
         pid = connection_id or self.active_provider_id
         provider = self._providers.get(pid)
         if not isinstance(provider, OpenAICompatibleProvider):
             raise ValidationError('Native tools require an OpenAI-compatible connection')
-        result = complete_tools(provider, messages, tools=tools)
+        result = complete_tools(provider, messages, tools=tools, context_window=context_window,
+                                max_output_tokens=max_output_tokens)
+        self.usage.append(result.usage)
+        return result
+
+    def complete_summary(self, messages, *, connection_id=None, context_window=None, max_output_tokens=8192):
+        from homun.models.native_transport import complete_summary
+        provider = self._providers.get(connection_id or self.active_provider_id)
+        if not isinstance(provider, OpenAICompatibleProvider):
+            raise ValidationError('Native summaries require an OpenAI-compatible connection')
+        result = complete_summary(provider, messages, context_window=context_window,
+                                  max_output_tokens=max_output_tokens)
         self.usage.append(result.usage)
         return result
 

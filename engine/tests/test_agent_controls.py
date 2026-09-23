@@ -231,3 +231,10 @@ def test_legacy_workflow_without_epoch_argument_recovers_its_own_generation(setu
     scripted(ctx,NativeMessage(role='assistant',content='Risultato aggiornato'))
     assert advance(ctx,p['id'],epoch=epoch)=='completed'
     with pytest.raises(ValueError):workflow_epoch(run['_workflow_id'],0)
+
+
+def test_stale_epoch_claim_returns_status_without_exception_path(setup):
+    from homun.application.agent_run_execution import _claim
+    ctx,actor,work,material=setup
+    p=native_start(ctx,actor,work,material)
+    assert _claim(ctx,p['id'],epoch=-1)==('superseded',None)

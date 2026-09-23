@@ -40,6 +40,7 @@ class RunView(BaseModel):
     executor_name: str
     connection_id: str
     observations: list[dict]
+    context: dict | None = None
     turns: int
     model_attempts: int
     history_redacted: bool = False

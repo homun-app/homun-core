@@ -1,0 +1,19 @@
+{
+  "fixture": "real source reads with scripted choices; real local summary/final model",
+  "model": "qwen3.5:4b",
+  "statuses": [
+    "failed"
+  ],
+  "run_status": "failed",
+  "error_code": "agent_context_summary_failed",
+  "context_policy": {
+    "context_window": 8192,
+    "max_output_tokens": 512
+  },
+  "model_attempts": 1,
+  "canonical_message_count": 14,
+  "canonical_history_sha256": "fbe1071637e7d910fa0bb82fb79571957e90a4a58cc499b1514f2fb972e8e215",
+  "artifact_count": 0,
+  "usage": [],
+  "diagnostic": "context_ollama_failure_diagnostic.json"
+}
