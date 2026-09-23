@@ -19,7 +19,7 @@ from homun.policy.intake import latest_intake
 from homun.policy.work import require_work_access
 
 PROPOSAL_TYPE = 'agent_run.propose'
-ACTIVE = {'pending_approval', 'queued', 'running', 'waiting_input', 'paused'}
+ACTIVE = {'pending_approval', 'queued', 'running', 'waiting_input', 'waiting_external', 'paused'}
 from homun.domain.capabilities import AGENT_RUN
 LIMITS = AGENT_RUN.limits
 
@@ -59,6 +59,8 @@ def authority(ctx, store, actor, run, *, approve=False, running=False):
             raise PermissionDeniedError('Only the human owner or reviewer can authorize the run')
     from homun.application.agent_tool_registry import registry_for
     registry_for(run)
+    from homun.application.agent_mcp import validate_bindings
+    validate_bindings(store, run.get("_mcp_bindings", []))
     validate_sources(ctx, store, actor, run['materials'])
     validate_team(store, run.get('team'))
     if run.get('person'):
@@ -78,6 +80,8 @@ def authority(ctx, store, actor, run, *, approve=False, running=False):
 
 
 def propose(ctx, actor, work_id, body):
+    from homun.application.agent_mcp import discover, validate_bindings
+    bindings = discover(ctx, actor, work_id, body)
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             work = require_work_access(store, actor, work_id)
@@ -107,6 +111,7 @@ def propose(ctx, actor, work_id, body):
                         prior.update(status='blocked', error_code='agent_run_proposal_obsolete')
                         continue
                 raise ConflictError('Work already has an active agent run')
+            validate_bindings(store, bindings)
             person = _bind_person(store, actor, body.get('person_id'))
             ids = list(dict.fromkeys(body.get('material_ids') or []))
             if len(ids) > LIMITS['max_materials']:
@@ -168,6 +173,10 @@ def propose(ctx, actor, work_id, body):
                                           'max_output_tokens': connection.max_output_tokens}
                 run['_messages'] = [m.model_dump() for m in initial_messages(run['_objective'], run['_instructions'])]
             from homun.application.agent_tool_registry import registry_for
+            if bindings and not agent_native.enabled(run):
+                raise ValidationError('External agent tools require native model support')
+            run['_mcp_bindings'] = bindings
+            run['external_tools'] = [{k: b[k] for k in ('server_id', 'server_name', 'tool', 'name')} | {'description': b['descriptor'].get('description', '')} for b in bindings]
             run['_registry_version'] = 1
             run['tools'] = registry_for(run).manifest()
             run['digest'] = hashlib.sha256(json.dumps(run, sort_keys=True).encode()).hexdigest()

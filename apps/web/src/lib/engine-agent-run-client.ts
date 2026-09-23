@@ -6,7 +6,9 @@ import type { Work } from '../components/builder/conversation-types.ts';
 
 export type AgentRun = {
   id: string; work_id: string; digest: string; expected_version: number;
-  status: 'pending_approval' | 'queued' | 'running' | 'waiting_input' | 'completed' | 'failed' | 'blocked' | 'paused' | 'cancelled';
+  status: 'pending_approval' | 'queued' | 'running' | 'waiting_input' | 'waiting_external' | 'completed' | 'failed' | 'blocked' | 'paused' | 'cancelled';
+  external_request_id?: string;
+  external_tools?: {server_id: string; server_name: string; tool: string; name: string; description: string}[];
   tool_version: string;
   tools?: { name: string; toolset: string; version: string; schema_hash: string; definition_hash: string; kind: 'tool' | 'ask'; replay: 'read_only' | 'model' | 'never' }[];
   team?: { id: string; name: string; members: {id: string; name: string; role: string}[] };
@@ -33,12 +35,12 @@ async function request(workId: string, suffix = '', body?: unknown) {
 export async function listAgentRuns(workId: string): Promise<AgentRun[]> {
   return (await request(workId)).items;
 }
-export async function prepareAgentRun(work: Work, materialIds: string[], commandId: string, teamId?: string, personId?: string): Promise<AgentRun> {
+export async function prepareAgentRun(work: Work, materialIds: string[], commandId: string, teamId?: string, personId?: string, serverIds?: string[]): Promise<AgentRun> {
   const existing = (await listAgentRuns(work.id)).find(p => p.id === commandId);
   if (existing) return existing;
   const current = (await listEngineWorks()).find(w => w['id'] === work.id);
   if (!current) throw homunErrorFromHttp(404, {detail:'Lavoro non accessibile'}, 'Lavoro non accessibile');
-  return request(work.id, '', { command_id: commandId, expected_version: current['version'], material_ids: materialIds, ...(teamId ? {team_id: teamId} : {}), ...(personId ? {person_id: personId} : {}) });
+  return request(work.id, '', { command_id: commandId, expected_version: current['version'], material_ids: materialIds, ...(serverIds?.length ? {server_ids: serverIds} : {}), ...(teamId ? {team_id: teamId} : {}), ...(personId ? {person_id: personId} : {}) });
 }
 export function approveAgentRun(workId: string, run: AgentRun, commandId: string): Promise<AgentRun> {
   return request(workId, `/${encodeURIComponent(run.id)}/approve`, {

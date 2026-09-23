@@ -59,6 +59,13 @@ def deliver_agent_runs(ctx):
         if record.type != PROPOSAL_TYPE:
             continue
         run = record.result
+        if run['status'] == 'waiting_external':
+            from homun.application.agent_external import resume_external
+            try:
+                resume_external(ctx, run['id'])
+            except DomainError as exc:
+                fail(ctx, run['id'], exc.code, blocked=True)
+            run = ctx.repository.load().commands[run['id']].result
         if run['status'] == 'waiting_input':
             try:
                 resume_waiting(ctx, run['id'])

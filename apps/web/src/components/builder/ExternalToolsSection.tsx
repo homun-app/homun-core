@@ -85,6 +85,7 @@ export function ExternalToolsSection({
       const done = await approveEngineToolCall(call.id, call.digest);
       setNotice(done.status === "completed"
         ? "Strumento eseguito: il risultato è in revisione nella conversazione."
+        : done.status === "result_ready" ? "Risultato ricevuto: Homun lo userà per continuare il lavoro."
         : done.error ?? "Chiamata in corso; aggiorna lo stato prima di proseguire.");
       await reload();
     } catch (cause) {
@@ -136,13 +137,14 @@ export function ExternalToolsSection({
           </div>
         </>
       )}
-      {pending.filter((c) => c.status !== "completed").map((call) => (
+      {pending.filter((c) => c.status !== "completed" && !c.agent_run_id).map((call) => (
         <div className="cv-settings-card" key={call.id}>
           <strong>{call.server_name} · {call.tool}</strong>
           {call.tool_description && <p>{call.tool_description}</p>}
           <p className="cw-engine-summary__hint">
             Argomenti: <code>{JSON.stringify(call.arguments)}</code>
           </p>
+          {call.status === "result_ready" && <p role="status">Risultato ricevuto per Homun. La consegna finale sarà preparata dal lavoro in corso.</p>}
           {call.error && <p role="status">{call.error}</p>}
           {call.status === "publication_pending" && <ExternalDeliveryCard proposalId={call.id} onChanged={reload} />}
           {["pending_approval", "running"].includes(call.status) && <div className="cs-actions">

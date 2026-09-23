@@ -15,7 +15,7 @@ export function EngineAgentControls({ workId, run, onUpdated }: {
   const [notice, setNotice] = useState('');
   const pending = useRef<PendingControl | null>(null);
   if (run.tool_version !== 'adaptive-materials-native-v2'
-    || !['queued', 'running', 'waiting_input', 'paused'].includes(run.status)) return null;
+    || !['queued', 'running', 'waiting_input', 'waiting_external', 'paused'].includes(run.status)) return null;
 
   async function send(action: AgentControlAction) {
     if (busy) return;
@@ -48,12 +48,12 @@ export function EngineAgentControls({ workId, run, onUpdated }: {
       <p role="status">Il servizio AI è temporaneamente indisponibile. Homun riproverà automaticamente
         {' '}(tentativo {Math.min(run.recovery.attempts + 1, 3)} di 3). Puoi correggere le indicazioni o interrompere il lavoro.</p>}
     <div className="cw-agent-control-actions">
-      {run.status !== 'waiting_input' && (run.status === 'paused'
+      {!['waiting_input', 'waiting_external'].includes(run.status) && (run.status === 'paused'
         ? <button className="cw-secondary" disabled={busy} onClick={() => void send('resume')}>Riprendi</button>
         : <button className="cw-secondary" disabled={busy} onClick={() => void send('pause')}>Pausa</button>)}
       <button className="cw-secondary" disabled={busy} onClick={() => void send('cancel')}>Interrompi</button>
     </div>
-    {run.status !== 'waiting_input' && <>
+    {!['waiting_input', 'waiting_external'].includes(run.status) && <>
     <label>Correggi le indicazioni
       <textarea rows={3} maxLength={16000} value={text} disabled={busy}
         onChange={event => { setText(event.target.value); setNotice(''); }}

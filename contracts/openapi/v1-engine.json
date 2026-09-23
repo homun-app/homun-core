@@ -2217,6 +2217,14 @@
             ],
             "title": "Person Id"
           },
+          "server_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 4,
+            "title": "Server Ids",
+            "type": "array"
+          },
           "team_id": {
             "anyOf": [
               {
@@ -2292,6 +2300,32 @@
           "expected_version": {
             "title": "Expected Version",
             "type": "integer"
+          },
+          "external_request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Request Id"
+          },
+          "external_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Tools"
           },
           "history_redacted": {
             "default": false,

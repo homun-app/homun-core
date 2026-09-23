@@ -142,6 +142,10 @@ def advance(ctx, run_id, *, epoch=None):
             if not _dispatch_allowed(ctx, actor, run):
                 return 'superseded'
             try:
+                if any(b['name'] == decision.tool for b in run.get('_mcp_bindings', [])):
+                    registry_for(run).validate(decision.tool, decision.arguments)
+                    from homun.application.agent_external import stage
+                    return stage(ctx, actor, run, decision)
                 observation = registry_for(run, material_executor=run_tool, collaborator_executor=consult).dispatch(
                     decision.tool, decision.arguments, ctx=ctx, actor=actor, run=run)
             except ValidationError as exc:

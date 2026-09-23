@@ -14,7 +14,7 @@ import hashlib
 
 def _digest(proposal: dict) -> str:
     """Binds the approval to the exact server/tool/arguments the person saw."""
-    bound = {k: proposal.get(k) for k in ("id", "work_id", "server_id", "tool", "arguments", "expected_version", "_server_hash", "_tool_descriptor")}
+    bound = {k: proposal.get(k) for k in ("id", "work_id", "server_id", "tool", "arguments", "expected_version", "_server_hash", "_tool_descriptor", "_agent_binding")}
     bound["action"] = "external_tool_call"
     return hashlib.sha256(json.dumps(bound, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
@@ -25,8 +25,7 @@ PROPOSAL_TYPE = "external_tool.call"
 ACTIVE = {"pending_approval", "queued", "running", "publication_pending"}
 
 
-def server_hash(server):
-    return hashlib.sha256(server.model_dump_json().encode()).hexdigest()
+from homun.application.mcp_contracts import server_hash
 
 
 def _record_public(record: CommandRecord) -> dict[str, Any]:
@@ -46,7 +45,7 @@ def _lookup(store, proposal_id: str, work_id: str | None = None) -> CommandRecor
     return record
 
 
-def propose(ctx, actor, body) -> dict[str, Any]:
+def propose(ctx, actor, body, *, agent_binding=None) -> dict[str, Any]:
     """Stage a tool call for human approval. Persists; never executes."""
     work_id = str(body.get("work_id") or "")
     server_id = str(body.get("server_id") or "")
@@ -63,6 +62,8 @@ def propose(ctx, actor, body) -> dict[str, Any]:
     require_work_access(initial, actor, work_id)
     prior = initial.commands.get(body['command_id'])
     if prior is not None:
+        if agent_binding and prior.result.get('_agent_binding') != agent_binding:
+            raise ConflictError('Command belongs to a different agent action')
         if (prior.type != PROPOSAL_TYPE or prior.actor_id != actor.id or
                 any(prior.result.get(k) != v for k,v in {'work_id':work_id,'server_id':server_id,'tool':tool,'arguments':arguments}.items())):
             raise ConflictError('Command id already used for a different request')
@@ -94,6 +95,8 @@ def propose(ctx, actor, body) -> dict[str, Any]:
                 raise PermissionDeniedError('Tool is outside the declared server surface')
             prior_command = store.commands.get(body['command_id'])
             if prior_command is not None:
+                if agent_binding and prior_command.result.get('_agent_binding') != agent_binding:
+                    raise ConflictError('Command belongs to a different agent action')
                 prior = prior_command.result
                 if (prior_command.type != PROPOSAL_TYPE or prior_command.actor_id != actor.id
                         or any(prior.get(k) != v for k,v in {'work_id':work_id,'server_id':server_id,'tool':tool,'arguments':arguments}.items())):
@@ -113,6 +116,8 @@ def propose(ctx, actor, body) -> dict[str, Any]:
                         continue
                     if (prior.get("server_id") == server_id and prior.get("tool") == tool
                             and prior.get("arguments") == arguments and prior.get("_server_hash") == server_hash(server)):
+                        if agent_binding and prior.get('_agent_binding') != agent_binding:
+                            raise ValidationError('Resolve the existing external proposal before another agent action')
                         return deepcopy(_record_public(existing))
                     raise ValidationError("This work already has an active external tool call")
             result = {
@@ -123,6 +128,14 @@ def propose(ctx, actor, body) -> dict[str, Any]:
                 "tool_description": str(descriptor.get("description") or ""),
                 "created_by": actor.id, "created_at": utc_now().isoformat(),
             }
+            if agent_binding:
+                result['_agent_binding'] = deepcopy(agent_binding)
+                result['agent_run_id'] = agent_binding['run_id']
+                from homun.application.agent_external_link import validate_link
+                linked_run = validate_link(ctx,store,actor,result,staging=True)
+                linked_run.update(status='waiting_external',external_request_id=result['id'])
+                for key in ('_lease_token','_lease_until','_active_call_id'):
+                    linked_run.pop(key,None)
             result["digest"] = _digest(result)
             store.commands[body["command_id"]] = CommandRecord(
                 command_id=body["command_id"], type=PROPOSAL_TYPE, actor_id=actor.id,
@@ -154,6 +167,8 @@ def approve(ctx, actor, proposal_id: str, body) -> dict[str, Any]:
                 if not deadline or datetime.fromisoformat(deadline) <= utc_now():
                     proposal.update(status='outcome_unknown', error='Esito esterno incerto: verificare sul servizio prima di una nuova azione.')
             elif status in {'pending_approval', 'queued'}:
+                from homun.application.agent_external_link import validate_link
+                linked_run = validate_link(ctx,store,actor,proposal)
                 server = store.external_servers.get(proposal['server_id'])
                 if not proposal.get('_server_hash') or not proposal.get('_tool_descriptor'):
                     proposal.update(status='blocked', error='Proposta precedente: creare una nuova approvazione con configurazione verificata.')
@@ -169,6 +184,8 @@ def approve(ctx, actor, proposal_id: str, body) -> dict[str, Any]:
                     server = server.model_copy(deep=True)
                     proposal.update(status='running', _dispatch_deadline=(utc_now()+timedelta(seconds=30)).isoformat(),
                                     _approved_by=actor.id, _dispatch_started_at=utc_now().isoformat())
+                    if linked_run is not None:
+                        linked_run['_active_call_id'] = proposal['_agent_binding']['call_id']
                     dispatch = True
             snapshot = deepcopy(proposal)
         ctx.service.store = store
@@ -194,7 +211,7 @@ def approve(ctx, actor, proposal_id: str, body) -> dict[str, Any]:
                 with ctx.repository.transaction() as store:
                     current=_lookup(store,proposal_id).result
                     current.update(_receipt=deepcopy(outcome), _received_at=utc_now().isoformat(),
-                                   status='tool_error' if outcome.get('is_error') else 'publication_pending')
+                                   status='tool_error' if outcome.get('is_error') else ('result_ready' if current.get('_agent_binding') else 'publication_pending'))
                     current.pop('error',None)
                     if outcome.get('is_error'):
                         current['error']='Lo strumento ha restituito un errore; nessun ritentativo automatico.'

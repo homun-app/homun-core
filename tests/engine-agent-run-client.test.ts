@@ -109,3 +109,15 @@ test('control does not POST when the work is no longer accessible', async () => 
     assert.equal(calls, 1);
   } finally { globalThis.fetch = old; }
 });
+
+ test('preparation pins selected external servers without approving actions', async () => {
+  const old = globalThis.fetch; let calls = 0;
+  globalThis.fetch = async (_url, init) => {
+    if (++calls === 1) return Response.json({items:[]});
+    if (calls === 2) return Response.json({items:[{id:'w',version:1}]});
+    assert.deepEqual(JSON.parse(String(init?.body)).server_ids, ['s1','s2']);
+    return Response.json({id:'r',status:'pending_approval'});
+  };
+  try { await prepareAgentRun({id:'w'} as never, [], 'r', undefined, undefined, ['s1','s2']); }
+  finally { globalThis.fetch = old; }
+});

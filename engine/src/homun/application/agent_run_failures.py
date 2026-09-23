@@ -28,7 +28,7 @@ def fail(ctx, run_id, code, *, token=None, blocked=False, epoch=None, expected_s
             run = lookup(store, run_id)
             if epoch is not None and run['_epoch'] != epoch:
                 return 'superseded'
-            if run['status'] not in {'queued', 'running', 'waiting_input'}:
+            if run['status'] not in {'queued', 'running', 'waiting_input', 'waiting_external'}:
                 return run['status']
             if token is not None and run.get('_lease_token') != token:
                 return run['status']

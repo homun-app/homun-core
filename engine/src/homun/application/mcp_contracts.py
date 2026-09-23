@@ -57,3 +57,8 @@ def validate_arguments(descriptor, arguments):
 def require_same_descriptor(expected, actual):
     if expected != actual:
         raise ConflictError('Tool descriptor changed; create a new approval')
+
+
+def server_hash(server):
+    import hashlib
+    return hashlib.sha256(server.model_dump_json().encode()).hexdigest()

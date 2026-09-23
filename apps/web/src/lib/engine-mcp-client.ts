@@ -53,7 +53,7 @@ const jsonHeaders = {
 export async function listEngineServers(): Promise<ExternalServer[]> {
   const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/servers`,
     { method: "GET", headers: jsonHeaders });
-  if (!response.ok) throw new Error(`List MCP servers failed: HTTP ${response.status}`);
+  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Server esterni non disponibili");
   return ((await response.json()) as { items: ExternalServer[] }).items ?? [];
 }
 
@@ -144,7 +144,8 @@ export async function skillEngineAction(input: {
 
 export type ExternalToolCall = {
   id: string;
-  status: "pending_approval" | "running" | "completed" | "failed" | "publication_pending" | "outcome_unknown" | "tool_error" | "blocked";
+  agent_run_id?: string;
+  status: "pending_approval" | "result_ready" | "running" | "completed" | "failed" | "publication_pending" | "outcome_unknown" | "tool_error" | "blocked";
   work_id: string;
   server_id: string;
   server_name: string;
@@ -194,7 +195,7 @@ export async function approveEngineToolCall(proposalId: string, digest: string):
     });
   if (!response.ok) {
     const detail = (await response.json().catch(() => null)) as { detail?: { message?: string } } | null;
-    throw new Error(detail?.detail?.message ?? `Approve failed: HTTP ${response.status}`);
+    throw homunErrorFromHttp(response.status, detail, "Approvazione esterna non disponibile");
   }
   return (await response.json()) as ExternalToolCall;
 }
@@ -203,7 +204,7 @@ export async function listEngineToolCalls(workId: string): Promise<ExternalToolC
   const response = await mcpFetch(
     `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/works/${encodeURIComponent(workId)}/mcp/tools`,
     { method: "GET", headers: jsonHeaders });
-  if (!response.ok) throw new Error(`List tool calls failed: HTTP ${response.status}`);
+  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Azioni esterne non disponibili");
   return ((await response.json()) as { items: ExternalToolCall[] }).items ?? [];
 }
 

@@ -58,3 +58,8 @@ Tool registry: tools/registry.py and application/agent_tool_registry.py adapt
 the single-entry schema/handler/toolset design of Hermes tools/registry.py at
 the same pinned commit. Homun builds immutable per-run contracts and validates
 manifest hashes before model/tool IO; discovery grants no additional authority.
+
+application/agent_mcp.py adapts namespacing and bounded hash-suffixed wire names
+from tools/mcp_tool_schema.py at the pinned commit. Homun hashes original server
+identity and tool name to prevent sanitized-name collisions. Native integration
+uses Homun approvals and durable receipts, without an upstream runtime.

@@ -76,7 +76,16 @@ Una verifica del sorgente non aggiorna l'app installata.
   locale. Prima della chiamata, discovery e confronto nella stessa sessione:
   contratti cambiati bloccano senza inviare l’azione. [Prove](research/2026-09-23-mcp-contracts-verifica.md).
 
+- Strumenti MCP selezionati ora disponibili al modello nel ciclo nativo: ogni
+  azione attende consenso, la ricevuta riprende il run e solo il risultato finale
+  diventa artifact. Annullamenti e riavvii conservano gli esiti senza ridispatch.
+  [Prova Ollama + stdio](research/2026-09-23-agent-mcp-verifica.md).
+
 ## Evidenze della tranche corrente
+
+Ciclo MCP nativo: **800 test engine passati, 1 saltato**, più 9 controlli finali;
+220 test web, typecheck/build e OpenAPI allineati, architettura 0 errori. Ollama
++ stdio reali: azione approvata, ripresa da SQLite e una sola consegna corretta.
 
 Contratti MCP: **791 test engine passati, 1 saltato**, 216 test web; typecheck,
 build e OpenAPI allineati, architettura 0 errori. Fixture stdio: contratto valido

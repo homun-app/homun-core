@@ -9,9 +9,12 @@ import { HomunGuidanceNotice } from '@/components/HomunGuidanceNotice';
 import { listEngineTeams, type EngineTeam } from '@/lib/engine-projects-client';
 import { EngineRunRecipientPicker } from './EngineRunRecipientPicker';
 import { EngineMaterialSelection } from './EngineMaterialSelection';
+import { EngineAgentServerPicker } from './EngineAgentServerPicker';
+import { EngineAgentExternalApproval } from './EngineAgentExternalApproval';
 import { EngineAgentControls } from './EngineAgentControls';
 
 export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () => Promise<void> }) {
+  const [serverIds, setServerIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [teams, setTeams] = useState<EngineTeam[]>([]);
   const [teamId, setTeamId] = useState('');
@@ -26,7 +29,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
   }, []);
   const run = useEngineExecution(work, onChanged, {
     list: listAgentRuns, approve: approveAgentRun,
-    prepare: (work: Work, id: string, materials: string[], team: string, person: string) => prepareAgentRun(work, materials, id, team || undefined, person || undefined),
+    prepare: (work: Work, id: string, materials: string[], team: string, person: string, servers: string[]) => prepareAgentRun(work, materials, id, team || undefined, person || undefined, servers),
   });
   const p = run.proposal;
   const revising = p?.status === 'completed' && work.engineStatus === 'ready';
@@ -45,12 +48,13 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       <HomunErrorNotice error={teamError} />
       <EngineRunRecipientPicker value={personId} disabled={run.busy} onBusyChange={setPersonBusy}
         onChange={id => { run.renew(); setPersonId(id); }} />
+      <EngineAgentServerPicker selected={serverIds} disabled={run.busy} onChange={ids => { run.renew(); setServerIds(ids); }} />
       <EngineMaterialSelection work={work} filter={eligibleForRead} uploadExtensions={READ_UPLOAD_EXTENSIONS}
         selected={selected} maxSelected={12} disabled={run.busy}
         emptyHint="Puoi partire dalla richiesta o aggiungere i documenti da consultare."
         onSelectionChange={ids => { run.renew(); setSelected(ids); }} />
       <button className="cw-secondary" disabled={run.busy || personBusy || !['draft','ready','failed'].includes(work.engineStatus ?? '')}
-        onClick={() => void run.prepare(selected, teamId, personId)}>{revising ? 'Prepara la revisione richiesta' : "Prepara l’esecuzione"}</button>
+        onClick={() => void run.prepare(selected, teamId, personId, serverIds)}>{revising ? 'Prepara la revisione richiesta' : "Prepara l’esecuzione"}</button>
     </>}
     {p?.status === 'pending_approval' && <>
       <p><strong>{p.executor_name}</strong> · {p.materials.length ? p.materials.map(m => m.title).join(', ') : 'Obiettivo senza documenti'}</p>
@@ -58,9 +62,14 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {p.person && <p>Eventuali chiarimenti saranno richiesti a {p.person.name}, tramite un invito limitato alla domanda.</p>}
       <p>Autorizzi letture e ricerche su queste fonti, fino a {p.limits.max_turns} passaggi.
         Il risultato arriverà in revisione. Invii esterni e modifiche ai file non sono inclusi.</p>
+      {!!p.external_tools?.length && <>
+        <p>Strumenti disponibili: ogni azione esterna richiede una tua approvazione separata.</p>
+        <ul>{p.external_tools.map(tool => <li key={`${tool.server_id}:${tool.tool}`}><strong>{tool.server_name} · {tool.tool}</strong>{tool.description && ` — ${tool.description}`}</li>)}</ul>
+      </>}
       <button className="cw-primary" disabled={run.busy} onClick={() => void run.approve()}>Avvia il lavoro</button>
     </>}
     {p && ['queued','running'].includes(p.status) && <p role="status">{p.executor_name} sta lavorando · {p.turns} passaggi completati.</p>}
+    {p?.external_request_id && <EngineAgentExternalApproval active={p.status === 'waiting_external'} key={p.external_request_id ?? p.id} workId={work.id} requestId={p.external_request_id} />}
     {p?.status === 'paused' && <p role="status">Lavoro in pausa. Puoi correggere le indicazioni o riprendere.</p>}
     {p?.status === 'cancelled' && <p role="status">Esecuzione interrotta. Le attività già svolte restano consultabili.</p>}
     {p && <EngineAgentControls key={p.id} workId={work.id} run={p} onUpdated={async updated => {

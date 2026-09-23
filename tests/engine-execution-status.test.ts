@@ -12,3 +12,9 @@ test('paused execution continues polling and a repeated pause refreshes work sta
   assert.equal(executionRefreshes('cancelled', 'running'), true);
   assert.equal(executionRefreshes('queued', 'paused'), true);
 });
+
+test('external approval waits keep polling and refresh the work', async () => {
+  const { executionPolls, executionRefreshes } = await import('../apps/web/src/lib/engine-execution-status.ts');
+  assert.equal(executionPolls('waiting_external'), true);
+  assert.equal(executionRefreshes('waiting_external', 'running'), true);
+});

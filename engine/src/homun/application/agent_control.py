@@ -41,7 +41,7 @@ def control_in_store(ctx,store,actor,work_id,run_id,body,*,echo=True):
         raise ValidationError('Unknown execution control')
     if action in {'steer','redirect'} and (not isinstance(text,str) or not text.strip() or len(text)>16000):
         raise ValidationError('A correction of 1 to 16000 characters is required')
-    if run['status'] not in ACTIVE and not (run['status']=='waiting_input' and action=='cancel'):
+    if run['status'] not in ACTIVE and not (run['status'] in {'waiting_input','waiting_external'} and action=='cancel'):
         raise ConflictError('Run is no longer controllable')
     if work.version != body['expected_version']:
         raise ConflictError('Work changed; refresh the control')

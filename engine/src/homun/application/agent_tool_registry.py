@@ -18,6 +18,9 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None):
     for definition in tool_definition(run.get('team'), run['assignee_id']):
         registry.register(ToolEntry(definition, 'team', '1', Consultation,
             collaborator_executor, replay='model'))
+    from homun.application.agent_mcp import entries
+    for entry in entries(run.get('_mcp_bindings', [])):
+        registry.register(entry)
     if run.get('_protocol') == PROTOCOL:
         registry.register(ToolEntry(QUESTION, 'human', '1',
             QuestionArguments, kind='ask', replay='never'))

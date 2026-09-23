@@ -21,6 +21,9 @@ test('native running controls expose pause, cancellation and clearly distinct co
     const waiting = renderer.render({...props,run:{...props.run,status:'waiting_input'}});
     assert.match(waiting, />Interrompi</);
     assert.doesNotMatch(waiting, />Pausa<|>Invia correzione<|>Rivedi il piano<|<textarea/);
+    const external = renderer.render({...props,run:{...props.run,status:'waiting_external'}});
+    assert.match(external, />Interrompi</);
+    assert.doesNotMatch(external, />Pausa<|>Invia correzione<|>Rivedi il piano<|<textarea/);
     for (const run of [{...props.run,status:'completed'}, {...props.run,tool_version:'adaptive-materials-v1'}]) {
       assert.equal(renderer.render({...props,run}), '');
     }
