@@ -28,6 +28,8 @@ export function engineWorkPanelMessage(
       return 'Accordo confermato: aggiungi i due listini nella conversazione e Homun preparerà l’azione da approvare.';
     if (intake.capability === 'read_material')
       return 'Accordo confermato: carica il materiale nella conversazione e Homun preparerà l’azione da approvare.';
+    if (intake.capability === 'agent_run')
+      return 'Accordo confermato: scegli fonti e partecipanti in «Lavora con Homun», poi approva l’esecuzione.';
     if (intake.capability === 'synthesize')
       return 'Accordo confermato: scegli i documenti per la sintesi nella sezione «Scrivi la sintesi» e approva l’esecuzione.';
     return 'Il riepilogo è confermato: i prossimi passi si concordano in chat.';
@@ -40,7 +42,7 @@ export function engineWorkPanelMessage(
     case 'failed': return 'Esecuzione non completata. Controlla l’errore nella conversazione.';
     case 'paused': return 'Lavoro in pausa.';
     case 'cancelled': return 'Lavoro chiuso senza eseguirlo: l’accordo resta nello storico della conversazione.';
-    case 'waiting_input': return 'In attesa del tuo contributo nella conversazione.';
+    case 'waiting_input': return 'In attesa di un contributo nella conversazione.';
     default: return 'Le proposte e le approvazioni disponibili sono nella conversazione.';
   }
 }

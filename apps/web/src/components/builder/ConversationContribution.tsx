@@ -34,7 +34,7 @@ export function ConversationContribution({
   const request = work.request;
   const pending = request?.status === "pending";
   const canManage = viewer === (work.requester || "Fabio") || viewer === work.reviewer;
-  const canReply = pending && viewer === request.to && !request.childId;
+  const canReply = pending && viewer === request.to && !request.childId && !request.viaInvitation;
   return (
     <div className="cw-contribution">
       {pending ? (
@@ -134,7 +134,11 @@ export function ConversationContribution({
             </>
           ) : (
             <p className="cw-hint">
-              La richiesta è nelle notifiche di {request.to}. Il lavoro rimane in attesa.
+              {request.viaInvitation
+                ? `Il lavoro aspetta il contributo di ${request.to}. Condividi il link riservato dalla sezione Invito al contributo.`
+                : work.source === "engine"
+                  ? `Il lavoro aspetta il contributo di ${request.to}.`
+                  : `La richiesta è nelle notifiche di ${request.to}. Il lavoro rimane in attesa.`}
             </p>
           )}
         </>

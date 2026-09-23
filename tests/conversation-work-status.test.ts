@@ -100,7 +100,7 @@ describe("workspaceWorkStatus (engine works)", () => {
     );
     assert.equal(
       workspaceWorkStatus(sampleWork({ source: "engine", engineStatus: "waiting_input" }), [], undefined),
-      "In attesa del tuo contributo",
+      "In attesa di un contributo",
     );
     assert.equal(
       workspaceWorkStatus(sampleWork({ source: "engine", engineStatus: "insolito" }), [], undefined),

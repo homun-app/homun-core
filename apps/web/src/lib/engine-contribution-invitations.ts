@@ -31,3 +31,12 @@ export async function portalRequest<T>(engine: string, token: string, action: 'r
   if (!response.ok) throw homunErrorFromHttp(response.status, data, 'Contributo non disponibile');
   return data as T;
 }
+
+export type ContributionPerson = { id: string; name: string };
+export async function listPeople(): Promise<ContributionPerson[]> {
+  return (await invitationRequest<{items: ContributionPerson[]}>('/people')).items;
+}
+
+export function createPerson(name: string, commandId: string): Promise<ContributionPerson> {
+  return invitationRequest<ContributionPerson>('/people', { command_id: commandId, name });
+}

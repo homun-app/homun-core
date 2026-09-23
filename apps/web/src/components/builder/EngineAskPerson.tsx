@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { HomunErrorNotice } from '@/components/HomunErrorNotice';
-import { invitationRequest } from '@/lib/engine-contribution-invitations';
+import { invitationRequest, listPeople, createPerson, type ContributionPerson } from '@/lib/engine-contribution-invitations';
 import { EngineContributionInvitations } from './EngineContributionInvitations';
 import type { Work } from './conversation-types';
 
-type Person = { id: string; name: string };
+type Person = ContributionPerson;
 export function EngineAskPerson({ work, onChanged }: { work: Work; onChanged?: (() => Promise<void>) | undefined }) {
   const [people,setPeople] = useState<Person[]>([]);
   const [selected,setSelected] = useState('');
@@ -13,13 +13,13 @@ export function EngineAskPerson({ work, onChanged }: { work: Work; onChanged?: (
   const [asked,setAsked] = useState(false);
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState<unknown>(null);
-  useEffect(() => { void invitationRequest<{ items: Person[] }>('/people').then(v => setPeople(v.items)).catch(setError); }, []);
+  useEffect(() => { void listPeople().then(setPeople).catch(setError); }, []);
   async function ask() {
     setBusy(true); setError(null);
     try {
       let personId = selected;
       if (!personId) {
-        const person = await invitationRequest<Person>('/people', { command_id: crypto.randomUUID(), name });
+        const person = await createPerson(name, crypto.randomUUID());
         personId = person.id;
       }
       await invitationRequest(`/works/${encodeURIComponent(work.id)}/ask-person`, {

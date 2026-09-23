@@ -63,7 +63,7 @@ export type Work = {
   archived?: boolean;
   catalogPlan?: CatalogPlan;
   coordinatedBy?: string;
-  request?: { to: string; need: string; status: "pending" | "resolved"; childId?: string };
+  request?: { to: string; viaInvitation?: boolean; need: string; status: "pending" | "resolved"; childId?: string };
   routineId?: string;
   runNumber?: number;
   startedAt?: string;
@@ -83,6 +83,7 @@ export type Work = {
   engineOwnerName?: string;
   /** Engine plan/artifact revision counters (Fonte=motore); 0 = none yet. */
   enginePlanRevision?: number;
+  engineRevisionRequested?: boolean;
   engineArtifactVersion?: number;
   /** Accepted plan steps (phase ladder) from the engine works list. */
   enginePlan?: EnginePlanStepProjection[] | undefined;

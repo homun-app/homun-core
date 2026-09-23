@@ -42,8 +42,8 @@ export function ConversationWorkspaceWelcome({
           <em>Decidiamo insieme come farlo.</em>
         </h1>
         <p>
-          Raccontami il risultato che cerchi. Ti proporrò un obiettivo chiaro e il collaboratore
-          adatto, oppure un nuovo profilo da creare. Il lavoro parte dopo la tua conferma.
+          Chiedi quello che ti serve. Homun può lavorare direttamente con te; puoi coinvolgere
+          un collaboratore o costruire la tua squadra quando vuoi.
         </p>
         <span className="cw-example-note">
           Esempio: «Prepara il catalogo prodotti per il cliente entro venerdì».

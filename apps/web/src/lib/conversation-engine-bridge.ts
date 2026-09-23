@@ -32,6 +32,7 @@ export type EngineWorkRecord = {
   current_plan_revision: number;
   current_artifact_version: number;
   intake_confirmed?: boolean;
+  revision_requested?: boolean;
   due_date?: string | null;
   plan?: Array<{
     id: string;
@@ -55,6 +56,7 @@ export type EngineWorkRecord = {
   pending_contribution?: {
     id: string;
     to_actor_id: string;
+    recipient_name?: string;
     need: string;
     status: string;
     step_id: string;
@@ -87,12 +89,14 @@ export function parseEngineWorkRecord(raw: Record<string, unknown>): EngineWorkR
   } else if ("reviewer_id" in raw) {
     record.reviewer_id = null;
   }
+  record.revision_requested = raw["revision_requested"] === true;
   const pending = raw["pending_contribution"];
   if (pending && typeof pending === "object") {
     const p = pending as Record<string, unknown>;
     record.pending_contribution = {
       id: String(p["id"] ?? ""),
       to_actor_id: String(p["to_actor_id"] ?? ""),
+      ...(typeof p["recipient_name"] === "string" ? {recipient_name: p["recipient_name"]} : {}),
       need: String(p["need"] ?? ""),
       status: String(p["status"] ?? "pending"),
       step_id: String(p["step_id"] ?? ""),
@@ -217,6 +221,7 @@ export function engineWorkToUiWork(
     engineStatus: record.status,
     engineObjective: record.objective,
     engineIntakeConfirmed: record.intake_confirmed ?? false,
+    engineRevisionRequested: record.revision_requested ?? false,
     enginePlan: record.plan as Work["enginePlan"],
     engineLatestArtifact: record.latest_artifact,
     engineDue: record.due_date,
@@ -232,10 +237,11 @@ export function engineWorkToUiWork(
   if (record.pending_contribution) {
     work.engineContributionRequestId = record.pending_contribution.id;
     work.request = {
-      to:
+      to: record.pending_contribution.recipient_name ?? (
         record.pending_contribution.to_actor_id === "person_fabio"
           ? "Fabio"
-          : record.pending_contribution.to_actor_id,
+          : record.pending_contribution.to_actor_id),
+      viaInvitation: Boolean(record.pending_contribution.recipient_name),
       need: record.pending_contribution.need,
       status: record.pending_contribution.status === "pending" ? "pending" : "resolved",
     };

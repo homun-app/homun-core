@@ -9,6 +9,7 @@ import { EngineRoutineCreator } from "./EngineRoutines";
 import { ExternalToolsSection } from "./ExternalToolsSection";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { engineWorkPanelMessage } from "@/lib/engine-project-projection";
+import { defaultLocalActor } from "@/lib/engine-domain-client";
 import { intakeConfirmLabel } from "@/lib/engine-intake-display";
 import { engineDraftStatusLabel, engineStatusLabel } from "@/lib/engine-work-status";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
@@ -118,7 +119,7 @@ export function EngineWorkspaceWorkPanel({
             ) : (
               <>
                 {ownerName || "Homun"}
-                {!ownerName && <span className="cw-engine-summary__hint"> coordina finché non confermi un collaboratore</span>}
+                {!ownerName && <span className="cw-engine-summary__hint"> lavora direttamente con te</span>}
               </>
             )}
           </dd>
@@ -321,7 +322,7 @@ function PhaseLadder({
             </span>
             <small>
               {STEP_STATUS_LABELS[step.status] ?? step.status} ·{" "}
-              {agentNames?.[step.assignee_id] ?? "Collaboratore"}
+              {agentNames?.[step.assignee_id] ?? (step.assignee_id === defaultLocalActor().id ? (step.capability === "general" ? "Tu" : "Homun") : "Collaboratore")}
             </small>
           </li>
         ))}

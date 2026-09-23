@@ -4,6 +4,7 @@ import type { Work } from "./conversation-types";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { EngineMaterialRead } from "./EngineMaterialRead";
+import { EngineAgentRun } from "./EngineAgentRun";
 import { EngineSynthesis } from "./EngineSynthesis";
 import { EnginePriceComparison } from "./EnginePriceComparison";
 import { EngineResultReview } from "./EngineResultReview";
@@ -121,7 +122,7 @@ export function EngineWorkIntake({
               </div>
             )}
             <dl className="cw-intake-facts">
-              <div><dt>Attività prevista</dt><dd>{p.capability === 'compare_csv' ? 'Confronto prezzi fra due CSV' : p.capability === 'read_material' ? 'Lettura autorizzata di un materiale' : p.capability === 'synthesize' ? 'Sintesi scritta da Homun o dal collaboratore scelto, bozza in revisione' : 'Preparazione del lavoro, senza esecuzione automatica'}</dd></div>
+              <div><dt>Attività prevista</dt><dd>{p.capability === 'compare_csv' ? 'Confronto prezzi fra due CSV' : p.capability === 'read_material' ? 'Lettura autorizzata di un materiale' : p.capability === 'agent_run' ? 'Esecuzione adattiva con letture e ricerche nei documenti scelti' : p.capability === 'synthesize' ? 'Sintesi scritta da Homun o dal collaboratore scelto, bozza in revisione' : 'Preparazione del lavoro, senza esecuzione automatica'}</dd></div>
               <div>
                 <dt>Risultato atteso</dt>
                 <dd>{p.output}</dd>
@@ -149,7 +150,7 @@ export function EngineWorkIntake({
                           ? "Confronto CSV"
                           : step.capability === "read_material"
                             ? "Lettura materiale"
-                            : "Passaggio umano"}{" "}
+                            : step.capability === "agent_run" ? "Ricerca e lettura con Homun" : step.capability === "synthesize" ? "Sintesi" : "Passaggio umano"}{" "}
                         · {step.assignee || agent?.name || "Homun"}
                         {(step.expected_materials?.length ?? 0) > 0 && (
                           <> · attende: {step.expected_materials.join(", ")}</>
@@ -234,12 +235,12 @@ export function EngineWorkIntake({
                 <p className="cw-intake-note">
                   {p.capability === "compare_csv"
                     ? "Il lavoro è concordato. Aggiungi i due listini qui sotto; ti mostrerò l’azione da approvare prima di eseguirla."
-                    : "Il lavoro è concordato. Carica qui sotto il materiale da leggere; ti mostrerò l’azione da approvare prima di eseguirla."}
+                    : "Il lavoro è concordato. Scegli qui sotto le fonti da usare; ti mostrerò l’azione da approvare prima di eseguirla."}
                 </p>
               )
             )}
             {confirmed && work.engineStatus === "review" && work.engineLatestArtifact
-              && lastSucceededCapability(work) === "general" && (
+              && ["general", "agent_run"].includes(lastSucceededCapability(work) ?? "") && (
               <EngineArtifactReviewInline work={work} onChanged={onChanged} />
             )}
             {confirmed && <PhaseTool work={work} onChanged={onChanged} />}
@@ -289,6 +290,7 @@ export function EngineWorkIntake({
       {confirmed && p.capability === "read_material" && (
         <EngineMaterialRead initiallyOpen work={work} onChanged={onChanged} />
       )}
+      {confirmed && p.capability === "agent_run" && !work.enginePlan?.length && <EngineAgentRun work={work} onChanged={onChanged} />}
       {confirmed && p.capability === "synthesize" && (
         <EngineSynthesis initiallyOpen work={work} onChanged={onChanged} />
       )}
@@ -337,10 +339,11 @@ function lastSucceededCapability(work: Parameters<typeof EngineWorkIntake>[0]["w
 /** Capability of the phase in play: the running one, else the first waiting. */
 function currentPhaseCapability(work: Parameters<typeof EngineWorkIntake>[0]["work"]): string {
   const steps = work.enginePlan;
+  if (work.engineStatus === "ready" && work.engineRevisionRequested && lastSucceededCapability(work) === "agent_run") return "agent_run";
   if (!steps?.length) return "general";
   const running = steps.find((step) => step.status === "running");
   const current = running ?? steps.find((step) => step.status === "pending");
-  return current?.capability ?? "general";
+  return current?.capability ?? (work.engineStatus === "ready" && lastSucceededCapability(work) === "agent_run" ? "agent_run" : "general");
 }
 
 /** The dedicated tool flow drives its phase: comparison or authorized read. */
@@ -353,6 +356,8 @@ function PhaseTool({ work, onChanged }: {
     return <EnginePriceComparison work={work} onChanged={onChanged} />;
   if (capability === "read_material")
     return <EngineMaterialRead work={work} onChanged={onChanged} />;
+  if (capability === "agent_run")
+    return <EngineAgentRun work={work} onChanged={onChanged} />;
   if (capability === "synthesize")
     return <EngineSynthesis work={work} onChanged={onChanged} />;
   return null;

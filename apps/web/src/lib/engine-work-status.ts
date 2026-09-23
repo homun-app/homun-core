@@ -8,7 +8,7 @@ export const ENGINE_STATUS_LABELS: Record<string, string> = {
   failed: "Da verificare",
   paused: "In pausa",
   cancelled: "Chiuso",
-  waiting_input: "In attesa del tuo contributo",
+  waiting_input: "In attesa di un contributo",
   waiting_approval: "In attesa di approvazione",
 };
 

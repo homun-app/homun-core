@@ -1338,8 +1338,7 @@ export function ConversationWorkspace() {
             onCancelInFlight={() => engine.cancelInFlight()}
             details={
               work && scenario ? (
-                <ConversationWorkspaceWorkPanel
-                  onRefreshEngine={engine.refresh}
+                <ConversationWorkspaceWorkPanel onRefreshEngine={engine.refresh}
                   work={work}
                   scenario={scenario}
                   viewer={viewer}
