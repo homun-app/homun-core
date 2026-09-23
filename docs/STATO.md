@@ -60,6 +60,13 @@ nei rispettivi rapporti e non sono stati ripetuti automaticamente qui.
 
 ## Prossimo passo: uso reale e UX
 
+La [verifica della visione rispetto al codice](research/2026-09-23-visione-prodotto-gap.md)
+riporta l'analisi ai due ingressi richiesti: usare subito Homun e costruire la
+propria squadra. Mancano ancora il ciclo adattivo generalista con strumenti,
+l'onboarding aziendale e la collaborazione operativa tra identità distinte.
+Team e coordinatore persistiti non certificano delega autonoma o collaborazione
+multipersona. Il confronto listini rimane una prova tecnica circoscritta.
+
 Ripercorrere primo avvio, domanda semplice, lavoro con materiali, collaborazione,
 revisione e ricorrenza. Per ogni scenario esplicitare obiettivo dell'utente,
 passaggi richiesti, decisioni da confermare, risultato atteso e recupero dagli

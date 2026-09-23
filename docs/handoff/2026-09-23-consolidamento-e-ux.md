@@ -31,12 +31,14 @@ cose da implementare da zero.
 
 ## Prossimo confronto con Fabio
 
-Partire da tre lavori: confronto listini, relazione da materiali, ricorrenza di
-un lavoro riuscito. Ricostruire richiesta → chiarimento → accordo → fonti →
-esecuzione → revisione → riutilizzo, includendo fallimenti e ripresa dopo giorni.
+La [verifica visione/codice](../research/2026-09-23-visione-prodotto-gap.md)
+recepisce la direzione ribadita da Fabio: uso diretto generalista e onboarding
+aziendale per costruire una squadra di persone e bot. Questa era già la visione
+iniziale; il confronto listini resta una fixture tecnica, non il posizionamento.
 
-Discutere quali decisioni l'utente deve davvero prendere e quali configurazioni
-possono apparire solo quando necessarie. Conservare obiettivo, autorizzazione,
-fonti e verificabilità; misurare attriti e conferme ripetitive prima di cambiare
-componenti. Restano aperti recupero MCP, identità/rete, cifratura completa,
-qualità del modello e distribuzione verificata.
+Discutere insieme i due ingressi, il passaggio da domanda ad azione e quando
+serve un collaboratore stabile. I gap principali sono il ciclo adattivo con
+strumenti, l'onboarding organizzativo, il coordinamento operativo e le identità
+condivise. Preservare dominio, DBOS, artifact, memoria e procedure già presenti.
+L'analisi è statica: nessun nuovo walkthrough o test multipersona è stato svolto.
+Nessuna implementazione di questi percorsi è autorizzata dal solo rapporto.

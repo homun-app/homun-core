@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **172**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **173**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -183,3 +183,4 @@ Documenti censiti: **172**. Punto di ingresso: [indice](README.md).
 | [engine/packaging/README.md](../engine/packaging/README.md) | Riferimento corrente |
 | [experiments/engine/f0_2_runtime/README.md](../experiments/engine/f0_2_runtime/README.md) | Fotografia storica |
 | [roadmap.md](../roadmap.md) | Riferimento corrente |
+| [docs/research/2026-09-23-visione-prodotto-gap.md](research/2026-09-23-visione-prodotto-gap.md) | Analisi statica corrente e priorita proposte |

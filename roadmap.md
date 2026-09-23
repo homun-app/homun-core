@@ -43,7 +43,7 @@ capacità attuali, prove e limiti. I percorsi simulati restano espliciti.
 - [x] Intake conversazionale: sintesi distinta, proposta agente/nuovo profilo, conferma e riepilogo compatto
 - [x] Stabilità strutturale del brief nelle riformulazioni: campi modificati dichiarati, conservazione engine-side, diff esplicito e lettura non interrotta dai refresh
 - [x] Stabilità della conversazione: scroll ancorato a chi legge (policy testata), attese del modello oneste nel transcript (fasi + tempo), 409 a versione stantia con recupero guidato e proposta stantia ritirata
-- [x] Distinzione domanda/lavoro: classificazione backend senza stato, una domanda resta in chat senza creare lavori o collaboratori
+- [x] Distinzione domanda/lavoro: classificazione backend senza stato, una domanda resta in chat senza imporre un brief o un collaboratore; il client crea ancora un Work di supporto
 - [x] Registro unico delle capacità: fonte singola per vocabolario, versione tool, limiti ed effetti; disponibilità interrogabile per attore; intake alimentato dal catalogo reale
 - [x] Prompt esterni al codice e multilingua: file nel pacchetto con varianti it/en, store con fallback, lingua per workspace (`HOMUN_LANGUAGE`) e per richiesta, rilevamento automatico in classificazione
 - [x] Seconda capacità locale limitata: lettura autorizzata di un materiale → artifact con estratto, provenienza e revisione umana (fonte condivisa con il confronto CSV, DBOS idempotente)
@@ -55,7 +55,10 @@ capacità attuali, prove e limiti. I percorsi simulati restano espliciti.
 - [x] Materiali, Plugin e scadenze di Compiti collegati allo stato persistente del motore
 - [ ] Contratto di recupero degli effetti MCP esterni
 - [x] Guida d'uso e confronto documentato Hermes/Homun, con capacità e testimonianze distinte
-- [ ] Walkthrough UX con Fabio e prove sui tre casi prioritari; definire la prima semplificazione
+- [x] [Analisi visione/codice](docs/research/2026-09-23-visione-prodotto-gap.md): uso diretto e squadra aziendale
+- [ ] Disegno UX dei due ingressi: chat operativa e onboarding aziendale; definire il primo percorso completo
+- [ ] Ciclo generalista adattivo con strumenti, osservazioni e ripresa persistente
+- [ ] Coordinamento operativo e contributo di colleghi con identità distinte
 
 ## Consolidamento delle fondamenta — aggiornato al 19 settembre 2026
 

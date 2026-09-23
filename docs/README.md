@@ -4,6 +4,8 @@ Aggiornamento: 23 settembre 2026, consolidamento integrato in `main` (`8b7658b2`
 
 ## Da dove iniziare
 
+- [Visione e distanza dal codice](research/2026-09-23-visione-prodotto-gap.md): uso diretto, onboarding aziendale e squadra persone–bot; priorità proposte.
+
 - [Uso di Homun](USO-HOMUN.md): percorsi concreti, risultato atteso e limiti.
 - [Stato verificato](STATO.md): capacità attuali e problemi ancora aperti.
 - [Confronto con Hermes](research/2026-09-23-hermes-homun-utilizzo.md): documentazione upstream aggiornata, testimonianze e implicazioni per Homun.
