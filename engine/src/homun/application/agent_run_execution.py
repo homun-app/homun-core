@@ -3,7 +3,7 @@ import json
 from copy import deepcopy
 from datetime import datetime, timedelta
 from uuid import uuid4
-from homun.application import budgets
+from homun.application import budgets, agent_native
 from homun.application.agent_runs import authority, lookup
 from homun.application.agent_tools import catalog, run_tool
 from homun.application.agent_team import tool_definition
@@ -66,6 +66,8 @@ def _claim(ctx, run_id):
 
 
 def _decision(ctx, run):
+    if agent_native.enabled(run) and agent_native.pending(run):
+        return agent_native.decision(run)
     if run.get('_decision'):
         return AgentDecision.model_validate(run['_decision'])
     actor = Actor.model_validate(run['_actor'])
@@ -82,9 +84,16 @@ def _decision(ctx, run):
     reservation = budgets.reserve(ctx, actor, run['work_id'], BudgetCounters(attempts=1),
         purpose='agent_run.decide', accounting_actor_id=run['assignee_id'])
     try:
-        decision, result = decide(ctx.models, objective=run['_objective'], tools=catalog() + tool_definition(run.get("team"), run["assignee_id"]),
-            observations=run['observations'], connection_id=run['connection_id'],
-            instructions=run['_instructions'])
+        tools = catalog() + tool_definition(run.get('team'), run['assignee_id'])
+        if agent_native.enabled(run):
+            result = ctx.models.complete_tools(agent_native.history(run), tools=tools + [agent_native.QUESTION],
+                                               connection_id=run['connection_id'])
+            agent_native.append_round(run, result.message)
+            decision = agent_native.decision(run)
+        else:
+            decision, result = decide(ctx.models, objective=run['_objective'], tools=tools,
+                observations=run['observations'], connection_id=run['connection_id'],
+                instructions=run['_instructions'])
     except Exception:
         budgets.reconcile_unknown(ctx, actor, run['work_id'], reservation)
         raise
@@ -96,6 +105,8 @@ def _decision(ctx, run):
             if current.get('_lease_token') != run['_lease_token']:
                 raise ValidationError('Run lease changed')
             current['_decision'] = decision.model_dump()
+            if agent_native.enabled(run):
+                current['_messages'] = run['_messages']
         ctx.service.store = store
     return decision
 
@@ -127,6 +138,8 @@ def advance(ctx, run_id):
                 service = ctx.service.for_store(store)
                 current['turns'] += 1
                 if decision.kind == 'tool':
+                    if agent_native.enabled(current):
+                        agent_native.append_result(current, observation)
                     current['observations'].append({'tool': decision.tool, 'arguments': decision.arguments,
                                                     'message': decision.message, 'result': observation})
                 elif decision.kind == 'ask':

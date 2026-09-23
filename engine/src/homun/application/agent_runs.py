@@ -2,6 +2,8 @@
 import hashlib
 import json
 from copy import deepcopy
+from homun.application import agent_native
+from homun.models.native_prompt import initial_messages
 from homun.application.work_request_context import request_history
 from homun.application.agent_team import bind_team, validate_team
 from homun.application.contribution_people import _people
@@ -148,6 +150,12 @@ def propose(ctx, actor, work_id, body):
                                              'constraints': (brief or {}).get('constraints', []),
                                              'revision': revision_context(store, work),
                                              'organization_context': organization_background(store, actor)}, ensure_ascii=False), '_epoch': 0}
+            # Pin the protocol in the approval scope; never downgrade on provider failure.
+            connection = ctx.models.get_connection(connection_id)
+            run['_protocol'] = agent_native.PROTOCOL if connection.kind == 'openai_compatible' else 'json-decision-v1'
+            if agent_native.enabled(run):
+                run['tool_version'] = 'adaptive-materials-native-v2'
+                run['_messages'] = [m.model_dump() for m in initial_messages(run['_objective'], run['_instructions'])]
             run['digest'] = hashlib.sha256(json.dumps(run, sort_keys=True).encode()).hexdigest()
             save(store, actor, run['id'], PROPOSAL_TYPE, fingerprint, run)
         ctx.service.store = store
@@ -212,6 +220,8 @@ def resume_waiting(ctx, run_id):
             service = ctx.service.for_store(store)
             service.apply(actor, f'{run_id}:resume:{run["_epoch"]}', 'work.start',
                           {'work_id': work.id, 'expected_version': work.version, 'durable': False})
+            if agent_native.enabled(run):
+                agent_native.append_result(run, {'question': request.need, 'text': request.response_text})
             run['observations'].append({'tool': 'human_input', 'result': {'question': request.need, 'text': request.response_text}})
             run['_epoch'] += 1
             run.update(status='queued', _run_version=work.version,

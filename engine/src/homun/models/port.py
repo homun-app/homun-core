@@ -7,7 +7,11 @@ Callers must only depend on this module and models.types.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Literal, Protocol
+from typing import Literal, Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from homun.models.agent_turn import ToolDefinition
+    from homun.models.native_turn import NativeMessage, NativeResult
 
 from pydantic import BaseModel, Field
 
@@ -75,6 +79,13 @@ class ModelPort(Protocol):
     def list_usage(self, *, limit: int = 50) -> list[UsageEntry]: ...
 
 
+class NativeToolPort(ModelPort, Protocol):
+    """Optional native conversation surface; separate from plain-chat adapters."""
+
+    def complete_tools(self, messages: list["NativeMessage"], *, tools: list["ToolDefinition"],
+                       connection_id: str | None = None) -> "NativeResult": ...
+
+
 # Re-export for callers that import port only
 __all__ = [
     "ChatMessage",
@@ -82,6 +93,7 @@ __all__ = [
     "Connection",
     "ConnectionKind",
     "ModelPort",
+    "NativeToolPort",
     "UsageEntry",
     "VerifyResult",
     "utc_now",

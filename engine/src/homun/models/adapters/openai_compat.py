@@ -112,6 +112,14 @@ class OpenAICompatModelAdapter:
         self.usage.append(result.usage)
         return result
 
+    def complete_tools(self, messages, *, tools, connection_id=None):
+        from homun.models.native_transport import complete_tools
+        if connection_id is not None:
+            self.get_connection(connection_id)
+        result = complete_tools(self._provider, messages, tools=tools)
+        self.usage.append(result.usage)
+        return result
+
     def stream(
         self,
         messages: list[ChatMessage],

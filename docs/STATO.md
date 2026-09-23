@@ -1,7 +1,7 @@
 # Stato verificato di Homun 2
 
-Aggiornato il 23 settembre 2026 con la tranche operativa successiva ad
-`a2d420c8`. Lo stato precedente e i rapporti datati conservano le prove storiche.
+Aggiornato il 23 settembre 2026 con il primo nucleo nativo successivo a
+`d264a5f6`. Lo stato precedente e i rapporti datati conservano le prove storiche.
 Una verifica del sorgente non aggiorna l'app installata.
 
 ## Capacità presenti
@@ -36,7 +36,18 @@ Una verifica del sorgente non aggiorna l'app installata.
 - Destinatari nominativi e portale temporaneo per contributi testuali; una risposta
   può far riprendere il ciclo adattivo. Identità dichiarata, non account verificato.
 
+- Nuovi run OpenAI-compatible con messaggi e strumenti nativi, cronologia canonica
+  e ripresa delle chiamate pendenti dopo un contributo umano. Nucleo mantenuto in
+  Homun, derivato dalla logica Hermes con attribuzione MIT; nessun runtime esterno.
+
 ## Evidenze della tranche corrente
+
+Il [primo nucleo nativo](research/2026-09-23-owned-core-verifica.md) aggiunge
+verifiche di trasporto, ripresa, autorità e una prova Ollama reale. Suite completa
+finale: 625 test motore passati, 1 saltato, inclusi 17 test nativi.
+OpenAPI invariato; wheel con attribuzione verificata.
+L'app installata non è stata aggiornata.
+
 
 Il [rapporto operativo](research/2026-09-23-homun-operativo-verifica.md) distingue
 prove automatiche, modello locale reale e limiti. Suite: 608 motore passati e 1

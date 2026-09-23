@@ -23,6 +23,7 @@ each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 - **Manual update checks offer the available version only once.**
 
 ## Improvements
+- **Native agent tool rounds in the Homun engine**, with persisted call/result history and pending-call recovery after human input; Hermes-derived execution guidance includes MIT attribution.
 - **Current usage and developer documentation**, with verified limits and a dated Hermes usage comparison.
 
 ## [0.2.1001] — 2026-09-23

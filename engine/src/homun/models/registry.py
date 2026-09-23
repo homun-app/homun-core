@@ -238,6 +238,17 @@ class ModelRegistry:
         self.usage.append(result.usage)
         return result
 
+    def complete_tools(self, messages, *, tools, connection_id=None):
+        from homun.domain.errors import ValidationError
+        from homun.models.native_transport import complete_tools
+        pid = connection_id or self.active_provider_id
+        provider = self._providers.get(pid)
+        if not isinstance(provider, OpenAICompatibleProvider):
+            raise ValidationError('Native tools require an OpenAI-compatible connection')
+        result = complete_tools(provider, messages, tools=tools)
+        self.usage.append(result.usage)
+        return result
+
     def stream(
         self,
         messages: list[ChatMessage],
