@@ -9,6 +9,18 @@ each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 
 ## [Unreleased]
 
+## [0.2.1001] — 2026-09-23
+
+Updating becomes a visible, guided flow: you watch the download and choose when to restart.
+
+## Improvements
+- **Download progress window.** Accepting an update now opens a small progress window (percentage and megabytes); the Dock icon mirrors the progress. Homun keeps working while it downloads.
+- **Explicit restart consent.** When the download completes the app asks whether to close and restart now to install, or install on the next quit. Nothing is ever installed silently.
+
+## Fixes
+- **A malformed update event can no longer crash the main process** (defensive guards around the update offer, the download start and the Dock progress call).
+- **A staged download equal to the running version no longer prompts again** (leftover from an install-on-quit is ignored unless genuinely newer).
+
 ## [0.2.1000] — 2026-09-23
 
 Updates become visible: the app now says which version it runs and lets you check for updates on demand.
