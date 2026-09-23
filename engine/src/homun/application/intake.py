@@ -153,13 +153,6 @@ def propose(ctx, actor, work_id, body):
             selected = next((a for a in agents if a['id'] == brief.suggested_agent_id), None)
             if brief.suggested_agent_id and not selected:
                 raise ValueError('Suggested agent does not exist in active roster')
-            collaborator_name = None
-            if selected:
-                collaborator_name = selected['name']
-            elif brief.new_agent:
-                collaborator_name = brief.new_agent.name
-            if not _plan_step_assignee_names_valid(brief.plan_steps, agents, collaborator_name):
-                raise ValueError('Plan step assignee is not a roster collaborator')
             if previous_brief:
                 values = stabilize(brief, previous_brief)
             else:
@@ -167,6 +160,12 @@ def propose(ctx, actor, work_id, body):
             values['suggested_agent'] = {k: selected[k] for k in ('id', 'name', 'role', 'revision')} if selected else None
             if previous_brief:
                 values = preserve_staffing(values, previous_brief, agents, owner_id=work.owner_id)
+            # Validate the effective agreement: a staffing-only clarification
+            # may legitimately echo old assignments before normalization.
+            collaborator = values.get('suggested_agent') or values.get('new_agent')
+            collaborator_name = collaborator.get('name') if collaborator else None
+            if not _plan_step_assignee_names_valid(values.get('plan_steps'), agents, collaborator_name):
+                raise ValueError('Plan step assignee is not a roster collaborator')
             changes = brief_changes(previous_brief, values)
             error = None
         except (ValueError, TypeError):

@@ -604,7 +604,8 @@ def test_explicit_return_to_homun_keeps_confirming_human_owner(setup):
 
 
 @pytest.mark.parametrize('staffing', ['existing', 'proposed'])
-def test_return_to_homun_reassigns_inherited_phases_before_confirmation(setup, staffing):
+@pytest.mark.parametrize('echo_phases', [False, True])
+def test_return_to_homun_reassigns_inherited_phases_before_confirmation(setup, staffing, echo_phases):
     from homun.application.intake import propose, confirm
     ctx, actor, wid, brief = setup
     previous_name = 'Ada' if staffing == 'existing' else 'Elena'
@@ -618,7 +619,8 @@ def test_return_to_homun_reassigns_inherited_phases_before_confirmation(setup, s
     ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
     first = propose(ctx, actor, wid, {'command_id':'delegated-phases', 'text':'Confronta i listini', 'expected_version':1})
     assert first['status'] == 'pending_confirmation'
-    brief.update(suggested_agent_id=None, new_agent=None, changed_fields=['staffing'], plan_steps=[])
+    brief.update(suggested_agent_id=None, new_agent=None, changed_fields=['staffing'],
+                 plan_steps=brief['plan_steps'] if echo_phases else [])
     direct = propose(ctx, actor, wid, {'command_id':'homun-phases', 'text':'Occupatene direttamente Homun', 'expected_version':1})
     assert direct['status'] == 'pending_confirmation'
     assert [step['assignee'] for step in direct['plan_steps']] == ['', '']
@@ -631,3 +633,19 @@ def test_return_to_homun_reassigns_inherited_phases_before_confirmation(setup, s
     assert work.owner_id == actor.id and set(store.agents) == before
     plan = store.plans[store.plan_key(wid, work.current_plan_revision)]
     assert [step.assignee_id for step in plan.steps] == [actor.id, actor.id]
+
+
+def test_return_to_homun_rejects_fresh_invalid_phase_assignment(setup):
+    from homun.application.intake import propose
+    ctx, actor, wid, brief = setup
+    brief.update(suggested_agent_id=None, new_agent={
+        'name':'Elena', 'role':'Analisi', 'instructions':'Confronta i dati'},
+        plan_steps=[{'title':'Confronta dati', 'capability':'compare_csv', 'assignee':'Elena'}])
+    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
+    first = propose(ctx, actor, wid, {'command_id':'phase-first', 'text':'Confronta listini', 'expected_version':1})
+    assert first['status'] == 'pending_confirmation'
+    brief.update(new_agent=None, changed_fields=['staffing', 'plan_steps'])
+    direct = propose(ctx, actor, wid, {'command_id':'phase-invalid', 'text':'Homun, cambia anche la fase', 'expected_version':1})
+    assert direct['status'] == 'failed'
+    assert direct['error_code'] == 'intake_invalid_response'
+    assert not ctx.repository.load().plans
