@@ -131,7 +131,11 @@ jobs:
         run: |
           APP_PATH="$(find dist-installers -maxdepth 3 -type d -iname Homun.app -print -quit)"
           test -n "$APP_PATH"
-          npm run release:verify -- "$APP_PATH" --expected-arch arm64
+          if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ] && [ "${{ steps.signing.outputs.has_cert }}" = "true" ]; then
+            npm run release:verify -- "$APP_PATH" --expected-arch arm64 --signed
+          else
+            npm run release:verify -- "$APP_PATH" --expected-arch arm64
+          fi
 
       - name: Create installer checksums
         working-directory: apps/desktop
