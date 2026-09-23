@@ -1,0 +1,83 @@
+"""Adaptive runs: selected sources, explicit scope approval, observable progress."""
+from fastapi import APIRouter, Header
+from pydantic import BaseModel, Field
+from homun.application.agent_runs import approve, list_runs, propose
+from homun.domain.errors import DomainError
+from homun.routes.domain_support import _http_error
+from homun.routes.price_comparisons import request_context
+
+router = APIRouter(prefix='/v1/workspaces/{workspace_id}', tags=['agent-runs'])
+
+
+class RunRequest(BaseModel):
+    command_id: str = Field(min_length=1, max_length=160)
+    expected_version: int = Field(ge=1)
+    material_ids: list[str] = Field(default_factory=list, max_length=12)
+    team_id: str | None = Field(default=None, max_length=160)
+    person_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class RunApproval(BaseModel):
+    command_id: str = Field(min_length=1, max_length=160)
+    expected_version: int = Field(ge=1)
+    digest: str
+
+
+class RunView(BaseModel):
+    id: str
+    work_id: str
+    status: str
+    expected_version: int
+    digest: str
+    materials: list[dict]
+    team: dict | None = None
+    person: dict | None = None
+    limits: dict
+    tool_version: str
+    assignee_id: str
+    executor_name: str
+    connection_id: str
+    observations: list[dict]
+    turns: int
+    model_attempts: int
+    history_redacted: bool = False
+    request_id: str | None = None
+    artifact_id: str | None = None
+    error_code: str | None = None
+
+
+class RunList(BaseModel):
+    items: list[RunView]
+
+
+@router.post('/works/{work_id}/agent-runs', response_model=RunView, response_model_exclude_none=True)
+def create_run(workspace_id: str, work_id: str, body: RunRequest,
+               x_homun_actor_id: str | None = Header(default=None),
+               x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        return propose(ctx, actor, work_id, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get('/works/{work_id}/agent-runs', response_model=RunList, response_model_exclude_none=True)
+def get_runs(workspace_id: str, work_id: str,
+             x_homun_actor_id: str | None = Header(default=None),
+             x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        return list_runs(ctx, actor, work_id)
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post('/works/{work_id}/agent-runs/{run_id}/approve', response_model=RunView, response_model_exclude_none=True)
+def approve_run(workspace_id: str, work_id: str, run_id: str, body: RunApproval,
+                x_homun_actor_id: str | None = Header(default=None),
+                x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        return approve(ctx, actor, work_id, run_id, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc

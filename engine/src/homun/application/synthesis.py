@@ -139,6 +139,7 @@ def propose(ctx, actor, work_id, body):
             pinned = propose_pin_version(
                 service, store, actor, work, 'synthesize', body['command_id'], body['expected_version'],
                 {'title': 'Scrivi la sintesi concordata', 'assignee_id': assignee_id,
+                 'capability': 'synthesize',
                  'output_expected': 'Bozza in Markdown da revisionare'},
             )
             proposal = {

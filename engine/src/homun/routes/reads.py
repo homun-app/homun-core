@@ -37,6 +37,11 @@ def list_works(
         )
         if pending is not None:
             payload["pending_contribution"] = pending.model_dump(mode="json")
+            person = next((r.result for r in ctx.service.store.commands.values()
+                           if r.type == 'person.define' and r.actor_id == actor.id
+                           and r.result.get('id') == pending.to_actor_id), None)
+            if person:
+                payload["pending_contribution"]["recipient_name"] = person['name']
         payload["intake_confirmed"] = has_confirmed_intake(ctx.service.store, work.id)
         plan = ctx.service.current_plan(work)
         if plan is not None:
@@ -54,6 +59,9 @@ def list_works(
                 # The result awaiting (or having received) human review.
                 payload["latest_artifact"] = {"id": artifact.id, "version": artifact.version,
                                               "title": artifact.title, "content": artifact.content}
+        reviews = sorted((r for r in ctx.service.store.reviews.values() if r.work_id == work.id), key=lambda r: r.created_at)
+        payload["revision_requested"] = bool(reviews and reviews[-1].decision == 'request_changes'
+            and reviews[-1].artifact_version_id == (payload.get('latest_artifact') or {}).get('id'))
         items.append(payload)
     return {"items": items}
 

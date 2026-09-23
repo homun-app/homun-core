@@ -286,7 +286,7 @@ def test_clarification_model_receives_prior_task_context(setup):
     # The collaborator recommendation is grounded in the registered capability catalog,
     # without readiness signals that made models decline executable work.
     capabilities=seen[0]['capabilities']
-    assert [c['id'] for c in capabilities]==['compare_csv','read_material','synthesize','general']
+    assert [c['id'] for c in capabilities]==['compare_csv','read_material','synthesize','general','agent_run']
     assert all('ready' not in c and 'eligible_materials' not in c for c in capabilities)
 
 

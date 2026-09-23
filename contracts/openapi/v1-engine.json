@@ -75,6 +75,47 @@
         "title": "ApprovalRequest",
         "type": "object"
       },
+      "AskPersonRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "need": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Need",
+            "type": "string"
+          },
+          "person_id": {
+            "title": "Person Id",
+            "type": "string"
+          },
+          "step_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id",
+          "person_id",
+          "need",
+          "step_id",
+          "expected_version"
+        ],
+        "title": "AskPersonRequest",
+        "type": "object"
+      },
       "Body_ingest_project_material_v1_workspaces__workspace_id__projects__project_id__materials_ingest_post": {
         "properties": {
           "file": {
@@ -803,7 +844,8 @@
         "title": "CompleteRequest",
         "type": "object"
       },
-      "ConfirmRequest": {
+      "ContextRequest": {
+        "additionalProperties": false,
         "properties": {
           "command_id": {
             "maxLength": 160,
@@ -811,27 +853,54 @@
             "title": "Command Id",
             "type": "string"
           },
-          "create_agent": {
-            "default": false,
-            "title": "Create Agent",
-            "type": "boolean"
-          },
-          "digest": {
-            "title": "Digest",
+          "company": {
+            "default": "",
+            "maxLength": 6000,
+            "title": "Company",
             "type": "string"
           },
-          "expected_version": {
-            "minimum": 1.0,
-            "title": "Expected Version",
+          "expected_revision": {
+            "minimum": 0.0,
+            "title": "Expected Revision",
             "type": "integer"
+          },
+          "goals": {
+            "default": "",
+            "maxLength": 6000,
+            "title": "Goals",
+            "type": "string"
+          },
+          "people": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "People",
+            "type": "string"
+          },
+          "team_size": {
+            "anyOf": [
+              {
+                "maximum": 6.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Size"
+          },
+          "tools": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Tools",
+            "type": "string"
           }
         },
         "required": [
           "command_id",
-          "digest",
-          "expected_version"
+          "expected_revision"
         ],
-        "title": "ConfirmRequest",
+        "title": "ContextRequest",
         "type": "object"
       },
       "CredentialsRequest": {
@@ -979,7 +1048,8 @@
               "compare_csv",
               "read_material",
               "synthesize",
-              "general"
+              "general",
+              "agent_run"
             ],
             "title": "Capability",
             "type": "string"
@@ -1185,6 +1255,22 @@
         "title": "InterpretRequest",
         "type": "object"
       },
+      "InvitationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "recipient_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Recipient Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipient_name"
+        ],
+        "title": "InvitationRequest",
+        "type": "object"
+      },
       "MemoryListResponse": {
         "properties": {
           "memories": {
@@ -1343,6 +1429,29 @@
         "title": "OllamaPresetRequest",
         "type": "object"
       },
+      "PersonRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id",
+          "name"
+        ],
+        "title": "PersonRequest",
+        "type": "object"
+      },
       "PlanStepPayload": {
         "properties": {
           "assignee": {
@@ -1356,7 +1465,8 @@
               "compare_csv",
               "read_material",
               "synthesize",
-              "general"
+              "general",
+              "agent_run"
             ],
             "title": "Capability",
             "type": "string"
@@ -1586,6 +1696,43 @@
         "title": "RectifyMemoryRequest",
         "type": "object"
       },
+      "ResponseRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "maxLength": 12000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "ResponseRequest",
+        "type": "object"
+      },
+      "RevisionRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 0.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command_id",
+          "expected_revision"
+        ],
+        "title": "RevisionRequest",
+        "type": "object"
+      },
       "RosterEntry": {
         "properties": {
           "display_name": {
@@ -1749,6 +1896,251 @@
           "expected_version"
         ],
         "title": "RoutineUpdateRequest",
+        "type": "object"
+      },
+      "RunApproval": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command_id",
+          "expected_version",
+          "digest"
+        ],
+        "title": "RunApproval",
+        "type": "object"
+      },
+      "RunList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "RunList",
+        "type": "object"
+      },
+      "RunRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "material_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 12,
+            "title": "Material Ids",
+            "type": "array"
+          },
+          "person_id": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person Id"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
+          }
+        },
+        "required": [
+          "command_id",
+          "expected_version"
+        ],
+        "title": "RunRequest",
+        "type": "object"
+      },
+      "RunView": {
+        "properties": {
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Id"
+          },
+          "assignee_id": {
+            "title": "Assignee Id",
+            "type": "string"
+          },
+          "connection_id": {
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "executor_name": {
+            "title": "Executor Name",
+            "type": "string"
+          },
+          "expected_version": {
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "history_redacted": {
+            "default": false,
+            "title": "History Redacted",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "limits": {
+            "additionalProperties": true,
+            "title": "Limits",
+            "type": "object"
+          },
+          "materials": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Materials",
+            "type": "array"
+          },
+          "model_attempts": {
+            "title": "Model Attempts",
+            "type": "integer"
+          },
+          "observations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Observations",
+            "type": "array"
+          },
+          "person": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team"
+          },
+          "tool_version": {
+            "title": "Tool Version",
+            "type": "string"
+          },
+          "turns": {
+            "title": "Turns",
+            "type": "integer"
+          },
+          "work_id": {
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "work_id",
+          "status",
+          "expected_version",
+          "digest",
+          "materials",
+          "limits",
+          "tool_version",
+          "assignee_id",
+          "executor_name",
+          "connection_id",
+          "observations",
+          "turns",
+          "model_attempts"
+        ],
+        "title": "RunView",
         "type": "object"
       },
       "ServerActionRequest": {
@@ -2249,6 +2641,63 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "homun__routes__intake__ConfirmRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "create_agent": {
+            "default": false,
+            "title": "Create Agent",
+            "type": "boolean"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command_id",
+          "digest",
+          "expected_version"
+        ],
+        "title": "ConfirmRequest",
+        "type": "object"
+      },
+      "homun__routes__organization__ConfirmRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 0.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "proposal_id": {
+            "title": "Proposal Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id",
+          "expected_revision",
+          "proposal_id"
+        ],
+        "title": "ConfirmRequest",
+        "type": "object"
       }
     }
   },
@@ -2277,6 +2726,110 @@
         "summary": "Capabilities",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/contribution-portal/read": {
+      "post": {
+        "operationId": "read_v1_contribution_portal_read_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read",
+        "tags": [
+          "contribution-invitations"
+        ]
+      }
+    },
+    "/v1/contribution-portal/respond": {
+      "post": {
+        "operationId": "respond_v1_contribution_portal_respond_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Respond",
+        "tags": [
+          "contribution-invitations"
         ]
       }
     },
@@ -3373,6 +3926,178 @@
         "summary": "Post Command Stream",
         "tags": [
           "domain"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/contribution-invitations/{invitation_id}/revoke": {
+      "post": {
+        "operationId": "revoke_v1_workspaces__workspace_id__contribution_invitations__invitation_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "invitation_id",
+            "required": true,
+            "schema": {
+              "title": "Invitation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke",
+        "tags": [
+          "contribution-invitations"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/contributions/{request_id}/invitation": {
+      "post": {
+        "operationId": "issue_v1_workspaces__workspace_id__contributions__request_id__invitation_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Issue",
+        "tags": [
+          "contribution-invitations"
         ]
       }
     },
@@ -4981,6 +5706,476 @@
         "summary": "Rectify Memory",
         "tags": [
           "memory"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/organization": {
+      "get": {
+        "operationId": "get_state_v1_workspaces__workspace_id__organization_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get State",
+        "tags": [
+          "organization"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/organization/confirm": {
+      "post": {
+        "operationId": "confirm_v1_workspaces__workspace_id__organization_confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/homun__routes__organization__ConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm",
+        "tags": [
+          "organization"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/organization/context": {
+      "post": {
+        "operationId": "update_context_v1_workspaces__workspace_id__organization_context_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Context",
+        "tags": [
+          "organization"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/organization/propose": {
+      "post": {
+        "operationId": "propose_v1_workspaces__workspace_id__organization_propose_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Propose",
+        "tags": [
+          "organization"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/people": {
+      "get": {
+        "operationId": "people_v1_workspaces__workspace_id__people_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People",
+        "tags": [
+          "contribution-invitations"
+        ]
+      },
+      "post": {
+        "operationId": "define_person_v1_workspaces__workspace_id__people_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Define Person",
+        "tags": [
+          "contribution-invitations"
         ]
       }
     },
@@ -6793,6 +7988,454 @@
         ]
       }
     },
+    "/v1/workspaces/{workspace_id}/works/{work_id}/agent-runs": {
+      "get": {
+        "operationId": "get_runs_v1_workspaces__workspace_id__works__work_id__agent_runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Runs",
+        "tags": [
+          "agent-runs"
+        ]
+      },
+      "post": {
+        "operationId": "create_run_v1_workspaces__workspace_id__works__work_id__agent_runs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Run",
+        "tags": [
+          "agent-runs"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/works/{work_id}/agent-runs/{run_id}/approve": {
+      "post": {
+        "operationId": "approve_run_v1_workspaces__workspace_id__works__work_id__agent_runs__run_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunApproval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Run",
+        "tags": [
+          "agent-runs"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/works/{work_id}/ask-person": {
+      "post": {
+        "operationId": "ask_person_v1_workspaces__workspace_id__works__work_id__ask_person_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskPersonRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ask Person",
+        "tags": [
+          "contribution-invitations"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/works/{work_id}/contribution-invitations": {
+      "get": {
+        "operationId": "list_invitations_v1_workspaces__workspace_id__works__work_id__contribution_invitations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Invitations",
+        "tags": [
+          "contribution-invitations"
+        ]
+      }
+    },
     "/v1/workspaces/{workspace_id}/works/{work_id}/intake": {
       "get": {
         "operationId": "get_intake_v1_workspaces__workspace_id__works__work_id__intake_get",
@@ -7129,7 +8772,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ConfirmRequest"
+                "$ref": "#/components/schemas/homun__routes__intake__ConfirmRequest"
               }
             }
           },

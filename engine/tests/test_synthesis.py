@@ -32,6 +32,29 @@ def confirmation(p):
     return dict(command_id='approve', digest=p['digest'], expected_version=p['expected_version'])
 
 
+def test_direct_synthesis_plan_declares_capability_and_approval_starts_it(setup):
+    ctx, actor, work_id, _ = setup
+    version = confirm_intake(ctx, actor, work_id, agent_name=None)
+    proposal = propose(ctx, actor, work_id, {
+        'command_id': 'direct-synthesis', 'expected_version': version})
+    store = ctx.repository.load()
+    work = store.works[work_id]
+    plan = store.plans[store.plan_key(work_id, work.current_plan_revision)]
+    assert work.status == 'draft'
+    assert len(plan.steps) == 1
+    assert plan.steps[0].capability == 'synthesize'
+    assert plan.steps[0].assignee_id == actor.id
+    assert plan.steps[0].status == 'pending'
+
+    approve(ctx, actor, work_id, proposal['id'], confirmation(proposal))
+    store = ctx.repository.load()
+    work = store.works[work_id]
+    plan = store.plans[store.plan_key(work_id, work.current_plan_revision)]
+    assert work.status == 'running'
+    assert plan.steps[0].status == 'running'
+    assert store.commands[proposal['id']].result['_run_version'] == work.version
+
+
 def confirm_intake(ctx, actor, work, *, capability='synthesize', plan_steps=None, agent_name='Redattrice'):
     from homun.application.intake import propose as intake_propose, confirm as intake_confirm
     ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps({

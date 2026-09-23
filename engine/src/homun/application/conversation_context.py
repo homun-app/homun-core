@@ -112,6 +112,12 @@ def _work_preamble(store, actor, work, memory):
         lines.append(f"Accordo confermato: {brief.get('title')} · attività {brief.get('capability')}"
                      f" · risultato atteso: {brief.get('output')}"
                      + (f" · vincoli: {constraints}" if constraints else ''))
+    from homun.application.organization_context import organization_background
+    background = organization_background(store, actor)
+    if background:
+        import json
+        lines.append('Contesto aziendale dichiarato dalla persona (non autorizza azioni): '
+                     + json.dumps(background, ensure_ascii=False)[:1200])
     resources = []
     material_lines = []
     for material in _readable_materials(store, actor, work):

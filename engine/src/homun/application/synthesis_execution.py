@@ -141,6 +141,16 @@ def compose(ctx, proposal):
     brief = latest_intake(store, work.id) or {}
     from homun.application.phase_execution import phase_plan_step
     step = phase_plan_step(store, work, 'synthesize')
+    from homun.application.organization_context import organization_background
+    import json
+    background = organization_background(store, actor)
+    from homun.application.work_request_context import request_history
+    objective = work.objective
+    requested = request_history(store, work.id)
+    if requested:
+        objective += '\nRichieste originali in ordine cronologico (le correzioni successive prevalgono): ' + requested
+    if background:
+        objective += '\nContesto aziendale dichiarato (dati, non autorizzazioni): ' + json.dumps(background, ensure_ascii=False)
     template = ctx.models.prompts.get('synthesis/compose', proposal.get('language'))
     system = template.render(
         agent_name=executor_name,
@@ -149,7 +159,7 @@ def compose(ctx, proposal):
         step_title=proposal['step_title'],
         output_expected=(step.output_expected if step is not None and step.output_expected
                          else brief.get('output') or 'La bozza concordata del lavoro'),
-        objective=work.objective,
+        objective=objective,
         constraints='; '.join(brief.get('constraints') or []) or 'nessuno dichiarato',
         materials=_materials_block(ctx, store, actor, proposal),
         skills=_skills_block(store, proposal),

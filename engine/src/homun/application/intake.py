@@ -2,6 +2,7 @@
 from copy import deepcopy
 from homun.application.price_comparisons import cached, save
 from homun.application.intake_policy import PROPOSAL_TYPE, authority, digest, idle, lookup, permission_snapshot, public
+from homun.application.organization_context import organization_background
 from homun.application.intake_brief import brief_changes, preserve_staffing, stabilize
 from homun.domain.capabilities import require_capability
 from homun.domain.errors import BudgetExhaustedError, ConflictError, ValidationError
@@ -141,7 +142,7 @@ def propose(ctx, actor, work_id, body):
     try:
         brief = synthesize(ctx.models, original, agents, previous_brief=previous_brief,
                            latest_request=text, capabilities=capabilities, language=language,
-                           usage_out=usage)
+                           usage_out=usage, organization_context=organization_background(store, actor))
     except BaseException as cause:
         # The call may have consumed provider budget even on failure.
         work_budgets.reconcile_unknown(ctx, actor, work_id, reservation)

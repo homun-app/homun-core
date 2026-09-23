@@ -20,13 +20,15 @@ def _work_start(ctx: CommandContext, actor: Actor, command_id: str, payload: dic
         raise ValidationError("Cannot start work without a plan")
     assert_work_transition(work.status, WorkStatus.RUNNING)
     work.status = WorkStatus.RUNNING
-    # Mark first pending step running.
-    first_step = None
-    for step in plan.steps:
-        if step.status == StepStatus.PENDING:
-            step.status = StepStatus.RUNNING
-            first_step = step
-            break
+    # A clarification can resume an already-running phase. Do not start its
+    # successor until that phase has delivered and been reviewed.
+    first_step = next((step for step in plan.steps if step.status == StepStatus.RUNNING), None)
+    if first_step is None:
+        for step in plan.steps:
+            if step.status == StepStatus.PENDING:
+                step.status = StepStatus.RUNNING
+                first_step = step
+                break
     work.version += 1
     work.updated_at = utc_now()
     ctx._emit(
