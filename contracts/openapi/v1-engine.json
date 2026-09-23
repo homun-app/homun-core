@@ -2843,6 +2843,32 @@
         "title": "ToolApproveRequest",
         "type": "object"
       },
+      "ToolDeliveryRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command_id",
+          "digest",
+          "expected_version"
+        ],
+        "title": "ToolDeliveryRequest",
+        "type": "object"
+      },
       "ToolProposeRequest": {
         "properties": {
           "arguments": {
@@ -5593,6 +5619,178 @@
           }
         },
         "summary": "Approve Tool Call",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/mcp/tools/{proposal_id}/delivery": {
+      "get": {
+        "operationId": "preview_tool_delivery_v1_workspaces__workspace_id__mcp_tools__proposal_id__delivery_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Tool Delivery",
+        "tags": [
+          "mcp",
+          "skills"
+        ]
+      },
+      "post": {
+        "operationId": "approve_tool_delivery_v1_workspaces__workspace_id__mcp_tools__proposal_id__delivery_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolDeliveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Tool Delivery",
         "tags": [
           "mcp",
           "skills"

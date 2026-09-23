@@ -68,7 +68,15 @@ Una verifica del sorgente non aggiorna l'app installata.
   pubblicazione senza nuova chiamata, esiti incerti visibili, approvazione legata
   alla configurazione server e al lavoro. [Prove e limiti](research/2026-09-23-external-receipts-verifica.md).
 
+- Riapprovazione della sola consegna per ricevute MCP salvate su lavori poi
+  modificati: anteprima, consenso sulla versione corrente e artifact atomico,
+  senza ripetere l’azione esterna. [Verifica](research/2026-09-23-external-delivery-verifica.md).
+
 ## Evidenze della tranche corrente
+
+Consegna riapprovata: **777 test engine passati, 1 saltato**, più 19 verifiche
+mirate con riapertura SQLite, lavoro cambiato e server rimosso. 216 test web,
+typecheck/build e OpenAPI allineati; architettura senza errori.
 
 Ricevute esterne: **768 test engine passati, 1 saltato**, poi **47 test mirati**
 dopo la correzione finale; 216 test web, typecheck e build riusciti. Una vera

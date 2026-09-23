@@ -1,3 +1,4 @@
+import { ExternalDeliveryCard } from "./ExternalDeliveryCard";
 /** Supervised external MCP tool calls, in the work panel next to the phases. */
 import { useEffect, useState } from "react";
 import {
@@ -142,10 +143,11 @@ export function ExternalToolsSection({
             Argomenti: <code>{JSON.stringify(call.arguments)}</code>
           </p>
           {call.error && <p role="status">{call.error}</p>}
-          {["pending_approval", "publication_pending", "running"].includes(call.status) && <div className="cs-actions">
+          {call.status === "publication_pending" && <ExternalDeliveryCard proposalId={call.id} onChanged={reload} />}
+          {["pending_approval", "running"].includes(call.status) && <div className="cs-actions">
             <button type="button" className="cw-primary" disabled={busy}
               onClick={() => void approve(call)}>
-              {busy ? "Attendi…" : call.status === "publication_pending" ? "Riprendi pubblicazione" : call.status === "running" ? "Verifica esito" : "Approva ed esegui"}
+              {busy ? "Attendi…" : call.status === "running" ? "Verifica esito" : "Approva ed esegui"}
             </button>
           </div>}
         </div>

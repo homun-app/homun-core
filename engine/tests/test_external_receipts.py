@@ -97,7 +97,8 @@ def test_tool_error_receipt_is_not_redispatched(setup,monkeypatch):
     monkeypatch.setattr(mcp_client,'call_tool',lambda *a:pytest.fail('redispatched'))
     assert approve(setup)['status']=='tool_error'
 
-def test_real_stdio_receipt_survives_context_restart(tmp_path,monkeypatch):
+@pytest.mark.parametrize('changed_work', [False, True])
+def test_real_stdio_receipt_survives_context_restart(tmp_path,monkeypatch,changed_work):
     import json
     import sys
     from homun.application import external_publication
@@ -137,7 +138,16 @@ for line in sys.stdin:
     assert json.loads(counter.read_text())==1
     restarted=create_context(db_path=path,data_dir=tmp_path,for_tests=True)
     monkeypatch.setattr(external_publication,'publish',original)
-    outcome=external_tools.approve(restarted,actor,'p',{'digest':p['digest']})
+    if changed_work:
+        from homun.application import external_delivery
+        with restarted.repository.transaction() as store:
+            store.works[work['work_id']].version+=1
+            store.external_servers.pop('srv')
+        preview=external_delivery.preview(restarted,actor,'p')
+        outcome=external_delivery.deliver(restarted,actor,'p',{'command_id':'delivery',
+            'digest':preview['digest'],'expected_version':preview['expected_version']})
+    else:
+        outcome=external_tools.approve(restarted,actor,'p',{'digest':p['digest']})
     assert outcome['status']=='completed'
     assert json.loads(counter.read_text())==1
     assert len(restarted.repository.load().artifacts)==1

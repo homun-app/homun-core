@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **197**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **199**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -208,3 +208,5 @@ Documenti censiti: **197**. Punto di ingresso: [indice](README.md).
 | [docs/superpowers/plans/2026-09-23-agent-tool-registry.md](superpowers/plans/2026-09-23-agent-tool-registry.md) | Piano registro strumenti e prerequisito MCP |
 | [docs/research/2026-09-23-external-receipts-verifica.md](research/2026-09-23-external-receipts-verifica.md) | Ricevute MCP durevoli e ripresa pubblicazione |
 | [docs/superpowers/plans/2026-09-23-external-receipts.md](superpowers/plans/2026-09-23-external-receipts.md) | Piano persistenza chiamate esterne |
+| [docs/research/2026-09-23-external-delivery-verifica.md](research/2026-09-23-external-delivery-verifica.md) | Riapprovazione consegna di ricevute persistite |
+| [docs/superpowers/plans/2026-09-23-external-delivery.md](superpowers/plans/2026-09-23-external-delivery.md) | Piano consenso separato alla consegna |

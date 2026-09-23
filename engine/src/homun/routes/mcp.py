@@ -8,7 +8,7 @@ from homun.context import get_context
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _actor_from_headers, _http_error
 from homun.routes.price_comparisons import request_context
-from homun.application import external_tools
+from homun.application import external_tools, external_delivery
 from homun.application.mcp_catalog import catalog_public
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["mcp", "skills"])
@@ -140,6 +140,10 @@ class ToolApproveRequest(BaseModel):
     digest: str
 
 
+class ToolDeliveryRequest(ToolApproveRequest):
+    expected_version: int = Field(ge=1)
+
+
 class SkillCreateRequest(BaseModel):
     command_id: str = Field(min_length=1, max_length=160)
     name: str = Field(min_length=1, max_length=80)
@@ -184,6 +188,28 @@ def approve_tool_call(workspace_id: str, proposal_id: str, body: ToolApproveRequ
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
     try:
         return external_tools.approve(ctx, actor, proposal_id, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/mcp/tools/{proposal_id}/delivery")
+def preview_tool_delivery(workspace_id: str, proposal_id: str,
+                          x_homun_actor_id: str | None = Header(default=None),
+                          x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        return external_delivery.preview(ctx, actor, proposal_id)
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/mcp/tools/{proposal_id}/delivery")
+def approve_tool_delivery(workspace_id: str, proposal_id: str, body: ToolDeliveryRequest,
+                          x_homun_actor_id: str | None = Header(default=None),
+                          x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        return external_delivery.deliver(ctx, actor, proposal_id, body.model_dump())
     except DomainError as exc:
         raise _http_error(exc) from exc
 

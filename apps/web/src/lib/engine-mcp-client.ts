@@ -1,3 +1,4 @@
+import { homunErrorFromHttp } from "./homun-errors.ts";
 /** MCP server declarations and skills: person-approved, never silent. */
 import { ENGINE_DEFAULT_BASE_URL } from "./engine-client.ts";
 import {
@@ -245,5 +246,31 @@ export async function declareCatalogEntry(input: {
     args,
     toolsInclude: input.entry.tools_include,
     toolsExclude: input.entry.tools_exclude,
+  });
+}
+
+
+export type ExternalDeliveryPreview = {
+  proposal_id: string; work_id: string; expected_version: number;
+  title: string; objective: string; text: string; digest: string; receipt_hash: string;
+};
+
+async function deliveryRequest(proposalId: string, body?: object) {
+  const response = await mcpFetch(
+    `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/tools/${encodeURIComponent(proposalId)}/delivery`,
+    { method: body ? "POST" : "GET", headers: jsonHeaders,
+      ...(body ? { body: JSON.stringify(body) } : {}) });
+  const result = await response.json();
+  if (!response.ok) throw homunErrorFromHttp(response.status, result, "Consegna non disponibile");
+  return result;
+}
+
+export function previewEngineToolDelivery(proposalId: string): Promise<ExternalDeliveryPreview> {
+  return deliveryRequest(proposalId);
+}
+
+export function approveEngineToolDelivery(preview: ExternalDeliveryPreview, commandId: string): Promise<ExternalToolCall> {
+  return deliveryRequest(preview.proposal_id, {
+    command_id: commandId, expected_version: preview.expected_version, digest: preview.digest,
   });
 }

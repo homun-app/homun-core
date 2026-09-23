@@ -1,5 +1,9 @@
 # Ricevute durevoli delle chiamate esterne
 
+Aggiornamento successivo: la riapprovazione delle consegne dopo cambiamenti del
+lavoro è ora implementata e verificata nel [rapporto dedicato](2026-09-23-external-delivery-verifica.md).
+I limiti sotto descrivono lo stato della prima tranche.
+
 ## Comportamento implementato
 
 Il percorso MCP supervisionato salva l'intento prima dell'IO e l'intera ricevuta
