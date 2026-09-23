@@ -50,7 +50,10 @@ def require_work_command_authority(store, actor, command_type, payload):
             require_project_capability(store, actor, str(payload['project_id']), 'write')
     elif command_type in {'conversation.rename', 'conversation.post_message', 'work.create', 'project.create_from_conversation'}:
         require_conversation_access(store, actor, payload.get('conversation_id', ''))
-    elif command_type.startswith(('routine.',)):
+    elif command_type.startswith(('routine.', 'external.', 'skill.')):
+        if str(actor.kind) != 'person' and command_type != 'skill.create':
+            from homun.domain.errors import PermissionDeniedError
+            raise PermissionDeniedError('Only a person may manage MCP servers and skill lifecycle')
         require_workspace_actor(actor, store.workspace_id)
     elif command_type.startswith(('work.', 'plan.')):
         work_id = payload.get('work_id', '')

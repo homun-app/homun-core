@@ -12,6 +12,7 @@ import {
   ArrowUpRight,
   BookMarked,
   Bot,
+  Sparkles,
   FolderKanban,
   UsersRound,
   Wallet,
@@ -25,6 +26,7 @@ import {
 } from "./ConversationModelsSettingsSection";
 import { ConversationPeopleSettingsSection } from "./ConversationPeopleSettingsSection";
 import { ConversationCapabilitiesSettingsSection } from "./ConversationCapabilitiesSettingsSection";
+import { ConversationMcpSettingsSection, ConversationSkillsSettingsSection } from "./EngineMcpSettings";
 import { ConversationAutomationsSettingsSection } from "./ConversationAutomationsSettingsSection";
 import { ConversationMemorySettingsSection } from "./ConversationMemorySettingsSection";
 import { ConversationAgentsSettingsSection } from "./ConversationAgentsSettingsSection";
@@ -42,6 +44,7 @@ const sections = [
   { id: "projects", label: "Progetti", icon: FolderKanban },
   { id: "memory", label: "Memoria", icon: BookMarked },
   { id: "plugins", label: "Plugin e capacità", icon: Puzzle },
+  { id: "skills", label: "Skill", icon: Sparkles },
   { id: "automations", label: "Automazioni", icon: Zap },
   { id: "archive", label: "Archivio", icon: Archive },
   { id: "data", label: "Dati della demo", icon: Database },
@@ -255,6 +258,7 @@ export function ConversationSettings({
           {section === "people" && <ConversationPeopleSettingsSection />}
           {section === "plugins" && <ConversationCapabilitiesSettingsSection />}
           {section === "automations" && <ConversationAutomationsSettingsSection />}
+          {section === "skills" && <ConversationSkillsSettingsSection />}
           {section === "agents" && <ConversationAgentsSettingsSection actorId="person_fabio" />}
           {section === "projects" && (
             <ConversationProjectsSettingsSection actorId="person_fabio" />

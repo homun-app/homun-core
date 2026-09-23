@@ -240,6 +240,41 @@ class Routine(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class ExternalServer(BaseModel):
+    """Declared MCP server: explicit surface, person-approved, probe-only until bridged."""
+    id: str
+    workspace_id: str
+    name: str
+    transport: str = "stdio"  # stdio | http
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    url: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+    tools_include: list[str] = Field(default_factory=list)
+    tools_exclude: list[str] = Field(default_factory=list)
+    status: str = "enabled"  # enabled | disabled
+    revision: int = 1
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class Skill(BaseModel):
+    """Procedural memory: markdown the agent proposes, the person approves."""
+    id: str
+    workspace_id: str
+    name: str
+    description: str = Field(default="", max_length=120)
+    body: str = ""
+    tags: list[str] = Field(default_factory=list)
+    status: str = "staged"  # staged | approved | archived
+    author_type: str = "person"  # person | agent
+    author_id: str = ""
+    revision: int = 1
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 class BudgetCounters(BaseModel):
     """Unknown usage stays unknown: absent values are never filled with zero."""
 

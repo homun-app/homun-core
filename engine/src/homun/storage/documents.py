@@ -18,6 +18,8 @@ ENTITY_TYPES = {
     "review": ("reviews", models.Review),
     "work_budget": ("work_budgets", models.WorkBudget),
     "routine": ("routines", models.Routine),
+    "external_server": ("external_servers", models.ExternalServer),
+    "skill": ("skills", models.Skill),
 }
 
 

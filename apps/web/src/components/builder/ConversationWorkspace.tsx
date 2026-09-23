@@ -1333,12 +1333,8 @@ export function ConversationWorkspace() {
               if (!work) return;
               engine.discardPatch(work, messageIndex);
             }}
-            onSaveMemory={(messageIndex) => {
-              if (!work) return;
-              void engine.saveMemoryFromMessage(work, messageIndex).catch(() => {
-                setNotice("Salvataggio memoria non riuscito. Controlla il banner errori.");
-              });
-            }}
+            onSaveMemory={work ? (i) => void engine.saveMemoryFromMessage(work, i).catch(() => setNotice("Salvataggio memoria non riuscito. Controlla il banner errori.")) : undefined}
+            onSaveSkill={work ? (i) => void engine.saveSkillFromMessage(work, i).then(() => setNotice("Procedura salvata: approvala in Impostazioni → Skill.")).catch(() => setNotice("Salvataggio procedura non riuscito. Controlla il banner errori.")) : undefined}
             onCancelInFlight={() => engine.cancelInFlight()}
             details={
               work && scenario ? (

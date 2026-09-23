@@ -47,6 +47,10 @@ from homun.domain.commands.work import _work_pause
 from homun.domain.commands.work import _work_cancel
 from homun.domain.commands.work import _work_set_due
 from homun.domain.commands.routines import _routine_create, _routine_pause, _routine_resume, _routine_stop, _routine_skip_next, _routine_update
+from homun.domain.commands.external import (
+    _external_create, _external_update, _external_remove,
+    _skill_create, _skill_patch, _skill_approve, _skill_reject, _skill_archive,
+)
 from homun.domain.commands.conversations import append_engine_message
 from homun.domain.commands.projects import ensure_project_for_work
 from homun.domain.commands.materials import register_prepared_material
@@ -96,6 +100,14 @@ HANDLERS = {
     "routine.stop": _routine_stop,
     "routine.update": _routine_update,
     "routine.skip_next": _routine_skip_next,
+    "external.create": _external_create,
+    "external.update": _external_update,
+    "external.remove": _external_remove,
+    "skill.create": _skill_create,
+    "skill.patch": _skill_patch,
+    "skill.approve": _skill_approve,
+    "skill.reject": _skill_reject,
+    "skill.archive": _skill_archive,
 }
 
 

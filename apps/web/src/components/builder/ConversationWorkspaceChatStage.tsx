@@ -51,7 +51,8 @@ type Props = {
   historyLoading?: boolean;
   onConfirmPatch?: (messageIndex: number) => void;
   onDiscardPatch?: (messageIndex: number) => void;
-  onSaveMemory?: (messageIndex: number) => void;
+  onSaveMemory?: ((messageIndex: number) => void) | undefined;
+  onSaveSkill?: ((messageIndex: number) => void) | undefined;
   onCancelInFlight?: () => void;
 };
 
@@ -88,6 +89,7 @@ export function ConversationWorkspaceChatStage({
   onConfirmPatch,
   onDiscardPatch,
   onSaveMemory,
+  onSaveSkill,
   onCancelInFlight,
 }: Props) {
   const mentionRefs = [
@@ -188,6 +190,16 @@ export function ConversationWorkspaceChatStage({
                         Salva in memoria
                       </button>
                     ))}
+                  {engineMode && m.who === "agent" && !m.partial && onSaveSkill && (
+                    <button
+                      type="button"
+                      className="cs-link cw-memory-promote"
+                      disabled={engineBusy}
+                      onClick={() => onSaveSkill(i)}
+                    >
+                      Salva come procedura
+                    </button>
+                  )}
                   {m.patchProposal && !m.patchResolved && onConfirmPatch && onDiscardPatch && (
                     <WorkPatchPreviewCard
                       summaryLines={m.patchProposal.summary_lines}

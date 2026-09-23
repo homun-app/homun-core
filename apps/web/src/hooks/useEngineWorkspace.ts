@@ -39,6 +39,7 @@ import type { EngineTeam } from "@/lib/engine-projects-client";
 import { renameEngineWork } from "@/lib/engine-work-naming";
 import { closeEngineWork, reviseEnginePlan, setEngineWorkBudget, setEngineWorkDue, startEngineWork, submitEngineArtifact } from "@/lib/engine-work-lifecycle";
 import { createEngineRoutine, routineEngineAction, updateEngineRoutine, type EngineRoutine } from "@/lib/engine-routines-client";
+import { createEngineSkill } from "@/lib/engine-mcp-client";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
 import { proposeWorkIntake } from "@/lib/engine-intake-client";
 import { applyIntakePreview } from "@/lib/engine-intake-display";
@@ -75,6 +76,7 @@ export type EngineWorkspaceState = {
   discardPatch: (work: Work, messageIndex: number) => void;
   applyObjectivePatch: (work: Work, nextObjective: string) => Promise<void>;
   saveMemoryFromMessage: (work: Work, messageIndex: number) => Promise<void>;
+  saveSkillFromMessage: (work: Work, messageIndex: number) => Promise<void>;
   fulfillContribution: (
     work: Work,
     text: string,
@@ -409,6 +411,16 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     }
   }
 
+  async function saveSkillFromMessage(work: Work, messageIndex: number): Promise<void> {
+    const messages = messageOverlay[work.id] ?? work.messages;
+    const message = messages[messageIndex];
+    if (!message || message.who !== "agent" || message.partial) return;
+    const text = message.text.trim().slice(0, 20000);
+    if (!text) return;
+    const title = text.split("\n")[0]!.slice(0, 60) || "Procedura";
+    await createEngineSkill({ name: title, description: title.slice(0, 60), body: text, authorType: "agent" });
+  }
+
   async function saveMemoryFromMessage(work: Work, messageIndex: number): Promise<void> {
     if (backend !== "engine" || work.source !== "engine") {
       throw new Error("saveMemoryFromMessage requires an engine-backed work");
@@ -585,6 +597,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     discardPatch,
     applyObjectivePatch,
     saveMemoryFromMessage,
+    saveSkillFromMessage,
     fulfillContribution,
     cancelInFlight,
     clearError: () => setError(null),

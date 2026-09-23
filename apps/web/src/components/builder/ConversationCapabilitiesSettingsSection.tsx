@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { ENGINE_DEFAULT_BASE_URL } from "@/lib/engine-client";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
+import { ConversationMcpSettingsSection } from "./EngineMcpSettings";
 
 type CapabilityItem = {
   id: string;
@@ -36,7 +37,8 @@ export function ConversationCapabilitiesSettingsSection() {
 
   return (
     <>
-      <h3>Plugin e capacità</h3>
+      <ConversationMcpSettingsSection />
+      <h3>Capacità del motore</h3>
       <p>
         Ciò che la tua squadra sa fare davvero, dal registro del motore: le capacità elencate
         qui sono le uniche che i collaboratori possono eseguire. Nessuno può prometterti
