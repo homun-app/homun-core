@@ -4,6 +4,8 @@ Aggiornamento: 23 settembre 2026, consolidamento e tranche operativa.
 
 ## Da dove iniziare
 
+- [Hermes: riuso prima di nuova implementazione](research/2026-09-23-hermes-codice-prima-di-reinventare.md): prima ispezione del codice e decisioni tecniche da verificare.
+
 - [Tranche operativa](research/2026-09-23-homun-operativo-verifica.md): uso diretto, squadra, contributi, prove e limiti.
 
 - [Visione e distanza dal codice](research/2026-09-23-visione-prodotto-gap.md): uso diretto, onboarding aziendale e squadra persone–bot; priorità proposte.
