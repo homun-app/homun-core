@@ -1,7 +1,8 @@
 # Homun operativo: consegna e verifica
 
 23 settembre 2026. Tranche successiva ad `a2d420c8`, branch di lavoro
-`fabio/homun-squadra-operativa`. Sorgente locale; non è una nuova release desktop.
+`fabio/homun-squadra-operativa`, integrato in fast-forward su `main` fino a
+`bbe39022`. Sorgente locale; non è una nuova release desktop.
 
 ## Obiettivo e perimetro consegnato
 
@@ -41,6 +42,9 @@ Sul sorgente della tranche, Python 3.13 dell'ambiente esistente:
 - OpenAPI rigenerato e controllato; architettura **0 errori, 35 avvisi** di dimensione.
 - Review indipendenti del percorso diretto, onboarding, contributi e ciclo adattivo;
   rilievi corretti e regressioni rieseguite. Diff senza errori di whitespace.
+
+Verifica dopo il merge su `main`: stessi 608 test motore (1 saltato), 211 web,
+11 desktop, typecheck, entrambe le build, OpenAPI e architettura confermati.
 
 Restano gli avvisi build sui chunk, una deprecazione Starlette/AnyIO e il debito
 lint globale già documentato. Nessuna formattazione massiva del legacy.
