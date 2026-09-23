@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **179**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **181**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -190,3 +190,5 @@ Documenti censiti: **179**. Punto di ingresso: [indice](README.md).
 | [docs/superpowers/plans/2026-09-23-homun-operativo.md](superpowers/plans/2026-09-23-homun-operativo.md) | Piano o specifica datata; perimetro nel rapporto operativo |
 | [docs/superpowers/specs/2026-09-23-homun-operativo-design.md](superpowers/specs/2026-09-23-homun-operativo-design.md) | Piano o specifica datata; perimetro nel rapporto operativo |
 | [docs/research/2026-09-23-hermes-codice-prima-di-reinventare.md](research/2026-09-23-hermes-codice-prima-di-reinventare.md) | Analisi codice upstream e criterio di riuso |
+| [docs/research/2026-09-23-sistemi-agentici-open-source.md](research/2026-09-23-sistemi-agentici-open-source.md) | Ricerca comparativa e shortlist di riuso; ispezione statica |
+| [docs/research/2026-09-23-prova-hermes-openhands.md](research/2026-09-23-prova-hermes-openhands.md) | Esperimento locale comparativo, evidenze e criteri per un motore proprio |

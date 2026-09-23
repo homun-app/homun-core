@@ -4,6 +4,10 @@ Aggiornamento: 23 settembre 2026, consolidamento e tranche operativa.
 
 ## Da dove iniziare
 
+- [Prova pratica Hermes / OpenHands SDK](research/2026-09-23-prova-hermes-openhands.md): prove locali ripetute, correzione e ripresa, evidenze e confini di integrazione.
+
+- [Sistemi agentici open source](research/2026-09-23-sistemi-agentici-open-source.md): confronto, prompt, evidenze e shortlist di riuso per Homun.
+
 - [Hermes: riuso prima di nuova implementazione](research/2026-09-23-hermes-codice-prima-di-reinventare.md): prima ispezione del codice e decisioni tecniche da verificare.
 
 - [Tranche operativa](research/2026-09-23-homun-operativo-verifica.md): uso diretto, squadra, contributi, prove e limiti.

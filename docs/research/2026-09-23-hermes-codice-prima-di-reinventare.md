@@ -1,5 +1,7 @@
 # Hermes come base tecnica per Homun
 
+> Aggiornamento di indirizzo del 23 settembre: Fabio ha chiarito che vuole un motore Homun proprio, derivato dalla logica di un riferimento consolidato. Le ipotesi sotto di incorporare un runtime/SDK esterno sono superate; il confronto resta utile per scegliere e riprodurre il comportamento di riferimento. Vedi la [prova pratica](2026-09-23-prova-hermes-openhands.md).
+
 23 settembre 2026. Decisione di metodo ribadita da Fabio: prima esaminare e
 riutilizzare sistemi consolidati, poi progettare ciò che distingue Homun.
 Il confronto di prodotto precedente non sostituisce questa analisi del codice.

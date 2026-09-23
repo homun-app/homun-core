@@ -1,0 +1,32 @@
+{
+  "date": "2026-09-23",
+  "hermes_commit": "c9dca726514b709cf6e677d236a79fc8d0627f37",
+  "openhands_sdk": "1.49.5",
+  "openhands_tools": "1.49.5",
+  "litellm": "1.93.0",
+  "python": "3.12.12",
+  "ollama_model": "homun-bench-qwen3.5-4b:20260923",
+  "base_model": "qwen3.5:4b",
+  "base_digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+  "bench_digest": "c2f6789e8a951ec80b1014fea4d93cc471eaf0448e5b6e3f65ef7279f267198e",
+  "context_length_observed": 65536,
+  "temperature": 0,
+  "reasoning_effort": "none",
+  "max_tokens_per_call": 2048,
+  "stream": false,
+  "max_iterations_per_run": 10,
+  "max_seconds_per_process": 240,
+  "business_tool": "workspace",
+  "additional_openhands_control_tools": [
+    "think",
+    "finish"
+  ],
+  "hermes_tool_search_enabled": false,
+  "credentials": "only dummy key local-ollama to loopback; no cloud inference",
+  "external_reference": "https://www.iana.org/help/example-domains",
+  "protocol": "# Protocollo pratico Hermes / OpenHands\n\n23 settembre 2026. Esperimento isolato, senza modificare il runtime Homun.\n\n- Hermes: c9dca726514b709cf6e677d236a79fc8d0627f37, editable install completo.\n- OpenHands SDK/tools: 1.49.5, stessa versione installata insieme da PyPI; LiteLLM fissato a 1.93.0 come nel lockfile upstream, dopo incompatibilità osservata con 1.102.1.\n- Python 3.12.12, venv separati; inferenza Ollama locale qwen3.5:4b Q4_K_M.\n- Sampling comune imposto dal proxy locale: temperatura 0, reasoning_effort none, 2048 token massimi per chiamata, niente streaming. Il proxy conserva richieste e risposte; non modifica prompt, strumenti o risultati.\n- Finestra effettiva del modello osservata: 65536 token (alias separato, stessi pesi). Dieci iterazioni massime per run. Timeout esterno per processo: 240 secondi.\n- Un solo strumento di business per entrambi, con implementazione condivisa: lettura dei file sintetici, scrittura di piano.md/checkpoint.md, fetch della pagina pubblica IANA. Nessun accesso a shell, dati aziendali o credenziali.\n- Restano i prompt e gli strumenti di controllo propri del motore: il confronto è fra motori adattati allo stesso confine operativo, non fra prodotti completi con tutti i loro strumenti nativi.\n- Smoke diagnostici non conteggiati. Prove misurate sequenziali, due ripetizioni per scenario.\n\nScenari:\n1. Consegna: brief + note + fonte pubblica -> piano operativo italiano, massimo 180 parole, responsabile Giulia, 12000 EUR, 30 novembre 2026, approvazione umana, tre passi e fonte; rilettura del file scritto.\n2. Correzione: pausa richiesta al primo read durante l'esecuzione; riapertura della conversazione con Sara, 8000 EUR, 15 dicembre 2026; mantenere gli altri vincoli. Qui la correzione avviene fra due run dopo una pausa nativa, non nel mezzo di una richiesta LLM.\n3. Ripresa: pausa richiesta al primo read; chiusura e nuovo processo con storia persistita nativamente; continuare l'obiettivo originale senza reinserire il brief nel messaggio. È una pausa ordinata, non un kill -9 o una prova di exactly-once su effetti esterni.\n\nValutazione: artefatto esistente, valori corretti, tre passi, limite parole, vincolo umano, fonte consultata, rilettura finale, domande inutili, errori strumenti, perdita di contesto. Tempi e token dal proxy; costo monetario API non applicabile all'inferenza locale, energia non misurata. Nessuna classifica generale su un campione piccolo e un solo modello.\n\nPassi:\n- [x] Verificare provider e isolare ambienti.\n- [x] Installare versioni e preparare fixture, strumenti e cattura comuni.\n- [x] Smoke e verifica del cablaggio; correggere solo l'adattatore della prova.\n- [x] Eseguire due ripetizioni dei tre scenari per ciascun motore.\n- [x] Verificare artefatti, tracce e ripresa persistita.\n- [x] Salvare evidenze e decisione sul riferimento da riprodurre, con limiti espliciti.\n\nConfigurazione Hermes: model.streaming=false, tools.tool_search.enabled=off (esposizione diretta del singolo strumento), context_length=65536, memoria personale e revisione in background disabilitate. OpenHands conserva i controlli nativi finish e think. Nessun prompt base sostituito.\n",
+  "product_direction": "Owned Homun engine derived from pinned reference logic; no Hermes/OpenHands production runtime dependency",
+  "main_trial_count": 12,
+  "timeline_followup_count": 2,
+  "upstream_sources_modified": false
+}
