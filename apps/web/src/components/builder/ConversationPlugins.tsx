@@ -139,7 +139,7 @@ export function ConversationPlugins({
             }}
           />
           <div className="cw-composer-caption">
-            Catalogo dimostrativo · nessuna connessione esterna
+            Nessuna connessione esterna senza la tua approvazione
           </div>
         </div>
       </section>

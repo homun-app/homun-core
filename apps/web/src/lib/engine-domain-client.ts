@@ -295,7 +295,7 @@ export async function listEngineWorks(
 }
 
 export function defaultLocalActor(): EngineActor {
-  return { id: "person_fabio", displayName: "Fabio" };
+  return { id: "person_fabio", displayName: "Tu" };
 }
 
 export type EngineArtifact = {

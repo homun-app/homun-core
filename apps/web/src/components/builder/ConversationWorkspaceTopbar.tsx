@@ -99,9 +99,7 @@ export function ConversationWorkspaceTopbar({
           >
             <Settings2 size={18} />
           </button>
-          {engineMode ? (
-            <span className="cw-viewer">Fonte: motore · Sessione locale · {defaultLocalActor().displayName}</span>
-          ) : (
+          {!engineMode && (
             <label className="cw-viewer">
               Fonte: simulazione · Vista demo{" "}
               <ConversationSelectField

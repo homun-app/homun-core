@@ -9,6 +9,14 @@ each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-09-23
+
+Pulizia dell'esperienza per chi installa da zero: via ogni traccia dell'ambiente di sviluppo.
+
+## Fixes
+- **Identità neutra per il primo avvio.** Un nuovo utente si chiama «Tu» (modificabile in Impostazioni), non più con l'identità demo dello sviluppo.
+- **Rimossi i riferimenti di sviluppo dall'interfaccia**: il link «Versione precedente» nella barra laterale, l'indicatore tecnico nell'intestazione, l'etichetta «PROTOTIPO», la sezione e i link dei dati demo (restano solo nell'ambiente di sviluppo), e le diciture fuorvianti «Archivio locale» e «Catalogo dimostrativo».
+
 ## [0.2.0] — 2026-09-22
 
 La nuova generazione di Homun: lo stesso assistente che delega lavoro reale ai collaboratori, ricostruito su un motore conversazionale locale con approvazione umana esplicita per ogni esecuzione.

@@ -47,7 +47,7 @@ const sections = [
   { id: "skills", label: "Skill", icon: Sparkles },
   { id: "automations", label: "Automazioni", icon: Zap },
   { id: "archive", label: "Archivio", icon: Archive },
-  { id: "data", label: "Dati della demo", icon: Database },
+  ...(import.meta.env.DEV ? [{ id: "data", label: "Dati della demo", icon: Database } as const] : []),
   { id: "help", label: "Guida", icon: HelpCircle },
 ];
 export function ConversationSettings({
@@ -125,7 +125,7 @@ export function ConversationSettings({
       <div className="cv-settings-layout">
         <header>
           <div>
-            <small>HOMUN · PROTOTIPO</small>
+            <small>HOMUN</small>
             <h2>Impostazioni</h2>
           </div>
           <button aria-label="Chiudi impostazioni" className="cw-icon" onClick={close}>
@@ -168,7 +168,6 @@ export function ConversationSettings({
                   maxLength={50}
                   onChange={(e) => change("displayName", e.target.value)}
                 />
-                <small>L’identità demo di riferimento rimane Fabio.</small>
               </label>
               <label>
                 Azienda <span>facoltativo</span>
@@ -284,7 +283,7 @@ export function ConversationSettings({
               )}
             </>
           )}
-          {section === "data" && (
+          {import.meta.env.DEV && section === "data" && (
             <>
               <h3>I dati della prova</h3>
               <p>{storageStatus}</p>
@@ -368,20 +367,24 @@ export function ConversationSettings({
                   </p>
                 </li>
               </ol>
-              <div className="cv-settings-card">
-                <strong>Cosa è simulato</strong>
-                <p>
-                  AI, esecuzioni, connessioni, inviti, permessi e costi. La chat riconosce esempi
-                  guidati e alcune istruzioni: non interpreta qualsiasi richiesta.
-                </p>
-              </div>
-              <div className="cv-settings-links">
-                <a href="/?work-demo=busy&edition=complete">
-                  Demo con 18 lavori ↗
-                </a>
-                <a href="/">Spazio libero ↗</a>
-                <a href="http://127.0.0.1:4182/prototypes/first-work.html">Versione precedente ↗</a>
-              </div>
+              {import.meta.env.DEV && (
+                <>
+                  <div className="cv-settings-card">
+                    <strong>Cosa è simulato</strong>
+                    <p>
+                      AI, esecuzioni, connessioni, inviti, permessi e costi. La chat riconosce esempi
+                      guidati e alcune istruzioni: non interpreta qualsiasi richiesta.
+                    </p>
+                  </div>
+                  <div className="cv-settings-links">
+                    <a href="/?work-demo=busy&edition=complete">
+                      Demo con 18 lavori ↗
+                    </a>
+                    <a href="/">Spazio libero ↗</a>
+                    <a href="http://127.0.0.1:4182/prototypes/first-work.html">Versione precedente ↗</a>
+                  </div>
+                </>
+              )}
             </>
           )}
           {error && (

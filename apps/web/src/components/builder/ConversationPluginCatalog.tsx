@@ -151,7 +151,7 @@ export function ConversationPluginCatalog({
       </div>
       <footer>
         <span role="status">
-          {feedback || "Catalogo dimostrativo · connessioni e autorizzazioni da configurare"}
+          {feedback || "Connessioni e autorizzazioni si configurano da te, strumento per strumento"}
         </span>
         <button onClick={onClose}>Fatto</button>
       </footer>

@@ -64,7 +64,7 @@ export function ConversationProjectsSettingsSection({ actorId = "person_fabio" }
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
   const selectedTeam = teams.find((t) => t.id === selectedTeamId) ?? null;
-  const actor = { id: actorId, displayName: actorId === "person_fabio" ? "Fabio" : actorId };
+  const actor = { id: actorId, displayName: actorId === "person_fabio" ? "Tu" : actorId };
 
   async function refresh() {
     const [p, t, a] = await Promise.all([

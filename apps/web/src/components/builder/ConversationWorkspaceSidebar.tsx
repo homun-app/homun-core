@@ -245,9 +245,6 @@ export function ConversationWorkspaceSidebar({
         </div>
       </div>
       <div className="cw-sidebar-foot">
-        <a href="http://127.0.0.1:4182/prototypes/first-work.html">
-          <ArrowLeft size={14} /> Versione precedente
-        </a>
         <button aria-label="Impostazioni dello spazio" onClick={onOpenSettings}>
           <span className="cw-user">{preferences.displayName.slice(0, 1)}</span>
           <span>

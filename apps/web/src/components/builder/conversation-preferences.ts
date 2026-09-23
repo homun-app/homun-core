@@ -12,7 +12,7 @@ export type ConversationPreferences = {
 };
 export const defaultPreferences: ConversationPreferences = {
   spaceName: "Il tuo spazio",
-  displayName: "Fabio",
+  displayName: "Tu",
   company: "",
   textSize: "standard",
   motion: true,

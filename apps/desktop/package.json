@@ -1,7 +1,7 @@
 {
   "name": "homun-desktop",
   "productName": "Homun",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Homun local workspace",
   "main": "src/main.cjs",
   "private": true,
