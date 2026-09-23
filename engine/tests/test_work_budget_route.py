@@ -29,11 +29,17 @@ def test_works_list_reports_budget_and_set_budget_updates_caps(client):
     tc, = client,
     actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
     ctx = __import__("homun.context", fromlist=["get_context"]).get_context()
-    conv = ctx.service.apply(actor, "c", "conversation.create", {"title": "B"})
-    work = ctx.service.apply(actor, "w", "work.create",
-                             {"conversation_id": conv["conversation_id"], "title": "B", "objective": "O"})
+    # Atomic creation (the runtime pump may rebind ctx.service.store between
+    # bare applies; race seen on CI runners). Intake propose/confirm manage
+    # their own transactions.
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            service = ctx.service.for_store(store)
+            conv = service.apply(actor, "c", "conversation.create", {"title": "B"})
+            work = service.apply(actor, "w", "work.create",
+                                 {"conversation_id": conv["conversation_id"], "title": "B", "objective": "O"})
+        ctx.service.store = store
     wid = work["work_id"]
-    ctx.persist()
     brief = {"title": "T", "objective": "O", "output": "R", "constraints": [], "missing_information": [],
              "suggested_agent_id": None, "new_agent": None, "rationale": "r", "capability": "general"}
     ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
@@ -55,19 +61,23 @@ def test_documents_library_lists_reviewed_artifacts_actor_scoped(client):
     actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
     from homun.context import get_context
     ctx = get_context()
-    conv = ctx.service.apply(actor, "dc", "conversation.create", {"title": "D"})
-    work = ctx.service.apply(actor, "dw", "work.create",
-                             {"conversation_id": conv["conversation_id"], "title": "Lavoro documento", "objective": "O"})
-    wid = work["work_id"]
-    ctx.persist()
-    ctx.service.apply(actor, "dp", "plan.propose", {"work_id": wid, "expected_version": 1, "steps": [
-        {"title": "Consegna", "assignee_id": actor.id}]})
-    ctx.service.apply(actor, "dpa", "plan.accept", {"work_id": wid, "expected_version": 2})
-    started = ctx.service.apply(actor, "da", "work.start", {"work_id": wid, "expected_version": 3})
-    ctx.service.apply(actor, "ds", "work.submit_artifact",
-                      {"work_id": wid, "expected_version": started["version"],
-                       "title": "Esito verificato", "content": "contenuto del documento"})
-    ctx.persist()
+    # Atomic transaction: the runtime pump may rebind ctx.service.store between
+    # bare applies, dropping unsaved in-memory writes (race seen on CI runners).
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            service = ctx.service.for_store(store)
+            conv = service.apply(actor, "dc", "conversation.create", {"title": "D"})
+            work = service.apply(actor, "dw", "work.create",
+                                 {"conversation_id": conv["conversation_id"], "title": "Lavoro documento", "objective": "O"})
+            wid = work["work_id"]
+            service.apply(actor, "dp", "plan.propose", {"work_id": wid, "expected_version": 1, "steps": [
+                {"title": "Consegna", "assignee_id": actor.id}]})
+            service.apply(actor, "dpa", "plan.accept", {"work_id": wid, "expected_version": 2})
+            started = service.apply(actor, "da", "work.start", {"work_id": wid, "expected_version": 3})
+            service.apply(actor, "ds", "work.submit_artifact",
+                          {"work_id": wid, "expected_version": started["version"],
+                           "title": "Esito verificato", "content": "contenuto del documento"})
+        ctx.service.store = store
     items = tc.get("/v1/workspaces/ws_local/artifacts",
                    headers={"X-Homun-Actor-Id": actor.id}).json()["items"]
     entry = next(a for a in items if a["work_id"] == wid)
