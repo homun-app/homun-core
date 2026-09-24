@@ -123,6 +123,15 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   e adattatore IDE Agent Client Protocol (`AcpServerAdapter`) con gestione del ciclo di vita e
   consenso/rifiuto interattivo delle modifiche ai file.
 
+- Sistema di estensione e plugin (H37) con caricamento di manifest v1/v2 (YAML/JSON),
+  isolamento e gestione sicura dei moduli fratelli, ledger rigoroso delle registrazioni
+  (strumenti, hook, provider, piattaforme, comandi, skill, pannelli UI e requisiti di segreti),
+  dispatch di hook con ispezione delle signature e fail-closed sui blocchi di policy (`pre_tool_call`),
+  ciclo di vita enable/disable privo di capacità residue (nessuno stale tool/hook o comando),
+  ricaricamento dinamico della configurazione e contratto di conservazione dei dati persistenti
+  (`<homun_home>/plugin-data/<name>/`) separato dall'albero di installazione del plugin.
+
+
 - Controlli nativi di pausa/ripresa/annullamento e correzioni dalla chat, con
   invalidazione delle risposte superate, conservazione degli esiti incerti e
   oscuramento delle fonti revocate. [Prove e limiti](research/2026-09-23-agent-controls-verifica.md).

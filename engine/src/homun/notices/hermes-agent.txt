@@ -270,3 +270,12 @@ and application/acp_adapter.py derive OpenAI-compatible API serving (/v1/chat/co
 hosted MCP agent tool server (homun_task, homun_ask, homun_status), and Agent Client Protocol
 (ACP) IDE adapter with edit approval workflows from gateway/platforms/api_server*.py,
 acp_adapter/, and mcp_serve.py at the pinned commit.
+
+application/plugin_storage.py, application/plugin_contracts.py, application/plugin_loader.py,
+application/plugin_manager.py, and routes/plugins.py derive plugin manifests, dynamic directory
+discovery, sibling submodule isolation, capability registration ledger (tools, hooks, providers,
+platforms, commands, skills, panels, secrets), fail-closed policy hook dispatch, enable/disable
+lifecycle with zero stale capabilities, configuration reload, and persistent retained-data
+contract outside install trees from plugins/plugin_storage.py, plugins/plugin_loader.py,
+hermes_cli/plugins*.py, and hermes_cli/plugins_ledger.py at the pinned commit.
+

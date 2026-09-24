@@ -98,6 +98,11 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.code_execution_tool import execute as code_exec_execute
         for ce_entry in code_exec_entries(code_exec_execute, code_exec.get('version', 1)):
             registry.register(ce_entry)
+    plugins = run.get('plugins')
+    if isinstance(plugins, dict) and plugins.get('policy') == 'extensible-plugins-v1' and plugins.get('version') == 1:
+        from homun.application.plugin_manager import get_plugin_manager
+        for p_entry in get_plugin_manager().get_active_tools():
+            registry.register(p_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())

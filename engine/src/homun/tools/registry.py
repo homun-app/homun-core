@@ -67,6 +67,10 @@ class ToolRegistry:
         self._entries[definition.name] = _RegisteredTool(
             definition.model_dump_json(), json.dumps(metadata), validator, serializer, entry.handler)
 
+    def unregister(self, name: str) -> None:
+        if name in self._entries:
+            del self._entries[name]
+
     def definitions(self) -> list[ToolDefinition]:
         return [ToolDefinition.model_validate_json(self._entries[name].definition_json)
                 for name in sorted(self._entries)]

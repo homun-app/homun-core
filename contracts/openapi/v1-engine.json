@@ -2067,6 +2067,89 @@
         "title": "PlanStepPayload",
         "type": "object"
       },
+      "PluginActionResponse": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "name",
+          "message"
+        ],
+        "title": "PluginActionResponse",
+        "type": "object"
+      },
+      "PluginConfigReloadRequest": {
+        "properties": {
+          "plugins": {
+            "additionalProperties": true,
+            "title": "Plugins",
+            "type": "object"
+          }
+        },
+        "title": "PluginConfigReloadRequest",
+        "type": "object"
+      },
+      "PluginStorageFile": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "size_bytes"
+        ],
+        "title": "PluginStorageFile",
+        "type": "object"
+      },
+      "PluginStorageInfoResponse": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/PluginStorageFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "storage_path": {
+            "title": "Storage Path",
+            "type": "string"
+          },
+          "total_size_bytes": {
+            "title": "Total Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "storage_path",
+          "files",
+          "total_size_bytes"
+        ],
+        "title": "PluginStorageInfoResponse",
+        "type": "object"
+      },
       "ProposalRequest": {
         "properties": {
           "command_id": {
@@ -4874,6 +4957,301 @@
         "summary": "List Usage Attempts",
         "tags": [
           "models"
+        ]
+      }
+    },
+    "/v1/plugins": {
+      "get": {
+        "description": "List loaded plugins, manifests, active capabilities and summary.",
+        "operationId": "list_plugins_v1_plugins_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Plugins V1 Plugins Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Plugins",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/v1/plugins/reload-config": {
+      "post": {
+        "description": "Apply updated configuration across all plugins.",
+        "operationId": "reload_plugin_config_v1_plugins_reload_config_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginConfigReloadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reload Plugin Config V1 Plugins Reload Config Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reload Plugin Config",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/v1/plugins/{name}": {
+      "delete": {
+        "description": "Uninstall a plugin, deleting its install tree while honoring retained data.",
+        "operationId": "uninstall_plugin_v1_plugins__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether to purge persistent data (default: False)",
+            "in": "query",
+            "name": "purge_data",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Whether to purge persistent data (default: False)",
+              "title": "Purge Data",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Uninstall Plugin",
+        "tags": [
+          "plugins"
+        ]
+      },
+      "get": {
+        "description": "Retrieve details for a specific plugin.",
+        "operationId": "get_plugin_detail_v1_plugins__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Plugin Detail V1 Plugins  Name  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Plugin Detail",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/v1/plugins/{name}/data": {
+      "get": {
+        "description": "Inspect retained storage directory and files for a plugin.",
+        "operationId": "get_plugin_storage_v1_plugins__name__data_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginStorageInfoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Plugin Storage",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/v1/plugins/{name}/disable": {
+      "post": {
+        "description": "Disable a plugin and release all registered capabilities without stale remnants.",
+        "operationId": "disable_plugin_v1_plugins__name__disable_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disable Plugin",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/v1/plugins/{name}/enable": {
+      "post": {
+        "description": "Enable a disabled plugin and re-register its capabilities.",
+        "operationId": "enable_plugin_v1_plugins__name__enable_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enable Plugin",
+        "tags": [
+          "plugins"
         ]
       }
     },
