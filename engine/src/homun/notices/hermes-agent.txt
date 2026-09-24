@@ -301,3 +301,14 @@ key redaction, profile-scoped encrypted credential vault with opaque model handl
 fill redaction registration, and single-execution write approval gates with auditable refusal
 from tools/path_security.py, tools/url_safety.py, agent/redact.py, agent/vault_store.py,
 tools/write_approval.py, and tools/approval.py at the pinned commit.
+application/media_vision.py, application/media_image_gen.py, application/media_video_gen.py,
+application/media_stt.py, application/media_tts.py, application/media_voice_mode.py, and
+routes/media_api.py derive multimodal vision/video frame preparation, text-to-image generation
+and editing with catalog aspect ratios, video generation with duration clamping, audio STT
+transcription dispatch, markdown-normalized TTS speech synthesis and streaming chunks, and
+wake-word detection ("Hey Homun" / "Hey Hermes") with barge-in interruption from
+tools/vision_tools.py, tools/image_generation_tool.py, tools/image_generation_catalog.py,
+tools/video_generation_tool.py, tools/xai_video_tools.py, tools/transcription_tools.py,
+tools/tts_tool.py, tools/tts_streaming.py, tools/voice_mode.py, and tools/wake_word.py
+at the pinned commit.
+

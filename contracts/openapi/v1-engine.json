@@ -1638,6 +1638,97 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "ImageEditRequest": {
+        "properties": {
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "1:1",
+            "title": "Aspect Ratio"
+          },
+          "image_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Image Urls",
+            "type": "array"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt",
+          "image_urls"
+        ],
+        "title": "ImageEditRequest",
+        "type": "object"
+      },
+      "ImageGenerateRequest": {
+        "properties": {
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "1:1",
+            "title": "Aspect Ratio"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "ImageGenerateRequest",
+        "type": "object"
+      },
       "IntakeClassification": {
         "properties": {
           "kind": {
@@ -3587,6 +3678,41 @@
         "title": "SkillCreateRequest",
         "type": "object"
       },
+      "SttTranscribeRequest": {
+        "properties": {
+          "audio_path": {
+            "title": "Audio Path",
+            "type": "string"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          }
+        },
+        "required": [
+          "audio_path"
+        ],
+        "title": "SttTranscribeRequest",
+        "type": "object"
+      },
       "SuggestedAgent": {
         "properties": {
           "id": {
@@ -4384,6 +4510,53 @@
         "title": "ToolProposeRequest",
         "type": "object"
       },
+      "TtsSynthesizeRequest": {
+        "properties": {
+          "audio_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "mp3",
+            "title": "Audio Format"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "TtsSynthesizeRequest",
+        "type": "object"
+      },
       "UrlValidateRequest": {
         "properties": {
           "allow_private": {
@@ -4555,6 +4728,93 @@
           "updated_at"
         ],
         "title": "VaultItemResponse",
+        "type": "object"
+      },
+      "VideoGenerateRequest": {
+        "properties": {
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "16:9",
+            "title": "Aspect Ratio"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 5,
+            "title": "Duration Seconds"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "720p",
+            "title": "Resolution"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "VideoGenerateRequest",
+        "type": "object"
+      },
+      "VisionAnalyzeRequest": {
+        "properties": {
+          "image_source": {
+            "title": "Image Source",
+            "type": "string"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "Describe what you see in this image.",
+            "title": "Prompt"
+          }
+        },
+        "required": [
+          "image_source"
+        ],
+        "title": "VisionAnalyzeRequest",
+        "type": "object"
+      },
+      "WakeCheckRequest": {
+        "properties": {
+          "phrase": {
+            "title": "Phrase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phrase"
+        ],
+        "title": "WakeCheckRequest",
         "type": "object"
       },
       "homun__routes__intake__ConfirmRequest": {
@@ -4965,6 +5225,314 @@
         "summary": "Health",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/media/image/edit": {
+      "post": {
+        "description": "Edit existing images based on instructions.",
+        "operationId": "edit_image_v1_media_image_edit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Edit Image V1 Media Image Edit Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Image",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/v1/media/image/generate": {
+      "post": {
+        "description": "Generate image from prompt.",
+        "operationId": "generate_image_v1_media_image_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageGenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Generate Image V1 Media Image Generate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Image",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/v1/media/stt/transcribe": {
+      "post": {
+        "description": "Transcribe audio to text.",
+        "operationId": "transcribe_stt_v1_media_stt_transcribe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SttTranscribeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Transcribe Stt V1 Media Stt Transcribe Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Transcribe Stt",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/v1/media/tts/synthesize": {
+      "post": {
+        "description": "Synthesize text to speech audio.",
+        "operationId": "synthesize_tts_v1_media_tts_synthesize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TtsSynthesizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Synthesize Tts V1 Media Tts Synthesize Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Synthesize Tts",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/v1/media/video/generate": {
+      "post": {
+        "description": "Generate video from text prompt.",
+        "operationId": "generate_video_v1_media_video_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoGenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Generate Video V1 Media Video Generate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Video",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/v1/media/vision/analyze": {
+      "post": {
+        "description": "Analyze image content with vision models.",
+        "operationId": "analyze_vision_v1_media_vision_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VisionAnalyzeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Analyze Vision V1 Media Vision Analyze Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Vision",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/v1/media/voice/wake-check": {
+      "post": {
+        "description": "Check phrase for wake word detection.",
+        "operationId": "check_wake_word_v1_media_voice_wake_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WakeCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Check Wake Word V1 Media Voice Wake Check Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Wake Word",
+        "tags": [
+          "media"
         ]
       }
     },
