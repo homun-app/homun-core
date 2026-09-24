@@ -23,6 +23,37 @@ Do not claim an external action was performed unless a tool result verifies it.
 '''
 
 
-def initial_messages(objective, instructions):
-    return [NativeMessage(role='system', content=GUIDANCE + '\nAssigned instructions:\n' + instructions),
-            NativeMessage(role='user', content=objective)]
+def initial_messages(
+    objective: str,
+    instructions: str,
+    *,
+    cwd=None,
+    workspace_root=None,
+    persona=None,
+    tools_manifest=None,
+    expand_refs: bool = False,
+):
+    if cwd or workspace_root or persona or tools_manifest:
+        from homun.application.prompt_assembler import PromptAssembler
+        assembler = PromptAssembler(base_guidance=GUIDANCE)
+        messages = assembler.assemble(
+            objective,
+            instructions,
+            cwd=cwd,
+            workspace_root=workspace_root,
+            persona=persona,
+            tools_manifest=tools_manifest,
+        )
+    else:
+        messages = [
+            NativeMessage(role='system', content=GUIDANCE + '\nAssigned instructions:\n' + instructions),
+            NativeMessage(role='user', content=objective),
+        ]
+
+    if expand_refs and messages:
+        from homun.application.context_references import expand_references
+        expanded_obj, _ = expand_references(messages[-1].content, cwd=cwd or workspace_root)
+        messages[-1] = NativeMessage(role='user', content=expanded_obj)
+
+    return messages
+

@@ -239,3 +239,15 @@ with role permissions and append-only event logging, and pluggable channel adapt
 Slack, WhatsApp, Webhook relay) from gateway/pairing.py, gateway/authz_mixin.py, gateway/turn_lease.py,
 gateway/hosted_rooms.py, and gateway/platforms/ at the pinned commit.
 
+application/side_question.py derives detached context-aware side questions (/btw), snapshot prefix
+trimming for role alternation, plain-text transcript rendering with tool call summaries, tool suppression,
+and parent run token/cost attribution from agent/side_question.py at the pinned commit.
+
+application/context_references.py and application/prompt_assembler.py derive context @-references (@file,
+@folder, @diff, @staged, @git, @url) with sensitive path / SSRF boundaries and size truncation,
+hierarchical instruction discovery with documented precedence (AGENTS.override.md > AGENTS.md > CLAUDE.md >
+.cursorrules), subdirectory ancestor walk hints, prompt-injection threat scanning, and context files
+manifest from agent/prompt_builder.py, agent/system_prompt.py, agent/context_file_sources.py,
+agent/context_references.py, and agent/subdirectory_hints.py at the pinned commit.
+
+
