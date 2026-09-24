@@ -74,6 +74,12 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   parsing selezioni multiple, conservazione delle risposte parziali in caso di timeout
   ed evidenza esplicita degli errori di recapito.
 
+- Checkpoint del filesystem e rollback selettivo (`CheckpointManager`, H12) con
+  store git shadow trasparente, ledger delle scritture dell'agente che tutela le
+  modifiche manuali dell'utente, rollback selettivo per singolo file, raccolta diff
+  dell'albero di lavoro (`collect_working_diff`) e isolamento dei sotto-agenti in
+  worktree git dedicati (`create_subagent_worktree`, `cleanup_subagent_worktree`).
+
 - Controlli nativi di pausa/ripresa/annullamento e correzioni dalla chat, con
   invalidazione delle risposte superate, conservazione degli esiti incerti e
   oscuramento delle fonti revocate. [Prove e limiti](research/2026-09-23-agent-controls-verifica.md).

@@ -191,4 +191,11 @@ Homun preserves already-answered questions when timeouts occur, cleanly separate
 presentation labels from recorded responses, and distinguishes delivery failure
 from deliberate user inactivity.
 
+execution/checkpoint_manager.py, execution/working_diff.py, and execution/subagent_worktree.py
+derive filesystem snapshots, transparent shadow git stores, agent-write ledgers, selective
+rollback preserving subsequent user edits, working tree diff collection (including untracked
+files), and subagent git worktree isolation from tools/checkpoint_manager.py, tools/working_diff.py,
+and tools/subagent_worktree.py at the pinned commit.
+
+
 
