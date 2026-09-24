@@ -66,6 +66,13 @@ def _claim(ctx, run_id, epoch=None):
                         )
                 except Exception:
                     pass
+                # Due heartbeat / proactive loop ticks (H26/H27) share the same queue.
+                try:
+                    from homun.application.automation_dispatch import inject_due_automation
+
+                    inject_due_automation(run, actor_id=actor.id)
+                except Exception:
+                    pass
                 consume_steering(run)
             token = uuid4().hex
             run.update(status='running', _lease_token=token,
