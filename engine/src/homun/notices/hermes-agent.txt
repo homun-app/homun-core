@@ -101,3 +101,9 @@ agent/turn_final_response.py at the pinned commit. Homun adds the observed Itali
 shape, conservative quote/excerpt exclusions, durable counters and human-control
 fences. After two ineffective nudges it reports a typed stall instead of publishing
 another promise as a completed deliverable. This is not semantic task verification.
+
+execution/docker.py derives container hardening, hash-based ownership and
+reconnection patterns from tools/environments/docker.py at the pinned commit.
+Homun uses a separate container per immutable job, offline SHA256-pinned images,
+private workspaces, bounded CLI capture and durable exclusive dispatch intents.
+This backend is not yet exposed to agents; Hermes is not a runtime dependency.

@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **213**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **216**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -230,3 +230,7 @@ Documenti censiti: **213**. Punto di ingresso: [indice](README.md).
 
 | [docs/superpowers/plans/2026-09-23-liveness.md](superpowers/plans/2026-09-23-liveness.md) | Recupero delle risposte con azione ancora da svolgere |
 | [docs/research/2026-09-23-agent-liveness-verifica.md](research/2026-09-23-agent-liveness-verifica.md) | Verifica stallo, invito a proseguire e consegna reale |
+
+| [docs/superpowers/specs/2026-09-23-owned-terminal-design.md](superpowers/specs/2026-09-23-owned-terminal-design.md) | Contratto backend terminale proprio, integrazione agente aperta |
+| [docs/superpowers/plans/2026-09-23-owned-terminal-backend.md](superpowers/plans/2026-09-23-owned-terminal-backend.md) | Piano backend Docker e seguito applicativo |
+| [docs/research/2026-09-24-owned-terminal-verifica.md](research/2026-09-24-owned-terminal-verifica.md) | Prove reali backend, H09/H10 parziali |

@@ -1,10 +1,15 @@
 # Stato verificato di Homun 2
 
-Aggiornato il 23 settembre 2026 con registro strumenti e trasporto MCP
+Aggiornato il 24 settembre 2026 con il primo backend terminale Docker proprio
 del nucleo nativo. Lo stato precedente e i rapporti datati conservano le prove storiche.
 Una verifica del sorgente non aggiorna l'app installata.
 
 ## Capacità presenti
+
+- Backend Docker proprio con immagine fissata, directory dedicata, limiti risorse,
+  log limitati e intenti persistenti che impediscono di ripetere un comando.
+  Verificato su Docker reale; collegamento ad approvazioni, chat e UI ancora aperto.
+  [Prove e limiti](research/2026-09-24-owned-terminal-verifica.md).
 
 - Motore Python persistente con comandi versionati, autorizzazioni, materiali,
   artifact, piani, budget, outbox e workflow DBOS.
