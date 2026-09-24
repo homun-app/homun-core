@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from fastapi.testclient import TestClient
 
@@ -230,30 +231,38 @@ def test_media_api_routes_report_unavailability(tmp_path: Path):
     app = create_app()
     client = TestClient(app)
 
+    def _detail_text(resp) -> str:
+        detail = resp.json().get("detail")
+        if isinstance(detail, dict):
+            return str(detail.get("error") or detail)
+        return str(detail or "")
+
     resp_vis = client.post(
         "/v1/media/vision/analyze",
         json={"image_source": "https://example.com/sample.png", "prompt": "Identify objects"},
     )
-    assert resp_vis.status_code == 400
-    assert "backend" in resp_vis.json()["detail"].lower()
+    # Remote URLs are rejected (400) or backend missing (503); never invent success.
+    assert resp_vis.status_code in (400, 503)
+    assert resp_vis.status_code != 200
 
     resp_img = client.post(
         "/v1/media/image/generate",
         json={"prompt": "Sunrise over ocean", "aspect_ratio": "16:9"},
     )
-    assert resp_img.status_code == 400
+    assert resp_img.status_code in (400, 503)
+    assert "not configured" in _detail_text(resp_img).lower() or "backend" in _detail_text(resp_img).lower()
 
     resp_edit = client.post(
         "/v1/media/image/edit",
         json={"prompt": "Add dolphins", "image_urls": ["https://example.com/ocean.png"]},
     )
-    assert resp_edit.status_code == 400
+    assert resp_edit.status_code in (400, 503)
 
     resp_vid = client.post(
         "/v1/media/video/generate",
         json={"prompt": "Running water stream", "duration_seconds": 6, "resolution": "1080p"},
     )
-    assert resp_vid.status_code == 400
+    assert resp_vid.status_code in (400, 503)
 
     wav_file = tmp_path / "sample.wav"
     wav_file.write_bytes(b"RIFFmockwav")
@@ -261,13 +270,21 @@ def test_media_api_routes_report_unavailability(tmp_path: Path):
         "/v1/media/stt/transcribe",
         json={"audio_path": str(wav_file), "language": "en"},
     )
-    assert resp_stt.status_code == 400
+    assert resp_stt.status_code in (400, 503)
 
     resp_tts = client.post(
         "/v1/media/tts/synthesize",
-        json={"text": "Saluti da Homun!", "audio_format": "mp3"},
+        json={"text": "Saluti da Homun!", "audio_format": "mp3", "provider": "macos_say"},
     )
-    assert resp_tts.status_code == 400
+    # macOS say is a real backend when present — success must include a file artifact.
+    assert resp_tts.status_code in (200, 400, 503)
+    if resp_tts.status_code == 200:
+        body = resp_tts.json()
+        assert body["audio_url"].startswith("file:")
+        path = Path(unquote(urlparse(body["audio_url"]).path))
+        assert path.is_file()
+    else:
+        assert "backend" in _detail_text(resp_tts).lower() or "not configured" in _detail_text(resp_tts).lower()
 
     resp_wake = client.post(
         "/v1/media/voice/wake-check",

@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from homun.application.media_backends import resolve_tts_dispatcher, resolve_vision_dispatcher
 from homun.application.media_image_gen import ImageGenerator
 from homun.application.media_stt import SpeechToTextTranscriber
 from homun.application.media_tts import TextToSpeechSynthesizer
@@ -14,6 +15,12 @@ from homun.application.media_vision import VisionAnalyzer
 from homun.application.media_voice_mode import VoiceSession, WakeWordDetector
 
 logger = logging.getLogger(__name__)
+
+def _media_http_error(error: str, metadata: Optional[Dict[str, Any]] = None) -> HTTPException:
+    code = (metadata or {}).get("code")
+    status = 503 if code == "backend_unavailable" or "not configured" in (error or "").lower() else 400
+    return HTTPException(status_code=status, detail={"error": error, "code": code})
+
 
 router = APIRouter(prefix="/v1/media", tags=["media"])
 
@@ -71,9 +78,14 @@ class WakeCheckRequest(BaseModel):
 @router.post("/vision/analyze", response_model=Dict[str, Any])
 def analyze_vision(req: VisionAnalyzeRequest) -> Dict[str, Any]:
     """Analyze image content with vision models."""
-    res = _vision_analyzer.analyze_image(req.image_source, prompt=req.prompt or "")
+    dispatcher = resolve_vision_dispatcher()
+    res = _vision_analyzer.analyze_image(
+        req.image_source,
+        prompt=req.prompt or "",
+        backend_dispatcher=dispatcher,
+    )
     if res.error:
-        raise HTTPException(status_code=400, detail=res.error)
+        raise _media_http_error(res.error, res.metadata)
     return {
         "description": res.description,
         "tokens_used": res.tokens_used,
@@ -92,7 +104,8 @@ def generate_image(req: ImageGenerateRequest) -> Dict[str, Any]:
         seed=req.seed,
     )
     if res.error:
-        raise HTTPException(status_code=400, detail=res.error)
+        meta = getattr(res, 'metadata', None)
+        raise _media_http_error(res.error, meta if isinstance(meta, dict) else None)
     return {
         "image_url": res.image_url,
         "prompt": res.prompt,
@@ -113,7 +126,8 @@ def edit_image(req: ImageEditRequest) -> Dict[str, Any]:
         model=req.model,
     )
     if res.error:
-        raise HTTPException(status_code=400, detail=res.error)
+        meta = getattr(res, 'metadata', None)
+        raise _media_http_error(res.error, meta if isinstance(meta, dict) else None)
     return {
         "image_url": res.image_url,
         "prompt": res.prompt,
@@ -133,7 +147,8 @@ def generate_video(req: VideoGenerateRequest) -> Dict[str, Any]:
         resolution=req.resolution or "720p",
     )
     if res.error:
-        raise HTTPException(status_code=400, detail=res.error)
+        meta = getattr(res, 'metadata', None)
+        raise _media_http_error(res.error, meta if isinstance(meta, dict) else None)
     return {
         "video_url": res.video_url,
         "prompt": res.prompt,
@@ -153,7 +168,8 @@ def transcribe_stt(req: SttTranscribeRequest) -> Dict[str, Any]:
         provider=req.provider,
     )
     if res.error:
-        raise HTTPException(status_code=400, detail=res.error)
+        meta = getattr(res, 'metadata', None)
+        raise _media_http_error(res.error, meta if isinstance(meta, dict) else None)
     return {
         "text": res.text,
         "duration_seconds": res.duration_seconds,
@@ -165,14 +181,17 @@ def transcribe_stt(req: SttTranscribeRequest) -> Dict[str, Any]:
 @router.post("/tts/synthesize", response_model=Dict[str, Any])
 def synthesize_tts(req: TtsSynthesizeRequest) -> Dict[str, Any]:
     """Synthesize text to speech audio."""
+    provider = req.provider or "macos_say"
+    dispatcher = resolve_tts_dispatcher(provider)
     res = _tts_synthesizer.synthesize(
         req.text,
         voice=req.voice,
         audio_format=req.audio_format or "mp3",
-        provider=req.provider,
+        provider=provider,
+        backend_dispatcher=dispatcher,
     )
     if res.error:
-        raise HTTPException(status_code=400, detail=res.error)
+        raise _media_http_error(res.error, res.metadata)
     return {
         "audio_url": res.audio_url,
         "audio_format": res.audio_format,

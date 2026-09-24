@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from homun.application.session_contracts import (
@@ -23,6 +25,7 @@ from homun.application.session_contracts import (
     SessionUsage,
 )
 from homun.application.session_storage import SessionStorage
+from homun.storage.paths import default_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +40,23 @@ _GLOBAL_DEFAULT_STORAGE: Optional[SessionStorage] = None
 
 
 def get_default_storage() -> SessionStorage:
+    """Return process-wide session storage.
+
+    Product default is a durable SQLite file under HOMUN_DATA_DIR.
+    Use HOMUN_SESSION_DB=:memory: (or set_default_storage) for tests.
+    """
     global _GLOBAL_DEFAULT_STORAGE
     if _GLOBAL_DEFAULT_STORAGE is None:
-        _GLOBAL_DEFAULT_STORAGE = SessionStorage(":memory:")
+        override = os.environ.get("HOMUN_SESSION_DB")
+        if override == ":memory:":
+            path: str | Path = ":memory:"
+        elif override:
+            path = Path(override).expanduser().resolve()
+            path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            path = default_data_dir() / "sessions.sqlite"
+            path.parent.mkdir(parents=True, exist_ok=True)
+        _GLOBAL_DEFAULT_STORAGE = SessionStorage(path)
     return _GLOBAL_DEFAULT_STORAGE
 
 

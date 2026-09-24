@@ -18,6 +18,20 @@ from homun.application.goal_manager import (
 )
 from homun.application.goal_tools import execute as execute_goal_tools
 from homun.domain.errors import ValidationError
+from homun.application.goal_store import GoalStore, set_goal_store
+
+
+@pytest.fixture(autouse=True)
+def _isolated_goal_store(tmp_path, monkeypatch):
+    """Keep H25 goal tests off the product goals.sqlite file."""
+    db = tmp_path / "goals-test.sqlite"
+    store = GoalStore(db)
+    set_goal_store(store)
+    monkeypatch.setenv("HOMUN_GOAL_DB", str(db))
+    yield store
+    store.close()
+    set_goal_store(None)
+
 
 
 def test_goal_contract_parsing():
@@ -196,11 +210,36 @@ def test_goal_tools_execution():
 
 
 def test_goal_session_migration():
+    from homun.application.goal_manager import load_goal
+
     mgr1 = GoalManager("session-old")
     mgr1.set("Persistent migration goal")
     assert migrate_goal_to_session("session-old", "session-new", reason="test-compaction") is True
-    assert mgr1.state.status == "cleared"
+    # Store is authoritative after migration; in-memory manager may be stale until reload.
+    assert load_goal("session-old").status == "cleared"
+    mgr1_reloaded = GoalManager("session-old")
+    assert mgr1_reloaded.state.status == "cleared"
 
     mgr2 = GoalManager("session-new")
     assert mgr2.is_active()
     assert mgr2.state.goal == "Persistent migration goal"
+
+
+def test_goal_survives_store_reopen(tmp_path, monkeypatch):
+    """Goals must reload from SQLite after a new GoalStore instance (restart)."""
+    from homun.application.goal_store import GoalStore, set_goal_store
+
+    db = tmp_path / "goals.sqlite"
+    store1 = GoalStore(db)
+    set_goal_store(store1)
+    mgr = GoalManager("session-persist")
+    mgr.set("Survive engine restart")
+    assert mgr.is_active()
+    store1.close()
+
+    store2 = GoalStore(db)
+    set_goal_store(store2)
+    mgr2 = GoalManager("session-persist")
+    assert mgr2.is_active()
+    assert mgr2.state.goal == "Survive engine restart"
+    set_goal_store(None)

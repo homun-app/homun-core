@@ -94,11 +94,13 @@ class VisionAnalyzer:
 
         try:
             res = backend_dispatcher(normalized_src, mime, prompt)
+            meta = dict(res.get("metadata") or {})
+            meta.setdefault("source", normalized_src[:30] + "...")
             return VisionAnalysisResult(
                 description=res.get("text", ""),
                 tokens_used=int(res.get("tokens", 0) or 0),
                 mime_type=mime,
-                metadata={"source": normalized_src[:30] + "..."},
+                metadata=meta,
             )
         except Exception as exc:
             return VisionAnalysisResult(

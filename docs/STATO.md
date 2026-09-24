@@ -354,6 +354,12 @@ dai test. Il [confronto Hermes](research/2026-09-23-hermes-homun-utilizzo.md)
 conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
 
 
+- **Backend reali e persistenza (2026-09-24)**: TTS macOS `say` e visione Ollama
+  collegati alle API media quando disponibili; probe TCC macOS per computer-use
+  senza dichiarare `ready` senza driver. Goal e sessioni di default su SQLite
+  durevole sotto `HOMUN_DATA_DIR`.
+  [Media](research/evidence/2026-09-24-media-backends/README.md).
+
 - **Correzione falsi successi (2026-09-24)**: i percorsi motore per media, computer-use,
   canali, hosted MCP, Copilot ACP, Yuanbao/Meet e batch eval non dichiarano più successo
   senza backend reale; restituiscono `backend_unavailable` o errore tipizzato.

@@ -26,6 +26,7 @@ from homun.application.goal_contracts import (
     _MAX_BARRIER_WAIT_S,
     run_gate,
 )
+from homun.application.goal_store import get_goal_store
 
 logger = logging.getLogger(__name__)
 
@@ -33,30 +34,30 @@ DEFAULT_JUDGE_TIMEOUT = 30.0
 DEFAULT_MAX_CONSECUTIVE_PARSE_FAILURES = 3
 DEFAULT_MAX_CONSECUTIVE_TRANSPORT_FAILURES = 5
 
-_GLOBAL_GOAL_CACHE: Dict[str, GoalState] = {}
-
 
 def load_goal(session_id: str) -> Optional[GoalState]:
-    """Load the goal state for a given session."""
+    """Load the goal state for a given session from durable storage."""
     if not session_id:
         return None
-    return _GLOBAL_GOAL_CACHE.get(session_id)
+    return get_goal_store().get(session_id)
 
 
 def save_goal(session_id: str, state: GoalState) -> None:
-    """Save the goal state for a given session."""
+    """Persist the goal state for a given session."""
     if not session_id or state is None:
         return
-    _GLOBAL_GOAL_CACHE[session_id] = state
+    get_goal_store().put(session_id, state)
 
 
 def clear_goal(session_id: str) -> None:
-    """Clear goal for a given session."""
+    """Mark goal cleared and persist for a given session."""
     if not session_id:
         return
-    state = _GLOBAL_GOAL_CACHE.get(session_id)
+    store = get_goal_store()
+    state = store.get(session_id)
     if state is not None:
         state.status = "cleared"
+        store.put(session_id, state)
 
 
 def migrate_goal_to_session(old_session_id: str, new_session_id: str, *, reason: str = "") -> bool:

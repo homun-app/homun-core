@@ -16,6 +16,7 @@ from homun.application.desktop_contracts import (
     DesktopCaptureResult,
     check_action_safety,
 )
+from homun.application.computer_use_macos import probe_macos_computer_use
 
 logger = logging.getLogger(__name__)
 
@@ -36,17 +37,23 @@ class ComputerUseDriver:
         windows_provider: Optional[Callable[[Optional[str]], List[Dict[str, Any]]]] = None,
         capture_provider: Optional[Callable[[Optional[str], str], DesktopCaptureResult]] = None,
         action_provider: Optional[Callable[[str, Dict[str, Any]], DesktopActionResult]] = None,
+        auto_probe: bool = True,
     ) -> None:
         self._active_app: Optional[str] = None
         self._active_window_id: Optional[int] = None
         self._active_pid: Optional[int] = None
         self._last_capture: Optional[DesktopCaptureResult] = None
         self._permission_mode: str = "restricted"
-        self._status_probe = status_probe
         self._apps_provider = apps_provider
         self._windows_provider = windows_provider
         self._capture_provider = capture_provider
         self._action_provider = action_provider
+        if status_probe is not None:
+            self._status_probe = status_probe
+        elif auto_probe and sys.platform == "darwin":
+            self._status_probe = probe_macos_computer_use
+        else:
+            self._status_probe = None
 
     def get_status(self) -> Dict[str, Any]:
         """Return platform readiness only after a real permission/driver probe."""
@@ -60,6 +67,13 @@ class ComputerUseDriver:
             probed.setdefault("permission_mode", self._permission_mode)
             probed.setdefault("active_app", self._active_app)
             probed.setdefault("active_window_id", self._active_window_id)
+            # Probe alone never implies input/capture backends are installed.
+            if self._action_provider is None and self._capture_provider is None:
+                probed["ready"] = False
+                if not probed.get("code"):
+                    probed["code"] = "backend_unavailable"
+                if not probed.get("error"):
+                    probed["error"] = BACKEND_UNAVAILABLE
             return probed
 
         return {
