@@ -86,6 +86,12 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.session_tools import execute as session_execute
         for s_entry in session_entries(session_execute, session_mgmt.get('version', 1)):
             registry.register(s_entry)
+    gateway = run.get('gateway')
+    if isinstance(gateway, dict) and gateway.get('policy') == 'core-gateway-v1' and gateway.get('version') == 1:
+        from homun.application.gateway_contracts import entries as gateway_entries
+        from homun.application.gateway_tools import execute as gateway_execute
+        for gw_entry in gateway_entries(gateway_execute, gateway.get('version', 1)):
+            registry.register(gw_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())

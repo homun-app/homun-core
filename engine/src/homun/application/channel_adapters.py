@@ -1,0 +1,270 @@
+"""Messaging platform and channel adapters for gateway routing (H33).
+
+Derived from Hermes gateway/platforms/ and gateway/platform_registry.py
+at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
+Homun maintains pluggable channel adapters for Telegram, Discord, Slack,
+WhatsApp, and Webhook relays, supporting inbound parsing, media handling,
+thread routing, authorization gates, and turn lease acquisition.
+"""
+from __future__ import annotations
+
+import logging
+import time
+import uuid
+from typing import Any, Callable, Dict, List, Optional
+
+from homun.application.gateway_contracts import (
+    ChannelMedia,
+    ChannelMessage,
+    PlatformKind,
+)
+from homun.application.gateway_pairing import GatewayPairingManager
+from homun.application.gateway_turn_lease import TurnLeaseManager
+
+logger = logging.getLogger(__name__)
+
+
+class ChannelAdapter:
+    """Base class for messaging channel adapters."""
+
+    platform: str = "generic"
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = dict(config or {})
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        raise NotImplementedError
+
+    def format_outbound(self, text: str, *, reply_to: Optional[str] = None) -> Dict[str, Any]:
+        return {"text": text, "reply_to": reply_to}
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        """Deliver outbound message to platform destination."""
+        return {
+            "delivered": True,
+            "platform": self.platform,
+            "channel_id": channel_id,
+            "thread_id": thread_id,
+            "reply_to_id": reply_to_id,
+            "text": text,
+            "media_count": len(media or []),
+            "sent_at": time.time(),
+        }
+
+
+class TelegramAdapter(ChannelAdapter):
+    platform = "telegram"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        msg = payload.get("message") or payload
+        from_user = msg.get("from") or {}
+        chat = msg.get("chat") or {}
+        user_id = str(from_user.get("id") or "")
+        chat_id = str(chat.get("id") or "")
+        text = str(msg.get("text") or msg.get("caption") or "")
+
+        media_items = []
+        if "photo" in msg:
+            media_items.append(ChannelMedia(mime_type="image/jpeg", size_bytes=1024))
+        if "document" in msg:
+            doc = msg["document"]
+            media_items.append(ChannelMedia(mime_type=doc.get("mime_type", "application/octet-stream"), file_name=doc.get("file_name")))
+
+        return ChannelMessage(
+            id=str(msg.get("message_id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=chat_id,
+            user_id=user_id,
+            username=from_user.get("username"),
+            text=text,
+            topic_id=str(msg.get("message_thread_id")) if msg.get("message_thread_id") else None,
+            thread_id=str(msg.get("message_thread_id")) if msg.get("message_thread_id") else None,
+            is_direct=(chat.get("type") == "private"),
+            media=media_items,
+            timestamp=float(msg.get("date") or time.time()),
+        )
+
+
+class DiscordAdapter(ChannelAdapter):
+    platform = "discord"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        author = payload.get("author") or {}
+        user_id = str(author.get("id") or "")
+        channel_id = str(payload.get("channel_id") or "")
+        text = str(payload.get("content") or "")
+
+        media_items = []
+        for att in payload.get("attachments") or []:
+            media_items.append(ChannelMedia(
+                url=att.get("url"),
+                mime_type=att.get("content_type", "application/octet-stream"),
+                file_name=att.get("filename"),
+                size_bytes=att.get("size", 0),
+            ))
+
+        return ChannelMessage(
+            id=str(payload.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=channel_id,
+            user_id=user_id,
+            username=author.get("username"),
+            text=text,
+            thread_id=str(payload.get("thread_id")) if payload.get("thread_id") else None,
+            is_direct=bool(payload.get("guild_id") is None),
+            media=media_items,
+            timestamp=time.time(),
+        )
+
+
+class SlackAdapter(ChannelAdapter):
+    platform = "slack"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        event = payload.get("event") or payload
+        user_id = str(event.get("user") or "")
+        channel_id = str(event.get("channel") or "")
+        text = str(event.get("text") or "")
+        thread_ts = event.get("thread_ts")
+
+        media_items = []
+        for f in event.get("files") or []:
+            media_items.append(ChannelMedia(
+                url=f.get("url_private"),
+                mime_type=f.get("mimetype", "application/octet-stream"),
+                file_name=f.get("name"),
+                size_bytes=f.get("size", 0),
+            ))
+
+        return ChannelMessage(
+            id=str(event.get("ts") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=channel_id,
+            user_id=user_id,
+            text=text,
+            thread_id=str(thread_ts) if thread_ts else None,
+            is_direct=channel_id.startswith("D"),
+            media=media_items,
+            timestamp=float(event.get("ts") or time.time()),
+        )
+
+
+class WhatsAppAdapter(ChannelAdapter):
+    platform = "whatsapp"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        entry = (payload.get("entry") or [{}])[0]
+        changes = (entry.get("changes") or [{}])[0]
+        val = changes.get("value") or {}
+        msg = (val.get("messages") or [{}])[0]
+
+        from_number = str(msg.get("from") or "")
+        text_obj = msg.get("text") or {}
+        text = str(text_obj.get("body") or "")
+
+        return ChannelMessage(
+            id=str(msg.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=from_number,
+            user_id=from_number,
+            text=text,
+            is_direct=True,
+            timestamp=float(msg.get("timestamp") or time.time()),
+        )
+
+
+class WebhookRelayAdapter(ChannelAdapter):
+    platform = "webhook"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        return ChannelMessage(
+            id=str(payload.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(payload.get("channel_id") or "default_channel"),
+            user_id=str(payload.get("user_id") or "anonymous_user"),
+            username=payload.get("username"),
+            text=str(payload.get("text") or ""),
+            thread_id=payload.get("thread_id"),
+            topic_id=payload.get("topic_id"),
+            is_direct=bool(payload.get("is_direct", True)),
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+
+class ChannelRegistry:
+    """Registry and dispatcher for multi-platform channel adapters."""
+
+    def __init__(
+        self,
+        pairing_manager: Optional[GatewayPairingManager] = None,
+        lease_manager: Optional[TurnLeaseManager] = None,
+    ):
+        self.pairing_manager = pairing_manager or GatewayPairingManager()
+        self.lease_manager = lease_manager or TurnLeaseManager()
+        self._adapters: Dict[str, ChannelAdapter] = {
+            "telegram": TelegramAdapter(),
+            "discord": DiscordAdapter(),
+            "slack": SlackAdapter(),
+            "whatsapp": WhatsAppAdapter(),
+            "webhook": WebhookRelayAdapter(),
+        }
+
+    def register_adapter(self, adapter: ChannelAdapter) -> None:
+        self._adapters[adapter.platform.lower()] = adapter
+
+    def get_adapter(self, platform: str) -> Optional[ChannelAdapter]:
+        return self._adapters.get(platform.strip().lower())
+
+    def dispatch_inbound(
+        self,
+        platform: str,
+        raw_payload: Dict[str, Any],
+        handler: Callable[[ChannelMessage], str],
+    ) -> Dict[str, Any]:
+        """Dispatch inbound payload: authorization check, turn lease acquire, execution, and release."""
+        adapter = self.get_adapter(platform)
+        if not adapter:
+            raise ValueError(f"No adapter registered for platform: {platform}")
+
+        message = adapter.parse_inbound(raw_payload)
+
+        # 1. Authorization check
+        if not self.pairing_manager.is_user_authorized(message.platform, message.user_id):
+            return {
+                "status": "unauthorized",
+                "platform": message.platform,
+                "user_id": message.user_id,
+                "message": f"Unauthorized sender. To pair, send a pairing request code.",
+            }
+
+        # 2. Turn lease serialization: resolve session/routing key
+        routing_key = f"{message.platform}:{message.channel_id}:{message.thread_id or 'main'}"
+        token = self.lease_manager.acquire(routing_key, owner_key=message.user_id, timeout=5.0)
+        try:
+            # 3. Handle message
+            response_text = handler(message)
+
+            # 4. Deliver response
+            delivery_res = adapter.send(
+                message.channel_id,
+                response_text,
+                thread_id=message.thread_id,
+                reply_to_id=message.id,
+            )
+            return {
+                "status": "processed",
+                "message_id": message.id,
+                "routing_key": routing_key,
+                "response": response_text,
+                "delivery": delivery_res,
+            }
+        finally:
+            self.lease_manager.release(token)

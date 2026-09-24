@@ -230,3 +230,12 @@ indexing, database integrity checks, orphan message repair, and token accounting
 hermes_state_sessions.py, hermes_state_rewind.py, hermes_state_timeline.py, hermes_state_fts.py,
 hermes_state_repair.py, hermes_state_usage.py, hermes_cli/session_export.py, and
 hermes_cli/foreign_sessions.py at the pinned commit.
+
+application/gateway_contracts.py, application/gateway_pairing.py, application/gateway_turn_lease.py,
+application/gateway_hosted_rooms.py, application/channel_adapters.py, and application/gateway_tools.py
+derive DM pairing codes with unambiguous alphabet, TTL expiry, rate limiting, failed attempt lockout,
+platform allowlists, strict per-session turn leasing with fail-closed timeout, multi-agent hosted rooms
+with role permissions and append-only event logging, and pluggable channel adapters (Telegram, Discord,
+Slack, WhatsApp, Webhook relay) from gateway/pairing.py, gateway/authz_mixin.py, gateway/turn_lease.py,
+gateway/hosted_rooms.py, and gateway/platforms/ at the pinned commit.
+

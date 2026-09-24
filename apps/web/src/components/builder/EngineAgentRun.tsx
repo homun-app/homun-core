@@ -123,6 +123,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {p.goals?.policy === 'persistent-goals-v1' && <p>Homun gestisce obiettivi persistenti su più turni con contratti di verifica, barriere di attesa e criteri di qualità deterministici.</p>}
       {p.cron?.policy === 'durable-cron-v1' && <p>Homun gestisce pianificazioni cron persistenti con esecuzione a script o agente, catena di contesti e tracciamento incidenti.</p>}
       {p.session_management?.policy === 'durable-sessions-v1' && <p>Homun gestisce il ciclo di vita delle sessioni con ripristino cartella di lavoro, biforcazioni con tracciamento genealogia, esportazioni con rimozione dati sensibili e integrità SQLite.</p>}
+      {p.gateway?.policy === 'core-gateway-v1' && <p>Homun gestisce il runtime gateway multicanale con accoppiamento codici DM, leasing turni esclusivo, stanze di discussione multi-agente e adattatori di messaggistica.</p>}
       {p.terminal?.policy === 'ssh-v1'
         ? <p>Homun può proporre comandi su {p.terminal.user}@{p.terminal.host}:{p.terminal.port}. Ogni esecuzione richiede un’approvazione separata. Non è un container e non copia i file.</p>
         : p.terminal?.policy === 'local-private-v1'
