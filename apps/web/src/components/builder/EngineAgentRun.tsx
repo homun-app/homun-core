@@ -12,6 +12,7 @@ import { EngineMaterialSelection } from './EngineMaterialSelection';
 import { EngineAgentServerPicker } from './EngineAgentServerPicker';
 import { EngineAgentExternalApproval } from './EngineAgentExternalApproval';
 import { EngineAgentTerminalApproval } from './EngineAgentTerminalApproval';
+import { EngineWorkspaceEditApproval } from './EngineWorkspaceEditApproval';
 import { EngineAgentControls } from './EngineAgentControls';
 
 export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () => Promise<void> }) {
@@ -73,9 +74,10 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {p.team && <p>Squadra: {p.team.name}. Può consultare {p.team.members.map(m => m.name).join(', ')} usando i modelli configurati.</p>}
       {p.person && <p>Eventuali chiarimenti saranno richiesti a {p.person.name}, tramite un invito limitato alla domanda.</p>}
       <p>Autorizzi letture e ricerche su queste fonti, fino a {p.limits.max_turns} passaggi.
-        Il risultato arriverà in revisione. Invii esterni e modifiche ai file non sono inclusi.</p>
+        Il risultato arriverà in revisione. Gli invii esterni richiedono un’approvazione separata.</p>
       {p.terminal && <p>Terminale isolato abilitato per proporre comandi. Ogni esecuzione richiede un’approvazione separata.</p>}
-      {p.tools?.some(tool => tool.toolset === "workspace_files") && <p>Homun può leggere e consegnare copie dei file prodotti nella cartella del run.</p>}
+      {p.tools?.some(tool => tool.name === 'write_workspace_file') && <p>Homun può leggere, cercare e proporre modifiche nella cartella del run. Ogni scrittura richiede una tua approvazione separata, dopo una lettura aggiornata.</p>}
+      {p.tools?.some(tool => tool.toolset === "workspace_files") && !p.tools?.some(tool => tool.name === 'write_workspace_file') && <p>Homun può leggere e consegnare copie dei file prodotti nella cartella del run.</p>}
       {!!p.external_tools?.length && <>
         <p>Strumenti disponibili: ogni azione esterna richiede una tua approvazione separata.</p>
         <ul>{p.external_tools.map(tool => <li key={`${tool.server_id}:${tool.tool}`}><strong>{tool.server_name} · {tool.tool}</strong>{tool.description && ` — ${tool.description}`}</li>)}</ul>
@@ -85,6 +87,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
     {p && ['queued','running'].includes(p.status) && <p role="status">{p.executor_name} sta lavorando · {p.turns} passaggi completati.</p>}
     {p?.external_request_id && <EngineAgentExternalApproval active={p.status === 'waiting_external'} key={p.external_request_id ?? p.id} workId={work.id} requestId={p.external_request_id} />}
     {p?.terminal_request_id && <EngineAgentTerminalApproval key={p.terminal_request_id} workId={work.id} requestId={p.terminal_request_id} active={p.status === 'waiting_external'} />}
+    {p?.file_edit_request_id && <EngineWorkspaceEditApproval key={p.file_edit_request_id} workId={work.id} requestId={p.file_edit_request_id} active={p.status === 'waiting_external'} />}
     {p?.status === 'paused' && <p role="status">Lavoro in pausa. Puoi correggere le indicazioni o riprendere.</p>}
     {p?.status === 'cancelled' && <p role="status">Esecuzione interrotta. Le attività già svolte restano consultabili.</p>}
     {p && <EngineAgentControls key={p.id} workId={work.id} run={p} onUpdated={async updated => {

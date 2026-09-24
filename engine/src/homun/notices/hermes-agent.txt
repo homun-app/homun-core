@@ -102,6 +102,13 @@ shape, conservative quote/excerpt exclusions, durable counters and human-control
 fences. After two ineffective nudges it reports a typed stall instead of publishing
 another promise as a completed deliverable. This is not semantic task verification.
 
+execution/file_match.py derives the ordered fuzzy replacement chain from
+tools/fuzzy_match.py at the pinned commit. execution/file_syntax.py derives the
+lint-delta rule (new errors only; JSON/TOML fail closed) from
+tools/file_operations_lint.py. Homun keeps directory-descriptor confinement,
+exact human approval before any write, and does not run Hermes LSP or shell
+linters. Language-server diagnostics stay unavailable and are reported as such.
+
 execution/docker.py derives container hardening, hash-based ownership and
 reconnection patterns from tools/environments/docker.py at the pinned commit.
 Homun uses a separate container per immutable job, offline SHA256-pinned images,

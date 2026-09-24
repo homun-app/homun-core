@@ -16,10 +16,13 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   Collegamento nativo al modello con consenso per comando e receipt singola,
   configurazione opzionale e pannello UI presenti. Prova reale Ollama/Docker;
   durata approvata e watchdog persistente presenti mentre il motore è acceso.
-  File del workspace elencabili e leggibili; consegne immutabili scaricabili
-  nel dettaglio lavoro, verificate con modello/Docker reali.
+  File del workspace elencabili, ricercabili e leggibili per righe; le modifiche
+  attendono un'approvazione esatta e non usano uno snapshot obsoleto. Consegne
+  immutabili scaricabili nel dettaglio lavoro. Verifica Ollama della patch e
+  consegna, senza container. Language server e patch multi-file ancora aperti.
   [File e limiti](research/2026-09-24-workspace-files-verifica.md).
-  Sessione interattiva UI, timer indipendente, PTY e parità completa file tools ancora aperti.
+  [Modifiche](research/2026-09-24-workspace-edits-verifica.md).
+  Sessione interattiva UI, timer indipendente e PTY ancora aperti.
   [Scadenze](research/2026-09-24-terminal-deadline-verifica.md).
   [Ciclo agente](research/2026-09-24-agent-terminal-verifica.md).
   [Backend](research/2026-09-24-owned-terminal-verifica.md) e
@@ -202,7 +205,13 @@ resta una fotografia distinta.
   sono certificate dal numero di test. Restano da analizzare con scenari reali,
   inclusi errori, ripresa dopo giorni e materiali che cambiano.
 
-## Prossimo passo: uso reale e UX
+## Prossimo passo: parità Hermes, poi UX
+
+La tranche file H11 aggiunge pagine, ricerca e modifiche approvate. Restano
+aperti language server, patch V4A, processi in background/PTY e il resto della
+matrice. Non è parità completa.
+
+## Uso reale e UX
 
 I due ingressi — richiesta diretta e squadra aziendale — sono presenti nel
 perimetro del rapporto operativo. Il ciclo resta limitato ai materiali selezionati:

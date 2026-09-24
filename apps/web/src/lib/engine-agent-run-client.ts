@@ -9,6 +9,7 @@ export type AgentRun = {
   status: 'pending_approval' | 'queued' | 'running' | 'waiting_input' | 'waiting_external' | 'completed' | 'failed' | 'blocked' | 'paused' | 'cancelled';
   external_request_id?: string;
   terminal_request_id?: string;
+  file_edit_request_id?: string;
   terminal?: {image: string; policy: string};
   external_tools?: {server_id: string; server_name: string; tool: string; name: string; description: string}[];
   tool_version: string;

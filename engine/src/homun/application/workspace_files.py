@@ -21,7 +21,7 @@ def root_for(ctx,run):
 def _authorized(ctx,store,actor,run):
     current=lookup(store,run['id'],run['work_id'])
     authority(ctx,store,actor,current,running=True)
-    if (current.get('_workspace_files_version')!=1 or current['status']!='running'
+    if (current.get('_workspace_files_version') not in {1,2} or current['status']!='running'
             or current['_epoch']!=run['_epoch'] or current.get('_lease_token')!=run.get('_lease_token')):
         raise ConflictError('Workspace operation no longer belongs to the active run')
     return current
@@ -33,19 +33,34 @@ def public(result):return deepcopy({k:v for k,v in result.items() if not k.start
 def execute(ctx,actor,run,tool,args):
     store=ctx.repository.load();_authorized(ctx,store,actor,run)
     files=WorkspaceFiles(root_for(ctx,run))
+    if tool in {'write_workspace_file','patch_workspace_file'}:
+        raise ConflictError('File edits are applied only after exact approval')
     if tool=='deliver_workspace_file':return _deliver(ctx,actor,run,args,files)
-    if tool=='list_workspace_files':result=files.list(args.get('path',''),limit=args.get('limit',100))
+    version=run.get('_workspace_files_version')
+    if tool=='list_workspace_files':
+        result=files.list_page(args.get('path',''),limit=args.get('limit',100),cursor=args.get('cursor','')) if version==2 else files.list(args.get('path',''),limit=args.get('limit',100))
+    elif tool=='read_workspace_lines':
+        from homun.execution.file_pages import page
+        result=page(files,args['path'],offset=args.get('offset',1),limit=args.get('limit',200))
+    elif tool=='search_workspace_files':
+        from homun.execution.file_search import search
+        result=search(files,args['pattern'],target=args.get('target','content'),path=args.get('path',''),
+                      limit=args.get('limit',50),offset=args.get('offset',0))
     else:
         data=files.read(args['path'])
         result={'path':args['path'],'sha256':hashlib.sha256(data).hexdigest(),'byte_size':len(data)}
         try:
             text=data.decode('utf-8')
             if '\x00' in text:raise UnicodeError()
-        except UnicodeError:result.update(binary=True)
+        except UnicodeError:
+            result.update(binary=True,file_coverage={'path':args['path'],'sha256':result['sha256'],'complete':False,'representation':'binary'})
         else:
             offset=args.get('offset',0);limit=args.get('limit',6000)
+            complete=offset==0 and offset+limit>=len(text)
             result.update(binary=False,text=text[offset:offset+limit],offset=offset,
-                          next_offset=offset+limit if offset+limit<len(text) else None)
+                          next_offset=None if complete else offset+limit,
+                          file_coverage={'path':args['path'],'sha256':result['sha256'],'complete':complete,
+                                         'representation':'utf-8','total_lines':0 if complete and text=='' else None})
     _authorized(ctx,ctx.repository.load(),actor,run)
     return result
 

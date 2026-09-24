@@ -45,10 +45,14 @@ def project(run,tool_name,call_id,result):
     ref='result_'+digest
     run.setdefault('_tool_results',{}).setdefault(ref,{'text':raw,'tool':tool_name,'call_id':call_id})
     head=int(PREVIEW_CHARACTERS*0.4);tail=PREVIEW_CHARACTERS-head
-    return {'result_ref':ref,'format':'json','sha256':digest,'total_characters':len(raw),
+    projected={'result_ref':ref,'format':'json','sha256':digest,'total_characters':len(raw),
         'preview':raw[:head]+f'\n[OMITTED {len(raw)-PREVIEW_CHARACTERS} CHARACTERS]\n'+raw[-tail:],
         'notice':'Full result saved. Use read_tool_result with this result_ref to page or search literal text. Preview is incomplete.',
         **_flags(result)}
+    coverage=result.get('file_coverage') if isinstance(result,dict) else None
+    if isinstance(coverage,dict) and len(json.dumps(coverage,sort_keys=True))<=500:
+        projected['file_coverage']=coverage
+    return projected
 
 
 def read(run,arguments):

@@ -24,9 +24,9 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
     if run.get('terminal'):
         from homun.application.agent_terminal_contracts import entry as terminal_entry
         registry.register(terminal_entry(run['terminal']))
-    if run.get('_workspace_files_version') == 1:
+    if run.get('_workspace_files_version') in {1, 2}:
         from homun.application.workspace_file_contracts import entries as file_entries
-        for file_entry in file_entries(file_executor):registry.register(file_entry)
+        for file_entry in file_entries(file_executor, run['_workspace_files_version']):registry.register(file_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())

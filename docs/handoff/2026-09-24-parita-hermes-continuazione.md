@@ -221,23 +221,25 @@ browser/Electron, l'app installata, un ambiente remoto o un deployment.
 
 ## 8. Come continuare concretamente
 
-### Prima tranche consigliata: completare la semantica file H11
+### H11, tranche successiva a lettura e consegna: fatta in questo aggiornamento
 
-1. Verificare Git/ambiente e leggere i documenti indicati; controllare ciò che
-   esiste già prima di creare moduli o nuovi percorsi paralleli.
-2. Leggere nel checkout Hermes i tool file e i relativi test. Annotare esattamente
-   paginazione per righe, limiti caratteri, ricerca, sostituzione e patch.
-3. Proporre un piano tecnico breve nel repository e procedere autonomamente entro
-   l'obiettivo già approvato: enumerazione completa ma limitata/paginata, ricerca,
-   letture con riferimenti stabili, scritture e patch protette da lettura/hash
-   attuali; rifiuto di modifiche basate su snapshot obsoleti.
-4. Estendere le astrazioni esistenti mantenendo autorizzazioni, confinamento,
-   versioni dei tool e receipt. Verificare supporto binari/documenti e diagnostica
-   senza fingere capacità non implementate. Studiare il comportamento fuzzy patch
-   upstream prima di introdurre euristiche.
-5. Provare il percorso modello → lettura/ricerca → modifica autorizzata → verifica
-   → consegna; includere conflitto concorrente e ripresa senza doppia modifica.
-6. Aggiornare matrice, rapporto/evidenze e STATO; commit coerente e merge locale.
+Pagine ordinate, ricerca confinata, lettura per righe, scrittura e patch
+protette da lettura/hash, approvazione esatta e ripresa senza seconda scrittura.
+Prova Ollama isolata riuscita. Restano language server, V4A e diversi estrattori.
+Rapporto: [modifiche file](../research/2026-09-24-workspace-edits-verifica.md).
+
+### Prima tranche consigliata dopo questo aggiornamento: H09/H10
+
+1. Verificare Git e non rifare la tranche file appena integrata.
+2. Leggere in Hermes i tool di processo, PTY, background, log, wait, kill e write,
+   più i backend oltre Docker. Annotare cosa Homun possiede già nel terminale proprio.
+3. Estendere il backend esistente: un processo avviato deve poter continuare
+   mentre il modello fa altro, con polling, log, attesa, scrittura e arresto,
+   senza un secondo dispatch se l'esito è incerto.
+4. Il timer indipendente nel container, quando Homun è spento, resta un limite
+   da dichiarare finché non esiste un meccanismo proprio.
+5. Prove di ripresa, cancellazione e un solo risultato canonico; poi matrice,
+   rapporto, commit e merge locale.
 
 ### Tranche successive, ordine da confermare con le dipendenze del codice
 
@@ -377,14 +379,16 @@ Nessun budget numerico è stato richiesto. Non segnare completo a fine tranche.
 >
 > Il motore ha loop nativo persistente, controlli e recupero, bridge MCP con
 > consensi, terminale Docker proprio approvato e riprendibile, watchdog,
-> lettura file confinata e consegne immutabili. Sono capacità parziali:
-> non dichiarare raggiunta la parità. Le ultime prove erano 952 test engine
-> passati/1 skipped, 224 web, typecheck/build/OpenAPI/architettura verdi e fixture
-> reale Ollama/Docker. Non trattarle come verifica automatica di modifiche nuove.
+> lettura file confinata, consegne immutabili, ricerca, lettura per righe e
+> modifiche approvate. Sono capacità parziali: non dichiarare raggiunta la parità.
+> Le ultime prove di questa tranche sono 964 test engine passati/1 skipped,
+> 226 web, typecheck/build/OpenAPI/architettura verdi e una fixture Ollama di
+> ricerca, patch approvata e consegna. Non trattarle come verifica di modifiche nuove.
 >
-> Prima confronta e completa H11: paginazione/ricerca, semantica di lettura,
-> modifica e patch protette, diagnostica e percorso reale fino alla consegna.
-> Poi completa terminale/background/PTY/backend, web/browser, memoria, skill,
+> H11 ha ora pagine, ricerca, lettura per righe, scrittura e patch approvate,
+> con prova Ollama isolata. Restano language server, V4A e diversi estrattori:
+> non dichiararli chiusi. Il prossimo lavoro è terminale/background/PTY/backend,
+> poi web/browser, memoria, skill,
 > delegazione e tutte le restanti righe secondo dipendenze. L'ordine è modificabile
 > con motivazione tecnica, il perimetro completo no. Ispeziona sempre ciò che
 > Homun possiede già prima di dichiararlo assente o creare percorsi paralleli.

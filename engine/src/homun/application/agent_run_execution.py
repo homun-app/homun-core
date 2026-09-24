@@ -155,13 +155,20 @@ def advance(ctx, run_id, *, epoch=None):
                     registry_for(run).validate(decision.tool,decision.arguments)
                     from homun.application.agent_terminal import stage as stage_terminal
                     return stage_terminal(ctx,actor,run,decision)
+                if decision.tool in {'write_workspace_file','patch_workspace_file'} and run.get('_workspace_files_version')==2:
+                    registry_for(run).validate(decision.tool,decision.arguments)
+                    from homun.application.workspace_file_edits import stage as stage_edit
+                    staged=stage_edit(ctx,actor,run,decision)
+                    if staged=='waiting_external':return staged
+                    observation=staged
                 if any(b['name'] == decision.tool for b in run.get('_mcp_bindings', [])):
                     registry_for(run).validate(decision.tool, decision.arguments)
                     from homun.application.agent_external import stage
                     return stage(ctx, actor, run, decision)
-                from homun.application.workspace_files import execute as file_executor
-                observation = registry_for(run, material_executor=run_tool, collaborator_executor=consult, file_executor=file_executor).dispatch(
-                    decision.tool, decision.arguments, ctx=ctx, actor=actor, run=run)
+                if observation is None:
+                    from homun.application.workspace_files import execute as file_executor
+                    observation = registry_for(run, material_executor=run_tool, collaborator_executor=consult, file_executor=file_executor).dispatch(
+                        decision.tool, decision.arguments, ctx=ctx, actor=actor, run=run)
             except ValidationError as exc:
                 # Malformed arguments/readability are observations the model can correct.
                 observation = {'error_code': exc.code, 'message': exc.message}

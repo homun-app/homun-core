@@ -40,6 +40,7 @@ class RunView(BaseModel):
     external_tools: list[dict] | None = None
     external_request_id: str | None = None
     terminal_request_id: str | None = None
+    file_edit_request_id: str | None = None
     terminal: dict | None = None
     tools: list[dict] | None = None
     tool_version: str
