@@ -354,6 +354,9 @@ dai test. Il [confronto Hermes](research/2026-09-23-hermes-homun-utilizzo.md)
 conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
 
 
+- **H35 hosted MCP (2026-09-24)**: `HostedMcpEngineRunner` crea lavoro e propose
+  agent_run reali (`pending_approval`), senza dichiarare completed.
+
 - **H40/H42 persistenza (2026-09-24)**: WriteApprovalGate e DeliverableLedger
   salvano su SQLite sotto HOMUN_DATA_DIR e sopravvivono al riavvio del processo.
 

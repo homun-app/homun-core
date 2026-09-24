@@ -92,7 +92,10 @@ class HostedMcpAgentServer:
                         }],
                         "code": "backend_unavailable",
                     }
-                answer = runner.ask(question, context=str(arguments.get("context") or ""))
+                ask_kwargs = {"context": str(arguments.get("context") or "")}
+                if ctx is not None:
+                    ask_kwargs["ctx"] = ctx
+                answer = runner.ask(question, **ask_kwargs)
                 return {
                     "isError": False,
                     "content": [{"type": "text", "text": str(answer)}],
@@ -117,11 +120,13 @@ class HostedMcpAgentServer:
                         }],
                         "code": "backend_unavailable",
                     }
-                result = runner.run_task(
-                    objective,
-                    files=arguments.get("files") or [],
-                    allow_tools=arguments.get("allow_tools"),
-                )
+                task_kwargs = {
+                    "files": arguments.get("files") or [],
+                    "allow_tools": arguments.get("allow_tools"),
+                }
+                if ctx is not None:
+                    task_kwargs["ctx"] = ctx
+                result = runner.run_task(objective, **task_kwargs)
                 return {
                     "isError": False,
                     "content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}],
@@ -146,7 +151,10 @@ class HostedMcpAgentServer:
                         }],
                         "code": "backend_unavailable",
                     }
-                status_info = runner.get_status(work_id)
+                status_kwargs = {}
+                if ctx is not None:
+                    status_kwargs["ctx"] = ctx
+                status_info = runner.get_status(work_id, **status_kwargs)
                 return {
                     "isError": False,
                     "content": [{"type": "text", "text": json.dumps(status_info, indent=2, default=str)}],

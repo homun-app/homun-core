@@ -336,3 +336,34 @@ async def test_acp_adapter_lifecycle_and_edit_approval():
         on_proposal=on_rejection_proposal,
     )
     assert rejected is False
+
+
+def test_hosted_mcp_engine_runner_stages_real_agent_run(tmp_path):
+    from homun.application.hosted_mcp_agent import HostedMcpAgentServer
+    from homun.application.hosted_mcp_runner import HostedMcpEngineRunner
+    from homun.context import create_context
+    from homun.domain.models import Actor
+
+    ctx = create_context(db_path=tmp_path / "ws.db", data_dir=tmp_path, for_tests=True)
+    actor = Actor(id="person_a", workspace_id=ctx.workspace_id, display_name="A")
+    runner = HostedMcpEngineRunner(default_actor_id=actor.id)
+    server = HostedMcpAgentServer(runner=runner)
+
+    out = server.call_tool(
+        "homun_task",
+        {"objective": "Prepare a short Italian note about delivery"},
+        ctx=ctx,
+    )
+    assert out.get("isError") is False
+    payload = json.loads(out["content"][0]["text"])
+    assert payload["status"] == "pending_approval"
+    assert payload["work_id"]
+    assert payload["run_id"]
+    assert payload["digest"]
+
+    status = server.call_tool("homun_status", {"work_id": payload["work_id"]}, ctx=ctx)
+    assert status.get("isError") is False
+    status_body = json.loads(status["content"][0]["text"])
+    assert status_body["work_id"] == payload["work_id"]
+    assert any(r["id"] == payload["run_id"] for r in status_body["runs"])
+    ctx.close()
