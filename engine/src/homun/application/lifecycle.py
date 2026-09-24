@@ -3,6 +3,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from homun.runtime import dbos_app
+from homun.application.cron_dispatcher import fire_due_jobs
 
 @asynccontextmanager
 async def runtime_lifespan(ctx):
@@ -51,6 +52,15 @@ async def runtime_lifespan(ctx):
                     await asyncio.to_thread(reconcile_routine_schedules, ctx)
             except Exception:
                 logging.getLogger(__name__).exception("Routine schedule sync failed")
+            try:
+                await asyncio.to_thread(
+                    fire_due_jobs,
+                    getattr(ctx, "workspace_id", None) or "default",
+                    ctx=ctx,
+                    limit=5,
+                )
+            except Exception:
+                logging.getLogger(__name__).exception("Cron due-fire pass failed")
             try:
                 await asyncio.wait_for(stop.wait(), timeout=0.5)
             except TimeoutError:
