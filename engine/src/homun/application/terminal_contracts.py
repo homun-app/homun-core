@@ -6,6 +6,7 @@ from homun.domain.errors import ValidationError
 from homun.execution.contracts import JobSpec, LocalJobSpec, SshJobSpec, digest
 from homun.execution.singularity_jobs import SingularityJobSpec
 from homun.execution.modal_jobs import ModalJobSpec
+from homun.execution.daytona_jobs import DaytonaJobSpec
 
 
 class TerminalProposalRequest(BaseModel):
@@ -129,6 +130,11 @@ def job_spec(ctx, proposal: dict) -> JobSpec | LocalJobSpec | SshJobSpec | Singu
         if not image:
             raise ValidationError('Modal registry image reference is required')
         return ModalJobSpec(**common, image=image)
+    if proposal.get('policy')=='cloud-daytona-v1':
+        image = proposal.get('image')
+        if not image:
+            raise ValidationError('Daytona image reference is required')
+        return DaytonaJobSpec(**common, image=image)
     return JobSpec(**common,image=proposal['image'])
 
 

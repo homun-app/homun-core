@@ -43,6 +43,13 @@ def backend_for(ctx, proposal=None):
             if status.ready:
                 return ModalJobs(root)
             return UnavailableCloudJobs(name)
+        if name == 'daytona':
+            from homun.execution.cloud_backends import probe_cloud_backend
+            from homun.execution.daytona_jobs import DaytonaJobs
+            status = probe_cloud_backend('daytona')
+            if status.ready:
+                return DaytonaJobs(root)
+            return UnavailableCloudJobs(name)
         if name in CLOUD_BACKENDS:
             return UnavailableCloudJobs(name)
     return DockerJobs(root)

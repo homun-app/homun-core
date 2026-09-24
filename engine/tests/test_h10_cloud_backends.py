@@ -20,13 +20,21 @@ def test_unconfigured_modal_is_honest(monkeypatch):
     assert st.code == "backend_unavailable"
 
 
-def test_configured_but_unwired_daytona_refuses_start(monkeypatch):
+def test_configured_but_gated_daytona_refuses_start(monkeypatch):
     monkeypatch.setenv("DAYTONA_API_KEY", "test-key-not-real")
+    monkeypatch.setattr(
+        "homun.execution.daytona_jobs.daytona_sdk_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "homun.execution.daytona_jobs.daytona_live_allowed",
+        lambda: False,
+    )
     st = probe_cloud_backend("daytona")
     assert st.configured is True
     assert st.ready is False
     backend = UnavailableCloudJobs("daytona")
-    with pytest.raises(ExecutionUnavailable, match="not yet wired"):
+    with pytest.raises(ExecutionUnavailable, match="HOMUN_DAYTONA_ALLOW_LIVE|not yet wired|Daytona"):
         backend.start(object())
 
 

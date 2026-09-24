@@ -130,6 +130,44 @@ def probe_cloud_backend(name: str) -> CloudBackendStatus:
             error=None,
             code="ok",
         )
+    if key == "daytona":
+        from homun.execution.daytona_jobs import (
+            daytona_credentials_present,
+            daytona_live_allowed,
+            daytona_sdk_available,
+        )
+
+        if not daytona_sdk_available():
+            return CloudBackendStatus(
+                name=key,
+                configured=False,
+                ready=False,
+                error="Daytona SDK is not installed",
+            )
+        if not daytona_credentials_present():
+            return CloudBackendStatus(
+                name=key,
+                configured=False,
+                ready=False,
+                error="Daytona credentials missing (DAYTONA_API_KEY or HOMUN_DAYTONA_API_KEY)",
+            )
+        if not daytona_live_allowed():
+            return CloudBackendStatus(
+                name=key,
+                configured=True,
+                ready=False,
+                error=(
+                    "Daytona credentials present; set HOMUN_DAYTONA_ALLOW_LIVE=1 to permit "
+                    "workspace creation (may incur cloud charges)"
+                ),
+            )
+        return CloudBackendStatus(
+            name=key,
+            configured=True,
+            ready=True,
+            error=None,
+            code="ok",
+        )
     if not _env_present(keys):
         return CloudBackendStatus(
             name=key,
