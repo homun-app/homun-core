@@ -312,6 +312,14 @@ def advance(ctx, run_id, *, epoch=None):
                         {'work_id': work.id, 'expected_version': work.version,
                          'title': f'Risultato · {work.title}', 'content': content})
                     current.update(status='completed', artifact_id=result['artifact_id'])
+                    # Close proactive loop tick if one was awaiting a response (H27).
+                    try:
+                        from homun.application.automation_dispatch import automation_session_id
+                        from homun.application.loop_manager import LoopManager
+                        LoopManager(automation_session_id(current)).complete_tick(decision.message or "")
+                    except Exception:
+                        pass
+
                     service.append_engine_message(actor=actor, command_id=f'{run_id}:report',
                         conversation_id=work.primary_conversation_id, author_id='homun_engine',
                         text=f'{current["executor_name"]} ha preparato il risultato. Puoi verificarlo e chiedere modifiche.',
