@@ -502,3 +502,36 @@ def test_gateway_manage_disabled_policy():
     run = {"gateway": {"policy": "other-policy", "version": 1}}
     with pytest.raises(ValidationError, match="not enabled"):
         gateway_execute(None, None, run, "gateway_manage", {"action": "pairing_list"})
+
+
+def test_webhook_adapter_posts_when_url_configured(httpx_mock=None):
+    """Real HTTP POST when webhook_url is set (uses stdlib http.server)."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    received = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            received["body"] = json.loads(self.rfile.read(length).decode())
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args):
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        adapter = WebhookRelayAdapter(config={"webhook_url": f"http://127.0.0.1:{port}/hook"})
+        out = adapter.send("ch1", "hello webhook")
+        assert out["delivered"] is True
+        assert received["body"]["text"] == "hello webhook"
+        assert received["body"]["channel_id"] == "ch1"
+    finally:
+        server.shutdown()

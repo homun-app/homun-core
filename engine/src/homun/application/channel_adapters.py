@@ -9,9 +9,12 @@ thread routing, authorization gates, and turn lease acquisition.
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
+
+import httpx
 
 from homun.application.gateway_contracts import (
     ChannelMedia,
@@ -206,6 +209,77 @@ class WebhookRelayAdapter(ChannelAdapter):
             is_direct=bool(payload.get("is_direct", True)),
             timestamp=float(payload.get("timestamp") or time.time()),
         )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        url = (
+            str(self.config.get("webhook_url") or "").strip()
+            or str(os.environ.get("HOMUN_WEBHOOK_URL") or "").strip()
+        )
+        if not url:
+            return super().send(
+                channel_id,
+                text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+            )
+        body = {
+            "channel_id": channel_id,
+            "text": text,
+            "thread_id": thread_id,
+            "reply_to_id": reply_to_id,
+            "media_count": len(media or []),
+            "platform": self.platform,
+        }
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 10.0)) as client:
+                resp = client.post(url, json=body)
+            if resp.status_code >= 400:
+                return {
+                    "delivered": False,
+                    "platform": self.platform,
+                    "channel_id": channel_id,
+                    "thread_id": thread_id,
+                    "reply_to_id": reply_to_id,
+                    "text": text,
+                    "media_count": len(media or []),
+                    "sent_at": time.time(),
+                    "error": f"Webhook relay HTTP {resp.status_code}",
+                    "code": "backend_unavailable",
+                    "status_code": resp.status_code,
+                }
+            return {
+                "delivered": True,
+                "platform": self.platform,
+                "channel_id": channel_id,
+                "thread_id": thread_id,
+                "reply_to_id": reply_to_id,
+                "text": text,
+                "media_count": len(media or []),
+                "sent_at": time.time(),
+                "status_code": resp.status_code,
+            }
+        except Exception as exc:
+            return {
+                "delivered": False,
+                "platform": self.platform,
+                "channel_id": channel_id,
+                "thread_id": thread_id,
+                "reply_to_id": reply_to_id,
+                "text": text,
+                "media_count": len(media or []),
+                "sent_at": time.time(),
+                "error": str(exc),
+                "code": "backend_unavailable",
+            }
 
 
 class ChannelRegistry:
