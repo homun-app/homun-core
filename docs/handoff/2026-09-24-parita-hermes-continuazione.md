@@ -1,6 +1,6 @@
 # Continuazione: parità completa Homun / Hermes
 
-Data: 24 settembre 2026. Checkpoint del codice: `a4eba5ec` (+ commit H40/H42 in corso).
+Data: 24 settembre 2026. Checkpoint del codice: `10e4a8d9` (+ commit H40/H42 in corso).
 Questo documento trasferisce il lavoro a un'altra chat. Non certifica parità raggiunta.
 
 
@@ -12,6 +12,8 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 2. Backend reali: Ollama vision + macOS say TTS; probe TCC macOS.
 3. Persistenza: goals, sessions, heartbeat/loop, write approvals, deliverable ledger.
 4. H03 route side-question; H04 PromptAssembler+@refs nel propose (cwd confinato).
+5. H34 gateway SQLite + steering → coda agent_run; H35 MCP runner → pending_approval.
+6. H40/H42 ledger approvazioni/consegne su SQLite.
 
 **Prossimo passo eseguibile:** collegare dispatcher heartbeat/loop al ciclo agent_run;
 wire Hosted MCP runner a propose/approve reali; cua-driver per H16 input/capture;
