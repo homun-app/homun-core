@@ -39,6 +39,8 @@ def entry(config):
 
 
 def entries(config):
+    if config.get('policy')=='local-private-v1':
+        return _local_entries(config)
     JobSpec(workspace_id='validation',run_id='validation',call_id='validation',image=config['image'],command='true')
     version=config.get('version',1)
     if version>=5:arguments=PtyTerminalArguments
@@ -92,6 +94,36 @@ def entries(config):
         catalog.append(ToolEntry(ToolDefinition(name='terminal_write',
             description=write,
             input_schema=TerminalWriteArguments.model_json_schema()),'terminal','4',TerminalWriteArguments,replay='never'))
+    return catalog
+
+
+def _local_entries(config):
+    """Commands on this computer. Version 1 is not a successor of the Docker contract."""
+    if config.get('version', 1) != 1:
+        raise ValueError('Unknown local terminal contract')
+    definition = ToolDefinition(
+        name='terminal_execute',
+        description=(
+            "Propose a shell command in this work's private directory on this computer. "
+            "It is not a container, it is not offline, and it does not inherit environment variables. "
+            "Absolute paths remain reachable. Each command waits for explicit human approval. "
+            "Without background, the result arrives after the process exits. "
+            "With background true, the result arrives once the process is running and includes job_id; "
+            "then use terminal_poll, terminal_wait, or terminal_stop. "
+            "Stdin and a terminal are not available. "
+            "Set timeout_seconds (1..3600, default 300). Deadline enforcement requires Homun to be running."),
+        input_schema=BackgroundTerminalArguments.model_json_schema())
+    catalog = [ToolEntry(definition, 'terminal', '1', BackgroundTerminalArguments, replay='never')]
+    session = TerminalSessionArguments.model_json_schema()
+    catalog.append(ToolEntry(ToolDefinition(name='terminal_poll',
+        description='Read the status and recent logs of a background terminal session you started. Does not wait or start a process.',
+        input_schema=session), 'terminal', '1', TerminalSessionArguments))
+    catalog.append(ToolEntry(ToolDefinition(name='terminal_wait',
+        description='Wait until a background terminal session exits, then return its status and logs. Does not start a process. If the outcome is unknown, returns that state without retrying the command.',
+        input_schema=session), 'terminal', '1', TerminalSessionArguments, replay='never'))
+    catalog.append(ToolEntry(ToolDefinition(name='terminal_stop',
+        description='Stop one background terminal session you started. Other sessions keep running. Does not start a process.',
+        input_schema=session), 'terminal', '1', TerminalSessionArguments, replay='never'))
     return catalog
 
 

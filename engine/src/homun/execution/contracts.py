@@ -55,3 +55,32 @@ class JobSpec(BaseModel):
     @property
     def name(self) -> str:
         return "homun-job-" + self.identity[:32]
+
+
+class LocalJobSpec(BaseModel):
+    """A command on this computer. Identity matches a container job; the contract does not."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+    workspace_id: str = Field(min_length=1, max_length=256)
+    run_id: str = Field(min_length=1, max_length=256)
+    call_id: str = Field(min_length=1, max_length=256)
+    command: str = Field(min_length=1, max_length=16000)
+
+    @field_validator("command", "workspace_id", "run_id", "call_id")
+    @classmethod
+    def no_null(cls, value: str) -> str:
+        if "\x00" in value or not value.strip():
+            raise ValueError("Job fields must be nonempty and contain no NUL")
+        return value
+
+    @property
+    def identity(self) -> str:
+        return digest([self.workspace_id, self.run_id, self.call_id])
+
+    @property
+    def owner(self) -> str:
+        return digest([self.workspace_id, self.run_id])
+
+    @property
+    def contract(self) -> str:
+        return digest({"spec": self.model_dump(), "policy": "local-private-v1"})

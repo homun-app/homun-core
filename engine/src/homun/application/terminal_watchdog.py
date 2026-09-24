@@ -36,7 +36,7 @@ def reconcile(ctx,*,now=None,limit=4):
         try:
             if consent(snapshot)!=snapshot['digest']:
                 raise ConflictError('Terminal consent changed')
-            backend=terminal_jobs.backend_for(ctx);spec=job_spec(ctx,snapshot)
+            backend=terminal_jobs.backend_for(ctx, snapshot);spec=job_spec(ctx,snapshot)
             state=backend.inspect(spec)
             if state['status'] not in {'exited','dead'}:
                 # Persist the stop reason before IO, even if stop times out/crashes.

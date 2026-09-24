@@ -42,8 +42,10 @@ export function TerminalProposal({job, busy, active, act}: {job: TerminalJob; bu
       {job.stdin && !job.pty && <p>Homun potrà inviare input a questo processo dopo l'avvio. Non è un terminale interattivo.</p>}
       {job.pty && <p>Questo processo ha un terminale. Homun risponde alle richieste di stato, cursore e dimensione. Non è uno schermo completo.</p>}
       {job.timed_out && <p role="alert">Durata superata: Homun ha richiesto l’arresto. Verifica lo stato del processo qui sotto.</p>}
-      <p>Ambiente isolato, senza rete, con una cartella dedicata a questo lavoro.</p>
-      <details><summary>Ambiente autorizzato</summary><code>{job.image}</code></details>
+      {job.policy === 'local-private-v1'
+        ? <p>Questo comando gira su questo computer, nella cartella del lavoro. Non eredita le variabili d'ambiente. Non è un container: può usare percorsi assoluti e la rete.</p>
+        : <p>Ambiente isolato, senza rete, con una cartella dedicata a questo lavoro.</p>}
+      {job.image && <details><summary>Ambiente autorizzato</summary><code>{job.image}</code></details>}
       {job.status === 'pending_approval' && (active
         ? <button className="cw-primary" disabled={busy} onClick={() => void act('approve')}>Approva ed esegui il comando</button>
         : <p>Il lavoro è interrotto: questo comando non può essere approvato.</p>)}

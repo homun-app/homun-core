@@ -17,7 +17,8 @@ import { EngineAgentControls } from './EngineAgentControls';
 
 export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () => Promise<void> }) {
   const [terminalImage, setTerminalImage] = useState('');
-  const terminalValid = !terminalImage || /^sha256:[0-9a-f]{64}$/.test(terminalImage);
+  const [localTerminal, setLocalTerminal] = useState(false);
+  const terminalValid = localTerminal || !terminalImage || /^sha256:[0-9a-f]{64}$/.test(terminalImage);
   const [serverIds, setServerIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [teams, setTeams] = useState<EngineTeam[]>([]);
@@ -33,7 +34,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
   }, []);
   const run = useEngineExecution(work, onChanged, {
     list: listAgentRuns, approve: approveAgentRun,
-    prepare: (work: Work, id: string, materials: string[], team: string, person: string, servers: string[]) => prepareAgentRun(work, materials, id, team || undefined, person || undefined, servers, terminalImage || undefined),
+    prepare: (work: Work, id: string, materials: string[], team: string, person: string, servers: string[]) => prepareAgentRun(work, materials, id, team || undefined, person || undefined, servers, localTerminal ? undefined : terminalImage || undefined, localTerminal ? 'local' : undefined),
   });
   const p = run.proposal;
   const revising = p?.status === 'completed' && work.engineStatus === 'ready';
@@ -53,14 +54,19 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       <EngineRunRecipientPicker value={personId} disabled={run.busy} onBusyChange={setPersonBusy}
         onChange={id => { run.renew(); setPersonId(id); }} />
       <EngineAgentServerPicker selected={serverIds} disabled={run.busy} onChange={ids => { run.renew(); setServerIds(ids); }} />
-      <details><summary>Terminale isolato (opzionale)</summary>
-        <p>Consenti a Homun di proporre comandi. Ogni comando richiederà la tua approvazione.
-          Serve Docker locale con un’immagine già presente; non verrà scaricata automaticamente.</p>
-        <label>Identificativo completo dell’immagine Docker
-          <input value={terminalImage} disabled={run.busy} placeholder="sha256:…"
-            onChange={e => { run.renew(); setTerminalImage(e.target.value.trim()); }} />
-        </label>
-        {!terminalValid && <p role="alert">Inserisci sha256: seguito dalle 64 cifre esadecimali dell’immagine.</p>}
+      <details><summary>Terminale (opzionale)</summary>
+        <p>Consenti a Homun di proporre comandi. Ogni comando richiederà la tua approvazione.</p>
+        <label><input type="checkbox" checked={localTerminal} disabled={run.busy}
+          onChange={e => { run.renew(); setLocalTerminal(e.target.checked); }} /> Esegui su questo computer, senza container</label>
+        {localTerminal
+          ? <p>I comandi usano la cartella del lavoro e non ereditano le variabili d'ambiente. Non sono isolati dalla rete né dai percorsi assoluti.</p>
+          : <><p>Serve Docker locale con un’immagine già presente; non verrà scaricata automaticamente.</p>
+            <label>Identificativo completo dell’immagine Docker
+              <input value={terminalImage} disabled={run.busy} placeholder="sha256:…"
+                onChange={e => { run.renew(); setTerminalImage(e.target.value.trim()); }} />
+            </label>
+            {!terminalValid && <p role="alert">Inserisci sha256: seguito dalle 64 cifre esadecimali dell’immagine.</p>}
+          </>}
       </details>
       <EngineMaterialSelection work={work} filter={eligibleForRead} uploadExtensions={READ_UPLOAD_EXTENSIONS}
         selected={selected} maxSelected={12} disabled={run.busy}
@@ -75,7 +81,9 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {p.person && <p>Eventuali chiarimenti saranno richiesti a {p.person.name}, tramite un invito limitato alla domanda.</p>}
       <p>Autorizzi letture e ricerche su queste fonti, fino a {p.limits.max_turns} passaggi.
         Il risultato arriverà in revisione. Gli invii esterni richiedono un’approvazione separata.</p>
-      {p.terminal && <p>Terminale isolato abilitato per proporre comandi. Ogni esecuzione richiede un’approvazione separata.</p>}
+      {p.terminal?.policy === 'local-private-v1'
+        ? <p>Homun può proporre comandi su questo computer, nella cartella del lavoro. Ogni esecuzione richiede un’approvazione separata. Non è un container isolato.</p>
+        : p.terminal && <p>Terminale isolato abilitato per proporre comandi. Ogni esecuzione richiede un’approvazione separata.</p>}
       {p.tools?.some(tool => tool.name === 'write_workspace_file') && <p>Homun può leggere, cercare e proporre modifiche nella cartella del run. Ogni scrittura richiede una tua approvazione separata, dopo una lettura aggiornata.</p>}
       {p.tools?.some(tool => tool.toolset === "workspace_files") && !p.tools?.some(tool => tool.name === 'write_workspace_file') && <p>Homun può leggere e consegnare copie dei file prodotti nella cartella del run.</p>}
       {!!p.external_tools?.length && <>

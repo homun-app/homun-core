@@ -179,7 +179,16 @@ def propose(ctx, actor, work_id, body):
             from homun.application.agent_tool_registry import registry_for
             if bindings and not agent_native.enabled(run):
                 raise ValidationError('External agent tools require native model support')
-            if body.get('terminal_image'):
+            if body.get('terminal_backend') == 'local':
+                if body.get('terminal_image'):
+                    raise ValidationError('A local terminal does not use a container image')
+                if not agent_native.enabled(run):
+                    raise ValidationError('Terminal tools require native model support')
+                run['_workspace_files_version'] = 2
+                run['terminal'] = {'policy': 'local-private-v1', 'version': 1}
+            elif body.get('terminal_image'):
+                if body.get('terminal_backend') not in {None, 'docker'}:
+                    raise ValidationError('Unknown terminal backend')
                 if not agent_native.enabled(run):
                     raise ValidationError('Terminal tools require native model support')
                 from homun.execution.contracts import JobSpec
@@ -190,6 +199,10 @@ def propose(ctx, actor, work_id, body):
                     raise ValidationError('Terminal image must be a pinned SHA256') from None
                 run['_workspace_files_version']=2
                 run['terminal']={'image':body['terminal_image'],'policy':'docker-offline-v1','version':5}
+            elif body.get('terminal_backend') == 'docker':
+                raise ValidationError('Terminal image must be a pinned SHA256')
+            elif body.get('terminal_backend'):
+                raise ValidationError('Unknown terminal backend')
             run['_mcp_bindings'] = bindings
             run['external_tools'] = [{k: b[k] for k in ('server_id', 'server_name', 'tool', 'name')} | {'description': b['descriptor'].get('description', '')} for b in bindings]
             run['_registry_version'] = 1

@@ -130,7 +130,7 @@ def test_exit_before_release_stays_one_tool_result(setup, monkeypatch):
 def test_stopping_one_session_leaves_the_other_running(setup, monkeypatch):
     ctx, actor, work, proposal, _backend = start(setup, monkeypatch)
     sessions = Sessions()
-    monkeypatch.setattr(terminal_jobs, 'backend_for', lambda ctx: sessions)
+    monkeypatch.setattr(terminal_jobs, 'backend_for', lambda ctx, proposal=None: sessions)
     planned = [
         tool('cmd1', 'terminal_execute', {'command': 'echo one', 'background': True}),
         tool('cmd2', 'terminal_execute', {'command': 'echo two', 'background': True}),
@@ -153,7 +153,7 @@ def test_stdin_bytes_are_sent_once(setup, monkeypatch):
     from homun.execution.contracts import ExecutionUncertain
     ctx, actor, work, proposal, _backend = start(setup, monkeypatch)
     sessions = Sessions()
-    monkeypatch.setattr(terminal_jobs, 'backend_for', lambda ctx: sessions)
+    monkeypatch.setattr(terminal_jobs, 'backend_for', lambda ctx, proposal=None: sessions)
     ctx.models.complete_tools = lambda *a, **k: SimpleNamespace(
         message=tool('cmd1', 'terminal_execute', {'command': 'cat', 'background': True}), usage=None)
     job = release(ctx, actor, work, proposal['id'])
@@ -194,7 +194,7 @@ def test_pty_query_is_answered_once(setup, monkeypatch):
     sessions.log_text = 'alpha\x1b[6n'
     sessions.logs = lambda spec: {'text': sessions.log_text, 'truncated': False, 'tail_only': True, 'line_limit': 1000}
     sessions.write_stdin = lambda spec, payload: sessions.calls.append(('write', spec.call_id, payload))
-    monkeypatch.setattr(terminal_jobs, 'backend_for', lambda ctx: sessions)
+    monkeypatch.setattr(terminal_jobs, 'backend_for', lambda ctx, proposal=None: sessions)
     ctx.models.complete_tools = lambda *a, **k: SimpleNamespace(
         message=tool('cmd1', 'terminal_execute', {'command': 'query', 'background': True, 'pty': True}), usage=None)
     job = release(ctx, actor, work, proposal['id'])

@@ -15,6 +15,7 @@ class RunRequest(BaseModel):
     command_id: str = Field(min_length=1, max_length=160)
     expected_version: int = Field(ge=1)
     terminal_image: str | None = Field(default=None,pattern=r'^sha256:[0-9a-f]{64}$')
+    terminal_backend: Literal['docker', 'local'] | None = None
     server_ids: list[str] = Field(default_factory=list, max_length=4)
     material_ids: list[str] = Field(default_factory=list, max_length=12)
     team_id: str | None = Field(default=None, max_length=160)

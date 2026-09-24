@@ -30,7 +30,7 @@ def setup(tmp_path,monkeypatch):
     c=ctx.service.apply(actor,'c','conversation.create',{'title':'T'})
     w=ctx.service.apply(actor,'w','work.create',{'conversation_id':c['conversation_id'],'title':'T','objective':'O'})
     ctx.persist()
-    backend=Backend();monkeypatch.setattr(terminal_jobs,'backend_for',lambda ctx:backend)
+    backend=Backend();monkeypatch.setattr(terminal_jobs,'backend_for',lambda ctx, proposal=None: backend)
     body={'command_id':'job','image':'sha256:'+'a'*64,'command':'echo done','expected_version':1}
     yield ctx,actor,w['work_id'],body,backend
     ctx.close()

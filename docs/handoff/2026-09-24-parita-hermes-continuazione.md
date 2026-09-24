@@ -251,21 +251,30 @@ lette nei log nuovi. Non riavvia un container già partito e non è uno schermo
 completo. Il ridimensionamento, i segnali e un emulatore restano aperti.
 Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifica.md).
 
+### Processo sul computer, facoltativo: fatto in questo aggiornamento
+
+Un run può chiedere comandi su questo computer invece di un container.
+Il processo usa la cartella del lavoro e non eredita le variabili d'ambiente.
+Ogni comando resta soggetto all'approvazione esatta e non viene riavviato.
+Non è isolato dalla rete né dai percorsi assoluti, e non ha stdin né terminale.
+Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifica.md).
+
 ### Prima tranche consigliata dopo questo aggiornamento: gli altri backend H10
 
-1. Verificare Git e non rifare file, sessioni background, stdin a pipe e risposte PTY.
-2. Leggere in Hermes i backend oltre Docker.
-3. I backend local, SSH, Modal, Singularity, Daytona e Vercel restano assenti:
+1. Verificare Git e non rifare file, sessioni background, stdin a pipe, risposte PTY e il processo locale.
+2. Leggere in Hermes i backend oltre Docker e il processo locale.
+3. Il processo locale è usabile e facoltativo. Non è un container: non eredita l'ambiente, ma può usare percorsi assoluti e la rete. Non ha stdin né terminale.
+4. I backend SSH, Modal, Singularity, Daytona e Vercel restano assenti:
    non annunciarli. Una credenziale mancante blocca solo la prova di quel backend.
-4. Il timer indipendente nel container, quando Homun è spento, resta un limite
+5. Il timer indipendente nel container, quando Homun è spento, resta un limite
    dichiarato finché non esiste un meccanismo proprio.
-5. Uno schermo completo, il ridimensionamento e i segnali del PTY restano aperti.
+6. Uno schermo completo, il ridimensionamento e i segnali del PTY restano aperti.
 
 ### Tranche successive, ordine da confermare con le dipendenze del codice
 
-- H09/H10: backend oltre Docker. Sessioni background, poll, attesa, arresto,
-  avviso unico, stdin a pipe e risposte PTY sono usabili. Restano lo schermo
-  completo e il timer indipendente a motore spento.
+- H09/H10: SSH, Modal, Singularity, Daytona e Vercel. Il processo locale è usabile
+  e non è un container. Sessioni Docker, stdin a pipe e risposte PTY restano usabili.
+  Restano lo schermo completo e il timer indipendente a motore spento.
 - H14/H15: ricerca web ed estrazione, browser operativo con sessioni e recovery.
 - H17/H18: memoria durevole e motori memoria/contesto sostituibili.
 - H19/H20: caricamento, gestione e provenienza skill; trust/quarantena/setup.
@@ -401,17 +410,20 @@ Nessun budget numerico è stato richiesto. Non segnare completo a fine tranche.
 > consensi, terminale Docker proprio approvato e riprendibile, watchdog,
 > lettura file confinata, consegne immutabili, ricerca, lettura per righe e
 > modifiche approvate. Sono capacità parziali: non dichiarare raggiunta la parità.
-> Le prove della tranche terminale sono 978 test engine passati/1 skipped,
+> Le prove della tranche terminale sono 983 test engine passati/1 skipped,
 > 226 web, OpenAPI e architettura verdi, più container Docker isolati per
-> sessioni separate, uno stdin a pipe e una risposta PTY. Non trattarle come parità completa.
+> sessioni separate, uno stdin a pipe, una risposta PTY e un processo locale
+> senza ambiente ereditato. Non trattarle come parità completa.
 >
 > H11 ha ora pagine, ricerca, lettura per righe, scrittura e patch approvate,
 > con prova Ollama isolata. Restano language server, V4A e diversi estrattori:
 > non dichiararli chiusi. Il terminale Docker ha sessioni in background con
 > poll, attesa, arresto, un solo avviso di completamento, stdin a pipe e
 > risposte alle richieste di stato, cursore e dimensione su un terminale nuovo.
-> Non è uno schermo completo. Gli altri backend restano aperti: non dichiararli chiusi.
-> Il prossimo lavoro sono i backend oltre Docker,
+> Non è uno schermo completo. Un processo sul computer è usabile e facoltativo:
+> non eredita l'ambiente e non è un container. SSH, Modal, Singularity, Daytona
+> e Vercel restano aperti: non dichiararli chiusi.
+> Il prossimo lavoro sono SSH, Modal, Singularity, Daytona e Vercel,
 > poi web/browser, memoria, skill,
 > delegazione e tutte le restanti righe secondo dipendenze. L'ordine è modificabile
 > con motivazione tecnica, il perimetro completo no. Ispeziona sempre ciò che

@@ -5,16 +5,21 @@ from homun.application import agent_native
 from homun.application.agent_runs import authority,lookup
 from homun.domain.errors import ConflictError,PermissionDeniedError
 from homun.domain.models import CommandRecord,utc_now
-from homun.execution.contracts import JobSpec,digest
+from homun.execution.contracts import JobSpec, LocalJobSpec, digest
 from homun.execution.files import WorkspaceFiles,FileChangedError
 from homun.execution.docker import DockerJobs
+from homun.execution.local_jobs import LocalJobs
 from homun.materials.managed_blobs import materials_lock,publish
 
 OUTPUT_TYPE='work.output'
 
 
 def root_for(ctx,run):
-    spec=JobSpec(workspace_id=ctx.workspace_id,run_id=run['id'],call_id='files',image=run['terminal']['image'],command='true')
+    terminal=run['terminal']
+    if terminal.get('policy')=='local-private-v1':
+        spec=LocalJobSpec(workspace_id=ctx.workspace_id,run_id=run['id'],call_id='files',command='true')
+        return LocalJobs(ctx.data_dir.resolve()/'execution').workspace(spec)
+    spec=JobSpec(workspace_id=ctx.workspace_id,run_id=run['id'],call_id='files',image=terminal['image'],command='true')
     return DockerJobs(ctx.data_dir.resolve()/'execution').workspace(spec)
 
 

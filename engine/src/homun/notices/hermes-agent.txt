@@ -124,3 +124,9 @@ execution/pty_queries.py answers device-status, cursor-position and window-size
 queries once for a new background session started with a terminal. It reports
 the cursor at home and is not a screen emulator. Resize, signals and a full
 terminal remain unimplemented.
+execution/local_jobs.py runs an opt-in command on this computer in a private
+directory and does not inherit the parent environment. Hermes local execution
+scrubs a credential blocklist and otherwise inherits the user environment;
+Homun does not copy that inheritance. A local command is not a container:
+absolute paths and the network remain reachable, and stdin and a terminal are
+not provided.

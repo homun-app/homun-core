@@ -11,7 +11,7 @@ IMAGE='sha256:'+'a'*64
 
 def start(setup,monkeypatch):
     ctx,actor,work,_=setup;ctx.models.set_active('openai_compatible')
-    backend=Backend();monkeypatch.setattr(terminal_jobs,'backend_for',lambda ctx:backend)
+    backend=Backend();monkeypatch.setattr(terminal_jobs,'backend_for',lambda ctx, proposal=None: backend)
     p=agent_runs.propose(ctx,actor,work,{'command_id':'run','expected_version':1,'material_ids':[],'terminal_image':IMAGE})
     agent_runs.approve(ctx,actor,work,p['id'],{'command_id':'go','digest':p['digest'],'expected_version':p['expected_version']})
     ctx.models.complete_tools=lambda *a,**k:SimpleNamespace(message=NativeMessage(role='assistant',tool_calls=[ToolCall(id='cmd1',name='terminal_execute',arguments={'command':'echo done'})]),usage=None)

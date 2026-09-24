@@ -14,6 +14,7 @@ from homun.domain.errors import ConflictError, PermissionDeniedError
 
 from .cli import DockerCLI
 from .contracts import ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain, JobSpec, digest
+from .layout import confine_directory
 
 
 class DockerJobs:
@@ -24,12 +25,7 @@ class DockerJobs:
 
     @staticmethod
     def _directory(path: Path) -> Path:
-        if path.is_symlink() or any(p.is_symlink() for p in path.parents):
-            raise PermissionDeniedError("Execution paths must not contain symlinks")
-        path.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if not path.is_dir():
-            raise PermissionDeniedError("Execution path is not a directory")
-        return path
+        return confine_directory(path)
 
     def _workspace_identity(self, job: JobSpec) -> str:
         return digest(str(self.root / "workspaces" / job.owner))

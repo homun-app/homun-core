@@ -1,19 +1,20 @@
 """Public terminal request contracts and immutable consent payload."""
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
-from homun.execution.contracts import JobSpec, digest
+from homun.execution.contracts import JobSpec, LocalJobSpec, digest
 
 
 class TerminalProposalRequest(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     command_id: str = Field(min_length=1, max_length=160)
-    image: str = Field(pattern=r'^sha256:[0-9a-f]{64}$')
+    image: str | None = Field(default=None, pattern=r'^sha256:[0-9a-f]{64}$')
     command: str = Field(min_length=1, max_length=16000)
     expected_version: int = Field(ge=1)
     timeout_seconds: int = Field(default=300,ge=1,le=3600)
     background: bool = False
     stdin: bool = False
     pty: bool = False
+    policy: Literal['docker-offline-v1', 'local-private-v1'] = 'docker-offline-v1'
 
 
 class TerminalApprovalRequest(BaseModel):
@@ -31,10 +32,10 @@ class TerminalLogs(BaseModel):
 class TerminalProposal(BaseModel):
     id: str
     work_id: str
-    image: str
+    image: str | None = None
     command: str
     expected_version: int
-    policy: Literal['docker-offline-v1']
+    policy: Literal['docker-offline-v1', 'local-private-v1']
     digest: str
     status: Literal['pending_approval','dispatching','created','running','paused','restarting','removing','exited','dead','outcome_unknown']
     agent_run_id: str | None = None
@@ -59,7 +60,8 @@ class TerminalList(BaseModel):
 
 
 def consent(proposal: dict) -> str:
-    bound={k:proposal[k] for k in ('id','work_id','image','command','expected_version','policy','created_by')}
+    fields=('id','work_id','image','command','expected_version','policy','created_by')
+    bound={k:proposal[k] for k in fields if k in proposal}
     if 'timeout_seconds' in proposal:bound['timeout_seconds']=proposal['timeout_seconds']
     if proposal.get('background'):bound['background']=True
     if proposal.get('stdin'):bound['stdin']=True
@@ -68,9 +70,12 @@ def consent(proposal: dict) -> str:
     return digest(bound)
 
 
-def job_spec(ctx, proposal: dict) -> JobSpec:
-    return JobSpec(workspace_id=ctx.workspace_id,run_id=proposal.get('_agent_binding',{}).get('run_id',proposal['work_id']),call_id=proposal['id'],
-                   image=proposal['image'],command=proposal['command'])
+def job_spec(ctx, proposal: dict) -> JobSpec | LocalJobSpec:
+    common=dict(workspace_id=ctx.workspace_id,run_id=proposal.get('_agent_binding',{}).get('run_id',proposal['work_id']),
+                call_id=proposal['id'],command=proposal['command'])
+    if proposal.get('policy')=='local-private-v1':
+        return LocalJobSpec(**common)
+    return JobSpec(**common,image=proposal['image'])
 
 
 def public(proposal: dict) -> dict:

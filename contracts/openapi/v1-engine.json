@@ -2475,6 +2475,21 @@
             ],
             "title": "Team Id"
           },
+          "terminal_backend": {
+            "anyOf": [
+              {
+                "enum": [
+                  "docker",
+                  "local"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Backend"
+          },
           "terminal_image": {
             "anyOf": [
               {
@@ -3293,8 +3308,15 @@
             "type": "string"
           },
           "image": {
-            "title": "Image",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
           },
           "logs": {
             "anyOf": [
@@ -3318,7 +3340,10 @@
             "title": "Oom Killed"
           },
           "policy": {
-            "const": "docker-offline-v1",
+            "enum": [
+              "docker-offline-v1",
+              "local-private-v1"
+            ],
             "title": "Policy",
             "type": "string"
           },
@@ -3395,7 +3420,6 @@
         "required": [
           "id",
           "work_id",
-          "image",
           "command",
           "expected_version",
           "policy",
@@ -3433,8 +3457,24 @@
             "type": "integer"
           },
           "image": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Image",
+            "anyOf": [
+              {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
+          "policy": {
+            "default": "docker-offline-v1",
+            "enum": [
+              "docker-offline-v1",
+              "local-private-v1"
+            ],
+            "title": "Policy",
             "type": "string"
           },
           "pty": {
@@ -3457,7 +3497,6 @@
         },
         "required": [
           "command_id",
-          "image",
           "command",
           "expected_version"
         ],

@@ -24,7 +24,7 @@ def validate_link(ctx,store,actor,proposal,*,staging=False):
             or bool(call.arguments.get('background'))!=bool(proposal.get('background'))
             or bool(call.arguments.get('pty'))!=bool(proposal.get('pty'))
             or call.arguments.get('timeout_seconds',300)!=proposal.get('timeout_seconds',300)
-            or run.get('terminal',{}).get('image')!=proposal['image']):
+            or run.get('terminal',{}).get('image')!=proposal.get('image')):
         raise ConflictError('Terminal proposal differs from the canonical call')
     return run
 

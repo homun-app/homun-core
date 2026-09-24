@@ -50,4 +50,15 @@ esecuzione. Sono stati rimossi solo i container di quelle prove. Evidenze:
 [terminal_background_docker.json](evidence/2026-09-23-hermes-parity/terminal_background_docker.json),
 [terminal_stdin_docker.json](evidence/2026-09-23-hermes-parity/terminal_stdin_docker.json)
 e [terminal_pty_docker.json](evidence/2026-09-23-hermes-parity/terminal_pty_docker.json).
-Lo schermo completo non è implementato. Gli altri backend di H10 restano assenti.
+Lo schermo completo non è implementato.
+
+## Processo sul computer
+
+Un run può scegliere il processo locale al posto dell'immagine Docker. Il
+comando gira in `sh -c`, nella cartella del lavoro, con un ambiente fisso che
+non copia le variabili del processo Homun. L'approvazione resta esatta e un
+secondo avvio non ripete il comando. Arrestare una sessione non tocca l'altra.
+Non è un container: percorsi assoluti e rete restano raggiungibili. Non ci sono
+stdin né terminale. Motore: 983 passati, 1 saltato. Web: 226 passati.
+Architettura: 0 errori, 35 avvisi dimensionali preesistenti. OpenAPI rigenerato.
+SSH, Modal, Singularity, Daytona e Vercel restano assenti.

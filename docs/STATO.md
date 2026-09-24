@@ -24,6 +24,7 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   [Modifiche](research/2026-09-24-workspace-edits-verifica.md).
   Sessione interattiva UI e timer indipendente ancora aperti. Le sessioni nuove
   possono avere un terminale che risponde a stato, cursore e dimensione; non è uno schermo completo.
+  In alternativa, un comando può girare su questo computer, senza container e senza ereditare l'ambiente.
   [Scadenze](research/2026-09-24-terminal-deadline-verifica.md).
   [Ciclo agente](research/2026-09-24-agent-terminal-verifica.md).
   [Backend](research/2026-09-24-owned-terminal-verifica.md) e
@@ -211,7 +212,9 @@ resta una fotografia distinta.
 La tranche file H11 aggiunge pagine, ricerca e modifiche approvate. Il terminale
 può lasciare un comando Docker in esecuzione, leggerne lo stato, attenderlo,
 arrestarlo, inviargli byte sullo stdin o rispondere alle richieste di un terminale
-nuovo. Restano aperti lo schermo completo, gli altri backend, language server,
+nuovo. Può anche eseguire un comando su questo computer, nella cartella del lavoro,
+senza ereditare l'ambiente: non è un container. Restano aperti lo schermo completo,
+SSH, Modal, Singularity, Daytona, Vercel, language server,
 patch V4A e il resto della matrice. Non è parità completa.
 
 ## Uso reale e UX

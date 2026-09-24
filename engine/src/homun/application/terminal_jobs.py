@@ -7,6 +7,7 @@ from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedEr
 from homun.domain.models import CommandRecord, utc_now
 from homun.execution.contracts import ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain
 from homun.execution.docker import DockerJobs
+from homun.execution.local_jobs import LocalJobs
 from homun.execution.pty_queries import PtyQueryResponder, unread
 from homun.policy.work import require_work_access
 
@@ -14,10 +15,13 @@ TYPE = 'terminal.job'
 TRANSPORT_ERRORS = (ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain)
 
 
-def backend_for(ctx):
+def backend_for(ctx, proposal=None):
     # Resolve the trusted context root (macOS temp roots can contain /var aliases),
     # not any caller-supplied workspace or mount path.
-    return DockerJobs(ctx.data_dir.resolve() / 'execution')
+    root = ctx.data_dir.resolve() / 'execution'
+    if (proposal or {}).get('policy') == 'local-private-v1':
+        return LocalJobs(root)
+    return DockerJobs(root)
 
 
 def _lookup(store, actor, work_id, proposal_id, *, write=False):
@@ -36,9 +40,15 @@ def _human_owner(actor, work):
 def propose(ctx, actor, work_id, body, *, agent_binding=None):
     try:
         request = TerminalProposalRequest.model_validate(body)
-        result = dict(id=request.command_id,work_id=work_id,image=request.image,command=request.command,
-                      expected_version=request.expected_version,timeout_seconds=request.timeout_seconds,policy='docker-offline-v1',created_by=actor.id,
+        if request.policy == 'local-private-v1':
+            if request.image or request.stdin or request.pty:
+                raise ValidationError('A local command has no image, stdin, or terminal')
+        elif not request.image:
+            raise ValidationError('Terminal image must be a pinned SHA256')
+        result = dict(id=request.command_id,work_id=work_id,command=request.command,
+                      expected_version=request.expected_version,timeout_seconds=request.timeout_seconds,policy=request.policy,created_by=actor.id,
                       created_at=utc_now().isoformat(),status='pending_approval')
+        if request.image:result['image']=request.image
         if request.background:result['background']=True
         if request.stdin:result['stdin']=True
         if request.pty:result['pty']=True
@@ -96,7 +106,7 @@ def approve(ctx, actor, work_id, proposal_id, body):
         ctx.service.store = store
     # Persist the intent before IO. Even a process crash cannot authorize another start.
     try:
-        state = backend_for(ctx).start(job_spec(ctx,snapshot), **({'stdin': True} if snapshot.get('stdin') or snapshot.get('pty') else {}), **({'pty': True} if snapshot.get('pty') else {}))
+        state = backend_for(ctx, snapshot).start(job_spec(ctx,snapshot), **({'stdin': True} if snapshot.get('stdin') or snapshot.get('pty') else {}), **({'pty': True} if snapshot.get('pty') else {}))
     except TRANSPORT_ERRORS as exc:
         state = _unknown(exc)
     return _record(ctx,actor,work_id,proposal_id,snapshot,state)
@@ -128,7 +138,7 @@ def _observe(ctx, actor, work_id, proposal_id, *, stop=False):
             proposal['_io_epoch'] = proposal.get('_io_epoch',0)+1
             snapshot = deepcopy(proposal)
         ctx.service.store = store
-    backend = backend_for(ctx)
+    backend = backend_for(ctx, snapshot)
     spec = job_spec(ctx,snapshot)
     try:
         state = backend.stop(spec) if stop else backend.inspect(spec)
@@ -157,7 +167,7 @@ def _answer_pty(ctx, actor, work_id, proposal_id):
     if proposal is None or not proposal.get('pty') or proposal['status'] in {'pending_approval', 'dispatching'}:
         return
     try:
-        logs = backend_for(ctx).logs(job_spec(ctx, proposal))
+        logs = backend_for(ctx, proposal).logs(job_spec(ctx, proposal))
     except TRANSPORT_ERRORS:
         return
     raw = logs.get('text') or ''
@@ -172,7 +182,7 @@ def _answer_pty(ctx, actor, work_id, proposal_id):
         visible_delta += responder.flush()
     if replies and proposal['status'] not in {'exited', 'dead'}:
         try:
-            backend_for(ctx).write_stdin(job_spec(ctx, proposal), replies)
+            backend_for(ctx, proposal).write_stdin(job_spec(ctx, proposal), replies)
         except TRANSPORT_ERRORS:
             return
     with ctx.repository.locked():
@@ -203,7 +213,8 @@ def write_payload(ctx, actor, work_id, proposal_id, payload: bytes):
     """Send bytes to a running owned container. Does not create or start one."""
     store = ctx.repository.load()
     _lookup(store, actor, work_id, proposal_id)
-    backend_for(ctx).write_stdin(job_spec(ctx, store.commands[proposal_id].result), payload)
+    proposal = store.commands[proposal_id].result
+    backend_for(ctx, proposal).write_stdin(job_spec(ctx, proposal), payload)
 
 
 def stop(ctx, actor, work_id, proposal_id):

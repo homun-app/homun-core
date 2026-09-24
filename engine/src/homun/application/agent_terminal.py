@@ -11,14 +11,22 @@ from homun.application.agent_terminal_link import validate_link
 def stage(ctx,actor,run,decision):
     call=agent_native.pending(run)
     proposal_id='terminal:'+digest([run['id'],run['_epoch'],call.id])
-    body={'command_id':proposal_id,'image':run['terminal']['image'],'command':decision.arguments['command'],
+    terminal=run['terminal']
+    body={'command_id':proposal_id,'command':decision.arguments['command'],'policy':terminal['policy'],
         'timeout_seconds':decision.arguments.get('timeout_seconds',300),'expected_version':run['_run_version']}
-    if decision.arguments.get('pty') and not decision.arguments.get('background'):
-        raise ValidationError('A PTY session must stay in the background')
-    if decision.arguments.get('background'):
+    if terminal['policy']=='local-private-v1':
+        if decision.arguments.get('pty'):
+            raise ValidationError('A local session has no terminal')
+    else:
+        body['image']=terminal['image']
+        if decision.arguments.get('pty') and not decision.arguments.get('background'):
+            raise ValidationError('A PTY session must stay in the background')
+        if decision.arguments.get('background'):
+            body['background']=True
+            if terminal.get('version',1)>=4:body['stdin']=True
+            if decision.arguments.get('pty'):body['pty']=True
+    if terminal['policy']=='local-private-v1' and decision.arguments.get('background'):
         body['background']=True
-        if run.get('terminal',{}).get('version',1)>=4:body['stdin']=True
-        if decision.arguments.get('pty'):body['pty']=True
     terminal_jobs.propose(ctx,actor,run['work_id'],body,agent_binding={
         'run_id':run['id'],'epoch':run['_epoch'],'call_id':call.id,'lease_token':run['_lease_token']})
     return 'waiting_external'
