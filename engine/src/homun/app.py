@@ -94,5 +94,7 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(safety_api.router)
     from homun.routes import media_api
     app.include_router(media_api.router)
+    from homun.routes import deliverables_api
+    app.include_router(deliverables_api.router)
     return app
 

@@ -311,4 +311,10 @@ tools/vision_tools.py, tools/image_generation_tool.py, tools/image_generation_ca
 tools/video_generation_tool.py, tools/xai_video_tools.py, tools/transcription_tools.py,
 tools/tts_tool.py, tools/tts_streaming.py, tools/voice_mode.py, and tools/wake_word.py
 at the pinned commit.
+application/deliverable_policy.py, application/deliverable_extractor.py, application/deliverable_ledger.py,
+and routes/deliverables_api.py derive deliverable media classification (PDF, images, spreadsheets, audio,
+presentations), scratch/workspace directory confinement, code-block protection (ignoring literal example
+paths inside fenced code blocks or backtick expressions), and at-most-once delivery ledger tracking from
+gateway/media_policy.py, gateway/delivery.py, gateway/delivery_ledger.py, tools/bot_live_delivery.py,
+and website/docs/user-guide/features/deliverable-mode.md at the pinned commit.
 

@@ -1410,6 +1410,92 @@
         "title": "CredentialsRequest",
         "type": "object"
       },
+      "DeliverableItem": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "exists_on_disk": {
+            "title": "Exists On Disk",
+            "type": "boolean"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "mime_type": {
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "filename",
+          "category",
+          "mime_type",
+          "exists_on_disk",
+          "size_bytes"
+        ],
+        "title": "DeliverableItem",
+        "type": "object"
+      },
+      "DeliveryReceiptResponse": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "channel": {
+            "title": "Channel",
+            "type": "string"
+          },
+          "delivered_at": {
+            "title": "Delivered At",
+            "type": "number"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "receipt_id": {
+            "title": "Receipt Id",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "receipt_id",
+          "channel",
+          "session_id",
+          "path",
+          "filename",
+          "category",
+          "status",
+          "delivered_at"
+        ],
+        "title": "DeliveryReceiptResponse",
+        "type": "object"
+      },
       "EngineCapabilities": {
         "properties": {
           "api_version": {
@@ -2668,6 +2754,51 @@
         "title": "ReadRequest",
         "type": "object"
       },
+      "RecordDeliveryRequest": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "channel": {
+            "title": "Channel",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "channel",
+          "path",
+          "filename",
+          "category"
+        ],
+        "title": "RecordDeliveryRequest",
+        "type": "object"
+      },
       "RectifyMemoryRequest": {
         "properties": {
           "text": {
@@ -3503,6 +3634,52 @@
           "model_attempts"
         ],
         "title": "RunView",
+        "type": "object"
+      },
+      "ScanDeliverablesRequest": {
+        "properties": {
+          "check_exists": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "title": "Check Exists"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "ScanDeliverablesRequest",
+        "type": "object"
+      },
+      "ScanDeliverablesResponse": {
+        "properties": {
+          "cleaned_text": {
+            "title": "Cleaned Text",
+            "type": "string"
+          },
+          "deliverables": {
+            "items": {
+              "$ref": "#/components/schemas/DeliverableItem"
+            },
+            "title": "Deliverables",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cleaned_text",
+          "deliverables"
+        ],
+        "title": "ScanDeliverablesResponse",
         "type": "object"
       },
       "ServerActionRequest": {
@@ -5204,6 +5381,144 @@
         "summary": "Report Credential",
         "tags": [
           "providers"
+        ]
+      }
+    },
+    "/v1/deliverables/deliver": {
+      "post": {
+        "description": "Record an artifact delivery receipt in the ledger.",
+        "operationId": "record_artifact_delivery_v1_deliverables_deliver_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordDeliveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryReceiptResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Artifact Delivery",
+        "tags": [
+          "deliverables"
+        ]
+      }
+    },
+    "/v1/deliverables/receipts": {
+      "get": {
+        "description": "List delivery receipts for session or across all channels.",
+        "operationId": "list_delivery_receipts_v1_deliverables_receipts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeliveryReceiptResponse"
+                  },
+                  "title": "Response List Delivery Receipts V1 Deliverables Receipts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Delivery Receipts",
+        "tags": [
+          "deliverables"
+        ]
+      }
+    },
+    "/v1/deliverables/scan": {
+      "post": {
+        "description": "Scan message text for generated deliverable artifacts, ignoring code blocks.",
+        "operationId": "scan_deliverables_v1_deliverables_scan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanDeliverablesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanDeliverablesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scan Deliverables",
+        "tags": [
+          "deliverables"
         ]
       }
     },
