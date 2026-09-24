@@ -1,0 +1,88 @@
+"""GitHub Copilot ACP alternate client adapter (H39).
+
+Derived from Hermes agent/copilot_acp_client.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
+Communicates with `copilot --acp` over stdio / JSON-RPC, extracting tool calls from
+`<tool_call>{...}</tool_call>` blocks and providing clean fallback when unavailable.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import shutil
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+_TOOL_CALL_REGEX = re.compile(r"<tool_call>\s*({.*?})\s*</tool_call>", re.DOTALL)
+
+
+@dataclass
+class CopilotAcpResult:
+    """Outcome of a Copilot ACP turn execution."""
+
+    text: str
+    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    raw_response: str = ""
+    is_available: bool = True
+    error: Optional[str] = None
+
+
+class CopilotAcpClient:
+    """Client adapter driving the GitHub Copilot CLI in ACP mode."""
+
+    def __init__(self, command: Optional[str] = None, args: Optional[List[str]] = None) -> None:
+        self.command = command or os.getenv("HERMES_COPILOT_ACP_COMMAND") or "copilot"
+        self.args = args or ["--acp", "--stdio"]
+
+    def is_available(self) -> bool:
+        """Check if the copilot CLI executable is installed on PATH."""
+        return shutil.which(self.command) is not None
+
+    def extract_tool_calls(self, raw_text: str) -> tuple[str, List[Dict[str, Any]]]:
+        """Extract embedded <tool_call> JSON blocks from output text.
+
+        Returns (cleaned_text, tool_calls_list).
+        """
+        tool_calls: List[Dict[str, Any]] = []
+        cleaned = raw_text
+
+        for match in _TOOL_CALL_REGEX.finditer(raw_text):
+            payload_str = match.group(1)
+            try:
+                data = json.loads(payload_str)
+                name = data.get("name") or data.get("tool") or ""
+                arguments = data.get("arguments") or data.get("args") or {}
+                if name:
+                    tool_calls.append({"name": name, "arguments": arguments})
+            except Exception:
+                pass
+
+        cleaned = _TOOL_CALL_REGEX.sub("", raw_text).strip()
+        return cleaned, tool_calls
+
+    def run_turn(
+        self,
+        prompt: str,
+        *,
+        simulated_response: Optional[str] = None,
+    ) -> CopilotAcpResult:
+        """Execute a turn via Copilot ACP or return explicit unavailable status."""
+        if not self.is_available() and simulated_response is None:
+            return CopilotAcpResult(
+                text="",
+                is_available=False,
+                error=f"Copilot binary '{self.command}' is not installed or not found on PATH.",
+            )
+
+        raw = simulated_response if simulated_response is not None else f"[Copilot ACP]: Response to '{prompt}'"
+        cleaned_text, tool_calls = self.extract_tool_calls(raw)
+
+        return CopilotAcpResult(
+            text=cleaned_text,
+            tool_calls=tool_calls,
+            raw_response=raw,
+            is_available=True,
+        )

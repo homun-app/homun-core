@@ -286,5 +286,10 @@ schema adaptation, multi-credential pools with round-robin rotation, cooldowns (
 token classification, and prioritized auxiliary routing with complete failover audit logging from
 providers/base.py, providers/__init__.py, agent/credential_pool*.py, and agent/auxiliary_client.py
 at the pinned commit.
-
-
+application/codex_runtime.py, application/copilot_acp_client.py, application/relay_runtime.py,
+application/managed_tool_gateway.py, and routes/alternate_runtimes.py derive Codex App-Server
+JSON-RPC protocol adaptation, GitHub Copilot ACP stdio tool extraction (<tool_call>), NeMo Relay
+enterprise proxy session headers (x-dynamo-session-id), and managed vendor tool gateway routing
+with explicit service gap reporting when unconfigured from agent/codex_runtime.py,
+agent/copilot_acp_client.py, agent/relay_runtime.py, agent/relay_llm.py, and
+tools/managed_tool_gateway.py at the pinned commit.

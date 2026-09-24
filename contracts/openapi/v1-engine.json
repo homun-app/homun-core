@@ -727,6 +727,38 @@
         "title": "ClassifyRequest",
         "type": "object"
       },
+      "CodexTurnRequest": {
+        "properties": {
+          "events": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Events"
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Messages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "title": "CodexTurnRequest",
+        "type": "object"
+      },
       "CommandRequest": {
         "properties": {
           "command_id": {
@@ -1258,6 +1290,30 @@
           "expected_revision"
         ],
         "title": "ContextRequest",
+        "type": "object"
+      },
+      "CopilotAcpRequest": {
+        "properties": {
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "simulated_response": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulated Response"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "CopilotAcpRequest",
         "type": "object"
       },
       "CredentialsRequest": {
@@ -2420,6 +2476,41 @@
           "text"
         ],
         "title": "RectifyMemoryRequest",
+        "type": "object"
+      },
+      "RelayDispatchRequest": {
+        "properties": {
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "operation",
+          "payload"
+        ],
+        "title": "RelayDispatchRequest",
         "type": "object"
       },
       "ReportCredentialRequest": {
@@ -4083,6 +4174,37 @@
         "title": "ToolDeliveryRequest",
         "type": "object"
       },
+      "ToolGatewayRequest": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "nous",
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "tool_name",
+          "arguments"
+        ],
+        "title": "ToolGatewayRequest",
+        "type": "object"
+      },
       "ToolProposeRequest": {
         "properties": {
           "arguments": {
@@ -5630,6 +5752,206 @@
         "summary": "Adapt Fixture",
         "tags": [
           "providers"
+        ]
+      }
+    },
+    "/v1/runtimes/codex/turn": {
+      "post": {
+        "description": "Execute a turn through the Codex App-Server protocol adapter.",
+        "operationId": "run_codex_turn_v1_runtimes_codex_turn_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodexTurnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Run Codex Turn V1 Runtimes Codex Turn Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Codex Turn",
+        "tags": [
+          "alternate_runtimes"
+        ]
+      }
+    },
+    "/v1/runtimes/copilot-acp/turn": {
+      "post": {
+        "description": "Execute a turn through the Copilot ACP client adapter.",
+        "operationId": "run_copilot_acp_turn_v1_runtimes_copilot_acp_turn_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopilotAcpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Run Copilot Acp Turn V1 Runtimes Copilot Acp Turn Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Copilot Acp Turn",
+        "tags": [
+          "alternate_runtimes"
+        ]
+      }
+    },
+    "/v1/runtimes/relay/dispatch": {
+      "post": {
+        "description": "Dispatch an operation through the NeMo Relay proxy adapter.",
+        "operationId": "dispatch_relay_operation_v1_runtimes_relay_dispatch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelayDispatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Dispatch Relay Operation V1 Runtimes Relay Dispatch Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dispatch Relay Operation",
+        "tags": [
+          "alternate_runtimes"
+        ]
+      }
+    },
+    "/v1/runtimes/status": {
+      "get": {
+        "description": "Report availability and configuration status of alternate runtimes.",
+        "operationId": "get_runtimes_status_v1_runtimes_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Runtimes Status V1 Runtimes Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Runtimes Status",
+        "tags": [
+          "alternate_runtimes"
+        ]
+      }
+    },
+    "/v1/runtimes/tool-gateway/invoke": {
+      "post": {
+        "description": "Invoke a tool via the managed cloud tool gateway.",
+        "operationId": "invoke_tool_gateway_v1_runtimes_tool_gateway_invoke_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolGatewayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Invoke Tool Gateway V1 Runtimes Tool Gateway Invoke Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invoke Tool Gateway",
+        "tags": [
+          "alternate_runtimes"
         ]
       }
     },
