@@ -1,0 +1,146 @@
+"""Human-approved native jobs, with durable dispatch and inspect-only recovery."""
+from copy import deepcopy
+from pydantic import ValidationError as SchemaError
+from homun.application.terminal_contracts import TerminalProposalRequest, consent, job_spec, public
+from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
+from homun.domain.models import CommandRecord, utc_now
+from homun.execution.contracts import ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain
+from homun.execution.docker import DockerJobs
+from homun.policy.work import require_work_access
+
+TYPE = 'terminal.job'
+TRANSPORT_ERRORS = (ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain)
+
+
+def backend_for(ctx):
+    # Resolve the trusted context root (macOS temp roots can contain /var aliases),
+    # not any caller-supplied workspace or mount path.
+    return DockerJobs(ctx.data_dir.resolve() / 'execution')
+
+
+def _lookup(store, actor, work_id, proposal_id, *, write=False):
+    work = require_work_access(store, actor, work_id, 'write' if write else 'read')
+    record = store.commands.get(proposal_id)
+    if record is None or record.type != TYPE or record.result['work_id'] != work_id:
+        raise NotFoundError('Terminal proposal not found for this work')
+    return work, record.result
+
+
+def _human_owner(actor, work):
+    if actor.kind != 'person' or actor.id not in {work.owner_id, work.reviewer_id}:
+        raise PermissionDeniedError('Only the owner or reviewer may control terminal execution')
+
+
+def propose(ctx, actor, work_id, body):
+    try:
+        request = TerminalProposalRequest.model_validate(body)
+        result = dict(id=request.command_id,work_id=work_id,image=request.image,command=request.command,
+                      expected_version=request.expected_version,policy='docker-offline-v1',created_by=actor.id,
+                      created_at=utc_now().isoformat(),status='pending_approval')
+        job_spec(ctx,result)
+    except SchemaError:
+        raise ValidationError('Invalid terminal proposal') from None
+    result['digest'] = consent(result)
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            work = require_work_access(store,actor,work_id)
+            prior = store.commands.get(request.command_id)
+            if prior:
+                if prior.type != TYPE or prior.result.get('digest') != result['digest']:
+                    raise ConflictError('Command id is already bound to another request')
+                return deepcopy(public(prior.result))
+            if work.archived or work.version != request.expected_version:
+                raise ConflictError('Work changed or is archived; create a current proposal')
+            store.commands[request.command_id] = CommandRecord(command_id=request.command_id,type=TYPE,
+                actor_id=actor.id,workspace_id=store.workspace_id,result=result)
+        ctx.service.store = store
+    return public(result)
+
+
+def approve(ctx, actor, work_id, proposal_id, body):
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            work, proposal = _lookup(store,actor,work_id,proposal_id,write=True)
+            _human_owner(actor,work)
+            if body.get('digest') != proposal['digest']:
+                raise ValidationError('Approval does not match the proposed command')
+            if consent(proposal) != proposal['digest']:
+                raise ConflictError('Proposed command changed')
+            if proposal['status'] != 'pending_approval':
+                return deepcopy(public(proposal))
+            if work.archived or work.version != proposal['expected_version']:
+                raise ConflictError('Work changed or is archived; create a new proposal')
+            proposal.update(status='dispatching',_approved_by=actor.id,_approved_at=utc_now().isoformat(),_io_epoch=1)
+            snapshot = deepcopy(proposal)
+        ctx.service.store = store
+    # Persist the intent before IO. Even a process crash cannot authorize another start.
+    try:
+        state = backend_for(ctx).start(job_spec(ctx,snapshot))
+    except TRANSPORT_ERRORS as exc:
+        state = _unknown(exc)
+    return _record(ctx,actor,work_id,proposal_id,snapshot,state)
+
+
+def _unknown(exc):
+    return dict(status='outcome_unknown',running=None,exit_code=None,oom_killed=None,logs=None,error_code=exc.code,
+                error='Stato del processo non verificato; aggiorna senza ripetere il comando.')
+
+
+def _record(ctx, actor, work_id, proposal_id, snapshot, state):
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            proposal = store.commands[proposal_id].result
+            if proposal.get('_io_epoch') == snapshot.get('_io_epoch'):
+                # Persist evidence independently of current viewer authority.
+                proposal.update({k:v for k,v in state.items() if k != 'container_id'})
+                if state['status'] != 'outcome_unknown' and not state.get('error_code'):
+                    proposal.pop('error',None)
+                    proposal.pop('error_code',None)
+                proposal['_observed_at'] = utc_now().isoformat()
+            response = deepcopy(public(proposal))
+        ctx.service.store = store
+    # Revocation during IO must not leak newly obtained logs or execution state.
+    require_work_access(ctx.repository.load(),actor,work_id,'read')
+    return response
+
+
+def _observe(ctx, actor, work_id, proposal_id, *, stop=False):
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            work, proposal = _lookup(store,actor,work_id,proposal_id,write=stop)
+            if stop:
+                _human_owner(actor,work)
+                if proposal['status'] in {'pending_approval','dispatching'}:
+                    raise ConflictError('Refresh the started process before stopping it')
+            if proposal['status'] == 'pending_approval':
+                return deepcopy(public(proposal))
+            proposal['_io_epoch'] = proposal.get('_io_epoch',0)+1
+            snapshot = deepcopy(proposal)
+        ctx.service.store = store
+    backend = backend_for(ctx)
+    spec = job_spec(ctx,snapshot)
+    try:
+        state = backend.stop(spec) if stop else backend.inspect(spec)
+        try:
+            state['logs'] = backend.logs(spec)
+        except TRANSPORT_ERRORS:
+            # Process state remains known even when log retrieval is unavailable.
+            state.update(logs=None,error_code='execution_logs_unavailable',error='Log non disponibili; aggiorna per riprovare.')
+    except TRANSPORT_ERRORS as exc:
+        state = _unknown(exc)
+    return _record(ctx,actor,work_id,proposal_id,snapshot,state)
+
+
+def refresh(ctx, actor, work_id, proposal_id):
+    return _observe(ctx,actor,work_id,proposal_id)
+
+
+def stop(ctx, actor, work_id, proposal_id):
+    return _observe(ctx,actor,work_id,proposal_id,stop=True)
+
+
+def list_for_work(ctx, actor, work_id):
+    store = ctx.repository.load()
+    require_work_access(store,actor,work_id,'read')
+    return {'items':[public(record.result) for record in store.commands.values()
+                     if record.type == TYPE and record.result['work_id'] == work_id]}

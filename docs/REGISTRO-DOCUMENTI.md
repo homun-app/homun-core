@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **216**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **218**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -234,3 +234,6 @@ Documenti censiti: **216**. Punto di ingresso: [indice](README.md).
 | [docs/superpowers/specs/2026-09-23-owned-terminal-design.md](superpowers/specs/2026-09-23-owned-terminal-design.md) | Contratto backend terminale proprio, integrazione agente aperta |
 | [docs/superpowers/plans/2026-09-23-owned-terminal-backend.md](superpowers/plans/2026-09-23-owned-terminal-backend.md) | Piano backend Docker e seguito applicativo |
 | [docs/research/2026-09-24-owned-terminal-verifica.md](research/2026-09-24-owned-terminal-verifica.md) | Prove reali backend, H09/H10 parziali |
+
+| [docs/superpowers/plans/2026-09-24-terminal-approval.md](superpowers/plans/2026-09-24-terminal-approval.md) | Contratto e piano consenso terminale |
+| [docs/research/2026-09-24-terminal-approval-verifica.md](research/2026-09-24-terminal-approval-verifica.md) | Consenso, API e ripresa SQLite/Docker verificati |

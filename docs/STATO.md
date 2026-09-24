@@ -8,8 +8,11 @@ Una verifica del sorgente non aggiorna l'app installata.
 
 - Backend Docker proprio con immagine fissata, directory dedicata, limiti risorse,
   log limitati e intenti persistenti che impediscono di ripetere un comando.
-  Verificato su Docker reale; collegamento ad approvazioni, chat e UI ancora aperto.
-  [Prove e limiti](research/2026-09-24-owned-terminal-verifica.md).
+  Verificato su Docker reale e riapertura SQLite. Proposte e approvazioni esatte
+  disponibili via API autenticate, con stato/log/arresto e ripresa senza redispatch.
+  Collegamento al modello e UI ancora aperto.
+  [Backend](research/2026-09-24-owned-terminal-verifica.md) e
+  [consenso applicativo](research/2026-09-24-terminal-approval-verifica.md).
 
 - Motore Python persistente con comandi versionati, autorizzazioni, materiali,
   artifact, piani, budget, outbox e workflow DBOS.

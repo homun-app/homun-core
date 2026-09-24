@@ -1,0 +1,14 @@
+{
+  "runtime": "real Docker plus native application and SQLite reopen; no model/UI",
+  "image": "sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132",
+  "checks": {
+    "proposal_inert": true,
+    "approved_execution": true,
+    "sqlite_reopen_recovery": true,
+    "exit_7_preserved": true,
+    "logs_recovered": true,
+    "reapproval_no_duplicate_file_effect": true,
+    "persisted_list_state": true,
+    "owned_container_removed": true
+  }
+}
