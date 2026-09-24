@@ -1,0 +1,28 @@
+{
+  "model": "qwen3.5:4b via local Ollama",
+  "image": "sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132",
+  "output": {
+    "id": "output:57dfb9cacc5a8781e101263e7a083afb83f57fd998f9e0303a1f3d9356c9b75e",
+    "work_id": "work_zwD9LI0nF3r89w",
+    "run_id": "eedb7b1b9eb84e63956d60448bfe728b",
+    "filename": "result.txt",
+    "source_path": "result.txt",
+    "sha256": "79b7a194342dff8dca02d70c40642114ed1f258ebc90402e01b441af712ce0bb",
+    "byte_size": 14,
+    "created_at": "2026-09-24T05:46:01.812193+00:00",
+    "review_status": "unreviewed"
+  },
+  "checks": {
+    "real_model_created_read_delivered_file": true,
+    "exact_approved_command": true,
+    "download_matches_bytes": true,
+    "workspace_mutation_does_not_change_delivery": true,
+    "recovery_and_sqlite_reopen_preserve_output": true,
+    "final_artifact": true
+  },
+  "tools": [
+    "terminal_execute",
+    "read_workspace_file",
+    "deliver_workspace_file"
+  ]
+}

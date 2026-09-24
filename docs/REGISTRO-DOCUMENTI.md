@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **222**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **224**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -243,3 +243,6 @@ Documenti censiti: **222**. Punto di ingresso: [indice](README.md).
 
 | [docs/superpowers/plans/2026-09-24-terminal-deadline.md](superpowers/plans/2026-09-24-terminal-deadline.md) | Contratto durata e watchdog |
 | [docs/research/2026-09-24-terminal-deadline-verifica.md](research/2026-09-24-terminal-deadline-verifica.md) | Scadenza reale, ripresa e limiti motore spento |
+
+| [docs/superpowers/plans/2026-09-24-workspace-files.md](superpowers/plans/2026-09-24-workspace-files.md) | Contratto file del run e snapshot |
+| [docs/research/2026-09-24-workspace-files-verifica.md](research/2026-09-24-workspace-files-verifica.md) | Lettura e consegna reale con modello e Docker |

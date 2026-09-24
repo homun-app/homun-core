@@ -6,7 +6,7 @@ from homun.models.agent_turn import ToolDefinition
 from homun.tools.registry import ToolEntry, ToolRegistry
 
 
-def registry_for(run, *, material_executor=None, collaborator_executor=None):
+def registry_for(run, *, material_executor=None, collaborator_executor=None, file_executor=None):
     registry = ToolRegistry()
     material_executor = material_executor or agent_tools.run_tool
     for definition in agent_tools.catalog():
@@ -24,6 +24,9 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None):
     if run.get('terminal'):
         from homun.application.agent_terminal_contracts import entry as terminal_entry
         registry.register(terminal_entry(run['terminal']))
+    if run.get('_workspace_files_version') == 1:
+        from homun.application.workspace_file_contracts import entries as file_entries
+        for file_entry in file_entries(file_executor):registry.register(file_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())

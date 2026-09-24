@@ -13,7 +13,10 @@ Una verifica del sorgente non aggiorna l'app installata.
   Collegamento nativo al modello con consenso per comando e receipt singola,
   configurazione opzionale e pannello UI presenti. Prova reale Ollama/Docker;
   durata approvata e watchdog persistente presenti mentre il motore è acceso.
-  Sessione interattiva UI, timer indipendente, PTY e file tools ancora aperti.
+  File del workspace elencabili e leggibili; consegne immutabili scaricabili
+  nel dettaglio lavoro, verificate con modello/Docker reali.
+  [File e limiti](research/2026-09-24-workspace-files-verifica.md).
+  Sessione interattiva UI, timer indipendente, PTY e parità completa file tools ancora aperti.
   [Scadenze](research/2026-09-24-terminal-deadline-verifica.md).
   [Ciclo agente](research/2026-09-24-agent-terminal-verifica.md).
   [Backend](research/2026-09-24-owned-terminal-verifica.md) e

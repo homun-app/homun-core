@@ -159,7 +159,8 @@ def advance(ctx, run_id, *, epoch=None):
                     registry_for(run).validate(decision.tool, decision.arguments)
                     from homun.application.agent_external import stage
                     return stage(ctx, actor, run, decision)
-                observation = registry_for(run, material_executor=run_tool, collaborator_executor=consult).dispatch(
+                from homun.application.workspace_files import execute as file_executor
+                observation = registry_for(run, material_executor=run_tool, collaborator_executor=consult, file_executor=file_executor).dispatch(
                     decision.tool, decision.arguments, ctx=ctx, actor=actor, run=run)
             except ValidationError as exc:
                 # Malformed arguments/readability are observations the model can correct.

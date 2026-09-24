@@ -1,3 +1,4 @@
+import { EngineWorkOutputs } from "./EngineWorkOutputs";
 import { EngineAskPerson } from "./EngineAskPerson";
 import { EngineContributionInvitations } from "./EngineContributionInvitations";
 /** Compact, source-explicit summary of an engine-backed work. */
@@ -188,7 +189,8 @@ export function EngineWorkspaceWorkPanel({
         agents={agents ?? []}
       />
       {work.source === "engine" && work.id && (
-        <ExternalToolsSection workId={work.id} runnable={!awaitingConfirmation && work.engineStatus !== "completed" && work.engineStatus !== "cancelled" && work.engineStatus !== "review"} />
+        <><EngineWorkOutputs key={work.id} workId={work.id} />
+        <ExternalToolsSection workId={work.id} runnable={!awaitingConfirmation && work.engineStatus !== "completed" && work.engineStatus !== "cancelled" && work.engineStatus !== "review"} /></>
       )}
       <FinalDeliverySection work={work} busy={busy} onSubmitArtifact={onSubmitArtifact} />
       {work.engineStatus === "completed" && onCreateRoutine && (

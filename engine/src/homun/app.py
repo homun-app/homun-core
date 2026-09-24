@@ -13,7 +13,7 @@ from homun import __version__
 from homun import context as context_mod
 from homun.context import create_context, get_context, reset_context_for_tests
 from homun.routes import backup, capabilities, domain, health, material_reads, mcp, memory, models, price_comparisons, intake, routines, synthesis, tool_chains
-from homun.routes import agent_runs, terminal
+from homun.routes import agent_runs, terminal, work_outputs
 from homun.routes.errors import storage_error_handler
 
 DEFAULT_HOST = "127.0.0.1"
@@ -68,6 +68,7 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(synthesis.router)
     app.include_router(agent_runs.router)
     app.include_router(terminal.router)
+    app.include_router(work_outputs.router)
     app.include_router(tool_chains.router)
     from homun.routes import organization
     app.include_router(organization.router)

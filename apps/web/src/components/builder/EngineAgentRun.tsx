@@ -75,6 +75,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       <p>Autorizzi letture e ricerche su queste fonti, fino a {p.limits.max_turns} passaggi.
         Il risultato arriverà in revisione. Invii esterni e modifiche ai file non sono inclusi.</p>
       {p.terminal && <p>Terminale isolato abilitato per proporre comandi. Ogni esecuzione richiede un’approvazione separata.</p>}
+      {p.tools?.some(tool => tool.toolset === "workspace_files") && <p>Homun può leggere e consegnare copie dei file prodotti nella cartella del run.</p>}
       {!!p.external_tools?.length && <>
         <p>Strumenti disponibili: ogni azione esterna richiede una tua approvazione separata.</p>
         <ul>{p.external_tools.map(tool => <li key={`${tool.server_id}:${tool.tool}`}><strong>{tool.server_name} · {tool.tool}</strong>{tool.description && ` — ${tool.description}`}</li>)}</ul>

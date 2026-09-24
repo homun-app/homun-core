@@ -15,7 +15,9 @@ class MaterialTooLargeError(ValidationError):
 
 
 def _references(store):
-    return {m.storage_relpath for m in store.materials.values() if m.storage_relpath}
+    return {m.storage_relpath for m in store.materials.values() if m.storage_relpath} | {
+        r.result['_storage_relpath'] for r in store.commands.values()
+        if r.type=='work.output' and r.result.get('_storage_relpath')}
 
 
 def recover_materials(ctx) -> list[str]:

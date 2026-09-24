@@ -155,8 +155,11 @@ configurazione è tecnica; Homun non scarica immagini automaticamente.
 **Arresta il processo** e verifica lo stato. Un esito incerto non equivale a un
 fallimento senza effetti: aggiorna prima di chiedere un altro comando.
 
-I file prodotti non vengono ancora importati automaticamente in Documenti; il
-modello riceve uscita e coda dei log. L’input interattivo al terminale non è ancora supportato. Per i nuovi comandi
+Puoi chiedere a Homun di leggere e consegnare i file prodotti nella cartella del
+run. Trovi le copie scaricabili in **File prodotti** nel dettaglio lavoro, con
+hash e provenienza. Cambiare il file originale non cambia una copia già consegnata.
+Queste copie non sono automaticamente approvate o aggiunte alla libreria Documenti;
+verificale prima di usarle. L’input interattivo al terminale non è ancora supportato. Per i nuovi comandi
 il limite predefinito è 300 secondi (il modello può proporne da 1 a 3600):
 Homun controlla la scadenza mentre è acceso e la recupera alla riapertura.
 A motore spento il processo può continuare; non è un timer autonomo di Docker. [Prove e limiti](research/2026-09-24-agent-terminal-verifica.md).
