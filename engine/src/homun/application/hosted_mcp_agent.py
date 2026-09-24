@@ -17,8 +17,9 @@ logger = logging.getLogger(__name__)
 class HostedMcpAgentServer:
     """Standard Model Context Protocol (MCP) server for Homun Agent."""
 
-    def __init__(self, workspace_id: str = "ws_local"):
+    def __init__(self, workspace_id: str = "ws_local", runner: Optional[Any] = None):
         self.workspace_id = workspace_id
+        self._runner = runner
         self._tools = {
             "homun_task": {
                 "name": "homun_task",
@@ -70,44 +71,85 @@ class HostedMcpAgentServer:
             }
 
         try:
+            runner = getattr(self, "_runner", None) or (ctx.get("runner") if isinstance(ctx, dict) else None)
+
             if name == "homun_ask":
                 question = str(arguments.get("question") or "").strip()
-                context = str(arguments.get("context") or "")
-                answer = f"Homun analysis for: {question}"
-                if context:
-                    answer += f" (Context analyzed: {len(context)} chars)"
+                if not question:
+                    return {
+                        "isError": True,
+                        "content": [{"type": "text", "text": "question is required"}],
+                    }
+                if runner is None or not callable(getattr(runner, "ask", None)):
+                    return {
+                        "isError": True,
+                        "content": [{
+                            "type": "text",
+                            "text": (
+                                "Homun ask backend is not configured. Wire a runner with "
+                                "ask() that executes a real side question; refusing to invent an answer."
+                            ),
+                        }],
+                        "code": "backend_unavailable",
+                    }
+                answer = runner.ask(question, context=str(arguments.get("context") or ""))
                 return {
                     "isError": False,
-                    "content": [{"type": "text", "text": answer}],
+                    "content": [{"type": "text", "text": str(answer)}],
                 }
 
             if name == "homun_task":
                 objective = str(arguments.get("objective") or "").strip()
-                files = arguments.get("files") or []
-                task_id = f"task_{uuid4().hex[:8]}"
-                res = {
-                    "task_id": task_id,
-                    "status": "completed",
-                    "objective": objective,
-                    "summary": f"Completed task: {objective}",
-                    "files_reviewed": files,
-                }
+                if not objective:
+                    return {
+                        "isError": True,
+                        "content": [{"type": "text", "text": "objective is required"}],
+                    }
+                if runner is None or not callable(getattr(runner, "run_task", None)):
+                    return {
+                        "isError": True,
+                        "content": [{
+                            "type": "text",
+                            "text": (
+                                "Homun task backend is not configured. Wire a runner with "
+                                "run_task() that starts a real agent run; refusing to report completion."
+                            ),
+                        }],
+                        "code": "backend_unavailable",
+                    }
+                result = runner.run_task(
+                    objective,
+                    files=arguments.get("files") or [],
+                    allow_tools=arguments.get("allow_tools"),
+                )
                 return {
                     "isError": False,
-                    "content": [{"type": "text", "text": json.dumps(res, indent=2)}],
+                    "content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}],
                 }
 
             if name == "homun_status":
                 work_id = str(arguments.get("work_id") or "").strip()
-                status_info = {
-                    "work_id": work_id,
-                    "status": "ready",
-                    "active_runs": 0,
-                    "completed_steps": 1,
-                }
+                if not work_id:
+                    return {
+                        "isError": True,
+                        "content": [{"type": "text", "text": "work_id is required"}],
+                    }
+                if runner is None or not callable(getattr(runner, "get_status", None)):
+                    return {
+                        "isError": True,
+                        "content": [{
+                            "type": "text",
+                            "text": (
+                                "Homun status backend is not configured. Wire a runner with "
+                                "get_status() that reads canonical work state."
+                            ),
+                        }],
+                        "code": "backend_unavailable",
+                    }
+                status_info = runner.get_status(work_id)
                 return {
                     "isError": False,
-                    "content": [{"type": "text", "text": json.dumps(status_info, indent=2)}],
+                    "content": [{"type": "text", "text": json.dumps(status_info, indent=2, default=str)}],
                 }
 
             return {

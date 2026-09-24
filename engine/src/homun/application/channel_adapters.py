@@ -47,9 +47,13 @@ class ChannelAdapter:
         reply_to_id: Optional[str] = None,
         media: Optional[List[ChannelMedia]] = None,
     ) -> Dict[str, Any]:
-        """Deliver outbound message to platform destination."""
+        """Deliver outbound message to platform destination.
+
+        Base adapters have no transport. Subclasses must override with a real
+        client; otherwise Homun reports an explicit delivery failure.
+        """
         return {
-            "delivered": True,
+            "delivered": False,
             "platform": self.platform,
             "channel_id": channel_id,
             "thread_id": thread_id,
@@ -57,6 +61,11 @@ class ChannelAdapter:
             "text": text,
             "media_count": len(media or []),
             "sent_at": time.time(),
+            "error": (
+                f"Channel transport for platform '{self.platform}' is not configured. "
+                "Refusing to report delivery without a real outbound client."
+            ),
+            "code": "backend_unavailable",
         }
 
 

@@ -1,8 +1,8 @@
 """Image generation and editing provider adapter (H41).
 
 Derived from Hermes tools/image_generation_tool.py and image_generation_catalog.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
-Normalizes aspect ratios, translates catalog parameters (FAL Flux, OpenAI DALL-E, Recraft),
-and dispatches image creation, variation, and multi-reference editing requests.
+Normalizes aspect ratios and dispatches image creation through an explicit backend.
+Without a backend, returns a typed unavailability error — never a fabricated URL.
 """
 from __future__ import annotations
 
@@ -24,6 +24,10 @@ ASPECT_RATIO_PRESETS = {
 }
 
 DEFAULT_IMAGE_MODEL = "fal-ai/flux-2/klein/9b"
+BACKEND_UNAVAILABLE = (
+    "Image generation backend is not configured. Pass a backend_dispatcher that "
+    "calls a configured image provider, or set provider credentials."
+)
 
 
 @dataclass
@@ -60,42 +64,37 @@ class ImageGenerator:
         """Generate a new image from a text prompt."""
         used_model = model or self.default_model
         norm_ratio = self.normalize_aspect_ratio(aspect_ratio)
+        payload = {"prompt": prompt, "aspect_ratio": norm_ratio, "seed": seed}
 
-        payload = {
-            "prompt": prompt,
-            "aspect_ratio": norm_ratio,
-            "seed": seed,
-        }
+        if backend_dispatcher is None:
+            return ImageGenerationResult(
+                image_url="",
+                prompt=prompt,
+                model=used_model,
+                aspect_ratio=norm_ratio,
+                seed=seed,
+                error=BACKEND_UNAVAILABLE,
+                metadata={"code": "backend_unavailable"},
+            )
 
-        if backend_dispatcher:
-            try:
-                res = backend_dispatcher(used_model, payload)
-                return ImageGenerationResult(
-                    image_url=res.get("image_url", ""),
-                    prompt=prompt,
-                    model=used_model,
-                    aspect_ratio=norm_ratio,
-                    seed=res.get("seed", seed),
-                    metadata=res.get("metadata", {}),
-                )
-            except Exception as exc:
-                return ImageGenerationResult(
-                    image_url="",
-                    prompt=prompt,
-                    model=used_model,
-                    aspect_ratio=norm_ratio,
-                    error=str(exc),
-                )
-
-        # Default synthetic output
-        return ImageGenerationResult(
-            image_url=f"https://generated.images.internal/{used_model.replace('/', '_')}/mock_img.png",
-            prompt=prompt,
-            model=used_model,
-            aspect_ratio=norm_ratio,
-            seed=seed or 42,
-            metadata={"status": "synthesized"},
-        )
+        try:
+            res = backend_dispatcher(used_model, payload)
+            return ImageGenerationResult(
+                image_url=res.get("image_url", ""),
+                prompt=prompt,
+                model=used_model,
+                aspect_ratio=norm_ratio,
+                seed=res.get("seed", seed),
+                metadata=res.get("metadata", {}),
+            )
+        except Exception as exc:
+            return ImageGenerationResult(
+                image_url="",
+                prompt=prompt,
+                model=used_model,
+                aspect_ratio=norm_ratio,
+                error=str(exc),
+            )
 
     def edit(
         self,
@@ -118,36 +117,32 @@ class ImageGenerator:
 
         used_model = model or f"{self.default_model}/edit"
         norm_ratio = self.normalize_aspect_ratio(aspect_ratio)
+        payload = {"prompt": prompt, "image_urls": image_urls, "aspect_ratio": norm_ratio}
 
-        payload = {
-            "prompt": prompt,
-            "image_urls": image_urls,
-            "aspect_ratio": norm_ratio,
-        }
+        if backend_dispatcher is None:
+            return ImageGenerationResult(
+                image_url="",
+                prompt=prompt,
+                model=used_model,
+                aspect_ratio=norm_ratio,
+                error=BACKEND_UNAVAILABLE,
+                metadata={"code": "backend_unavailable"},
+            )
 
-        if backend_dispatcher:
-            try:
-                res = backend_dispatcher(used_model, payload)
-                return ImageGenerationResult(
-                    image_url=res.get("image_url", ""),
-                    prompt=prompt,
-                    model=used_model,
-                    aspect_ratio=norm_ratio,
-                    metadata=res.get("metadata", {}),
-                )
-            except Exception as exc:
-                return ImageGenerationResult(
-                    image_url="",
-                    prompt=prompt,
-                    model=used_model,
-                    aspect_ratio=norm_ratio,
-                    error=str(exc),
-                )
-
-        return ImageGenerationResult(
-            image_url=f"https://generated.images.internal/{used_model.replace('/', '_')}/edited_img.png",
-            prompt=prompt,
-            model=used_model,
-            aspect_ratio=norm_ratio,
-            metadata={"edited_from": image_urls},
-        )
+        try:
+            res = backend_dispatcher(used_model, payload)
+            return ImageGenerationResult(
+                image_url=res.get("image_url", ""),
+                prompt=prompt,
+                model=used_model,
+                aspect_ratio=norm_ratio,
+                metadata=res.get("metadata", {}),
+            )
+        except Exception as exc:
+            return ImageGenerationResult(
+                image_url="",
+                prompt=prompt,
+                model=used_model,
+                aspect_ratio=norm_ratio,
+                error=str(exc),
+            )

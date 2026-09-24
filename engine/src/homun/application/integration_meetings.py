@@ -81,8 +81,9 @@ def parse_teams_meeting_resource(resource_uri: str) -> Dict[str, Optional[str]]:
 class MeetingManager:
     """Manages active Google Meet sessions and Teams meeting lookups."""
 
-    def __init__(self) -> None:
+    def __init__(self, browser_backend: Optional[Any] = None) -> None:
         self._sessions: Dict[str, Dict[str, Any]] = {}
+        self._browser_backend = browser_backend
 
     def join_google_meet(
         self,
@@ -92,33 +93,50 @@ class MeetingManager:
         duration: Optional[str] = None,
         headed: bool = False,
         node: Optional[str] = None,
+        *,
+        browser_backend: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """Join a Google Meet session and initialize caption capture."""
+        """Join a Google Meet session via a real browser backend only."""
         clean_url = (url or "").strip()
         if not _MEET_URL_RE.match(clean_url):
             raise InvalidMeetingUrlError(f"Invalid Google Meet URL: '{clean_url}'")
 
-        session_id = f"meet_{uuid.uuid4().hex[:12]}"
-        session = {
-            "session_id": session_id,
-            "url": clean_url,
-            "mode": mode if mode in ("transcribe", "realtime") else "transcribe",
-            "guest_name": guest_name,
-            "duration": duration,
-            "headed": headed,
-            "node": node or "local",
-            "state": "joined",
-            "captions": [
-                {"speaker": "System", "text": f"Connected to {clean_url}"},
-            ],
-        }
-        self._sessions[session_id] = session
+        backend = browser_backend or getattr(self, "_browser_backend", None)
+        if backend is None or not callable(getattr(backend, "join", None)):
+            return {
+                "success": False,
+                "error": (
+                    "Google Meet browser backend is not configured. Homun will not "
+                    "report a joined session or invent captions without a real join."
+                ),
+                "code": "backend_unavailable",
+                "url": clean_url,
+                "state": "unavailable",
+            }
+
+        session = backend.join(
+            url=clean_url,
+            mode=mode if mode in ("transcribe", "realtime") else "transcribe",
+            guest_name=guest_name,
+            duration=duration,
+            headed=headed,
+            node=node or "local",
+        )
+        session_id = str(session.get("session_id") or f"meet_{uuid.uuid4().hex[:12]}")
+        stored = dict(session)
+        stored.setdefault("session_id", session_id)
+        stored.setdefault("url", clean_url)
+        stored.setdefault("mode", mode if mode in ("transcribe", "realtime") else "transcribe")
+        stored.setdefault("guest_name", guest_name)
+        stored.setdefault("captions", [])
+        stored.setdefault("state", "joined")
+        self._sessions[session_id] = stored
         return {
             "success": True,
             "session_id": session_id,
             "url": clean_url,
-            "mode": session["mode"],
-            "state": session["state"],
+            "mode": stored["mode"],
+            "state": stored["state"],
         }
 
     def get_meet_status(self, session_id: str) -> Dict[str, Any]:

@@ -1,19 +1,22 @@
 """Text-to-speech (TTS) speech synthesis adapter (H41).
 
 Derived from Hermes tools/tts_tool.py and tts_streaming.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
-Normalizes text (stripping markdown/code fences), dispatches speech synthesis across Edge TTS,
-OpenAI, ElevenLabs, and local engines, producing MP3 or Opus audio outputs.
+Normalizes text and dispatches synthesis only through an explicit backend.
 """
 from __future__ import annotations
 
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
 SUPPORTED_AUDIO_FORMATS = frozenset({"mp3", "opus", "wav", "ogg"})
+BACKEND_UNAVAILABLE = (
+    "Text-to-speech backend is not configured. Pass a backend_dispatcher that "
+    "calls a configured speech provider."
+)
 
 
 @dataclass
@@ -37,15 +40,11 @@ class TextToSpeechSynthesizer:
         """Strip markdown links, code blocks, bold/italics for smooth vocal delivery."""
         if not text:
             return ""
-        # Strip code blocks
         clean = re.sub(r"```[\s\S]*?```", " [code snippet omitted] ", text)
         clean = re.sub(r"`[^`]+`", " ", clean)
-        # Strip markdown images and links: [alt](url) -> alt
         clean = re.sub(r"!\[.*?\]\(.*?\)", "", clean)
         clean = re.sub(r"\[(.*?)\]\(.*?\)", r"\1", clean)
-        # Strip bold / italics
         clean = re.sub(r"[*_]{1,3}(.*?)[*_]{1,3}", r"\1", clean)
-        # Collapse whitespace
         clean = re.sub(r"\s+", " ", clean).strip()
         return clean
 
@@ -65,42 +64,40 @@ class TextToSpeechSynthesizer:
 
         used_prov = provider or self.default_provider
         fmt = audio_format if audio_format in SUPPORTED_AUDIO_FORMATS else "mp3"
-
         payload = {
             "text": clean_text,
             "voice": voice or "it-IT-ElsaNeural",
             "format": fmt,
         }
 
-        if backend_dispatcher:
-            try:
-                res = backend_dispatcher(used_prov, payload)
-                return SpeechSynthesisResult(
-                    audio_url=res.get("audio_url", ""),
-                    audio_format=fmt,
-                    duration_seconds=res.get("duration", 2.0),
-                    provider=used_prov,
-                    text=clean_text,
-                    metadata=res.get("metadata", {}),
-                )
-            except Exception as exc:
-                return SpeechSynthesisResult(
-                    audio_url="",
-                    audio_format=fmt,
-                    provider=used_prov,
-                    text=clean_text,
-                    error=str(exc),
-                )
+        if backend_dispatcher is None:
+            return SpeechSynthesisResult(
+                audio_url="",
+                audio_format=fmt,
+                provider=used_prov,
+                text=clean_text,
+                error=BACKEND_UNAVAILABLE,
+                metadata={"code": "backend_unavailable"},
+            )
 
-        # Default synthetic output
-        return SpeechSynthesisResult(
-            audio_url=f"https://audio.speech.internal/{used_prov}/speech.{fmt}",
-            audio_format=fmt,
-            duration_seconds=len(clean_text.split()) * 0.35,
-            provider=used_prov,
-            text=clean_text,
-            metadata={"status": "synthesized"},
-        )
+        try:
+            res = backend_dispatcher(used_prov, payload)
+            return SpeechSynthesisResult(
+                audio_url=res.get("audio_url", ""),
+                audio_format=fmt,
+                duration_seconds=float(res.get("duration", 0.0) or 0.0),
+                provider=used_prov,
+                text=clean_text,
+                metadata=res.get("metadata", {}),
+            )
+        except Exception as exc:
+            return SpeechSynthesisResult(
+                audio_url="",
+                audio_format=fmt,
+                provider=used_prov,
+                text=clean_text,
+                error=str(exc),
+            )
 
     def stream_speech_chunks(self, text: str, chunk_size: int = 150) -> Iterator[str]:
         """Split text into sentence/clause chunks suitable for low-latency streaming TTS."""

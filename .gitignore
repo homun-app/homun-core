@@ -57,3 +57,5 @@ experiments/**/.data/
 apps/desktop/.package/
 apps/desktop/dist-installers/
 apps/desktop/node_modules/
+
+.audit-hermes-ref/

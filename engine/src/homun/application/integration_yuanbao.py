@@ -37,36 +37,34 @@ class YuanbaoAdapter:
 
     def __init__(
         self,
-        connected: bool = True,
+        connected: bool = False,
+        members_provider: Optional[Any] = None,
+        sticker_catalog: Optional[List[Dict[str, str]]] = None,
+        group_info_provider: Optional[Any] = None,
+        # Deprecated aliases kept for older tests that inject fixtures explicitly.
         mock_members_provider: Optional[Any] = None,
         mock_sticker_catalog: Optional[List[Dict[str, str]]] = None,
     ) -> None:
         self.connected = connected
-        self._members_provider = mock_members_provider
-        self._sticker_catalog = mock_sticker_catalog or [
-            {"sticker_id": "stk_thumbs_up", "name": "点赞", "description": "Thumbs up"},
-            {"sticker_id": "stk_celebrate", "name": "庆祝", "description": "Celebration party"},
-            {"sticker_id": "stk_heart", "name": "爱心", "description": "Love heart"},
-            {"sticker_id": "stk_thinking", "name": "思考", "description": "Thinking face"},
-        ]
+        self._members_provider = members_provider or mock_members_provider
+        self._group_info_provider = group_info_provider
+        self._sticker_catalog = sticker_catalog or mock_sticker_catalog
 
     def _ensure_connected(self) -> None:
         if not self.connected:
             raise YuanbaoNotConnectedError("Yuanbao platform adapter is not connected")
 
     def get_group_info(self, group_code: str) -> Dict[str, Any]:
-        """Fetch group metadata and member counts."""
+        """Fetch group metadata and member counts from a configured provider."""
         self._ensure_connected()
         code_clean = (group_code or "").strip()
         if not code_clean:
             raise YuanbaoError("group_code is required")
-        return {
-            "success": True,
-            "group_code": code_clean,
-            "group_name": f"Group-{code_clean}",
-            "member_count": 42,
-            "owner_user_id": "user_owner_01",
-        }
+        if not callable(self._group_info_provider):
+            raise YuanbaoError(
+                "Yuanbao group_info_provider is not configured; refusing to invent group metadata."
+            )
+        return self._group_info_provider(code_clean)
 
     def query_group_members(self, group_code: str, query: str = "") -> List[Dict[str, Any]]:
         """List or search group members by name or nickname."""
@@ -75,15 +73,11 @@ class YuanbaoAdapter:
         if not code_clean:
             raise YuanbaoError("group_code is required")
 
-        if callable(self._members_provider):
-            members = self._members_provider(code_clean)
-        else:
-            members = [
-                {"user_id": "u1", "nickname": "Alice", "role": "admin"},
-                {"user_id": "u2", "nickname": "Bob", "role": "member"},
-                {"user_id": "u3", "nickname": "Charlie", "role": "member"},
-                {"user_id": "u4", "nickname": "Alice Zhang", "role": "member"},
-            ]
+        if not callable(self._members_provider):
+            raise YuanbaoError(
+                "Yuanbao members_provider is not configured; refusing to invent member lists."
+            )
+        members = self._members_provider(code_clean)
 
         if not query:
             return members
@@ -94,6 +88,10 @@ class YuanbaoAdapter:
     def search_sticker(self, query: str) -> List[Dict[str, str]]:
         """Search available platform stickers by name or description."""
         self._ensure_connected()
+        if self._sticker_catalog is None:
+            raise YuanbaoError(
+                "Yuanbao sticker catalog is not configured; refusing to invent stickers."
+            )
         q_clean = (query or "").strip().lower()
         if not q_clean:
             return self._sticker_catalog
@@ -104,20 +102,15 @@ class YuanbaoAdapter:
         ]
 
     def send_sticker(self, group_code: str, sticker_id: str) -> Dict[str, Any]:
-        """Send a sticker to a group."""
+        """Send a sticker to a group via a configured transport only."""
         self._ensure_connected()
         code_clean = (group_code or "").strip()
         stk_clean = (sticker_id or "").strip()
         if not code_clean or not stk_clean:
             raise YuanbaoError("group_code and sticker_id are required")
-
-        return {
-            "success": True,
-            "action": "send_sticker",
-            "group_code": code_clean,
-            "sticker_id": stk_clean,
-            "delivered": True,
-        }
+        raise YuanbaoError(
+            "Yuanbao outbound transport is not configured; refusing to report sticker delivery."
+        )
 
     def resolve_recipient(
         self,
@@ -154,7 +147,7 @@ class YuanbaoAdapter:
         user_id: Optional[str] = None,
         name: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Send a direct message to a user resolved from group members."""
+        """Send a direct message once a transport is configured."""
         self._ensure_connected()
         code_clean = (group_code or "").strip()
         text_clean = (content or "").strip()
@@ -162,15 +155,7 @@ class YuanbaoAdapter:
             raise YuanbaoError("group_code and content are required")
 
         resolved_user_id, resolved_name = self.resolve_recipient(code_clean, user_id, name)
-        mention_token = format_mention(resolved_name)
-
-        return {
-            "success": True,
-            "action": "send_dm",
-            "group_code": code_clean,
-            "recipient_user_id": resolved_user_id,
-            "recipient_name": resolved_name,
-            "mention": mention_token,
-            "content": text_clean,
-            "delivered": True,
-        }
+        raise YuanbaoError(
+            f"Yuanbao outbound transport is not configured for recipient "
+            f"{resolved_user_id}/{resolved_name}; refusing to report DM delivery."
+        )

@@ -19,6 +19,7 @@ from homun.application.trajectory_compression import (
 from homun.application.batch_eval_runner import (
     BatchEvalRunner,
     BatchItem,
+    BatchItemResult,
 )
 from homun.application.observability_exporter import (
     ObservabilityCollector,
@@ -95,7 +96,20 @@ def test_trajectory_compression_and_invariants():
 
 
 def test_batch_eval_runner_concurrency_and_checkpoint(tmp_path: Path):
-    runner = BatchEvalRunner(output_dir=tmp_path / "eval_out", max_workers=2)
+    def executor(item: BatchItem) -> BatchItemResult:
+        return BatchItemResult(
+            id=item.id,
+            success=True,
+            output=f"real-{item.id}",
+            latency_seconds=0.01,
+            tool_stats={"terminal": {"count": 1, "success": 1, "failure": 0}},
+        )
+
+    runner = BatchEvalRunner(
+        output_dir=tmp_path / "eval_out",
+        max_workers=2,
+        task_executor=executor,
+    )
 
     items = [
         BatchItem(id=f"item_{i}", prompt=f"Compute value for index {i}")
@@ -110,7 +124,6 @@ def test_batch_eval_runner_concurrency_and_checkpoint(tmp_path: Path):
     assert "terminal" in summary.aggregated_tool_stats
     assert summary.aggregated_tool_stats["terminal"]["count"] == 5
 
-    # Test resume: does not re-execute completed items
     resumed_results, resumed_summary = runner.run_batch(items, run_name="test_run", resume=True)
     assert len(resumed_results) == 5
 

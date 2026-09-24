@@ -86,9 +86,16 @@ def focus_app(payload: Dict[str, str]) -> Dict[str, Any]:
     if not app_name:
         raise HTTPException(status_code=400, detail="app is required")
     res = _driver.focus_app(app_name)
+    body = {
+        "ok": res.ok,
+        "message": res.message,
+        "details": res.details,
+        "code": getattr(res, "code", None),
+    }
     if not res.ok:
-        raise HTTPException(status_code=404, detail=res.message)
-    return {"ok": True, "message": res.message, "details": res.details}
+        status = 503 if getattr(res, "code", None) == "backend_unavailable" else 404
+        raise HTTPException(status_code=status, detail=body)
+    return body
 
 
 @router.post("/capture")
@@ -124,15 +131,18 @@ def capture_desktop(payload: Dict[str, Any]) -> Dict[str, Any]:
 def perform_action(req: ActionRequest) -> Dict[str, Any]:
     """Execute a guarded pointer/keyboard action."""
     res = _driver.perform_action(req.action, req.params)
-    if not res.ok:
-        raise HTTPException(status_code=400, detail=res.message)
-    return {
+    body = {
         "ok": res.ok,
         "action": res.action,
         "message": res.message,
         "delivery_mode": res.delivery_mode,
         "details": res.details,
+        "code": getattr(res, "code", None),
     }
+    if not res.ok:
+        status = 503 if getattr(res, "code", None) == "backend_unavailable" else 400
+        raise HTTPException(status_code=status, detail=body)
+    return body
 
 
 # ── Desktop Window & Terminal Endpoints ─────────────────────────────────
@@ -193,7 +203,8 @@ def drive_preview(req: PreviewDriveRequest) -> Dict[str, Any]:
         key=req.key,
     )
     if not res["ok"]:
-        raise HTTPException(status_code=400, detail=res["error"])
+        status = 503 if res.get("code") == "backend_unavailable" else 400
+        raise HTTPException(status_code=status, detail=res)
     return res
 
 

@@ -96,11 +96,14 @@ class BatchRunResponse(BaseModel):
 
 @router.post("/batch/run")
 def run_batch_eval(req: BatchRunRequest) -> BatchRunResponse:
-    results, summary = _batch_runner.run_batch(
-        items=req.items,
-        run_name=req.run_name or "api_batch_run",
-        resume=bool(req.resume),
-    )
+    try:
+        results, summary = _batch_runner.run_batch(
+            items=req.items,
+            run_name=req.run_name or "api_batch_run",
+            resume=bool(req.resume),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return BatchRunResponse(results=results, summary=summary)
 
 

@@ -23,6 +23,7 @@ from homun.application.integration_feishu import (
 from homun.application.integration_yuanbao import (
     YuanbaoAdapter,
     YuanbaoAmbiguousRecipientError,
+    YuanbaoError,
     YuanbaoNotConnectedError,
     format_mention,
 )
@@ -200,33 +201,45 @@ def test_yuanbao_adapter_and_disambiguation():
     assert format_mention("Alice") == " @Alice "
     assert format_mention(" Bob ") == " @Bob "
 
-    # 3. Connected adapter with members provider
+    # 3. Connected adapter with members + sticker catalog providers
     members_data = [
         {"user_id": "u1", "nickname": "Zhang Wei", "role": "member"},
         {"user_id": "u2", "nickname": "Zhang San", "role": "member"},
         {"user_id": "u3", "nickname": "Li Si", "role": "member"},
     ]
-    yb = YuanbaoAdapter(connected=True, mock_members_provider=lambda _grp: members_data)
+    stickers = [
+        {"sticker_id": "stk_thumbs_up", "name": "点赞", "description": "Thumbs up"},
+    ]
+    yb = YuanbaoAdapter(
+        connected=True,
+        mock_members_provider=lambda _grp: members_data,
+        mock_sticker_catalog=stickers,
+        group_info_provider=lambda code: {
+            "success": True,
+            "group_code": code,
+            "group_name": "Real Group",
+            "member_count": 3,
+            "owner_user_id": "u1",
+        },
+    )
 
-    # Search sticker
-    stickers = yb.search_sticker("点赞")
-    assert len(stickers) == 1
-    assert stickers[0]["sticker_id"] == "stk_thumbs_up"
+    info = yb.get_group_info("grp_1")
+    assert info["member_count"] == 3
 
-    # Send sticker
-    stk_res = yb.send_sticker("grp_1", "stk_thumbs_up")
-    assert stk_res["delivered"] is True
+    found = yb.search_sticker("点赞")
+    assert len(found) == 1
+    assert found[0]["sticker_id"] == "stk_thumbs_up"
 
-    # Ambiguous recipient
+    # Outbound without transport must fail honestly
+    with pytest.raises(YuanbaoError, match="outbound transport"):
+        yb.send_sticker("grp_1", "stk_thumbs_up")
+
     with pytest.raises(YuanbaoAmbiguousRecipientError) as exc_info:
         yb.send_dm("grp_1", "Hello", name="Zhang")
     assert len(exc_info.value.candidates) == 2
 
-    # Resolved recipient
-    dm_res = yb.send_dm("grp_1", "Hello Li", name="Li Si")
-    assert dm_res["recipient_user_id"] == "u3"
-    assert dm_res["mention"] == " @Li Si "
-    assert dm_res["delivered"] is True
+    with pytest.raises(YuanbaoError, match="outbound transport"):
+        yb.send_dm("grp_1", "Hello Li", name="Li Si")
 
 
 def test_spotify_adapter_and_normalization():
@@ -285,34 +298,49 @@ def test_meetings_manager_and_teams_parser():
     assert parsed_comm["meeting_id"] == "meeting_abc"
     assert parsed_comm["recording_id"] == "rec_xyz"
 
-    # 2. Google Meet manager
+    # 2. Google Meet manager — no invented join without a browser backend
     mgr = MeetingManager()
 
-    # Invalid URL
     with pytest.raises(InvalidMeetingUrlError):
         mgr.join_google_meet("https://example.com/not-meet")
 
-    # Valid join
-    join_res = mgr.join_google_meet("https://meet.google.com/abc-defg-hij", mode="realtime", guest_name="Homun Bot")
+    join_unavailable = mgr.join_google_meet(
+        "https://meet.google.com/abc-defg-hij", mode="realtime", guest_name="Homun Bot"
+    )
+    assert join_unavailable["success"] is False
+    assert join_unavailable["state"] == "unavailable"
+
+    class FakeBrowser:
+        def join(self, **kwargs):
+            return {
+                "state": "joined",
+                "mode": kwargs.get("mode"),
+                "guest_name": kwargs.get("guest_name"),
+                "url": kwargs.get("url"),
+                "captions": [{"speaker": "System", "text": "Connected"}],
+            }
+
+    mgr_real = MeetingManager(browser_backend=FakeBrowser())
+    join_res = mgr_real.join_google_meet(
+        "https://meet.google.com/abc-defg-hij", mode="realtime", guest_name="Homun Bot"
+    )
     assert join_res["success"] is True
     session_id = join_res["session_id"]
 
     # Status
-    status = mgr.get_meet_status(session_id)
+    status = mgr_real.get_meet_status(session_id)
     assert status["state"] == "joined"
     assert status["mode"] == "realtime"
 
     # Speak (realtime mode)
-    speak_res = mgr.speak_in_meet(session_id, "Hello everyone from Homun Agent")
+    speak_res = mgr_real.speak_in_meet(session_id, "Hello everyone from Homun Agent")
     assert speak_res["spoken"] == "Hello everyone from Homun Agent"
 
-    # Transcript with last_n filter
-    transcript = mgr.get_meet_transcript(session_id, last_n=1)
+    transcript = mgr_real.get_meet_transcript(session_id, last_n=1)
     assert transcript["count"] == 1
     assert transcript["transcript"][0]["speaker"] == "Homun Bot"
 
-    # Leave cleanly
-    leave_res = mgr.leave_google_meet(session_id)
+    leave_res = mgr_real.leave_google_meet(session_id)
     assert leave_res["state"] == "finalized"
 
 
@@ -320,20 +348,18 @@ def test_integrations_fastapi_endpoints():
     app = create_app()
     client = TestClient(app)
 
-    # Test Google Meet endpoints
-    join_resp = client.post("/v1/integrations/meetings/meet/join", json={"url": "https://meet.google.com/xyz-uvwx-rst"})
+    # Without a browser backend, Meet join must not invent a live session.
+    join_resp = client.post(
+        "/v1/integrations/meetings/meet/join",
+        json={"url": "https://meet.google.com/xyz-uvwx-rst"},
+    )
     assert join_resp.status_code == 200
-    session_id = join_resp.json()["session_id"]
+    join_body = join_resp.json()
+    assert join_body.get("success") is False
+    assert join_body.get("code") == "backend_unavailable"
+    assert "session_id" not in join_body or not join_body.get("session_id")
 
-    status_resp = client.get(f"/v1/integrations/meetings/meet/status?session_id={session_id}")
-    assert status_resp.status_code == 200
-    assert status_resp.json()["state"] == "joined"
-
-    leave_resp = client.post("/v1/integrations/meetings/meet/leave", json={"session_id": session_id})
-    assert leave_resp.status_code == 200
-    assert leave_resp.json()["state"] == "finalized"
-
-    # Test Teams parse endpoint
+    # Test Teams parse endpoint (pure parsing — no live backend required)
     teams_resp = client.post(
         "/v1/integrations/meetings/teams/parse",
         json={"resource_uri": "users('usr_1')/onlineMeetings('mtg_2')"},

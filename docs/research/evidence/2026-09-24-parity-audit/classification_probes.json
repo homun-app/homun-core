@@ -1,0 +1,65 @@
+{
+  "H42_ledger_survives_new_instance": false,
+  "H39_copilot_missing": {
+    "avail": false,
+    "error": "Copilot binary 'no-such-bin' is not installed or not found on PATH."
+  },
+  "H39_copilot_available_no_real_spawn": {
+    "text": "[Copilot ACP]: Response to 'prompt only'"
+  },
+  "H45_default_mock": {
+    "success": true,
+    "output": "Evaluated output for 1"
+  },
+  "H23_sqlite_restart": {
+    "found": true,
+    "name": "Board"
+  },
+  "H40_write_gate_volatile": null,
+  "H40_vault_methods": [
+    "delete_item",
+    "get_item_metadata",
+    "list_items",
+    "resolve_secret_payload",
+    "store_item",
+    "vault_dir"
+  ],
+  "agent_default_tool_count": 3,
+  "agent_default_tools": [
+    "list_materials",
+    "read_material",
+    "search_materials"
+  ],
+  "NOT_in_agent_loop": {
+    "desktop": true,
+    "media": true,
+    "surfaces": true,
+    "kanban": true,
+    "integrations": true,
+    "research": true,
+    "catalog": true
+  },
+  "H43_yuanbao_fake_group": {
+    "success": true,
+    "group_code": "xyz",
+    "group_name": "Group-xyz",
+    "member_count": 42,
+    "owner_user_id": "user_owner_01"
+  },
+  "H16_tcc_hardcoded": {
+    "platform": "darwin",
+    "platform_supported": true,
+    "installed": true,
+    "ready": true,
+    "can_grant": true,
+    "accessibility": true,
+    "screen_recording": true,
+    "permission_mode": "restricted",
+    "active_app": null,
+    "active_window_id": null
+  },
+  "H41_missing_image": {
+    "error": null,
+    "tokens": 42
+  }
+}

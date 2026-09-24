@@ -238,7 +238,8 @@ def test_telegram_adapter():
     assert msg.is_direct is True
 
     out = adapter.send("888123", "Echo reply")
-    assert out["delivered"] is True
+    assert out["delivered"] is False
+    assert out.get("code") == "backend_unavailable"
     assert out["platform"] == "telegram"
 
 
@@ -355,7 +356,8 @@ def test_channel_registry_dispatch_flow():
     res_auth = registry.dispatch_inbound("telegram", raw_telegram, lambda msg: f"Processed: {msg.text}")
     assert res_auth["status"] == "processed"
     assert res_auth["response"] == "Processed: Hello bot"
-    assert res_auth["delivery"]["delivered"] is True
+    assert res_auth["delivery"]["delivered"] is False
+    assert res_auth["delivery"].get("code") == "backend_unavailable"
 
     # 4. Turn lease was cleanly released
     assert not lease_mgr.is_locked("telegram:112233:main")

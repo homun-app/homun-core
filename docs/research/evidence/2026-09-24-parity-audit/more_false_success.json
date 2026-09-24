@@ -1,0 +1,23 @@
+{
+  "H33_send": {
+    "delivered": true,
+    "platform": "telegram",
+    "channel_id": "1",
+    "thread_id": null,
+    "reply_to_id": null,
+    "text": "hello without bot token",
+    "media_count": 0,
+    "sent_at": 1790282108.728959
+  },
+  "H43_meet_join": {
+    "success": true,
+    "session_id": "meet_d48c0182a1a4",
+    "url": "https://meet.google.com/abc-defg-hij",
+    "mode": "transcribe",
+    "state": "joined"
+  },
+  "H25_storage": "module_global_dict",
+  "H25_after_cache_clear": null,
+  "H28_after_store_clear": null,
+  "H40_gate_lost_on_new_instance": null
+}

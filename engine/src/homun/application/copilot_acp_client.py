@@ -68,18 +68,41 @@ class CopilotAcpClient:
         prompt: str,
         *,
         simulated_response: Optional[str] = None,
+        transport: Optional[Any] = None,
     ) -> CopilotAcpResult:
-        """Execute a turn via Copilot ACP or return explicit unavailable status."""
-        if not self.is_available() and simulated_response is None:
+        """Execute a turn via Copilot ACP or return explicit unavailable status.
+
+        ``simulated_response`` is reserved for explicit test doubles. A present
+        binary without a configured transport must not invent a reply.
+        """
+        if simulated_response is not None:
+            cleaned_text, tool_calls = self.extract_tool_calls(simulated_response)
+            return CopilotAcpResult(
+                text=cleaned_text,
+                tool_calls=tool_calls,
+                raw_response=simulated_response,
+                is_available=True,
+            )
+
+        if not self.is_available():
             return CopilotAcpResult(
                 text="",
                 is_available=False,
                 error=f"Copilot binary '{self.command}' is not installed or not found on PATH.",
             )
 
-        raw = simulated_response if simulated_response is not None else f"[Copilot ACP]: Response to '{prompt}'"
-        cleaned_text, tool_calls = self.extract_tool_calls(raw)
+        if transport is None:
+            return CopilotAcpResult(
+                text="",
+                is_available=False,
+                error=(
+                    "Copilot ACP transport is not configured. Homun will not synthesize a "
+                    "response; provide a transport that speaks the ACP protocol over stdio."
+                ),
+            )
 
+        raw = transport.run(prompt)
+        cleaned_text, tool_calls = self.extract_tool_calls(raw)
         return CopilotAcpResult(
             text=cleaned_text,
             tool_calls=tool_calls,

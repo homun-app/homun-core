@@ -1,0 +1,47 @@
+[
+  {
+    "case": "vision_missing_file",
+    "error": null,
+    "tokens": 42,
+    "desc": "[Vision Analysis of image/jpeg]: In response to 'What is this?', the image was s"
+  },
+  {
+    "case": "vision_prepare_missing",
+    "mime": "image/jpeg",
+    "src_prefix": "/tmp/homun-audit-DOES-NOT-EXIST-xyz.png"
+  },
+  {
+    "case": "image_gen_no_backend",
+    "url": "https://generated.images.internal/fal-ai_flux-2_klein_9b/mock_img.png",
+    "meta": {
+      "status": "synthesized"
+    },
+    "error": null
+  },
+  {
+    "case": "video_gen_no_backend",
+    "url": "https://generated.video.internal/fal/clip_5s.mp4",
+    "meta": {
+      "simulated": true
+    },
+    "status": "completed",
+    "error": null
+  },
+  {
+    "case": "stt_fake_wav",
+    "text": "[Transcribed from homun-audit-fake.wav]: Speech converted successfully.",
+    "meta": {
+      "status": "synthesized"
+    },
+    "error": null,
+    "dur": 3.5
+  },
+  {
+    "case": "tts_no_backend",
+    "url": "https://audio.speech.internal/edge/speech.mp3",
+    "meta": {
+      "status": "synthesized"
+    },
+    "error": null
+  }
+]

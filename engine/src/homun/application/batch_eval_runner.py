@@ -11,7 +11,8 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -54,20 +55,7 @@ class BatchEvalRunner:
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.max_workers = max(1, min(16, max_workers))
-        self.task_executor = task_executor or self._default_mock_executor
-
-    def _default_mock_executor(self, item: BatchItem) -> BatchItemResult:
-        """Default mock task executor for evaluations."""
-        start = time.time()
-        # Simulated run
-        tools = {"terminal": {"count": 1, "success": 1, "failure": 0}}
-        return BatchItemResult(
-            id=item.id,
-            success=True,
-            output=f"Evaluated output for {item.id}",
-            latency_seconds=round(time.time() - start, 4),
-            tool_stats=tools,
-        )
+        self.task_executor = task_executor
 
     def _merge_tool_stats(
         self,
@@ -87,6 +75,12 @@ class BatchEvalRunner:
         resume: bool = False,
     ) -> Tuple[List[BatchItemResult], BatchSummary]:
         """Execute all items in the batch concurrently with checkpointing."""
+        if self.task_executor is None:
+            raise ValueError(
+                "BatchEvalRunner requires an explicit task_executor. "
+                "Homun will not invent successful evaluation results."
+            )
+
         checkpoint_file = self.output_dir / f"{run_name}_checkpoint.jsonl"
         completed_map: Dict[str, BatchItemResult] = {}
 
@@ -112,7 +106,9 @@ class BatchEvalRunner:
 
         if remaining_items:
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-                future_to_item = {pool.submit(self.task_executor, item): item for item in remaining_items}
+                future_to_item = {
+                    pool.submit(self.task_executor, item): item for item in remaining_items
+                }
                 for future in concurrent.futures.as_completed(future_to_item):
                     item = future_to_item[future]
                     try:
@@ -128,7 +124,6 @@ class BatchEvalRunner:
                     results.append(res)
                     self._merge_tool_stats(agg_tools, res.tool_stats)
 
-                    # Append to checkpoint
                     with open(checkpoint_file, "a", encoding="utf-8") as f:
                         f.write(json.dumps(res.model_dump()) + "\n")
 

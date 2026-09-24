@@ -72,12 +72,17 @@ class DesktopUiManager:
                 "platform": "unknown",
             }
 
-        window_data = mock_window or {
-            "app": "Code",
-            "title": "homun2 — Visual Studio Code",
-            "bounds": {"x": 100, "y": 100, "width": 1200, "height": 800},
-            "id": 4201,
-        }
+        window_data = mock_window
+        if window_data is None:
+            return {
+                "ok": False,
+                "error": (
+                    "read_window_below requires a desktop OS bridge. "
+                    "Refusing to invent window metadata."
+                ),
+                "code": "backend_unavailable",
+                "platform": "unknown",
+            }
         return {
             "ok": True,
             "window": window_data,
@@ -196,15 +201,37 @@ class DesktopUiManager:
         }
         self.emit_event("active", "preview.act", event_payload)
 
-        # Delta response format conforming to Hermes drive_preview
         if verb == "elements":
+            if self._emitter is None:
+                return {
+                    "ok": False,
+                    "error": (
+                        "Preview element inspection requires a connected desktop renderer. "
+                        "Refusing to invent element refs."
+                    ),
+                    "code": "backend_unavailable",
+                }
+            # Ask the renderer; without a response channel we only acknowledge the request.
+            emitted = self.emit_event("active", "preview.act", event_payload)
+            if not emitted:
+                return {
+                    "ok": False,
+                    "error": "Desktop renderer did not accept the elements request.",
+                    "code": "backend_unavailable",
+                }
             return {
                 "ok": True,
                 "action": "elements",
-                "elements": [
-                    {"ref": "btn-search", "role": "button", "label": "Search"},
-                    {"ref": "input-query", "role": "textbox", "label": "Query", "value": ""},
-                ],
+                "elements": [],
+                "note": "Element list must be supplied by the desktop renderer callback.",
+            }
+
+        emitted = self.emit_event("active", "preview.act", event_payload)
+        if not emitted and self._emitter is None:
+            return {
+                "ok": False,
+                "error": "Desktop renderer is not connected; refusing to report preview actions as successful.",
+                "code": "backend_unavailable",
             }
 
         return {

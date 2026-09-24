@@ -1,8 +1,7 @@
 """Speech-to-text (STT) audio transcription adapter (H41).
 
 Derived from Hermes tools/transcription_tools.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
-Manages audio transcription dispatch across local whisper and cloud providers (Groq, OpenAI,
-Mistral, ElevenLabs), validating audio formats and returning structured transcripts.
+Validates audio inputs and dispatches transcription only through an explicit backend.
 """
 from __future__ import annotations
 
@@ -14,6 +13,10 @@ from typing import Any, Callable, Dict, Optional
 logger = logging.getLogger(__name__)
 
 SUPPORTED_AUDIO_EXTENSIONS = frozenset({".wav", ".mp3", ".ogg", ".m4a", ".flac", ".webm"})
+BACKEND_UNAVAILABLE = (
+    "Speech-to-text backend is not configured. Pass a backend_dispatcher that "
+    "calls a local or cloud transcription provider."
+)
 
 
 @dataclass
@@ -54,27 +57,23 @@ class SpeechToTextTranscriber:
         used_prov = provider or self.default_provider
         params = {"path": str(p), "language": language}
 
-        if backend_dispatcher:
-            try:
-                res = backend_dispatcher(used_prov, params)
-                return TranscriptionResult(
-                    text=res.get("text", ""),
-                    duration_seconds=res.get("duration", 0.0),
-                    language=res.get("language", language or "en"),
-                    provider=used_prov,
-                    metadata=res.get("metadata", {}),
-                )
-            except Exception as exc:
-                return TranscriptionResult(
-                    text="",
-                    provider=used_prov,
-                    error=str(exc),
-                )
+        if backend_dispatcher is None:
+            return TranscriptionResult(
+                text="",
+                provider=used_prov,
+                language=language,
+                error=BACKEND_UNAVAILABLE,
+                metadata={"code": "backend_unavailable"},
+            )
 
-        return TranscriptionResult(
-            text=f"[Transcribed from {p.name}]: Speech converted successfully.",
-            duration_seconds=3.5,
-            language=language or "it",
-            provider=used_prov,
-            metadata={"status": "synthesized"},
-        )
+        try:
+            res = backend_dispatcher(used_prov, params)
+            return TranscriptionResult(
+                text=res.get("text", ""),
+                duration_seconds=float(res.get("duration", 0.0) or 0.0),
+                language=res.get("language", language),
+                provider=used_prov,
+                metadata=res.get("metadata", {}),
+            )
+        except Exception as exc:
+            return TranscriptionResult(text="", provider=used_prov, error=str(exc))

@@ -1,7 +1,8 @@
 # Stato verificato di Homun 2
 
-Aggiornato il 24 settembre 2026 con il primo backend terminale Docker proprio
-del nucleo nativo. Lo stato precedente e i rapporti datati conservano le prove storiche.
+Aggiornato il 24 settembre 2026: correzione dei falsi successi di parità Hermes
+(H16/H33/H35/H39/H41/H43/H45) e backend terminale Docker del nucleo nativo.
+Lo stato precedente e i rapporti datati conservano le prove storiche.
 Una verifica del sorgente non aggiorna l'app installata.
 
 Passaggio operativo corrente: [continuare la parità completa con Hermes](handoff/2026-09-24-parita-hermes-continuazione.md).
@@ -351,6 +352,16 @@ preparano l'analisi UX: ridurre passaggi, chiarire responsabilità e rendere sem
 riprendere il lavoro. La qualità va misurata con utenti del target, non dedotta
 dai test. Il [confronto Hermes](research/2026-09-23-hermes-homun-utilizzo.md)
 conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
+
+
+- **Correzione falsi successi (2026-09-24)**: i percorsi motore per media, computer-use,
+  canali, hosted MCP, Copilot ACP, Yuanbao/Meet e batch eval non dichiarano più successo
+  senza backend reale; restituiscono `backend_unavailable` o errore tipizzato.
+  [Guardie](research/evidence/2026-09-24-false-success-guards/README.md).
+  [Audit](research/2026-09-24-parity-audit-indipendente.md).
+  Le righe H16/H33/H35/H39/H41/H43/H45 della matrice sono `partial` (honesty only);
+  i backend reali e il collegamento prodotto restano aperti. Le voci «Parità … verificata»
+  sotto per quelle righe sono storiche e non sostituiscono la matrice corretta.
 
 - **Da fare successivamente (UI i18n)**: localizzazione multilingua di tutti i copy dell'interfaccia utente (UI copy) in modo che ciascun utente possa fruirne nella propria lingua. Registrato per la fase successiva alla parità funzionale con Hermes.
 - **Parità Hermes H28/H29 verificata**: pianificazione cron durevole (`cronjob_manage`) con parsing puro Python a 5 campi, intervalli relativi, timestamp ISO one-shot e trigger ad eventi; validazione preflight; iniezione del contesto a catena (`context_from`); esecuzione script e agente con pin di modello/provider; quota hold con pausa automatica e sblocco; tracciamento incidenti con deduplicazione dei fallimenti e risoluzione; code di consegna esterna. Suite: 1050 test motore passati, 226 test web passati, architettura conforme e build web pulita.

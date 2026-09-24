@@ -216,15 +216,12 @@ def test_openai_chat_completions_idempotency(api_client, monkeypatch):
 def test_hosted_mcp_agent_server():
     server = HostedMcpAgentServer()
 
-    # Protocol initialization
     init_res = server.handle_jsonrpc({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
     assert init_res["result"]["serverInfo"]["name"] == "homun-agent"
 
-    # Ping
     ping_res = server.handle_jsonrpc({"jsonrpc": "2.0", "id": 2, "method": "ping"})
     assert ping_res["result"] == {}
 
-    # Tool listing
     tools_res = server.handle_jsonrpc({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
     tools = tools_res["result"]["tools"]
     tool_names = [t["name"] for t in tools]
@@ -232,7 +229,7 @@ def test_hosted_mcp_agent_server():
     assert "homun_ask" in tool_names
     assert "homun_status" in tool_names
 
-    # Calling homun_ask
+    # Without a runner: honest unavailability (no invented completion)
     ask_call = server.handle_jsonrpc({
         "jsonrpc": "2.0",
         "id": 4,
@@ -242,10 +239,9 @@ def test_hosted_mcp_agent_server():
             "arguments": {"question": "How does parity work?", "context": "H35 matrix row"},
         },
     })
-    assert ask_call["result"]["isError"] is False
-    assert "Homun analysis for: How does parity work?" in ask_call["result"]["content"][0]["text"]
+    assert ask_call["result"]["isError"] is True
+    assert "not configured" in ask_call["result"]["content"][0]["text"].lower()
 
-    # Calling homun_task
     task_call = server.handle_jsonrpc({
         "jsonrpc": "2.0",
         "id": 5,
@@ -255,9 +251,33 @@ def test_hosted_mcp_agent_server():
             "arguments": {"objective": "Refactor codebase", "files": ["app.py"]},
         },
     })
-    assert task_call["result"]["isError"] is False
-    task_data = json.loads(task_call["result"]["content"][0]["text"])
-    assert task_data["status"] == "completed"
+    assert task_call["result"]["isError"] is True
+    assert "completed" not in task_call["result"]["content"][0]["text"].lower()
+
+    class Runner:
+        def ask(self, question, context=""):
+            return f"Real answer to {question}"
+
+        def run_task(self, objective, files=None, allow_tools=None):
+            return {
+                "task_id": "task_real",
+                "status": "running",
+                "objective": objective,
+                "files": files or [],
+            }
+
+        def get_status(self, work_id):
+            return {"work_id": work_id, "status": "ready", "active_runs": 0}
+
+    wired = HostedMcpAgentServer(runner=Runner())
+    ask_ok = wired.call_tool("homun_ask", {"question": "parity?"})
+    assert ask_ok["isError"] is False
+    assert "Real answer" in ask_ok["content"][0]["text"]
+
+    task_ok = wired.call_tool("homun_task", {"objective": "Refactor codebase", "files": ["app.py"]})
+    assert task_ok["isError"] is False
+    task_data = json.loads(task_ok["content"][0]["text"])
+    assert task_data["status"] == "running"
     assert task_data["objective"] == "Refactor codebase"
 
 
