@@ -23,8 +23,9 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 13. H16: macOS computer-use bridge (osascript/screencapture) auto-wired with TCC-gated readiness.
 14. H39: StdioAcpTransport real Copilot ACP JSON-RPC session when CLI present.
 15. H33: ntfy + Matrix HTTP adapters registered alongside Telegram/Discord/Slack/WhatsApp/webhook.
+16. H10: ModalJobs SDK bridge with HOMUN_MODAL_ALLOW_LIVE spend gate (no unpaid Sandbox.create by default).
 
-**Prossimo passo eseguibile:** bridge SDK Modal/Daytona/Vercel; H16 Linux/Windows + AX SoM; MCP OAuth/mTLS/reconnect + product sampling wiring; resto catalogo messaging Hermes; prove provider mancanti. Parità completa H01–H46 ancora aperta.
+**Prossimo passo eseguibile:** Daytona/Vercel/managed Modal bridges; H16 Linux/Windows + AX SoM; MCP OAuth/mTLS/reconnect + product sampling wiring; resto catalogo messaging Hermes; prove provider mancanti. Parità completa H01–H46 ancora aperta.
 
 
 ## 1. Obiettivo e decisioni già prese

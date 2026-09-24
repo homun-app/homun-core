@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from homun.domain.errors import ValidationError
 from homun.execution.contracts import JobSpec, LocalJobSpec, SshJobSpec, digest
 from homun.execution.singularity_jobs import SingularityJobSpec
+from homun.execution.modal_jobs import ModalJobSpec
 
 
 class TerminalProposalRequest(BaseModel):
@@ -123,6 +124,11 @@ def job_spec(ctx, proposal: dict) -> JobSpec | LocalJobSpec | SshJobSpec | Singu
         if not image:
             raise ValidationError('Singularity image (SIF path or docker:// URI) is required')
         return SingularityJobSpec(**common, image=image)
+    if proposal.get('policy')=='cloud-modal-v1':
+        image = proposal.get('image')
+        if not image:
+            raise ValidationError('Modal registry image reference is required')
+        return ModalJobSpec(**common, image=image)
     return JobSpec(**common,image=proposal['image'])
 
 

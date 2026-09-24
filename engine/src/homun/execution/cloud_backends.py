@@ -92,6 +92,44 @@ def probe_cloud_backend(name: str) -> CloudBackendStatus:
             error=None,
             code="ok",
         )
+    if key == "modal":
+        from homun.execution.modal_jobs import (
+            modal_credentials_present,
+            modal_live_allowed,
+            modal_sdk_available,
+        )
+
+        if not modal_sdk_available():
+            return CloudBackendStatus(
+                name=key,
+                configured=False,
+                ready=False,
+                error="Modal SDK is not installed (pip install modal)",
+            )
+        if not modal_credentials_present():
+            return CloudBackendStatus(
+                name=key,
+                configured=False,
+                ready=False,
+                error="Modal credentials missing (MODAL_TOKEN_ID/SECRET or HOMUN_MODAL_TOKEN)",
+            )
+        if not modal_live_allowed():
+            return CloudBackendStatus(
+                name=key,
+                configured=True,
+                ready=False,
+                error=(
+                    "Modal credentials present; set HOMUN_MODAL_ALLOW_LIVE=1 to permit "
+                    "Sandbox.create (may incur cloud charges)"
+                ),
+            )
+        return CloudBackendStatus(
+            name=key,
+            configured=True,
+            ready=True,
+            error=None,
+            code="ok",
+        )
     if not _env_present(keys):
         return CloudBackendStatus(
             name=key,

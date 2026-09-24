@@ -36,6 +36,13 @@ def backend_for(ctx, proposal=None):
             if status.ready:
                 return SingularityJobs(root)
             return UnavailableCloudJobs(name)
+        if name == 'modal':
+            from homun.execution.cloud_backends import probe_cloud_backend
+            from homun.execution.modal_jobs import ModalJobs
+            status = probe_cloud_backend('modal')
+            if status.ready:
+                return ModalJobs(root)
+            return UnavailableCloudJobs(name)
         if name in CLOUD_BACKENDS:
             return UnavailableCloudJobs(name)
     return DockerJobs(root)
