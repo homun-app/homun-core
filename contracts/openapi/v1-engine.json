@@ -50,6 +50,24 @@
         "title": "Achievement",
         "type": "object"
       },
+      "ActionRequest": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "ActionRequest",
+        "type": "object"
+      },
       "ActiveProviderRequest": {
         "properties": {
           "provider_id": {
@@ -4206,6 +4224,132 @@
         "title": "PluginStorageInfoResponse",
         "type": "object"
       },
+      "PreviewAnnotateRequest": {
+        "properties": {
+          "action": {
+            "default": "add",
+            "title": "Action",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selector"
+          }
+        },
+        "title": "PreviewAnnotateRequest",
+        "type": "object"
+      },
+      "PreviewDriveRequest": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selector"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "PreviewDriveRequest",
+        "type": "object"
+      },
+      "PreviewOpenRequest": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Label"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "PreviewOpenRequest",
+        "type": "object"
+      },
       "ProfileMetadata": {
         "properties": {
           "config_overrides": {
@@ -6301,6 +6445,22 @@
           "digest"
         ],
         "title": "TerminalApprovalRequest",
+        "type": "object"
+      },
+      "TerminalBufferRequest": {
+        "properties": {
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "title": "TerminalBufferRequest",
         "type": "object"
       },
       "TerminalList": {
@@ -8470,6 +8630,639 @@
         "summary": "Scan Deliverables",
         "tags": [
           "deliverables"
+        ]
+      }
+    },
+    "/v1/desktop/act": {
+      "post": {
+        "description": "Execute a guarded pointer/keyboard action.",
+        "operationId": "perform_action_v1_desktop_act_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Perform Action V1 Desktop Act Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Perform Action",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/apps": {
+      "get": {
+        "description": "List running desktop applications.",
+        "operationId": "list_apps_v1_desktop_apps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Apps V1 Desktop Apps Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Apps",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/capture": {
+      "post": {
+        "description": "Capture screen or window state with visual element hierarchy.",
+        "operationId": "capture_desktop_v1_desktop_capture_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Capture Desktop V1 Desktop Capture Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Capture Desktop",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/focus": {
+      "post": {
+        "description": "Bring target application window to front.",
+        "operationId": "focus_app_v1_desktop_focus_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Focus App V1 Desktop Focus Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Focus App",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/preview/annotate": {
+      "post": {
+        "description": "Outline or mark elements permanently in the preview pane.",
+        "operationId": "annotate_preview_v1_desktop_preview_annotate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewAnnotateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Annotate Preview V1 Desktop Preview Annotate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Annotate Preview",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/preview/close": {
+      "post": {
+        "description": "Close one or all tabs in the preview pane.",
+        "operationId": "preview_close_v1_desktop_preview_close_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Preview Close V1 Desktop Preview Close Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Close",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/preview/drive": {
+      "post": {
+        "description": "Drive preview browser interactions (click, type, scroll, elements).",
+        "operationId": "drive_preview_v1_desktop_preview_drive_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewDriveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Drive Preview V1 Desktop Preview Drive Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Drive Preview",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/preview/open": {
+      "post": {
+        "description": "Open a URL or file in the desktop preview pane.",
+        "operationId": "preview_open_v1_desktop_preview_open_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewOpenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Preview Open V1 Desktop Preview Open Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Open",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/preview/read": {
+      "get": {
+        "description": "Read rendered text content from the preview pane.",
+        "operationId": "preview_read_v1_desktop_preview_read_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "url",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Url"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Start",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "count",
+            "required": false,
+            "schema": {
+              "default": 2000,
+              "title": "Count",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Preview Read V1 Desktop Preview Read Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Read",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/status": {
+      "get": {
+        "description": "Read computer use readiness, permissions, and desktop UI availability.",
+        "operationId": "desktop_status_v1_desktop_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Desktop Status V1 Desktop Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Desktop Status",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/terminal": {
+      "get": {
+        "description": "Read lines and scrollback from the desktop terminal pane.",
+        "operationId": "read_terminal_v1_desktop_terminal_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start_line",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Line"
+            }
+          },
+          {
+            "in": "query",
+            "name": "count",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Count"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read Terminal V1 Desktop Terminal Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Terminal",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/terminal/buffer": {
+      "post": {
+        "description": "Inject xterm terminal buffer lines for inspection.",
+        "operationId": "set_terminal_buffer_v1_desktop_terminal_buffer_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TerminalBufferRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Terminal Buffer V1 Desktop Terminal Buffer Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Terminal Buffer",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/window-below": {
+      "get": {
+        "description": "Read OS window sitting directly behind the desktop app.",
+        "operationId": "read_window_below_v1_desktop_window_below_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read Window Below V1 Desktop Window Below Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Read Window Below",
+        "tags": [
+          "desktop"
+        ]
+      }
+    },
+    "/v1/desktop/windows": {
+      "get": {
+        "description": "List open application windows.",
+        "operationId": "list_windows_v1_desktop_windows_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "app",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "App"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Windows V1 Desktop Windows Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Windows",
+        "tags": [
+          "desktop"
         ]
       }
     },

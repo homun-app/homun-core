@@ -108,6 +108,15 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   su interprete figlio isolato con bridge RPC locale autenticato (UDS/TCP loopback), allowlist
   degli strumenti ammessi, tetto alle chiamate, troncamento output (40% testa / 60% coda) e timeout.
 
+- Controllo nativo del computer e strumenti desktop/anteprima (`ComputerUseDriver`, `DesktopUiManager`, H16)
+  con verifica dello stato di readiness del sistema operativo e permessi TCC (accessibilità e
+  registrazione schermo), elenco finestre con z-order e messa a fuoco delle app, cattura schermo/finestra
+  con gerarchia visiva SOM/vision/AX, blocco preventivo di combinazioni distruttive di tasti e pattern di
+  shell injection, ispezione della finestra sottostante, estrazione del buffer del terminale xterm interno,
+  gestione del riquadro di anteprima web/file, navigazione interattiva (click, type, scroll, elements)
+  con aggiornamenti delta e annotazioni permanenti sugli elementi; esposto via endpoint REST `/v1/desktop`.
+
+
 - Orchestrazione compiti con Kanban durevole e contratti PR (`KanbanStore`, `KanbanWorkflow`, H23)
   con persistenza SQLite WAL, isolamento dei profili, tracciamento DAG delle dipendenze,
   assegnazione worker con lease temporizzati e rinnovo heartbeat, recupero automatico

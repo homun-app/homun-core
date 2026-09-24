@@ -352,6 +352,14 @@ routes/kanban_api.py derive durable Kanban task orchestration (boards, columns, 
 worker claiming, heartbeat liveness, crashed worker recovery, and automatic dependency unblocking),
 card reviews with approve/changes_requested cycle, and PR contracts with verification gates from
 tools/kanban_tool.py and kanban/ at the pinned commit.
+application/desktop_contracts.py, application/desktop_ui_manager.py, application/computer_use_driver.py,
+and routes/desktop_api.py derive native desktop automation, OS readiness and TCC permission inspection,
+window enumeration and app focusing, screen/window SOM/vision/AX capture, destructive shortcut and shell
+injection blocking, window underneath reading, terminal buffer inspection, and in-app browser preview
+pane management, driving and persistent element annotations from tools/computer_use/, tools/desktop_ui.py,
+tools/read_window_tool.py, tools/read_terminal_tool.py, tools/preview_tool.py, tools/drive_preview_tool.py,
+and tools/annotate_preview_tool.py at the pinned commit.
+
 
 
 
