@@ -529,6 +529,96 @@
         "title": "ChainStepRequest",
         "type": "object"
       },
+      "ChatCompletionRequest": {
+        "properties": {
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "stream": {
+            "default": false,
+            "title": "Stream",
+            "type": "boolean"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
+          },
+          "tool_choice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Choice"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools"
+          }
+        },
+        "required": [
+          "model",
+          "messages"
+        ],
+        "title": "ChatCompletionRequest",
+        "type": "object"
+      },
       "ChatMessage": {
         "properties": {
           "content": {
@@ -1718,6 +1808,54 @@
           "text"
         ],
         "title": "MemoryNote",
+        "type": "object"
+      },
+      "ModelInfo": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "object": {
+            "default": "model",
+            "title": "Object",
+            "type": "string"
+          },
+          "owned_by": {
+            "default": "homun",
+            "title": "Owned By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ModelInfo",
+        "type": "object"
+      },
+      "ModelListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ModelInfo"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "object": {
+            "default": "list",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ModelListResponse",
         "type": "object"
       },
       "NewAgent": {
@@ -3920,6 +4058,64 @@
         ]
       }
     },
+    "/v1/chat/completions": {
+      "post": {
+        "description": "OpenAI-compatible chat completion endpoint supporting streaming, tools, and idempotency.",
+        "operationId": "chat_completions_v1_chat_completions_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatCompletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat Completions",
+        "tags": [
+          "openai_compat"
+        ]
+      }
+    },
     "/v1/contribution-portal/read": {
       "post": {
         "operationId": "read_v1_contribution_portal_read_post",
@@ -4066,6 +4262,28 @@
         "summary": "Memory Status",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "description": "List available models and presets in OpenAI format.",
+        "operationId": "list_models_v1_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Models",
+        "tags": [
+          "openai_compat"
         ]
       }
     },

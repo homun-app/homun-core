@@ -82,4 +82,6 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(memory.router)
     app.include_router(routines.router)
     app.include_router(mcp.router)
+    from homun.routes import openai_api
+    app.include_router(openai_api.router)
     return app

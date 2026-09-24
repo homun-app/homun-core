@@ -264,3 +264,9 @@ redaction of credentials/emails/phones, reactive same-role message merging, side
 persistence, and truthful aggregate token and cost accounting from agent/moa_loop.py,
 agent/moa_alternation.py, and agent/moa_trace.py at the pinned commit.
 
+application/api_server_contracts.py, routes/openai_api.py, application/hosted_mcp_agent.py,
+and application/acp_adapter.py derive OpenAI-compatible API serving (/v1/chat/completions,
+/v1/models), SSE streaming, tool-calls conversion, Idempotency-Key duplicate caching,
+hosted MCP agent tool server (homun_task, homun_ask, homun_status), and Agent Client Protocol
+(ACP) IDE adapter with edit approval workflows from gateway/platforms/api_server*.py,
+acp_adapter/, and mcp_serve.py at the pinned commit.

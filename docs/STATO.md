@@ -116,6 +116,13 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   l'oscuramento di credenziali/email/telefoni, unione reattiva dei turni utente adiacenti
   per backend con alternanza stretta e contabilizzazione veritiera e aggregata di token e costi.
 
+- Protocolli e server OpenAI/ACP/MCP (H35) con endpoint compatibili OpenAI (`/v1/chat/completions`,
+  `/v1/models`) che supportano streaming SSE con token e chiamate strumenti, caching per idempotenza
+  tramite intestazione `Idempotency-Key` o digest del corpo, server agente MCP ospitato
+  (`HostedMcpAgentServer`) con strumenti `homun_task`, `homun_ask`, `homun_status` via JSON-RPC/stdio,
+  e adattatore IDE Agent Client Protocol (`AcpServerAdapter`) con gestione del ciclo di vita e
+  consenso/rifiuto interattivo delle modifiche ai file.
+
 - Controlli nativi di pausa/ripresa/annullamento e correzioni dalla chat, con
   invalidazione delle risposte superate, conservazione degli esiti incerti e
   oscuramento delle fonti revocate. [Prove e limiti](research/2026-09-23-agent-controls-verifica.md).
