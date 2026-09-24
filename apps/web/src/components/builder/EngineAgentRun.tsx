@@ -33,6 +33,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
   const [teamId, setTeamId] = useState('');
   const [personId, setPersonId] = useState('');
   const [webPages, setWebPages] = useState(false);
+  const [ownedBrowser, setOwnedBrowser] = useState(false);
   const [personBusy, setPersonBusy] = useState(false);
   const [teamError, setTeamError] = useState<unknown>(null);
   useEffect(() => {
@@ -43,7 +44,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
   }, []);
   const run = useEngineExecution(work, onChanged, {
     list: listAgentRuns, approve: approveAgentRun,
-    prepare: (work: Work, id: string, materials: string[], team: string, person: string, servers: string[]) => prepareAgentRun(work, materials, id, team || undefined, person || undefined, servers, localTerminal || sshTerminal ? undefined : terminalImage || undefined, sshTerminal ? 'ssh' : localTerminal ? 'local' : undefined, sshTerminal ? {host: sshHost, user: sshUser, port: Number(sshPort), hostKey: sshHostKey, keyPath: sshKeyPath} : undefined, webPages),
+    prepare: (work: Work, id: string, materials: string[], team: string, person: string, servers: string[]) => prepareAgentRun(work, materials, id, team || undefined, person || undefined, servers, localTerminal || sshTerminal ? undefined : terminalImage || undefined, sshTerminal ? 'ssh' : localTerminal ? 'local' : undefined, sshTerminal ? {host: sshHost, user: sshUser, port: Number(sshPort), hostKey: sshHostKey, keyPath: sshKeyPath} : undefined, webPages, ownedBrowser),
   });
   const p = run.proposal;
   const revising = p?.status === 'completed' && work.engineStatus === 'ready';
@@ -65,7 +66,10 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       <EngineAgentServerPicker selected={serverIds} disabled={run.busy} onChange={ids => { run.renew(); setServerIds(ids); }} />
       <label><input type="checkbox" checked={webPages} disabled={run.busy}
         onChange={e => { run.renew(); setWebPages(e.target.checked); }} /> Leggi pagine web pubbliche</label>
-      {webPages && <p>Homun può cercare sul web pubblico e leggere il testo di una pagina http. Gli indirizzi privati sono rifiutati. Non è un browser e non accede agli account.</p>}
+      {webPages && <p>Homun può cercare sul web pubblico e leggere il testo di una pagina http. Gli indirizzi privati sono rifiutati. La ricerca non entra negli account.</p>}
+      <label><input type="checkbox" checked={ownedBrowser} disabled={run.busy}
+        onChange={e => { run.renew(); setOwnedBrowser(e.target.checked); }} /> Apri un browser privato, senza il tuo profilo</label>
+      {ownedBrowser && <p>Homun avvia un browser separato, legge il testo della pagina e lo chiude. Non usa il profilo di Chrome di questo computer. Non compila moduli e non entra negli account.</p>}
       <details><summary>Terminale (opzionale)</summary>
         <p>Consenti a Homun di proporre comandi. Ogni comando richiederà la tua approvazione.</p>
         <label><input type="checkbox" checked={localTerminal} disabled={run.busy}
@@ -104,7 +108,8 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {p.person && <p>Eventuali chiarimenti saranno richiesti a {p.person.name}, tramite un invito limitato alla domanda.</p>}
       <p>Autorizzi letture e ricerche su queste fonti, fino a {p.limits.max_turns} passaggi.
         Il risultato arriverà in revisione. Gli invii esterni richiedono un’approvazione separata.</p>
-      {p.web_pages?.version === 2 && <p>Homun può cercare sul web pubblico e leggere pagine http. Gli indirizzi privati sono rifiutati. Non è un browser e non accede agli account.</p>}
+      {p.browser?.policy === 'owned-headless-v1' && <p>Homun può aprire un browser privato, leggere una pagina pubblica e chiudere quel browser. Non usa il profilo di Chrome di questo computer.</p>}
+      {p.web_pages?.version === 2 && <p>Homun può cercare sul web pubblico e leggere pagine http. Gli indirizzi privati sono rifiutati. La ricerca non entra negli account.</p>}
       {p.web_pages?.version === 1 && <p>Homun può leggere pagine http pubbliche. Gli indirizzi privati sono rifiutati. La ricerca web non è configurata.</p>}
       {p.terminal?.policy === 'ssh-v1'
         ? <p>Homun può proporre comandi su {p.terminal.user}@{p.terminal.host}:{p.terminal.port}. Ogni esecuzione richiede un’approvazione separata. Non è un container e non copia i file.</p>

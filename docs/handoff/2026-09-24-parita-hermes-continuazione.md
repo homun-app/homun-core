@@ -292,7 +292,7 @@ rescue, provider nominati e X restano assenti.
 - H09/H10: Modal, Singularity, Daytona e Vercel. Il processo locale e l'host SSH
   sono usabili e non sono container. SSH non sincronizza i file. Sessioni Docker, stdin a pipe e risposte PTY restano usabili.
   Restano lo schermo completo e il timer indipendente a motore spento.
-- H14/H15: provider nominati, cache, rescue e X; browser operativo con sessioni e recovery. La lettura di una pagina pubblica e una ricerca HTML sono usabili.
+- H14/H15: provider nominati, cache, rescue e X; moduli, dialoghi, schermate e recupero del browser. Una lettura di pagina, una ricerca HTML e un browser privato sono usabili.
 - H17/H18: memoria durevole e motori memoria/contesto sostituibili.
 - H19/H20: caricamento, gestione e provenienza skill; trust/quarantena/setup.
 - H21/H22: delegazione/subagenti, risultati e completion durevoli dopo restart.
@@ -427,10 +427,11 @@ Nessun budget numerico è stato richiesto. Non segnare completo a fine tranche.
 > consensi, terminale Docker proprio approvato e riprendibile, watchdog,
 > lettura file confinata, consegne immutabili, ricerca, lettura per righe e
 > modifiche approvate. Sono capacità parziali: non dichiarare raggiunta la parità.
-> Le prove sono 993 test engine passati/1 skipped, 226 web, OpenAPI e
+> Le prove sono 996 test engine passati/1 skipped, 226 web, OpenAPI e
 > architettura verdi, più container Docker isolati, uno stdin a pipe, una
-> risposta PTY, un processo locale, un host SSH usa e getta e la pagina
-> pubblica example.com. Non trattarle come parità completa.
+> risposta PTY, un processo locale, un host SSH usa e getta, la pagina
+> pubblica example.com e un Chrome headless con profilo proprio. Non trattarle
+> come parità completa.
 >
 > H11 ha ora pagine, ricerca, lettura per righe, scrittura e patch approvate,
 > con prova Ollama isolata. Restano language server, V4A e diversi estrattori:
@@ -445,7 +446,9 @@ Nessun budget numerico è stato richiesto. Non segnare completo a fine tranche.
 > pubblici. I provider nominati, la cache e X restano aperti.
 > Modal, Singularity, Daytona e Vercel restano aperti: non dichiararli chiusi
 > senza una prova; qui mancano i programmi e le credenziali.
-> Il prossimo lavoro sono il browser e i provider di ricerca nominati,
+> Un browser privato legge una pagina pubblica e chiude solo quel processo.
+> Moduli, dialoghi e schermate restano aperti.
+> Il prossimo lavoro sono moduli e dialoghi del browser e i provider di ricerca nominati,
 > poi memoria, skill,
 > delegazione e tutte le restanti righe secondo dipendenze. L'ordine è modificabile
 > con motivazione tecnica, il perimetro completo no. Ispeziona sempre ciò che

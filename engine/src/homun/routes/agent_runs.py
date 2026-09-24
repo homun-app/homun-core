@@ -22,6 +22,7 @@ class RunRequest(BaseModel):
     ssh_host_key: str | None = Field(default=None, max_length=2000)
     ssh_key_path: str | None = Field(default=None, max_length=4096)
     web_pages: bool = False
+    browser: bool = False
     server_ids: list[str] = Field(default_factory=list, max_length=4)
     material_ids: list[str] = Field(default_factory=list, max_length=12)
     team_id: str | None = Field(default=None, max_length=160)
@@ -50,6 +51,7 @@ class RunView(BaseModel):
     file_edit_request_id: str | None = None
     terminal: dict | None = None
     web_pages: dict | None = None
+    browser: dict | None = None
     tools: list[dict] | None = None
     tool_version: str
     assignee_id: str

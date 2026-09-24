@@ -143,3 +143,7 @@ form and returns titles and URLs. Hermes uses the ddgs package and a keyless
 vendor ring. Homun does not copy those. Named providers, page cache and browser
 control remain absent. Version 1 of the tool still reports that search is not
 configured.
+execution/owned_browser.py starts headless Chrome with an engine-owned profile
+and closes that process group. Hermes browser control uses browser-use, a CDP
+supervisor and the person's profile options. Homun does not copy those. Forms,
+dialogs and screenshots are not implemented.

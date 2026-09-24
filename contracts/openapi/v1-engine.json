@@ -2423,6 +2423,11 @@
       },
       "RunRequest": {
         "properties": {
+          "browser": {
+            "default": false,
+            "title": "Browser",
+            "type": "boolean"
+          },
           "command_id": {
             "maxLength": 160,
             "minLength": 1,
@@ -2593,6 +2598,18 @@
           "assignee_id": {
             "title": "Assignee Id",
             "type": "string"
+          },
+          "browser": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser"
           },
           "connection_id": {
             "title": "Connection Id",
