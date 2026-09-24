@@ -117,3 +117,33 @@ def test_side_question_does_not_mutate_run_messages():
     finally:
         mod.lookup = original_lookup
         mod.authority = original_authority
+
+
+def test_write_approval_gate_survives_reopen(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOMUN_DATA_DIR", str(tmp_path))
+    from homun.application.write_approval_gate import WriteApprovalGate
+
+    gate = WriteApprovalGate(pending_dir=tmp_path / "approvals")
+    rec = gate.stage_action("memory", "put", {"k": "v"}, summary="store fact")
+    action_id = rec.id
+    del gate
+
+    gate2 = WriteApprovalGate(pending_dir=tmp_path / "approvals")
+    loaded = gate2.get_record(action_id)
+    assert loaded is not None
+    assert loaded.status == "pending"
+    assert loaded.payload == {"k": "v"}
+
+
+def test_deliverable_ledger_survives_reopen(tmp_path):
+    from homun.application.deliverable_ledger import DeliverableLedger
+
+    db = tmp_path / "ledger.sqlite"
+    led = DeliverableLedger(db)
+    led.record_delivery("s1", "telegram", "/tmp/a.pdf", "a.pdf", "document")
+    assert led.is_delivered("s1", "/tmp/a.pdf")
+    del led
+
+    led2 = DeliverableLedger(db)
+    assert led2.is_delivered("s1", "/tmp/a.pdf")
+    assert len(led2.list_receipts("s1")) == 1
