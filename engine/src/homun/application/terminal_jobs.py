@@ -1,6 +1,7 @@
 """Human-approved native jobs, with durable dispatch and inspect-only recovery."""
 from copy import deepcopy
 from datetime import timedelta
+import re
 from pydantic import ValidationError as SchemaError
 from homun.application.terminal_contracts import TerminalProposalRequest, consent, job_spec, public
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
@@ -28,6 +29,13 @@ def backend_for(ctx, proposal=None):
         return SshJobs(root)
     if isinstance(policy, str) and policy.startswith('cloud-') and policy.endswith('-v1'):
         name = policy[len('cloud-'):-len('-v1')]
+        if name == 'singularity':
+            from homun.execution.cloud_backends import probe_cloud_backend
+            from homun.execution.singularity_jobs import SingularityJobs
+            status = probe_cloud_backend('singularity')
+            if status.ready:
+                return SingularityJobs(root)
+            return UnavailableCloudJobs(name)
         if name in CLOUD_BACKENDS:
             return UnavailableCloudJobs(name)
     return DockerJobs(root)
@@ -60,8 +68,20 @@ def propose(ctx, actor, work_id, body, *, agent_binding=None, ssh_key_path=None)
         elif request.policy == 'local-private-v1':
             if request.image or request.stdin or request.pty:
                 raise ValidationError('A local command has no image, stdin, or terminal')
+        elif request.policy == 'cloud-singularity-v1':
+            if not request.image:
+                raise ValidationError('Singularity image (SIF path or docker:// URI) is required')
+            if request.stdin or request.pty:
+                raise ValidationError('Singularity execution has no stdin or terminal')
+        elif request.policy.startswith('cloud-') and request.policy.endswith('-v1'):
+            # Modal/Daytona/Vercel remain honesty-only until their SDK bridges land.
+            if not request.image:
+                raise ValidationError(f'{request.policy} requires an image reference')
         elif not request.image:
             raise ValidationError('Terminal image must be a pinned SHA256')
+        elif request.policy == 'docker-offline-v1':
+            if not re.fullmatch(r'sha256:[0-9a-f]{64}', request.image or ''):
+                raise ValidationError('Terminal image must be a pinned SHA256')
         result = dict(id=request.command_id,work_id=work_id,command=request.command,
                       expected_version=request.expected_version,timeout_seconds=request.timeout_seconds,policy=request.policy,created_by=actor.id,
                       created_at=utc_now().isoformat(),status='pending_approval')

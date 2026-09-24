@@ -384,9 +384,11 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
   sotto per quelle righe sono storiche e non sostituiscono la matrice corretta.
 
 - **Da fare successivamente (UI i18n)**: localizzazione multilingua di tutti i copy dell'interfaccia utente (UI copy) in modo che ciascun utente possa fruirne nella propria lingua. Registrato per la fase successiva alla parità funzionale con Hermes.
+- **H10 Singularity bridge (2026-09-24)**: `SingularityJobs` runs real `apptainer|singularity exec --containall --no-home` when CLI is on PATH / `HOMUN_SINGULARITY_BIN`; probe marks ready only after `version` succeeds. Modal/Daytona/Vercel remain unwired honesty stubs.
+- **H36 MCP resources/prompts (2026-09-24)**: probe lists resources/prompts when server capabilities advertise them; `read_resource` / `get_prompt` execute on the live session; sampling/elicitation default to typed refusal until product callbacks are installed.
 - **H33 channel HTTP transports (2026-09-24)**: webhook POST when URL set; Telegram/Discord/Slack/WhatsApp `send` use real Bot/Graph APIs when tokens (and WhatsApp phone_number_id) are configured; unconfigured → `backend_unavailable`. `gateway_manage adapter_send` reports `failed` when delivery did not happen.
 - **H35 idempotency + H27 complete_tick (2026-09-24)**: OpenAI API Idempotency-Key store on SQLite; loop `complete_tick` on agent finish.
-- **H10 cloud backends (2026-09-24)**: Modal/Daytona/Singularity/Vercel/managed Modal catalogued with typed unavailability; no invented sandboxes. `GET /v1/operations/terminal-backends`.
+- **H10 cloud backends (2026-09-24)**: Modal/Daytona/Vercel/managed Modal catalogued with typed unavailability; Singularity/Apptainer ready when CLI present (`SingularityJobs`). `GET /v1/operations/terminal-backends`.
 - **H28/H29 due-fire + Chronos (2026-09-24)**: `/v1/cron/due` and `/v1/cron/fire-due`; Chronos reports `backend_unavailable` until `HOMUN_CHRONOS_URL` is set.
 - **H32 hosted rooms + cron runner (2026-09-24)**: rooms/events on SQLite; cron prompt runs stage pending_approval agent runs via CronAgentRunner. [Evidenze](research/evidence/2026-09-24-hosted-rooms-durability/README.md).
 - **H32 pairing durability (2026-09-24)**: DM pairing codes and allowlists persist under `HOMUN_DATA_DIR/gateway/`. [Evidenze](research/evidence/2026-09-24-gateway-pairing-durability/README.md).

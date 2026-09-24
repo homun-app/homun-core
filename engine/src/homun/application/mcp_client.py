@@ -1,7 +1,8 @@
-"""Bounded MCP sessions; transport correctness belongs to the pinned MCP SDK.
+"""Extend MCP client with resources, prompts, and explicit sampling/elicitation gates (H36).
 
-Discovery never grants execution authority. Calls do not retry: a transport failure
-may follow an external effect and must be reconciled by the invocation owner.
+Discovery still never grants execution. Sampling and elicitation require injected
+callbacks; the default refuses with typed MCP ErrorData so servers cannot obtain
+silent model or human answers.
 """
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ import asyncio
 import fnmatch
 import os
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Awaitable, Callable, Optional
 
 import anyio
 import httpx2
@@ -22,6 +23,44 @@ from homun.domain.models import ExternalServer
 PROBE_TIMEOUT_SECONDS = 10.0
 MAX_DISCOVERY_PAGES = 100
 MCP_PROTOCOL_VERSION = "2025-06-18"  # SDK negotiates supported protocol versions.
+
+SamplingCallback = Callable[[Any, types.CreateMessageRequestParams], Awaitable[Any]]
+ElicitationCallback = Callable[[Any, types.ElicitRequestParams], Awaitable[Any]]
+
+_sampling_callback: Optional[SamplingCallback] = None
+_elicitation_callback: Optional[ElicitationCallback] = None
+
+
+def set_sampling_callback(callback: Optional[SamplingCallback]) -> None:
+    """Install product-owned sampling; None restores refuse-by-default."""
+    global _sampling_callback
+    _sampling_callback = callback
+
+
+def set_elicitation_callback(callback: Optional[ElicitationCallback]) -> None:
+    """Install product-owned elicitation; None restores refuse-by-default."""
+    global _elicitation_callback
+    _elicitation_callback = callback
+
+
+async def _refuse_sampling(context, params: types.CreateMessageRequestParams):
+    return types.ErrorData(
+        code=types.INVALID_REQUEST,
+        message=(
+            "MCP sampling is not configured for this Homun session. "
+            "Refusing createMessage without an authorized model callback."
+        ),
+    )
+
+
+async def _refuse_elicitation(context, params: types.ElicitRequestParams):
+    return types.ErrorData(
+        code=types.INVALID_REQUEST,
+        message=(
+            "MCP elicitation is not configured for this Homun session. "
+            "Refusing elicit without an authorized human consent callback."
+        ),
+    )
 
 
 def filtered_tools(server: ExternalServer, tools: list[dict[str, Any]]) -> list[str]:
@@ -65,31 +104,72 @@ class MCPPreflightError(RuntimeError):
     """The call was rejected before tools/call was sent."""
 
 
-async def _discover(session):
-    discovered, cursor, seen = [], None, set()
+async def _paginate(session, list_fn) -> list[dict[str, Any]]:
+    items, cursor, seen = [], None, set()
     for _ in range(MAX_DISCOVERY_PAGES):
-        page = await session.list_tools(params=types.PaginatedRequestParams(cursor=cursor) if cursor else None)
-        discovered.extend(t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in page.tools)
+        page = await list_fn(params=types.PaginatedRequestParams(cursor=cursor) if cursor else None)
+        batch = getattr(page, "tools", None)
+        if batch is None:
+            batch = getattr(page, "resources", None)
+        if batch is None:
+            batch = getattr(page, "prompts", None)
+        if batch is None:
+            batch = getattr(page, "resourceTemplates", None) or getattr(page, "resource_templates", None) or []
+        items.extend(t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in batch)
         cursor = page.next_cursor
         if not cursor:
-            return discovered
+            return items
         if cursor in seen:
             raise RuntimeError("MCP discovery repeated a pagination cursor")
         seen.add(cursor)
     raise RuntimeError("MCP discovery exceeded page limit")
 
 
-async def _operation(server: ExternalServer, tool_name: str | None, arguments: dict[str, Any], expected_descriptor=None, dispatch_state=None):
+async def _discover_tools(session):
+    return await _paginate(session, session.list_tools)
+
+
+async def _discover_resources(session):
+    try:
+        return await _paginate(session, session.list_resources)
+    except Exception:
+        return []
+
+
+async def _discover_prompts(session):
+    try:
+        return await _paginate(session, session.list_prompts)
+    except Exception:
+        return []
+
+
+async def _operation(
+    server: ExternalServer,
+    tool_name: str | None,
+    arguments: dict[str, Any],
+    expected_descriptor=None,
+    dispatch_state=None,
+    *,
+    resource_uri: str | None = None,
+    prompt_name: str | None = None,
+    prompt_arguments: dict[str, Any] | None = None,
+):
     with anyio.fail_after(PROBE_TIMEOUT_SECONDS):
         async with _transport(server) as (read, write):
-            async with ClientSession(read, write, read_timeout_seconds=PROBE_TIMEOUT_SECONDS,
-                                     client_info=types.Implementation(name="homun-engine", version="0.1.0")) as session:
+            async with ClientSession(
+                read,
+                write,
+                read_timeout_seconds=PROBE_TIMEOUT_SECONDS,
+                client_info=types.Implementation(name="homun-engine", version="0.1.0"),
+                sampling_callback=_sampling_callback or _refuse_sampling,
+                elicitation_callback=_elicitation_callback or _refuse_elicitation,
+            ) as session:
                 initialized = await session.initialize()
                 if tool_name is not None:
                     if expected_descriptor is not None:
                         from homun.application.mcp_contracts import select_descriptor, validate_arguments, require_same_descriptor
                         try:
-                            descriptors = await _discover(session)
+                            descriptors = await _discover_tools(session)
                             actual = select_descriptor(descriptors, tool_name)
                             require_same_descriptor(expected_descriptor, actual)
                             validate_arguments(actual, arguments)
@@ -105,22 +185,58 @@ async def _operation(server: ExternalServer, tool_name: str | None, arguments: d
                             "is_error": bool(raw.get("isError", False)),
                             "content": content,
                             "structured_content": raw.get("structuredContent")}
-                discovered = await _discover(session)
+                if resource_uri is not None:
+                    if dispatch_state is not None:
+                        dispatch_state['started'] = True
+                    result = await session.read_resource(resource_uri)
+                    raw = result.model_dump(mode="json", by_alias=True, exclude_none=True)
+                    return {"uri": resource_uri, "contents": raw.get("contents") or []}
+                if prompt_name is not None:
+                    if dispatch_state is not None:
+                        dispatch_state['started'] = True
+                    raw_args = prompt_arguments or {}
+                    str_args = {str(k): str(v) for k, v in raw_args.items()}
+                    result = await session.get_prompt(prompt_name, str_args or None)
+                    raw = result.model_dump(mode="json", by_alias=True, exclude_none=True)
+                    return {
+                        "name": prompt_name,
+                        "description": raw.get("description"),
+                        "messages": raw.get("messages") or [],
+                    }
+                discovered = await _discover_tools(session)
                 allowed = set(filtered_tools(server, discovered))
                 descriptors = [tool for tool in discovered if tool["name"] in allowed]
+                caps = initialized.capabilities
+                resources: list[dict[str, Any]] = []
+                prompts: list[dict[str, Any]] = []
+                if getattr(caps, "resources", None) is not None:
+                    resources = await _discover_resources(session)
+                if getattr(caps, "prompts", None) is not None:
+                    prompts = await _discover_prompts(session)
                 return {"ok": True,
                         "server_info": initialized.server_info.model_dump(mode="json", by_alias=True),
                         "tools": [tool["name"] for tool in descriptors],
                         "tool_descriptors": descriptors,
-                        "tool_count_total": len(discovered)}
+                        "tool_count_total": len(discovered),
+                        "resources": resources,
+                        "resource_uris": [str(r.get("uri") or "") for r in resources if r.get("uri")],
+                        "prompts": prompts,
+                        "prompt_names": [str(p.get("name") or "") for p in prompts if p.get("name")],
+                        "sampling_configured": _sampling_callback is not None,
+                        "elicitation_configured": _elicitation_callback is not None}
 
 
-def _run(server: ExternalServer, tool_name: str | None, arguments: dict[str, Any], expected_descriptor=None):
+def _run(server: ExternalServer, tool_name: str | None, arguments: dict[str, Any], expected_descriptor=None,
+         *, resource_uri: str | None = None, prompt_name: str | None = None,
+         prompt_arguments: dict[str, Any] | None = None):
     if server.status != "enabled":
         raise RuntimeError("Server is disabled")
     dispatch_state = {"started": False}
     try:
-        return asyncio.run(_operation(server, tool_name, arguments, expected_descriptor, dispatch_state))
+        return asyncio.run(_operation(
+            server, tool_name, arguments, expected_descriptor, dispatch_state,
+            resource_uri=resource_uri, prompt_name=prompt_name, prompt_arguments=prompt_arguments,
+        ))
     except Exception as exc:
         if expected_descriptor is not None and not dispatch_state["started"]:
             raise MCPPreflightError("Tool contract preflight failed; no call sent") from exc
@@ -134,7 +250,7 @@ def _run(server: ExternalServer, tool_name: str | None, arguments: dict[str, Any
 
 
 def probe_server(server: ExternalServer) -> dict[str, Any]:
-    """Discover complete descriptors; retain the existing public names list."""
+    """Discover tools, resources, and prompts; retain the existing public names list."""
     return _run(server, None, {})
 
 
@@ -143,3 +259,17 @@ def call_tool(server: ExternalServer, tool_name: str, arguments: dict[str, Any],
     if not filtered_tools(server, [{"name": tool_name}]):
         raise RuntimeError(f"Tool {tool_name!r} is not in the declared allowlist")
     return _run(server, tool_name, arguments, expected_descriptor)
+
+
+def read_resource(server: ExternalServer, uri: str) -> dict[str, Any]:
+    """Read one MCP resource URI through the live session."""
+    if not str(uri or "").strip():
+        raise RuntimeError("Resource URI is required")
+    return _run(server, None, {}, resource_uri=uri)
+
+
+def get_prompt(server: ExternalServer, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Fetch one MCP prompt template through the live session."""
+    if not str(name or "").strip():
+        raise RuntimeError("Prompt name is required")
+    return _run(server, None, {}, prompt_name=name, prompt_arguments=arguments or {})

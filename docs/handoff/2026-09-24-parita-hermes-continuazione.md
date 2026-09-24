@@ -19,8 +19,9 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 9. H32 pairing + hosted rooms SQLite; cron prompt → propose pending_approval.
 10. Cron due-fire API + Chronos honesty; H10 cloud backends registered; H35 idempotency SQLite; H27 complete_tick.
 11. H33: Telegram/Discord/Slack/WhatsApp HTTP send when tokens set; adapter_send honesty.
+12. H10: SingularityJobs real exec when CLI present; H36 resources/prompts + sampling/elicitation refuse-by-default.
 
-**Prossimo passo eseguibile:** bridge SDK H10 (Modal/Daytona/…); cua-driver H16; MCP sampling/OAuth/resources H36; catalogo messaging Hermes oltre i cinque adapter; prove provider mancanti. Parità completa H01–H46 ancora aperta.
+**Prossimo passo eseguibile:** bridge SDK Modal/Daytona/Vercel; cua-driver H16; MCP OAuth/mTLS/reconnect + product sampling/elicitation wiring; catalogo messaging Hermes oltre i cinque adapter; prove provider mancanti. Parità completa H01–H46 ancora aperta.
 
 
 ## 1. Obiettivo e decisioni già prese

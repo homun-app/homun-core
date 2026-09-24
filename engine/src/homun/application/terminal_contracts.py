@@ -1,24 +1,43 @@
 """Public terminal request contracts and immutable consent payload."""
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+import re
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from homun.domain.errors import ValidationError
 from homun.execution.contracts import JobSpec, LocalJobSpec, SshJobSpec, digest
+from homun.execution.singularity_jobs import SingularityJobSpec
 
 
 class TerminalProposalRequest(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     command_id: str = Field(min_length=1, max_length=160)
-    image: str | None = Field(default=None, pattern=r'^sha256:[0-9a-f]{64}$')
+    image: str | None = Field(default=None, max_length=4000)
     command: str = Field(min_length=1, max_length=16000)
     expected_version: int = Field(ge=1)
     timeout_seconds: int = Field(default=300,ge=1,le=3600)
     background: bool = False
     stdin: bool = False
     pty: bool = False
-    policy: Literal['docker-offline-v1', 'local-private-v1', 'ssh-v1'] = 'docker-offline-v1'
+    policy: Literal[
+        'docker-offline-v1',
+        'local-private-v1',
+        'ssh-v1',
+        'cloud-singularity-v1',
+        'cloud-modal-v1',
+        'cloud-managed_modal-v1',
+        'cloud-daytona-v1',
+        'cloud-vercel-v1',
+    ] = 'docker-offline-v1'
     ssh_host: str | None = Field(default=None, pattern=r'^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$')
     ssh_user: str | None = Field(default=None, pattern=r'^[A-Za-z0-9._-]{1,32}$')
     ssh_port: int | None = Field(default=None, ge=1, le=65535)
     ssh_host_key: str | None = Field(default=None, pattern=r'^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256) [A-Za-z0-9+/=]+$', max_length=2000)
+
+    @model_validator(mode='after')
+    def docker_image_must_be_digest(self):
+        if self.policy == 'docker-offline-v1' and self.image is not None:
+            if not re.fullmatch(r'sha256:[0-9a-f]{64}', self.image):
+                raise ValueError('Terminal image must be a pinned SHA256')
+        return self
 
 
 class TerminalApprovalRequest(BaseModel):
@@ -39,7 +58,16 @@ class TerminalProposal(BaseModel):
     image: str | None = None
     command: str
     expected_version: int
-    policy: Literal['docker-offline-v1', 'local-private-v1', 'ssh-v1']
+    policy: Literal[
+        'docker-offline-v1',
+        'local-private-v1',
+        'ssh-v1',
+        'cloud-singularity-v1',
+        'cloud-modal-v1',
+        'cloud-managed_modal-v1',
+        'cloud-daytona-v1',
+        'cloud-vercel-v1',
+    ]
     digest: str
     status: Literal['pending_approval','dispatching','created','running','paused','restarting','removing','exited','dead','outcome_unknown']
     agent_run_id: str | None = None
@@ -81,7 +109,7 @@ def consent(proposal: dict) -> str:
     return digest(bound)
 
 
-def job_spec(ctx, proposal: dict) -> JobSpec | LocalJobSpec | SshJobSpec:
+def job_spec(ctx, proposal: dict) -> JobSpec | LocalJobSpec | SshJobSpec | SingularityJobSpec:
     common=dict(workspace_id=ctx.workspace_id,run_id=proposal.get('_agent_binding',{}).get('run_id',proposal['work_id']),
                 call_id=proposal['id'],command=proposal['command'])
     if proposal.get('policy')=='local-private-v1':
@@ -90,6 +118,11 @@ def job_spec(ctx, proposal: dict) -> JobSpec | LocalJobSpec | SshJobSpec:
         return SshJobSpec(**common, host=proposal['ssh_host'], user=proposal['ssh_user'], port=proposal['ssh_port'],
                           host_key=proposal['ssh_host_key'], key_fingerprint=proposal['ssh_key_fingerprint'],
                           key_path=proposal['_ssh_key_path'])
+    if proposal.get('policy')=='cloud-singularity-v1':
+        image = proposal.get('image') or proposal.get('singularity_image')
+        if not image:
+            raise ValidationError('Singularity image (SIF path or docker:// URI) is required')
+        return SingularityJobSpec(**common, image=image)
     return JobSpec(**common,image=proposal['image'])
 
 

@@ -28,7 +28,7 @@ for line in sys.stdin:
         if mode == 'init_error':
             result = {'error': {'code': -32000, 'message': 'refused'}}
         else:
-            result = {'result': {'protocolVersion': '2025-06-18', 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'strict', 'version': '1'}}}
+            result = {'result': {'protocolVersion': '2025-06-18', 'capabilities': {'tools': {}, 'resources': {}, 'prompts': {}}, 'serverInfo': {'name': 'strict', 'version': '1'}}}
     elif not initialized:
         result = {'error': {'code': -32000, 'message': 'not initialized'}}
     elif method == 'tools/list':
@@ -38,6 +38,16 @@ for line in sys.stdin:
         result = {'result': {'tools': [{'name': 'second' if page else 'first', 'description': 'example', 'inputSchema': {'type': 'object', 'properties': {'q': {'type': 'string'}}}}]}}
         if not page:
             result['result']['nextCursor'] = 'page2'
+    elif method == 'resources/list':
+        result = {'result': {'resources': [{'uri': 'memo://notes', 'name': 'notes', 'mimeType': 'text/plain'}]}}
+    elif method == 'resources/read':
+        uri = (req.get('params') or {}).get('uri')
+        result = {'result': {'contents': [{'uri': uri, 'mimeType': 'text/plain', 'text': 'note body'}]}}
+    elif method == 'prompts/list':
+        result = {'result': {'prompts': [{'name': 'summarize', 'description': 'Summarize text'}]}}
+    elif method == 'prompts/get':
+        name = (req.get('params') or {}).get('name')
+        result = {'result': {'description': 'Summarize text', 'messages': [{'role': 'user', 'content': {'type': 'text', 'text': f'prompt:{name}'}}]}}
     elif method == 'tools/call':
         if mode == 'call_missing':
             continue
@@ -148,3 +158,22 @@ def test_http_session_headers_initialized_and_json_or_sse(sse):
         http.shutdown()
         http.server_close()
         worker.join(timeout=2)
+
+
+def test_probe_discovers_resources_and_prompts(tmp_path):
+    result = mcp_client.probe_server(server(tmp_path))
+    assert result["tools"] == ["first", "second"]
+    assert result["resource_uris"] == ["memo://notes"]
+    assert result["prompt_names"] == ["summarize"]
+    assert result["sampling_configured"] is False
+    assert result["elicitation_configured"] is False
+
+
+def test_read_resource_and_get_prompt(tmp_path):
+    decl = server(tmp_path)
+    resource = mcp_client.read_resource(decl, "memo://notes")
+    assert resource["uri"] == "memo://notes"
+    assert resource["contents"][0]["text"] == "note body"
+    prompt = mcp_client.get_prompt(decl, "summarize")
+    assert prompt["name"] == "summarize"
+    assert prompt["messages"][0]["content"]["text"] == "prompt:summarize"

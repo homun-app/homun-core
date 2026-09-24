@@ -63,30 +63,34 @@ def probe_cloud_backend(name: str) -> CloudBackendStatus:
         )
     keys = _ENV_KEYS[key]
     if key == "singularity":
-        # Binary path or PATH lookup — still not a full runtime without further wiring.
-        bin_path = os.environ.get("HOMUN_SINGULARITY_BIN") or os.environ.get("SINGULARITY_BIN")
+        from homun.execution.singularity_jobs import find_singularity_executable, singularity_version
+
+        bin_path = find_singularity_executable()
         if not bin_path:
             return CloudBackendStatus(
                 name=key,
                 configured=False,
                 ready=False,
-                error="Singularity backend requires HOMUN_SINGULARITY_BIN (or install singularity on PATH and set the env)",
+                error=(
+                    "Singularity backend requires apptainer/singularity on PATH "
+                    "or HOMUN_SINGULARITY_BIN"
+                ),
             )
-        if not os.path.isfile(bin_path):
+        try:
+            singularity_version(bin_path)
+        except Exception as exc:
             return CloudBackendStatus(
                 name=key,
                 configured=True,
                 ready=False,
-                error=f"Singularity binary not found: {bin_path}",
+                error=str(exc),
             )
         return CloudBackendStatus(
             name=key,
             configured=True,
-            ready=False,
-            error=(
-                "Singularity adapter is registered but the Homun execution bridge "
-                "is not yet wired; refusing to invent container runs"
-            ),
+            ready=True,
+            error=None,
+            code="ok",
         )
     if not _env_present(keys):
         return CloudBackendStatus(

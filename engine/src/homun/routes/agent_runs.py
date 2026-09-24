@@ -16,7 +16,7 @@ class RunRequest(BaseModel):
     command_id: str = Field(min_length=1, max_length=160)
     expected_version: int = Field(ge=1)
     terminal_image: str | None = Field(default=None,pattern=r'^sha256:[0-9a-f]{64}$')
-    terminal_backend: Literal['docker', 'local', 'ssh'] | None = None
+    terminal_backend: Literal['docker', 'local', 'ssh', 'modal', 'managed_modal', 'singularity', 'daytona', 'vercel'] | None = None
     ssh_host: str | None = Field(default=None, max_length=253)
     ssh_user: str | None = Field(default=None, max_length=32)
     ssh_port: int | None = Field(default=None, ge=1, le=65535)
