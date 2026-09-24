@@ -326,4 +326,12 @@ Spotify playback and reversible library track management, and Google Meet sessio
 Teams Graph meeting resource parsing from tools/homeassistant_tool.py, tools/discord_tool.py,
 tools/feishu_doc_tool.py, tools/feishu_drive_tool.py, tools/feishu_lark.py, tools/yuanbao_tools.py,
 plugins/spotify/, plugins/google_meet/, and plugins/teams_pipeline/ at the pinned commit.
+application/profile_operations.py, application/config_lifecycle.py, application/doctor_diagnostics.py,
+application/daemon_lifecycle.py, and routes/operations_api.py derive profile isolation, lifecycle operations,
+distribution bundles with SHA256 integrity verification, config schema migrations with automatic backups,
+doctor system diagnostics (platform, backends, dev tools, database integrity, schema status) with automated
+repair, and daemon lifecycle management (PID tracking, graceful shutdown, liveness verification) from
+hermes_cli/profiles.py, hermes_cli/profile_distribution.py, hermes_cli/config.py, hermes_cli/doctor.py,
+hermes_cli/doctor_platform.py, hermes_cli/doctor_tools.py, and hermes_cli/doctor_state.py at the pinned commit.
+
 

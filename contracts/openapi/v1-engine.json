@@ -1095,6 +1095,52 @@
         "title": "CompleteRequest",
         "type": "object"
       },
+      "ConfigMigrationResult": {
+        "properties": {
+          "applied_migrations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applied Migrations",
+            "type": "array"
+          },
+          "backup_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Path"
+          },
+          "from_version": {
+            "title": "From Version",
+            "type": "integer"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "to_version": {
+            "title": "To Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "success",
+          "from_version",
+          "to_version"
+        ],
+        "title": "ConfigMigrationResult",
+        "type": "object"
+      },
       "Connection": {
         "description": "Configured LLM connection (secrets never included).",
         "properties": {
@@ -1375,6 +1421,69 @@
         "title": "CopilotAcpRequest",
         "type": "object"
       },
+      "CreateProfileRequest": {
+        "properties": {
+          "config_overrides": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Overrides"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Description"
+          },
+          "name": {
+            "description": "Unique profile identifier",
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Profile"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateProfileRequest",
+        "type": "object"
+      },
       "CredentialsRequest": {
         "properties": {
           "api_key": {
@@ -1408,6 +1517,52 @@
           "api_key"
         ],
         "title": "CredentialsRequest",
+        "type": "object"
+      },
+      "DaemonStatus": {
+        "properties": {
+          "is_alive": {
+            "default": false,
+            "title": "Is Alive",
+            "type": "boolean"
+          },
+          "pid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pid"
+          },
+          "pid_file": {
+            "title": "Pid File",
+            "type": "string"
+          },
+          "state": {
+            "description": "stopped, running, stale_pid",
+            "title": "State",
+            "type": "string"
+          },
+          "uptime_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime Seconds"
+          }
+        },
+        "required": [
+          "state",
+          "pid_file"
+        ],
+        "title": "DaemonStatus",
         "type": "object"
       },
       "DeliverableItem": {
@@ -1619,6 +1774,84 @@
           "action"
         ],
         "title": "DiscordActionRequest",
+        "type": "object"
+      },
+      "DoctorFinding": {
+        "properties": {
+          "category": {
+            "description": "platform, backend, tools, storage, config",
+            "title": "Category",
+            "type": "string"
+          },
+          "check_name": {
+            "title": "Check Name",
+            "type": "string"
+          },
+          "fixed": {
+            "default": false,
+            "title": "Fixed",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "remedy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remedy"
+          },
+          "severity": {
+            "default": "info",
+            "description": "info, warning, error",
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "check_name",
+          "category",
+          "passed",
+          "message"
+        ],
+        "title": "DoctorFinding",
+        "type": "object"
+      },
+      "DoctorReport": {
+        "properties": {
+          "all_passed": {
+            "title": "All Passed",
+            "type": "boolean"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/DoctorFinding"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "summary": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Summary",
+            "type": "object"
+          }
+        },
+        "required": [
+          "all_passed"
+        ],
+        "title": "DoctorReport",
         "type": "object"
       },
       "EngineCapabilities": {
@@ -2024,6 +2257,43 @@
           "prompt"
         ],
         "title": "ImageGenerateRequest",
+        "type": "object"
+      },
+      "ImportProfileRequest": {
+        "properties": {
+          "overwrite": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "title": "Overwrite"
+          },
+          "package_data": {
+            "additionalProperties": true,
+            "title": "Package Data",
+            "type": "object"
+          },
+          "target_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Name"
+          }
+        },
+        "required": [
+          "package_data"
+        ],
+        "title": "ImportProfileRequest",
         "type": "object"
       },
       "IntakeClassification": {
@@ -2876,6 +3146,63 @@
           "total_size_bytes"
         ],
         "title": "PluginStorageInfoResponse",
+        "type": "object"
+      },
+      "ProfileMetadata": {
+        "properties": {
+          "config_overrides": {
+            "additionalProperties": true,
+            "title": "Config Overrides",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "description": {
+            "default": "",
+            "description": "Human readable description",
+            "title": "Description",
+            "type": "string"
+          },
+          "is_active": {
+            "default": false,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Unique profile identifier",
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Parent profile to inherit settings from",
+            "title": "Parent Profile"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ProfileMetadata",
         "type": "object"
       },
       "ProposalRequest": {
@@ -7751,6 +8078,437 @@
         "summary": "List Usage Attempts",
         "tags": [
           "models"
+        ]
+      }
+    },
+    "/v1/operations/config": {
+      "get": {
+        "operationId": "get_config_v1_operations_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Config V1 Operations Config Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Config",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/operations/config/migrate": {
+      "post": {
+        "operationId": "migrate_config_v1_operations_config_migrate_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigMigrationResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Migrate Config",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/operations/daemon/restart": {
+      "post": {
+        "operationId": "restart_daemon_v1_operations_daemon_restart_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Restart Daemon V1 Operations Daemon Restart Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Restart Daemon",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/operations/daemon/status": {
+      "get": {
+        "operationId": "get_daemon_status_v1_operations_daemon_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DaemonStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Daemon Status",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/operations/doctor": {
+      "get": {
+        "operationId": "run_doctor_diagnostics_v1_operations_doctor_get",
+        "parameters": [
+          {
+            "description": "Apply automated fixes",
+            "in": "query",
+            "name": "fix",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Apply automated fixes",
+              "title": "Fix",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoctorReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Doctor Diagnostics",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/operations/doctor/repair": {
+      "post": {
+        "operationId": "run_doctor_repair_v1_operations_doctor_repair_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoctorReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Run Doctor Repair",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/operations/profiles": {
+      "get": {
+        "operationId": "list_profiles_v1_operations_profiles_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProfileMetadata"
+                  },
+                  "title": "Response List Profiles V1 Operations Profiles Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Profiles",
+        "tags": [
+          "operations"
+        ]
+      },
+      "post": {
+        "operationId": "create_profile_v1_operations_profiles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileMetadata"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Profile",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/operations/profiles/import": {
+      "post": {
+        "operationId": "import_profile_v1_operations_profiles_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileMetadata"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Profile",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/operations/profiles/{name}": {
+      "delete": {
+        "operationId": "delete_profile_v1_operations_profiles__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Profile V1 Operations Profiles  Name  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Profile",
+        "tags": [
+          "operations"
+        ]
+      },
+      "get": {
+        "operationId": "get_profile_v1_operations_profiles__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileMetadata"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Profile",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/operations/profiles/{name}/activate": {
+      "post": {
+        "operationId": "activate_profile_v1_operations_profiles__name__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Activate Profile V1 Operations Profiles  Name  Activate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Profile",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/operations/profiles/{name}/export": {
+      "post": {
+        "operationId": "export_profile_v1_operations_profiles__name__export_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Export Profile V1 Operations Profiles  Name  Export Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Profile",
+        "tags": [
+          "operations"
         ]
       }
     },
