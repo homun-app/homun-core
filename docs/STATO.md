@@ -69,6 +69,11 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   delle code fences e conservazione del lavoro grezzo; polling e annullamento durevoli
   (`delegation_poll`, `delegation_cancel`) con stato salvato nel record del run.
 
+- Chiarimenti umani strutturati (`clarify`, H08) con supporto a domande singole o
+  in batch (fino a 5), opzione raccomandata contrassegnata ed esclusa dalla risposta,
+  parsing selezioni multiple, conservazione delle risposte parziali in caso di timeout
+  ed evidenza esplicita degli errori di recapito.
+
 - Controlli nativi di pausa/ripresa/annullamento e correzioni dalla chat, con
   invalidazione delle risposte superate, conservazione degli esiti incerti e
   oscuramento delle fonti revocate. [Prove e limiti](research/2026-09-23-agent-controls-verifica.md).

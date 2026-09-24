@@ -183,3 +183,12 @@ at the pinned commit. Homun executes subagents with isolated prompt envelopes, r
 budgets in the parent work envelope, validates JSON schemas while preserving raw work
 on repair failure, and tracks delegations durably across runs.
 
+application/clarify_contracts.py and application/clarify_tools.py derive
+human clarification, single and batched question dispatch, multi-select parsing,
+recommended option formatting, and partial timeout answer preservation from
+tools/clarify_tool.py and tools/clarify_gateway.py at the pinned commit.
+Homun preserves already-answered questions when timeouts occur, cleanly separates
+presentation labels from recorded responses, and distinguishes delivery failure
+from deliberate user inactivity.
+
+

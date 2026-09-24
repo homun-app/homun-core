@@ -62,6 +62,12 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.delegation_tools import execute as delegation_execute
         for del_entry in delegation_entries(delegation_execute, delegation.get('version', 1)):
             registry.register(del_entry)
+    clarify = run.get('clarify')
+    if isinstance(clarify, dict) and clarify.get('policy') == 'structured-clarify-v1' and clarify.get('version') == 1:
+        from homun.application.clarify_contracts import entries as clarify_entries
+        from homun.application.clarify_tools import execute as clarify_execute
+        for c_entry in clarify_entries(clarify_execute, clarify.get('version', 1)):
+            registry.register(c_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())
