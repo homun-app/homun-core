@@ -28,10 +28,10 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.workspace_file_contracts import entries as file_entries
         for file_entry in file_entries(file_executor, run['_workspace_files_version']):registry.register(file_entry)
     pages = run.get('web_pages')
-    if isinstance(pages, dict) and pages.get('policy') == 'public-http-v1' and pages.get('version') == 1:
+    if isinstance(pages, dict) and pages.get('policy') == 'public-http-v1' and pages.get('version') in {1, 2}:
         from homun.application.web_page_contracts import entries as web_entries
         from homun.application.web_pages import execute as web_execute
-        for web_entry in web_entries(web_execute):
+        for web_entry in web_entries(web_execute, pages.get('version', 1)):
             registry.register(web_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry

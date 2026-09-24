@@ -14,7 +14,7 @@ class WebSearchArguments(BaseModel):
     query: str = Field(min_length=1, max_length=500)
 
 
-def entries(handler):
+def entries(handler, version=1):
     extract = ToolDefinition(
         name='web_extract',
         description=(
@@ -22,17 +22,26 @@ def entries(handler):
             'Private, loopback, and link-local addresses are refused. '
             'There is no browser, no login, and no search. A refusal or a failed fetch is not page content.'),
         input_schema=WebExtractArguments.model_json_schema())
+    if version == 1:
+        search_description = (
+            'Web search is not configured. Calling it returns web_provider_unavailable and no results. '
+            'Do not invent search results.')
+    elif version == 2:
+        search_description = (
+            'Search the public web and return up to five titles, URLs, and snippets. '
+            'Private addresses are omitted. An empty list means no public results were returned. '
+            'Do not invent results. This is not a browser and it does not log in.')
+    else:
+        raise ValueError('Unknown web page contract')
     search = ToolDefinition(
         name='web_search',
-        description=(
-            'Web search is not configured. Calling it returns web_provider_unavailable and no results. '
-            'Do not invent search results.'),
+        description=search_description,
         input_schema=WebSearchArguments.model_json_schema())
     def extract_page(ctx, actor, run, args):
         return handler(ctx, actor, run, 'web_extract', args)
     def search_web(ctx, actor, run, args):
         return handler(ctx, actor, run, 'web_search', args)
     return [
-        ToolEntry(extract, 'web_pages', '1', WebExtractArguments, extract_page, replay='read_only'),
-        ToolEntry(search, 'web_pages', '1', WebSearchArguments, search_web, replay='read_only'),
+        ToolEntry(extract, 'web_pages', str(version), WebExtractArguments, extract_page, replay='read_only'),
+        ToolEntry(search, 'web_pages', str(version), WebSearchArguments, search_web, replay='read_only'),
     ]

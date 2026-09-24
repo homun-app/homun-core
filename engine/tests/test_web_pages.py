@@ -2,7 +2,7 @@
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from homun.execution.web_pages import fetch_page, visible_text
+from homun.execution.web_pages import fetch_page, search_hits, search_public, visible_text
 from test_agent_runs import setup
 
 
@@ -51,7 +51,22 @@ def test_example_page_is_readable():
     assert result["truncated"] is False
 
 
-def test_web_search_reports_that_no_provider_is_configured(setup):
+def test_search_hits_drop_private_urls():
+    page = b'''<a class="result__a" href="http://127.0.0.1/secret">Local</a>
+<a class="result__snippet" href="http://127.0.0.1/secret">hidden</a>
+<a class="result__a" href="https://example.com/">Example Domain</a>
+<a class="result__snippet" href="https://example.com/">documentation name</a>'''
+    hits = search_hits(page)
+    assert hits == [{"url": "https://example.com/", "title": "Example Domain", "snippet": "documentation name"}]
+
+
+def test_public_search_returns_example_domain():
+    result = search_public("example domain")
+    assert result.get("results"), result
+    assert any("example.com" in hit["url"] for hit in result["results"])
+
+
+def test_web_search_returns_public_results(setup):
     from types import SimpleNamespace
     from homun.application import agent_runs
     from homun.application.agent_run_execution import advance
@@ -61,12 +76,12 @@ def test_web_search_reports_that_no_provider_is_configured(setup):
     proposal = agent_runs.propose(ctx, actor, work, {
         "command_id": "run", "expected_version": 1, "material_ids": [], "web_pages": True})
     names = [item["name"] for item in proposal["tools"]]
-    assert proposal["web_pages"] == {"policy": "public-http-v1", "version": 1}
+    assert proposal["web_pages"] == {"policy": "public-http-v1", "version": 2}
     assert "web_extract" in names and "web_search" in names
     agent_runs.approve(ctx, actor, work, proposal["id"], {
         "command_id": "go", "digest": proposal["digest"], "expected_version": proposal["expected_version"]})
     ctx.models.complete_tools = lambda *a, **k: SimpleNamespace(message=NativeMessage(
-        role="assistant", tool_calls=[ToolCall(id="q1", name="web_search", arguments={"query": "example"})]), usage=None)
+        role="assistant", tool_calls=[ToolCall(id="q1", name="web_search", arguments={"query": "example domain"})]), usage=None)
     assert advance(ctx, proposal["id"]) == "running"
     observation = ctx.repository.load().commands[proposal["id"]].result["observations"][-1]
-    assert observation["result"]["error_code"] == "web_provider_unavailable"
+    assert any("example.com" in hit["url"] for hit in observation["result"]["results"])

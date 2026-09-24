@@ -271,10 +271,10 @@ Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifi
 
 Un run può leggere il testo di una pagina http o https pubblica. Gli indirizzi
 privati, di loopback e link-local sono rifiutati prima della connessione.
-`https://example.com/` restituisce il testo della pagina. La ricerca web
-risponde che non c'è un provider e non inventa risultati. Motore: 991 passati,
-1 saltato. Web: 226 passati. Architettura: 0 errori, 35 avvisi dimensionali
-preesistenti. Cache, rescue, provider nominati e X restano assenti.
+`https://example.com/` restituisce il testo della pagina. Una ricerca nuova
+restituisce titoli e URL pubblici; gli indirizzi privati nei risultati sono
+scartati. La versione 1 della ricerca resta quella senza provider. Cache,
+rescue, provider nominati e X restano assenti.
 
 ### Prima tranche consigliata dopo questo aggiornamento: gli altri backend H10
 
@@ -292,7 +292,7 @@ preesistenti. Cache, rescue, provider nominati e X restano assenti.
 - H09/H10: Modal, Singularity, Daytona e Vercel. Il processo locale e l'host SSH
   sono usabili e non sono container. SSH non sincronizza i file. Sessioni Docker, stdin a pipe e risposte PTY restano usabili.
   Restano lo schermo completo e il timer indipendente a motore spento.
-- H14/H15: provider di ricerca, cache, rescue e X; browser operativo con sessioni e recovery. La lettura di una pagina pubblica è usabile.
+- H14/H15: provider nominati, cache, rescue e X; browser operativo con sessioni e recovery. La lettura di una pagina pubblica e una ricerca HTML sono usabili.
 - H17/H18: memoria durevole e motori memoria/contesto sostituibili.
 - H19/H20: caricamento, gestione e provenienza skill; trust/quarantena/setup.
 - H21/H22: delegazione/subagenti, risultati e completion durevoli dopo restart.
@@ -427,7 +427,7 @@ Nessun budget numerico è stato richiesto. Non segnare completo a fine tranche.
 > consensi, terminale Docker proprio approvato e riprendibile, watchdog,
 > lettura file confinata, consegne immutabili, ricerca, lettura per righe e
 > modifiche approvate. Sono capacità parziali: non dichiarare raggiunta la parità.
-> Le prove sono 991 test engine passati/1 skipped, 226 web, OpenAPI e
+> Le prove sono 993 test engine passati/1 skipped, 226 web, OpenAPI e
 > architettura verdi, più container Docker isolati, uno stdin a pipe, una
 > risposta PTY, un processo locale, un host SSH usa e getta e la pagina
 > pubblica example.com. Non trattarle come parità completa.
@@ -441,10 +441,11 @@ Nessun budget numerico è stato richiesto. Non segnare completo a fine tranche.
 > non eredita l'ambiente e non è un container. Un host SSH è usabile e
 > facoltativo: la chiave pubblica del server è fissata nell'approvazione e i
 > file non vengono copiati. Una pagina http pubblica è leggibile e gli
-> indirizzi privati sono rifiutati. La ricerca web non ha un provider.
+> indirizzi privati sono rifiutati. Una ricerca nuova restituisce titoli e URL
+> pubblici. I provider nominati, la cache e X restano aperti.
 > Modal, Singularity, Daytona e Vercel restano aperti: non dichiararli chiusi
 > senza una prova; qui mancano i programmi e le credenziali.
-> Il prossimo lavoro sono i provider di ricerca e il browser,
+> Il prossimo lavoro sono il browser e i provider di ricerca nominati,
 > poi memoria, skill,
 > delegazione e tutte le restanti righe secondo dipendenze. L'ordine è modificabile
 > con motivazione tecnica, il perimetro completo no. Ispeziona sempre ciò che

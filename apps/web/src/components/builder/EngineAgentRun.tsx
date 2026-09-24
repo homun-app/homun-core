@@ -65,7 +65,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       <EngineAgentServerPicker selected={serverIds} disabled={run.busy} onChange={ids => { run.renew(); setServerIds(ids); }} />
       <label><input type="checkbox" checked={webPages} disabled={run.busy}
         onChange={e => { run.renew(); setWebPages(e.target.checked); }} /> Leggi pagine web pubbliche</label>
-      {webPages && <p>Homun può leggere il testo di una pagina http pubblica. Gli indirizzi privati sono rifiutati. La ricerca web non è configurata.</p>}
+      {webPages && <p>Homun può cercare sul web pubblico e leggere il testo di una pagina http. Gli indirizzi privati sono rifiutati. Non è un browser e non accede agli account.</p>}
       <details><summary>Terminale (opzionale)</summary>
         <p>Consenti a Homun di proporre comandi. Ogni comando richiederà la tua approvazione.</p>
         <label><input type="checkbox" checked={localTerminal} disabled={run.busy}
@@ -104,7 +104,8 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {p.person && <p>Eventuali chiarimenti saranno richiesti a {p.person.name}, tramite un invito limitato alla domanda.</p>}
       <p>Autorizzi letture e ricerche su queste fonti, fino a {p.limits.max_turns} passaggi.
         Il risultato arriverà in revisione. Gli invii esterni richiedono un’approvazione separata.</p>
-      {p.web_pages?.policy === 'public-http-v1' && <p>Homun può leggere pagine http pubbliche. Gli indirizzi privati sono rifiutati. La ricerca web non è configurata.</p>}
+      {p.web_pages?.version === 2 && <p>Homun può cercare sul web pubblico e leggere pagine http. Gli indirizzi privati sono rifiutati. Non è un browser e non accede agli account.</p>}
+      {p.web_pages?.version === 1 && <p>Homun può leggere pagine http pubbliche. Gli indirizzi privati sono rifiutati. La ricerca web non è configurata.</p>}
       {p.terminal?.policy === 'ssh-v1'
         ? <p>Homun può proporre comandi su {p.terminal.user}@{p.terminal.host}:{p.terminal.port}. Ogni esecuzione richiede un’approvazione separata. Non è un container e non copia i file.</p>
         : p.terminal?.policy === 'local-private-v1'

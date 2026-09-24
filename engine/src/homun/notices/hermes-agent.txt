@@ -138,4 +138,8 @@ fingerprint, and does not sync files. Stdin and a terminal are not provided.
 execution/web_pages.py reads one public page and refuses private addresses and
 credential-bearing URLs. Hermes tools/url_safety.py also covers proxies,
 fake-ip ranges and an option to allow private URLs. Homun does not copy those
-bypasses. Search providers, page cache and browser control remain absent.
+bypasses. web_search version 2 posts the query to DuckDuckGo's public HTML
+form and returns titles and URLs. Hermes uses the ddgs package and a keyless
+vendor ring. Homun does not copy those. Named providers, page cache and browser
+control remain absent. Version 1 of the tool still reports that search is not
+configured.

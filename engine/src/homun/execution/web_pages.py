@@ -11,7 +11,7 @@ import ipaddress
 import socket
 import ssl
 from html.parser import HTMLParser
-from urllib.parse import parse_qsl, urljoin, urlsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit
 
 MAX_BYTES = 1_000_000
 TEXT_LIMIT = 12_000
@@ -134,16 +134,19 @@ def _open(scheme: str, host: str, port: int, address: str):
     return connection
 
 
-def _exchange(scheme: str, host: str, port: int, path: str, address: str) -> tuple[int, str, str, bytes, bool]:
+def _exchange(scheme: str, host: str, port: int, path: str, address: str, *, method: str = "GET", payload: bytes | None = None) -> tuple[int, str, str, bytes, bool]:
     connection = _open(scheme, host, port, address)
+    headers = {
+        "Host": host if port in {80, 443} else f"{host}:{port}",
+        "User-Agent": "Homun",
+        "Accept": "text/html,text/plain",
+        "Accept-Encoding": "identity",
+        "Connection": "close",
+    }
+    if payload is not None:
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
     try:
-        connection.request("GET", path, headers={
-            "Host": host if port in {80, 443} else f"{host}:{port}",
-            "User-Agent": "Homun",
-            "Accept": "text/html,text/plain",
-            "Accept-Encoding": "identity",
-            "Connection": "close",
-        })
+        connection.request(method, path, body=payload, headers=headers)
         response = connection.getresponse()
         body = response.read(MAX_BYTES + 1)
         kind = response.headers.get("Content-Type", "")
@@ -180,3 +183,77 @@ def fetch_page(url: str) -> dict:
     except (TimeoutError, OSError, http.client.HTTPException, ssl.SSLError):
         return {"error_code": "web_fetch_failed", "message": "The page could not be read"}
     return {"error_code": "web_fetch_failed", "message": "The page redirected too many times"}
+
+
+class _SearchResults(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.results: list[dict[str, str]] = []
+        self._mode = ""
+        self._href = ""
+        self._buf: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "a":
+            return
+        classes = set(dict(attrs).get("class", "").split())
+        href = dict(attrs).get("href", "")
+        if "result__a" in classes:
+            self._mode = "title"
+            self._href = href
+            self._buf = []
+        elif "result__snippet" in classes:
+            self._mode = "snippet"
+            self._buf = []
+
+    def handle_data(self, data):
+        if self._mode:
+            self._buf.append(data)
+
+    def handle_endtag(self, tag):
+        if tag != "a" or not self._mode:
+            return
+        text = " ".join("".join(self._buf).split())
+        if self._mode == "title" and self._href:
+            self.results.append({"url": self._href, "title": text[:200], "snippet": ""})
+        elif self._mode == "snippet" and self.results:
+            self.results[-1]["snippet"] = text[:300]
+        self._mode = ""
+        self._buf = []
+
+
+def search_hits(raw: bytes, limit: int = 5) -> list[dict[str, str]]:
+    """Keep public http(s) results from a DuckDuckGo HTML page."""
+    parser = _SearchResults()
+    parser.feed(raw.decode("utf-8", errors="replace"))
+    kept = []
+    for hit in parser.results:
+        try:
+            _classify(hit["url"])
+        except PageRefusal:
+            continue
+        kept.append(hit)
+        if len(kept) >= limit:
+            break
+    return kept
+
+
+def search_public(query: str) -> dict:
+    """Return a short public result list. An empty list is not an invented answer."""
+    if not isinstance(query, str) or not query.strip() or len(query) > 500 or "\n" in query or "\r" in query:
+        return {"error_code": "web_query_refused", "message": "The search query is empty or not a single line"}
+    payload = urlencode({"q": query.strip()}).encode()
+    try:
+        scheme, host, port, path, address = _classify("https://html.duckduckgo.com/html/")
+        status, _kind, _location, body, _oversized = _exchange(
+            scheme, host, port, path, address, method="POST", payload=payload)
+    except PageRefusal as exc:
+        return {"error_code": exc.code, "message": exc.message}
+    except (TimeoutError, OSError, http.client.HTTPException, ssl.SSLError):
+        return {"error_code": "web_fetch_failed", "message": "The search page could not be read"}
+    if status != 200:
+        return {"error_code": "web_fetch_failed", "message": f"The search page returned status {status}", "status": status}
+    results = search_hits(body[:MAX_BYTES])
+    if not results and b"result__a" not in body:
+        return {"error_code": "web_fetch_failed", "message": "The search page did not return results"}
+    return {"provider": "duckduckgo-html", "query": query.strip(), "results": results}
