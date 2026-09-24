@@ -1,8 +1,9 @@
 # Sessioni terminale in background
 
 Tranche H09 sul backend Docker già approvato. I run nuovi con immagine terminale
-usano la versione 3 del contratto. I run salvati alle versioni 1 e 2 restano
-senza poll, attesa e arresto.
+usano la versione 5 del contratto. I run salvati alle versioni 1 e 2 restano
+senza poll, attesa e arresto. La versione 3 non ha stdin né terminale. La
+versione 4 ha lo stdin a pipe e non ha il terminale.
 
 ## Contratto
 
@@ -23,22 +24,30 @@ Lo stesso identificativo di chiamata non rimanda i byte se la consegna è già
 riuscita o è rimasta incerta. Non è un PTY: un programma che richiede un
 terminale interattivo non riceve questo input.
 
+Dalla versione 5 del contratto, `pty: true` insieme a `background: true` avvia
+un terminale sul container nuovo. A ogni aggiornamento dei log Homun risponde
+una sola volta alle richieste di stato, cursore e dimensione. I log mostrati
+al modello non contengono quelle richieste. Un container già avviato non viene
+riavviato per aggiungere il terminale. Non è uno schermo: niente ridimensionamento,
+segnali o emulazione completa.
+
 La scadenza del comando vale ancora solo mentre Homun è acceso. Non c'è un
 timer indipendente nel container a motore spento.
 
 ## Prove
 
-Motore: 971 passati, 1 saltato. Web: 226 passati. Architettura: 0 errori,
+Motore: 978 passati, 1 saltato. Web: 226 passati. Architettura: 0 errori,
 35 avvisi dimensionali preesistenti. OpenAPI rigenerato. Il test del pannello
-mostra la frase sul comando che resta in esecuzione solo quando la proposta è
-in background.
+mostra la frase sul terminale solo quando la proposta lo chiede, e tiene la
+frase sullo stdin a pipe quando il terminale non c'è.
 
 Le prove di stato usano un backend finto per approvazione, ripresa unica,
-avviso, assenza di un secondo avvio e stdin non ripetuto. Una prova isolata
-con l'immagine pinnata ha avviato due container `sleep`, ne ha arrestato uno
-e ha lasciato l'altro in esecuzione. Un'altra ha inviato una riga allo stdin
-di un processo già avviato e ha lasciato quel processo in esecuzione. In entrambi
-i casi sono stati rimossi solo i container della prova. Evidenze:
-[terminal_background_docker.json](evidence/2026-09-23-hermes-parity/terminal_background_docker.json)
-e [terminal_stdin_docker.json](evidence/2026-09-23-hermes-parity/terminal_stdin_docker.json).
-Il PTY non è implementato. Gli altri backend di H10 restano assenti.
+avviso, assenza di un secondo avvio, stdin non ripetuto e una sola risposta
+alla richiesta di cursore. Prove isolate con l'immagine pinnata: due container
+`sleep` con arresto di uno solo; una riga sullo stdin di un processo già
+avviato; un terminale nuovo che riceve la risposta di cursore e resta in
+esecuzione. Sono stati rimossi solo i container di quelle prove. Evidenze:
+[terminal_background_docker.json](evidence/2026-09-23-hermes-parity/terminal_background_docker.json),
+[terminal_stdin_docker.json](evidence/2026-09-23-hermes-parity/terminal_stdin_docker.json)
+e [terminal_pty_docker.json](evidence/2026-09-23-hermes-parity/terminal_pty_docker.json).
+Lo schermo completo non è implementato. Gli altri backend di H10 restano assenti.

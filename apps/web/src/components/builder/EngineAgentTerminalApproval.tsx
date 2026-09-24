@@ -39,7 +39,8 @@ export function TerminalProposal({job, busy, active, act}: {job: TerminalJob; bu
       {job.timeout_seconds !== undefined && <p>Durata autorizzata: {job.timeout_seconds} secondi.
         Il controllo della scadenza opera mentre Homun è acceso.</p>}
       {job.background && <p>Il comando resta in esecuzione dopo l'avvio. Homun potrà leggerne lo stato, attenderne la fine o arrestarlo senza una seconda approvazione.</p>}
-      {job.stdin && <p>Homun potrà inviare input a questo processo dopo l'avvio. Non è un terminale interattivo.</p>}
+      {job.stdin && !job.pty && <p>Homun potrà inviare input a questo processo dopo l'avvio. Non è un terminale interattivo.</p>}
+      {job.pty && <p>Questo processo ha un terminale. Homun risponde alle richieste di stato, cursore e dimensione. Non è uno schermo completo.</p>}
       {job.timed_out && <p role="alert">Durata superata: Homun ha richiesto l’arresto. Verifica lo stato del processo qui sotto.</p>}
       <p>Ambiente isolato, senza rete, con una cartella dedicata a questo lavoro.</p>
       <details><summary>Ambiente autorizzato</summary><code>{job.image}</code></details>

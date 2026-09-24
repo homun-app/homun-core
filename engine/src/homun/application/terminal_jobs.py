@@ -7,6 +7,7 @@ from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedEr
 from homun.domain.models import CommandRecord, utc_now
 from homun.execution.contracts import ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain
 from homun.execution.docker import DockerJobs
+from homun.execution.pty_queries import PtyQueryResponder, unread
 from homun.policy.work import require_work_access
 
 TYPE = 'terminal.job'
@@ -40,6 +41,7 @@ def propose(ctx, actor, work_id, body, *, agent_binding=None):
                       created_at=utc_now().isoformat(),status='pending_approval')
         if request.background:result['background']=True
         if request.stdin:result['stdin']=True
+        if request.pty:result['pty']=True
         job_spec(ctx,result)
     except SchemaError:
         raise ValidationError('Invalid terminal proposal') from None
@@ -94,7 +96,7 @@ def approve(ctx, actor, work_id, proposal_id, body):
         ctx.service.store = store
     # Persist the intent before IO. Even a process crash cannot authorize another start.
     try:
-        state = backend_for(ctx).start(job_spec(ctx,snapshot), **({'stdin': True} if snapshot.get('stdin') else {}))
+        state = backend_for(ctx).start(job_spec(ctx,snapshot), **({'stdin': True} if snapshot.get('stdin') or snapshot.get('pty') else {}), **({'pty': True} if snapshot.get('pty') else {}))
     except TRANSPORT_ERRORS as exc:
         state = _unknown(exc)
     return _record(ctx,actor,work_id,proposal_id,snapshot,state)
@@ -141,7 +143,60 @@ def _observe(ctx, actor, work_id, proposal_id, *, stop=False):
 
 
 def refresh(ctx, actor, work_id, proposal_id):
-    return _observe(ctx,actor,work_id,proposal_id)
+    observed = _observe(ctx,actor,work_id,proposal_id)
+    _answer_pty(ctx,actor,work_id,proposal_id)
+    current = ctx.repository.load().commands.get(proposal_id)
+    return public(current.result) if current is not None else observed
+
+
+def _answer_pty(ctx, actor, work_id, proposal_id):
+    """Reply once to each new PTY query. Never starts a container."""
+    store = ctx.repository.load()
+    record = store.commands.get(proposal_id)
+    proposal = record.result if record is not None and record.type == TYPE else None
+    if proposal is None or not proposal.get('pty') or proposal['status'] in {'pending_approval', 'dispatching'}:
+        return
+    try:
+        logs = backend_for(ctx).logs(job_spec(ctx, proposal))
+    except TRANSPORT_ERRORS:
+        return
+    raw = logs.get('text') or ''
+    delta = unread(proposal.get('_pty_raw', ''), raw)
+    if not delta:
+        _restore_pty_text(ctx, proposal_id)
+        return
+    responder = PtyQueryResponder()
+    responder._pending[:] = bytes.fromhex(proposal.get('_pty_pending') or '')
+    visible_delta, replies = responder.process(delta.encode())
+    if proposal['status'] in {'exited', 'dead'}:
+        visible_delta += responder.flush()
+    if replies and proposal['status'] not in {'exited', 'dead'}:
+        try:
+            backend_for(ctx).write_stdin(job_spec(ctx, proposal), replies)
+        except TRANSPORT_ERRORS:
+            return
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            current = store.commands[proposal_id].result
+            if current.get('_pty_raw', '') != proposal.get('_pty_raw', ''):
+                return
+            current['_pty_raw'] = raw
+            current['_pty_pending'] = bytes(responder._pending).hex()
+            visible = current.get('_pty_visible', '') + visible_delta.decode()
+            current['_pty_visible'] = visible
+            if isinstance(current.get('logs'), dict):
+                current['logs']['text'] = visible
+        ctx.service.store = store
+
+
+def _restore_pty_text(ctx, proposal_id):
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            current = store.commands[proposal_id].result
+            visible = current.get('_pty_visible')
+            if isinstance(visible, str) and isinstance(current.get('logs'), dict):
+                current['logs']['text'] = visible
+        ctx.service.store = store
 
 
 def write_payload(ctx, actor, work_id, proposal_id, payload: bytes):

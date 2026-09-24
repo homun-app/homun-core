@@ -120,4 +120,7 @@ one completion notice from tools/process_registry.py at the pinned commit.
 Each approved command keeps its own container. Stopping one session does not
 signal another. execution/docker_stdin.py delivers raw bytes to an already
 running container's pipe stdin and does not repeat an uncertain send.
-PTY input is not implemented.
+execution/pty_queries.py answers device-status, cursor-position and window-size
+queries once for a new background session started with a terminal. It reports
+the cursor at home and is not a screen emulator. Resize, signals and a full
+terminal remain unimplemented.

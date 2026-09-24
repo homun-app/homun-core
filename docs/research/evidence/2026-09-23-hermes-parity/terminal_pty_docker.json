@@ -1,0 +1,13 @@
+{
+  "image": "sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132",
+  "container_started": true,
+  "stdin": "open",
+  "pty": true,
+  "checks": {
+    "isatty": true,
+    "cursor_reply_once": true,
+    "process_still_running": true
+  },
+  "container": "586a27923da986e9929c3bbb971a9c81586f35d6e6150e9865d6d334821f7322",
+  "reply_bytes": 6
+}

@@ -233,8 +233,8 @@ Rapporto: [modifiche file](../research/2026-09-24-workspace-edits-verifica.md).
 Un comando con `background: true` resta in esecuzione dopo l'approvazione e
 restituisce `job_id`. Il modello può leggere, attendere o arrestare quella
 sessione. L'attesa o un avviso unico consegnano la fine; un esito incerto non
-rilancia il comando. Arrestare una sessione non tocca le altre. Restano PTY,
-stdin e il timer indipendente a motore spento.
+rilancia il comando. Arrestare una sessione non tocca le altre. Lo stdin a pipe
+e le risposte PTY sono nelle sezioni seguenti. Resta il timer indipendente a motore spento.
 Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifica.md).
 
 ### Stdin a pipe sulle sessioni background nuove: fatto in questo aggiornamento
@@ -243,22 +243,29 @@ Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifi
 PTY e non riavvia il comando. Una consegna incerta non viene ripetuta.
 Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifica.md).
 
-### Prima tranche consigliata dopo questo aggiornamento: PTY e gli altri backend H10
+### Risposte PTY sulle sessioni background nuove: fatte in questo aggiornamento
 
-1. Verificare Git e non rifare file, sessioni background e stdin a pipe.
-2. Leggere in Hermes il PTY e i backend oltre Docker.
-3. Un PTY va aggiunto solo se non cambia i comandi già avviati e non richiede
-   un secondo start. Altrimenti resta un limite dichiarato.
-4. I backend local, SSH, Modal, Singularity, Daytona e Vercel restano assenti:
+Un comando con `background: true` e `pty: true` nasce con un terminale.
+Homun risponde una sola volta alle richieste di stato, cursore e dimensione
+lette nei log nuovi. Non riavvia un container già partito e non è uno schermo
+completo. Il ridimensionamento, i segnali e un emulatore restano aperti.
+Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifica.md).
+
+### Prima tranche consigliata dopo questo aggiornamento: gli altri backend H10
+
+1. Verificare Git e non rifare file, sessioni background, stdin a pipe e risposte PTY.
+2. Leggere in Hermes i backend oltre Docker.
+3. I backend local, SSH, Modal, Singularity, Daytona e Vercel restano assenti:
    non annunciarli. Una credenziale mancante blocca solo la prova di quel backend.
-5. Il timer indipendente nel container, quando Homun è spento, resta un limite
+4. Il timer indipendente nel container, quando Homun è spento, resta un limite
    dichiarato finché non esiste un meccanismo proprio.
+5. Uno schermo completo, il ridimensionamento e i segnali del PTY restano aperti.
 
 ### Tranche successive, ordine da confermare con le dipendenze del codice
 
-- H09/H10: PTY sul container già approvato e backend oltre Docker.
-  Sessioni background, poll, attesa, arresto, avviso unico e stdin a pipe sono usabili.
-  Resta il timer indipendente a motore spento.
+- H09/H10: backend oltre Docker. Sessioni background, poll, attesa, arresto,
+  avviso unico, stdin a pipe e risposte PTY sono usabili. Restano lo schermo
+  completo e il timer indipendente a motore spento.
 - H14/H15: ricerca web ed estrazione, browser operativo con sessioni e recovery.
 - H17/H18: memoria durevole e motori memoria/contesto sostituibili.
 - H19/H20: caricamento, gestione e provenienza skill; trust/quarantena/setup.
@@ -394,16 +401,17 @@ Nessun budget numerico è stato richiesto. Non segnare completo a fine tranche.
 > consensi, terminale Docker proprio approvato e riprendibile, watchdog,
 > lettura file confinata, consegne immutabili, ricerca, lettura per righe e
 > modifiche approvate. Sono capacità parziali: non dichiarare raggiunta la parità.
-> Le prove della tranche terminale sono 971 test engine passati/1 skipped,
+> Le prove della tranche terminale sono 978 test engine passati/1 skipped,
 > 226 web, OpenAPI e architettura verdi, più container Docker isolati per
-> sessioni separate e uno stdin a pipe. Non trattarle come parità completa.
+> sessioni separate, uno stdin a pipe e una risposta PTY. Non trattarle come parità completa.
 >
 > H11 ha ora pagine, ricerca, lettura per righe, scrittura e patch approvate,
 > con prova Ollama isolata. Restano language server, V4A e diversi estrattori:
 > non dichiararli chiusi. Il terminale Docker ha sessioni in background con
-> poll, attesa, arresto, un solo avviso di completamento e stdin a pipe.
-> Il PTY e gli altri backend restano aperti: non dichiararli chiusi.
-> Il prossimo lavoro è il PTY e i backend oltre Docker,
+> poll, attesa, arresto, un solo avviso di completamento, stdin a pipe e
+> risposte alle richieste di stato, cursore e dimensione su un terminale nuovo.
+> Non è uno schermo completo. Gli altri backend restano aperti: non dichiararli chiusi.
+> Il prossimo lavoro sono i backend oltre Docker,
 > poi web/browser, memoria, skill,
 > delegazione e tutte le restanti righe secondo dipendenze. L'ordine è modificabile
 > con motivazione tecnica, il perimetro completo no. Ispeziona sempre ciò che

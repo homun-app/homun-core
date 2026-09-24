@@ -3322,6 +3322,17 @@
             "title": "Policy",
             "type": "string"
           },
+          "pty": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pty"
+          },
           "running": {
             "anyOf": [
               {
@@ -3425,6 +3436,11 @@
             "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Image",
             "type": "string"
+          },
+          "pty": {
+            "default": false,
+            "title": "Pty",
+            "type": "boolean"
           },
           "stdin": {
             "default": false,

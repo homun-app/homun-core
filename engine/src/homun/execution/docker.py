@@ -101,7 +101,7 @@ class DockerJobs:
             raise ExecutionUncertain("Container is missing; command will not be repeated")
         return state
 
-    def start(self, job: JobSpec, *, stdin: bool = False) -> dict:
+    def start(self, job: JobSpec, *, stdin: bool = False, pty: bool = False) -> dict:
         # Revalidate even when a caller used Pydantic's unchecked model_copy.
         job = JobSpec.model_validate(job.model_dump())
         workspace = self.workspace(job)
@@ -113,7 +113,8 @@ class DockerJobs:
             raise ExecutionUncertain("Recorded command has no container; automatic redispatch is forbidden")
         if any(c in str(workspace) for c in (",", "\n", "\r")):
             raise PermissionDeniedError("Workspace path cannot be represented as a Docker mount")
-        args = ["run", "--detach", *(["--interactive"] if stdin else []), "--name", job.name, "--pull=never", "--network=none", "--init",
+        if pty:stdin = True
+        args = ["run", "--detach", *(["--interactive"] if stdin else []), *(["--tty"] if pty else []), "--name", job.name, "--pull=never", "--network=none", "--init",
                 "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=512m",
                 "--cpus=1", "--workdir=/workspace", "--mount", f"type=bind,src={workspace},dst=/workspace",
                 "--label", f"io.homun.owner={job.owner}", "--label", f"io.homun.contract={job.contract}",

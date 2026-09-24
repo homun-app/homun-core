@@ -13,6 +13,8 @@ test('terminal consent renders exact command and disappears after cancellation',
     assert.doesNotMatch(html,/resta in esecuzione/);assert.doesNotMatch(html,/inviare input/);
     assert.match(renderer.render({...props,job:{...job,background:true,stdin:true}}),/resta in esecuzione/);
     assert.match(renderer.render({...props,job:{...job,stdin:true}}),/inviare input/);
+    assert.match(renderer.render({...props,job:{...job,pty:true}}),/risponde alle richieste/);
+    assert.doesNotMatch(renderer.render({...props,job:{...job,pty:true,stdin:true}}),/Non è un terminale interattivo/);
     assert.doesNotMatch(renderer.render({...props,active:false}),/Approva ed esegui il comando/);
     const running=renderer.render({...props,active:false,job:{...job,status:'running'}});
     assert.match(running,/Arresta il processo/);assert.match(running,/non conferma/);

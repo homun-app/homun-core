@@ -7,7 +7,7 @@ from homun.domain.errors import ConflictError, PermissionDeniedError, Validation
 
 class Backend:
     def __init__(self):self.calls=[];self.state=None
-    def start(self,spec,stdin=False):
+    def start(self,spec,stdin=False,pty=False):
         self.calls.append(('start',spec))
         self.state={'container_id':'a'*64,'status':'running','running':True,'exit_code':None,'oom_killed':False}
         return self.state.copy()

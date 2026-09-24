@@ -15,7 +15,7 @@ class Sessions:
         self.calls = []
         self.states = {}
 
-    def start(self, spec, stdin=False):
+    def start(self, spec, stdin=False, pty=False):
         self.calls.append(('start', spec.call_id))
         self.states[spec.call_id] = {'container_id': 'a' * 64, 'status': 'running', 'running': True,
                                      'exit_code': None, 'oom_killed': False}
@@ -63,6 +63,11 @@ def test_version_three_adds_session_tools_without_changing_version_two():
     assert new == ['terminal_execute', 'terminal_poll', 'terminal_wait', 'terminal_stop']
     newer = [item.definition.name for item in entries({'image': IMAGE, 'version': 4})]
     assert newer == ['terminal_execute', 'terminal_poll', 'terminal_wait', 'terminal_stop', 'terminal_write']
+    newest = entries({'image': IMAGE, 'version': 5})[0]
+    assert 'pty' in newest.definition.input_schema['properties']
+    assert 'pty' not in entries({'image': IMAGE, 'version': 4})[0].definition.input_schema['properties']
+    assert 'There is no PTY' in entries({'image': IMAGE, 'version': 4})[0].definition.description
+    assert 'not a full screen emulator' in newest.definition.description
 
 
 def test_background_returns_before_exit_and_poll_does_not_restart(setup, monkeypatch):
@@ -181,3 +186,20 @@ def test_stdin_bytes_are_sent_once(setup, monkeypatch):
     assert write_stdin(ctx, actor, run, {'session_id': job['id'], 'data': 'lost', 'newline': True})['status'] == 'outcome_unknown'
     writes = [item for item in sessions.calls if item[0] == 'write']
     assert writes == [('write', job['id'], b'hello\n'), ('write', job['id'], b'lost\n')]
+
+
+def test_pty_query_is_answered_once(setup, monkeypatch):
+    ctx, actor, work, proposal, _backend = start(setup, monkeypatch)
+    sessions = Sessions()
+    sessions.log_text = 'alpha\x1b[6n'
+    sessions.logs = lambda spec: {'text': sessions.log_text, 'truncated': False, 'tail_only': True, 'line_limit': 1000}
+    sessions.write_stdin = lambda spec, payload: sessions.calls.append(('write', spec.call_id, payload))
+    monkeypatch.setattr(terminal_jobs, 'backend_for', lambda ctx: sessions)
+    ctx.models.complete_tools = lambda *a, **k: SimpleNamespace(
+        message=tool('cmd1', 'terminal_execute', {'command': 'query', 'background': True, 'pty': True}), usage=None)
+    job = release(ctx, actor, work, proposal['id'])
+    assert job['pty'] is True and job['stdin'] is True
+    first = terminal_jobs.refresh(ctx, actor, work, job['id'])
+    second = terminal_jobs.refresh(ctx, actor, work, job['id'])
+    assert first['logs']['text'] == 'alpha' and second['logs']['text'] == 'alpha'
+    assert [item for item in sessions.calls if item[0] == 'write'] == [('write', job['id'], b'\x1b[1;1R')]

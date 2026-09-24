@@ -18,6 +18,10 @@ class BackgroundTerminalArguments(TimedTerminalArguments):
     background: bool = False
 
 
+class PtyTerminalArguments(BackgroundTerminalArguments):
+    pty: bool = False
+
+
 class TerminalSessionArguments(BaseModel):
     model_config = ConfigDict(extra='forbid',strict=True)
     session_id: str = Field(min_length=1,max_length=200)
@@ -37,7 +41,8 @@ def entry(config):
 def entries(config):
     JobSpec(workspace_id='validation',run_id='validation',call_id='validation',image=config['image'],command='true')
     version=config.get('version',1)
-    if version>=3:arguments=BackgroundTerminalArguments
+    if version>=5:arguments=PtyTerminalArguments
+    elif version>=3:arguments=BackgroundTerminalArguments
     elif version==2:arguments=TimedTerminalArguments
     else:arguments=TerminalArguments
     definition=ToolDefinition(name='terminal_execute',
@@ -45,7 +50,14 @@ def entries(config):
         input_schema=arguments.model_json_schema())
     if version==2:
         definition.description+=' Set timeout_seconds (1..3600, default 300); the person reviews this limit before execution. Deadline enforcement requires Homun to be running.'
-    if version>=4:
+    if version>=5:
+        definition.description=(
+            f"Propose a shell command in the run's isolated /workspace using image {config['image']}. No network. "
+            'Each command waits for explicit human approval. Without background, the result arrives after the process exits. '
+            'With background true, the result arrives once the process is running and includes job_id; then use terminal_poll, terminal_wait, terminal_stop, or terminal_write. '
+            'Set pty true only together with background to allocate a terminal. Homun answers device, cursor, and window queries. It is not a full screen emulator. '
+            'Set timeout_seconds (1..3600, default 300). Deadline enforcement requires Homun to be running.')
+    elif version>=4:
         definition.description=(
             f"Propose a shell command in the run's isolated /workspace using image {config['image']}. No network. "
             'Each command waits for explicit human approval. Without background, the result arrives after the process exits. '
@@ -71,8 +83,14 @@ def entries(config):
         description='Stop one background terminal session you started. Other sessions keep running. Does not start a process.',
         input_schema=session),'terminal','3',TerminalSessionArguments,replay='never'))
     if version>=4:
+        write = ('Send bytes to the stdin of a background session that was approved with input open. '
+                 'Does not start or repeat a command. No PTY. Set newline true to append one newline.')
+        if version>=5:
+            write = ('Send bytes to the stdin of a background session that was approved with input open. '
+                     'Does not start or repeat a command. Device queries on a terminal session are answered separately. '
+                     'Set newline true to append one newline.')
         catalog.append(ToolEntry(ToolDefinition(name='terminal_write',
-            description='Send bytes to the stdin of a background session that was approved with input open. Does not start or repeat a command. No PTY. Set newline true to append one newline.',
+            description=write,
             input_schema=TerminalWriteArguments.model_json_schema()),'terminal','4',TerminalWriteArguments,replay='never'))
     return catalog
 
