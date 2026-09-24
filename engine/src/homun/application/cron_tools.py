@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from homun.application.cron_agent_runner import make_cron_runner
 from homun.application.cron_manager import CronManager
 from homun.domain.errors import ValidationError
 
@@ -121,7 +122,11 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         if not job_id:
             raise ValidationError("job_id is required for 'run'")
         try:
-            occ = mgr.run_job(job_id)
+            job = mgr.get_job(job_id)
+            custom_runner = None
+            if job and not job.script and ctx is not None:
+                custom_runner = make_cron_runner(ctx, actor)
+            occ = mgr.run_job(job_id, custom_runner=custom_runner)
             run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True)]
             return {"status": "executed", "occurrence": occ.to_dict()}
         except ValueError as exc:

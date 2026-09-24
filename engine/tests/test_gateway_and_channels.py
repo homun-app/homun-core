@@ -38,8 +38,9 @@ from homun.domain.errors import ValidationError
 
 @pytest.fixture(autouse=True)
 def _pairing_in_memory(monkeypatch):
-    """Keep pairing unit tests off the product HOMUN_DATA_DIR sqlite file."""
+    """Keep pairing/room unit tests off the product HOMUN_DATA_DIR sqlite files."""
     monkeypatch.setenv("HOMUN_PAIRING_DB", ":memory:")
+    monkeypatch.setenv("HOMUN_ROOMS_DB", ":memory:")
     reset_gateway_state()
     yield
     reset_gateway_state()
@@ -181,6 +182,26 @@ def test_turn_lease_independent_keys():
 # ---------------------------------------------------------------------------
 # 3. Hosted Rooms Tests
 # ---------------------------------------------------------------------------
+
+
+
+def test_hosted_rooms_survive_store_reopen(tmp_path, monkeypatch):
+    monkeypatch.delenv("HOMUN_ROOMS_DB", raising=False)
+    db = tmp_path / "rooms.sqlite"
+    mgr1 = HostedRoomManager(db_path=db)
+    room = mgr1.create_room("Ops", "incidents", owner_id="owner1")
+    mgr1.join_room(room.id, "agent_a", role="member")
+    mgr1.post_event(room.id, "agent_a", kind="message.user", content="hello")
+    room_id = room.id
+
+    mgr2 = HostedRoomManager(db_path=db)
+    restored = mgr2.get_room(room_id)
+    assert restored is not None
+    assert restored.name == "Ops"
+    assert "agent_a" in restored.members
+    events = mgr2.get_events(room_id)
+    assert any(e.content == "hello" for e in events)
+
 
 def test_hosted_room_lifecycle_and_events():
     rm = HostedRoomManager()

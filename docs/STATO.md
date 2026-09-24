@@ -384,6 +384,7 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
   sotto per quelle righe sono storiche e non sostituiscono la matrice corretta.
 
 - **Da fare successivamente (UI i18n)**: localizzazione multilingua di tutti i copy dell'interfaccia utente (UI copy) in modo che ciascun utente possa fruirne nella propria lingua. Registrato per la fase successiva alla parità funzionale con Hermes.
+- **H32 hosted rooms + cron runner (2026-09-24)**: rooms/events on SQLite; cron prompt runs stage pending_approval agent runs via CronAgentRunner. [Evidenze](research/evidence/2026-09-24-hosted-rooms-durability/README.md).
 - **H32 pairing durability (2026-09-24)**: DM pairing codes and allowlists persist under `HOMUN_DATA_DIR/gateway/`. [Evidenze](research/evidence/2026-09-24-gateway-pairing-durability/README.md).
 - **H26/H27 automation dispatch (2026-09-24)**: due heartbeat/loop prompts enter `agent_run` via `_steering` on claim. [Evidenze](research/evidence/2026-09-24-automation-dispatch/README.md).
 - **H12 product wiring (2026-09-24)**: approved workspace writes snapshot via `CheckpointManager` under `HOMUN_DATA_DIR/checkpoints` before mutation; delegation can isolate with git worktrees when `worktree_isolation` is set. [Evidenze](research/evidence/2026-09-24-h12-product-wiring/README.md).

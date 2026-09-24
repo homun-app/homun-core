@@ -21,7 +21,7 @@ from homun.domain.errors import ValidationError
 
 _GLOBAL_PAIRING_MGR = GatewayPairingManager(db_path=":memory:")
 _GLOBAL_LEASE_MGR = TurnLeaseManager()
-_GLOBAL_ROOM_MGR = HostedRoomManager()
+_GLOBAL_ROOM_MGR = HostedRoomManager(db_path=":memory:")
 _GLOBAL_CHANNEL_REG = ChannelRegistry(_GLOBAL_PAIRING_MGR, _GLOBAL_LEASE_MGR)
 
 
@@ -31,7 +31,7 @@ def reset_gateway_state() -> None:
     _GLOBAL_PAIRING_MGR = GatewayPairingManager(db_path=":memory:")
     set_gateway_pairing_manager(_GLOBAL_PAIRING_MGR)
     _GLOBAL_LEASE_MGR = TurnLeaseManager()
-    _GLOBAL_ROOM_MGR = HostedRoomManager()
+    _GLOBAL_ROOM_MGR = HostedRoomManager(db_path=":memory:")
     _GLOBAL_CHANNEL_REG = ChannelRegistry(_GLOBAL_PAIRING_MGR, _GLOBAL_LEASE_MGR)
 
 
