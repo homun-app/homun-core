@@ -228,6 +228,10 @@ def propose(ctx, actor, work_id, body):
                 if not agent_native.enabled(run):
                     raise ValidationError('The browser requires native model support')
                 run['browser'] = {'policy': 'owned-headless-v1', 'version': 5}
+            if body.get('memory'):
+                if not agent_native.enabled(run):
+                    raise ValidationError('Memory tools require native model support')
+                run['memory'] = {'policy': 'scoped-workspace-v1', 'version': 1}
             run['_mcp_bindings'] = bindings
             run['external_tools'] = [{k: b[k] for k in ('server_id', 'server_name', 'tool', 'name')} | {'description': b['descriptor'].get('description', '')} for b in bindings]
             run['_registry_version'] = 1

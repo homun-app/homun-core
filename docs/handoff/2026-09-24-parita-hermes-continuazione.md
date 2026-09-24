@@ -293,7 +293,7 @@ rescue, provider nominati e X restano assenti.
   sono usabili e non sono container. SSH non sincronizza i file. Sessioni Docker, stdin a pipe e risposte PTY restano usabili.
   Restano lo schermo completo e il timer indipendente a motore spento.
 - H14/H15: provider nominati, cache, rescue e X; recupero del browser. Una lettura di pagina con cache TTL, ricerca HTML, provider nominati con credenziali dedicate e fallback rescue, ricerca X, e un browser privato sono usabili. Una finestra nativa viene chiusa senza conferma. Un campo di testo si può compilare. Una schermata della pagina si può salvare. I riquadri interni (iframe) pubblici sono esplorabili e i loro campi/pulsanti sono utilizzabili. Accettare una finestra, console e visione restano aperti.
-- H17/H18: memoria durevole e motori memoria/contesto sostituibili.
+- H17/H18: memoria durevole e motori memoria/contesto sostituibili. L'agente approvato dispone di consultazione memorie (`memory_recall`), memorizzazione con dedup e limiti (`memory_remember`), e ricerca sessione (`session_search`) con autorizzazioni di conversazione e vincoli temporali. Il backend Mem0/vettoriale è opzionale e mantiene SQLite come fonte di verità; background review e learning graph restano aperti.
 - H19/H20: caricamento, gestione e provenienza skill; trust/quarantena/setup.
 - H21/H22: delegazione/subagenti, risultati e completion durevoli dopo restart.
 - Poi completare tutte le altre righe e integrazioni della matrice. Questo ordine

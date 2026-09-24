@@ -44,6 +44,12 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.browser_form_pages import execute as browser_form_execute
         for browser_entry in browser_form_entries(browser_form_execute, browser.get('version')):
             registry.register(browser_entry)
+    mem = run.get('memory')
+    if isinstance(mem, dict) and mem.get('policy') == 'scoped-workspace-v1' and mem.get('version') == 1:
+        from homun.application.memory_contracts import entries as memory_entries
+        from homun.application.memory_tools import execute as memory_execute
+        for mem_entry in memory_entries(memory_execute, mem.get('version', 1)):
+            registry.register(mem_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())

@@ -161,3 +161,10 @@ controls inside public child frames / iframes and refuses private frame addresse
 Hermes browser control uses browser-use, a CDP supervisor (tools/browser_supervisor_frames.py)
 and the person's profile options. Homun does not copy those; it traverses child
 frames in process over the owned page socket.
+
+application/memory_contracts.py and application/memory_tools.py derive curated
+persistent memory inspection, bounded fact storage, deduplication, and session
+search from agent/memory_manager.py, tools/memory_tool.py, and
+tools/session_search_tool.py at the pinned commit. Homun maintains SQLite as the
+authoritative memory ledger, enforces project and conversation isolation, and
+requires explicit conversation access before returning historical session messages.

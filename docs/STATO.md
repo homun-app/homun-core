@@ -225,7 +225,9 @@ chiudere una finestra nativa senza confermarla, compilare un campo, salvare
 una schermata di quella pagina, interagire con i controlli nei riquadri (iframe) pubblici
 e chiudere solo quel processo. Non fotografa lo
 schermo di questo computer. Accettare una finestra, scorrimento e visione restano
-assenti.
+assenti. Può anche consultare memorie persistenti approvate (memory_recall), annotare
+fatti importanti con dedup e limite di capacità (memory_remember), e cercare nella sessione
+(session_search) con vincoli temporali e autorizzazioni di conversazione.
 Restano aperti lo schermo completo,
 Modal, Singularity, Daytona, Vercel, language server,
 patch V4A e il resto della matrice. Non è parità completa.
