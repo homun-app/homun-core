@@ -1,0 +1,119 @@
+"""Product wiring for H03 side questions and H04 prompt roots."""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from homun.application.agent_prompt_roots import resolve_prompt_roots
+from homun.application.agent_side_questions import answer_side_question
+from homun.application.automation_store import AutomationStore, set_automation_store
+from homun.application.heartbeat_manager import HeartbeatManager
+from homun.application.loop_manager import LoopManager
+from homun.domain.errors import ValidationError
+from homun.models.native_prompt import initial_messages
+
+
+def test_prompt_roots_confined_under_agent_workspaces(tmp_path):
+    cwd, root = resolve_prompt_roots(tmp_path, "ws1")
+    assert root == (tmp_path / "agent-workspaces" / "ws1").resolve()
+    assert cwd == root
+    (root / "AGENTS.md").write_text("Use concise answers.", encoding="utf-8")
+    msgs = initial_messages(
+        "Say hi @file:AGENTS.md",
+        "Be careful",
+        cwd=cwd,
+        workspace_root=root,
+        expand_refs=True,
+    )
+    assert "Use concise answers." in msgs[0].content or "Use concise answers." in msgs[1].content
+
+
+def test_prompt_roots_reject_escape(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    with pytest.raises(ValidationError):
+        resolve_prompt_roots(tmp_path, "ws1", workspace_root=str(outside))
+
+
+def test_heartbeat_and_loop_survive_reopen(tmp_path):
+    db = tmp_path / "auto.sqlite"
+    store = AutomationStore(db)
+    set_automation_store(store)
+    HeartbeatManager("s1", min_seconds=10).set("ping", interval_seconds=10)
+    LoopManager("s1").set("watch", interval_seconds=30)
+    store.close()
+
+    store2 = AutomationStore(db)
+    set_automation_store(store2)
+    assert HeartbeatManager("s1", min_seconds=10).is_active()
+    assert LoopManager("s1").is_active()
+    set_automation_store(None)
+
+
+def test_side_question_does_not_mutate_run_messages():
+    class FakeCtx:
+        class repository:
+            @staticmethod
+            def load():
+                return FakeStore()
+
+            @staticmethod
+            def save(_store):
+                return None
+
+    class FakeStore:
+        commands = {}
+
+    # Use thin doubles via answer_side_question with injected invoker and monkeypatched lookup
+    from homun.application import agent_side_questions as mod
+
+    run = {
+        "id": "run1",
+        "work_id": "w1",
+        "status": "running",
+        "connection_id": "fake",
+        "_messages": [
+            {"role": "user", "content": "Count rows"},
+            {"role": "assistant", "content": "There are 3 rows"},
+        ],
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cost_estimate": 0.0,
+    }
+
+    class Actor:
+        id = "a1"
+        workspace_id = "ws"
+
+    def fake_lookup(store, run_id, work_id=None):
+        return run
+
+    def fake_authority(store, actor, run):
+        return None
+
+    original_lookup = mod.lookup
+    original_authority = mod.authority
+    mod.lookup = fake_lookup
+    mod.authority = fake_authority
+    try:
+        out = answer_side_question(
+            FakeCtx(),
+            Actor(),
+            "w1",
+            "run1",
+            "How many rows?",
+            model_invoker=lambda messages, max_tokens=1024, tools=None: {
+                "text": "3",
+                "prompt_tokens": 5,
+                "completion_tokens": 1,
+                "cost_estimate": 0.0,
+            },
+        )
+        assert out["answer"] == "3"
+        assert out["main_transcript_unchanged"] is True
+        assert len(run["_messages"]) == 2
+        assert run["prompt_tokens"] == 5
+    finally:
+        mod.lookup = original_lookup
+        mod.authority = original_authority

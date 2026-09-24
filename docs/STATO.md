@@ -354,6 +354,11 @@ dai test. Il [confronto Hermes](research/2026-09-23-hermes-homun-utilizzo.md)
 conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
 
 
+- **H03/H04 e automazioni durevoli (2026-09-24)**: `/btw` raggiungibile via
+  `POST .../agent-runs/{id}/side-question`; `initial_messages` nel propose usa
+  PromptAssembler + `@` refs con cwd confinato in `agent-workspaces`. Heartbeat e
+  loop persistono su `automation.sqlite`.
+
 - **Backend reali e persistenza (2026-09-24)**: TTS macOS `say` e visione Ollama
   collegati alle API media quando disponibili; probe TCC macOS per computer-use
   senza dichiarare `ready` senza driver. Goal e sessioni di default su SQLite

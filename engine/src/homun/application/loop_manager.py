@@ -16,6 +16,8 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from homun.application.automation_store import load_typed, save_typed
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MIN_INTERVAL_SECONDS = 30
@@ -189,13 +191,13 @@ class LoopState:
         return f"every {format_interval(self.interval_seconds)}"
 
 
-_LOOP_CACHE: Dict[str, LoopState] = {}
+_KIND = "loop"
 
 
 def load_loop(session_id: str) -> Optional[LoopState]:
     if not session_id:
         return None
-    state = _LOOP_CACHE.get(session_id)
+    state = load_typed(_KIND, session_id, LoopState.from_dict)
     if state is None or state.status == "cleared":
         return None
     return state
@@ -204,16 +206,17 @@ def load_loop(session_id: str) -> Optional[LoopState]:
 def save_loop(session_id: str, state: LoopState) -> None:
     if not session_id or state is None:
         return
-    _LOOP_CACHE[session_id] = state
+    save_typed(_KIND, session_id, state)
 
 
 def clear_loop(session_id: str) -> bool:
     if not session_id:
         return False
-    state = _LOOP_CACHE.get(session_id)
+    state = load_typed(_KIND, session_id, LoopState.from_dict)
     if state is None or state.status == "cleared":
         return False
     state.status = "cleared"
+    save_typed(_KIND, session_id, state)
     return True
 
 

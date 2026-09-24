@@ -2,6 +2,18 @@
 import time
 import pytest
 
+from homun.application.automation_store import AutomationStore, set_automation_store
+
+
+@pytest.fixture(autouse=True)
+def _isolated_automation_store(tmp_path):
+    store = AutomationStore(tmp_path / "automation-test.sqlite")
+    set_automation_store(store)
+    yield store
+    store.close()
+    set_automation_store(None)
+
+
 from homun.application.heartbeat_manager import (
     HeartbeatManager,
     HeartbeatState,

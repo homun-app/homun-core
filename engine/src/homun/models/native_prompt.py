@@ -3,6 +3,13 @@
 Copyright (c) 2025 Nous Research. Full license: notices/hermes-agent.txt.
 The prompt is pinned in each proposal so a resumed run keeps its instructions.
 """
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
+from homun.application.context_references import expand_references
+from homun.application.prompt_assembler import PromptAssembler
 from homun.models.native_turn import NativeMessage
 
 GUIDANCE = '''You are Homun, an operational assistant working within an approved task.
@@ -27,14 +34,13 @@ def initial_messages(
     objective: str,
     instructions: str,
     *,
-    cwd=None,
-    workspace_root=None,
+    cwd: Optional[Path | str] = None,
+    workspace_root: Optional[Path | str] = None,
     persona=None,
     tools_manifest=None,
     expand_refs: bool = False,
 ):
-    if cwd or workspace_root or persona or tools_manifest:
-        from homun.application.prompt_assembler import PromptAssembler
+    if cwd or workspace_root or persona or tools_manifest or expand_refs:
         assembler = PromptAssembler(base_guidance=GUIDANCE)
         messages = assembler.assemble(
             objective,
@@ -51,9 +57,7 @@ def initial_messages(
         ]
 
     if expand_refs and messages:
-        from homun.application.context_references import expand_references
         expanded_obj, _ = expand_references(messages[-1].content, cwd=cwd or workspace_root)
         messages[-1] = NativeMessage(role='user', content=expanded_obj)
 
     return messages
-

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
 from homun.application.agent_runs import approve, list_runs, propose
 from homun.application.agent_control import control
+from homun.application.agent_side_questions import answer_side_question
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _http_error
 from homun.routes.price_comparisons import request_context
@@ -27,6 +28,8 @@ class RunRequest(BaseModel):
     material_ids: list[str] = Field(default_factory=list, max_length=12)
     team_id: str | None = Field(default=None, max_length=160)
     person_id: str | None = Field(default=None, min_length=1, max_length=160)
+    cwd: str | None = Field(default=None, max_length=4096)
+    workspace_root: str | None = Field(default=None, max_length=4096)
 
 
 class RunApproval(BaseModel):
@@ -121,3 +124,37 @@ def control_run(workspace_id: str, work_id: str, run_id: str, body: RunControl,
         return control(ctx, actor, work_id, run_id, body.model_dump(exclude_none=True))
     except DomainError as exc:
         raise _http_error(exc) from exc
+
+
+class SideQuestionRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=4000)
+
+
+class SideQuestionView(BaseModel):
+    answer: str
+    usage: dict | None = None
+    attempted_tools: list[str] = Field(default_factory=list)
+    run_id: str
+    work_id: str
+    main_transcript_unchanged: bool = True
+
+
+@router.post(
+    '/works/{work_id}/agent-runs/{run_id}/side-question',
+    response_model=SideQuestionView,
+    response_model_exclude_none=True,
+)
+def side_question(
+    workspace_id: str,
+    work_id: str,
+    run_id: str,
+    body: SideQuestionRequest,
+    x_homun_actor_id: str | None = Header(default=None),
+    x_homun_actor_name: str | None = Header(default=None),
+):
+    """Answer a detached /btw question without mutating the main run transcript (H03)."""
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        return answer_side_question(ctx, actor, work_id, run_id, body.question)
+    except DomainError as error:
+        raise _http_error(error) from error

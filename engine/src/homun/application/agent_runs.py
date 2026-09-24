@@ -4,6 +4,7 @@ import json
 from copy import deepcopy
 from homun.application import agent_native
 from homun.models.native_prompt import initial_messages
+from homun.application.agent_prompt_roots import roots_from_propose_body
 from homun.application.work_request_context import request_history
 from homun.application.agent_team import bind_team, validate_team
 from homun.application.contribution_people import _people
@@ -180,7 +181,17 @@ def propose(ctx, actor, work_id, body):
                 run['tool_version'] = 'adaptive-materials-native-v2'
                 run['_context_policy'] = {'context_window': connection.context_window,
                                           'max_output_tokens': connection.max_output_tokens}
-                run['_messages'] = [m.model_dump() for m in initial_messages(run['_objective'], run['_instructions'])]
+                cwd_path, workspace_root = roots_from_propose_body(
+                    ctx.data_dir, actor.workspace_id, body)
+                run['_cwd'] = str(cwd_path)
+                run['_workspace_root'] = str(workspace_root)
+                run['_messages'] = [m.model_dump() for m in initial_messages(
+                    run['_objective'],
+                    run['_instructions'],
+                    cwd=cwd_path,
+                    workspace_root=workspace_root,
+                    expand_refs=True,
+                )]
             from homun.application.agent_tool_registry import registry_for
             if bindings and not agent_native.enabled(run):
                 raise ValidationError('External agent tools require native model support')

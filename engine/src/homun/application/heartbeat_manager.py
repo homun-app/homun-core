@@ -15,6 +15,8 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional, Tuple
 
+from homun.application.automation_store import load_typed, save_typed
+
 logger = logging.getLogger(__name__)
 
 MIN_INTERVAL_SECONDS = 60
@@ -91,13 +93,13 @@ class HeartbeatState:
         )
 
 
-_HEARTBEAT_CACHE: Dict[str, HeartbeatState] = {}
+_KIND = "heartbeat"
 
 
 def load_heartbeat(session_id: str) -> Optional[HeartbeatState]:
     if not session_id:
         return None
-    state = _HEARTBEAT_CACHE.get(session_id)
+    state = load_typed(_KIND, session_id, HeartbeatState.from_dict)
     if state is None or state.status == "cleared":
         return None
     return state
@@ -106,16 +108,17 @@ def load_heartbeat(session_id: str) -> Optional[HeartbeatState]:
 def save_heartbeat(session_id: str, state: HeartbeatState) -> None:
     if not session_id or state is None:
         return
-    _HEARTBEAT_CACHE[session_id] = state
+    save_typed(_KIND, session_id, state)
 
 
 def clear_heartbeat(session_id: str) -> bool:
     if not session_id:
         return False
-    state = _HEARTBEAT_CACHE.get(session_id)
+    state = load_typed(_KIND, session_id, HeartbeatState.from_dict)
     if state is None or state.status == "cleared":
         return False
     state.status = "cleared"
+    save_typed(_KIND, session_id, state)
     return True
 
 
