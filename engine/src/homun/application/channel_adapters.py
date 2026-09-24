@@ -27,6 +27,51 @@ from homun.application.gateway_turn_lease import TurnLeaseManager
 logger = logging.getLogger(__name__)
 
 
+def _token_from(config: Dict[str, Any], *env_keys: str) -> str:
+    for key in ("bot_token", "token", "api_token"):
+        val = str(config.get(key) or "").strip()
+        if val:
+            return val
+    for env in env_keys:
+        val = str(os.environ.get(env) or "").strip()
+        if val:
+            return val
+    return ""
+
+
+def _http_delivery_result(
+    *,
+    platform: str,
+    channel_id: str,
+    text: str,
+    thread_id: Optional[str],
+    reply_to_id: Optional[str],
+    media: Optional[List[ChannelMedia]],
+    delivered: bool,
+    error: Optional[str] = None,
+    status_code: Optional[int] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "delivered": delivered,
+        "platform": platform,
+        "channel_id": channel_id,
+        "thread_id": thread_id,
+        "reply_to_id": reply_to_id,
+        "text": text,
+        "media_count": len(media or []),
+        "sent_at": time.time(),
+    }
+    if error:
+        out["error"] = error
+        out["code"] = "backend_unavailable"
+    if status_code is not None:
+        out["status_code"] = status_code
+    if extra:
+        out.update(extra)
+    return out
+
+
 class ChannelAdapter:
     """Base class for messaging channel adapters."""
 
@@ -104,6 +149,77 @@ class TelegramAdapter(ChannelAdapter):
             timestamp=float(msg.get("date") or time.time()),
         )
 
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        token = _token_from(self.config, "TELEGRAM_BOT_TOKEN", "HOMUN_TELEGRAM_BOT_TOKEN")
+        if not token:
+            return super().send(
+                channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media
+            )
+        payload: Dict[str, Any] = {"chat_id": channel_id, "text": text}
+        if thread_id:
+            payload["message_thread_id"] = thread_id
+        if reply_to_id:
+            payload["reply_to_message_id"] = reply_to_id
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, json=payload)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=f"Telegram API HTTP {resp.status_code}",
+                    status_code=resp.status_code,
+                )
+            data = resp.json() if resp.content else {}
+            if isinstance(data, dict) and data.get("ok") is False:
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=str(data.get("description") or "Telegram API rejected send"),
+                    status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+                extra={"provider_message_id": ((data.get("result") or {}) if isinstance(data, dict) else {}).get("message_id")},
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
+
 
 class DiscordAdapter(ChannelAdapter):
     platform = "discord"
@@ -135,6 +251,62 @@ class DiscordAdapter(ChannelAdapter):
             media=media_items,
             timestamp=time.time(),
         )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        token = _token_from(self.config, "DISCORD_BOT_TOKEN", "HOMUN_DISCORD_BOT_TOKEN")
+        if not token:
+            return super().send(
+                channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media
+            )
+        payload: Dict[str, Any] = {"content": text}
+        if reply_to_id:
+            payload["message_reference"] = {"message_id": reply_to_id}
+        url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
+        headers = {"Authorization": f"Bot {token}", "Content-Type": "application/json"}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, json=payload, headers=headers)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=f"Discord API HTTP {resp.status_code}",
+                    status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
 
 
 class SlackAdapter(ChannelAdapter):
@@ -168,6 +340,63 @@ class SlackAdapter(ChannelAdapter):
             timestamp=float(event.get("ts") or time.time()),
         )
 
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        token = _token_from(self.config, "SLACK_BOT_TOKEN", "HOMUN_SLACK_BOT_TOKEN")
+        if not token:
+            return super().send(
+                channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media
+            )
+        payload: Dict[str, Any] = {"channel": channel_id, "text": text}
+        if thread_id:
+            payload["thread_ts"] = thread_id
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post("https://slack.com/api/chat.postMessage", json=payload, headers=headers)
+            data = resp.json() if resp.content else {}
+            if resp.status_code >= 400 or (isinstance(data, dict) and data.get("ok") is False):
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=str((data or {}).get("error") if isinstance(data, dict) else f"Slack HTTP {resp.status_code}"),
+                    status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+                extra={"ts": data.get("ts") if isinstance(data, dict) else None},
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
+
 
 class WhatsAppAdapter(ChannelAdapter):
     platform = "whatsapp"
@@ -191,6 +420,86 @@ class WhatsAppAdapter(ChannelAdapter):
             is_direct=True,
             timestamp=float(msg.get("timestamp") or time.time()),
         )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        token = _token_from(
+            self.config,
+            "WHATSAPP_TOKEN",
+            "HOMUN_WHATSAPP_TOKEN",
+            "WHATSAPP_ACCESS_TOKEN",
+        )
+        phone_number_id = str(
+            self.config.get("phone_number_id")
+            or os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
+            or os.environ.get("HOMUN_WHATSAPP_PHONE_NUMBER_ID")
+            or ""
+        ).strip()
+        if not token or not phone_number_id:
+            return super().send(
+                channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media
+            )
+        version = str(self.config.get("api_version") or "v21.0")
+        url = f"https://graph.facebook.com/{version}/{phone_number_id}/messages"
+        payload: Dict[str, Any] = {
+            "messaging_product": "whatsapp",
+            "to": channel_id,
+            "type": "text",
+            "text": {"body": text},
+        }
+        if reply_to_id:
+            payload["context"] = {"message_id": reply_to_id}
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, json=payload, headers=headers)
+            data = resp.json() if resp.content else {}
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=f"WhatsApp API HTTP {resp.status_code}",
+                    status_code=resp.status_code,
+                )
+            msg_id = None
+            if isinstance(data, dict):
+                messages = data.get("messages") or []
+                if messages and isinstance(messages[0], dict):
+                    msg_id = messages[0].get("id")
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+                extra={"provider_message_id": msg_id},
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
 
 
 class WebhookRelayAdapter(ChannelAdapter):

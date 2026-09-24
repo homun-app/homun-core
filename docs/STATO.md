@@ -384,7 +384,7 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
   sotto per quelle righe sono storiche e non sostituiscono la matrice corretta.
 
 - **Da fare successivamente (UI i18n)**: localizzazione multilingua di tutti i copy dell'interfaccia utente (UI copy) in modo che ciascun utente possa fruirne nella propria lingua. Registrato per la fase successiva alla parità funzionale con Hermes.
-- **H33 webhook transport (2026-09-24)**: `WebhookRelayAdapter.send` POSTs when configured; other platforms still `backend_unavailable` without clients.
+- **H33 channel HTTP transports (2026-09-24)**: webhook POST when URL set; Telegram/Discord/Slack/WhatsApp `send` use real Bot/Graph APIs when tokens (and WhatsApp phone_number_id) are configured; unconfigured → `backend_unavailable`. `gateway_manage adapter_send` reports `failed` when delivery did not happen.
 - **H35 idempotency + H27 complete_tick (2026-09-24)**: OpenAI API Idempotency-Key store on SQLite; loop `complete_tick` on agent finish.
 - **H10 cloud backends (2026-09-24)**: Modal/Daytona/Singularity/Vercel/managed Modal catalogued with typed unavailability; no invented sandboxes. `GET /v1/operations/terminal-backends`.
 - **H28/H29 due-fire + Chronos (2026-09-24)**: `/v1/cron/due` and `/v1/cron/fire-due`; Chronos reports `backend_unavailable` until `HOMUN_CHRONOS_URL` is set.

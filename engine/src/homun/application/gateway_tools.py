@@ -167,7 +167,11 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         if not adapter:
             raise ValidationError(f"Adapter not available for platform: {platform}")
         res = adapter.send(channel_id, text, thread_id=args.get("thread_id"))
-        return {"status": "sent", "delivery": res}
+        delivered = bool(res.get("delivered"))
+        return {
+            "status": "sent" if delivered else "failed",
+            "delivery": res,
+        }
 
     if action == "adapter_status":
         adapters = list(_GLOBAL_CHANNEL_REG._adapters.keys())

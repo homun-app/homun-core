@@ -1,6 +1,6 @@
 # Continuazione: parità completa Homun / Hermes
 
-Data: 24 settembre 2026. Checkpoint del codice: `2210a35e` (+ commit H40/H42 in corso).
+Data: 24 settembre 2026. Checkpoint del codice: dopo H33 HTTP transports (Telegram/Discord/Slack/WhatsApp + webhook).
 Questo documento trasferisce il lavoro a un'altra chat. Non certifica parità raggiunta.
 
 
@@ -18,8 +18,9 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 8. H12 checkpoint su write approvate; H26/H27 inject su claim agent_run.
 9. H32 pairing + hosted rooms SQLite; cron prompt → propose pending_approval.
 10. Cron due-fire API + Chronos honesty; H10 cloud backends registered; H35 idempotency SQLite; H27 complete_tick.
+11. H33: Telegram/Discord/Slack/WhatsApp HTTP send when tokens set; adapter_send honesty.
 
-**Prossimo passo eseguibile:** implementare bridge SDK reali H10 (Modal/Daytona/…); cua-driver H16; trasporti canale H33; MCP sampling/OAuth H36; prove provider mancanti. Parità completa H01–H46 ancora aperta.
+**Prossimo passo eseguibile:** bridge SDK H10 (Modal/Daytona/…); cua-driver H16; MCP sampling/OAuth/resources H36; catalogo messaging Hermes oltre i cinque adapter; prove provider mancanti. Parità completa H01–H46 ancora aperta.
 
 
 ## 1. Obiettivo e decisioni già prese

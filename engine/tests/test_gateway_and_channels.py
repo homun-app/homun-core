@@ -480,14 +480,16 @@ def test_gateway_manage_tool_actions():
     })
     assert events_res["count"] == 3
 
-    # 6. Adapter send
+    # 6. Adapter send without transport reports failure (honesty)
     send_res = gateway_execute(None, None, run, "gateway_manage", {
         "action": "adapter_send",
         "platform": "telegram",
         "channel_id": "999888",
         "text": "Outbound alert",
     })
-    assert send_res["status"] == "sent"
+    assert send_res["status"] == "failed"
+    assert send_res["delivery"]["delivered"] is False
+    assert send_res["delivery"].get("code") == "backend_unavailable"
 
     # 7. Revoke pairing
     rev_res = gateway_execute(None, None, run, "gateway_manage", {
@@ -535,3 +537,138 @@ def test_webhook_adapter_posts_when_url_configured(httpx_mock=None):
         assert received["body"]["channel_id"] == "ch1"
     finally:
         server.shutdown()
+
+
+def test_telegram_send_posts_when_token_configured(monkeypatch):
+    calls = []
+
+    class _Resp:
+        status_code = 200
+        content = b'{"ok":true,"result":{"message_id":42}}'
+
+        def json(self):
+            return {"ok": True, "result": {"message_id": 42}}
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, json=None, headers=None):
+            calls.append({"url": url, "json": json, "headers": headers})
+            return _Resp()
+
+    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", _Client)
+    adapter = TelegramAdapter(config={"bot_token": "tg-test-token"})
+    out = adapter.send("888123", "hello tg", reply_to_id="10")
+    assert out["delivered"] is True
+    assert out.get("provider_message_id") == 42
+    assert calls and "sendMessage" in calls[0]["url"]
+    assert calls[0]["json"]["chat_id"] == "888123"
+    assert calls[0]["json"]["text"] == "hello tg"
+    assert calls[0]["json"]["reply_to_message_id"] == "10"
+
+
+def test_discord_send_posts_when_token_configured(monkeypatch):
+    calls = []
+
+    class _Resp:
+        status_code = 200
+        content = b"{}"
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, json=None, headers=None):
+            calls.append({"url": url, "json": json, "headers": headers})
+            return _Resp()
+
+    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", _Client)
+    adapter = DiscordAdapter(config={"bot_token": "dsc-test-token"})
+    out = adapter.send("chan_444", "hello dsc", reply_to_id="msg_1")
+    assert out["delivered"] is True
+    assert "discord.com/api/v10/channels/chan_444/messages" in calls[0]["url"]
+    assert calls[0]["headers"]["Authorization"] == "Bot dsc-test-token"
+    assert calls[0]["json"]["content"] == "hello dsc"
+
+
+def test_slack_send_posts_when_token_configured(monkeypatch):
+    calls = []
+
+    class _Resp:
+        status_code = 200
+        content = b'{"ok":true,"ts":"1.2"}'
+
+        def json(self):
+            return {"ok": True, "ts": "1.2"}
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, json=None, headers=None):
+            calls.append({"url": url, "json": json, "headers": headers})
+            return _Resp()
+
+    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", _Client)
+    adapter = SlackAdapter(config={"bot_token": "xoxb-test"})
+    out = adapter.send("C123", "hello slack", thread_id="1.0")
+    assert out["delivered"] is True
+    assert out.get("ts") == "1.2"
+    assert calls[0]["url"] == "https://slack.com/api/chat.postMessage"
+    assert calls[0]["json"]["channel"] == "C123"
+    assert calls[0]["json"]["thread_ts"] == "1.0"
+
+
+def test_whatsapp_send_posts_when_token_configured(monkeypatch):
+    calls = []
+
+    class _Resp:
+        status_code = 200
+        content = b'{"messages":[{"id":"wamid.1"}]}'
+
+        def json(self):
+            return {"messages": [{"id": "wamid.1"}]}
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, json=None, headers=None):
+            calls.append({"url": url, "json": json, "headers": headers})
+            return _Resp()
+
+    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", _Client)
+    adapter = WhatsAppAdapter(
+        config={"bot_token": "wa-token", "phone_number_id": "pnid_1"}
+    )
+    out = adapter.send("15551234567", "hello wa")
+    assert out["delivered"] is True
+    assert "graph.facebook.com" in calls[0]["url"]
+    assert "pnid_1/messages" in calls[0]["url"]
+    assert calls[0]["json"]["to"] == "15551234567"
+    assert calls[0]["headers"]["Authorization"] == "Bearer wa-token"
