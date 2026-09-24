@@ -150,6 +150,11 @@ def test_search_with_rescue_triggers_fallback_and_is_not_cached(monkeypatch):
         "execute_provider_search",
         lambda provider, query, limit=5: {"error_code": "web_fetch_failed", "message": "503 Backend Offline"},
     )
+    monkeypatch.setattr(
+        web_providers,
+        "search_public",
+        lambda query: {"results": [{"url": "https://example.com/item", "title": "Example", "snippet": "..."}]},
+    )
 
     res = web_providers.search_with_rescue("example domain", provider="brave", cache=cache)
     assert res.get("rescued_from") == "brave"

@@ -264,6 +264,31 @@ def propose(ctx, actor, work_id, body):
                 if not agent_native.enabled(run):
                     raise ValidationError('Code execution tools require native model support')
                 run['code_execution'] = {'policy': 'programmatic-v1', 'version': 1}
+            if body.get('moa'):
+                if not agent_native.enabled(run):
+                    raise ValidationError('Mixture of Agents requires native model support')
+                moa_val = body['moa']
+                if isinstance(moa_val, dict):
+                    preset_name = str(moa_val.get('preset') or 'default')
+                    fanout = str(moa_val.get('fanout') or 'user_turn')
+                    privacy = str(moa_val.get('privacy_filter') or 'none')
+                    ref_models = moa_val.get('reference_models') or []
+                    aggregator = moa_val.get('aggregator') or {}
+                else:
+                    preset_name = 'default'
+                    fanout = 'user_turn'
+                    privacy = 'none'
+                    ref_models = []
+                    aggregator = {}
+                run['moa'] = {
+                    'policy': 'mixture-of-agents-v1',
+                    'version': 1,
+                    'preset': preset_name,
+                    'fanout': fanout,
+                    'privacy_filter': privacy,
+                    'reference_models': ref_models,
+                    'aggregator': aggregator,
+                }
             run['_mcp_bindings'] = bindings
             run['external_tools'] = [{k: b[k] for k in ('server_id', 'server_name', 'tool', 'name')} | {'description': b['descriptor'].get('description', '')} for b in bindings]
             run['_registry_version'] = 1

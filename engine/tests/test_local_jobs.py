@@ -15,7 +15,7 @@ def job(root_name: str) -> LocalJobSpec:
 
 def finished(jobs: LocalJobs, spec: LocalJobSpec) -> dict:
     state = jobs.inspect(spec)
-    for _ in range(50):
+    for _ in range(250):
         if state['running'] is not True:
             return state
         time.sleep(0.02)

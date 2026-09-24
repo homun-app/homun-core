@@ -118,8 +118,9 @@ class ModelPort(Protocol):
 class NativeToolPort(ModelPort, Protocol):
     """Optional native conversation surface; separate from plain-chat adapters."""
 
-    def complete_tools(self, messages: list["NativeMessage"], *, tools: list["ToolDefinition"],
-                       connection_id: str | None = None, context_window: int | None = None,
+    def complete_tools(self, messages: list["NativeMessage"], *, tools: list["ToolDefinition"] | None = None,
+                       connection_id: str | None = None, model_id: str | None = None,
+                       context_window: int | None = None,
                        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS) -> "NativeResult": ...
 
     def complete_summary(self, messages: list["NativeMessage"], *, connection_id: str | None = None,

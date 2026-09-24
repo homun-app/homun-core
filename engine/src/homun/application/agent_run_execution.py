@@ -85,8 +85,60 @@ def _decision(ctx, run):
     result = None
     try:
         if agent_native.enabled(run):
-            result = ctx.models.complete_tools(messages, tools=tools,
-                                               connection_id=run['connection_id'], **run.get('_context_policy',{}))
+            if run.get('moa') and run['moa'].get('policy') == 'mixture-of-agents-v1':
+                from homun.application.moa_contracts import MoAAggregator, MoAPreset, MoAReferenceModel
+                from homun.application.moa_coordinator import MoACoordinator
+                moa_cfg = run['moa']
+                refs = [
+                    MoAReferenceModel(**r) for r in moa_cfg.get('reference_models', [])
+                ]
+                if not refs:
+                    refs = [MoAReferenceModel(
+                        provider=run.get('connection_id') or 'openai_compatible',
+                        model=run.get('_model_id') or 'gpt-4o-mini',
+                        label='Advisor-1',
+                    )]
+                agg_data = moa_cfg.get('aggregator') or {}
+                agg = MoAAggregator(
+                    provider=agg_data.get('provider') or run.get('connection_id') or 'openai_compatible',
+                    model=agg_data.get('model') or run.get('_model_id') or 'gpt-4o',
+                    label=agg_data.get('label') or 'Aggregator',
+                )
+                preset = MoAPreset(
+                    name=moa_cfg.get('preset') or 'default',
+                    reference_models=refs,
+                    aggregator=agg,
+                    fanout=moa_cfg.get('fanout') or 'user_turn',
+                    privacy_filter=moa_cfg.get('privacy_filter') or 'none',
+                )
+                coord = run.get('_moa_coordinator')
+                if coord is None or coord.preset.name != preset.name:
+                    coord = MoACoordinator(
+                        preset,
+                        session_id=run.get('work_id') or run.get('id'),
+                        save_traces=bool(moa_cfg.get('save_traces')),
+                    )
+                    run['_moa_coordinator'] = coord
+
+                def _adv_exec(prov, mdl, msgs):
+                    res = ctx.models.complete_tools(msgs, tools=None, connection_id=prov, model_id=mdl)
+                    return res.message.content, res.usage
+
+                def _agg_exec(prov, mdl, msgs, tls):
+                    res = ctx.models.complete_tools(msgs, tools=tls, connection_id=prov, model_id=mdl, **run.get('_context_policy', {}))
+                    return res.message, res.usage
+
+                iter_idx = len(run.get('observations', []))
+                result = coord.execute_turn(
+                    messages,
+                    tools=tools,
+                    iteration_index=iter_idx,
+                    advisor_executor=_adv_exec,
+                    aggregator_executor=_agg_exec,
+                )
+            else:
+                result = ctx.models.complete_tools(messages, tools=tools,
+                                                   connection_id=run['connection_id'], **run.get('_context_policy',{}))
             agent_native.append_round(run, result.message)
             decision = agent_native.decision(run)
             from homun.application.agent_continuation_state import complete_decision

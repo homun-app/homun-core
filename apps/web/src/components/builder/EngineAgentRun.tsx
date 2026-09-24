@@ -125,6 +125,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {p.session_management?.policy === 'durable-sessions-v1' && <p>Homun gestisce il ciclo di vita delle sessioni con ripristino cartella di lavoro, biforcazioni con tracciamento genealogia, esportazioni con rimozione dati sensibili e integrità SQLite.</p>}
       {p.gateway?.policy === 'core-gateway-v1' && <p>Homun gestisce il runtime gateway multicanale con accoppiamento codici DM, leasing turni esclusivo, stanze di discussione multi-agente e adattatori di messaggistica.</p>}
       {p.code_execution?.policy === 'programmatic-v1' && <p>Homun può comporre chiamate programmatiche agli strumenti tramite script Python locali, riducendo l'output e gestendo gli errori in un unico turno.</p>}
+      {p.moa?.policy === 'mixture-of-agents-v1' && <p>Homun orchestra una miscela di modelli consultivi (MoA) che analizzano il contesto in parallelo, mentre l'aggregatore esegue gli strumenti e sintetizza la risposta finale.</p>}
       {p.terminal?.policy === 'ssh-v1'
         ? <p>Homun può proporre comandi su {p.terminal.user}@{p.terminal.host}:{p.terminal.port}. Ogni esecuzione richiede un’approvazione separata. Non è un container e non copia i file.</p>
         : p.terminal?.policy === 'local-private-v1'

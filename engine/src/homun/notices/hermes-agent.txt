@@ -255,3 +255,12 @@ application/code_execution_tool.py derive Programmatic Tool Calling (PTC) via ch
 code execution, authenticated local RPC Unix domain / TCP loopback socket, tool whitelist
 enforcement, output truncation (40% head / 60% tail), execution timeouts, and call budget limits
 from tools/code_execution_tool.py and tools/code_execution_rpc.py at the pinned commit.
+
+application/moa_contracts.py, application/moa_filter.py, application/moa_alternation.py,
+application/moa_trace.py, and application/moa_coordinator.py derive Mixture of Agents (MoA)
+orchestration, advisory reference models (advisors only advise without tool schemas), acting
+aggregator execution of tools, fanout cadences (user_turn, per_iteration, every_n:N), privacy
+redaction of credentials/emails/phones, reactive same-role message merging, side-channel trace
+persistence, and truthful aggregate token and cost accounting from agent/moa_loop.py,
+agent/moa_alternation.py, and agent/moa_trace.py at the pinned commit.
+

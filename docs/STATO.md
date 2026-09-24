@@ -108,6 +108,14 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   su interprete figlio isolato con bridge RPC locale autenticato (UDS/TCP loopback), allowlist
   degli strumenti ammessi, tetto alle chiamate, troncamento output (40% testa / 60% coda) e timeout.
 
+- Orchestrazione Mixture of Agents (`MoACoordinator`, H24) con modelli di riferimento
+  consultivi (`MoAReferenceModel`) che consigliano senza schemi strumenti (gli advisor
+  non causano effetti collaterali), aggregatore attivo (`MoAAggregator`) che esegue gli
+  strumenti e sintetizza la risposta, cadenze fanout (`user_turn`, `per_iteration`,
+  `every_n:N`) con riuso della guida in cache, filtri privacy (`display`, `full`) per
+  l'oscuramento di credenziali/email/telefoni, unione reattiva dei turni utente adiacenti
+  per backend con alternanza stretta e contabilizzazione veritiera e aggregata di token e costi.
+
 - Controlli nativi di pausa/ripresa/annullamento e correzioni dalla chat, con
   invalidazione delle risposte superate, conservazione degli esiti incerti e
   oscuramento delle fonti revocate. [Prove e limiti](research/2026-09-23-agent-controls-verifica.md).
