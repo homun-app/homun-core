@@ -135,3 +135,7 @@ uses a persistent ControlMaster, accept-new host keys, and file sync of the
 agent home. Homun does not copy that: it ignores the person's SSH configuration
 and agent, pins the server public key in the approval, checks the private key
 fingerprint, and does not sync files. Stdin and a terminal are not provided.
+execution/web_pages.py reads one public page and refuses private addresses and
+credential-bearing URLs. Hermes tools/url_safety.py also covers proxies,
+fake-ip ranges and an option to allow private URLs. Homun does not copy those
+bypasses. Search providers, page cache and browser control remain absent.

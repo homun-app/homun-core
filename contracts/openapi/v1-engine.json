@@ -2563,6 +2563,11 @@
               }
             ],
             "title": "Terminal Image"
+          },
+          "web_pages": {
+            "default": false,
+            "title": "Web Pages",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2795,6 +2800,18 @@
           "turns": {
             "title": "Turns",
             "type": "integer"
+          },
+          "web_pages": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Web Pages"
           },
           "work_id": {
             "title": "Work Id",

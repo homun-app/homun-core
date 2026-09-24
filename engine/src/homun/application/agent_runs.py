@@ -220,6 +220,10 @@ def propose(ctx, actor, work_id, body):
                 raise ValidationError('Terminal image must be a pinned SHA256')
             elif body.get('terminal_backend'):
                 raise ValidationError('Unknown terminal backend')
+            if body.get('web_pages'):
+                if not agent_native.enabled(run):
+                    raise ValidationError('Web pages require native model support')
+                run['web_pages'] = {'policy': 'public-http-v1', 'version': 1}
             run['_mcp_bindings'] = bindings
             run['external_tools'] = [{k: b[k] for k in ('server_id', 'server_name', 'tool', 'name')} | {'description': b['descriptor'].get('description', '')} for b in bindings]
             run['_registry_version'] = 1

@@ -215,7 +215,9 @@ arrestarlo, inviargli byte sullo stdin o rispondere alle richieste di un termina
 nuovo. Può anche eseguire un comando su questo computer, nella cartella del lavoro,
 senza ereditare l'ambiente: non è un container. Può anche eseguire un comando
 su un host SSH approvato, con la chiave pubblica del server fissata nell'approvazione
-e senza copiare i file. Restano aperti lo schermo completo,
+e senza copiare i file. Può anche leggere il testo di una pagina http pubblica,
+rifiutando gli indirizzi privati; la ricerca web non ha ancora un provider.
+Restano aperti lo schermo completo,
 Modal, Singularity, Daytona, Vercel, language server,
 patch V4A e il resto della matrice. Non è parità completa.
 
