@@ -10,6 +10,7 @@ class TerminalProposalRequest(BaseModel):
     image: str = Field(pattern=r'^sha256:[0-9a-f]{64}$')
     command: str = Field(min_length=1, max_length=16000)
     expected_version: int = Field(ge=1)
+    timeout_seconds: int = Field(default=300,ge=1,le=3600)
 
 
 class TerminalApprovalRequest(BaseModel):
@@ -36,6 +37,9 @@ class TerminalProposal(BaseModel):
     agent_run_id: str | None = None
     created_by: str
     created_at: str
+    timeout_seconds: int | None = None
+    deadline_at: str | None = None
+    timed_out: bool = False
     running: bool | None = None
     exit_code: int | None = None
     oom_killed: bool | None = None
@@ -50,6 +54,7 @@ class TerminalList(BaseModel):
 
 def consent(proposal: dict) -> str:
     bound={k:proposal[k] for k in ('id','work_id','image','command','expected_version','policy','created_by')}
+    if 'timeout_seconds' in proposal:bound['timeout_seconds']=proposal['timeout_seconds']
     if proposal.get('_agent_binding'):bound['_agent_binding']=proposal['_agent_binding']
     return digest(bound)
 

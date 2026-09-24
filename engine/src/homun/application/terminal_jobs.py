@@ -1,5 +1,6 @@
 """Human-approved native jobs, with durable dispatch and inspect-only recovery."""
 from copy import deepcopy
+from datetime import timedelta
 from pydantic import ValidationError as SchemaError
 from homun.application.terminal_contracts import TerminalProposalRequest, consent, job_spec, public
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
@@ -35,7 +36,7 @@ def propose(ctx, actor, work_id, body, *, agent_binding=None):
     try:
         request = TerminalProposalRequest.model_validate(body)
         result = dict(id=request.command_id,work_id=work_id,image=request.image,command=request.command,
-                      expected_version=request.expected_version,policy='docker-offline-v1',created_by=actor.id,
+                      expected_version=request.expected_version,timeout_seconds=request.timeout_seconds,policy='docker-offline-v1',created_by=actor.id,
                       created_at=utc_now().isoformat(),status='pending_approval')
         job_spec(ctx,result)
     except SchemaError:
@@ -49,7 +50,10 @@ def propose(ctx, actor, work_id, body, *, agent_binding=None):
             work = require_work_access(store,actor,work_id)
             prior = store.commands.get(request.command_id)
             if prior:
-                if prior.type != TYPE or prior.result.get('digest') != result['digest']:
+                replay=deepcopy(result)
+                if 'timeout_seconds' not in prior.result and 'timeout_seconds' not in body:
+                    replay.pop('timeout_seconds',None)
+                if prior.type != TYPE or prior.result.get('digest') != consent(replay):
                     raise ConflictError('Command id is already bound to another request')
                 return deepcopy(public(prior.result))
             if work.archived or work.version != request.expected_version:
@@ -81,6 +85,8 @@ def approve(ctx, actor, work_id, proposal_id, body):
             from homun.application.agent_terminal_link import validate_link
             linked=validate_link(ctx,store,actor,proposal)
             if linked is not None:linked['_active_call_id']=proposal['_agent_binding']['call_id']
+            if proposal.get('timeout_seconds') is not None:
+                proposal['deadline_at']=(utc_now()+timedelta(seconds=proposal['timeout_seconds'])).isoformat()
             proposal.update(status='dispatching',_approved_by=actor.id,_approved_at=utc_now().isoformat(),_io_epoch=1)
             snapshot = deepcopy(proposal)
         ctx.service.store = store
@@ -98,18 +104,8 @@ def _unknown(exc):
 
 
 def _record(ctx, actor, work_id, proposal_id, snapshot, state):
-    with ctx.repository.locked():
-        with ctx.repository.transaction() as store:
-            proposal = store.commands[proposal_id].result
-            if proposal.get('_io_epoch') == snapshot.get('_io_epoch'):
-                # Persist evidence independently of current viewer authority.
-                proposal.update({k:v for k,v in state.items() if k != 'container_id'})
-                if state['status'] != 'outcome_unknown' and not state.get('error_code'):
-                    proposal.pop('error',None)
-                    proposal.pop('error_code',None)
-                proposal['_observed_at'] = utc_now().isoformat()
-            response = deepcopy(public(proposal))
-        ctx.service.store = store
+    from homun.application.terminal_state import record
+    response=record(ctx,proposal_id,snapshot,state)
     # Revocation during IO must not leak newly obtained logs or execution state.
     require_work_access(ctx.repository.load(),actor,work_id,'read')
     return response

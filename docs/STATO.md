@@ -12,7 +12,9 @@ Una verifica del sorgente non aggiorna l'app installata.
   disponibili via API autenticate, con stato/log/arresto e ripresa senza redispatch.
   Collegamento nativo al modello con consenso per comando e receipt singola,
   configurazione opzionale e pannello UI presenti. Prova reale Ollama/Docker;
-  sessione interattiva UI, watchdog, PTY e file tools ancora aperti.
+  durata approvata e watchdog persistente presenti mentre il motore è acceso.
+  Sessione interattiva UI, timer indipendente, PTY e file tools ancora aperti.
+  [Scadenze](research/2026-09-24-terminal-deadline-verifica.md).
   [Ciclo agente](research/2026-09-24-agent-terminal-verifica.md).
   [Backend](research/2026-09-24-owned-terminal-verifica.md) e
   [consenso applicativo](research/2026-09-24-terminal-approval-verifica.md).

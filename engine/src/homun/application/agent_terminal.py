@@ -11,7 +11,7 @@ def stage(ctx,actor,run,decision):
     proposal_id='terminal:'+digest([run['id'],run['_epoch'],call.id])
     terminal_jobs.propose(ctx,actor,run['work_id'],{
         'command_id':proposal_id,'image':run['terminal']['image'],'command':decision.arguments['command'],
-        'expected_version':run['_run_version']},agent_binding={
+        'timeout_seconds':decision.arguments.get('timeout_seconds',300),'expected_version':run['_run_version']},agent_binding={
         'run_id':run['id'],'epoch':run['_epoch'],'call_id':call.id,'lease_token':run['_lease_token']})
     return 'waiting_external'
 
@@ -34,9 +34,9 @@ def resume(ctx,run_id):
             validate_link(ctx,store,actor,proposal)
             if proposal['status'] not in {'exited','dead'} or proposal.get('logs') is None:return False
             call=agent_native.pending(run)
-            receipt={k:deepcopy(proposal.get(k)) for k in ('status','exit_code','oom_killed','logs','error_code','error')}
+            receipt={k:deepcopy(proposal.get(k)) for k in ('status','exit_code','timed_out','oom_killed','logs','error_code','error')}
             receipt['job_id']=proposal_id
-            receipt['is_error']=proposal.get('exit_code')!=0 or proposal['status']=='dead'
+            receipt['is_error']=bool(proposal.get('timed_out')) or proposal.get('exit_code')!=0 or proposal['status']=='dead'
             receipt=agent_native.append_result(run,receipt)
             run['observations'].append({'tool':call.name,'arguments':call.arguments,'message':'Terminal command completed','result':receipt})
             run['turns']+=1

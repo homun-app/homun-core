@@ -145,7 +145,7 @@ configurazione è tecnica; Homun non scarica immagini automaticamente.
 1. Inserisci l’immagine e prepara il lavoro. Senza immagine il modello non riceve
    lo strumento terminale.
 2. Avvia il lavoro: Homun può proporre un comando, ma non eseguirlo da solo.
-3. Leggi il comando proposto e l’ambiente. Se corrisponde alla richiesta, scegli
+3. Leggi il comando proposto, l’ambiente e la durata autorizzata. Se corrisponde alla richiesta, scegli
    **Approva ed esegui il comando**. L’esecuzione è senza rete e dispone di una
    cartella dedicata al run, non dei file del computer.
 4. Puoi aggiornare stato e log o arrestare il processo. Quando il processo termina
@@ -156,5 +156,7 @@ configurazione è tecnica; Homun non scarica immagini automaticamente.
 fallimento senza effetti: aggiorna prima di chiedere un altro comando.
 
 I file prodotti non vengono ancora importati automaticamente in Documenti; il
-modello riceve uscita e coda dei log. Non sono ancora supportati input interattivo
-al terminale e scadenza automatica dei processi. [Prove e limiti](research/2026-09-24-agent-terminal-verifica.md).
+modello riceve uscita e coda dei log. L’input interattivo al terminale non è ancora supportato. Per i nuovi comandi
+il limite predefinito è 300 secondi (il modello può proporne da 1 a 3600):
+Homun controlla la scadenza mentre è acceso e la recupera alla riapertura.
+A motore spento il processo può continuare; non è un timer autonomo di Docker. [Prove e limiti](research/2026-09-24-agent-terminal-verifica.md).

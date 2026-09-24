@@ -114,3 +114,20 @@ def test_log_transport_failure_waits_without_losing_tool_output(setup,monkeypatc
     monkeypatch.setattr(backend,'logs',original)
     assert resume(ctx,p['id'])
     assert 'done' in ctx.repository.load().commands[p['id']].result['_messages'][-1]['content']
+
+
+def test_deadline_reason_reaches_model_even_if_process_exits_zero(setup,monkeypatch):
+    from datetime import timedelta
+    from homun.domain.models import utc_now
+    from homun.application.terminal_watchdog import reconcile
+    from homun.application.agent_terminal import resume
+    s=start(setup,monkeypatch);ctx,actor,work,p,backend=s;job=choose(s)
+    terminal_jobs.approve(ctx,actor,work,job['id'],{'digest':job['digest']})
+    def graceful(spec):
+        backend.state.update(status='exited',running=False,exit_code=0)
+        return backend.state.copy()
+    monkeypatch.setattr(backend,'stop',graceful)
+    reconcile(ctx,now=utc_now()+timedelta(seconds=301))
+    assert resume(ctx,p['id'])
+    receipt=ctx.repository.load().commands[p['id']].result['observations'][-1]['result']
+    assert receipt['timed_out'] and receipt['is_error'] and receipt['exit_code']==0

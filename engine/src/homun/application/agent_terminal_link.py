@@ -19,7 +19,9 @@ def validate_link(ctx,store,actor,proposal,*,staging=False):
     call=agent_native.pending(run)
     call=resolve_call(run,call) if call else None
     if (call is None or call.id!=link['call_id'] or call.name!='terminal_execute'
-            or call.arguments!={'command':proposal['command']}
+            or call.arguments.get('command')!=proposal['command']
+            or set(call.arguments)-{'command','timeout_seconds'}
+            or call.arguments.get('timeout_seconds',300)!=proposal.get('timeout_seconds',300)
             or run.get('terminal',{}).get('image')!=proposal['image']):
         raise ConflictError('Terminal proposal differs from the canonical call')
     return run
