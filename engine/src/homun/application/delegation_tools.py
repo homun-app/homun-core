@@ -12,8 +12,10 @@ import json
 import uuid
 import jsonschema
 from homun.application import budgets
+from homun.application.workspace_files import root_for
 from homun.domain.errors import ValidationError
 from homun.domain.models import BudgetCounters
+from homun.execution.subagent_worktree import cleanup_subagent_worktree, create_subagent_worktree
 from homun.models.types import ChatMessage
 
 
@@ -85,6 +87,14 @@ def execute(ctx, actor, run, tool, args):
 
         user_content = f"Execute the following task:\n{task}"
 
+        worktree_info = None
+        if bool(run.get("delegation", {}).get("worktree_isolation")):
+            try:
+                repo_root = str(root_for(ctx, run))
+                worktree_info = create_subagent_worktree(repo_root, subagent_id=del_id)
+            except Exception:
+                worktree_info = None
+
         try:
             result = ctx.models.complete(
                 [
@@ -97,6 +107,8 @@ def execute(ctx, actor, run, tool, args):
             charge(ctx, actor, run, reservation, getattr(result, "usage", None))
         except Exception:
             budgets.reconcile_unknown(ctx, actor, run["work_id"], reservation)
+            if worktree_info:
+                cleanup_subagent_worktree(worktree_info, force=True)
             raise
 
         result_text = result.text.strip()
@@ -104,6 +116,9 @@ def execute(ctx, actor, run, tool, args):
         schema_error = None
         if output_schema:
             structured_data, schema_error = _validate_schema(result_text, output_schema)
+
+        if worktree_info:
+            cleanup_subagent_worktree(worktree_info, force=False)
 
         record = {
             "delegation_id": del_id,
@@ -116,6 +131,7 @@ def execute(ctx, actor, run, tool, args):
             "result": result_text,
             "structured_output": structured_data,
             "schema_error": schema_error,
+            "worktree": worktree_info,
         }
         delegations[del_id] = record
 

@@ -4,6 +4,7 @@ import difflib
 import hashlib
 from homun.application import agent_native
 from homun.application.agent_runs import authority, lookup
+from homun.application.workspace_checkpoints import note_agent_write, snapshot_before_write
 from homun.application.workspace_file_baseline import full_baseline, seen_current
 from homun.application.workspace_files import root_for
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
@@ -259,9 +260,12 @@ def _apply(ctx, actor, work_id, proposal_id, snapshot):
         return _finish(ctx, actor, work_id, proposal_id, snapshot, 'outcome_unknown',
                        'Approved bytes failed integrity verification. The file was not written again.')
     run = ctx.repository.load().commands[snapshot['_agent_binding']['run_id']].result
-    outcome = WorkspaceFiles(root_for(ctx, run)).write_bytes(
+    root = root_for(ctx, run)
+    snapshot_before_write(root, reason=f"pre-write:{snapshot['path']}")
+    outcome = WorkspaceFiles(root).write_bytes(
         snapshot['path'], data, before_sha=snapshot['before_sha256'])
     if outcome in {'written', 'already'}:
+        note_agent_write(root, snapshot['path'])
         return _finish(ctx, actor, work_id, proposal_id, snapshot, 'applied', None)
     if outcome == 'mismatch':
         return _finish(ctx, actor, work_id, proposal_id, snapshot, 'conflict',
