@@ -25,21 +25,25 @@ import pytest
 
 from homun.application.cron_contracts import CronIncident, CronJob, CronOccurrence
 from homun.application.cron_manager import (
+    AGENT_RUNNER_UNAVAILABLE,
     CronManager,
     compute_next_cron,
     compute_next_run,
     parse_schedule,
     reset_store,
 )
+from homun.application.cron_store import CronStore, set_cron_store
 from homun.application.cron_tools import execute as cron_execute
 from homun.domain.errors import ValidationError
 
 
 @pytest.fixture(autouse=True)
 def clean_cron_store():
-    reset_store()
+    store = CronStore(":memory:")
+    set_cron_store(store)
     yield
     reset_store()
+    set_cron_store(None)
 
 
 def test_parse_schedule_and_compute_next_run():
@@ -341,18 +345,20 @@ def test_cron_tool_execution():
     res_resume = cron_execute(ctx, actor, run, "cronjob_manage", {"action": "resume", "job_id": job_id})
     assert res_resume["status"] == "active"
 
-    # 6. Run job
+    # 6. Run job without agent runner: honest failure (no synthetic success)
     res_run = cron_execute(ctx, actor, run, "cronjob_manage", {"action": "run", "job_id": job_id})
     assert res_run["status"] == "executed"
-    assert res_run["occurrence"]["status"] == "success"
+    assert res_run["occurrence"]["status"] == "failed"
+    assert res_run["occurrence"]["error"] == "backend_unavailable"
+    assert AGENT_RUNNER_UNAVAILABLE in res_run["occurrence"]["output_preview"]
 
-    # 7. History
+    # 7. History records the failed attempt
     res_hist = cron_execute(ctx, actor, run, "cronjob_manage", {"action": "history", "job_id": job_id})
     assert res_hist["count"] == 1
 
-    # 8. Incidents
+    # 8. Incidents recorded for unavailable runner
     res_inc = cron_execute(ctx, actor, run, "cronjob_manage", {"action": "incidents", "job_id": job_id})
-    assert res_inc["count"] == 0
+    assert res_inc["count"] >= 1
 
     # 9. Remove job
     res_rem = cron_execute(ctx, actor, run, "cronjob_manage", {"action": "remove", "job_id": job_id})
@@ -362,3 +368,54 @@ def test_cron_tool_execution():
     run_disabled = {"work_id": "ws-tool"}
     with pytest.raises(ValidationError, match="Cron scheduling tools are not enabled"):
         cron_execute(ctx, actor, run_disabled, "cronjob_manage", {"action": "list"})
+
+
+def test_cron_jobs_survive_store_reopen(tmp_path):
+    """H28/H29: jobs, history, incidents, and deliveries survive a new process/store."""
+    db = tmp_path / "cron.sqlite"
+    store1 = CronStore(db)
+    mgr1 = CronManager(workspace_id="ws-persist", store=store1)
+    job = mgr1.create_job(
+        schedule="every 1h",
+        prompt="nightly report",
+        name="Nightly",
+        deliver="chat",
+    )
+
+    def ok_runner(payload):
+        return 0, "report body", None
+
+    occ = mgr1.run_job(job.id, now=1000.0, custom_runner=ok_runner)
+    assert occ.status == "success"
+    assert len(mgr1.get_deliveries()) == 1
+    job_id = job.id
+    store1.close()
+
+    store2 = CronStore(db)
+    mgr2 = CronManager(workspace_id="ws-persist", store=store2)
+    restored = mgr2.get_job(job_id)
+    assert restored is not None
+    assert restored.name == "Nightly"
+    assert restored.run_count == 1
+    assert "report body" in (restored.last_output or "")
+    hist = mgr2.get_history(job_id)
+    assert len(hist) == 1
+    assert hist[0].status == "success"
+    assert len(mgr2.get_deliveries()) == 1
+    assert mgr2.get_deliveries()[0]["target"] == "chat"
+
+    # Isolation: another workspace does not see these jobs
+    other = CronManager(workspace_id="ws-other", store=store2)
+    assert other.list_jobs() == []
+    store2.close()
+
+
+def test_prompt_job_without_runner_is_not_synthetic_success():
+    mgr = CronManager(workspace_id="ws-honest")
+    job = mgr.create_job(schedule="every 1h", prompt="do work")
+    occ = mgr.run_job(job.id, now=50.0)
+    assert occ.status == "failed"
+    assert occ.error == "backend_unavailable"
+    assert AGENT_RUNNER_UNAVAILABLE in occ.output_preview
+    assert job.error_count == 1
+    assert mgr.get_incidents(job.id)

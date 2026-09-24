@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from homun.application.cron_contracts import CronIncident, CronJob, CronOccurrence
+from homun.application.cron_store import CronStore, get_cron_store
 
 logger = logging.getLogger(__name__)
 
@@ -33,25 +34,19 @@ _UNIT_SECONDS = {
     "d": 86400, "day": 86400, "days": 86400,
 }
 
-# Workspace-scoped stores: workspace_id -> {job_id: CronJob}
-_STORE_JOBS: Dict[str, Dict[str, CronJob]] = {}
-_STORE_OCCURRENCES: Dict[str, Dict[str, List[CronOccurrence]]] = {}
-_STORE_INCIDENTS: Dict[str, Dict[str, List[CronIncident]]] = {}
-_STORE_DELIVERIES: Dict[str, List[Dict[str, Any]]] = {}
+AGENT_RUNNER_UNAVAILABLE = (
+    "Cron prompt/skills jobs require an injected agent runner; "
+    "no synthetic success is returned without a real execution backend."
+)
 
 
 def reset_store(workspace_id: Optional[str] = None) -> None:
-    """Reset store in-memory state (useful for test fixtures)."""
+    """Clear durable cron state (tests should prefer an isolated :memory: store)."""
+    store = get_cron_store()
     if workspace_id is not None:
-        _STORE_JOBS.pop(workspace_id, None)
-        _STORE_OCCURRENCES.pop(workspace_id, None)
-        _STORE_INCIDENTS.pop(workspace_id, None)
-        _STORE_DELIVERIES.pop(workspace_id, None)
+        store.clear_workspace(workspace_id)
     else:
-        _STORE_JOBS.clear()
-        _STORE_OCCURRENCES.clear()
-        _STORE_INCIDENTS.clear()
-        _STORE_DELIVERIES.clear()
+        store.clear_all()
 
 
 def parse_schedule(schedule_str: str) -> Dict[str, Any]:
@@ -200,20 +195,16 @@ def compute_next_run(job: CronJob, now: Optional[float] = None) -> float:
 class CronManager:
     """Manager for durable cron jobs, preflight checks, and execution histories."""
 
-    def __init__(self, workspace_id: str = "default"):
+    def __init__(self, workspace_id: str = "default", store: Optional[CronStore] = None):
         self.workspace_id = str(workspace_id or "default")
+        self._store = store or get_cron_store()
+        # Write-through cache keeps object identity for callers within this manager.
+        self._jobs: Dict[str, CronJob] = {}
 
-    def _jobs_store(self) -> Dict[str, CronJob]:
-        return _STORE_JOBS.setdefault(self.workspace_id, {})
-
-    def _occ_store(self) -> Dict[str, List[CronOccurrence]]:
-        return _STORE_OCCURRENCES.setdefault(self.workspace_id, {})
-
-    def _inc_store(self) -> Dict[str, List[CronIncident]]:
-        return _STORE_INCIDENTS.setdefault(self.workspace_id, {})
-
-    def _deliv_store(self) -> List[Dict[str, Any]]:
-        return _STORE_DELIVERIES.setdefault(self.workspace_id, [])
+    def _persist_job(self, job: CronJob) -> CronJob:
+        self._jobs[job.id] = job
+        self._store.put_job(self.workspace_id, job)
+        return job
 
     def create_job(
         self,
@@ -270,8 +261,7 @@ class CronManager:
         )
 
         self.preflight_check(job)
-        self._jobs_store()[job.id] = job
-        return job
+        return self._persist_job(job)
 
     def preflight_check(self, job: CronJob) -> None:
         """Validate job runnable prerequisites before saving or execution."""
@@ -289,13 +279,29 @@ class CronManager:
                 logger.warning("Preflight notice: script path does not exist yet (%s)", full_path)
 
     def get_job(self, job_id: str) -> Optional[CronJob]:
-        return self._jobs_store().get(job_id)
+        cached = self._jobs.get(job_id)
+        if cached is not None:
+            return cached
+        job = self._store.get_job(self.workspace_id, job_id)
+        if job is not None:
+            self._jobs[job_id] = job
+        return job
 
     def list_jobs(self, include_cleared: bool = False) -> List[CronJob]:
-        jobs = list(self._jobs_store().values())
+        # Prefer store as source of truth; reuse cached objects for identity.
+        result: List[CronJob] = []
+        for job in self._store.list_jobs(self.workspace_id):
+            cached = self._jobs.get(job.id)
+            if cached is None:
+                self._jobs[job.id] = job
+                result.append(job)
+            else:
+                for key, value in job.__dict__.items():
+                    setattr(cached, key, value)
+                result.append(cached)
         if not include_cleared:
-            jobs = [j for j in jobs if j.status != "cleared"]
-        return jobs
+            result = [j for j in result if j.status != "cleared"]
+        return result
 
     def update_job(
         self,
@@ -355,7 +361,7 @@ class CronManager:
             job.paused_reason = reason
 
         self.preflight_check(job)
-        return job
+        return self._persist_job(job)
 
     def pause_job(self, job_id: str, reason: str = "user-paused") -> Optional[CronJob]:
         job = self.get_job(job_id)
@@ -364,7 +370,7 @@ class CronManager:
         job.status = "paused"
         job.paused_reason = reason
         job.next_run_at = 0.0
-        return job
+        return self._persist_job(job)
 
     def resume_job(self, job_id: str, now: Optional[float] = None) -> Optional[CronJob]:
         job = self.get_job(job_id)
@@ -375,7 +381,7 @@ class CronManager:
         job.quota_hold = False
         curr = time.time() if now is None else float(now)
         job.next_run_at = compute_next_run(job, now=curr)
-        return job
+        return self._persist_job(job)
 
     def remove_job(self, job_id: str) -> bool:
         job = self.get_job(job_id)
@@ -383,6 +389,7 @@ class CronManager:
             return False
         job.status = "cleared"
         job.next_run_at = 0.0
+        self._persist_job(job)
         return True
 
     def trigger_quota_hold(self, job_id: str, reason: str = "provider quota exhausted", now: Optional[float] = None) -> Optional[CronJob]:
@@ -395,19 +402,20 @@ class CronManager:
         job.status = "paused"
         job.paused_reason = f"quota_hold: {reason}"
         job.next_run_at = 0.0
+        self._persist_job(job)
         self.record_incident(job_id, f"Quota hold triggered: {reason}", now=curr)
         return job
 
     def record_incident(self, job_id: str, error_message: str, now: Optional[float] = None) -> CronIncident:
         """Record or deduplicate an incident for this job."""
         curr = time.time() if now is None else float(now)
-        incidents = self._inc_store().setdefault(job_id, [])
+        incidents = self.get_incidents(job_id)
 
-        # Deduplicate against unresolved matching error
         for inc in incidents:
             if not inc.resolved and inc.error_message == error_message:
                 inc.occurrence_count += 1
                 inc.last_seen_at = curr
+                self._store.put_incident(self.workspace_id, inc)
                 return inc
 
         new_inc = CronIncident(
@@ -418,7 +426,7 @@ class CronManager:
             occurrence_count=1,
             resolved=False,
         )
-        incidents.append(new_inc)
+        self._store.put_incident(self.workspace_id, new_inc)
         return new_inc
 
     def resolve_incidents(self, job_id: str) -> int:
@@ -428,17 +436,18 @@ class CronManager:
         for inc in incidents:
             if not inc.resolved:
                 inc.resolved = True
+                self._store.put_incident(self.workspace_id, inc)
                 count += 1
         return count
 
     def get_incidents(self, job_id: str) -> List[CronIncident]:
-        return list(self._inc_store().get(job_id, []))
+        return self._store.list_incidents(self.workspace_id, job_id)
 
     def get_history(self, job_id: str) -> List[CronOccurrence]:
-        return list(self._occ_store().get(job_id, []))
+        return self._store.list_occurrences(self.workspace_id, job_id)
 
     def get_deliveries(self) -> List[Dict[str, Any]]:
-        return list(self._deliv_store())
+        return self._store.list_deliveries(self.workspace_id)
 
     def claim_job_for_fire(self, job_id: str, now: Optional[float] = None) -> Optional[CronJob]:
         """Claim a runnable job for execution, ensuring atomic execution reservation."""
@@ -506,7 +515,6 @@ class CronManager:
                 error = str(exc)
                 output = f"Execution failed: {exc}"
         elif job.script:
-            # Script execution
             cmd = job.script
             try:
                 proc = subprocess.run(
@@ -526,9 +534,10 @@ class CronManager:
                 error = str(exc)
                 output = f"Script execution error: {exc}"
         else:
-            # Mock / prompt job execution
-            exit_code = 0
-            output = f"Executed prompt task: {effective_prompt[:100]}..."
+            # Prompt/skills jobs need a real agent runner — never invent success.
+            exit_code = -1
+            error = "backend_unavailable"
+            output = AGENT_RUNNER_UNAVAILABLE
 
         duration = time.time() - start_time
         status = "success" if exit_code == 0 else "failed"
@@ -545,7 +554,7 @@ class CronManager:
             error=error,
             duration_s=round(duration, 3),
         )
-        self._occ_store().setdefault(job.id, []).append(occurrence)
+        self._store.append_occurrence(self.workspace_id, occurrence)
 
         # 5. Update job metrics and state
         job.last_run_at = curr
@@ -564,12 +573,13 @@ class CronManager:
             job.status = "completed"
             job.next_run_at = 0.0
         elif job.status == "active":
-            # Schedule next run
             job.next_run_at = compute_next_run(job, now=curr)
 
+        self._persist_job(job)
+
         # 7. Durable delivery queuing (H29)
-        if job.deliver != "local" and output:
-            self._deliv_store().append({
+        if job.deliver != "local" and output and status == "success":
+            self._store.append_delivery(self.workspace_id, {
                 "job_id": job.id,
                 "target": job.deliver,
                 "output": output,
