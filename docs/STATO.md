@@ -226,8 +226,10 @@ una schermata di quella pagina, interagire con i controlli nei riquadri (iframe)
 e chiudere solo quel processo. Non fotografa lo
 schermo di questo computer. Accettare una finestra, scorrimento e visione restano
 assenti. Può anche consultare memorie persistenti approvate (memory_recall), annotare
-fatti importanti con dedup e limite di capacità (memory_remember), e cercare nella sessione
-(session_search) con vincoli temporali e autorizzazioni di conversazione.
+fatti importanti con dedup e limite di capacità (memory_remember), cercare nella sessione
+(session_search) con vincoli temporali e autorizzazioni di conversazione, scoprire competenze
+approvate (skill_search), caricarne le istruzioni complete su richiesta (skill_view) con quarantena
+rigorosa per le bozze, e proporre nuove competenze apprese (skill_propose) in attesa di approvazione umana.
 Restano aperti lo schermo completo,
 Modal, Singularity, Daytona, Vercel, language server,
 patch V4A e il resto della matrice. Non è parità completa.

@@ -117,6 +117,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {p.web_pages?.version === 2 && <p>Homun può cercare sul web pubblico e leggere pagine http. Gli indirizzi privati sono rifiutati. La ricerca non entra negli account.</p>}
       {p.web_pages?.version === 1 && <p>Homun può leggere pagine http pubbliche. Gli indirizzi privati sono rifiutati. La ricerca web non è configurata.</p>}
       {p.memory?.policy === 'scoped-workspace-v1' && <p>Homun può consultare la memoria persistente del progetto, annotare fatti importanti verificati e cercare messaggi passati nella sessione.</p>}
+      {p.skills?.policy === 'workspace-catalog-v1' && <p>Homun può consultare le competenze e linee guida approvate dell’area di lavoro e proporre nuove competenze in quarantena in attesa di approvazione umana.</p>}
       {p.terminal?.policy === 'ssh-v1'
         ? <p>Homun può proporre comandi su {p.terminal.user}@{p.terminal.host}:{p.terminal.port}. Ogni esecuzione richiede un’approvazione separata. Non è un container e non copia i file.</p>
         : p.terminal?.policy === 'local-private-v1'

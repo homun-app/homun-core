@@ -168,3 +168,9 @@ search from agent/memory_manager.py, tools/memory_tool.py, and
 tools/session_search_tool.py at the pinned commit. Homun maintains SQLite as the
 authoritative memory ledger, enforces project and conversation isolation, and
 requires explicit conversation access before returning historical session messages.
+
+application/skill_contracts.py and application/skill_tools.py derive progressive
+skill metadata discovery, full instruction body disclosure on demand, and learning/proposal
+from tools/skills_tool.py, tools/skill_manager.py, and tools/skills_guard.py at the
+pinned commit. Homun keeps unapproved or newly proposed skills in a staged quarantine
+until explicit human approval, refusing their execution or display as trusted instructions.

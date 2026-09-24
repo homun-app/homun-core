@@ -50,6 +50,12 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.memory_tools import execute as memory_execute
         for mem_entry in memory_entries(memory_execute, mem.get('version', 1)):
             registry.register(mem_entry)
+    skills = run.get('skills')
+    if isinstance(skills, dict) and skills.get('policy') == 'workspace-catalog-v1' and skills.get('version') == 1:
+        from homun.application.skill_contracts import entries as skill_entries
+        from homun.application.skill_tools import execute as skill_execute
+        for skill_entry in skill_entries(skill_execute, skills.get('version', 1)):
+            registry.register(skill_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())
