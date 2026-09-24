@@ -340,6 +340,14 @@ token budget trajectory compression protecting head and tail turns without sever
 concurrent batch dataset runner with resume checkpointing and tool stats aggregation, and OpenTelemetry/Langfuse
 trace and span observation from agent/trajectory.py, trajectory_compressor.py, batch_runner.py,
 mini_swe_runner.py, and plugins/observability/langfuse at the pinned commit.
+application/surface_companion.py, application/surface_achievements.py, application/surface_tours_tips.py,
+application/surface_cleanup.py, application/surface_security_guidance.py, application/surface_catalog_packs.py,
+and routes/surface_catalog_api.py derive virtual companion state and ASCII skins, achievement milestone tracking
+and persistence, onboarding tours and context-aware tips, workspace disk cleanup and cache purging, security
+pattern scanning and guidance advisories, and the complete catalog manifest of bundled and optional skill packs
+with safe installation and uninstallation from agent/pet/, plugins/hermes-achievements/, tools/tour_tool.py,
+tools/tip_tool.py, plugins/disk-cleanup/, plugins/security-guidance/, and plugin-catalog/ at the pinned commit.
+
 
 
 

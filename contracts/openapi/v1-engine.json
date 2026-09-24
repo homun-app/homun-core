@@ -1,6 +1,55 @@
 {
   "components": {
     "schemas": {
+      "Achievement": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "icon": {
+            "title": "Icon",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "points": {
+            "title": "Points",
+            "type": "integer"
+          },
+          "progress": {
+            "default": 0.0,
+            "title": "Progress",
+            "type": "number"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unlocked_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unlocked At"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "icon",
+          "points"
+        ],
+        "title": "Achievement",
+        "type": "object"
+      },
       "ActiveProviderRequest": {
         "properties": {
           "provider_id": {
@@ -972,6 +1021,121 @@
         "title": "ClassifyRequest",
         "type": "object"
       },
+      "CleanupCandidate": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "is_dir": {
+            "title": "Is Dir",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "category",
+          "size_bytes",
+          "is_dir"
+        ],
+        "title": "CleanupCandidate",
+        "type": "object"
+      },
+      "CleanupExecuteRequest": {
+        "properties": {
+          "categories": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categories"
+          }
+        },
+        "title": "CleanupExecuteRequest",
+        "type": "object"
+      },
+      "CleanupExecutionReport": {
+        "properties": {
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "purged_count": {
+            "title": "Purged Count",
+            "type": "integer"
+          },
+          "reclaimed_bytes": {
+            "title": "Reclaimed Bytes",
+            "type": "integer"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "purged_count",
+          "reclaimed_bytes"
+        ],
+        "title": "CleanupExecutionReport",
+        "type": "object"
+      },
+      "CleanupScanReport": {
+        "properties": {
+          "by_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Category",
+            "type": "object"
+          },
+          "candidate_count": {
+            "title": "Candidate Count",
+            "type": "integer"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CleanupCandidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "target_root": {
+            "title": "Target Root",
+            "type": "string"
+          },
+          "total_reclaimable_bytes": {
+            "title": "Total Reclaimable Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target_root",
+          "total_reclaimable_bytes",
+          "candidate_count"
+        ],
+        "title": "CleanupScanReport",
+        "type": "object"
+      },
       "CodexTurnRequest": {
         "properties": {
           "events": {
@@ -1054,6 +1218,20 @@
           "result"
         ],
         "title": "CommandResponse",
+        "type": "object"
+      },
+      "CompanionActionRequest": {
+        "properties": {
+          "action": {
+            "description": "feed, play, rest",
+            "title": "Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "CompanionActionRequest",
         "type": "object"
       },
       "ComparisonLimits": {
@@ -3387,6 +3565,19 @@
         "title": "OutputView",
         "type": "object"
       },
+      "PackActionRequest": {
+        "properties": {
+          "pack_id": {
+            "title": "Pack Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pack_id"
+        ],
+        "title": "PackActionRequest",
+        "type": "object"
+      },
       "PathValidateRequest": {
         "properties": {
           "allow_sensitive": {
@@ -3461,6 +3652,61 @@
           "name"
         ],
         "title": "PersonRequest",
+        "type": "object"
+      },
+      "PetState": {
+        "properties": {
+          "active_skin": {
+            "default": "default",
+            "title": "Active Skin",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "energy": {
+            "default": 100,
+            "title": "Energy",
+            "type": "integer"
+          },
+          "experience": {
+            "default": 0,
+            "title": "Experience",
+            "type": "integer"
+          },
+          "hunger": {
+            "default": 100,
+            "title": "Hunger",
+            "type": "integer"
+          },
+          "last_interaction": {
+            "title": "Last Interaction",
+            "type": "number"
+          },
+          "level": {
+            "default": 1,
+            "title": "Level",
+            "type": "integer"
+          },
+          "mood": {
+            "default": "happy",
+            "title": "Mood",
+            "type": "string"
+          },
+          "name": {
+            "default": "Homun",
+            "title": "Name",
+            "type": "string"
+          },
+          "species": {
+            "default": "Automaton",
+            "title": "Species",
+            "type": "string"
+          }
+        },
+        "title": "PetState",
         "type": "object"
       },
       "PlanStepPayload": {
@@ -4820,6 +5066,58 @@
         "title": "ScanDeliverablesResponse",
         "type": "object"
       },
+      "SecurityAdvisory": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "matched_text": {
+            "title": "Matched Text",
+            "type": "string"
+          },
+          "remediation": {
+            "title": "Remediation",
+            "type": "string"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "severity": {
+            "description": "critical, high, medium, low",
+            "title": "Severity",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_id",
+          "severity",
+          "title",
+          "description",
+          "matched_text",
+          "remediation"
+        ],
+        "title": "SecurityAdvisory",
+        "type": "object"
+      },
+      "SecurityScanRequest": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "SecurityScanRequest",
+        "type": "object"
+      },
       "ServerActionRequest": {
         "properties": {
           "command_id": {
@@ -4919,6 +5217,54 @@
         "title": "ServerCreateRequest",
         "type": "object"
       },
+      "SetSkinRequest": {
+        "properties": {
+          "skin_id": {
+            "title": "Skin Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skin_id"
+        ],
+        "title": "SetSkinRequest",
+        "type": "object"
+      },
+      "ShippedSkill": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "system_prompt": {
+            "title": "System Prompt",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "system_prompt"
+        ],
+        "title": "ShippedSkill",
+        "type": "object"
+      },
       "SkillActionRequest": {
         "properties": {
           "command_id": {
@@ -4991,6 +5337,51 @@
           "name"
         ],
         "title": "SkillCreateRequest",
+        "type": "object"
+      },
+      "SkillPack": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_installed": {
+            "default": false,
+            "title": "Is Installed",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/ShippedSkill"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "version": {
+            "default": "1.0.0",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "category",
+          "description"
+        ],
+        "title": "SkillPack",
         "type": "object"
       },
       "SpotifyActionRequest": {
@@ -5904,6 +6295,58 @@
         "title": "TerminalProposalRequest",
         "type": "object"
       },
+      "Tip": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "shortcut": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shortcut"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "category",
+          "title",
+          "body"
+        ],
+        "title": "Tip",
+        "type": "object"
+      },
+      "ToggleCompanionRequest": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "ToggleCompanionRequest",
+        "type": "object"
+      },
       "ToolApproveRequest": {
         "properties": {
           "command_id": {
@@ -6022,6 +6465,45 @@
         "title": "ToolProposeRequest",
         "type": "object"
       },
+      "TourStep": {
+        "properties": {
+          "action_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Hint"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          },
+          "target_surface": {
+            "title": "Target Surface",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "title",
+          "content",
+          "target_surface"
+        ],
+        "title": "TourStep",
+        "type": "object"
+      },
       "TrajectorySample": {
         "properties": {
           "completed": {
@@ -6115,6 +6597,19 @@
           "text"
         ],
         "title": "TtsSynthesizeRequest",
+        "type": "object"
+      },
+      "UnlockAchievementRequest": {
+        "properties": {
+          "achievement_id": {
+            "title": "Achievement Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "achievement_id"
+        ],
+        "title": "UnlockAchievementRequest",
         "type": "object"
       },
       "UrlValidateRequest": {
@@ -6534,6 +7029,559 @@
         "summary": "Capabilities",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/catalog/achievements": {
+      "get": {
+        "operationId": "list_achievements_v1_catalog_achievements_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Achievements V1 Catalog Achievements Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Achievements",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/achievements/unlock": {
+      "post": {
+        "operationId": "unlock_achievement_v1_catalog_achievements_unlock_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnlockAchievementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Achievement"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unlock Achievement",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/cleanup/execute": {
+      "post": {
+        "operationId": "execute_cleanup_v1_catalog_cleanup_execute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupExecutionReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execute Cleanup",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/cleanup/scan": {
+      "post": {
+        "operationId": "scan_cleanup_v1_catalog_cleanup_scan_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupScanReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Scan Cleanup",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/companion/action": {
+      "post": {
+        "operationId": "companion_action_v1_catalog_companion_action_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanionActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PetState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Companion Action",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/companion/skin": {
+      "post": {
+        "operationId": "set_companion_skin_v1_catalog_companion_skin_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSkinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PetState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Companion Skin",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/companion/state": {
+      "get": {
+        "operationId": "get_companion_state_v1_catalog_companion_state_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Companion State V1 Catalog Companion State Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Companion State",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/companion/toggle": {
+      "post": {
+        "operationId": "toggle_companion_v1_catalog_companion_toggle_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToggleCompanionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PetState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Toggle Companion",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/packs": {
+      "get": {
+        "operationId": "list_catalog_packs_v1_catalog_packs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SkillPack"
+                  },
+                  "title": "Response List Catalog Packs V1 Catalog Packs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Catalog Packs",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/packs/install": {
+      "post": {
+        "operationId": "install_pack_v1_catalog_packs_install_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillPack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Install Pack",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/packs/uninstall": {
+      "post": {
+        "operationId": "uninstall_pack_v1_catalog_packs_uninstall_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Uninstall Pack V1 Catalog Packs Uninstall Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Uninstall Pack",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/security/scan": {
+      "post": {
+        "operationId": "scan_security_v1_catalog_security_scan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecurityScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SecurityAdvisory"
+                  },
+                  "title": "Response Scan Security V1 Catalog Security Scan Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scan Security",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/tips": {
+      "get": {
+        "operationId": "get_tips_v1_catalog_tips_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Tip"
+                  },
+                  "title": "Response Get Tips V1 Catalog Tips Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Tips",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/tips/random": {
+      "get": {
+        "operationId": "get_random_tip_v1_catalog_tips_random_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tip"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Random Tip",
+        "tags": [
+          "surface_catalog"
+        ]
+      }
+    },
+    "/v1/catalog/tour": {
+      "get": {
+        "operationId": "get_onboarding_tour_v1_catalog_tour_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TourStep"
+                  },
+                  "title": "Response Get Onboarding Tour V1 Catalog Tour Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Onboarding Tour",
+        "tags": [
+          "surface_catalog"
         ]
       }
     },
