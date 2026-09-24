@@ -709,3 +709,54 @@ def test_whatsapp_send_posts_when_token_configured(monkeypatch):
     assert "pnid_1/messages" in calls[0]["url"]
     assert calls[0]["json"]["to"] == "15551234567"
     assert calls[0]["headers"]["Authorization"] == "Bearer wa-token"
+
+
+def test_email_send_without_smtp_is_unavailable():
+    from homun.application.channel_adapters import EmailAdapter
+
+    out = EmailAdapter().send("user@example.com", "hello")
+    assert out["delivered"] is False
+    assert out.get("code") == "backend_unavailable"
+
+
+def test_email_send_uses_smtp_when_configured(monkeypatch):
+    from homun.application.channel_adapters import EmailAdapter
+
+    calls = []
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=None):
+            calls.append({"host": host, "port": port})
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def ehlo(self):
+            return None
+
+        def starttls(self):
+            return None
+
+        def login(self, user, password):
+            calls.append({"login": user})
+
+        def send_message(self, msg):
+            calls.append({"to": msg["To"], "body": msg.get_content()})
+
+    monkeypatch.setattr("homun.application.channel_adapters.smtplib.SMTP", FakeSMTP)
+    adapter = EmailAdapter(
+        config={
+            "smtp_host": "smtp.example",
+            "smtp_port": 587,
+            "smtp_user": "u",
+            "smtp_password": "p",
+            "from": "homun@example.com",
+        }
+    )
+    out = adapter.send("dest@example.com", "hi there")
+    assert out["delivered"] is True
+    assert calls[0]["host"] == "smtp.example"
+    assert any(c.get("to") == "dest@example.com" for c in calls)

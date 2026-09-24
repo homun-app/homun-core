@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import logging
 import os
+import smtplib
 import time
 import uuid
+from email.message import EmailMessage
 from typing import Any, Callable, Dict, List, Optional
 
 import httpx
@@ -748,6 +750,91 @@ class MatrixAdapter(ChannelAdapter):
             )
 
 
+class EmailAdapter(ChannelAdapter):
+    """SMTP outbound email (Hermes messaging catalog: email)."""
+
+    platform = "email"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        return ChannelMessage(
+            id=str(payload.get("message_id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(payload.get("to") or payload.get("channel_id") or ""),
+            user_id=str(payload.get("from") or payload.get("user_id") or ""),
+            text=str(payload.get("subject") or "") + "\n" + str(payload.get("text") or payload.get("body") or ""),
+            is_direct=True,
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        host = (
+            str(self.config.get("smtp_host") or "").strip()
+            or str(os.environ.get("HOMUN_SMTP_HOST") or os.environ.get("SMTP_HOST") or "").strip()
+        )
+        port = int(self.config.get("smtp_port") or os.environ.get("HOMUN_SMTP_PORT") or os.environ.get("SMTP_PORT") or 587)
+        user = (
+            str(self.config.get("smtp_user") or "").strip()
+            or str(os.environ.get("HOMUN_SMTP_USER") or os.environ.get("SMTP_USER") or "").strip()
+        )
+        password = (
+            str(self.config.get("smtp_password") or "").strip()
+            or str(os.environ.get("HOMUN_SMTP_PASSWORD") or os.environ.get("SMTP_PASSWORD") or "").strip()
+        )
+        mail_from = (
+            str(self.config.get("from") or "").strip()
+            or str(os.environ.get("HOMUN_SMTP_FROM") or user or "").strip()
+        )
+        if not host or not mail_from or not channel_id:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+
+        subject = str(self.config.get("subject") or thread_id or "Homun")
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = mail_from
+        msg["To"] = channel_id
+        if reply_to_id:
+            msg["In-Reply-To"] = reply_to_id
+        msg.set_content(text)
+        try:
+            with smtplib.SMTP(host, port, timeout=float(self.config.get("timeout") or 20.0)) as smtp:
+                smtp.ehlo()
+                if self.config.get("starttls", True):
+                    smtp.starttls()
+                    smtp.ehlo()
+                if user and password:
+                    smtp.login(user, password)
+                smtp.send_message(msg)
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=250,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
+
+
 class ChannelRegistry:
     """Registry and dispatcher for multi-platform channel adapters."""
 
@@ -766,6 +853,7 @@ class ChannelRegistry:
             "webhook": WebhookRelayAdapter(),
             "ntfy": NtfyAdapter(),
             "matrix": MatrixAdapter(),
+            "email": EmailAdapter(),
         }
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:
