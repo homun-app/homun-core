@@ -108,6 +108,14 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   su interprete figlio isolato con bridge RPC locale autenticato (UDS/TCP loopback), allowlist
   degli strumenti ammessi, tetto alle chiamate, troncamento output (40% testa / 60% coda) e timeout.
 
+- Orchestrazione compiti con Kanban durevole e contratti PR (`KanbanStore`, `KanbanWorkflow`, H23)
+  con persistenza SQLite WAL, isolamento dei profili, tracciamento DAG delle dipendenze,
+  assegnazione worker con lease temporizzati e rinnovo heartbeat, recupero automatico
+  dei worker arrestati o crashati, sblocco automatico delle dipendenze al completamento
+  di una scheda, flusso di revisione strutturato (`request_review`, `review_card` con ciclo
+  approve / changes_requested), contratti PR con verifica automatica dei criteri di gating
+  e protezione branch prima del merge; esposto via endpoint REST `/v1/kanban`.
+
 - Orchestrazione Mixture of Agents (`MoACoordinator`, H24) con modelli di riferimento
   consultivi (`MoAReferenceModel`) che consigliano senza schemi strumenti (gli advisor
   non causano effetti collaterali), aggregatore attivo (`MoAAggregator`) che esegue gli

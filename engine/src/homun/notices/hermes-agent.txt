@@ -347,6 +347,12 @@ and persistence, onboarding tours and context-aware tips, workspace disk cleanup
 pattern scanning and guidance advisories, and the complete catalog manifest of bundled and optional skill packs
 with safe installation and uninstallation from agent/pet/, plugins/hermes-achievements/, tools/tour_tool.py,
 tools/tip_tool.py, plugins/disk-cleanup/, plugins/security-guidance/, and plugin-catalog/ at the pinned commit.
+application/kanban_contracts.py, application/kanban_store.py, application/kanban_workflow.py, and
+routes/kanban_api.py derive durable Kanban task orchestration (boards, columns, dependency tracking,
+worker claiming, heartbeat liveness, crashed worker recovery, and automatic dependency unblocking),
+card reviews with approve/changes_requested cycle, and PR contracts with verification gates from
+tools/kanban_tool.py and kanban/ at the pinned commit.
+
 
 
 

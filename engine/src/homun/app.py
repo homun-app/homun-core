@@ -104,5 +104,7 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(research_api.router)
     from homun.routes import surface_catalog_api
     app.include_router(surface_catalog_api.router)
+    from homun.routes import kanban_api
+    app.include_router(kanban_api.router)
     return app
 

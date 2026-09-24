@@ -1006,6 +1006,31 @@
         "title": "ChatMessage",
         "type": "object"
       },
+      "ClaimCardRequest": {
+        "properties": {
+          "lease_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 60.0,
+            "title": "Lease Seconds"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id"
+        ],
+        "title": "ClaimCardRequest",
+        "type": "object"
+      },
       "ClassifyRequest": {
         "properties": {
           "text": {
@@ -1877,6 +1902,99 @@
         "title": "CopilotAcpRequest",
         "type": "object"
       },
+      "CreateBoardRequest": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "default",
+            "title": "Owner Profile"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateBoardRequest",
+        "type": "object"
+      },
+      "CreateCardRequest": {
+        "properties": {
+          "board_id": {
+            "title": "Board Id",
+            "type": "string"
+          },
+          "dependencies": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dependencies"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Description"
+          },
+          "lane": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "backlog",
+            "title": "Lane"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "board_id",
+          "title"
+        ],
+        "title": "CreateCardRequest",
+        "type": "object"
+      },
       "CreateProfileRequest": {
         "properties": {
           "config_overrides": {
@@ -2385,6 +2503,28 @@
         "title": "EngineCapabilities",
         "type": "object"
       },
+      "FanOutRequest": {
+        "properties": {
+          "board_id": {
+            "title": "Board Id",
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "board_id",
+          "tasks"
+        ],
+        "title": "FanOutRequest",
+        "type": "object"
+      },
       "FeishuCommentRequest": {
         "properties": {
           "comment_id": {
@@ -2675,6 +2815,31 @@
           "uptime_seconds"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "HeartbeatRequest": {
+        "properties": {
+          "lease_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 60.0,
+            "title": "Lease Seconds"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id"
+        ],
+        "title": "HeartbeatRequest",
         "type": "object"
       },
       "ImageEditRequest": {
@@ -3077,6 +3242,169 @@
           "recipient_name"
         ],
         "title": "InvitationRequest",
+        "type": "object"
+      },
+      "KanbanBoard": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lanes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lanes",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_profile": {
+            "default": "default",
+            "title": "Owner Profile",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "KanbanBoard",
+        "type": "object"
+      },
+      "KanbanCard": {
+        "properties": {
+          "artifacts": {
+            "description": "Paths or URIs of produced deliverables",
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "assigned_worker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Worker Id"
+          },
+          "board_id": {
+            "title": "Board Id",
+            "type": "string"
+          },
+          "claim_expires_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Expires At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "dependencies": {
+            "description": "IDs of cards that must be done first",
+            "items": {
+              "type": "string"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lane": {
+            "default": "backlog",
+            "title": "Lane",
+            "type": "string"
+          },
+          "pr_contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PRContract"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Notes"
+          },
+          "review_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Status"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "board_id",
+          "title"
+        ],
+        "title": "KanbanCard",
         "type": "object"
       },
       "MeetJoinRequest": {
@@ -3563,6 +3891,50 @@
           "review_status"
         ],
         "title": "OutputView",
+        "type": "object"
+      },
+      "PRContract": {
+        "properties": {
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "target_branch": {
+            "default": "main",
+            "title": "Target Branch",
+            "type": "string"
+          }
+        },
+        "title": "PRContract",
         "type": "object"
       },
       "PackActionRequest": {
@@ -4297,6 +4669,36 @@
         "title": "ReportCredentialRequest",
         "type": "object"
       },
+      "RequestReviewRequest": {
+        "properties": {
+          "artifacts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifacts"
+          },
+          "pr_contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PRContract"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "RequestReviewRequest",
+        "type": "object"
+      },
       "ResponseRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4311,6 +4713,51 @@
           "text"
         ],
         "title": "ResponseRequest",
+        "type": "object"
+      },
+      "ReviewCardRequest": {
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Notes"
+          }
+        },
+        "required": [
+          "approved"
+        ],
+        "title": "ReviewCardRequest",
+        "type": "object"
+      },
+      "ReviewResponse": {
+        "properties": {
+          "card": {
+            "$ref": "#/components/schemas/KanbanCard"
+          },
+          "unlocked_dependants": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unlocked Dependants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "card",
+          "unlocked_dependants"
+        ],
+        "title": "ReviewResponse",
         "type": "object"
       },
       "RevisionRequest": {
@@ -8781,6 +9228,563 @@
         "summary": "Yuanbao Action",
         "tags": [
           "integrations"
+        ]
+      }
+    },
+    "/v1/kanban/boards": {
+      "get": {
+        "operationId": "list_boards_v1_kanban_boards_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "owner_profile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Profile"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KanbanBoard"
+                  },
+                  "title": "Response List Boards V1 Kanban Boards Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Boards",
+        "tags": [
+          "kanban"
+        ]
+      },
+      "post": {
+        "operationId": "create_board_v1_kanban_boards_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBoardRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KanbanBoard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Board",
+        "tags": [
+          "kanban"
+        ]
+      }
+    },
+    "/v1/kanban/boards/{board_id}": {
+      "get": {
+        "operationId": "get_board_v1_kanban_boards__board_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "board_id",
+            "required": true,
+            "schema": {
+              "title": "Board Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KanbanBoard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Board",
+        "tags": [
+          "kanban"
+        ]
+      }
+    },
+    "/v1/kanban/boards/{board_id}/cards": {
+      "get": {
+        "operationId": "list_cards_v1_kanban_boards__board_id__cards_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "board_id",
+            "required": true,
+            "schema": {
+              "title": "Board Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lane",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lane"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KanbanCard"
+                  },
+                  "title": "Response List Cards V1 Kanban Boards  Board Id  Cards Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Cards",
+        "tags": [
+          "kanban"
+        ]
+      }
+    },
+    "/v1/kanban/cards": {
+      "post": {
+        "operationId": "create_card_v1_kanban_cards_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCardRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KanbanCard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Card",
+        "tags": [
+          "kanban"
+        ]
+      }
+    },
+    "/v1/kanban/cards/fan_out": {
+      "post": {
+        "operationId": "fan_out_tasks_v1_kanban_cards_fan_out_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FanOutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KanbanCard"
+                  },
+                  "title": "Response Fan Out Tasks V1 Kanban Cards Fan Out Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fan Out Tasks",
+        "tags": [
+          "kanban"
+        ]
+      }
+    },
+    "/v1/kanban/cards/{card_id}": {
+      "get": {
+        "operationId": "get_card_v1_kanban_cards__card_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KanbanCard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Card",
+        "tags": [
+          "kanban"
+        ]
+      }
+    },
+    "/v1/kanban/cards/{card_id}/claim": {
+      "post": {
+        "operationId": "claim_card_v1_kanban_cards__card_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimCardRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KanbanCard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Card",
+        "tags": [
+          "kanban"
+        ]
+      }
+    },
+    "/v1/kanban/cards/{card_id}/heartbeat": {
+      "post": {
+        "operationId": "heartbeat_card_v1_kanban_cards__card_id__heartbeat_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Heartbeat Card V1 Kanban Cards  Card Id  Heartbeat Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Heartbeat Card",
+        "tags": [
+          "kanban"
+        ]
+      }
+    },
+    "/v1/kanban/cards/{card_id}/request_review": {
+      "post": {
+        "operationId": "request_review_v1_kanban_cards__card_id__request_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KanbanCard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Review",
+        "tags": [
+          "kanban"
+        ]
+      }
+    },
+    "/v1/kanban/cards/{card_id}/review": {
+      "post": {
+        "operationId": "review_card_v1_kanban_cards__card_id__review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewCardRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Card",
+        "tags": [
+          "kanban"
+        ]
+      }
+    },
+    "/v1/kanban/recover_crashed": {
+      "post": {
+        "operationId": "recover_crashed_v1_kanban_recover_crashed_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Recover Crashed V1 Kanban Recover Crashed Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Recover Crashed",
+        "tags": [
+          "kanban"
         ]
       }
     },
