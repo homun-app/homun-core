@@ -1496,6 +1496,131 @@
         "title": "DeliveryReceiptResponse",
         "type": "object"
       },
+      "DiscordActionRequest": {
+        "properties": {
+          "action": {
+            "description": "Action name (e.g. list_guilds, pin_message, create_thread)",
+            "title": "Action",
+            "type": "string"
+          },
+          "after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel Id"
+          },
+          "guild_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guild Id"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 20,
+            "title": "Limit"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "role_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "DiscordActionRequest",
+        "type": "object"
+      },
       "EngineCapabilities": {
         "properties": {
           "api_version": {
@@ -1516,6 +1641,47 @@
           "features"
         ],
         "title": "EngineCapabilities",
+        "type": "object"
+      },
+      "FeishuCommentRequest": {
+        "properties": {
+          "comment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Id"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "file_token": {
+            "title": "File Token",
+            "type": "string"
+          },
+          "file_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "docx",
+            "title": "File Type"
+          }
+        },
+        "required": [
+          "file_token",
+          "content"
+        ],
+        "title": "FeishuCommentRequest",
         "type": "object"
       },
       "FileEdit": {
@@ -1685,6 +1851,51 @@
           "items"
         ],
         "title": "FileEditList",
+        "type": "object"
+      },
+      "HACallRequest": {
+        "properties": {
+          "domain": {
+            "description": "Service domain (e.g. 'light', 'switch')",
+            "title": "Domain",
+            "type": "string"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target entity_id",
+            "title": "Entity Id"
+          },
+          "service": {
+            "description": "Service name (e.g. 'turn_on', 'turn_off')",
+            "title": "Service",
+            "type": "string"
+          },
+          "service_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional service parameters",
+            "title": "Service Data"
+          }
+        },
+        "required": [
+          "domain",
+          "service"
+        ],
+        "title": "HACallRequest",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -2087,6 +2298,108 @@
           "recipient_name"
         ],
         "title": "InvitationRequest",
+        "type": "object"
+      },
+      "MeetJoinRequest": {
+        "properties": {
+          "duration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
+          "guest_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "Homun Agent",
+            "title": "Guest Name"
+          },
+          "headed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "title": "Headed"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "transcribe",
+            "title": "Mode"
+          },
+          "node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "MeetJoinRequest",
+        "type": "object"
+      },
+      "MeetLeaveRequest": {
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "MeetLeaveRequest",
+        "type": "object"
+      },
+      "MeetSpeakRequest": {
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "text"
+        ],
+        "title": "MeetSpeakRequest",
         "type": "object"
       },
       "MemoryListResponse": {
@@ -3855,6 +4168,137 @@
         "title": "SkillCreateRequest",
         "type": "object"
       },
+      "SpotifyActionRequest": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "context_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Uri"
+          },
+          "device_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 20,
+            "title": "Limit"
+          },
+          "offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 0,
+            "title": "Offset"
+          },
+          "position_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Ms"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "track_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Track Id"
+          },
+          "types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Types"
+          },
+          "uris": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uris"
+          },
+          "volume_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Percent"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "SpotifyActionRequest",
+        "type": "object"
+      },
       "SttTranscribeRequest": {
         "properties": {
           "audio_path": {
@@ -4113,6 +4557,19 @@
           "expected_version"
         ],
         "title": "SynthesisRequest",
+        "type": "object"
+      },
+      "TeamsParseRequest": {
+        "properties": {
+          "resource_uri": {
+            "title": "Resource Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_uri"
+        ],
+        "title": "TeamsParseRequest",
         "type": "object"
       },
       "TerminalApprovalRequest": {
@@ -4994,6 +5451,79 @@
         "title": "WakeCheckRequest",
         "type": "object"
       },
+      "YuanbaoActionRequest": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "group_code": {
+            "title": "Group Code",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "sticker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sticker Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "action",
+          "group_code"
+        ],
+        "title": "YuanbaoActionRequest",
+        "type": "object"
+      },
       "homun__routes__intake__ConfirmRequest": {
         "properties": {
           "command_id": {
@@ -5540,6 +6070,743 @@
         "summary": "Health",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/integrations/discord/action": {
+      "post": {
+        "operationId": "discord_action_v1_integrations_discord_action_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscordActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Discord Action V1 Integrations Discord Action Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discord Action",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/feishu/comments": {
+      "get": {
+        "operationId": "feishu_list_comments_v1_integrations_feishu_comments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "file_token",
+            "required": true,
+            "schema": {
+              "title": "File Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "file_type",
+            "required": false,
+            "schema": {
+              "default": "docx",
+              "title": "File Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "is_whole",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Is Whole",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Page Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Feishu List Comments V1 Integrations Feishu Comments Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Feishu List Comments",
+        "tags": [
+          "integrations"
+        ]
+      },
+      "post": {
+        "operationId": "feishu_create_or_reply_comment_v1_integrations_feishu_comments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeishuCommentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Feishu Create Or Reply Comment V1 Integrations Feishu Comments Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Feishu Create Or Reply Comment",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/feishu/document": {
+      "get": {
+        "operationId": "feishu_get_document_v1_integrations_feishu_document_get",
+        "parameters": [
+          {
+            "description": "Document token",
+            "in": "query",
+            "name": "doc_token",
+            "required": true,
+            "schema": {
+              "description": "Document token",
+              "title": "Doc Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Feishu Get Document V1 Integrations Feishu Document Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Feishu Get Document",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/homeassistant/call": {
+      "post": {
+        "operationId": "ha_call_service_v1_integrations_homeassistant_call_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HACallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ha Call Service V1 Integrations Homeassistant Call Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ha Call Service",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/homeassistant/entities": {
+      "get": {
+        "operationId": "ha_list_entities_v1_integrations_homeassistant_entities_get",
+        "parameters": [
+          {
+            "description": "Filter by domain",
+            "in": "query",
+            "name": "domain",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by domain",
+              "title": "Domain"
+            }
+          },
+          {
+            "description": "Filter by area",
+            "in": "query",
+            "name": "area",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by area",
+              "title": "Area"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ha List Entities V1 Integrations Homeassistant Entities Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ha List Entities",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/homeassistant/states/{entity_id}": {
+      "get": {
+        "operationId": "ha_get_state_v1_integrations_homeassistant_states__entity_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "title": "Entity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ha Get State V1 Integrations Homeassistant States  Entity Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ha Get State",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/meetings/meet/join": {
+      "post": {
+        "operationId": "meet_join_v1_integrations_meetings_meet_join_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeetJoinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Meet Join V1 Integrations Meetings Meet Join Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Meet Join",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/meetings/meet/leave": {
+      "post": {
+        "operationId": "meet_leave_v1_integrations_meetings_meet_leave_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeetLeaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Meet Leave V1 Integrations Meetings Meet Leave Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Meet Leave",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/meetings/meet/speak": {
+      "post": {
+        "operationId": "meet_speak_v1_integrations_meetings_meet_speak_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeetSpeakRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Meet Speak V1 Integrations Meetings Meet Speak Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Meet Speak",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/meetings/meet/status": {
+      "get": {
+        "operationId": "meet_status_v1_integrations_meetings_meet_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Meet Status V1 Integrations Meetings Meet Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Meet Status",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/meetings/meet/transcript": {
+      "get": {
+        "operationId": "meet_transcript_v1_integrations_meetings_meet_transcript_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "last_n",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last N"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Meet Transcript V1 Integrations Meetings Meet Transcript Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Meet Transcript",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/meetings/teams/parse": {
+      "post": {
+        "operationId": "teams_parse_v1_integrations_meetings_teams_parse_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamsParseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Teams Parse V1 Integrations Meetings Teams Parse Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Teams Parse",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/spotify/action": {
+      "post": {
+        "operationId": "spotify_action_v1_integrations_spotify_action_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpotifyActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Spotify Action V1 Integrations Spotify Action Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Spotify Action",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/yuanbao/action": {
+      "post": {
+        "operationId": "yuanbao_action_v1_integrations_yuanbao_action_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/YuanbaoActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Yuanbao Action V1 Integrations Yuanbao Action Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Yuanbao Action",
+        "tags": [
+          "integrations"
         ]
       }
     },
