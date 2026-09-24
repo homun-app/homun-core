@@ -36,9 +36,33 @@ from homun.application.gateway_turn_lease import TurnLeaseManager, TurnLeaseTime
 from homun.domain.errors import ValidationError
 
 
+@pytest.fixture(autouse=True)
+def _pairing_in_memory(monkeypatch):
+    """Keep pairing unit tests off the product HOMUN_DATA_DIR sqlite file."""
+    monkeypatch.setenv("HOMUN_PAIRING_DB", ":memory:")
+    reset_gateway_state()
+    yield
+    reset_gateway_state()
+
+
 # ---------------------------------------------------------------------------
 # 1. Pairing Lifecycle & Security Tests
 # ---------------------------------------------------------------------------
+
+def test_pairing_survives_store_reopen(tmp_path, monkeypatch):
+    monkeypatch.delenv("HOMUN_PAIRING_DB", raising=False)
+    db = tmp_path / "pairing.sqlite"
+    mgr1 = GatewayPairingManager(db_path=db)
+    req = mgr1.request_pairing("telegram", "persist_user", username="alice")
+    mgr1.approve_code(req.code, approved_by="ops")
+    assert mgr1.is_user_authorized("telegram", "persist_user")
+
+    mgr2 = GatewayPairingManager(db_path=db)
+    assert mgr2.is_user_authorized("telegram", "persist_user")
+    restored = mgr2.get_request_by_code(req.code, now=req.created_at + 10)
+    assert restored is not None
+    assert restored.status == "approved"
+
 
 def test_pairing_code_generation_and_unambiguous_alphabet():
     mgr = GatewayPairingManager()

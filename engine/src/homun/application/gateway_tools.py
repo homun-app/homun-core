@@ -11,11 +11,15 @@ from typing import Any, Dict
 
 from homun.application.channel_adapters import ChannelRegistry
 from homun.application.gateway_hosted_rooms import HostedRoomManager
-from homun.application.gateway_pairing import GatewayPairingManager
+from homun.application.gateway_pairing import (
+    GatewayPairingManager,
+    get_gateway_pairing_manager,
+    set_gateway_pairing_manager,
+)
 from homun.application.gateway_turn_lease import TurnLeaseManager
 from homun.domain.errors import ValidationError
 
-_GLOBAL_PAIRING_MGR = GatewayPairingManager()
+_GLOBAL_PAIRING_MGR = GatewayPairingManager(db_path=":memory:")
 _GLOBAL_LEASE_MGR = TurnLeaseManager()
 _GLOBAL_ROOM_MGR = HostedRoomManager()
 _GLOBAL_CHANNEL_REG = ChannelRegistry(_GLOBAL_PAIRING_MGR, _GLOBAL_LEASE_MGR)
@@ -24,7 +28,8 @@ _GLOBAL_CHANNEL_REG = ChannelRegistry(_GLOBAL_PAIRING_MGR, _GLOBAL_LEASE_MGR)
 def reset_gateway_state() -> None:
     """Reset global gateway managers (primarily used in tests)."""
     global _GLOBAL_PAIRING_MGR, _GLOBAL_LEASE_MGR, _GLOBAL_ROOM_MGR, _GLOBAL_CHANNEL_REG
-    _GLOBAL_PAIRING_MGR = GatewayPairingManager()
+    _GLOBAL_PAIRING_MGR = GatewayPairingManager(db_path=":memory:")
+    set_gateway_pairing_manager(_GLOBAL_PAIRING_MGR)
     _GLOBAL_LEASE_MGR = TurnLeaseManager()
     _GLOBAL_ROOM_MGR = HostedRoomManager()
     _GLOBAL_CHANNEL_REG = ChannelRegistry(_GLOBAL_PAIRING_MGR, _GLOBAL_LEASE_MGR)

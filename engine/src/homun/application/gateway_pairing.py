@@ -8,12 +8,18 @@ and operator approval allowlisting.
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import secrets
+import sqlite3
+import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from homun.application.gateway_contracts import PairingRequest
+from homun.storage.paths import default_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +53,7 @@ class GatewayPairingManager:
         max_verification_failures: Optional[int] = None,
         allowlist_users: Optional[Set[str]] = None,
         denylist_users: Optional[Set[str]] = None,
+        db_path: Optional[str | Path] = None,
     ):
         self.workspace_id = workspace_id
         self.code_ttl_seconds = code_ttl_seconds
@@ -70,6 +77,122 @@ class GatewayPairingManager:
                     self._allowed_users.setdefault(plat.strip().lower(), set()).add(uid.strip())
                 else:
                     self._allowed_users.setdefault("generic", set()).add(item.strip())
+
+        if db_path is None:
+            override = os.environ.get("HOMUN_PAIRING_DB")
+            if override:
+                db_path = override
+            else:
+                root = default_data_dir() / "gateway"
+                root.mkdir(parents=True, exist_ok=True)
+                db_path = root / f"pairing-{self.workspace_id}.sqlite"
+        self._db_path = str(db_path)
+        self._db_lock = threading.RLock()
+        if self._db_path != ":memory:":
+            Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        if self._db_path != ":memory:":
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pairing_kv (
+                kind TEXT NOT NULL,
+                key TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (kind, key)
+            )
+            """
+        )
+        self._conn.commit()
+        self._load()
+
+    def _put(self, kind: str, key: str, payload: Dict[str, Any]) -> None:
+        with self._db_lock:
+            self._conn.execute(
+                """
+                INSERT INTO pairing_kv(kind, key, payload, updated_at)
+                VALUES(?, ?, ?, ?)
+                ON CONFLICT(kind, key) DO UPDATE SET
+                    payload = excluded.payload,
+                    updated_at = excluded.updated_at
+                """,
+                (kind, key, json.dumps(payload, ensure_ascii=False, sort_keys=True), time.time()),
+            )
+            self._conn.commit()
+
+    def _delete(self, kind: str, key: str) -> None:
+        with self._db_lock:
+            self._conn.execute(
+                "DELETE FROM pairing_kv WHERE kind = ? AND key = ?",
+                (kind, key),
+            )
+            self._conn.commit()
+
+    def _persist_all(self) -> None:
+        """Rewrite durable allowlist/lockout/rate state (codes persist individually)."""
+        with self._db_lock:
+            self._conn.execute("DELETE FROM pairing_kv WHERE kind IN ('allow','deny','lockout','rate','fail','meta')")
+            for plat, users in self._allowed_users.items():
+                self._conn.execute(
+                    "INSERT INTO pairing_kv(kind, key, payload, updated_at) VALUES(?, ?, ?, ?)",
+                    ("allow", plat, json.dumps(sorted(users)), time.time()),
+                )
+            if self._denylist_users:
+                self._conn.execute(
+                    "INSERT INTO pairing_kv(kind, key, payload, updated_at) VALUES(?, ?, ?, ?)",
+                    ("deny", "users", json.dumps(sorted(self._denylist_users)), time.time()),
+                )
+            for (plat, uid), until in self._lockouts.items():
+                self._conn.execute(
+                    "INSERT INTO pairing_kv(kind, key, payload, updated_at) VALUES(?, ?, ?, ?)",
+                    ("lockout", f"{plat}|{uid}", json.dumps({"until": until}), time.time()),
+                )
+            for (plat, uid), ts in self._user_requests.items():
+                self._conn.execute(
+                    "INSERT INTO pairing_kv(kind, key, payload, updated_at) VALUES(?, ?, ?, ?)",
+                    ("rate", f"{plat}|{uid}", json.dumps({"at": ts}), time.time()),
+                )
+            for (plat, uid), n in self._failed_attempts.items():
+                self._conn.execute(
+                    "INSERT INTO pairing_kv(kind, key, payload, updated_at) VALUES(?, ?, ?, ?)",
+                    ("fail", f"{plat}|{uid}", json.dumps({"n": n}), time.time()),
+                )
+            self._conn.execute(
+                "INSERT INTO pairing_kv(kind, key, payload, updated_at) VALUES(?, ?, ?, ?)",
+                ("meta", "global_failures", json.dumps({"n": self._global_failures}), time.time()),
+            )
+            self._conn.commit()
+
+    def _persist_request(self, req: PairingRequest) -> None:
+        self._put("code", req.code, req.to_dict())
+
+    def _load(self) -> None:
+        rows = self._conn.execute("SELECT kind, key, payload FROM pairing_kv").fetchall()
+        for kind, key, payload in rows:
+            try:
+                data = json.loads(payload)
+            except Exception:
+                continue
+            if kind == "code" and isinstance(data, dict):
+                req = PairingRequest.from_dict(data)
+                self._pairing[req.code] = req
+            elif kind == "allow" and isinstance(data, list):
+                self._allowed_users[key] = set(str(u) for u in data)
+            elif kind == "deny" and isinstance(data, list):
+                self._denylist_users |= set(str(u) for u in data)
+            elif kind == "lockout" and isinstance(data, dict) and "|" in key:
+                plat, uid = key.split("|", 1)
+                self._lockouts[(plat, uid)] = float(data.get("until") or 0)
+            elif kind == "rate" and isinstance(data, dict) and "|" in key:
+                plat, uid = key.split("|", 1)
+                self._user_requests[(plat, uid)] = float(data.get("at") or 0)
+            elif kind == "fail" and isinstance(data, dict) and "|" in key:
+                plat, uid = key.split("|", 1)
+                self._failed_attempts[(plat, uid)] = int(data.get("n") or 0)
+            elif kind == "meta" and key == "global_failures" and isinstance(data, dict):
+                self._global_failures = int(data.get("n") or 0)
 
     def get_request_by_code(self, code: str, *, now: Optional[float] = None) -> Optional[PairingRequest]:
         curr = time.time() if now is None else float(now)
@@ -138,6 +261,8 @@ class GatewayPairingManager:
         )
         self._pairing[code] = req
         self._user_requests[key] = curr
+        self._persist_request(req)
+        self._persist_all()
         return req
 
     def approve_code(
@@ -174,6 +299,8 @@ class GatewayPairingManager:
         self._failed_attempts.pop(key, None)
         self._allowed_users.setdefault(req.platform, set()).add(req.user_id)
         self._global_failures = 0
+        self._persist_request(req)
+        self._persist_all()
         return req
 
     def decline_code(self, code: str, *, now: Optional[float] = None) -> PairingRequest:
@@ -194,6 +321,8 @@ class GatewayPairingManager:
         if fails >= self.max_failed_attempts:
             self._lockouts[key] = curr + self.lockout_seconds
 
+        self._persist_request(req)
+        self._persist_all()
         return req
 
     def revoke_user(self, platform: str, user_id: str) -> bool:
@@ -202,6 +331,7 @@ class GatewayPairingManager:
         allowed = self._allowed_users.get(plat)
         if allowed and uid in allowed:
             allowed.remove(uid)
+            self._persist_all()
             return True
         return False
 
@@ -226,3 +356,22 @@ class GatewayPairingManager:
             st = status.strip().lower()
             reqs = [r for r in reqs if r.status == st]
         return reqs
+
+
+
+_GLOBAL_PAIRING: Optional[GatewayPairingManager] = None
+_GLOBAL_LOCK = threading.Lock()
+
+
+def get_gateway_pairing_manager(workspace_id: str = "default") -> GatewayPairingManager:
+    global _GLOBAL_PAIRING
+    with _GLOBAL_LOCK:
+        if _GLOBAL_PAIRING is None or _GLOBAL_PAIRING.workspace_id != workspace_id:
+            _GLOBAL_PAIRING = GatewayPairingManager(workspace_id=workspace_id)
+        return _GLOBAL_PAIRING
+
+
+def set_gateway_pairing_manager(manager: Optional[GatewayPairingManager]) -> None:
+    global _GLOBAL_PAIRING
+    with _GLOBAL_LOCK:
+        _GLOBAL_PAIRING = manager
