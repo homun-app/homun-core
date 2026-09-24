@@ -216,8 +216,10 @@ nuovo. Può anche eseguire un comando su questo computer, nella cartella del lav
 senza ereditare l'ambiente: non è un container. Può anche eseguire un comando
 su un host SSH approvato, con la chiave pubblica del server fissata nell'approvazione
 e senza copiare i file. Può anche leggere il testo di una pagina http pubblica,
-rifiutando gli indirizzi privati, e può cercare sul web pubblico. I provider
-nominati, la cache e X restano assenti. Può anche aprire un browser privato,
+rifiutando gli indirizzi privati, con memorizzazione temporanea in cache; può cercare
+sul web pubblico, consultare provider dedicati con verifica delle chiavi e fallback di
+salvataggio (rescue) su errore senza memorizzazione sticky dei risultati di emergenza,
+e cercare post/profili pubblici su X con vincoli conformi a xAI. Può anche aprire un browser privato,
 senza il profilo di Chrome di questo computer, leggere una pagina pubblica,
 chiudere una finestra nativa senza confermarla, compilare un campo, salvare
 una schermata di quella pagina, interagire con i controlli nei riquadri (iframe) pubblici

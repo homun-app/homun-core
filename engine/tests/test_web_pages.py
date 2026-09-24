@@ -76,8 +76,8 @@ def test_web_search_returns_public_results(setup):
     proposal = agent_runs.propose(ctx, actor, work, {
         "command_id": "run", "expected_version": 1, "material_ids": [], "web_pages": True})
     names = [item["name"] for item in proposal["tools"]]
-    assert proposal["web_pages"] == {"policy": "public-http-v1", "version": 2}
-    assert "web_extract" in names and "web_search" in names
+    assert proposal["web_pages"] == {"policy": "public-http-v1", "version": 3}
+    assert "web_extract" in names and "web_search" in names and "x_search" in names
     agent_runs.approve(ctx, actor, work, proposal["id"], {
         "command_id": "go", "digest": proposal["digest"], "expected_version": proposal["expected_version"]})
     ctx.models.complete_tools = lambda *a, **k: SimpleNamespace(message=NativeMessage(
@@ -85,3 +85,100 @@ def test_web_search_returns_public_results(setup):
     assert advance(ctx, proposal["id"]) == "running"
     observation = ctx.repository.load().commands[proposal["id"]].result["observations"][-1]
     assert any("example.com" in hit["url"] for hit in observation["result"]["results"])
+
+
+def test_web_cache_and_query_normalization():
+    from homun.execution.web_cache import WebCache, normalize_query, normalize_url
+    assert normalize_query("  Example   Query  ") == "example query"
+    assert normalize_url("https://Example.COM:443/test/?q=1") == "https://example.com/test/?q=1"
+    assert normalize_url("http://example.com:80/") == "http://example.com/"
+
+    cache = WebCache(ttl_seconds=60)
+    assert cache.get_search("duckduckgo-html", "foo bar") is None
+    cache.put_search("duckduckgo-html", "  FOO   bar  ", {"results": [{"url": "https://example.com"}]})
+    hit = cache.get_search("duckduckgo-html", "foo bar")
+    assert hit == {"results": [{"url": "https://example.com"}]}
+
+    # Error responses are never cached
+    cache.put_search("duckduckgo-html", "error query", {"error_code": "web_fetch_failed"})
+    assert cache.get_search("duckduckgo-html", "error query") is None
+
+    # URL extract cache
+    assert cache.get_extract("https://example.com") is None
+    cache.put_extract("https://example.com", {"status": 200, "text": "hello"})
+    assert cache.get_extract("https://example.com:443/") == {"status": 200, "text": "hello"}
+
+
+def test_cached_fetch_page_serves_from_cache():
+    from homun.execution.web_cache import WebCache, cached_fetch_page
+    cache = WebCache(ttl_seconds=60)
+    cache.put_extract("https://example.com/", {"status": 200, "text": "hello", "truncated": False})
+    res = cached_fetch_page("https://example.com/", cache=cache)
+    assert res.get("cached") is True
+    assert res.get("text") == "hello"
+
+
+def test_named_provider_credential_validation():
+    import os
+    from homun.execution.web_providers import execute_provider_search
+    # Ensure env key is not set
+    old_val = os.environ.pop("BRAVE_API_KEY", None)
+    try:
+        res = execute_provider_search("brave", "test query")
+        assert res["error_code"] == "web_provider_credentials_missing"
+        assert "BRAVE_API_KEY" in res["message"]
+    finally:
+        if old_val is not None:
+            os.environ["BRAVE_API_KEY"] = old_val
+
+    res = execute_provider_search("unknown_engine", "test query")
+    assert res["error_code"] == "web_provider_unavailable"
+
+
+def test_search_with_rescue_triggers_fallback_and_is_not_cached(monkeypatch):
+    from homun.execution.web_cache import WebCache
+    from homun.execution import web_providers
+
+    cache = WebCache(ttl_seconds=60)
+    # Simulate a provider fetch failure (e.g. 503 from backend API)
+    monkeypatch.setattr(
+        web_providers,
+        "execute_provider_search",
+        lambda provider, query, limit=5: {"error_code": "web_fetch_failed", "message": "503 Backend Offline"},
+    )
+
+    res = web_providers.search_with_rescue("example domain", provider="brave", cache=cache)
+    assert res.get("rescued_from") == "brave"
+    assert "Configured backend 'brave' failed" in res.get("backend_error", "")
+    assert any("example.com" in hit["url"] for hit in res.get("results", []))
+
+    # Hermes invariant: rescue results must NEVER be cached
+    assert cache.get_search("brave", "example domain") is None
+
+
+def test_x_search_validation_and_credentials():
+    import os
+    from homun.execution.x_search import search_x
+
+    # Query validation
+    assert search_x("")["error_code"] == "web_query_refused"
+    assert search_x("line1\nline2")["error_code"] == "web_query_refused"
+
+    # Handles count validation
+    handles = [f"user{i}" for i in range(12)]
+    assert search_x("news", allowed_handles=handles)["error_code"] == "web_query_refused"
+
+    # Date format validation
+    assert search_x("news", from_date="not-a-date")["error_code"] == "web_query_refused"
+    assert search_x("news", from_date="2026/01/01")["error_code"] == "web_query_refused"
+
+    # Credential check
+    old_key = os.environ.pop("XAI_API_KEY", None)
+    try:
+        res = search_x("news", from_date="2026-01-01")
+        assert res["error_code"] == "web_provider_credentials_missing"
+        assert "XAI_API_KEY" in res["message"]
+    finally:
+        if old_key is not None:
+            os.environ["XAI_API_KEY"] = old_key
+

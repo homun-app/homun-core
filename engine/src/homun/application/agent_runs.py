@@ -223,7 +223,7 @@ def propose(ctx, actor, work_id, body):
             if body.get('web_pages'):
                 if not agent_native.enabled(run):
                     raise ValidationError('Web pages require native model support')
-                run['web_pages'] = {'policy': 'public-http-v1', 'version': 2}
+                run['web_pages'] = {'policy': 'public-http-v1', 'version': 3}
             if body.get('browser'):
                 if not agent_native.enabled(run):
                     raise ValidationError('The browser requires native model support')
