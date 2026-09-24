@@ -3349,6 +3349,17 @@
             "title": "Status",
             "type": "string"
           },
+          "stdin": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stdin"
+          },
           "timed_out": {
             "default": false,
             "title": "Timed Out",
@@ -3414,6 +3425,11 @@
             "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Image",
             "type": "string"
+          },
+          "stdin": {
+            "default": false,
+            "title": "Stdin",
+            "type": "boolean"
           },
           "timeout_seconds": {
             "default": 300,

@@ -4,8 +4,11 @@ Poll, wait, stop and one completion notice follow the process-registry
 behavior of Hermes Agent (MIT); see homun/notices/hermes-agent.txt.
 No PTY, stdin write, or second dispatch.
 """
+import hashlib
 from copy import deepcopy
 from homun.application import agent_native, terminal_jobs
+from homun.execution.contracts import ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain
+from homun.execution.docker_stdin import StdinNotSent
 from homun.application.agent_runs import authority, lookup
 from homun.domain.errors import ConflictError, DomainError, NotFoundError, PermissionDeniedError, ValidationError
 from homun.domain.models import Actor
@@ -204,3 +207,75 @@ def announce(ctx, run_id):
             run['_terminal_notices'] = notices
         ctx.service.store = store
     return True
+
+
+def _write_view(session_id, intent):
+    body = {'job_id': session_id, 'background': True, 'stdin': True, 'bytes': intent.get('bytes', 0)}
+    if intent['status'] == 'applied':
+        body.update(status='applied', complete=True, is_error=False)
+    elif intent['status'] == 'not_sent':
+        body.update(status='not_sent', complete=False, is_error=True, error=intent.get('error', 'Stdin was not sent'))
+    else:
+        body.update(status='outcome_unknown', complete=False, is_error=True,
+                    error='Stdin delivery could not be confirmed; it will not be sent again')
+    return body
+
+
+def _begin_write(ctx, run, session_id, call_id, payload):
+    digest = hashlib.sha256(payload).hexdigest()
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            current = lookup(store, run['id'])
+            authority(ctx, store, Actor.model_validate(current['_actor']), current, running=True)
+            proposal = _owned(store, current, session_id)
+            writes = proposal.setdefault('_stdin_writes', {})
+            intent = writes.get(call_id)
+            if intent:
+                if intent.get('sha256') != digest:
+                    raise ConflictError('Stdin call is already bound to other bytes')
+                if intent['status'] == 'sending':
+                    intent['status'] = 'unknown'
+                return _write_view(session_id, intent)
+            writes[call_id] = {'status': 'sending', 'sha256': digest, 'bytes': len(payload)}
+        ctx.service.store = store
+    return None
+
+
+def _settle_write(ctx, run, session_id, call_id, status, error=None):
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            proposal = _owned(store, lookup(store, run['id']), session_id)
+            intent = proposal['_stdin_writes'][call_id]
+            if intent['status'] == 'applied':
+                return _write_view(session_id, intent)
+            intent['status'] = status
+            if error:
+                intent['error'] = error
+            view = _write_view(session_id, intent)
+        ctx.service.store = store
+    return view
+
+
+def write_stdin(ctx, actor, run, arguments):
+    """Deliver one stdin payload. A repeated call id never sends those bytes again."""
+    data = arguments.get('data') or ''
+    payload = (data + ('\n' if arguments.get('newline') else '')).encode()
+    if not payload or len(payload) > 8192:
+        raise ValidationError('Stdin write needs bytes within the limit')
+    session_id = arguments['session_id']
+    proposal = _session(ctx, run, session_id)
+    if not proposal.get('background') or not proposal.get('stdin'):
+        raise ValidationError('This session was not approved to receive stdin')
+    call = agent_native.pending(run)
+    if call is None or call.name != 'terminal_write' or call.id is None:
+        raise ConflictError('Stdin write does not match the canonical call')
+    begun = _begin_write(ctx, run, session_id, call.id, payload)
+    if begun is not None:
+        return begun
+    try:
+        terminal_jobs.write_payload(ctx, actor, run['work_id'], session_id, payload)
+    except StdinNotSent as exc:
+        return _settle_write(ctx, run, session_id, call.id, 'not_sent', str(exc))
+    except (ExecutionUncertain, ExecutionTimeout, ExecutionUnavailable) as exc:
+        return _settle_write(ctx, run, session_id, call.id, 'unknown', str(exc))
+    return _settle_write(ctx, run, session_id, call.id, 'applied')

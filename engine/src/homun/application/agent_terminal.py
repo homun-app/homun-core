@@ -12,7 +12,9 @@ def stage(ctx,actor,run,decision):
     proposal_id='terminal:'+digest([run['id'],run['_epoch'],call.id])
     body={'command_id':proposal_id,'image':run['terminal']['image'],'command':decision.arguments['command'],
         'timeout_seconds':decision.arguments.get('timeout_seconds',300),'expected_version':run['_run_version']}
-    if decision.arguments.get('background'):body['background']=True
+    if decision.arguments.get('background'):
+        body['background']=True
+        if run.get('terminal',{}).get('version',1)>=4:body['stdin']=True
     terminal_jobs.propose(ctx,actor,run['work_id'],body,agent_binding={
         'run_id':run['id'],'epoch':run['_epoch'],'call_id':call.id,'lease_token':run['_lease_token']})
     return 'waiting_external'

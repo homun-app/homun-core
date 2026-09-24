@@ -118,4 +118,6 @@ Agents reach this backend only through an approved terminal tool. Hermes is not 
 application/agent_terminal_sessions.py derives background poll, wait, stop and
 one completion notice from tools/process_registry.py at the pinned commit.
 Each approved command keeps its own container. Stopping one session does not
-signal another. PTY input and stdin write are not implemented.
+signal another. execution/docker_stdin.py delivers raw bytes to an already
+running container's pipe stdin and does not repeat an uncertain send.
+PTY input is not implemented.

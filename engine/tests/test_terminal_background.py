@@ -15,7 +15,7 @@ class Sessions:
         self.calls = []
         self.states = {}
 
-    def start(self, spec):
+    def start(self, spec, stdin=False):
         self.calls.append(('start', spec.call_id))
         self.states[spec.call_id] = {'container_id': 'a' * 64, 'status': 'running', 'running': True,
                                      'exit_code': None, 'oom_killed': False}
@@ -61,6 +61,8 @@ def test_version_three_adds_session_tools_without_changing_version_two():
     new = [item.definition.name for item in entries({'image': IMAGE, 'version': 3})]
     assert old == ['terminal_execute']
     assert new == ['terminal_execute', 'terminal_poll', 'terminal_wait', 'terminal_stop']
+    newer = [item.definition.name for item in entries({'image': IMAGE, 'version': 4})]
+    assert newer == ['terminal_execute', 'terminal_poll', 'terminal_wait', 'terminal_stop', 'terminal_write']
 
 
 def test_background_returns_before_exit_and_poll_does_not_restart(setup, monkeypatch):
@@ -139,3 +141,43 @@ def test_stopping_one_session_leaves_the_other_running(setup, monkeypatch):
     assert sessions.states[first['id']]['status'] == 'exited'
     assert sessions.states[second['id']]['status'] == 'running'
     assert sum(kind == 'start' for kind, _name in sessions.calls) == 2
+
+
+def test_stdin_bytes_are_sent_once(setup, monkeypatch):
+    from homun.application.agent_terminal_sessions import write_stdin
+    from homun.execution.contracts import ExecutionUncertain
+    ctx, actor, work, proposal, _backend = start(setup, monkeypatch)
+    sessions = Sessions()
+    monkeypatch.setattr(terminal_jobs, 'backend_for', lambda ctx: sessions)
+    ctx.models.complete_tools = lambda *a, **k: SimpleNamespace(
+        message=tool('cmd1', 'terminal_execute', {'command': 'cat', 'background': True}), usage=None)
+    job = release(ctx, actor, work, proposal['id'])
+    assert job['stdin'] is True
+
+    def plant(data):
+        with ctx.repository.transaction() as store:
+            stored = store.commands[proposal['id']].result
+            stored['status'] = 'running'
+            stored['_messages'].append(tool('cmdw', 'terminal_write', {
+                'session_id': job['id'], 'data': data, 'newline': True}).model_dump())
+        return run_of(ctx, proposal['id'])
+
+    def deliver(spec, payload):
+        sessions.calls.append(('write', spec.call_id, payload))
+        if payload == b'lost\n':
+            raise ExecutionUncertain('lost')
+    sessions.write_stdin = deliver
+    run = plant('hello')
+    assert write_stdin(ctx, actor, run, {'session_id': job['id'], 'data': 'hello', 'newline': True})['status'] == 'applied'
+    assert write_stdin(ctx, actor, run, {'session_id': job['id'], 'data': 'hello', 'newline': True})['status'] == 'applied'
+    with ctx.repository.transaction() as store:
+        stored = store.commands[proposal['id']].result
+        stored['_messages'] = [item for item in stored['_messages']
+            if not item.get('tool_calls') or item['tool_calls'][0].get('id') != 'cmdw']
+        stored['_messages'].append(tool('cmdx', 'terminal_write', {
+            'session_id': job['id'], 'data': 'lost', 'newline': True}).model_dump())
+    run = run_of(ctx, proposal['id'])
+    assert write_stdin(ctx, actor, run, {'session_id': job['id'], 'data': 'lost', 'newline': True})['status'] == 'outcome_unknown'
+    assert write_stdin(ctx, actor, run, {'session_id': job['id'], 'data': 'lost', 'newline': True})['status'] == 'outcome_unknown'
+    writes = [item for item in sessions.calls if item[0] == 'write']
+    assert writes == [('write', job['id'], b'hello\n'), ('write', job['id'], b'lost\n')]

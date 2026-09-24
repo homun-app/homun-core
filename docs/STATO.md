@@ -208,8 +208,8 @@ resta una fotografia distinta.
 ## Prossimo passo: parità Hermes, poi UX
 
 La tranche file H11 aggiunge pagine, ricerca e modifiche approvate. Il terminale
-può lasciare un comando Docker in esecuzione e poi leggerne lo stato, attenderlo
-o arrestarlo. Restano aperti PTY, stdin, gli altri backend, language server,
+può lasciare un comando Docker in esecuzione, leggerne lo stato, attenderlo,
+arrestarlo o inviargli byte sullo stdin. Restano aperti il PTY, gli altri backend, language server,
 patch V4A e il resto della matrice. Non è parità completa.
 
 ## Uso reale e UX

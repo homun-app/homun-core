@@ -1,0 +1,13 @@
+{
+  "image": "sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132",
+  "container_started": true,
+  "stdin": "pipe",
+  "pty": false,
+  "checks": {
+    "no_file_before_write": true,
+    "one_line_delivered": true,
+    "process_still_running": true
+  },
+  "container": "fc03bfcd6188b4e27c8e4a7f9e8f5e6d88a98611a79d52602ca69158734710e0",
+  "bytes": 12
+}

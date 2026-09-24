@@ -12,6 +12,7 @@ class TerminalProposalRequest(BaseModel):
     expected_version: int = Field(ge=1)
     timeout_seconds: int = Field(default=300,ge=1,le=3600)
     background: bool = False
+    stdin: bool = False
 
 
 class TerminalApprovalRequest(BaseModel):
@@ -40,6 +41,7 @@ class TerminalProposal(BaseModel):
     created_at: str
     timeout_seconds: int | None = None
     background: bool | None = None
+    stdin: bool | None = None
     deadline_at: str | None = None
     timed_out: bool = False
     running: bool | None = None
@@ -58,6 +60,7 @@ def consent(proposal: dict) -> str:
     bound={k:proposal[k] for k in ('id','work_id','image','command','expected_version','policy','created_by')}
     if 'timeout_seconds' in proposal:bound['timeout_seconds']=proposal['timeout_seconds']
     if proposal.get('background'):bound['background']=True
+    if proposal.get('stdin'):bound['stdin']=True
     if proposal.get('_agent_binding'):bound['_agent_binding']=proposal['_agent_binding']
     return digest(bound)
 

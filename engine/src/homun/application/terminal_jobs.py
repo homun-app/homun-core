@@ -39,6 +39,7 @@ def propose(ctx, actor, work_id, body, *, agent_binding=None):
                       expected_version=request.expected_version,timeout_seconds=request.timeout_seconds,policy='docker-offline-v1',created_by=actor.id,
                       created_at=utc_now().isoformat(),status='pending_approval')
         if request.background:result['background']=True
+        if request.stdin:result['stdin']=True
         job_spec(ctx,result)
     except SchemaError:
         raise ValidationError('Invalid terminal proposal') from None
@@ -93,7 +94,7 @@ def approve(ctx, actor, work_id, proposal_id, body):
         ctx.service.store = store
     # Persist the intent before IO. Even a process crash cannot authorize another start.
     try:
-        state = backend_for(ctx).start(job_spec(ctx,snapshot))
+        state = backend_for(ctx).start(job_spec(ctx,snapshot), **({'stdin': True} if snapshot.get('stdin') else {}))
     except TRANSPORT_ERRORS as exc:
         state = _unknown(exc)
     return _record(ctx,actor,work_id,proposal_id,snapshot,state)
@@ -141,6 +142,13 @@ def _observe(ctx, actor, work_id, proposal_id, *, stop=False):
 
 def refresh(ctx, actor, work_id, proposal_id):
     return _observe(ctx,actor,work_id,proposal_id)
+
+
+def write_payload(ctx, actor, work_id, proposal_id, payload: bytes):
+    """Send bytes to a running owned container. Does not create or start one."""
+    store = ctx.repository.load()
+    _lookup(store, actor, work_id, proposal_id)
+    backend_for(ctx).write_stdin(job_spec(ctx, store.commands[proposal_id].result), payload)
 
 
 def stop(ctx, actor, work_id, proposal_id):

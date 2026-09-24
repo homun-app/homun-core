@@ -237,12 +237,18 @@ rilancia il comando. Arrestare una sessione non tocca le altre. Restano PTY,
 stdin e il timer indipendente a motore spento.
 Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifica.md).
 
-### Prima tranche consigliata dopo questo aggiornamento: PTY/stdin e gli altri backend H10
+### Stdin a pipe sulle sessioni background nuove: fatto in questo aggiornamento
 
-1. Verificare Git e non rifare le tranche file e sessioni background.
-2. Leggere in Hermes PTY, scrittura stdin e i backend oltre Docker.
-3. Estendere il container già approvato con uno stdin reale, oppure dichiarare
-   il limite se il detach attuale non può riceverlo senza un secondo avvio.
+`terminal_write` consegna byte allo stdin del container già avviato. Non è un
+PTY e non riavvia il comando. Una consegna incerta non viene ripetuta.
+Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifica.md).
+
+### Prima tranche consigliata dopo questo aggiornamento: PTY e gli altri backend H10
+
+1. Verificare Git e non rifare file, sessioni background e stdin a pipe.
+2. Leggere in Hermes il PTY e i backend oltre Docker.
+3. Un PTY va aggiunto solo se non cambia i comandi già avviati e non richiede
+   un secondo start. Altrimenti resta un limite dichiarato.
 4. I backend local, SSH, Modal, Singularity, Daytona e Vercel restano assenti:
    non annunciarli. Una credenziale mancante blocca solo la prova di quel backend.
 5. Il timer indipendente nel container, quando Homun è spento, resta un limite
@@ -250,8 +256,8 @@ Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifi
 
 ### Tranche successive, ordine da confermare con le dipendenze del codice
 
-- H09/H10: PTY e stdin sul container già approvato; backend oltre Docker.
-  Le sessioni background con poll, attesa, arresto e avviso unico sono usabili.
+- H09/H10: PTY sul container già approvato e backend oltre Docker.
+  Sessioni background, poll, attesa, arresto, avviso unico e stdin a pipe sono usabili.
   Resta il timer indipendente a motore spento.
 - H14/H15: ricerca web ed estrazione, browser operativo con sessioni e recovery.
 - H17/H18: memoria durevole e motori memoria/contesto sostituibili.
@@ -388,16 +394,16 @@ Nessun budget numerico è stato richiesto. Non segnare completo a fine tranche.
 > consensi, terminale Docker proprio approvato e riprendibile, watchdog,
 > lettura file confinata, consegne immutabili, ricerca, lettura per righe e
 > modifiche approvate. Sono capacità parziali: non dichiarare raggiunta la parità.
-> Le prove della tranche sessioni sono 970 test engine passati/1 skipped,
-> 226 web, OpenAPI e architettura verdi, più due container Docker isolati di
-> cui uno solo viene arrestato. Non trattarle come parità completa.
+> Le prove della tranche terminale sono 971 test engine passati/1 skipped,
+> 226 web, OpenAPI e architettura verdi, più container Docker isolati per
+> sessioni separate e uno stdin a pipe. Non trattarle come parità completa.
 >
 > H11 ha ora pagine, ricerca, lettura per righe, scrittura e patch approvate,
 > con prova Ollama isolata. Restano language server, V4A e diversi estrattori:
 > non dichiararli chiusi. Il terminale Docker ha sessioni in background con
-> poll, attesa, arresto e un solo avviso di completamento. Restano PTY, stdin
-> e gli altri backend: non dichiararli chiusi. Il prossimo lavoro è PTY/stdin
-> e i backend oltre Docker,
+> poll, attesa, arresto, un solo avviso di completamento e stdin a pipe.
+> Il PTY e gli altri backend restano aperti: non dichiararli chiusi.
+> Il prossimo lavoro è il PTY e i backend oltre Docker,
 > poi web/browser, memoria, skill,
 > delegazione e tutte le restanti righe secondo dipendenze. L'ordine è modificabile
 > con motivazione tecnica, il perimetro completo no. Ispeziona sempre ciò che

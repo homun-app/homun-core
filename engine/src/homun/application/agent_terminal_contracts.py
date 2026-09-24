@@ -23,6 +23,13 @@ class TerminalSessionArguments(BaseModel):
     session_id: str = Field(min_length=1,max_length=200)
 
 
+class TerminalWriteArguments(BaseModel):
+    model_config = ConfigDict(extra='forbid',strict=True)
+    session_id: str = Field(min_length=1,max_length=200)
+    data: str = Field(default='',max_length=4096)
+    newline: bool = False
+
+
 def entry(config):
     return entries(config)[0]
 
@@ -38,7 +45,14 @@ def entries(config):
         input_schema=arguments.model_json_schema())
     if version==2:
         definition.description+=' Set timeout_seconds (1..3600, default 300); the person reviews this limit before execution. Deadline enforcement requires Homun to be running.'
-    if version>=3:
+    if version>=4:
+        definition.description=(
+            f"Propose a shell command in the run's isolated /workspace using image {config['image']}. No network. "
+            'Each command waits for explicit human approval. Without background, the result arrives after the process exits. '
+            'With background true, the result arrives once the process is running and includes job_id; then use terminal_poll, terminal_wait, terminal_stop, or terminal_write. '
+            'terminal_write sends bytes to that process stdin and does not start a container. There is no PTY. '
+            'Set timeout_seconds (1..3600, default 300). Deadline enforcement requires Homun to be running.')
+    elif version>=3:
         definition.description=(
             f"Propose a shell command in the run's isolated /workspace using image {config['image']}. No network. "
             'Each command waits for explicit human approval. Without background, the result arrives after the process exits. '
@@ -56,6 +70,10 @@ def entries(config):
     catalog.append(ToolEntry(ToolDefinition(name='terminal_stop',
         description='Stop one background terminal session you started. Other sessions keep running. Does not start a process.',
         input_schema=session),'terminal','3',TerminalSessionArguments,replay='never'))
+    if version>=4:
+        catalog.append(ToolEntry(ToolDefinition(name='terminal_write',
+            description='Send bytes to the stdin of a background session that was approved with input open. Does not start or repeat a command. No PTY. Set newline true to append one newline.',
+            input_schema=TerminalWriteArguments.model_json_schema()),'terminal','4',TerminalWriteArguments,replay='never'))
     return catalog
 
 

@@ -10,8 +10,9 @@ test('terminal consent renders exact command and disappears after cancellation',
     const props={job,busy:false,active:true,act:()=>{}};
     const html=renderer.render(props);
     assert.match(html,/300 secondi/);assert.match(html,/mentre Homun è acceso/);assert.match(html,/echo authorized/);assert.match(html,/sha256:exact/);assert.match(html,/Approva ed esegui il comando/);
-    assert.doesNotMatch(html,/resta in esecuzione/);
-    assert.match(renderer.render({...props,job:{...job,background:true}}),/resta in esecuzione/);
+    assert.doesNotMatch(html,/resta in esecuzione/);assert.doesNotMatch(html,/inviare input/);
+    assert.match(renderer.render({...props,job:{...job,background:true,stdin:true}}),/resta in esecuzione/);
+    assert.match(renderer.render({...props,job:{...job,stdin:true}}),/inviare input/);
     assert.doesNotMatch(renderer.render({...props,active:false}),/Approva ed esegui il comando/);
     const running=renderer.render({...props,active:false,job:{...job,status:'running'}});
     assert.match(running,/Arresta il processo/);assert.match(running,/non conferma/);

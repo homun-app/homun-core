@@ -64,3 +64,10 @@ class DockerCLI:
             reader.join(timeout=1)
             raise ExecutionTimeout("Docker transport timed out; execution may have occurred") from None
         return Reply(process.returncode, retained.decode("utf-8", errors="replace"), clipped)
+
+    def socket_path(self) -> str:
+        reply = self.run(["context", "inspect", "--format", "{{.Endpoints.docker.Host}}"])
+        host = reply.output.strip()
+        if reply.returncode or reply.truncated or not host.startswith("unix://"):
+            raise ExecutionUnavailable("Docker socket is not available")
+        return host.removeprefix("unix://")

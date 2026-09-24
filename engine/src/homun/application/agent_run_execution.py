@@ -157,6 +157,10 @@ def advance(ctx, run_id, *, epoch=None):
                     registry_for(run).validate(decision.tool,decision.arguments)
                     from homun.application.agent_terminal import stage as stage_terminal
                     return stage_terminal(ctx,actor,run,decision)
+                if decision.tool == 'terminal_write' and run.get('terminal',{}).get('version',1) >= 4:
+                    registry_for(run).validate(decision.tool,decision.arguments)
+                    from homun.application.agent_terminal_sessions import write_stdin
+                    observation = write_stdin(ctx,actor,run,decision.arguments)
                 if decision.tool in {'terminal_poll','terminal_wait','terminal_stop'} and run.get('terminal',{}).get('version',1) >= 3:
                     registry_for(run).validate(decision.tool,decision.arguments)
                     from homun.application import agent_terminal_sessions as terminal_sessions
