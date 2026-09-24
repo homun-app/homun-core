@@ -18,14 +18,21 @@ from homun.application.session_manager import SessionManager, get_default_storag
 from homun.application.session_storage import SessionStorage
 
 
-def test_macos_status_probe_is_real_and_not_ready_without_driver():
+def test_macos_status_probe_is_real_and_bridge_gated():
     driver = ComputerUseDriver(auto_probe=True)
     status = driver.get_status()
     assert status["platform_supported"] is True or status["platform"] != "darwin"
-    assert status["ready"] is False
-    assert status.get("permissions_verified") in (True, False)
-    # Without capture/action providers, ready must stay false even if TCC is granted.
-    assert status.get("code") in ("backend_unavailable", "permissions_required", "platform_unsupported", None) or status["ready"] is False
+    if status.get("ready"):
+        assert status.get("driver") == "macos-bridge"
+        assert status.get("accessibility") is True
+        assert status.get("screen_recording") is True
+    else:
+        assert status.get("code") in (
+            "backend_unavailable",
+            "permissions_required",
+            "platform_unsupported",
+            None,
+        ) or status["ready"] is False
 
 
 def test_session_default_storage_is_durable(tmp_path, monkeypatch):

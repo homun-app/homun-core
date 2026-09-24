@@ -66,22 +66,43 @@ def test_stt_tts_without_backend_no_synthesis():
 def test_computer_use_does_not_claim_ready_or_fake_os_effects():
     driver = ComputerUseDriver()
     status = driver.get_status()
-    assert status["ready"] is False
-    assert status.get("accessibility") is not True or status.get("permissions_verified") is True
-    # Without a verified probe, do not advertise TCC grants as true
-    if not status.get("permissions_verified"):
-        assert status.get("accessibility") in (False, None)
-        assert status.get("screen_recording") in (False, None)
+    # Ready only when a real probe reports Accessibility + Screen Recording.
+    if status.get("ready"):
+        assert status.get("permissions_verified") is True
+        assert status.get("accessibility") is True
+        assert status.get("screen_recording") is True
+        assert status.get("driver") == "macos-bridge"
+        apps = driver.list_apps()
+        assert isinstance(apps, list)
+        cap = driver.capture(mode="som")
+        # Real capture yields PNG bytes, or an honest note — never tiny fake payload.
+        if cap.png_b64:
+            raw = __import__("base64").b64decode(cap.png_b64)
+            assert len(raw) > 200 and raw[:8] == b"\x89PNG\r\n\x1a\n"
+            assert cap.width > 0 and cap.height > 0
+        else:
+            assert cap.width == 0 or cap.note
+    else:
+        assert status.get("code") in (
+            "backend_unavailable",
+            "permissions_required",
+            "platform_unsupported",
+            None,
+        )
+        apps = driver.list_apps()
+        assert apps == [] or (isinstance(apps, dict) and apps.get("error"))
+        cap = driver.capture(mode="som")
+        assert cap.width == 0 or not cap.png_b64 or cap.note
+        assert not (
+            cap.width == 1200
+            and cap.png_b64
+            and len(__import__("base64").b64decode(cap.png_b64)) < 200
+        )
 
-    apps = driver.list_apps()
-    assert apps == [] or (isinstance(apps, dict) and apps.get("error"))
-
-    cap = driver.capture(mode="som")
-    assert cap.width == 0 or not cap.png_b64 or cap.note
-    assert not (cap.width == 1200 and cap.png_b64 and len(__import__("base64").b64decode(cap.png_b64)) < 200)
-
+    # Without Accessibility, click must fail; with it, still must not fabricate.
     click = driver.perform_action("click", {"x": 1, "y": 1})
-    assert click.ok is False
+    if status.get("accessibility") is not True:
+        assert click.ok is False
 
 
 def test_channel_send_without_transport_not_delivered():

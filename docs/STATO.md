@@ -384,6 +384,7 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
   sotto per quelle righe sono storiche e non sostituiscono la matrice corretta.
 
 - **Da fare successivamente (UI i18n)**: localizzazione multilingua di tutti i copy dell'interfaccia utente (UI copy) in modo che ciascun utente possa fruirne nella propria lingua. Registrato per la fase successiva alla parità funzionale con Hermes.
+- **H16 macOS bridge (2026-09-24)**: `computer_use_macos_bridge` wires real app list / focus / capture / click / type via osascript+screencapture; `ready` only when TCC Accessibility and Screen Recording probes pass.
 - **H10 Singularity bridge (2026-09-24)**: `SingularityJobs` runs real `apptainer|singularity exec --containall --no-home` when CLI is on PATH / `HOMUN_SINGULARITY_BIN`; probe marks ready only after `version` succeeds. Modal/Daytona/Vercel remain unwired honesty stubs.
 - **H36 MCP resources/prompts (2026-09-24)**: probe lists resources/prompts when server capabilities advertise them; `read_resource` / `get_prompt` execute on the live session; sampling/elicitation default to typed refusal until product callbacks are installed.
 - **H33 channel HTTP transports (2026-09-24)**: webhook POST when URL set; Telegram/Discord/Slack/WhatsApp `send` use real Bot/Graph APIs when tokens (and WhatsApp phone_number_id) are configured; unconfigured → `backend_unavailable`. `gateway_manage adapter_send` reports `failed` when delivery did not happen.

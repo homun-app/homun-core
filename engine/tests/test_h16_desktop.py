@@ -144,35 +144,58 @@ def test_desktop_api_endpoints_report_unavailability():
     res = client.get("/v1/desktop/status")
     assert res.status_code == 200
     body = res.json()
-    assert body["ready"] is False
-    # macOS may report a real TCC probe (permissions_verified True) while still
-    # refusing ready without an input/capture driver.
-    assert body.get("code") in ("backend_unavailable", "permissions_required", None) or body["ready"] is False
+    # Ready only with verified TCC + macOS bridge; otherwise honesty codes.
+    if body.get("ready"):
+        assert body.get("driver") == "macos-bridge"
+        assert body.get("accessibility") is True
+        assert body.get("screen_recording") is True
+    else:
+        assert body.get("code") in ("backend_unavailable", "permissions_required", None) or body["ready"] is False
 
     res_apps = client.get("/v1/desktop/apps")
     assert res_apps.status_code == 200
-    assert res_apps.json()["apps"] == []
+    assert isinstance(res_apps.json()["apps"], list)
 
     res_wins = client.get("/v1/desktop/windows")
     assert res_wins.status_code == 200
-    assert res_wins.json()["windows"] == []
+    assert isinstance(res_wins.json()["windows"], list)
 
     res_focus = client.post("/v1/desktop/focus", json={"app": "Code"})
-    assert res_focus.status_code == 503
-    focus_detail = res_focus.json()["detail"]
-    assert focus_detail["ok"] is False
-    assert focus_detail["code"] == "backend_unavailable"
+    focus_detail = res_focus.json().get("detail") or res_focus.json()
+    if res_focus.status_code == 200:
+        assert focus_detail.get("ok") is True
+    else:
+        assert res_focus.status_code in (404, 503)
+        assert focus_detail["ok"] is False
+        assert focus_detail["code"] in (
+            "backend_unavailable",
+            "permissions_required",
+            "execution_failed",
+        )
 
     res_cap = client.post("/v1/desktop/capture", json={"mode": "som"})
     assert res_cap.status_code == 200
-    assert res_cap.json()["width"] == 0
-    assert "not configured" in (res_cap.json().get("note") or "").lower()
+    cap = res_cap.json()
+    if cap.get("png_b64"):
+        assert cap["width"] > 0 and cap["height"] > 0
+    else:
+        assert cap["width"] == 0
+        assert cap.get("note")
 
     res_act = client.post("/v1/desktop/act", json={"action": "click", "params": {"ref": "btn-run"}})
-    assert res_act.status_code == 503
-    act_detail = res_act.json()["detail"]
-    assert act_detail["ok"] is False
-    assert act_detail["code"] == "backend_unavailable"
+    act_detail = res_act.json().get("detail") or res_act.json()
+    if res_act.status_code == 200:
+        assert act_detail.get("ok") is True
+    else:
+        assert res_act.status_code in (400, 404, 503)
+        assert act_detail["ok"] is False
+        assert act_detail["code"] in (
+            "backend_unavailable",
+            "permissions_required",
+            "execution_failed",
+            "unknown_action",
+            "blocked_safety_violation",
+        )
 
     res_po = client.post(
         "/v1/desktop/preview/open", json={"url": "https://example.com", "label": "Example"}

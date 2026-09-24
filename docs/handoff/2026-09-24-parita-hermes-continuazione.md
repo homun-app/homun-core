@@ -20,8 +20,9 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 10. Cron due-fire API + Chronos honesty; H10 cloud backends registered; H35 idempotency SQLite; H27 complete_tick.
 11. H33: Telegram/Discord/Slack/WhatsApp HTTP send when tokens set; adapter_send honesty.
 12. H10: SingularityJobs real exec when CLI present; H36 resources/prompts + sampling/elicitation refuse-by-default.
+13. H16: macOS computer-use bridge (osascript/screencapture) auto-wired with TCC-gated readiness.
 
-**Prossimo passo eseguibile:** bridge SDK Modal/Daytona/Vercel; cua-driver H16; MCP OAuth/mTLS/reconnect + product sampling/elicitation wiring; catalogo messaging Hermes oltre i cinque adapter; prove provider mancanti. Parità completa H01–H46 ancora aperta.
+**Prossimo passo eseguibile:** bridge SDK Modal/Daytona/Vercel; H16 Linux/Windows + AX SoM capture; MCP OAuth/mTLS/reconnect + product sampling/elicitation wiring; catalogo messaging Hermes oltre i cinque adapter; prove provider mancanti. Parità completa H01–H46 ancora aperta.
 
 
 ## 1. Obiettivo e decisioni già prese

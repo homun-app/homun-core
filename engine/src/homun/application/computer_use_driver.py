@@ -55,6 +55,18 @@ class ComputerUseDriver:
         else:
             self._status_probe = None
 
+        if (
+            auto_probe
+            and sys.platform == "darwin"
+            and apps_provider is None
+            and windows_provider is None
+            and capture_provider is None
+            and action_provider is None
+        ):
+            from homun.application.computer_use_macos_bridge import attach_macos_providers
+
+            attach_macos_providers(self)
+
     def get_status(self) -> Dict[str, Any]:
         """Return platform readiness only after a real permission/driver probe."""
         plat = sys.platform
@@ -67,13 +79,15 @@ class ComputerUseDriver:
             probed.setdefault("permission_mode", self._permission_mode)
             probed.setdefault("active_app", self._active_app)
             probed.setdefault("active_window_id", self._active_window_id)
-            # Probe alone never implies input/capture backends are installed.
+            # Providers alone are not readiness — permissions must still pass.
             if self._action_provider is None and self._capture_provider is None:
                 probed["ready"] = False
                 if not probed.get("code"):
                     probed["code"] = "backend_unavailable"
                 if not probed.get("error"):
                     probed["error"] = BACKEND_UNAVAILABLE
+            else:
+                probed["driver"] = "macos-bridge"
             return probed
 
         return {
