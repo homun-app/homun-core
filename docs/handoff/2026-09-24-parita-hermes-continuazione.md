@@ -1,6 +1,6 @@
 # Continuazione: parità completa Homun / Hermes
 
-Data: 24 settembre 2026. Checkpoint del codice: `96339f47` (+ commit H40/H42 in corso).
+Data: 24 settembre 2026. Checkpoint del codice: `0f1cb97f` (+ commit H40/H42 in corso).
 Questo documento trasferisce il lavoro a un'altra chat. Non certifica parità raggiunta.
 
 
@@ -17,10 +17,10 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 7. H28/H29 CronStore SQLite; prompt jobs senza runner → backend_unavailable.
 8. H12 checkpoint su write approvate; H26/H27 inject su claim agent_run.
 9. H32 pairing + hosted rooms SQLite; cron prompt → propose pending_approval.
+10. Cron due-fire API + Chronos honesty; H10 cloud backends registered; H35 idempotency SQLite; H27 complete_tick.
 
-**Prossimo passo eseguibile:** cron due-fire daemon + Chronos provider;
-cua-driver H16; complete_tick loop on finish; H10/H14/H36 catalogs;
-API idempotency H35; real channel transports H33.
+**Prossimo passo eseguibile:** implementare bridge SDK reali H10 (Modal/Daytona/…); cua-driver H16; trasporti canale H33; MCP sampling/OAuth H36; prove provider mancanti. Parità completa H01–H46 ancora aperta.
+
 
 ## 1. Obiettivo e decisioni già prese
 
