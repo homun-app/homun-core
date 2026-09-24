@@ -221,3 +221,12 @@ derive durable scheduling, cron/interval/one-shot/event parsing, payload preflig
 chained context injection (context_from), script and agent execution, quota hold, deduplicated
 incident tracking, and non-local delivery queuing from cron/jobs.py, cron/executions.py,
 cron/incidents.py, cron/quota_hold.py, and tools/cronjob_tools.py at the pinned commit.
+
+application/session_contracts.py, application/session_storage.py, application/session_manager.py,
+and application/session_tools.py derive session lifecycle CRUD, working directory restoration,
+carrier-aware turn rewind, fork branching with lineage tracking, secret-redacted export,
+transcript import without identity drift, structured handoffs, SQLite WAL mode, FTS5 full-text
+indexing, database integrity checks, orphan message repair, and token accounting from
+hermes_state_sessions.py, hermes_state_rewind.py, hermes_state_timeline.py, hermes_state_fts.py,
+hermes_state_repair.py, hermes_state_usage.py, hermes_cli/session_export.py, and
+hermes_cli/foreign_sessions.py at the pinned commit.

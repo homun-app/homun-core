@@ -213,6 +213,8 @@ def advance(ctx, run_id, *, epoch=None):
                         current['_goals'] = run['_goals']
                     if '_cron' in run:
                         current['_cron'] = run['_cron']
+                    if '_sessions' in run:
+                        current['_sessions'] = run['_sessions']
                     if agent_native.enabled(current):
                         observation = agent_native.append_result(current, observation)
                     current['observations'].append({'tool': decision.tool, 'arguments': decision.arguments,

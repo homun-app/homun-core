@@ -80,6 +80,12 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.cron_tools import execute as cron_execute
         for cr_entry in cron_entries(cron_execute, cron.get('version', 1)):
             registry.register(cr_entry)
+    session_mgmt = run.get('session_management')
+    if isinstance(session_mgmt, dict) and session_mgmt.get('policy') == 'durable-sessions-v1' and session_mgmt.get('version') == 1:
+        from homun.application.session_contracts import entries as session_entries
+        from homun.application.session_tools import execute as session_execute
+        for s_entry in session_entries(session_execute, session_mgmt.get('version', 1)):
+            registry.register(s_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())
