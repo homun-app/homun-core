@@ -68,6 +68,12 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.clarify_tools import execute as clarify_execute
         for c_entry in clarify_entries(clarify_execute, clarify.get('version', 1)):
             registry.register(c_entry)
+    goals = run.get('goals')
+    if isinstance(goals, dict) and goals.get('policy') == 'persistent-goals-v1' and goals.get('version') == 1:
+        from homun.application.goal_contracts import entries as goal_entries
+        from homun.application.goal_tools import execute as goal_execute
+        for g_entry in goal_entries(goal_execute, goals.get('version', 1)):
+            registry.register(g_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())

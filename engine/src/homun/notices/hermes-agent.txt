@@ -197,5 +197,25 @@ rollback preserving subsequent user edits, working tree diff collection (includi
 files), and subagent git worktree isolation from tools/checkpoint_manager.py, tools/working_diff.py,
 and tools/subagent_worktree.py at the pinned commit.
 
+application/goal_contracts.py, application/goal_manager.py, and application/goal_tools.py
+derive persistent multi-turn goals, completion contracts (outcome, verification, constraints,
+boundaries, stop_when), deterministic quality gates, wait barriers (pid, session, seconds),
+fail-open auxiliary judging, and budget backstops from hermes_cli/goals.py and
+gateway/run_goals.py at the pinned commit. Homun evaluates goals without mutating system
+prompts or creating implicit Kanban cards.
+
+application/heartbeat_manager.py derives durable same-session idle recurring heartbeats,
+claim immediate reservation, claim rewind/abandon on cancelled admission or runner rejection,
+tick coalescing, human input preemption, and conversation boundary isolation across
+compression and reset from hermes_cli/heartbeat.py, gateway/run_heartbeat_acceptance.py,
+and gateway/run_heartbeat_restore.py at the pinned commit.
+
+application/loop_manager.py derives proactive recurring execution loops, fixed and self-paced
+cadence with exponential backoff and normalized digest comparisons, self-stop markers
+(LOOP_COMPLETE), count stops (--times), evidence-based judge stops (--until), and strict goal
+precedence (active goals defer loops; waiting/parked goals permit loops) from
+hermes_cli/loops.py and cli_loops_mixin.py at the pinned commit.
+
+
 
 

@@ -120,6 +120,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {p.skills?.policy === 'workspace-catalog-v1' && <p>Homun può consultare le competenze e linee guida approvate dell’area di lavoro e proporre nuove competenze in quarantena in attesa di approvazione umana.</p>}
       {p.delegation?.policy === 'isolated-subagent-v1' && <p>Homun può delegare compiti a sotto-agenti isolati con budget limitato, strumenti dedicati e convalida di schemi strutturati.</p>}
       {p.clarify?.policy === 'structured-clarify-v1' && <p>Homun può porre domande a scelta singola, multipla o aperta per chiarire requisiti e decisioni.</p>}
+      {p.goals?.policy === 'persistent-goals-v1' && <p>Homun gestisce obiettivi persistenti su più turni con contratti di verifica, barriere di attesa e criteri di qualità deterministici.</p>}
       {p.terminal?.policy === 'ssh-v1'
         ? <p>Homun può proporre comandi su {p.terminal.user}@{p.terminal.host}:{p.terminal.port}. Ogni esecuzione richiede un’approvazione separata. Non è un container e non copia i file.</p>
         : p.terminal?.policy === 'local-private-v1'

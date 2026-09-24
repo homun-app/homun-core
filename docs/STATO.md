@@ -80,6 +80,20 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   dell'albero di lavoro (`collect_working_diff`) e isolamento dei sotto-agenti in
   worktree git dedicati (`create_subagent_worktree`, `cleanup_subagent_worktree`).
 
+- Obiettivi persistenti su più turni (`GoalManager`, H25) con contratti strutturati
+  (outcome, verification, constraints, boundaries, stop_when), criteri di qualità deterministici
+  (`run_gate`), barriere di attesa su PID/sessioni/tempo (`wait_on`), giudizio di avanzamento
+  fail-open e tetto sui turni senza creazione implicita di schede Kanban.
+
+- Heartbeat di sessione inattiva (`HeartbeatManager`, H26) con claim immediato e ripristino/rewind
+  in caso di cancellazione prima dell'esecuzione, coalescenza dei tick saltati, priorità assoluta
+  dei messaggi umani e isolamento dei confini di conversazione su rotazione e reset.
+
+- Loop proattivi a intervalli fissi o auto-adattivi (`LoopManager`, H27) con backoff esponenziale
+  su digest normalizzati, marcatore di arresto autonomo (`LOOP_COMPLETE`), giudizio di arresto
+  basato su evidenze (`--until`), tetto ai cicli (`--times`), pausa su budget tick e precedenza
+  degli obiettivi (un obiettivo attivo differisce il loop, un obiettivo in attesa lo consente).
+
 - Controlli nativi di pausa/ripresa/annullamento e correzioni dalla chat, con
   invalidazione delle risposte superate, conservazione degli esiti incerti e
   oscuramento delle fonti revocate. [Prove e limiti](research/2026-09-23-agent-controls-verifica.md).
