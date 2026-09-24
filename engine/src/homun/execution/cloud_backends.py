@@ -168,6 +168,38 @@ def probe_cloud_backend(name: str) -> CloudBackendStatus:
             error=None,
             code="ok",
         )
+    if key == "managed_modal":
+        url = (
+            str(os.environ.get("HOMUN_MANAGED_MODAL_URL") or os.environ.get("NOUS_MODAL_URL") or "").strip()
+        )
+        if not url:
+            return CloudBackendStatus(
+                name=key,
+                configured=False,
+                ready=False,
+                error="managed_modal requires HOMUN_MANAGED_MODAL_URL (or NOUS_MODAL_URL)",
+            )
+        allow = str(os.environ.get("HOMUN_MANAGED_MODAL_ALLOW_LIVE") or "").strip() in {"1", "true", "yes"}
+        if not allow:
+            return CloudBackendStatus(
+                name=key,
+                configured=True,
+                ready=False,
+                error=(
+                    "managed_modal URL is set; set HOMUN_MANAGED_MODAL_ALLOW_LIVE=1 to permit "
+                    "remote sandboxes (may incur cloud charges)"
+                ),
+            )
+        # Live client not implemented: refuse invented runs even with opt-in.
+        return CloudBackendStatus(
+            name=key,
+            configured=True,
+            ready=False,
+            error=(
+                "managed_modal live opt-in is set, but the Homun-owned managed Modal "
+                "client is not yet implemented; refusing invented runs"
+            ),
+        )
     if key == "vercel":
         from homun.execution.vercel_jobs import (
             vercel_credentials_present,
