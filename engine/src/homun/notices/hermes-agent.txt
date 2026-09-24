@@ -250,4 +250,8 @@ hierarchical instruction discovery with documented precedence (AGENTS.override.m
 manifest from agent/prompt_builder.py, agent/system_prompt.py, agent/context_file_sources.py,
 agent/context_references.py, and agent/subdirectory_hints.py at the pinned commit.
 
-
+application/code_execution_contracts.py, application/code_execution_rpc.py, and
+application/code_execution_tool.py derive Programmatic Tool Calling (PTC) via child process
+code execution, authenticated local RPC Unix domain / TCP loopback socket, tool whitelist
+enforcement, output truncation (40% head / 60% tail), execution timeouts, and call budget limits
+from tools/code_execution_tool.py and tools/code_execution_rpc.py at the pinned commit.

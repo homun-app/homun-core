@@ -94,6 +94,20 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   basato su evidenze (`--until`), tetto ai cicli (`--times`), pausa su budget tick e precedenza
   degli obiettivi (un obiettivo attivo differisce il loop, un obiettivo in attesa lo consente).
 
+- Domande secondarie staccate contestuali (`SideQuestionRunner`, `/btw`, H03) su snapshot
+  della cronologia senza turni sintetici o violazioni di alternanza ruoli, con soppressione
+  degli strumenti e attribuzione di costi e token al run principale.
+
+- Assemblaggio istruzioni e riferimenti al contesto (`PromptAssembler`, H04) con precedenza
+  gerarchica documentata (`AGENTS.override.md` > `AGENTS.md` > `CLAUDE.md` > `.cursorrules`),
+  scansione minacce da prompt-injection, blocco file non attendibili e risoluzione riferimenti
+  `@file` (con intervalli di righe), `@folder`, `@diff`, `@staged`, `@git`, `@url` con
+  protezione SSRF su IP privati e blocco file sensibili.
+
+- Chiamata programmatica di strumenti via esecuzione codice Python (`execute_code`, PTC, H13)
+  su interprete figlio isolato con bridge RPC locale autenticato (UDS/TCP loopback), allowlist
+  degli strumenti ammessi, tetto alle chiamate, troncamento output (40% testa / 60% coda) e timeout.
+
 - Controlli nativi di pausa/ripresa/annullamento e correzioni dalla chat, con
   invalidazione delle risposte superate, conservazione degli esiti incerti e
   oscuramento delle fonti revocate. [Prove e limiti](research/2026-09-23-agent-controls-verifica.md).

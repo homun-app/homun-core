@@ -260,6 +260,10 @@ def propose(ctx, actor, work_id, body):
                 if not agent_native.enabled(run):
                     raise ValidationError('Gateway tools require native model support')
                 run['gateway'] = {'policy': 'core-gateway-v1', 'version': 1}
+            if body.get('code_execution'):
+                if not agent_native.enabled(run):
+                    raise ValidationError('Code execution tools require native model support')
+                run['code_execution'] = {'policy': 'programmatic-v1', 'version': 1}
             run['_mcp_bindings'] = bindings
             run['external_tools'] = [{k: b[k] for k in ('server_id', 'server_name', 'tool', 'name')} | {'description': b['descriptor'].get('description', '')} for b in bindings]
             run['_registry_version'] = 1

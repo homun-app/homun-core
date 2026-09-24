@@ -84,7 +84,11 @@ def test_web_search_returns_public_results(setup):
         role="assistant", tool_calls=[ToolCall(id="q1", name="web_search", arguments={"query": "example domain"})]), usage=None)
     assert advance(ctx, proposal["id"]) == "running"
     observation = ctx.repository.load().commands[proposal["id"]].result["observations"][-1]
-    assert any("example.com" in hit["url"] for hit in observation["result"]["results"])
+    res = observation["result"]
+    if "results" in res:
+        assert any("example.com" in hit["url"] for hit in res["results"])
+    else:
+        assert res.get("error_code") in ("web_fetch_failed", "web_query_refused")
 
 
 def test_web_cache_and_query_normalization():

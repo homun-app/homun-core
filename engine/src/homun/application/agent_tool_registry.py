@@ -92,6 +92,12 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.gateway_tools import execute as gateway_execute
         for gw_entry in gateway_entries(gateway_execute, gateway.get('version', 1)):
             registry.register(gw_entry)
+    code_exec = run.get('code_execution')
+    if isinstance(code_exec, dict) and code_exec.get('policy') == 'programmatic-v1' and code_exec.get('version') == 1:
+        from homun.application.code_execution_contracts import entries as code_exec_entries
+        from homun.application.code_execution_tool import execute as code_exec_execute
+        for ce_entry in code_exec_entries(code_exec_execute, code_exec.get('version', 1)):
+            registry.register(ce_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())
