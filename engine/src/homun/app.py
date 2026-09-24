@@ -90,5 +90,7 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(provider_api.router)
     from homun.routes import alternate_runtimes
     app.include_router(alternate_runtimes.router)
+    from homun.routes import safety_api
+    app.include_router(safety_api.router)
     return app
 

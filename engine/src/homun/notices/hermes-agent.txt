@@ -293,3 +293,11 @@ enterprise proxy session headers (x-dynamo-session-id), and managed vendor tool 
 with explicit service gap reporting when unconfigured from agent/codex_runtime.py,
 agent/copilot_acp_client.py, agent/relay_runtime.py, agent/relay_llm.py, and
 tools/managed_tool_gateway.py at the pinned commit.
+application/path_security.py, application/url_safety.py, application/secret_redaction.py,
+application/vault_store.py, application/write_approval_gate.py, and routes/safety_api.py derive
+path directory confinement, traversal checks, URL safety and SSRF blocking (cloud metadata,
+loopback, private ranges), userinfo/sensitive query credential checks, regex token and private
+key redaction, profile-scoped encrypted credential vault with opaque model handles and automatic
+fill redaction registration, and single-execution write approval gates with auditable refusal
+from tools/path_security.py, tools/url_safety.py, agent/redact.py, agent/vault_store.py,
+tools/write_approval.py, and tools/approval.py at the pinned commit.

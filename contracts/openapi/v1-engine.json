@@ -145,6 +145,65 @@
         "title": "ApprovalRequest",
         "type": "object"
       },
+      "ApprovalResolveRequest": {
+        "properties": {
+          "decision": {
+            "description": "'approve' or 'reject'",
+            "title": "Decision",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ApprovalResolveRequest",
+        "type": "object"
+      },
+      "ApprovalStageRequest": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "origin": {
+            "default": "foreground",
+            "title": "Origin",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "subsystem": {
+            "title": "Subsystem",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subsystem",
+          "action",
+          "payload",
+          "summary"
+        ],
+        "title": "ApprovalStageRequest",
+        "type": "object"
+      },
       "AskPersonRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2128,6 +2187,59 @@
         "title": "OutputView",
         "type": "object"
       },
+      "PathValidateRequest": {
+        "properties": {
+          "allow_sensitive": {
+            "default": false,
+            "title": "Allow Sensitive",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "root": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "PathValidateRequest",
+        "type": "object"
+      },
+      "PathValidateResponse": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "is_safe": {
+            "title": "Is Safe",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_safe"
+        ],
+        "title": "PathValidateResponse",
+        "type": "object"
+      },
       "PersonRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2476,6 +2588,32 @@
           "text"
         ],
         "title": "RectifyMemoryRequest",
+        "type": "object"
+      },
+      "RedactRequest": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "RedactRequest",
+        "type": "object"
+      },
+      "RedactResponse": {
+        "properties": {
+          "redacted_text": {
+            "title": "Redacted Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "redacted_text"
+        ],
+        "title": "RedactResponse",
         "type": "object"
       },
       "RelayDispatchRequest": {
@@ -4246,6 +4384,58 @@
         "title": "ToolProposeRequest",
         "type": "object"
       },
+      "UrlValidateRequest": {
+        "properties": {
+          "allow_private": {
+            "default": false,
+            "title": "Allow Private",
+            "type": "boolean"
+          },
+          "resolve_dns": {
+            "default": false,
+            "title": "Resolve Dns",
+            "type": "boolean"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "UrlValidateRequest",
+        "type": "object"
+      },
+      "UrlValidateResponse": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "is_safe": {
+            "title": "Is Safe",
+            "type": "boolean"
+          },
+          "normalized_url": {
+            "title": "Normalized Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "is_safe",
+          "normalized_url"
+        ],
+        "title": "UrlValidateResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -4284,6 +4474,87 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VaultItemCreateRequest": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "secret_payload": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Secret Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "secret_payload"
+        ],
+        "title": "VaultItemCreateRequest",
+        "type": "object"
+      },
+      "VaultItemResponse": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "VaultItemResponse",
         "type": "object"
       },
       "homun__routes__intake__ConfirmRequest": {
@@ -5952,6 +6223,427 @@
         "summary": "Invoke Tool Gateway",
         "tags": [
           "alternate_runtimes"
+        ]
+      }
+    },
+    "/v1/safety/approvals/pending": {
+      "get": {
+        "description": "List pending write approval actions.",
+        "operationId": "list_pending_approvals_v1_safety_approvals_pending_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "subsystem",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subsystem"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Pending Approvals V1 Safety Approvals Pending Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Pending Approvals",
+        "tags": [
+          "safety"
+        ]
+      }
+    },
+    "/v1/safety/approvals/stage": {
+      "post": {
+        "description": "Stage a write action for approval.",
+        "operationId": "stage_approval_v1_safety_approvals_stage_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalStageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Stage Approval V1 Safety Approvals Stage Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stage Approval",
+        "tags": [
+          "safety"
+        ]
+      }
+    },
+    "/v1/safety/approvals/{action_id}/resolve": {
+      "post": {
+        "description": "Resolve a pending approval action (approve or reject).",
+        "operationId": "resolve_approval_v1_safety_approvals__action_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "title": "Action Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Resolve Approval V1 Safety Approvals  Action Id  Resolve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Approval",
+        "tags": [
+          "safety"
+        ]
+      }
+    },
+    "/v1/safety/path/validate": {
+      "post": {
+        "description": "Validate filesystem path against traversal and security policies.",
+        "operationId": "validate_path_v1_safety_path_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PathValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PathValidateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Path",
+        "tags": [
+          "safety"
+        ]
+      }
+    },
+    "/v1/safety/redact": {
+      "post": {
+        "description": "Scrub sensitive credentials, tokens, and keys from text.",
+        "operationId": "redact_content_v1_safety_redact_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedactResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Redact Content",
+        "tags": [
+          "safety"
+        ]
+      }
+    },
+    "/v1/safety/url/validate": {
+      "post": {
+        "description": "Validate URL against SSRF, private address, and sensitive parameter policies.",
+        "operationId": "validate_url_v1_safety_url_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UrlValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrlValidateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Url",
+        "tags": [
+          "safety"
+        ]
+      }
+    },
+    "/v1/safety/vault/items": {
+      "get": {
+        "description": "List metadata for items in vault (model-safe, no secrets).",
+        "operationId": "list_vault_items_v1_safety_vault_items_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VaultItemResponse"
+                  },
+                  "title": "Response List Vault Items V1 Safety Vault Items Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Vault Items",
+        "tags": [
+          "safety"
+        ]
+      },
+      "post": {
+        "description": "Store encrypted credential item in local vault.",
+        "operationId": "create_vault_item_v1_safety_vault_items_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VaultItemCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultItemResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Vault Item",
+        "tags": [
+          "safety"
+        ]
+      }
+    },
+    "/v1/safety/vault/items/{item_id}": {
+      "delete": {
+        "description": "Delete an item from the vault.",
+        "operationId": "delete_vault_item_v1_safety_vault_items__item_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Delete Vault Item V1 Safety Vault Items  Item Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Vault Item",
+        "tags": [
+          "safety"
         ]
       }
     },
