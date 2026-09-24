@@ -168,6 +168,46 @@ def probe_cloud_backend(name: str) -> CloudBackendStatus:
             error=None,
             code="ok",
         )
+    if key == "vercel":
+        from homun.execution.vercel_jobs import (
+            vercel_credentials_present,
+            vercel_live_allowed,
+            vercel_sdk_available,
+        )
+
+        if not vercel_credentials_present():
+            return CloudBackendStatus(
+                name=key,
+                configured=False,
+                ready=False,
+                error="Vercel credentials missing (VERCEL_TOKEN or HOMUN_VERCEL_TOKEN)",
+            )
+        if not vercel_live_allowed():
+            return CloudBackendStatus(
+                name=key,
+                configured=True,
+                ready=False,
+                error=(
+                    "Vercel credentials present; set HOMUN_VERCEL_ALLOW_LIVE=1 after the "
+                    "Homun sandbox client is implemented (may incur cloud charges)"
+                ),
+            )
+        if not vercel_sdk_available():
+            return CloudBackendStatus(
+                name=key,
+                configured=True,
+                ready=False,
+                error="Vercel live opt-in set but no Homun-compatible Vercel sandbox SDK is installed",
+            )
+        return CloudBackendStatus(
+            name=key,
+            configured=True,
+            ready=False,
+            error=(
+                "Vercel credentials and live opt-in are present, but the Homun-owned "
+                "sandbox client is not yet implemented; refusing invented runs"
+            ),
+        )
     if not _env_present(keys):
         return CloudBackendStatus(
             name=key,
