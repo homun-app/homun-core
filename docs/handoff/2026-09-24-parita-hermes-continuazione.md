@@ -1,6 +1,6 @@
 # Continuazione: parità completa Homun / Hermes
 
-Data: 24 settembre 2026. Checkpoint del codice: dopo H33 HTTP transports (Telegram/Discord/Slack/WhatsApp + webhook).
+Data: 24 settembre 2026. Checkpoint del codice: `2defb927` (locale `main` / `fabio/hermes-parity`, nessun push).
 Questo documento trasferisce il lavoro a un'altra chat. Non certifica parità raggiunta.
 
 
@@ -25,8 +25,11 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 15. H33: ntfy + Matrix HTTP adapters registered alongside Telegram/Discord/Slack/WhatsApp/webhook.
 16. H10: ModalJobs SDK bridge with HOMUN_MODAL_ALLOW_LIVE spend gate (no unpaid Sandbox.create by default).
 17. H10: DaytonaJobs SDK bridge with HOMUN_DAYTONA_ALLOW_LIVE spend gate.
+18. H10: Vercel probe + HOMUN_VERCEL_ALLOW_LIVE honesty (client not implemented yet).
 
-**Prossimo passo eseguibile:** Vercel/managed Modal bridges; H16 Linux/Windows + AX SoM; MCP OAuth/mTLS/reconnect + product sampling wiring; resto catalogo messaging Hermes; prove provider mancanti. Parità completa H01–H46 ancora aperta.
+**Prossimo passo eseguibile:** managed Modal client; Vercel sandbox client; H16 Linux/Windows + AX SoM; MCP OAuth/mTLS/reconnect + product sampling wiring; resto catalogo messaging Hermes (email, signal, …); prove provider con credenziali. Parità completa H01–H46 ancora aperta.
+
+**Blocchi esterni (non inventare):** token canali reali; TCC Accessibility/Screen Recording per prove H16 live; `HOMUN_MODAL_ALLOW_LIVE` / `HOMUN_DAYTONA_ALLOW_LIVE` + SDK per prove cloud a pagamento; Copilot CLI con `--acp` per prova H39 live.
 
 
 ## 1. Obiettivo e decisioni già prese
