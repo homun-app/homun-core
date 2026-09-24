@@ -186,6 +186,48 @@
         "title": "AddMemoryRequest",
         "type": "object"
       },
+      "ApprovalCreateRequest": {
+        "properties": {
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "command": {
+            "title": "Command",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "tool_name",
+          "command",
+          "description"
+        ],
+        "title": "ApprovalCreateRequest",
+        "type": "object"
+      },
       "ApprovalRequest": {
         "properties": {
           "command_id": {
@@ -210,31 +252,6 @@
           "expected_version"
         ],
         "title": "ApprovalRequest",
-        "type": "object"
-      },
-      "ApprovalResolveRequest": {
-        "properties": {
-          "decision": {
-            "description": "'approve' or 'reject'",
-            "title": "Decision",
-            "type": "string"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          }
-        },
-        "required": [
-          "decision"
-        ],
-        "title": "ApprovalResolveRequest",
         "type": "object"
       },
       "ApprovalStageRequest": {
@@ -269,6 +286,34 @@
           "summary"
         ],
         "title": "ApprovalStageRequest",
+        "type": "object"
+      },
+      "ArtifactRegisterRequest": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "path_or_url": {
+            "title": "Path Or Url",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "artifact_type",
+          "path_or_url"
+        ],
+        "title": "ArtifactRegisterRequest",
         "type": "object"
       },
       "AskPersonRequest": {
@@ -1745,6 +1790,65 @@
           "model_id"
         ],
         "title": "Connection",
+        "type": "object"
+      },
+      "ConnectionRegisterRequest": {
+        "properties": {
+          "client_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "1.0.0",
+            "title": "Client Version"
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Endpoint"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "default",
+            "title": "Profile"
+          },
+          "surface_kind": {
+            "title": "Surface Kind",
+            "type": "string"
+          },
+          "transport": {
+            "title": "Transport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "surface_kind",
+          "transport"
+        ],
+        "title": "ConnectionRegisterRequest",
         "type": "object"
       },
       "ConnectionRequest": {
@@ -5808,6 +5912,86 @@
         "title": "ServerCreateRequest",
         "type": "object"
       },
+      "SessionSyncRequest": {
+        "properties": {
+          "active_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Tools"
+          },
+          "cwd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Cwd"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "surface_kind": {
+            "title": "Surface Kind",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Title"
+          },
+          "token_usage": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Usage"
+          }
+        },
+        "required": [
+          "session_id",
+          "profile",
+          "surface_kind",
+          "status"
+        ],
+        "title": "SessionSyncRequest",
+        "type": "object"
+      },
       "SetSkinRequest": {
         "properties": {
           "skin_id": {
@@ -6157,6 +6341,24 @@
           "name"
         ],
         "title": "StartSpanRequest",
+        "type": "object"
+      },
+      "SteeringQueueRequest": {
+        "properties": {
+          "guidance": {
+            "title": "Guidance",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "guidance"
+        ],
+        "title": "SteeringQueueRequest",
         "type": "object"
       },
       "SttTranscribeRequest": {
@@ -7607,6 +7809,44 @@
           "proposal_id"
         ],
         "title": "ConfirmRequest",
+        "type": "object"
+      },
+      "homun__routes__safety_api__ApprovalResolveRequest": {
+        "properties": {
+          "decision": {
+            "description": "'approve' or 'reject'",
+            "title": "Decision",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ApprovalResolveRequest",
+        "type": "object"
+      },
+      "homun__routes__surface_gateway_api__ApprovalResolveRequest": {
+        "properties": {
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ApprovalResolveRequest",
         "type": "object"
       }
     }
@@ -12993,7 +13233,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ApprovalResolveRequest"
+                "$ref": "#/components/schemas/homun__routes__safety_api__ApprovalResolveRequest"
               }
             }
           },
@@ -13293,6 +13533,466 @@
         "summary": "Delete Vault Item",
         "tags": [
           "safety"
+        ]
+      }
+    },
+    "/v1/surfaces/approvals": {
+      "post": {
+        "description": "Post an action approval to the queue.",
+        "operationId": "create_approval_v1_surfaces_approvals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Approval V1 Surfaces Approvals Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Approval",
+        "tags": [
+          "surfaces"
+        ]
+      }
+    },
+    "/v1/surfaces/approvals/{request_id}/resolve": {
+      "post": {
+        "description": "Resolve a pending approval.",
+        "operationId": "resolve_approval_v1_surfaces_approvals__request_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/homun__routes__surface_gateway_api__ApprovalResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Resolve Approval V1 Surfaces Approvals  Request Id  Resolve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Approval",
+        "tags": [
+          "surfaces"
+        ]
+      }
+    },
+    "/v1/surfaces/artifacts": {
+      "post": {
+        "description": "Record an artifact for multi-surface availability.",
+        "operationId": "register_artifact_v1_surfaces_artifacts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactRegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Register Artifact V1 Surfaces Artifacts Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Artifact",
+        "tags": [
+          "surfaces"
+        ]
+      }
+    },
+    "/v1/surfaces/connections": {
+      "get": {
+        "description": "List active surface client connections.",
+        "operationId": "list_connections_v1_surfaces_connections_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "profile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Connections V1 Surfaces Connections Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Connections",
+        "tags": [
+          "surfaces"
+        ]
+      },
+      "post": {
+        "description": "Register a new surface client connection.",
+        "operationId": "register_connection_v1_surfaces_connections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionRegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Register Connection V1 Surfaces Connections Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Connection",
+        "tags": [
+          "surfaces"
+        ]
+      }
+    },
+    "/v1/surfaces/connections/{connection_id}": {
+      "delete": {
+        "description": "Disconnect a surface client.",
+        "operationId": "disconnect_v1_surfaces_connections__connection_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Disconnect V1 Surfaces Connections  Connection Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disconnect",
+        "tags": [
+          "surfaces"
+        ]
+      }
+    },
+    "/v1/surfaces/sessions/sync": {
+      "post": {
+        "description": "Synchronize task state across surfaces.",
+        "operationId": "sync_session_v1_surfaces_sessions_sync_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Sync Session V1 Surfaces Sessions Sync Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync Session",
+        "tags": [
+          "surfaces"
+        ]
+      }
+    },
+    "/v1/surfaces/sessions/{session_id}/snapshot": {
+      "get": {
+        "description": "Get live task status, steering, approvals, and artifacts for a session.",
+        "operationId": "get_session_snapshot_v1_surfaces_sessions__session_id__snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Session Snapshot V1 Surfaces Sessions  Session Id  Snapshot Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session Snapshot",
+        "tags": [
+          "surfaces"
+        ]
+      }
+    },
+    "/v1/surfaces/sessions/{session_id}/steering/drain": {
+      "post": {
+        "description": "Consume pending steering instructions for active turn.",
+        "operationId": "drain_steering_v1_surfaces_sessions__session_id__steering_drain_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Drain Steering V1 Surfaces Sessions  Session Id  Steering Drain Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Drain Steering",
+        "tags": [
+          "surfaces"
+        ]
+      }
+    },
+    "/v1/surfaces/steering": {
+      "post": {
+        "description": "Queue steering guidance from any surface.",
+        "operationId": "queue_steering_v1_surfaces_steering_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SteeringQueueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Queue Steering V1 Surfaces Steering Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Queue Steering",
+        "tags": [
+          "surfaces"
         ]
       }
     },

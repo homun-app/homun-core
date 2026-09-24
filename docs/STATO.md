@@ -116,6 +116,14 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   gestione del riquadro di anteprima web/file, navigazione interattiva (click, type, scroll, elements)
   con aggiornamenti delta e annotazioni permanenti sugli elementi; esposto via endpoint REST `/v1/desktop`.
 
+- Gateway multi-superficie e sincronizzazione cross-client (`SurfaceGatewayManager`, H34)
+  con supporto unificato per client CLI, TUI, Desktop, Web/Dashboard e BotScreen, molteplici
+  trasporti di connessione (locale, SSH, URL, cloud), isolamento per profilo, code di guida
+  e steering interattivo coerenti (`drain_steering_guidance`), coda centralizzata delle richieste
+  di approvazione (`request_approval`, `resolve_approval` con decisioni una-volta/sessione/sempre/nega),
+  registro degli artifact e snapshot di stato condivisi in tempo reale; esposto via endpoint REST `/v1/surfaces`.
+
+
 
 - Orchestrazione compiti con Kanban durevole e contratti PR (`KanbanStore`, `KanbanWorkflow`, H23)
   con persistenza SQLite WAL, isolamento dei profili, tracciamento DAG delle dipendenze,

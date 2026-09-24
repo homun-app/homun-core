@@ -359,6 +359,12 @@ injection blocking, window underneath reading, terminal buffer inspection, and i
 pane management, driving and persistent element annotations from tools/computer_use/, tools/desktop_ui.py,
 tools/read_window_tool.py, tools/read_terminal_tool.py, tools/preview_tool.py, tools/drive_preview_tool.py,
 and tools/annotate_preview_tool.py at the pinned commit.
+application/surface_contracts.py, application/surface_gateway_manager.py, and routes/surface_gateway_api.py
+derive multi-surface client connections (CLI, TUI, Desktop, Web/Dashboard, BotScreen), multi-transport
+support (local, SSH, URL, cloud), cross-surface live session synchronization, coherent task steering,
+unified approval queue resolution, and deliverable artifact registries from tui_gateway/contracts/,
+tui_gateway/server.py, tui_gateway/session_lifecycle.py, cli.py, and ui-tui/ at the pinned commit.
+
 
 
 
