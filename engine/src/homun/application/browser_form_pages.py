@@ -1,7 +1,11 @@
 """Dispatch form actions for one owned browser session."""
+from pathlib import Path
+from secrets import token_hex
+
 from homun.domain.errors import ValidationError
 from homun.execution.browser_forms import click, fill, open_page, press, snapshot
 from homun.execution.browser_sessions import close_browser, open_browser, require_browser
+from homun.execution.browser_shots import capture
 from homun.execution.owned_browser import chrome_path
 from homun.execution.web_pages import PageRefusal, _classify
 
@@ -28,7 +32,7 @@ def _once(browser, run, action):
 
 def execute(ctx, actor, run, tool, args):
     browser_run = run.get('browser', {})
-    if browser_run.get('policy') != 'owned-headless-v1' or browser_run.get('version') != 3:
+    if browser_run.get('policy') != 'owned-headless-v1' or browser_run.get('version') not in {3, 4}:
         raise ValidationError('The browser is not enabled for this run')
     if tool == 'browser_close':
         close_browser(run['id'])
@@ -56,4 +60,7 @@ def execute(ctx, actor, run, tool, args):
         return _once(browser, run, lambda: click(browser, args['ref']))
     if tool == 'browser_press':
         return _once(browser, run, lambda: press(browser, args['key']))
+    if tool == 'browser_screenshot' and browser_run.get('version') == 4:
+        dest = Path(ctx.data_dir) / 'execution' / 'browser-shots' / run['id'] / f'{token_hex(8)}.png'
+        return _once(browser, run, lambda: capture(browser, dest))
     raise ValidationError('Unknown browser tool')

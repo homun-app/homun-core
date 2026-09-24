@@ -8,6 +8,7 @@ from homun.application.agent_run_execution import advance
 from homun.application.browser_form_pages import execute
 from homun.execution.browser_forms import click, fill, open_page
 from homun.execution.browser_sessions import close_browser, open_browser
+from homun.execution.browser_shots import capture
 from homun.execution.owned_browser import OwnedBrowser, read_page
 from homun.models.native_turn import NativeMessage, ToolCall
 from test_agent_runs import setup
@@ -51,9 +52,9 @@ def test_approved_run_reads_in_an_owned_browser(setup):
     ctx.models.set_active("openai_compatible")
     proposal = agent_runs.propose(ctx, actor, work, {
         "command_id": "run", "expected_version": 1, "material_ids": [], "browser": True})
-    assert proposal["browser"] == {"policy": "owned-headless-v1", "version": 3}
+    assert proposal["browser"] == {"policy": "owned-headless-v1", "version": 4}
     names = [item["name"] for item in proposal["tools"]]
-    assert "browser_open" in names and "browser_type" in names and "browser_read" not in names
+    assert "browser_open" in names and "browser_type" in names and "browser_screenshot" in names and "browser_read" not in names
     agent_runs.approve(ctx, actor, work, proposal["id"], {
         "command_id": "go", "digest": proposal["digest"], "expected_version": proposal["expected_version"]})
     ctx.models.complete_tools = lambda *a, **k: SimpleNamespace(message=NativeMessage(
@@ -102,3 +103,21 @@ def test_owned_browser_fills_a_public_field_and_clicks_its_button(tmp_path):
         assert ((value.get("result") or {}).get("result") or {}).get("value") == "homun-form-proof"
     finally:
         close_browser("form-proof")
+
+
+def test_owned_browser_saves_a_png_of_the_public_page(tmp_path):
+    browser = open_browser(tmp_path, "shot-proof")
+    dest = tmp_path / "shots" / "page.png"
+    try:
+        opened = open_page(browser, "https://example.com/")
+        assert "Example Domain" in opened.get("text", ""), opened
+        shot = capture(browser, dest)
+        assert shot.get("url", "").startswith("https://example.com"), shot
+        raw = dest.read_bytes()
+        assert raw.startswith(b"\x89PNG\r\n\x1a\n")
+        assert shot["bytes"] == len(raw) and shot["width"] >= 100 and shot["height"] >= 100
+        assert "execution/browsers" not in shot["path"]
+    finally:
+        close_browser("shot-proof")
+    assert dest.is_file()
+    assert not (tmp_path / "execution" / "browsers" / "shot-proof").exists()

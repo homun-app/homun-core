@@ -219,9 +219,10 @@ e senza copiare i file. Può anche leggere il testo di una pagina http pubblica,
 rifiutando gli indirizzi privati, e può cercare sul web pubblico. I provider
 nominati, la cache e X restano assenti. Può anche aprire un browser privato,
 senza il profilo di Chrome di questo computer, leggere una pagina pubblica,
-chiudere una finestra nativa senza confermarla, compilare un campo e chiudere
-solo quel processo. Accettare una finestra, i riquadri interni e le schermate
-restano assenti.
+chiudere una finestra nativa senza confermarla, compilare un campo, salvare
+una schermata di quella pagina e chiudere solo quel processo. Non fotografa lo
+schermo di questo computer. Accettare una finestra e i riquadri interni restano
+assenti.
 Restano aperti lo schermo completo,
 Modal, Singularity, Daytona, Vercel, language server,
 patch V4A e il resto della matrice. Non è parità completa.
