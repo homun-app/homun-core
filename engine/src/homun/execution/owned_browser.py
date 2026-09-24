@@ -160,6 +160,8 @@ class OwnedBrowser:
             self.argv, cwd=self.root, stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         self._page: _Page | None = None
+        self.refs: dict[str, dict] = {}
+        self.receipts: dict[str, dict] = {}
 
     def _port(self) -> int:
         marker = self.root / "profile" / "DevToolsActivePort"
@@ -224,9 +226,11 @@ class OwnedBrowser:
                 "action": "dismiss",
             })
 
-    def read(self, url: str, *, dismiss_dialogs: bool = False) -> dict:
-        _classify(url)
-        page = self._page_socket()
+    def wait_document(self, *, dismiss_dialogs: bool) -> dict:
+        """Wait until the current public page has loaded. A read does not accept dialogs."""
+        page = self._page
+        if page is None:
+            return {"error_code": "web_fetch_failed", "message": "The browser has no page"}
         dialogs: list[dict] = []
 
         def notice() -> None:
@@ -234,7 +238,6 @@ class OwnedBrowser:
 
         watcher = notice if dismiss_dialogs else None
         try:
-            page.call("Page.navigate", {"url": url}, notice=watcher)
             deadline = time.monotonic() + 15
             href = ""
             while time.monotonic() < deadline:
@@ -259,13 +262,36 @@ class OwnedBrowser:
             _classify(href)
         except PageRefusal as exc:
             return {"error_code": exc.code, "message": exc.message}
+        settled = {"url": href}
+        if dialogs:
+            settled["dialogs"] = dialogs
+        return settled
+
+    def read(self, url: str, *, dismiss_dialogs: bool = False) -> dict:
+        _classify(url)
+        page = self._page_socket()
+        self.refs = {}
+        early: list[dict] = []
+
+        def notice() -> None:
+            early.extend(self._dismiss_dialogs())
+
+        try:
+            page.call("Page.navigate", {"url": url}, notice=notice if dismiss_dialogs else None)
+        except _TooManyDialogs:
+            return {"error_code": "web_fetch_failed", "message": "The page opened too many dialogs"}
+        settled = self.wait_document(dismiss_dialogs=dismiss_dialogs)
+        if "error_code" in settled:
+            return settled
+        if early:
+            settled["dialogs"] = early + list(settled.get("dialogs") or [])
         evaluated = page.call(
             "Runtime.evaluate",
             {"expression": "document.body ? document.body.innerText : ''", "returnByValue": True})
         text = str(((evaluated.get("result") or {}).get("result") or {}).get("value") or "")
-        result = {"url": href, "text": text[:TEXT_LIMIT], "truncated": len(text) > TEXT_LIMIT}
-        if dialogs:
-            result["dialogs"] = dialogs
+        result = {"url": settled["url"], "text": text[:TEXT_LIMIT], "truncated": len(text) > TEXT_LIMIT}
+        if settled.get("dialogs"):
+            result["dialogs"] = settled["dialogs"]
         return result
 
     def close(self) -> None:

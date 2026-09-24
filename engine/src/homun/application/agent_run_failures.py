@@ -54,4 +54,7 @@ def fail(ctx, run_id, code, *, token=None, blocked=False, epoch=None, expected_s
                         sequence=store.next_sequence(), type='work.agent_run_failed', actor_id='homun_engine',
                         command_id=run_id, payload={'error_code': code}))
         ctx.service.store = store
+    if run['status'] in {'failed', 'blocked'}:
+        from homun.execution.browser_sessions import close_browser
+        close_browser(run_id)
     return run['status']

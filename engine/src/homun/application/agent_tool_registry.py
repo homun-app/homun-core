@@ -39,6 +39,11 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.browser_pages import execute as browser_execute
         for browser_entry in browser_entries(browser_execute, browser.get('version', 1)):
             registry.register(browser_entry)
+    if isinstance(browser, dict) and browser.get('policy') == 'owned-headless-v1' and browser.get('version') == 3:
+        from homun.application.browser_form_contracts import entries as browser_form_entries
+        from homun.application.browser_form_pages import execute as browser_form_execute
+        for browser_entry in browser_form_entries(browser_form_execute):
+            registry.register(browser_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())

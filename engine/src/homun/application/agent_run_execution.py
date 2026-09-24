@@ -239,6 +239,9 @@ def advance(ctx, run_id, *, epoch=None):
                 current.pop('_lease_until', None)
                 status = current['status']
             ctx.service.store = store
+        if status in {'completed', 'failed', 'blocked'}:
+            from homun.execution.browser_sessions import close_browser
+            close_browser(run_id)
         return status
     except ContextPreparationDeferred:
         return ctx.repository.load().commands[run_id].result['status']

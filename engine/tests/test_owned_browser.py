@@ -1,8 +1,15 @@
 """The owned browser reads a public page and does not signal other processes."""
 import subprocess
 import time
+from types import SimpleNamespace
 
+from homun.application import agent_runs
+from homun.application.agent_run_execution import advance
+from homun.application.browser_form_pages import execute
+from homun.execution.browser_forms import click, fill, open_page
+from homun.execution.browser_sessions import close_browser, open_browser
 from homun.execution.owned_browser import OwnedBrowser, read_page
+from homun.models.native_turn import NativeMessage, ToolCall
 from test_agent_runs import setup
 
 
@@ -40,21 +47,58 @@ def test_owned_browser_dismisses_a_native_dialog_without_accepting_it(tmp_path):
 
 
 def test_approved_run_reads_in_an_owned_browser(setup):
-    from types import SimpleNamespace
-    from homun.application import agent_runs
-    from homun.application.agent_run_execution import advance
-    from homun.models.native_turn import NativeMessage, ToolCall
     ctx, actor, work, _ = setup
     ctx.models.set_active("openai_compatible")
     proposal = agent_runs.propose(ctx, actor, work, {
         "command_id": "run", "expected_version": 1, "material_ids": [], "browser": True})
-    assert proposal["browser"] == {"policy": "owned-headless-v1", "version": 2}
-    assert "browser_read" in [item["name"] for item in proposal["tools"]]
+    assert proposal["browser"] == {"policy": "owned-headless-v1", "version": 3}
+    names = [item["name"] for item in proposal["tools"]]
+    assert "browser_open" in names and "browser_type" in names and "browser_read" not in names
     agent_runs.approve(ctx, actor, work, proposal["id"], {
         "command_id": "go", "digest": proposal["digest"], "expected_version": proposal["expected_version"]})
     ctx.models.complete_tools = lambda *a, **k: SimpleNamespace(message=NativeMessage(
         role="assistant", tool_calls=[ToolCall(
-            id="b1", name="browser_read", arguments={"url": "https://example.com/"})]), usage=None)
-    assert advance(ctx, proposal["id"]) == "running"
-    text = str(ctx.repository.load().commands[proposal["id"]].result["observations"][-1]["result"])
-    assert "Example Domain" in text
+            id="b1", name="browser_open", arguments={"url": "https://example.com/"})]), usage=None)
+    try:
+        assert advance(ctx, proposal["id"]) == "running"
+        text = str(ctx.repository.load().commands[proposal["id"]].result["observations"][-1]["result"])
+        assert "Example Domain" in text
+    finally:
+        close_browser(proposal["id"])
+
+
+def test_private_form_open_does_not_start_a_browser(tmp_path):
+    result = execute(type("Ctx", (), {"data_dir": tmp_path})(), None, {
+        "id": "run", "browser": {"policy": "owned-headless-v1", "version": 3},
+    }, "browser_open", {"url": "http://127.0.0.1/secret"})
+    assert result["error_code"] == "web_address_refused"
+    assert not (tmp_path / "execution").exists()
+
+
+def test_owned_browser_fills_a_public_field_and_clicks_its_button(tmp_path):
+    browser = open_browser(tmp_path, "form-proof")
+    try:
+        browser._page_socket().call("Page.addScriptToEvaluateOnNewDocument", {"source": (
+            "document.addEventListener('DOMContentLoaded', () => {"
+            " const input = document.createElement('input');"
+            " input.setAttribute('aria-label', 'Proof field');"
+            " const button = document.createElement('button');"
+            " button.type = 'button'; button.textContent = 'Proof button';"
+            " button.addEventListener('click', () => document.body.setAttribute('data-proof', input.value));"
+            " document.body.append(input, button); });"
+        )})
+        opened = open_page(browser, "https://example.com/")
+        assert "Example Domain" in opened.get("text", ""), opened
+        snapshot = opened.get("snapshot", "")
+        field = next(line.split()[0] for line in snapshot.splitlines() if "Proof field" in line)
+        button = next(line.split()[0] for line in snapshot.splitlines() if "Proof button" in line)
+        typed = fill(browser, field, "homun-form-proof")
+        assert typed.get("typed") is True and "homun-form-proof" not in str(typed), typed
+        clicked = click(browser, button)
+        assert clicked.get("clicked") == button, clicked
+        value = browser._page_socket().call(
+            "Runtime.evaluate",
+            {"expression": "document.body.getAttribute('data-proof')", "returnByValue": True})
+        assert ((value.get("result") or {}).get("result") or {}).get("value") == "homun-form-proof"
+    finally:
+        close_browser("form-proof")

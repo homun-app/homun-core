@@ -145,6 +145,7 @@ control remain absent. Version 1 of the tool still reports that search is not
 configured.
 execution/owned_browser.py starts headless Chrome with an engine-owned profile
 and closes that process group. A native dialog is dismissed and its message is
-returned; it is not accepted. Hermes browser control uses browser-use, a CDP
-supervisor and the person's profile options. Homun does not copy those. Forms
+returned; it is not accepted. A later contract can fill one text field from an
+accessibility ref and click that control. Hermes browser control uses browser-use, a CDP
+supervisor and the person's profile options. Homun does not copy those. Iframes
 and screenshots are not implemented.
