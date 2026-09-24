@@ -38,6 +38,7 @@ def propose(ctx, actor, work_id, body, *, agent_binding=None):
         result = dict(id=request.command_id,work_id=work_id,image=request.image,command=request.command,
                       expected_version=request.expected_version,timeout_seconds=request.timeout_seconds,policy='docker-offline-v1',created_by=actor.id,
                       created_at=utc_now().isoformat(),status='pending_approval')
+        if request.background:result['background']=True
         job_spec(ctx,result)
     except SchemaError:
         raise ValidationError('Invalid terminal proposal') from None

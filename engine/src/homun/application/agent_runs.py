@@ -189,7 +189,7 @@ def propose(ctx, actor, work_id, body):
                 except SchemaError:
                     raise ValidationError('Terminal image must be a pinned SHA256') from None
                 run['_workspace_files_version']=2
-                run['terminal']={'image':body['terminal_image'],'policy':'docker-offline-v1','version':2}
+                run['terminal']={'image':body['terminal_image'],'policy':'docker-offline-v1','version':3}
             run['_mcp_bindings'] = bindings
             run['external_tools'] = [{k: b[k] for k in ('server_id', 'server_name', 'tool', 'name')} | {'description': b['descriptor'].get('description', '')} for b in bindings]
             run['_registry_version'] = 1

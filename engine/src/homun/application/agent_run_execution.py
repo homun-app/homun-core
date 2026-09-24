@@ -28,6 +28,8 @@ class _ModelFailure(Exception):
 
 
 def _claim(ctx, run_id, epoch=None):
+    from homun.application.agent_terminal_sessions import announce
+    announce(ctx, run_id)
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             run = lookup(store, run_id)
@@ -155,6 +157,17 @@ def advance(ctx, run_id, *, epoch=None):
                     registry_for(run).validate(decision.tool,decision.arguments)
                     from homun.application.agent_terminal import stage as stage_terminal
                     return stage_terminal(ctx,actor,run,decision)
+                if decision.tool in {'terminal_poll','terminal_wait','terminal_stop'} and run.get('terminal',{}).get('version',1) >= 3:
+                    registry_for(run).validate(decision.tool,decision.arguments)
+                    from homun.application import agent_terminal_sessions as terminal_sessions
+                    if decision.tool == 'terminal_wait':
+                        staged = terminal_sessions.stage_wait(ctx,actor,run,decision)
+                        if staged == 'waiting_external':return staged
+                        observation = staged
+                    elif decision.tool == 'terminal_poll':
+                        observation = terminal_sessions.poll(ctx,actor,run,decision.arguments)
+                    else:
+                        observation = terminal_sessions.stop(ctx,actor,run,decision.arguments)
                 if decision.tool in {'write_workspace_file','patch_workspace_file'} and run.get('_workspace_files_version')==2:
                     registry_for(run).validate(decision.tool,decision.arguments)
                     from homun.application.workspace_file_edits import stage as stage_edit

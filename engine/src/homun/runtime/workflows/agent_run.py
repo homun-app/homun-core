@@ -65,6 +65,9 @@ def deliver_agent_runs(ctx):
                 if run.get('terminal_request_id'):
                     from homun.application.agent_terminal import resume as resume_terminal
                     resume_terminal(ctx,run['id'])
+                elif run.get('terminal_wait_id'):
+                    from homun.application.agent_terminal_sessions import resume_wait
+                    resume_wait(ctx,run['id'])
                 elif run.get('file_edit_request_id'):
                     from homun.application.workspace_file_edits import resume as resume_edit
                     resume_edit(ctx,run['id'])

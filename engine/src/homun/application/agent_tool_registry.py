@@ -22,8 +22,8 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
     for entry in entries(run.get('_mcp_bindings', []), include_source=run.get('_tool_bridge_version') == 1):
         registry.register(entry)
     if run.get('terminal'):
-        from homun.application.agent_terminal_contracts import entry as terminal_entry
-        registry.register(terminal_entry(run['terminal']))
+        from homun.application.agent_terminal_contracts import entries as terminal_entries
+        for terminal_entry in terminal_entries(run['terminal']):registry.register(terminal_entry)
     if run.get('_workspace_files_version') in {1, 2}:
         from homun.application.workspace_file_contracts import entries as file_entries
         for file_entry in file_entries(file_executor, run['_workspace_files_version']):registry.register(file_entry)

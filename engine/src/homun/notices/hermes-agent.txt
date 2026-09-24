@@ -113,4 +113,9 @@ execution/docker.py derives container hardening, hash-based ownership and
 reconnection patterns from tools/environments/docker.py at the pinned commit.
 Homun uses a separate container per immutable job, offline SHA256-pinned images,
 private workspaces, bounded CLI capture and durable exclusive dispatch intents.
-This backend is not yet exposed to agents; Hermes is not a runtime dependency.
+Agents reach this backend only through an approved terminal tool. Hermes is not a runtime dependency.
+
+application/agent_terminal_sessions.py derives background poll, wait, stop and
+one completion notice from tools/process_registry.py at the pinned commit.
+Each approved command keeps its own container. Stopping one session does not
+signal another. PTY input and stdin write are not implemented.

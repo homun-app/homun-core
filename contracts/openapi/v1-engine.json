@@ -3213,6 +3213,17 @@
             ],
             "title": "Agent Run Id"
           },
+          "background": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background"
+          },
           "command": {
             "title": "Command",
             "type": "string"
@@ -3377,6 +3388,11 @@
       "TerminalProposalRequest": {
         "additionalProperties": false,
         "properties": {
+          "background": {
+            "default": false,
+            "title": "Background",
+            "type": "boolean"
+          },
           "command": {
             "maxLength": 16000,
             "minLength": 1,
