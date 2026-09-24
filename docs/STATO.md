@@ -384,6 +384,7 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
   sotto per quelle righe sono storiche e non sostituiscono la matrice corretta.
 
 - **Da fare successivamente (UI i18n)**: localizzazione multilingua di tutti i copy dell'interfaccia utente (UI copy) in modo che ciascun utente possa fruirne nella propria lingua. Registrato per la fase successiva alla parità funzionale con Hermes.
+- **H39 Copilot ACP stdio (2026-09-24)**: `StdioAcpTransport` runs real initialize → session/new → session/prompt over the Copilot CLI when present; failures are typed, never synthesized replies.
 - **H16 macOS bridge (2026-09-24)**: `computer_use_macos_bridge` wires real app list / focus / capture / click / type via osascript+screencapture; `ready` only when TCC Accessibility and Screen Recording probes pass.
 - **H10 Singularity bridge (2026-09-24)**: `SingularityJobs` runs real `apptainer|singularity exec --containall --no-home` when CLI is on PATH / `HOMUN_SINGULARITY_BIN`; probe marks ready only after `version` succeeds. Modal/Daytona/Vercel remain unwired honesty stubs.
 - **H36 MCP resources/prompts (2026-09-24)**: probe lists resources/prompts when server capabilities advertise them; `read_resource` / `get_prompt` execute on the live session; sampling/elicitation default to typed refusal until product callbacks are installed.

@@ -21,8 +21,9 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 11. H33: Telegram/Discord/Slack/WhatsApp HTTP send when tokens set; adapter_send honesty.
 12. H10: SingularityJobs real exec when CLI present; H36 resources/prompts + sampling/elicitation refuse-by-default.
 13. H16: macOS computer-use bridge (osascript/screencapture) auto-wired with TCC-gated readiness.
+14. H39: StdioAcpTransport real Copilot ACP JSON-RPC session when CLI present.
 
-**Prossimo passo eseguibile:** bridge SDK Modal/Daytona/Vercel; H16 Linux/Windows + AX SoM capture; MCP OAuth/mTLS/reconnect + product sampling/elicitation wiring; catalogo messaging Hermes oltre i cinque adapter; prove provider mancanti. Parità completa H01–H46 ancora aperta.
+**Prossimo passo eseguibile:** bridge SDK Modal/Daytona/Vercel; H16 Linux/Windows + AX SoM; MCP OAuth/mTLS/reconnect + product sampling wiring; catalogo messaging Hermes oltre i cinque adapter (+ ntfy/matrix/…); prove provider mancanti. Parità completa H01–H46 ancora aperta.
 
 
 ## 1. Obiettivo e decisioni già prese

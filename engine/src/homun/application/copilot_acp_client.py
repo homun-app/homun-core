@@ -14,6 +14,8 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from homun.application.acp_stdio_transport import StdioAcpTransport
+
 logger = logging.getLogger(__name__)
 
 _TOOL_CALL_REGEX = re.compile(r"<tool_call>\s*({.*?})\s*</tool_call>", re.DOTALL)
@@ -69,11 +71,14 @@ class CopilotAcpClient:
         *,
         simulated_response: Optional[str] = None,
         transport: Optional[Any] = None,
+        timeout_seconds: float = 60.0,
+        cwd: Optional[str] = None,
     ) -> CopilotAcpResult:
         """Execute a turn via Copilot ACP or return explicit unavailable status.
 
-        ``simulated_response`` is reserved for explicit test doubles. A present
-        binary without a configured transport must not invent a reply.
+        ``simulated_response`` is reserved for explicit test doubles. When the
+        binary is on PATH and no transport is injected, Homun opens a real
+        ``StdioAcpTransport`` session (initialize → session/new → session/prompt).
         """
         if simulated_response is not None:
             cleaned_text, tool_calls = self.extract_tool_calls(simulated_response)
@@ -91,21 +96,28 @@ class CopilotAcpClient:
                 error=f"Copilot binary '{self.command}' is not installed or not found on PATH.",
             )
 
-        if transport is None:
+        active = transport
+        if active is None:
+            active = StdioAcpTransport(
+                self.command,
+                self.args,
+                cwd=cwd,
+                timeout_seconds=timeout_seconds,
+            )
+
+        try:
+            raw = active.run(prompt)
+        except Exception as exc:
             return CopilotAcpResult(
                 text="",
                 is_available=False,
-                error=(
-                    "Copilot ACP transport is not configured. Homun will not synthesize a "
-                    "response; provide a transport that speaks the ACP protocol over stdio."
-                ),
+                error=f"Copilot ACP transport failed: {exc}",
             )
 
-        raw = transport.run(prompt)
-        cleaned_text, tool_calls = self.extract_tool_calls(raw)
+        cleaned_text, tool_calls = self.extract_tool_calls(raw or "")
         return CopilotAcpResult(
             text=cleaned_text,
             tool_calls=tool_calls,
-            raw_response=raw,
+            raw_response=raw or "",
             is_available=True,
         )
