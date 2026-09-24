@@ -56,6 +56,12 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.skill_tools import execute as skill_execute
         for skill_entry in skill_entries(skill_execute, skills.get('version', 1)):
             registry.register(skill_entry)
+    delegation = run.get('delegation')
+    if isinstance(delegation, dict) and delegation.get('policy') == 'isolated-subagent-v1' and delegation.get('version') == 1:
+        from homun.application.delegation_contracts import entries as delegation_entries
+        from homun.application.delegation_tools import execute as delegation_execute
+        for del_entry in delegation_entries(delegation_execute, delegation.get('version', 1)):
+            registry.register(del_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())

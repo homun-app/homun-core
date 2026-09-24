@@ -174,3 +174,12 @@ skill metadata discovery, full instruction body disclosure on demand, and learni
 from tools/skills_tool.py, tools/skill_manager.py, and tools/skills_guard.py at the
 pinned commit. Homun keeps unapproved or newly proposed skills in a staged quarantine
 until explicit human approval, refusing their execution or display as trusted instructions.
+
+application/delegation_contracts.py and application/delegation_tools.py derive
+isolated subagent execution, task delegation, bounded turn limits, structured output
+schema validation and repair, and background subagent polling/cancellation from
+tools/delegate_tool.py, tools/delegation_output_schema.py, and tools/async_delegation.py
+at the pinned commit. Homun executes subagents with isolated prompt envelopes, reserves
+budgets in the parent work envelope, validates JSON schemas while preserving raw work
+on repair failure, and tracks delegations durably across runs.
+

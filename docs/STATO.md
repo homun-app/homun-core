@@ -64,6 +64,11 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   e ripresa delle chiamate pendenti dopo un contributo umano. Nucleo mantenuto in
   Homun, derivato dalla logica Hermes con attribuzione MIT; nessun runtime esterno.
 
+- Delegazione a sotto-agenti isolati (`delegate_task`, H21/H22) con budget limitato,
+  istruzioni e strumenti dedicati, e validazione di output JSON Schema con riparazione
+  delle code fences e conservazione del lavoro grezzo; polling e annullamento durevoli
+  (`delegation_poll`, `delegation_cancel`) con stato salvato nel record del run.
+
 - Controlli nativi di pausa/ripresa/annullamento e correzioni dalla chat, con
   invalidazione delle risposte superate, conservazione degli esiti incerti e
   oscuramento delle fonti revocate. [Prove e limiti](research/2026-09-23-agent-controls-verifica.md).

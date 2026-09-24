@@ -15,6 +15,7 @@ export type AgentRun = {
   browser?: {policy: string; version: number};
   memory?: {policy: string; version: number};
   skills?: {policy: string; version: number};
+  delegation?: {policy: string; version: number};
   external_tools?: {server_id: string; server_name: string; tool: string; name: string; description: string}[];
   tool_version: string;
   tools?: { name: string; toolset: string; version: string; schema_hash: string; definition_hash: string; kind: 'tool' | 'ask'; replay: 'read_only' | 'model' | 'never' }[];
@@ -42,12 +43,12 @@ async function request(workId: string, suffix = '', body?: unknown) {
 export async function listAgentRuns(workId: string): Promise<AgentRun[]> {
   return (await request(workId)).items;
 }
-export async function prepareAgentRun(work: Work, materialIds: string[], commandId: string, teamId?: string, personId?: string, serverIds?: string[], terminalImage?: string, terminalBackend?: 'local' | 'ssh', ssh?: {host: string; user: string; port: number; hostKey: string; keyPath: string}, webPages?: boolean, browser?: boolean, memory?: boolean, skills?: boolean): Promise<AgentRun> {
+export async function prepareAgentRun(work: Work, materialIds: string[], commandId: string, teamId?: string, personId?: string, serverIds?: string[], terminalImage?: string, terminalBackend?: 'local' | 'ssh', ssh?: {host: string; user: string; port: number; hostKey: string; keyPath: string}, webPages?: boolean, browser?: boolean, memory?: boolean, skills?: boolean, delegation?: boolean): Promise<AgentRun> {
   const existing = (await listAgentRuns(work.id)).find(p => p.id === commandId);
   if (existing) return existing;
   const current = (await listEngineWorks()).find(w => w['id'] === work.id);
   if (!current) throw homunErrorFromHttp(404, {detail:'Lavoro non accessibile'}, 'Lavoro non accessibile');
-  return request(work.id, '', { command_id: commandId, expected_version: current['version'], material_ids: materialIds, ...(terminalBackend === 'local' ? {terminal_backend: 'local'} : terminalBackend === 'ssh' && ssh ? {terminal_backend: 'ssh', ssh_host: ssh.host, ssh_user: ssh.user, ssh_port: ssh.port, ssh_host_key: ssh.hostKey, ssh_key_path: ssh.keyPath} : terminalImage ? {terminal_image: terminalImage} : {}), ...(serverIds?.length ? {server_ids: serverIds} : {}), ...(teamId ? {team_id: teamId} : {}), ...(personId ? {person_id: personId} : {}), ...(webPages ? {web_pages: true} : {}), ...(browser ? {browser: true} : {}), ...(memory ? {memory: true} : {}), ...(skills ? {skills: true} : {}) });
+  return request(work.id, '', { command_id: commandId, expected_version: current['version'], material_ids: materialIds, ...(terminalBackend === 'local' ? {terminal_backend: 'local'} : terminalBackend === 'ssh' && ssh ? {terminal_backend: 'ssh', ssh_host: ssh.host, ssh_user: ssh.user, ssh_port: ssh.port, ssh_host_key: ssh.hostKey, ssh_key_path: ssh.keyPath} : terminalImage ? {terminal_image: terminalImage} : {}), ...(serverIds?.length ? {server_ids: serverIds} : {}), ...(teamId ? {team_id: teamId} : {}), ...(personId ? {person_id: personId} : {}), ...(webPages ? {web_pages: true} : {}), ...(browser ? {browser: true} : {}), ...(memory ? {memory: true} : {}), ...(skills ? {skills: true} : {}), ...(delegation ? {delegation: true} : {}) });
 }
 export function approveAgentRun(workId: string, run: AgentRun, commandId: string): Promise<AgentRun> {
   return request(workId, `/${encodeURIComponent(run.id)}/approve`, {

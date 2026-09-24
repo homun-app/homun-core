@@ -207,6 +207,8 @@ def advance(ctx, run_id, *, epoch=None):
                 elif stalled:
                     pass
                 elif decision.kind == 'tool':
+                    if '_delegations' in run:
+                        current['_delegations'] = run['_delegations']
                     if agent_native.enabled(current):
                         observation = agent_native.append_result(current, observation)
                     current['observations'].append({'tool': decision.tool, 'arguments': decision.arguments,
