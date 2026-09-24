@@ -131,6 +131,17 @@ Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
   ricaricamento dinamico della configurazione e contratto di conservazione dei dati persistenti
   (`<homun_home>/plugin-data/<name>/`) separato dall'albero di installazione del plugin.
 
+- Registro provider di inferenza e routing ausiliario (H38) con profili dichiarativi per i principali
+  provider (OpenAI, Anthropic, OpenRouter, DeepSeek, Gemini, Ollama, Custom), risoluzione euristica
+  del provider dal modello, adattamento della sintassi di reasoning/thinking (`top-level reasoning_effort`,
+  `extra_body.reasoning`, `anthropic_thinking`, nessuno per modelli che non supportano reasoning),
+  adattamento dei fixture multimediali e dei risultati strumenti contenenti media (con fallback
+  testuale informativo per provider non-vision), adattamento degli schemi di risposta, pool di
+  credenziali multiple per provider con rotazione round-robin, gestione degli stati ok/cooldown/dead,
+  finestre temporali di cooldown su errori 429/quota, e router ausiliario con catene di fallback
+  prioritizzate e audit trail completo di tutti i tentativi di failover.
+
+
 
 - Controlli nativi di pausa/ripresa/annullamento e correzioni dalla chat, con
   invalidazione delle risposte superate, conservazione degli esiti incerti e

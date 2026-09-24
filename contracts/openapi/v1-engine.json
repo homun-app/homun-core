@@ -14,6 +14,76 @@
         "title": "ActiveProviderRequest",
         "type": "object"
       },
+      "AdaptFixtureRequest": {
+        "properties": {
+          "media_item": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Item"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
+          },
+          "schema_def": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Def"
+          }
+        },
+        "title": "AdaptFixtureRequest",
+        "type": "object"
+      },
+      "AddCredentialRequest": {
+        "properties": {
+          "key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Id"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "secret_value": {
+            "title": "Secret Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "secret_value"
+        ],
+        "title": "AddCredentialRequest",
+        "type": "object"
+      },
       "AddMemoryRequest": {
         "properties": {
           "project_id": {
@@ -2352,6 +2422,46 @@
         "title": "RectifyMemoryRequest",
         "type": "object"
       },
+      "ReportCredentialRequest": {
+        "properties": {
+          "cooldown_seconds": {
+            "default": 60.0,
+            "title": "Cooldown Seconds",
+            "type": "number"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "rate_limit",
+            "title": "Error Type"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "key_id",
+          "status"
+        ],
+        "title": "ReportCredentialRequest",
+        "type": "object"
+      },
       "ResponseRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4303,6 +4413,147 @@
         ]
       }
     },
+    "/v1/credentials/pool": {
+      "get": {
+        "description": "List credentials in the multi-credential pool with masked secrets.",
+        "operationId": "list_credentials_v1_credentials_pool_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Credentials V1 Credentials Pool Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Credentials",
+        "tags": [
+          "providers"
+        ]
+      },
+      "post": {
+        "description": "Add a credential to the pool for failover rotation.",
+        "operationId": "add_credential_v1_credentials_pool_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Add Credential V1 Credentials Pool Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Credential",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/credentials/pool/report": {
+      "post": {
+        "description": "Report success or error to trigger rotation or cooldown.",
+        "operationId": "report_credential_v1_credentials_pool_report_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Report Credential V1 Credentials Pool Report Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report Credential",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
     "/v1/health": {
       "get": {
         "operationId": "health_v1_health_get",
@@ -5252,6 +5503,133 @@
         "summary": "Enable Plugin",
         "tags": [
           "plugins"
+        ]
+      }
+    },
+    "/v1/providers": {
+      "get": {
+        "description": "List all registered provider profiles and declared capabilities.",
+        "operationId": "list_providers_v1_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Providers V1 Providers Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Providers",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/providers/{name}": {
+      "get": {
+        "description": "Retrieve details of a specific provider profile.",
+        "operationId": "get_provider_v1_providers__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Provider V1 Providers  Name  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Provider",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/providers/{name}/adapt": {
+      "post": {
+        "description": "Demonstrate wire adaptation of reasoning, media, and schema for this provider.",
+        "operationId": "adapt_fixture_v1_providers__name__adapt_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdaptFixtureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Adapt Fixture V1 Providers  Name  Adapt Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Adapt Fixture",
+        "tags": [
+          "providers"
         ]
       }
     },

@@ -279,3 +279,12 @@ lifecycle with zero stale capabilities, configuration reload, and persistent ret
 contract outside install trees from plugins/plugin_storage.py, plugins/plugin_loader.py,
 hermes_cli/plugins*.py, and hermes_cli/plugins_ledger.py at the pinned commit.
 
+application/provider_contracts.py, application/provider_registry.py, application/credential_pool.py,
+application/auxiliary_router.py, and routes/provider_api.py derive declarative provider profiles,
+inference registry, reasoning/thinking adaptation, media fixture and vision tool-result adaptation,
+schema adaptation, multi-credential pools with round-robin rotation, cooldowns (429/quota), and dead
+token classification, and prioritized auxiliary routing with complete failover audit logging from
+providers/base.py, providers/__init__.py, agent/credential_pool*.py, and agent/auxiliary_client.py
+at the pinned commit.
+
+

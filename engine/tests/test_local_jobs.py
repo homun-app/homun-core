@@ -16,11 +16,12 @@ def job(root_name: str) -> LocalJobSpec:
 def finished(jobs: LocalJobs, spec: LocalJobSpec) -> dict:
     state = jobs.inspect(spec)
     for _ in range(250):
-        if state['running'] is not True:
+        if state.get('exit_code') is not None or state.get('running') is False:
             return state
         time.sleep(0.02)
         state = jobs.inspect(spec)
     return state
+
 
 
 def test_local_command_hides_parent_environment_and_does_not_restart(tmp_path, monkeypatch):

@@ -86,5 +86,7 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(openai_api.router)
     from homun.routes import plugins
     app.include_router(plugins.router)
+    from homun.routes import provider_api
+    app.include_router(provider_api.router)
     return app
 

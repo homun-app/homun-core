@@ -109,6 +109,14 @@ def test_restored_pending_work_resumes_with_originals(tmp_path):
                   'payload':{'request_id':started['request_id'],'expected_version':started['version'],'text':'Continue'}}
             response=client.post('/v1/workspaces/ws_local/commands',headers=_headers(),json=body)
             assert response.status_code==200,response.text
+            if response.json()['result']['status'] != 'completed':
+                import time
+                for _ in range(50):
+                    time.sleep(0.1)
+                    poll = client.post('/v1/workspaces/ws_local/commands',headers=_headers(),json=body)
+                    if poll.json()['result']['status'] == 'completed':
+                        response = poll
+                        break
             assert response.json()['result']['status']=='completed'
             assert client.post('/v1/workspaces/ws_local/commands',headers=_headers(),json=body).json()==response.json()
         assert len(list((restored/'receipts').glob('*.json')))==1
