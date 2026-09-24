@@ -384,6 +384,7 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
   sotto per quelle righe sono storiche e non sostituiscono la matrice corretta.
 
 - **Da fare successivamente (UI i18n)**: localizzazione multilingua di tutti i copy dell'interfaccia utente (UI copy) in modo che ciascun utente possa fruirne nella propria lingua. Registrato per la fase successiva alla parità funzionale con Hermes.
+- **H10 cloud backends (2026-09-24)**: Modal/Daytona/Singularity/Vercel/managed Modal catalogued with typed unavailability; no invented sandboxes. `GET /v1/operations/terminal-backends`.
 - **H28/H29 due-fire + Chronos (2026-09-24)**: `/v1/cron/due` and `/v1/cron/fire-due`; Chronos reports `backend_unavailable` until `HOMUN_CHRONOS_URL` is set.
 - **H32 hosted rooms + cron runner (2026-09-24)**: rooms/events on SQLite; cron prompt runs stage pending_approval agent runs via CronAgentRunner. [Evidenze](research/evidence/2026-09-24-hosted-rooms-durability/README.md).
 - **H32 pairing durability (2026-09-24)**: DM pairing codes and allowlists persist under `HOMUN_DATA_DIR/gateway/`. [Evidenze](research/evidence/2026-09-24-gateway-pairing-durability/README.md).

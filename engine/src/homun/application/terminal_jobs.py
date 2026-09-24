@@ -6,6 +6,7 @@ from homun.application.terminal_contracts import TerminalProposalRequest, consen
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from homun.domain.models import CommandRecord, utc_now
 from homun.execution.contracts import ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain
+from homun.execution.cloud_backends import CLOUD_BACKENDS, UnavailableCloudJobs
 from homun.execution.docker import DockerJobs
 from homun.execution.local_jobs import LocalJobs
 from homun.execution.ssh_jobs import SshJobs, key_fingerprint
@@ -20,10 +21,15 @@ def backend_for(ctx, proposal=None):
     # Resolve the trusted context root (macOS temp roots can contain /var aliases),
     # not any caller-supplied workspace or mount path.
     root = ctx.data_dir.resolve() / 'execution'
-    if (proposal or {}).get('policy') == 'local-private-v1':
+    policy = (proposal or {}).get('policy')
+    if policy == 'local-private-v1':
         return LocalJobs(root)
-    if (proposal or {}).get('policy') == 'ssh-v1':
+    if policy == 'ssh-v1':
         return SshJobs(root)
+    if isinstance(policy, str) and policy.startswith('cloud-') and policy.endswith('-v1'):
+        name = policy[len('cloud-'):-len('-v1')]
+        if name in CLOUD_BACKENDS:
+            return UnavailableCloudJobs(name)
     return DockerJobs(root)
 
 

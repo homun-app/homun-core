@@ -157,3 +157,18 @@ def get_daemon_status() -> DaemonStatus:
 @router.post("/daemon/restart")
 def restart_daemon() -> Dict[str, Any]:
     return _daemon_mgr.restart()
+
+
+@router.get("/terminal-backends")
+def list_terminal_backends() -> Dict[str, Any]:
+    """H10 catalog: local/docker/ssh are product-ready; cloud adapters report honest status."""
+    from homun.execution.cloud_backends import list_cloud_backend_status
+
+    return {
+        "builtin": [
+            {"name": "docker", "ready": True, "kind": "terminal_backend"},
+            {"name": "local", "ready": True, "kind": "terminal_backend"},
+            {"name": "ssh", "ready": True, "kind": "terminal_backend"},
+        ],
+        "cloud": list_cloud_backend_status(),
+    }

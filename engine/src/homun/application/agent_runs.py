@@ -229,6 +229,24 @@ def propose(ctx, actor, work_id, body):
                 run['terminal']={'image':body['terminal_image'],'policy':'docker-offline-v1','version':5}
             elif body.get('terminal_backend') == 'docker':
                 raise ValidationError('Terminal image must be a pinned SHA256')
+            elif body.get('terminal_backend') in {
+                'modal', 'managed_modal', 'singularity', 'daytona', 'vercel',
+            }:
+                if not agent_native.enabled(run):
+                    raise ValidationError('Terminal tools require native model support')
+                from homun.execution.cloud_backends import probe_cloud_backend
+                name = body['terminal_backend']
+                status = probe_cloud_backend(name)
+                # Allow proposing so the operator sees the honest unavailability on execute.
+                run['terminal'] = {
+                    'policy': f'cloud-{name}-v1',
+                    'version': 1,
+                    'backend': name,
+                    'configured': status.configured,
+                    'ready': status.ready,
+                    'status_error': status.error,
+                }
+                run['_workspace_files_version'] = 2
             elif body.get('terminal_backend'):
                 raise ValidationError('Unknown terminal backend')
             if body.get('web_pages'):
