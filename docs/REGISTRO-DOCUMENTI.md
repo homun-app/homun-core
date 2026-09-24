@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **218**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **220**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -237,3 +237,6 @@ Documenti censiti: **218**. Punto di ingresso: [indice](README.md).
 
 | [docs/superpowers/plans/2026-09-24-terminal-approval.md](superpowers/plans/2026-09-24-terminal-approval.md) | Contratto e piano consenso terminale |
 | [docs/research/2026-09-24-terminal-approval-verifica.md](research/2026-09-24-terminal-approval-verifica.md) | Consenso, API e ripresa SQLite/Docker verificati |
+
+| [docs/superpowers/plans/2026-09-24-agent-terminal.md](superpowers/plans/2026-09-24-agent-terminal.md) | Collegamento terminale al ciclo nativo |
+| [docs/research/2026-09-24-agent-terminal-verifica.md](research/2026-09-24-agent-terminal-verifica.md) | Modello/consenso/Docker/ripresa, limiti UI espliciti |

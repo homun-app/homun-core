@@ -21,6 +21,9 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None):
     from homun.application.agent_mcp import entries
     for entry in entries(run.get('_mcp_bindings', []), include_source=run.get('_tool_bridge_version') == 1):
         registry.register(entry)
+    if run.get('terminal'):
+        from homun.application.agent_terminal_contracts import entry as terminal_entry
+        registry.register(terminal_entry(run['terminal']))
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())

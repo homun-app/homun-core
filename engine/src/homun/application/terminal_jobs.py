@@ -31,7 +31,7 @@ def _human_owner(actor, work):
         raise PermissionDeniedError('Only the owner or reviewer may control terminal execution')
 
 
-def propose(ctx, actor, work_id, body):
+def propose(ctx, actor, work_id, body, *, agent_binding=None):
     try:
         request = TerminalProposalRequest.model_validate(body)
         result = dict(id=request.command_id,work_id=work_id,image=request.image,command=request.command,
@@ -40,6 +40,9 @@ def propose(ctx, actor, work_id, body):
         job_spec(ctx,result)
     except SchemaError:
         raise ValidationError('Invalid terminal proposal') from None
+    if agent_binding:
+        result['_agent_binding']=deepcopy(agent_binding)
+        result['agent_run_id']=agent_binding['run_id']
     result['digest'] = consent(result)
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
@@ -51,6 +54,11 @@ def propose(ctx, actor, work_id, body):
                 return deepcopy(public(prior.result))
             if work.archived or work.version != request.expected_version:
                 raise ConflictError('Work changed or is archived; create a current proposal')
+            if agent_binding:
+                from homun.application.agent_terminal_link import validate_link
+                run=validate_link(ctx,store,actor,result,staging=True)
+                run.update(status='waiting_external',terminal_request_id=result['id'])
+                for key in ('_lease_token','_lease_until','_active_call_id'):run.pop(key,None)
             store.commands[request.command_id] = CommandRecord(command_id=request.command_id,type=TYPE,
                 actor_id=actor.id,workspace_id=store.workspace_id,result=result)
         ctx.service.store = store
@@ -70,6 +78,9 @@ def approve(ctx, actor, work_id, proposal_id, body):
                 return deepcopy(public(proposal))
             if work.archived or work.version != proposal['expected_version']:
                 raise ConflictError('Work changed or is archived; create a new proposal')
+            from homun.application.agent_terminal_link import validate_link
+            linked=validate_link(ctx,store,actor,proposal)
+            if linked is not None:linked['_active_call_id']=proposal['_agent_binding']['call_id']
             proposal.update(status='dispatching',_approved_by=actor.id,_approved_at=utc_now().isoformat(),_io_epoch=1)
             snapshot = deepcopy(proposal)
         ctx.service.store = store

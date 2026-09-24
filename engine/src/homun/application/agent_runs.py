@@ -179,6 +179,16 @@ def propose(ctx, actor, work_id, body):
             from homun.application.agent_tool_registry import registry_for
             if bindings and not agent_native.enabled(run):
                 raise ValidationError('External agent tools require native model support')
+            if body.get('terminal_image'):
+                if not agent_native.enabled(run):
+                    raise ValidationError('Terminal tools require native model support')
+                from homun.execution.contracts import JobSpec
+                from pydantic import ValidationError as SchemaError
+                try:
+                    JobSpec(workspace_id=actor.workspace_id,run_id=run['id'],call_id='validation',image=body['terminal_image'],command='true')
+                except SchemaError:
+                    raise ValidationError('Terminal image must be a pinned SHA256') from None
+                run['terminal']={'image':body['terminal_image'],'policy':'docker-offline-v1'}
             run['_mcp_bindings'] = bindings
             run['external_tools'] = [{k: b[k] for k in ('server_id', 'server_name', 'tool', 'name')} | {'description': b['descriptor'].get('description', '')} for b in bindings]
             run['_registry_version'] = 1

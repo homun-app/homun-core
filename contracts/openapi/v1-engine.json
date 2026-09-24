@@ -2236,6 +2236,18 @@
               }
             ],
             "title": "Team Id"
+          },
+          "terminal_image": {
+            "anyOf": [
+              {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Image"
           }
         },
         "required": [
@@ -2411,6 +2423,29 @@
               }
             ],
             "title": "Team"
+          },
+          "terminal": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal"
+          },
+          "terminal_request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Request Id"
           },
           "tool_version": {
             "title": "Tool Version",
@@ -2918,6 +2953,17 @@
       },
       "TerminalProposal": {
         "properties": {
+          "agent_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Run Id"
+          },
           "command": {
             "title": "Command",
             "type": "string"

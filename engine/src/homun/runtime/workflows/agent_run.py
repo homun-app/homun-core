@@ -62,7 +62,11 @@ def deliver_agent_runs(ctx):
         if run['status'] == 'waiting_external':
             from homun.application.agent_external import resume_external
             try:
-                resume_external(ctx, run['id'])
+                if run.get('terminal_request_id'):
+                    from homun.application.agent_terminal import resume as resume_terminal
+                    resume_terminal(ctx,run['id'])
+                else:
+                    resume_external(ctx, run['id'])
             except DomainError as exc:
                 fail(ctx, run['id'], exc.code, blocked=True)
             run = ctx.repository.load().commands[run['id']].result

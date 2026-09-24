@@ -33,6 +33,7 @@ class TerminalProposal(BaseModel):
     policy: Literal['docker-offline-v1']
     digest: str
     status: Literal['pending_approval','dispatching','created','running','paused','restarting','removing','exited','dead','outcome_unknown']
+    agent_run_id: str | None = None
     created_by: str
     created_at: str
     running: bool | None = None
@@ -48,11 +49,13 @@ class TerminalList(BaseModel):
 
 
 def consent(proposal: dict) -> str:
-    return digest({k:proposal[k] for k in ('id','work_id','image','command','expected_version','policy','created_by')})
+    bound={k:proposal[k] for k in ('id','work_id','image','command','expected_version','policy','created_by')}
+    if proposal.get('_agent_binding'):bound['_agent_binding']=proposal['_agent_binding']
+    return digest(bound)
 
 
 def job_spec(ctx, proposal: dict) -> JobSpec:
-    return JobSpec(workspace_id=ctx.workspace_id,run_id=proposal['work_id'],call_id=proposal['id'],
+    return JobSpec(workspace_id=ctx.workspace_id,run_id=proposal.get('_agent_binding',{}).get('run_id',proposal['work_id']),call_id=proposal['id'],
                    image=proposal['image'],command=proposal['command'])
 
 

@@ -10,7 +10,10 @@ Una verifica del sorgente non aggiorna l'app installata.
   log limitati e intenti persistenti che impediscono di ripetere un comando.
   Verificato su Docker reale e riapertura SQLite. Proposte e approvazioni esatte
   disponibili via API autenticate, con stato/log/arresto e ripresa senza redispatch.
-  Collegamento al modello e UI ancora aperto.
+  Collegamento nativo al modello con consenso per comando e receipt singola,
+  configurazione opzionale e pannello UI presenti. Prova reale Ollama/Docker;
+  sessione interattiva UI, watchdog, PTY e file tools ancora aperti.
+  [Ciclo agente](research/2026-09-24-agent-terminal-verifica.md).
   [Backend](research/2026-09-24-owned-terminal-verifica.md) e
   [consenso applicativo](research/2026-09-24-terminal-approval-verifica.md).
 

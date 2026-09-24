@@ -1,0 +1,13 @@
+{
+  "model": "qwen3.5:4b via local Ollama",
+  "image": "sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132",
+  "checks": {
+    "real_model_proposed_exact_command": true,
+    "no_effect_before_approval": true,
+    "sqlite_restart_resume": true,
+    "one_canonical_receipt": true,
+    "no_duplicate_effect_on_reapproval": true,
+    "final_artifact": true
+  },
+  "final_message": "The command has been executed successfully. Here's the report:\n\n**Observed stdout:** `HOMUN_TERMINAL_OK`\n\n**Exit code:** 0\n\nThe command completed without errors and appended \"proof-once\\n\" to proof.txt, followed by printing \"HOMUN_TERMINAL_OK\"."
+}

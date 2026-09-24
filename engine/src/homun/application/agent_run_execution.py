@@ -151,6 +151,10 @@ def advance(ctx, run_id, *, epoch=None):
                     from homun.application.agent_tool_bridge import resolve_call
                     call = resolve_call(run, agent_native.pending(run))
                     decision = decision.model_copy(update={'tool': call.name, 'arguments': call.arguments})
+                if decision.tool == 'terminal_execute' and run.get('terminal'):
+                    registry_for(run).validate(decision.tool,decision.arguments)
+                    from homun.application.agent_terminal import stage as stage_terminal
+                    return stage_terminal(ctx,actor,run,decision)
                 if any(b['name'] == decision.tool for b in run.get('_mcp_bindings', [])):
                     registry_for(run).validate(decision.tool, decision.arguments)
                     from homun.application.agent_external import stage

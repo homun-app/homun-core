@@ -1,6 +1,7 @@
 # Usare Homun oggi
 
-23 settembre 2026 — uso diretto, squadra e contributi nel percorso motore.
+24 settembre 2026 — uso diretto, squadra, contributi e terminale nativo nel sorgente.
+Le modifiche del sorgente non aggiornano automaticamente l’app installata.
 Questa guida descrive l'uso supportato; le [prove](research/2026-09-23-consolidamento-verifica.md)
 precisano quali passaggi sono stati verificati dal vivo e quali nei test.
 
@@ -132,3 +133,28 @@ hanno ancora limiti descritti nello [stato corrente](STATO.md).
 La [ricerca Hermes/Homun](research/2026-09-23-hermes-homun-utilizzo.md) prepara
 l'analisi UX di questi percorsi; le implementazioni successive sono descritte
 nel [rapporto operativo](research/2026-09-23-homun-operativo-verifica.md).
+
+
+## Eseguire un comando con Homun
+
+Nella versione di sviluppo puoi abilitare **Terminale isolato (opzionale)** quando
+prepari un’esecuzione Homun. Serve Docker locale funzionante e l’identificativo
+completo `sha256:…` di un’immagine già presente e adatta al lavoro. Questa prima
+configurazione è tecnica; Homun non scarica immagini automaticamente.
+
+1. Inserisci l’immagine e prepara il lavoro. Senza immagine il modello non riceve
+   lo strumento terminale.
+2. Avvia il lavoro: Homun può proporre un comando, ma non eseguirlo da solo.
+3. Leggi il comando proposto e l’ambiente. Se corrisponde alla richiesta, scegli
+   **Approva ed esegui il comando**. L’esecuzione è senza rete e dispone di una
+   cartella dedicata al run, non dei file del computer.
+4. Puoi aggiornare stato e log o arrestare il processo. Quando il processo termina
+   e i log sono recuperati, Homun usa l’esito per proseguire e preparare il risultato.
+
+**Interrompi** ferma il lavoro dell’agente; per un processo già avviato usa anche
+**Arresta il processo** e verifica lo stato. Un esito incerto non equivale a un
+fallimento senza effetti: aggiorna prima di chiedere un altro comando.
+
+I file prodotti non vengono ancora importati automaticamente in Documenti; il
+modello riceve uscita e coda dei log. Non sono ancora supportati input interattivo
+al terminale e scadenza automatica dei processi. [Prove e limiti](research/2026-09-24-agent-terminal-verifica.md).
