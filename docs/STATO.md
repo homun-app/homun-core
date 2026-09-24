@@ -354,6 +354,9 @@ dai test. Il [confronto Hermes](research/2026-09-23-hermes-homun-utilizzo.md)
 conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
 
 
+- **H34 surfaces (2026-09-24)**: SurfaceGatewayManager persiste sessioni, approvazioni,
+  steering e artifact su SQLite; reconnect dopo restart del processo.
+
 - **H35 hosted MCP (2026-09-24)**: `HostedMcpEngineRunner` crea lavoro e propose
   agent_run reali (`pending_approval`), senza dichiarare completed.
 

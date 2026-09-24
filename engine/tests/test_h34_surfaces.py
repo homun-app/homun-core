@@ -1,14 +1,14 @@
 """Tests for H34: Multi-surface gateway, connections, steering, and approvals."""
-import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
 from homun.application.surface_contracts import ConnectionTransportKind, SurfaceKind
 from homun.application.surface_gateway_manager import SurfaceGatewayManager
+import pytest
 
 
 def test_surface_gateway_manager():
-    mgr = SurfaceGatewayManager()
+    mgr = SurfaceGatewayManager(db_path=':memory:')
 
     # Register connections
     c1 = mgr.register_connection(
@@ -156,3 +156,17 @@ def test_surface_gateway_api_endpoints():
     # Disconnect
     res_disc = client.delete(f"/v1/surfaces/connections/{conn_id}")
     assert res_disc.status_code == 200
+
+
+def test_surface_gateway_survives_reopen(tmp_path):
+    db = tmp_path / "gateway.sqlite"
+    mgr = SurfaceGatewayManager(db_path=db)
+    from homun.application.surface_contracts import SurfaceKind
+    mgr.sync_session_state("s1", "default", SurfaceKind.CLI, "working", title="T")
+    appr = mgr.request_approval("s1", "shell", "rm -rf /", "dangerous")
+    del mgr
+    mgr2 = SurfaceGatewayManager(db_path=db)
+    snap = mgr2.get_session_snapshot("s1")
+    assert snap is not None
+    assert snap.title == "T"
+    assert mgr2.get_session_snapshot("s1").pending_approvals[0].request_id == appr.request_id
