@@ -7,7 +7,7 @@ loro numeri rimangono invariati; gli ingressi principali e i rimandi superati
 sono stati aggiornati. Specifiche e visione restano requisiti, con una matrice
 separata per lo stato del codice.
 
-Documenti censiti: **224**. Punto di ingresso: [indice](README.md).
+Documenti censiti: **225**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
@@ -38,7 +38,8 @@ Documenti censiti: **224**. Punto di ingresso: [indice](README.md).
 | [docs/development/transizione-homun.md](development/transizione-homun.md) | Riferimento corrente |
 | [docs/handoff/2026-09-19-ripresa-sviluppo-homun.md](handoff/2026-09-19-ripresa-sviluppo-homun.md) | Passaggio storico, sostituito dal 23/9 |
 | [docs/handoff/2026-09-21-prompt-nuova-chat.md](handoff/2026-09-21-prompt-nuova-chat.md) | Passaggio storico, sostituito dal 23/9 |
-| [docs/handoff/2026-09-23-consolidamento-e-ux.md](handoff/2026-09-23-consolidamento-e-ux.md) | Passaggio corrente |
+| [docs/handoff/2026-09-23-consolidamento-e-ux.md](handoff/2026-09-23-consolidamento-e-ux.md) | Passaggio storico; continuazione parità nel 24/9 |
+| [docs/handoff/2026-09-24-parita-hermes-continuazione.md](handoff/2026-09-24-parita-hermes-continuazione.md) | Passaggio corrente: obiettivo completo, prove e prompt |
 | [docs/release.md](release.md) | Riferimento corrente |
 | [docs/research/2026-09-19-accordo-conversazionale-stabile.md](research/2026-09-19-accordo-conversazionale-stabile.md) | Ricerca o evidenza datata; perimetro nel documento |
 | [docs/research/2026-09-19-agent-systems-lessons.md](research/2026-09-19-agent-systems-lessons.md) | Ricerca o evidenza datata; perimetro nel documento |

@@ -4,6 +4,9 @@ Aggiornato il 24 settembre 2026 con il primo backend terminale Docker proprio
 del nucleo nativo. Lo stato precedente e i rapporti datati conservano le prove storiche.
 Una verifica del sorgente non aggiorna l'app installata.
 
+Passaggio operativo corrente: [continuare la parità completa con Hermes](handoff/2026-09-24-parita-hermes-continuazione.md).
+Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
+
 ## Capacità presenti
 
 - Backend Docker proprio con immagine fissata, directory dedicata, limiti risorse,
