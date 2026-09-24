@@ -100,5 +100,7 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(integrations_api.router)
     from homun.routes import operations_api
     app.include_router(operations_api.router)
+    from homun.routes import research_api
+    app.include_router(research_api.router)
     return app
 

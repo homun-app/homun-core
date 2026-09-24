@@ -333,5 +333,13 @@ doctor system diagnostics (platform, backends, dev tools, database integrity, sc
 repair, and daemon lifecycle management (PID tracking, graceful shutdown, liveness verification) from
 hermes_cli/profiles.py, hermes_cli/profile_distribution.py, hermes_cli/config.py, hermes_cli/doctor.py,
 hermes_cli/doctor_platform.py, hermes_cli/doctor_tools.py, and hermes_cli/doctor_state.py at the pinned commit.
+application/trajectory_capture.py, application/trajectory_compression.py, application/batch_eval_runner.py,
+application/observability_exporter.py, and routes/research_api.py derive ShareGPT trajectory formatting,
+process-safe flock file appending, reasoning scratchpad conversion (<REASONING_SCRATCHPAD> to <think>),
+token budget trajectory compression protecting head and tail turns without severing tool call/response pairs,
+concurrent batch dataset runner with resume checkpointing and tool stats aggregation, and OpenTelemetry/Langfuse
+trace and span observation from agent/trajectory.py, trajectory_compressor.py, batch_runner.py,
+mini_swe_runner.py, and plugins/observability/langfuse at the pinned commit.
+
 
 
