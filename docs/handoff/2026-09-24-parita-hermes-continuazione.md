@@ -1,6 +1,6 @@
 # Continuazione: parità completa Homun / Hermes
 
-Data: 24 settembre 2026. Checkpoint del codice: `3292a4ab` (+ commit H40/H42 in corso).
+Data: 24 settembre 2026. Checkpoint del codice: `96339f47` (+ commit H40/H42 in corso).
 Questo documento trasferisce il lavoro a un'altra chat. Non certifica parità raggiunta.
 
 
