@@ -760,3 +760,43 @@ def test_email_send_uses_smtp_when_configured(monkeypatch):
     assert out["delivered"] is True
     assert calls[0]["host"] == "smtp.example"
     assert any(c.get("to") == "dest@example.com" for c in calls)
+
+
+def test_signal_send_without_rest_url_unavailable():
+    from homun.application.channel_adapters import SignalAdapter
+
+    out = SignalAdapter().send("+15551234567", "hi")
+    assert out["delivered"] is False
+    assert out.get("code") == "backend_unavailable"
+
+
+def test_signal_send_posts_when_rest_configured(monkeypatch):
+    from homun.application.channel_adapters import SignalAdapter
+
+    calls = []
+
+    class _Resp:
+        status_code = 201
+        content = b"{}"
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, json=None, headers=None):
+            calls.append({"url": url, "json": json})
+            return _Resp()
+
+    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", _Client)
+    out = SignalAdapter(config={"rest_url": "http://127.0.0.1:8080", "number": "+100"}).send(
+        "+1555", "ping"
+    )
+    assert out["delivered"] is True
+    assert calls[0]["url"].endswith("/v2/send")
+    assert calls[0]["json"]["recipients"] == ["+1555"]

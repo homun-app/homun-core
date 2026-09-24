@@ -750,6 +750,86 @@ class MatrixAdapter(ChannelAdapter):
             )
 
 
+
+class SignalAdapter(ChannelAdapter):
+    """signal-cli REST API outbound (when SIGNAL_CLI_REST_URL is set)."""
+
+    platform = "signal"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        envelope = payload.get("envelope") or payload
+        data = envelope.get("dataMessage") or {}
+        return ChannelMessage(
+            id=str(envelope.get("timestamp") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(envelope.get("source") or payload.get("channel_id") or ""),
+            user_id=str(envelope.get("sourceNumber") or envelope.get("source") or ""),
+            text=str(data.get("message") or payload.get("text") or ""),
+            is_direct=True,
+            timestamp=float(envelope.get("timestamp") or time.time()) / (
+                1000.0 if envelope.get("timestamp") and envelope.get("timestamp") > 10_000_000_000 else 1.0
+            ),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        base = (
+            str(self.config.get("rest_url") or "").strip()
+            or str(os.environ.get("SIGNAL_CLI_REST_URL") or os.environ.get("HOMUN_SIGNAL_CLI_REST_URL") or "").strip()
+        )
+        number = (
+            str(self.config.get("number") or "").strip()
+            or str(os.environ.get("SIGNAL_CLI_NUMBER") or os.environ.get("HOMUN_SIGNAL_NUMBER") or "").strip()
+        )
+        if not base or not number:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        url = f"{base.rstrip('/')}/v2/send"
+        payload = {"message": text, "number": number, "recipients": [channel_id]}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 20.0)) as client:
+                resp = client.post(url, json=payload)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=f"Signal REST HTTP {resp.status_code}",
+                    status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
+
+
 class EmailAdapter(ChannelAdapter):
     """SMTP outbound email (Hermes messaging catalog: email)."""
 
@@ -854,6 +934,7 @@ class ChannelRegistry:
             "ntfy": NtfyAdapter(),
             "matrix": MatrixAdapter(),
             "email": EmailAdapter(),
+            "signal": SignalAdapter(),
         }
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:
