@@ -2463,6 +2463,67 @@
             "title": "Server Ids",
             "type": "array"
           },
+          "ssh_host": {
+            "anyOf": [
+              {
+                "maxLength": 253,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Host"
+          },
+          "ssh_host_key": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Host Key"
+          },
+          "ssh_key_path": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Key Path"
+          },
+          "ssh_port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Port"
+          },
+          "ssh_user": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh User"
+          },
           "team_id": {
             "anyOf": [
               {
@@ -2480,7 +2541,8 @@
               {
                 "enum": [
                   "docker",
-                  "local"
+                  "local",
+                  "ssh"
                 ],
                 "type": "string"
               },
@@ -3342,7 +3404,8 @@
           "policy": {
             "enum": [
               "docker-offline-v1",
-              "local-private-v1"
+              "local-private-v1",
+              "ssh-v1"
             ],
             "title": "Policy",
             "type": "string"
@@ -3368,6 +3431,61 @@
               }
             ],
             "title": "Running"
+          },
+          "ssh_host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Host"
+          },
+          "ssh_host_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Host Key"
+          },
+          "ssh_key_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Key Fingerprint"
+          },
+          "ssh_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Port"
+          },
+          "ssh_user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh User"
           },
           "status": {
             "enum": [
@@ -3472,7 +3590,8 @@
             "default": "docker-offline-v1",
             "enum": [
               "docker-offline-v1",
-              "local-private-v1"
+              "local-private-v1",
+              "ssh-v1"
             ],
             "title": "Policy",
             "type": "string"
@@ -3481,6 +3600,56 @@
             "default": false,
             "title": "Pty",
             "type": "boolean"
+          },
+          "ssh_host": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Host"
+          },
+          "ssh_host_key": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "pattern": "^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256) [A-Za-z0-9+/=]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Host Key"
+          },
+          "ssh_port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Port"
+          },
+          "ssh_user": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9._-]{1,32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh User"
           },
           "stdin": {
             "default": false,

@@ -39,6 +39,8 @@ def entry(config):
 
 
 def entries(config):
+    if config.get('policy')=='ssh-v1':
+        return _ssh_entries(config)
     if config.get('policy')=='local-private-v1':
         return _local_entries(config)
     JobSpec(workspace_id='validation',run_id='validation',call_id='validation',image=config['image'],command='true')
@@ -123,6 +125,38 @@ def _local_entries(config):
         input_schema=session), 'terminal', '1', TerminalSessionArguments, replay='never'))
     catalog.append(ToolEntry(ToolDefinition(name='terminal_stop',
         description='Stop one background terminal session you started. Other sessions keep running. Does not start a process.',
+        input_schema=session), 'terminal', '1', TerminalSessionArguments, replay='never'))
+    return catalog
+
+
+def _ssh_entries(config):
+    """Commands on one approved SSH host. Version 1 is not a Docker or local contract."""
+    if config.get('version', 1) != 1:
+        raise ValueError('Unknown SSH terminal contract')
+    target = f"{config['user']}@{config['host']}:{config['port']}"
+    definition = ToolDefinition(
+        name='terminal_execute',
+        description=(
+            f"Propose a shell command on the approved SSH host {target}. "
+            "It is not a container and it does not inherit environment variables. "
+            "The remote directory is private to this run under that account's home. "
+            "Files are not copied to or from that host. Each command waits for explicit human approval. "
+            "Without background, the result arrives after the process exits. "
+            "With background true, the result arrives once the process is running and includes job_id; "
+            "then use terminal_poll, terminal_wait, or terminal_stop. "
+            "Stdin and a terminal are not available. "
+            "Set timeout_seconds (1..3600, default 300). Deadline enforcement requires Homun to be running."),
+        input_schema=BackgroundTerminalArguments.model_json_schema())
+    catalog = [ToolEntry(definition, 'terminal', '1', BackgroundTerminalArguments, replay='never')]
+    session = TerminalSessionArguments.model_json_schema()
+    catalog.append(ToolEntry(ToolDefinition(name='terminal_poll',
+        description='Read the status and recent logs of a background SSH session you started. Does not wait or start a process.',
+        input_schema=session), 'terminal', '1', TerminalSessionArguments))
+    catalog.append(ToolEntry(ToolDefinition(name='terminal_wait',
+        description='Wait until a background SSH session exits, then return its status and logs. Does not start a process. If the outcome is unknown, returns that state without retrying the command.',
+        input_schema=session), 'terminal', '1', TerminalSessionArguments, replay='never'))
+    catalog.append(ToolEntry(ToolDefinition(name='terminal_stop',
+        description='Stop one background SSH session you started. Other sessions keep running. Does not start a process.',
         input_schema=session), 'terminal', '1', TerminalSessionArguments, replay='never'))
     return catalog
 

@@ -18,7 +18,15 @@ import { EngineAgentControls } from './EngineAgentControls';
 export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () => Promise<void> }) {
   const [terminalImage, setTerminalImage] = useState('');
   const [localTerminal, setLocalTerminal] = useState(false);
-  const terminalValid = localTerminal || !terminalImage || /^sha256:[0-9a-f]{64}$/.test(terminalImage);
+  const [sshTerminal, setSshTerminal] = useState(false);
+  const [sshHost, setSshHost] = useState('');
+  const [sshUser, setSshUser] = useState('');
+  const [sshPort, setSshPort] = useState('22');
+  const [sshKeyPath, setSshKeyPath] = useState('');
+  const [sshHostKey, setSshHostKey] = useState('');
+  const terminalValid = sshTerminal
+    ? Boolean(sshHost && sshUser && sshKeyPath && sshHostKey && Number(sshPort) >= 1)
+    : localTerminal || !terminalImage || /^sha256:[0-9a-f]{64}$/.test(terminalImage);
   const [serverIds, setServerIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [teams, setTeams] = useState<EngineTeam[]>([]);
@@ -34,7 +42,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
   }, []);
   const run = useEngineExecution(work, onChanged, {
     list: listAgentRuns, approve: approveAgentRun,
-    prepare: (work: Work, id: string, materials: string[], team: string, person: string, servers: string[]) => prepareAgentRun(work, materials, id, team || undefined, person || undefined, servers, localTerminal ? undefined : terminalImage || undefined, localTerminal ? 'local' : undefined),
+    prepare: (work: Work, id: string, materials: string[], team: string, person: string, servers: string[]) => prepareAgentRun(work, materials, id, team || undefined, person || undefined, servers, localTerminal || sshTerminal ? undefined : terminalImage || undefined, sshTerminal ? 'ssh' : localTerminal ? 'local' : undefined, sshTerminal ? {host: sshHost, user: sshUser, port: Number(sshPort), hostKey: sshHostKey, keyPath: sshKeyPath} : undefined),
   });
   const p = run.proposal;
   const revising = p?.status === 'completed' && work.engineStatus === 'ready';
@@ -57,9 +65,20 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       <details><summary>Terminale (opzionale)</summary>
         <p>Consenti a Homun di proporre comandi. Ogni comando richiederà la tua approvazione.</p>
         <label><input type="checkbox" checked={localTerminal} disabled={run.busy}
-          onChange={e => { run.renew(); setLocalTerminal(e.target.checked); }} /> Esegui su questo computer, senza container</label>
+          onChange={e => { run.renew(); setLocalTerminal(e.target.checked); if (e.target.checked) setSshTerminal(false); }} /> Esegui su questo computer, senza container</label>
+        <label><input type="checkbox" checked={sshTerminal} disabled={run.busy}
+          onChange={e => { run.renew(); setSshTerminal(e.target.checked); if (e.target.checked) setLocalTerminal(false); }} /> Esegui via SSH su un host approvato</label>
+        {sshTerminal && <>
+          <p>Ogni comando resta da approvare. Homun non usa la configurazione SSH di questo computer e non copia i file.</p>
+          <label>Host<input value={sshHost} disabled={run.busy} onChange={e => { run.renew(); setSshHost(e.target.value.trim()); }} /></label>
+          <label>Utente<input value={sshUser} disabled={run.busy} onChange={e => { run.renew(); setSshUser(e.target.value.trim()); }} /></label>
+          <label>Porta<input value={sshPort} disabled={run.busy} onChange={e => { run.renew(); setSshPort(e.target.value.trim()); }} /></label>
+          <label>Percorso della chiave privata<input value={sshKeyPath} disabled={run.busy} onChange={e => { run.renew(); setSshKeyPath(e.target.value.trim()); }} /></label>
+          <label>Chiave pubblica del server<input value={sshHostKey} disabled={run.busy} onChange={e => { run.renew(); setSshHostKey(e.target.value.trim()); }} /></label>
+        </>}
         {localTerminal
           ? <p>I comandi usano la cartella del lavoro e non ereditano le variabili d'ambiente. Non sono isolati dalla rete né dai percorsi assoluti.</p>
+          : sshTerminal ? null
           : <><p>Serve Docker locale con un’immagine già presente; non verrà scaricata automaticamente.</p>
             <label>Identificativo completo dell’immagine Docker
               <input value={terminalImage} disabled={run.busy} placeholder="sha256:…"
@@ -81,7 +100,9 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {p.person && <p>Eventuali chiarimenti saranno richiesti a {p.person.name}, tramite un invito limitato alla domanda.</p>}
       <p>Autorizzi letture e ricerche su queste fonti, fino a {p.limits.max_turns} passaggi.
         Il risultato arriverà in revisione. Gli invii esterni richiedono un’approvazione separata.</p>
-      {p.terminal?.policy === 'local-private-v1'
+      {p.terminal?.policy === 'ssh-v1'
+        ? <p>Homun può proporre comandi su {p.terminal.user}@{p.terminal.host}:{p.terminal.port}. Ogni esecuzione richiede un’approvazione separata. Non è un container e non copia i file.</p>
+        : p.terminal?.policy === 'local-private-v1'
         ? <p>Homun può proporre comandi su questo computer, nella cartella del lavoro. Ogni esecuzione richiede un’approvazione separata. Non è un container isolato.</p>
         : p.terminal && <p>Terminale isolato abilitato per proporre comandi. Ogni esecuzione richiede un’approvazione separata.</p>}
       {p.tools?.some(tool => tool.name === 'write_workspace_file') && <p>Homun può leggere, cercare e proporre modifiche nella cartella del run. Ogni scrittura richiede una tua approvazione separata, dopo una lettura aggiornata.</p>}

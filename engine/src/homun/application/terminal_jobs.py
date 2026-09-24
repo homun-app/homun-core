@@ -8,6 +8,7 @@ from homun.domain.models import CommandRecord, utc_now
 from homun.execution.contracts import ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain
 from homun.execution.docker import DockerJobs
 from homun.execution.local_jobs import LocalJobs
+from homun.execution.ssh_jobs import SshJobs, key_fingerprint
 from homun.execution.pty_queries import PtyQueryResponder, unread
 from homun.policy.work import require_work_access
 
@@ -21,6 +22,8 @@ def backend_for(ctx, proposal=None):
     root = ctx.data_dir.resolve() / 'execution'
     if (proposal or {}).get('policy') == 'local-private-v1':
         return LocalJobs(root)
+    if (proposal or {}).get('policy') == 'ssh-v1':
+        return SshJobs(root)
     return DockerJobs(root)
 
 
@@ -37,10 +40,18 @@ def _human_owner(actor, work):
         raise PermissionDeniedError('Only the owner or reviewer may control terminal execution')
 
 
-def propose(ctx, actor, work_id, body, *, agent_binding=None):
+def propose(ctx, actor, work_id, body, *, agent_binding=None, ssh_key_path=None):
     try:
         request = TerminalProposalRequest.model_validate(body)
-        if request.policy == 'local-private-v1':
+        if request.policy == 'ssh-v1':
+            if request.image or request.stdin or request.pty:
+                raise ValidationError('An SSH command has no image, stdin, or terminal')
+            if not request.ssh_host or not request.ssh_user or not request.ssh_port or not request.ssh_host_key:
+                raise ValidationError('SSH target is incomplete')
+            if not ssh_key_path:
+                raise ValidationError('SSH requires a private key')
+            fingerprint = key_fingerprint(ssh_key_path)
+        elif request.policy == 'local-private-v1':
             if request.image or request.stdin or request.pty:
                 raise ValidationError('A local command has no image, stdin, or terminal')
         elif not request.image:
@@ -52,6 +63,9 @@ def propose(ctx, actor, work_id, body, *, agent_binding=None):
         if request.background:result['background']=True
         if request.stdin:result['stdin']=True
         if request.pty:result['pty']=True
+        if request.policy == 'ssh-v1':
+            result.update(ssh_host=request.ssh_host, ssh_user=request.ssh_user, ssh_port=request.ssh_port,
+                          ssh_host_key=request.ssh_host_key, ssh_key_fingerprint=fingerprint, _ssh_key_path=ssh_key_path)
         job_spec(ctx,result)
     except SchemaError:
         raise ValidationError('Invalid terminal proposal') from None

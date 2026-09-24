@@ -259,12 +259,20 @@ Ogni comando resta soggetto all'approvazione esatta e non viene riavviato.
 Non è isolato dalla rete né dai percorsi assoluti, e non ha stdin né terminale.
 Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifica.md).
 
+### Host SSH, facoltativo: fatto in questo aggiornamento
+
+Un run può chiedere comandi su un host SSH indicato nella preparazione.
+Homun non usa la configurazione SSH di questo computer, fissa la chiave pubblica
+del server nell'approvazione e non copia i file. Ogni comando resta soggetto
+all'approvazione esatta e non viene riavviato. Non ha stdin né terminale.
+Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifica.md).
+
 ### Prima tranche consigliata dopo questo aggiornamento: gli altri backend H10
 
-1. Verificare Git e non rifare file, sessioni background, stdin a pipe, risposte PTY e il processo locale.
-2. Leggere in Hermes i backend oltre Docker e il processo locale.
-3. Il processo locale è usabile e facoltativo. Non è un container: non eredita l'ambiente, ma può usare percorsi assoluti e la rete. Non ha stdin né terminale.
-4. I backend SSH, Modal, Singularity, Daytona e Vercel restano assenti:
+1. Verificare Git e non rifare file, sessioni background, stdin a pipe, risposte PTY, il processo locale e l'host SSH.
+2. Leggere in Hermes i backend oltre Docker, il processo locale e SSH.
+3. Il processo locale e l'host SSH sono usabili e facoltativi. Non sono container. SSH non sincronizza i file e non ha stdin né terminale.
+4. I backend Modal, Singularity, Daytona e Vercel restano assenti:
    non annunciarli. Una credenziale mancante blocca solo la prova di quel backend.
 5. Il timer indipendente nel container, quando Homun è spento, resta un limite
    dichiarato finché non esiste un meccanismo proprio.
@@ -272,8 +280,8 @@ Rapporto: [sessioni terminale](../research/2026-09-24-terminal-background-verifi
 
 ### Tranche successive, ordine da confermare con le dipendenze del codice
 
-- H09/H10: SSH, Modal, Singularity, Daytona e Vercel. Il processo locale è usabile
-  e non è un container. Sessioni Docker, stdin a pipe e risposte PTY restano usabili.
+- H09/H10: Modal, Singularity, Daytona e Vercel. Il processo locale e l'host SSH
+  sono usabili e non sono container. SSH non sincronizza i file. Sessioni Docker, stdin a pipe e risposte PTY restano usabili.
   Restano lo schermo completo e il timer indipendente a motore spento.
 - H14/H15: ricerca web ed estrazione, browser operativo con sessioni e recovery.
 - H17/H18: memoria durevole e motori memoria/contesto sostituibili.
@@ -306,7 +314,7 @@ necessariamente assente: ispezionare prima il codice Homun.
 | H41–H46 | Media/voce, deliverable, integrazioni, setup/distribuzione, eval, cataloghi |
 
 Leggere le righe singole nella matrice: questa tabella è soltanto un indice.
-Esempi da non dimenticare: backend SSH/Modal/Singularity/Daytona/Vercel; risorse,
+Esempi da non dimenticare: backend Modal/Singularity/Daytona/Vercel e i limiti SSH (niente copia dei file, stdin o terminale); risorse,
 prompt, sampling, elicitation, OAuth/mTLS MCP; canali e provider nominati;
 plugin e skill distribuiti; CLI/TUI/desktop; media e live voice; cataloghi opzionali.
 Non eliminare questi requisiti perché meno urgenti o richiedono credenziali.
@@ -410,10 +418,10 @@ Nessun budget numerico è stato richiesto. Non segnare completo a fine tranche.
 > consensi, terminale Docker proprio approvato e riprendibile, watchdog,
 > lettura file confinata, consegne immutabili, ricerca, lettura per righe e
 > modifiche approvate. Sono capacità parziali: non dichiarare raggiunta la parità.
-> Le prove della tranche terminale sono 983 test engine passati/1 skipped,
+> Le prove della tranche terminale sono 986 test engine passati/1 skipped,
 > 226 web, OpenAPI e architettura verdi, più container Docker isolati per
-> sessioni separate, uno stdin a pipe, una risposta PTY e un processo locale
-> senza ambiente ereditato. Non trattarle come parità completa.
+> sessioni separate, uno stdin a pipe, una risposta PTY, un processo locale
+> senza ambiente ereditato e un host SSH usa e getta. Non trattarle come parità completa.
 >
 > H11 ha ora pagine, ricerca, lettura per righe, scrittura e patch approvate,
 > con prova Ollama isolata. Restano language server, V4A e diversi estrattori:
@@ -421,9 +429,11 @@ Nessun budget numerico è stato richiesto. Non segnare completo a fine tranche.
 > poll, attesa, arresto, un solo avviso di completamento, stdin a pipe e
 > risposte alle richieste di stato, cursore e dimensione su un terminale nuovo.
 > Non è uno schermo completo. Un processo sul computer è usabile e facoltativo:
-> non eredita l'ambiente e non è un container. SSH, Modal, Singularity, Daytona
-> e Vercel restano aperti: non dichiararli chiusi.
-> Il prossimo lavoro sono SSH, Modal, Singularity, Daytona e Vercel,
+> non eredita l'ambiente e non è un container. Un host SSH è usabile e
+> facoltativo: la chiave pubblica del server è fissata nell'approvazione e i
+> file non vengono copiati. Modal, Singularity, Daytona e Vercel restano aperti:
+> non dichiararli chiusi.
+> Il prossimo lavoro sono Modal, Singularity, Daytona e Vercel,
 > poi web/browser, memoria, skill,
 > delegazione e tutte le restanti righe secondo dipendenze. L'ordine è modificabile
 > con motivazione tecnica, il perimetro completo no. Ispeziona sempre ciò che

@@ -213,8 +213,10 @@ La tranche file H11 aggiunge pagine, ricerca e modifiche approvate. Il terminale
 può lasciare un comando Docker in esecuzione, leggerne lo stato, attenderlo,
 arrestarlo, inviargli byte sullo stdin o rispondere alle richieste di un terminale
 nuovo. Può anche eseguire un comando su questo computer, nella cartella del lavoro,
-senza ereditare l'ambiente: non è un container. Restano aperti lo schermo completo,
-SSH, Modal, Singularity, Daytona, Vercel, language server,
+senza ereditare l'ambiente: non è un container. Può anche eseguire un comando
+su un host SSH approvato, con la chiave pubblica del server fissata nell'approvazione
+e senza copiare i file. Restano aperti lo schermo completo,
+Modal, Singularity, Daytona, Vercel, language server,
 patch V4A e il resto della matrice. Non è parità completa.
 
 ## Uso reale e UX

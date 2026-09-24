@@ -5,6 +5,7 @@ import { homunErrorFromHttp } from './homun-errors.ts';
 
 export type TerminalJob = {
   id: string; work_id: string; command: string; image?: string; policy?: string; digest: string;
+  ssh_host?: string; ssh_user?: string; ssh_port?: number;
   status: 'pending_approval' | 'dispatching' | 'created' | 'running' | 'paused' | 'restarting' | 'removing' | 'exited' | 'dead' | 'outcome_unknown';
   timeout_seconds?: number; background?: boolean; stdin?: boolean; pty?: boolean; deadline_at?: string; timed_out?: boolean;
   exit_code?: number; error?: string;

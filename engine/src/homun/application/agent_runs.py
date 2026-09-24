@@ -15,6 +15,7 @@ from homun.application.price_comparisons import cached, save
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError, DomainError
 from homun.domain.models import Actor
 from homun.materials.source import verify_material
+from homun.execution.ssh_jobs import key_fingerprint
 from homun.policy.intake import latest_intake
 from homun.policy.work import require_work_access
 
@@ -25,7 +26,11 @@ LIMITS = AGENT_RUN.limits
 
 
 def public(run):
-    return deepcopy({k: v for k, v in run.items() if not k.startswith('_')})
+    item = deepcopy({k: v for k, v in run.items() if not k.startswith('_')})
+    terminal = item.get('terminal')
+    if isinstance(terminal, dict):
+        terminal.pop('key_path', None)
+    return item
 
 
 def public_for(store, actor, run):
@@ -186,6 +191,18 @@ def propose(ctx, actor, work_id, body):
                     raise ValidationError('Terminal tools require native model support')
                 run['_workspace_files_version'] = 2
                 run['terminal'] = {'policy': 'local-private-v1', 'version': 1}
+            elif body.get('terminal_backend') == 'ssh':
+                if body.get('terminal_image'):
+                    raise ValidationError('An SSH terminal does not use a container image')
+                if not agent_native.enabled(run):
+                    raise ValidationError('Terminal tools require native model support')
+                key_id = key_fingerprint(body.get('ssh_key_path') or '')
+                host, user, host_key = body.get('ssh_host'), body.get('ssh_user'), body.get('ssh_host_key')
+                port = body.get('ssh_port') or 22
+                if not host or not user or not host_key:
+                    raise ValidationError('SSH target is incomplete')
+                run['terminal'] = {'policy': 'ssh-v1', 'version': 1, 'host': host, 'user': user, 'port': port,
+                                   'host_key': host_key, 'key_fingerprint': key_id, 'key_path': body['ssh_key_path']}
             elif body.get('terminal_image'):
                 if body.get('terminal_backend') not in {None, 'docker'}:
                     raise ValidationError('Unknown terminal backend')

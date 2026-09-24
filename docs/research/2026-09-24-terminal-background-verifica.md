@@ -61,4 +61,16 @@ secondo avvio non ripete il comando. Arrestare una sessione non tocca l'altra.
 Non è un container: percorsi assoluti e rete restano raggiungibili. Non ci sono
 stdin né terminale. Motore: 983 passati, 1 saltato. Web: 226 passati.
 Architettura: 0 errori, 35 avvisi dimensionali preesistenti. OpenAPI rigenerato.
-SSH, Modal, Singularity, Daytona e Vercel restano assenti.
+## Host SSH
+
+Un run può scegliere un host SSH al posto del container o del processo locale.
+Ogni comando resta da approvare. Homun ignora la configurazione SSH di questo
+computer e l'agent delle chiavi, fissa la chiave pubblica del server
+nell'approvazione e controlla l'impronta della chiave privata. Il comando gira
+in una cartella sotto la home di quell'account e non eredita le variabili del
+processo Homun. I file non vengono copiati. Non ci sono stdin né terminale.
+Arrestare una sessione non tocca l'altra. La prova usa un `sshd` usa e getta
+su 127.0.0.1, con chiavi generate per il test e rimosse alla fine. Motore: 986
+passati, 1 saltato. Web: 226 passati. Architettura: 0 errori, 35 avvisi
+dimensionali preesistenti. OpenAPI rigenerato. Modal, Singularity, Daytona e
+Vercel restano assenti.

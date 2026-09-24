@@ -130,3 +130,8 @@ scrubs a credential blocklist and otherwise inherits the user environment;
 Homun does not copy that inheritance. A local command is not a container:
 absolute paths and the network remain reachable, and stdin and a terminal are
 not provided.
+execution/ssh_jobs.py runs one approved command on an explicit host. Hermes SSH
+uses a persistent ControlMaster, accept-new host keys, and file sync of the
+agent home. Homun does not copy that: it ignores the person's SSH configuration
+and agent, pins the server public key in the approval, checks the private key
+fingerprint, and does not sync files. Stdin and a terminal are not provided.
