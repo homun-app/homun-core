@@ -74,6 +74,12 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.goal_tools import execute as goal_execute
         for g_entry in goal_entries(goal_execute, goals.get('version', 1)):
             registry.register(g_entry)
+    cron = run.get('cron')
+    if isinstance(cron, dict) and cron.get('policy') == 'durable-cron-v1' and cron.get('version') == 1:
+        from homun.application.cron_contracts import entries as cron_entries
+        from homun.application.cron_tools import execute as cron_execute
+        for cr_entry in cron_entries(cron_execute, cron.get('version', 1)):
+            registry.register(cr_entry)
     if run.get('_result_storage_version') == 1:
         from homun.application.agent_results import entry
         registry.register(entry())

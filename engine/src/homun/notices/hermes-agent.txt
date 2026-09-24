@@ -216,6 +216,8 @@ cadence with exponential backoff and normalized digest comparisons, self-stop ma
 precedence (active goals defer loops; waiting/parked goals permit loops) from
 hermes_cli/loops.py and cli_loops_mixin.py at the pinned commit.
 
-
-
-
+application/cron_contracts.py, application/cron_manager.py, and application/cron_tools.py
+derive durable scheduling, cron/interval/one-shot/event parsing, payload preflight checks,
+chained context injection (context_from), script and agent execution, quota hold, deduplicated
+incident tracking, and non-local delivery queuing from cron/jobs.py, cron/executions.py,
+cron/incidents.py, cron/quota_hold.py, and tools/cronjob_tools.py at the pinned commit.

@@ -277,3 +277,6 @@ preparano l'analisi UX: ridurre passaggi, chiarire responsabilità e rendere sem
 riprendere il lavoro. La qualità va misurata con utenti del target, non dedotta
 dai test. Il [confronto Hermes](research/2026-09-23-hermes-homun-utilizzo.md)
 conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
+
+- **Da fare successivamente (UI i18n)**: localizzazione multilingua di tutti i copy dell'interfaccia utente (UI copy) in modo che ciascun utente possa fruirne nella propria lingua. Registrato per la fase successiva alla parità funzionale con Hermes.
+- **Parità Hermes H28/H29 verificata**: pianificazione cron durevole (`cronjob_manage`) con parsing puro Python a 5 campi, intervalli relativi, timestamp ISO one-shot e trigger ad eventi; validazione preflight; iniezione del contesto a catena (`context_from`); esecuzione script e agente con pin di modello/provider; quota hold con pausa automatica e sblocco; tracciamento incidenti con deduplicazione dei fallimenti e risoluzione; code di consegna esterna. Suite: 1050 test motore passati, 226 test web passati, architettura conforme e build web pulita.

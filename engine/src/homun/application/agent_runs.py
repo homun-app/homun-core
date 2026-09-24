@@ -248,6 +248,10 @@ def propose(ctx, actor, work_id, body):
                 if not agent_native.enabled(run):
                     raise ValidationError('Goal tools require native model support')
                 run['goals'] = {'policy': 'persistent-goals-v1', 'version': 1}
+            if body.get('cron'):
+                if not agent_native.enabled(run):
+                    raise ValidationError('Cron tools require native model support')
+                run['cron'] = {'policy': 'durable-cron-v1', 'version': 1}
             run['_mcp_bindings'] = bindings
             run['external_tools'] = [{k: b[k] for k in ('server_id', 'server_name', 'tool', 'name')} | {'description': b['descriptor'].get('description', '')} for b in bindings]
             run['_registry_version'] = 1
