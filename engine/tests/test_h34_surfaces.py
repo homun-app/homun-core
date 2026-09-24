@@ -170,3 +170,19 @@ def test_surface_gateway_survives_reopen(tmp_path):
     assert snap is not None
     assert snap.title == "T"
     assert mgr2.get_session_snapshot("s1").pending_approvals[0].request_id == appr.request_id
+
+
+def test_surface_steering_imports_into_agent_run_queue(tmp_path):
+    from homun.application.surface_contracts import SurfaceKind
+    from homun.application.surface_gateway_manager import (
+        SurfaceGatewayManager,
+        set_surface_gateway_manager,
+    )
+
+    mgr = SurfaceGatewayManager(db_path=tmp_path / "gw.sqlite")
+    set_surface_gateway_manager(mgr)
+    mgr.queue_steering_guidance("run-xyz", "Prefer Italian summaries")
+    drained = mgr.drain_steering_guidance("run-xyz")
+    assert len(drained) == 1
+    assert "Italian" in drained[0].guidance
+    set_surface_gateway_manager(None)

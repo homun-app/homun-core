@@ -318,3 +318,18 @@ class SurfaceGatewayManager:
         self._artifacts_by_session[session_id].append(artifact)
         self._persist_artifacts(session_id)
         return artifact
+
+
+_GLOBAL_MANAGER: SurfaceGatewayManager | None = None
+
+
+def get_surface_gateway_manager() -> SurfaceGatewayManager:
+    global _GLOBAL_MANAGER
+    if _GLOBAL_MANAGER is None:
+        _GLOBAL_MANAGER = SurfaceGatewayManager()
+    return _GLOBAL_MANAGER
+
+
+def set_surface_gateway_manager(manager: SurfaceGatewayManager | None) -> None:
+    global _GLOBAL_MANAGER
+    _GLOBAL_MANAGER = manager

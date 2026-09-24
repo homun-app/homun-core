@@ -10,15 +10,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from homun.application.surface_contracts import ConnectionTransportKind, SurfaceKind
-from homun.application.surface_gateway_manager import SurfaceGatewayManager
+from homun.application.surface_gateway_manager import SurfaceGatewayManager, get_surface_gateway_manager, get_surface_gateway_manager
 
 router = APIRouter(prefix="/v1/surfaces", tags=["surfaces"])
 
-_manager = SurfaceGatewayManager()
 
-
-def get_surface_gateway_manager() -> SurfaceGatewayManager:
-    return _manager
 
 
 # ── Schemas ─────────────────────────────────────────────────────────────
@@ -82,7 +78,7 @@ def register_connection(req: ConnectionRegisterRequest) -> Dict[str, Any]:
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid transport: {req.transport}")
 
-    conn = _manager.register_connection(
+    conn = get_surface_gateway_manager().register_connection(
         surface_kind=kind,
         transport=transport,
         endpoint=req.endpoint or "",
@@ -102,7 +98,7 @@ def register_connection(req: ConnectionRegisterRequest) -> Dict[str, Any]:
 @router.get("/connections")
 def list_connections(profile: Optional[str] = None) -> Dict[str, Any]:
     """List active surface client connections."""
-    conns = _manager.list_connections(profile=profile)
+    conns = get_surface_gateway_manager().list_connections(profile=profile)
     return {
         "connections": [
             {
@@ -122,7 +118,7 @@ def list_connections(profile: Optional[str] = None) -> Dict[str, Any]:
 @router.delete("/connections/{connection_id}")
 def disconnect(connection_id: str) -> Dict[str, Any]:
     """Disconnect a surface client."""
-    ok = _manager.disconnect(connection_id)
+    ok = get_surface_gateway_manager().disconnect(connection_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Connection not found")
     return {"ok": True, "connection_id": connection_id}
@@ -138,7 +134,7 @@ def sync_session(req: SessionSyncRequest) -> Dict[str, Any]:
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid surface_kind: {req.surface_kind}")
 
-    snap = _manager.sync_session_state(
+    snap = get_surface_gateway_manager().sync_session_state(
         session_id=req.session_id,
         profile=req.profile,
         surface_kind=kind,
@@ -162,7 +158,7 @@ def sync_session(req: SessionSyncRequest) -> Dict[str, Any]:
 @router.get("/sessions/{session_id}/snapshot")
 def get_session_snapshot(session_id: str) -> Dict[str, Any]:
     """Get live task status, steering, approvals, and artifacts for a session."""
-    snap = _manager.get_session_snapshot(session_id)
+    snap = get_surface_gateway_manager().get_session_snapshot(session_id)
     if not snap:
         raise HTTPException(status_code=404, detail="Session snapshot not found")
 
@@ -198,7 +194,7 @@ def get_session_snapshot(session_id: str) -> Dict[str, Any]:
 @router.post("/steering")
 def queue_steering(req: SteeringQueueRequest) -> Dict[str, Any]:
     """Queue steering guidance from any surface."""
-    steer = _manager.queue_steering_guidance(req.session_id, req.guidance)
+    steer = get_surface_gateway_manager().queue_steering_guidance(req.session_id, req.guidance)
     return {
         "ok": True,
         "session_id": steer.session_id,
@@ -210,7 +206,7 @@ def queue_steering(req: SteeringQueueRequest) -> Dict[str, Any]:
 @router.post("/sessions/{session_id}/steering/drain")
 def drain_steering(session_id: str) -> Dict[str, Any]:
     """Consume pending steering instructions for active turn."""
-    items = _manager.drain_steering_guidance(session_id)
+    items = get_surface_gateway_manager().drain_steering_guidance(session_id)
     return {
         "session_id": session_id,
         "guidance_list": [{"guidance": s.guidance, "queued_at": s.queued_at} for s in items],
@@ -222,7 +218,7 @@ def drain_steering(session_id: str) -> Dict[str, Any]:
 @router.post("/approvals")
 def create_approval(req: ApprovalCreateRequest) -> Dict[str, Any]:
     """Post an action approval to the queue."""
-    appr = _manager.request_approval(
+    appr = get_surface_gateway_manager().request_approval(
         session_id=req.session_id,
         tool_name=req.tool_name,
         command=req.command,
@@ -243,7 +239,7 @@ def create_approval(req: ApprovalCreateRequest) -> Dict[str, Any]:
 def resolve_approval(request_id: str, req: ApprovalResolveRequest) -> Dict[str, Any]:
     """Resolve a pending approval."""
     try:
-        resolved = _manager.resolve_approval(request_id, req.decision)
+        resolved = get_surface_gateway_manager().resolve_approval(request_id, req.decision)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -262,7 +258,7 @@ def resolve_approval(request_id: str, req: ApprovalResolveRequest) -> Dict[str, 
 @router.post("/artifacts")
 def register_artifact(req: ArtifactRegisterRequest) -> Dict[str, Any]:
     """Record an artifact for multi-surface availability."""
-    art = _manager.register_artifact(
+    art = get_surface_gateway_manager().register_artifact(
         session_id=req.session_id,
         artifact_type=req.artifact_type,
         path_or_url=req.path_or_url,

@@ -50,6 +50,22 @@ def _claim(ctx, run_id, epoch=None):
                 raise ValidationError('Adaptive run reached its observation limit')
             if agent_native.enabled(run):
                 agent_recovery.migrate_inflight(run)
+                # Import surface steering into the canonical run queue before consume.
+                try:
+                    from homun.application.surface_gateway_manager import get_surface_gateway_manager
+
+                    surface_items = get_surface_gateway_manager().drain_steering_guidance(run_id)
+                    for item in surface_items:
+                        run.setdefault("_steering", []).append(
+                            {
+                                "text": item.guidance,
+                                "command_id": f"surface-{uuid4().hex[:10]}",
+                                "actor_id": actor.id,
+                                "source": "surface_gateway",
+                            }
+                        )
+                except Exception:
+                    pass
                 consume_steering(run)
             token = uuid4().hex
             run.update(status='running', _lease_token=token,
