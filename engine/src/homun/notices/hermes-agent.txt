@@ -147,6 +147,8 @@ execution/owned_browser.py starts headless Chrome with an engine-owned profile
 and closes that process group. A native dialog is dismissed and its message is
 returned; it is not accepted. A later contract can fill one text field from an
 accessibility ref and click that control. It can also save a PNG of that page.
-It does not capture the person's screen. Hermes browser control uses browser-use, a CDP
-supervisor and the person's profile options. Homun does not copy those. Iframes
-are not implemented.
+It does not capture the person's screen. Version 5 also collects interactive
+controls inside public child frames / iframes and refuses private frame addresses.
+Hermes browser control uses browser-use, a CDP supervisor (tools/browser_supervisor_frames.py)
+and the person's profile options. Homun does not copy those; it traverses child
+frames in process over the owned page socket.

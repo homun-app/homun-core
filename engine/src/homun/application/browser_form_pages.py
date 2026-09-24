@@ -32,7 +32,7 @@ def _once(browser, run, action):
 
 def execute(ctx, actor, run, tool, args):
     browser_run = run.get('browser', {})
-    if browser_run.get('policy') != 'owned-headless-v1' or browser_run.get('version') not in {3, 4}:
+    if browser_run.get('policy') != 'owned-headless-v1' or browser_run.get('version') not in {3, 4, 5}:
         raise ValidationError('The browser is not enabled for this run')
     if tool == 'browser_close':
         close_browser(run['id'])
@@ -46,6 +46,8 @@ def execute(ctx, actor, run, tool, args):
             return {'error_code': 'browser_unavailable', 'message': 'No owned browser is installed'}
         try:
             browser = open_browser(ctx.data_dir, run['id'])
+            if browser_run.get('version') >= 5:
+                browser.include_frames = True
         except PageRefusal as exc:
             return {'error_code': exc.code, 'message': exc.message}
         return _once(browser, run, lambda: open_page(browser, args['url']))
@@ -60,7 +62,7 @@ def execute(ctx, actor, run, tool, args):
         return _once(browser, run, lambda: click(browser, args['ref']))
     if tool == 'browser_press':
         return _once(browser, run, lambda: press(browser, args['key']))
-    if tool == 'browser_screenshot' and browser_run.get('version') == 4:
+    if tool == 'browser_screenshot' and browser_run.get('version') in {4, 5}:
         dest = Path(ctx.data_dir) / 'execution' / 'browser-shots' / run['id'] / f'{token_hex(8)}.png'
         return _once(browser, run, lambda: capture(browser, dest))
     raise ValidationError('Unknown browser tool')

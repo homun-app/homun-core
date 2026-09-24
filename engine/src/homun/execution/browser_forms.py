@@ -5,6 +5,7 @@ same navigate, snapshot, type, click and press sequence. Homun does not copy
 the Hermes supervisor, and it does not use the person's browser profile.
 """
 from homun.execution.owned_browser import TEXT_LIMIT, OwnedBrowser
+from homun.execution.web_pages import PageRefusal, _classify
 
 _INTERACTIVE = frozenset({
     "textbox", "searchbox", "combobox", "button", "link", "checkbox", "radio", "switch", "tab",
@@ -26,10 +27,25 @@ def _key_code(key: str) -> int | None:
 
 def _enable(browser: OwnedBrowser):
     page = browser._page_socket()
+    page.call("Page.enable")
     page.call("DOM.enable")
     page.call("DOM.getDocument")
     page.call("Accessibility.enable")
     return page
+
+
+def _collect_child_frames(frame_node: dict) -> list[tuple[str, str]]:
+    results: list[tuple[str, str]] = []
+    for child in frame_node.get("childFrames") or []:
+        if not isinstance(child, dict):
+            continue
+        frame = child.get("frame") or {}
+        fid = frame.get("id")
+        furl = str(frame.get("url") or "")
+        if fid:
+            results.append((fid, furl))
+        results.extend(_collect_child_frames(child))
+    return results
 
 
 def snapshot(browser: OwnedBrowser) -> dict:
@@ -55,6 +71,37 @@ def snapshot(browser: OwnedBrowser) -> dict:
         name = str((node.get("name") or {}).get("value") or "")[:120]
         refs[ref] = {"backend": backend, "role": role}
         lines.append(f"{ref} {role} {name}".rstrip())
+    if getattr(browser, "include_frames", False) and len(refs) < 80:
+        try:
+            tree_frames = page.call("Page.getFrameTree")
+            root_frame = (tree_frames.get("result") or {}).get("frameTree") or {}
+            for frame_id, frame_url in _collect_child_frames(root_frame):
+                if len(refs) >= 80:
+                    break
+                if frame_url.startswith("http://") or frame_url.startswith("https://"):
+                    try:
+                        _classify(frame_url)
+                    except PageRefusal:
+                        continue
+                try:
+                    ax = page.call("Accessibility.getFullAXTree", {"frameId": frame_id})
+                    for node in (ax.get("result") or {}).get("nodes") or []:
+                        if node.get("ignored"):
+                            continue
+                        role = str((node.get("role") or {}).get("value") or "")
+                        backend = node.get("backendDOMNodeId")
+                        if role not in _INTERACTIVE or not isinstance(backend, int):
+                            continue
+                        ref = f"@e{len(refs) + 1}"
+                        if len(refs) >= 80:
+                            break
+                        name = str((node.get("name") or {}).get("value") or "")[:120]
+                        refs[ref] = {"backend": backend, "role": role}
+                        lines.append(f"{ref} {role} {name}".rstrip())
+                except Exception:
+                    continue
+        except Exception:
+            pass
     browser.refs = refs
     text = "\n".join(lines)
     body = {"url": settled["url"], "snapshot": text[:TEXT_LIMIT], "truncated": len(text) > TEXT_LIMIT}

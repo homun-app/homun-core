@@ -1,4 +1,4 @@
-"""Owned browser session that can fill one public form. Version 4 can also save a PNG."""
+"""Owned browser session that can fill one public form. Version 5 also supports public frames."""
 from pydantic import BaseModel, ConfigDict, Field
 from homun.models.agent_turn import ToolDefinition
 from homun.tools.registry import ToolEntry
@@ -28,13 +28,20 @@ class BrowserPressArguments(BaseModel):
 
 
 def entries(handler, version=3):
-    if version not in {3, 4}:
+    if version not in {3, 4, 5}:
         raise ValueError('Unknown browser contract')
     shared = (
         'Use the private headless browser for this run. The person\'s Chrome profile is not used. '
         'Private addresses are refused. A native dialog is dismissed without confirmation and is not accepted. '
         'There is no login and no second tab. The browser process stays open until browser_close or the run ends.'
     )
+    if version == 5:
+        shared = (
+            'Use the private headless browser for this run. The person\'s Chrome profile is not used. '
+            'Private addresses are refused. A native dialog is dismissed without confirmation and is not accepted. '
+            'Controls inside public frames are included. '
+            'There is no login and no second tab. The browser process stays open until browser_close or the run ends.'
+        )
     specs = [
         ('browser_open', BrowserOpenArguments,
          'Open one public http or https page and return its text plus refs for interactive controls. ' + shared),
@@ -49,7 +56,7 @@ def entries(handler, version=3):
         ('browser_close', BrowserEmptyArguments,
          'Close the private browser started for this run. Only that process is stopped. ' + shared),
     ]
-    if version == 4:
+    if version in {4, 5}:
         specs.append((
             'browser_screenshot', BrowserEmptyArguments,
             'Save a PNG of the current public page in the private browser. It is not a screenshot of the person\'s screen. ' + shared,

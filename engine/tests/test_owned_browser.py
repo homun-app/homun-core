@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from homun.application import agent_runs
 from homun.application.agent_run_execution import advance
 from homun.application.browser_form_pages import execute
-from homun.execution.browser_forms import click, fill, open_page
+from homun.execution.browser_forms import click, fill, open_page, snapshot
 from homun.execution.browser_sessions import close_browser, open_browser
 from homun.execution.browser_shots import capture
 from homun.execution.owned_browser import OwnedBrowser, read_page
@@ -52,7 +52,7 @@ def test_approved_run_reads_in_an_owned_browser(setup):
     ctx.models.set_active("openai_compatible")
     proposal = agent_runs.propose(ctx, actor, work, {
         "command_id": "run", "expected_version": 1, "material_ids": [], "browser": True})
-    assert proposal["browser"] == {"policy": "owned-headless-v1", "version": 4}
+    assert proposal["browser"] == {"policy": "owned-headless-v1", "version": 5}
     names = [item["name"] for item in proposal["tools"]]
     assert "browser_open" in names and "browser_type" in names and "browser_screenshot" in names and "browser_read" not in names
     agent_runs.approve(ctx, actor, work, proposal["id"], {
@@ -121,3 +121,63 @@ def test_owned_browser_saves_a_png_of_the_public_page(tmp_path):
         close_browser("shot-proof")
     assert dest.is_file()
     assert not (tmp_path / "execution" / "browsers" / "shot-proof").exists()
+
+
+def test_owned_browser_interacts_inside_iframe(tmp_path):
+    browser = open_browser(tmp_path, "iframe-proof")
+    browser.include_frames = True
+    try:
+        browser._page_socket().call("Page.addScriptToEvaluateOnNewDocument", {"source": (
+            "if (window.self === window.top) {"
+            " document.addEventListener('DOMContentLoaded', () => {"
+            "  const frame = document.createElement('iframe');"
+            "  document.body.appendChild(frame);"
+            "  frame.contentDocument.body.innerHTML = '<input aria-label=\"Frame field\"><button type=\"button\">Frame button</button>';"
+            "  frame.contentDocument.querySelector('button').addEventListener('click', () => {"
+            "   frame.contentDocument.body.setAttribute('data-clicked', 'yes');"
+            "  });"
+            " });"
+            "}"
+        )})
+        opened = open_page(browser, "https://example.com/")
+        assert "Example Domain" in opened.get("text", ""), opened
+        snapshot = opened.get("snapshot", "")
+        field = next(line.split()[0] for line in snapshot.splitlines() if "Frame field" in line)
+        button = next(line.split()[0] for line in snapshot.splitlines() if "Frame button" in line)
+        typed = fill(browser, field, "homun-frame-value")
+        assert typed.get("typed") is True
+        clicked = click(browser, button)
+        assert clicked.get("clicked") == button
+        val = browser._page_socket().call(
+            "Runtime.evaluate",
+            {"expression": "document.querySelector('iframe').contentDocument.body.getAttribute('data-clicked')", "returnByValue": True})
+        assert ((val.get("result") or {}).get("result") or {}).get("value") == "yes"
+        input_val = browser._page_socket().call(
+            "Runtime.evaluate",
+            {"expression": "document.querySelector('iframe').contentDocument.querySelector('input').value", "returnByValue": True})
+        assert ((input_val.get("result") or {}).get("result") or {}).get("value") == "homun-frame-value"
+    finally:
+        close_browser("iframe-proof")
+
+
+def test_version_5_populates_iframe_and_version_4_ignores_it(tmp_path):
+    browser = open_browser(tmp_path, "v4-v5-proof")
+    try:
+        browser._page_socket().call("Page.addScriptToEvaluateOnNewDocument", {"source": (
+            "if (window.self === window.top) {"
+            " document.addEventListener('DOMContentLoaded', () => {"
+            "  const frame = document.createElement('iframe');"
+            "  document.body.appendChild(frame);"
+            "  frame.contentDocument.body.innerHTML = '<button type=\"button\">V5 Button</button>';"
+            " });"
+            "}"
+        )})
+        browser.include_frames = False
+        res_v4 = open_page(browser, "https://example.com/")
+        assert "V5 Button" not in res_v4.get("snapshot", "")
+        browser.include_frames = True
+        res_v5 = snapshot(browser)
+        assert "V5 Button" in res_v5.get("snapshot", "")
+    finally:
+        close_browser("v4-v5-proof")
+
