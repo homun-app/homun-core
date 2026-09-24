@@ -591,6 +591,163 @@ class WebhookRelayAdapter(ChannelAdapter):
             }
 
 
+class NtfyAdapter(ChannelAdapter):
+    """ntfy.sh / self-hosted topic push (Hermes messaging catalog)."""
+
+    platform = "ntfy"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        return ChannelMessage(
+            id=str(payload.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(payload.get("topic") or payload.get("channel_id") or "default"),
+            user_id=str(payload.get("sender") or "ntfy"),
+            text=str(payload.get("message") or payload.get("text") or ""),
+            is_direct=True,
+            timestamp=float(payload.get("time") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        base = (
+            str(self.config.get("server") or "").strip()
+            or str(os.environ.get("HOMUN_NTFY_SERVER") or os.environ.get("NTFY_SERVER") or "").strip()
+            or "https://ntfy.sh"
+        )
+        topic = channel_id.strip()
+        if not topic:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        url = f"{base.rstrip('/')}/{topic}"
+        headers: Dict[str, str] = {"Content-Type": "text/plain; charset=utf-8"}
+        token = _token_from(self.config, "NTFY_TOKEN", "HOMUN_NTFY_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, content=text.encode("utf-8"), headers=headers)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=f"ntfy HTTP {resp.status_code}",
+                    status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
+
+
+class MatrixAdapter(ChannelAdapter):
+    """Matrix Client-Server API m.room.message send (when homeserver + token set)."""
+
+    platform = "matrix"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        content = payload.get("content") or {}
+        sender = str(payload.get("sender") or "")
+        room = str(payload.get("room_id") or payload.get("channel_id") or "")
+        return ChannelMessage(
+            id=str(payload.get("event_id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=room,
+            user_id=sender,
+            text=str(content.get("body") or payload.get("text") or ""),
+            is_direct=False,
+            timestamp=float(payload.get("origin_server_ts") or time.time()) / (
+                1000.0 if payload.get("origin_server_ts") else 1.0
+            ),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        homeserver = (
+            str(self.config.get("homeserver") or "").strip()
+            or str(os.environ.get("MATRIX_HOMESERVER") or os.environ.get("HOMUN_MATRIX_HOMESERVER") or "").strip()
+        )
+        token = _token_from(self.config, "MATRIX_ACCESS_TOKEN", "HOMUN_MATRIX_ACCESS_TOKEN")
+        if not homeserver or not token:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        txn = uuid.uuid4().hex
+        url = f"{homeserver.rstrip('/')}/_matrix/client/v3/rooms/{channel_id}/send/m.room.message/{txn}"
+        payload: Dict[str, Any] = {"msgtype": "m.text", "body": text}
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.put(url, json=payload, headers=headers)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=f"Matrix API HTTP {resp.status_code}",
+                    status_code=resp.status_code,
+                )
+            data = resp.json() if resp.content else {}
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+                extra={"event_id": data.get("event_id") if isinstance(data, dict) else None},
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
+
+
 class ChannelRegistry:
     """Registry and dispatcher for multi-platform channel adapters."""
 
@@ -607,6 +764,8 @@ class ChannelRegistry:
             "slack": SlackAdapter(),
             "whatsapp": WhatsAppAdapter(),
             "webhook": WebhookRelayAdapter(),
+            "ntfy": NtfyAdapter(),
+            "matrix": MatrixAdapter(),
         }
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:

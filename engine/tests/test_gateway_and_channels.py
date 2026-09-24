@@ -638,6 +638,43 @@ def test_slack_send_posts_when_token_configured(monkeypatch):
     assert calls[0]["json"]["thread_ts"] == "1.0"
 
 
+def test_ntfy_send_posts_when_configured(monkeypatch):
+    calls = []
+
+    class _Resp:
+        status_code = 200
+        content = b"ok"
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, content=None, headers=None, json=None):
+            calls.append({"url": url, "content": content, "headers": headers})
+            return _Resp()
+
+    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", _Client)
+    from homun.application.channel_adapters import NtfyAdapter
+
+    out = NtfyAdapter(config={"server": "https://ntfy.example"}).send("homun-test", "ping")
+    assert out["delivered"] is True
+    assert calls[0]["url"] == "https://ntfy.example/homun-test"
+
+
+def test_matrix_send_requires_homeserver_and_token():
+    from homun.application.channel_adapters import MatrixAdapter
+
+    out = MatrixAdapter().send("!room:example.org", "hi")
+    assert out["delivered"] is False
+    assert out.get("code") == "backend_unavailable"
+
+
 def test_whatsapp_send_posts_when_token_configured(monkeypatch):
     calls = []
 
