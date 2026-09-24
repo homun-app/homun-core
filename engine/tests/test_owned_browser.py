@@ -2,7 +2,7 @@
 import subprocess
 import time
 
-from homun.execution.owned_browser import read_page
+from homun.execution.owned_browser import OwnedBrowser, read_page
 from test_agent_runs import setup
 
 
@@ -26,6 +26,19 @@ def test_owned_browser_reads_example_and_spares_another_process(tmp_path):
         time.sleep(0.2)
 
 
+def test_owned_browser_dismisses_a_native_dialog_without_accepting_it(tmp_path):
+    browser = OwnedBrowser(tmp_path / "browser")
+    try:
+        page = browser._page_socket()
+        page.call("Page.addScriptToEvaluateOnNewDocument", {"source": "confirm('homun-dialog-proof')"})
+        result = browser.read("https://example.com/", dismiss_dialogs=True)
+    finally:
+        browser.close()
+    assert "Example Domain" in result.get("text", ""), result
+    assert result.get("dialogs") == [{
+        "type": "confirm", "message": "homun-dialog-proof", "action": "dismiss"}]
+
+
 def test_approved_run_reads_in_an_owned_browser(setup):
     from types import SimpleNamespace
     from homun.application import agent_runs
@@ -35,7 +48,7 @@ def test_approved_run_reads_in_an_owned_browser(setup):
     ctx.models.set_active("openai_compatible")
     proposal = agent_runs.propose(ctx, actor, work, {
         "command_id": "run", "expected_version": 1, "material_ids": [], "browser": True})
-    assert proposal["browser"] == {"policy": "owned-headless-v1", "version": 1}
+    assert proposal["browser"] == {"policy": "owned-headless-v1", "version": 2}
     assert "browser_read" in [item["name"] for item in proposal["tools"]]
     agent_runs.approve(ctx, actor, work, proposal["id"], {
         "command_id": "go", "digest": proposal["digest"], "expected_version": proposal["expected_version"]})

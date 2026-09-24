@@ -69,7 +69,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {webPages && <p>Homun può cercare sul web pubblico e leggere il testo di una pagina http. Gli indirizzi privati sono rifiutati. La ricerca non entra negli account.</p>}
       <label><input type="checkbox" checked={ownedBrowser} disabled={run.busy}
         onChange={e => { run.renew(); setOwnedBrowser(e.target.checked); }} /> Apri un browser privato, senza il tuo profilo</label>
-      {ownedBrowser && <p>Homun avvia un browser separato, legge il testo della pagina e lo chiude. Non usa il profilo di Chrome di questo computer. Non compila moduli e non entra negli account.</p>}
+      {ownedBrowser && <p>Homun avvia un browser separato, legge il testo della pagina e lo chiude. Non usa il profilo di Chrome di questo computer. Non compila moduli e non entra negli account. Se la pagina apre una finestra nativa, la chiude senza confermare e riporta il testo.</p>}
       <details><summary>Terminale (opzionale)</summary>
         <p>Consenti a Homun di proporre comandi. Ogni comando richiederà la tua approvazione.</p>
         <label><input type="checkbox" checked={localTerminal} disabled={run.busy}
@@ -108,7 +108,8 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {p.person && <p>Eventuali chiarimenti saranno richiesti a {p.person.name}, tramite un invito limitato alla domanda.</p>}
       <p>Autorizzi letture e ricerche su queste fonti, fino a {p.limits.max_turns} passaggi.
         Il risultato arriverà in revisione. Gli invii esterni richiedono un’approvazione separata.</p>
-      {p.browser?.policy === 'owned-headless-v1' && <p>Homun può aprire un browser privato, leggere una pagina pubblica e chiudere quel browser. Non usa il profilo di Chrome di questo computer.</p>}
+      {p.browser?.policy === 'owned-headless-v1' && p.browser.version === 1 && <p>Homun può aprire un browser privato, leggere una pagina pubblica e chiudere quel browser. Non usa il profilo di Chrome di questo computer.</p>}
+      {p.browser?.policy === 'owned-headless-v1' && p.browser.version === 2 && <p>Homun può aprire un browser privato, leggere una pagina pubblica e chiudere quel browser. Non usa il profilo di Chrome di questo computer. Una finestra nativa viene chiusa senza conferma e il suo testo viene riportato.</p>}
       {p.web_pages?.version === 2 && <p>Homun può cercare sul web pubblico e leggere pagine http. Gli indirizzi privati sono rifiutati. La ricerca non entra negli account.</p>}
       {p.web_pages?.version === 1 && <p>Homun può leggere pagine http pubbliche. Gli indirizzi privati sono rifiutati. La ricerca web non è configurata.</p>}
       {p.terminal?.policy === 'ssh-v1'

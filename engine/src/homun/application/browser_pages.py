@@ -12,8 +12,11 @@ def execute(ctx, actor, run, tool, args):
         raise ValidationError('The browser is not enabled for this run')
     if tool != 'browser_read':
         raise ValidationError('Unknown browser tool')
+    version = run.get('browser', {}).get('version')
+    if version not in {1, 2}:
+        raise ValidationError('Unknown browser contract')
     root = Path(ctx.data_dir) / 'execution' / 'browsers' / token_hex(8)
     try:
-        return read_page(root, args['url'])
+        return read_page(root, args['url'], dismiss_dialogs=version == 2)
     finally:
         shutil.rmtree(root, ignore_errors=True)

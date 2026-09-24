@@ -19,6 +19,8 @@ from .layout import confine_directory
 from .web_pages import PageRefusal, _classify
 
 TEXT_LIMIT = 12_000
+_DIALOG_TYPES = frozenset({"alert", "confirm", "prompt", "beforeunload"})
+_DIALOG_LIMIT = 8
 _CANDIDATES = (
     Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
     Path("/usr/bin/google-chrome"),
@@ -83,21 +85,37 @@ def _recv_text(sock: socket.socket) -> str:
             sock.sendall(bytes([0x8A, 0x80]) + os.urandom(4))
 
 
+class _TooManyDialogs(Exception):
+    """A page opened more native dialogs than one read will close."""
+
+
 class _Page:
     def __init__(self, sock: socket.socket):
         self.sock = sock
         self.seq = 0
+        self.events: list[dict] = []
+        self.replies: dict[int, dict] = {}
 
-    def call(self, method: str, params: dict | None = None, timeout: float = 15) -> dict:
+    def call(self, method: str, params: dict | None = None, timeout: float = 15, notice=None) -> dict:
         self.seq += 1
         current = self.seq
         _send_text(self.sock, json.dumps({"id": current, "method": method, "params": params or {}}))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            if current in self.replies:
+                return self.replies.pop(current)
             self.sock.settimeout(max(0.1, deadline - time.monotonic()))
             message = json.loads(_recv_text(self.sock))
-            if message.get("id") == current:
+            incoming = message.get("id")
+            if incoming == current:
                 return message
+            if incoming is not None:
+                self.replies[incoming] = message
+                continue
+            if "method" in message:
+                self.events.append(message)
+                if notice is not None:
+                    notice()
         raise TimeoutError(method)
 
 
@@ -182,22 +200,61 @@ class OwnedBrowser:
         self._page.call("Runtime.enable")
         return self._page
 
-    def read(self, url: str) -> dict:
+    def _dismiss_dialogs(self) -> list[dict]:
+        """Close native dialogs without accepting them. A read must not confirm."""
+        page = self._page
+        if page is None:
+            return []
+        found: list[dict] = []
+        while True:
+            index = next((i for i, event in enumerate(page.events)
+                          if event.get("method") == "Page.javascriptDialogOpening"), None)
+            if index is None:
+                return found
+            params = page.events.pop(index).get("params") or {}
+            kind = str(params.get("type") or "")
+            if kind not in _DIALOG_TYPES:
+                continue
+            if len(found) >= _DIALOG_LIMIT:
+                raise _TooManyDialogs()
+            page.call("Page.handleJavaScriptDialog", {"accept": False})
+            found.append({
+                "type": kind,
+                "message": str(params.get("message") or "")[:500],
+                "action": "dismiss",
+            })
+
+    def read(self, url: str, *, dismiss_dialogs: bool = False) -> dict:
         _classify(url)
         page = self._page_socket()
-        page.call("Page.navigate", {"url": url})
-        deadline = time.monotonic() + 15
-        href = ""
-        while time.monotonic() < deadline:
-            location = page.call("Runtime.evaluate", {"expression": "location.href", "returnByValue": True})
-            href = str(((location.get("result") or {}).get("result") or {}).get("value") or "")
-            state = page.call("Runtime.evaluate", {"expression": "document.readyState", "returnByValue": True})
-            ready = str(((state.get("result") or {}).get("result") or {}).get("value") or "")
-            if href.startswith(("http://", "https://")) and ready == "complete":
-                break
-            time.sleep(0.1)
-        else:
-            return {"error_code": "web_fetch_failed", "message": "The browser did not finish loading"}
+        dialogs: list[dict] = []
+
+        def notice() -> None:
+            dialogs.extend(self._dismiss_dialogs())
+
+        watcher = notice if dismiss_dialogs else None
+        try:
+            page.call("Page.navigate", {"url": url}, notice=watcher)
+            deadline = time.monotonic() + 15
+            href = ""
+            while time.monotonic() < deadline:
+                if watcher is not None:
+                    watcher()
+                location = page.call(
+                    "Runtime.evaluate", {"expression": "location.href", "returnByValue": True}, notice=watcher)
+                href = str(((location.get("result") or {}).get("result") or {}).get("value") or "")
+                state = page.call(
+                    "Runtime.evaluate", {"expression": "document.readyState", "returnByValue": True}, notice=watcher)
+                ready = str(((state.get("result") or {}).get("result") or {}).get("value") or "")
+                if href.startswith(("http://", "https://")) and ready == "complete":
+                    break
+                time.sleep(0.1)
+            else:
+                return {"error_code": "web_fetch_failed", "message": "The browser did not finish loading"}
+            if watcher is not None:
+                watcher()
+        except _TooManyDialogs:
+            return {"error_code": "web_fetch_failed", "message": "The page opened too many dialogs"}
         try:
             _classify(href)
         except PageRefusal as exc:
@@ -206,7 +263,10 @@ class OwnedBrowser:
             "Runtime.evaluate",
             {"expression": "document.body ? document.body.innerText : ''", "returnByValue": True})
         text = str(((evaluated.get("result") or {}).get("result") or {}).get("value") or "")
-        return {"url": href, "text": text[:TEXT_LIMIT], "truncated": len(text) > TEXT_LIMIT}
+        result = {"url": href, "text": text[:TEXT_LIMIT], "truncated": len(text) > TEXT_LIMIT}
+        if dialogs:
+            result["dialogs"] = dialogs
+        return result
 
     def close(self) -> None:
         if self._page is not None:
@@ -221,7 +281,7 @@ class OwnedBrowser:
                 self.process.wait(timeout=3)
 
 
-def read_page(root: Path, url: str) -> dict:
+def read_page(root: Path, url: str, *, dismiss_dialogs: bool = False) -> dict:
     """Open one public page in a private browser and always close that process."""
     try:
         _classify(url)
@@ -233,7 +293,7 @@ def read_page(root: Path, url: str) -> dict:
     try:
         if "Application Support/Google/Chrome" in " ".join(browser.argv):
             return {"error_code": "browser_unavailable", "message": "The person's browser profile was refused"}
-        return browser.read(url)
+        return browser.read(url, dismiss_dialogs=dismiss_dialogs)
     except PageRefusal as exc:
         return {"error_code": exc.code, "message": exc.message}
     except (TimeoutError, OSError, json.JSONDecodeError):

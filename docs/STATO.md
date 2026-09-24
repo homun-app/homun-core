@@ -218,9 +218,9 @@ su un host SSH approvato, con la chiave pubblica del server fissata nell'approva
 e senza copiare i file. Può anche leggere il testo di una pagina http pubblica,
 rifiutando gli indirizzi privati, e può cercare sul web pubblico. I provider
 nominati, la cache e X restano assenti. Può anche aprire un browser privato,
-senza il profilo di Chrome di questo computer, leggere una pagina pubblica e
-chiudere solo quel processo. Moduli, finestre di dialogo e schermate restano
-assenti.
+senza il profilo di Chrome di questo computer, leggere una pagina pubblica,
+chiudere una finestra nativa senza confermarla e chiudere solo quel processo.
+Accettare una finestra, compilare moduli e catturare schermate restano assenti.
 Restano aperti lo schermo completo,
 Modal, Singularity, Daytona, Vercel, language server,
 patch V4A e il resto della matrice. Non è parità completa.
