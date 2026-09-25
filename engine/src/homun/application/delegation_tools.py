@@ -12,7 +12,7 @@ import json
 import uuid
 import jsonschema
 from homun.application import budgets
-from homun.application.workspace_files import root_for
+from homun.application.workspace_file_contracts import root_for
 from homun.domain.errors import ValidationError
 from homun.domain.models import BudgetCounters
 from homun.execution.subagent_worktree import cleanup_subagent_worktree, create_subagent_worktree

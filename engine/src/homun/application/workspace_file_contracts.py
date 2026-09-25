@@ -96,3 +96,16 @@ def entries(handler=None, version=1):
             ToolDefinition(name=name, description=description, input_schema=schema.model_json_schema()),
             'workspace_files', str(version), schema, execute if handler else None,
             replay='never' if name in {'deliver_workspace_file', 'write_workspace_file', 'patch_workspace_file'} else 'read_only')
+
+
+def root_for(ctx, run):
+    from homun.execution.contracts import JobSpec, LocalJobSpec
+    from homun.execution.docker import DockerJobs
+    from homun.execution.local_jobs import LocalJobs
+    terminal = run['terminal']
+    if terminal.get('policy') == 'local-private-v1':
+        spec = LocalJobSpec(workspace_id=ctx.workspace_id, run_id=run['id'], call_id='files', command='true')
+        return LocalJobs(ctx.data_dir.resolve() / 'execution').workspace(spec)
+    spec = JobSpec(workspace_id=ctx.workspace_id, run_id=run['id'], call_id='files', image=terminal['image'], command='true')
+    return DockerJobs(ctx.data_dir.resolve() / 'execution').workspace(spec)
+

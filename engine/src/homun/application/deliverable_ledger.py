@@ -93,7 +93,8 @@ class DeliverableLedger:
             """
             INSERT INTO receipts(receipt_id, session_id, path, payload, delivered_at)
             VALUES(?, ?, ?, ?, ?)
-            ON CONFLICT(receipt_id) DO UPDATE SET
+            ON CONFLICT(session_id, path) DO UPDATE SET
+                receipt_id = excluded.receipt_id,
                 payload = excluded.payload,
                 delivered_at = excluded.delivered_at
             """,
@@ -122,20 +123,24 @@ class DeliverableLedger:
         *,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> DeliveryReceipt:
-        """Record an artifact delivery receipt."""
-        receipt_id = f"dlv_{uuid.uuid4().hex[:12]}"
-        receipt = DeliveryReceipt(
-            receipt_id=receipt_id,
-            channel=channel,
-            session_id=session_id,
-            path=path,
-            filename=filename,
-            category=category,
-            status="delivered",
-            delivered_at=time.time(),
-            metadata=metadata or {},
-        )
+        """Record an artifact delivery receipt (idempotent at-most-once delivery)."""
         with self._lock:
+            existing_id = self._delivered_index.get((session_id, path))
+            if existing_id and existing_id in self._receipts:
+                return self._receipts[existing_id]
+
+            receipt_id = f"dlv_{uuid.uuid4().hex[:12]}"
+            receipt = DeliveryReceipt(
+                receipt_id=receipt_id,
+                channel=channel,
+                session_id=session_id,
+                path=path,
+                filename=filename,
+                category=category,
+                status="delivered",
+                delivered_at=time.time(),
+                metadata=metadata or {},
+            )
             self._receipts[receipt_id] = receipt
             self._delivered_index[(session_id, path)] = receipt_id
             self._persist(receipt)
@@ -166,3 +171,10 @@ def reset_deliverable_ledger() -> None:
     global _GLOBAL_DELIVERABLE_LEDGER
     with _LEDGER_LOCK:
         _GLOBAL_DELIVERABLE_LEDGER = None
+
+
+def set_deliverable_ledger(ledger: Optional[DeliverableLedger]) -> None:
+    global _GLOBAL_DELIVERABLE_LEDGER
+    with _LEDGER_LOCK:
+        _GLOBAL_DELIVERABLE_LEDGER = ledger
+

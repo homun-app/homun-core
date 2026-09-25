@@ -41,8 +41,10 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 31. H36: MCP OAuth refuse-until-broker + mTLS client certs on HTTP.
 32. refactor: channel_adapters_catalog split; H33 A2A adapter.
 33. H33: Buzz + Raft channel adapters.
+34. H33: Home Assistant, MS Graph Webhook, OpenWebUI, Teams Meetings, WeCom Callback, WhatsApp Cloud, Yuanbao adapters (full 34/34 messaging catalog complete).
+35. H36: MCPOAuthBroker (client credentials & refresh flow with TTL caching and typed refusal) wired into MCP client; H42 deliverable ledger idempotency fix.
 
-**Prossimo passo eseguibile:** resto catalogo messaging (Open WebUI, MS Graph webhook, …); MCP OAuth token broker; prove live con credenziali; prove provider con credenziali. Parità completa H01–H46 ancora aperta.
+**Prossimo passo eseguibile:** prove live con credenziali; prove provider con credenziali; H34 / H35 / H39 / H40 / H41 / H43 / H45 continuazione parità verso chiusura integrale H01–H46.
 
 **Blocchi esterni (non inventare):** token canali reali; TCC Accessibility/Screen Recording per prove H16 live macOS; DISPLAY + xdotool su Linux; `HOMUN_MODAL_ALLOW_LIVE` / `HOMUN_DAYTONA_ALLOW_LIVE` + SDK per prove cloud a pagamento; Copilot CLI con `--acp` per prova H39 live.
 

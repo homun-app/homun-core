@@ -8,18 +8,54 @@ thread routing, authorization gates, and turn lease acquisition.
 """
 from __future__ import annotations
 
+import json
 import logging
-import socket
 import os
 import smtplib
+import socket
 import time
-import json
-import uuid
-from email.message import EmailMessage
 from typing import Any, Callable, Dict, List, Optional
+import uuid
 
 import httpx
 
+from homun.application.channel_contracts import (
+    ChannelAdapter,
+    _http_delivery_result,
+    _token_from,
+)
+from homun.application.channel_adapters_protocols import (
+    BlueBubblesAdapter,
+    EmailAdapter,
+    IrcAdapter,
+    LineAdapter,
+    SignalAdapter,
+    SimplexAdapter,
+    SmsAdapter,
+)
+from homun.application.channel_adapters_catalog import (
+    DingTalkAdapter,
+    FeishuChannelAdapter,
+    GoogleChatAdapter,
+    MattermostAdapter,
+    QqBotAdapter,
+    TeamsAdapter,
+    WeComAdapter,
+    WeixinAdapter,
+)
+from homun.application.channel_adapters_extended import (
+    A2AAdapter,
+    BuzzAdapter,
+    HomeAssistantAdapter,
+    MSGraphWebhookAdapter,
+    OpenWebUIAdapter,
+    PhotonAdapter,
+    RaftAdapter,
+    TeamsMeetingsAdapter,
+    WeComCallbackAdapter,
+    WhatsAppCloudAdapter,
+    YuanbaoAdapter,
+)
 from homun.application.gateway_contracts import (
     ChannelMedia,
     ChannelMessage,
@@ -31,97 +67,9 @@ from homun.application.gateway_turn_lease import TurnLeaseManager
 logger = logging.getLogger(__name__)
 
 
-def _token_from(config: Dict[str, Any], *env_keys: str) -> str:
-    for key in ("bot_token", "token", "api_token"):
-        val = str(config.get(key) or "").strip()
-        if val:
-            return val
-    for env in env_keys:
-        val = str(os.environ.get(env) or "").strip()
-        if val:
-            return val
-    return ""
-
-
-def _http_delivery_result(
-    *,
-    platform: str,
-    channel_id: str,
-    text: str,
-    thread_id: Optional[str],
-    reply_to_id: Optional[str],
-    media: Optional[List[ChannelMedia]],
-    delivered: bool,
-    error: Optional[str] = None,
-    status_code: Optional[int] = None,
-    extra: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    out: Dict[str, Any] = {
-        "delivered": delivered,
-        "platform": platform,
-        "channel_id": channel_id,
-        "thread_id": thread_id,
-        "reply_to_id": reply_to_id,
-        "text": text,
-        "media_count": len(media or []),
-        "sent_at": time.time(),
-    }
-    if error:
-        out["error"] = error
-        out["code"] = "backend_unavailable"
-    if status_code is not None:
-        out["status_code"] = status_code
-    if extra:
-        out.update(extra)
-    return out
-
-
-class ChannelAdapter:
-    """Base class for messaging channel adapters."""
-
-    platform: str = "generic"
-
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        self.config = dict(config or {})
-
-    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
-        raise NotImplementedError
-
-    def format_outbound(self, text: str, *, reply_to: Optional[str] = None) -> Dict[str, Any]:
-        return {"text": text, "reply_to": reply_to}
-
-    def send(
-        self,
-        channel_id: str,
-        text: str,
-        *,
-        thread_id: Optional[str] = None,
-        reply_to_id: Optional[str] = None,
-        media: Optional[List[ChannelMedia]] = None,
-    ) -> Dict[str, Any]:
-        """Deliver outbound message to platform destination.
-
-        Base adapters have no transport. Subclasses must override with a real
-        client; otherwise Homun reports an explicit delivery failure.
-        """
-        return {
-            "delivered": False,
-            "platform": self.platform,
-            "channel_id": channel_id,
-            "thread_id": thread_id,
-            "reply_to_id": reply_to_id,
-            "text": text,
-            "media_count": len(media or []),
-            "sent_at": time.time(),
-            "error": (
-                f"Channel transport for platform '{self.platform}' is not configured. "
-                "Refusing to report delivery without a real outbound client."
-            ),
-            "code": "backend_unavailable",
-        }
-
-
 class TelegramAdapter(ChannelAdapter):
+    """Telegram Bot API adapter."""
+
     platform = "telegram"
 
     def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
@@ -226,6 +174,8 @@ class TelegramAdapter(ChannelAdapter):
 
 
 class DiscordAdapter(ChannelAdapter):
+    """Discord Bot API adapter."""
+
     platform = "discord"
 
     def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
@@ -314,6 +264,8 @@ class DiscordAdapter(ChannelAdapter):
 
 
 class SlackAdapter(ChannelAdapter):
+    """Slack Web API adapter."""
+
     platform = "slack"
 
     def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
@@ -403,6 +355,8 @@ class SlackAdapter(ChannelAdapter):
 
 
 class WhatsAppAdapter(ChannelAdapter):
+    """WhatsApp Cloud API adapter."""
+
     platform = "whatsapp"
 
     def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
@@ -507,19 +461,18 @@ class WhatsAppAdapter(ChannelAdapter):
 
 
 class WebhookRelayAdapter(ChannelAdapter):
+    """Generic outbound webhook relay."""
+
     platform = "webhook"
 
     def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
         return ChannelMessage(
             id=str(payload.get("id") or uuid.uuid4().hex[:8]),
             platform=self.platform,
-            channel_id=str(payload.get("channel_id") or "default_channel"),
-            user_id=str(payload.get("user_id") or "anonymous_user"),
-            username=payload.get("username"),
-            text=str(payload.get("text") or ""),
+            channel_id=str(payload.get("channel_id") or payload.get("target") or "default"),
+            user_id=str(payload.get("user_id") or payload.get("sender") or "webhook_caller"),
+            text=str(payload.get("text") or payload.get("message") or ""),
             thread_id=payload.get("thread_id"),
-            topic_id=payload.get("topic_id"),
-            is_direct=bool(payload.get("is_direct", True)),
             timestamp=float(payload.get("timestamp") or time.time()),
         )
 
@@ -532,71 +485,59 @@ class WebhookRelayAdapter(ChannelAdapter):
         reply_to_id: Optional[str] = None,
         media: Optional[List[ChannelMedia]] = None,
     ) -> Dict[str, Any]:
-        url = (
-            str(self.config.get("webhook_url") or "").strip()
-            or str(os.environ.get("HOMUN_WEBHOOK_URL") or "").strip()
-        )
-        if not url:
-            return super().send(
-                channel_id,
-                text,
-                thread_id=thread_id,
-                reply_to_id=reply_to_id,
-                media=media,
-            )
-        body = {
+        webhook_url = str(self.config.get("webhook_url") or os.environ.get("HOMUN_WEBHOOK_URL") or "").strip()
+        if not webhook_url:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+
+        payload = {
+            "platform": self.platform,
             "channel_id": channel_id,
             "text": text,
             "thread_id": thread_id,
             "reply_to_id": reply_to_id,
             "media_count": len(media or []),
-            "platform": self.platform,
+            "timestamp": time.time(),
         }
         try:
             with httpx.Client(timeout=float(self.config.get("timeout") or 10.0)) as client:
-                resp = client.post(url, json=body)
+                resp = client.post(webhook_url, json=payload)
             if resp.status_code >= 400:
-                return {
-                    "delivered": False,
-                    "platform": self.platform,
-                    "channel_id": channel_id,
-                    "thread_id": thread_id,
-                    "reply_to_id": reply_to_id,
-                    "text": text,
-                    "media_count": len(media or []),
-                    "sent_at": time.time(),
-                    "error": f"Webhook relay HTTP {resp.status_code}",
-                    "code": "backend_unavailable",
-                    "status_code": resp.status_code,
-                }
-            return {
-                "delivered": True,
-                "platform": self.platform,
-                "channel_id": channel_id,
-                "thread_id": thread_id,
-                "reply_to_id": reply_to_id,
-                "text": text,
-                "media_count": len(media or []),
-                "sent_at": time.time(),
-                "status_code": resp.status_code,
-            }
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=f"Webhook HTTP {resp.status_code}",
+                    status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+            )
         except Exception as exc:
-            return {
-                "delivered": False,
-                "platform": self.platform,
-                "channel_id": channel_id,
-                "thread_id": thread_id,
-                "reply_to_id": reply_to_id,
-                "text": text,
-                "media_count": len(media or []),
-                "sent_at": time.time(),
-                "error": str(exc),
-                "code": "backend_unavailable",
-            }
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
 
 
 class NtfyAdapter(ChannelAdapter):
-    """ntfy.sh / self-hosted topic push (Hermes messaging catalog)."""
+    """ntfy HTTP topic publish (H33)."""
 
     platform = "ntfy"
 
@@ -604,10 +545,10 @@ class NtfyAdapter(ChannelAdapter):
         return ChannelMessage(
             id=str(payload.get("id") or uuid.uuid4().hex[:8]),
             platform=self.platform,
-            channel_id=str(payload.get("topic") or payload.get("channel_id") or "default"),
-            user_id=str(payload.get("sender") or "ntfy"),
+            channel_id=str(payload.get("topic") or payload.get("channel_id") or ""),
+            user_id=str(payload.get("user") or payload.get("user_id") or "ntfy"),
             text=str(payload.get("message") or payload.get("text") or ""),
-            is_direct=True,
+            is_direct=False,
             timestamp=float(payload.get("time") or time.time()),
         )
 
@@ -620,17 +561,15 @@ class NtfyAdapter(ChannelAdapter):
         reply_to_id: Optional[str] = None,
         media: Optional[List[ChannelMedia]] = None,
     ) -> Dict[str, Any]:
-        base = (
+        server = (
             str(self.config.get("server") or "").strip()
-            or str(os.environ.get("HOMUN_NTFY_SERVER") or os.environ.get("NTFY_SERVER") or "").strip()
-            or "https://ntfy.sh"
+            or str(os.environ.get("NTFY_SERVER") or os.environ.get("HOMUN_NTFY_SERVER") or "https://ntfy.sh").strip()
         )
-        topic = channel_id.strip()
-        if not topic:
-            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
-        url = f"{base.rstrip('/')}/{topic}"
-        headers: Dict[str, str] = {"Content-Type": "text/plain; charset=utf-8"}
         token = _token_from(self.config, "NTFY_TOKEN", "HOMUN_NTFY_TOKEN")
+        if not channel_id or not server:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        url = f"{server.rstrip('/')}/{channel_id}"
+        headers: Dict[str, str] = {"Title": "Homun"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         try:
@@ -672,24 +611,20 @@ class NtfyAdapter(ChannelAdapter):
 
 
 class MatrixAdapter(ChannelAdapter):
-    """Matrix Client-Server API m.room.message send (when homeserver + token set)."""
+    """Matrix Client-Server v3 room message delivery (H33)."""
 
     platform = "matrix"
 
     def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
         content = payload.get("content") or {}
-        sender = str(payload.get("sender") or "")
-        room = str(payload.get("room_id") or payload.get("channel_id") or "")
         return ChannelMessage(
-            id=str(payload.get("event_id") or uuid.uuid4().hex[:8]),
+            id=str(payload.get("event_id") or payload.get("id") or uuid.uuid4().hex[:8]),
             platform=self.platform,
-            channel_id=room,
-            user_id=sender,
+            channel_id=str(payload.get("room_id") or payload.get("channel_id") or ""),
+            user_id=str(payload.get("sender") or payload.get("user_id") or ""),
             text=str(content.get("body") or payload.get("text") or ""),
             is_direct=False,
-            timestamp=float(payload.get("origin_server_ts") or time.time()) / (
-                1000.0 if payload.get("origin_server_ts") else 1.0
-            ),
+            timestamp=float(payload.get("origin_server_ts", 0)) / 1000.0 or time.time(),
         )
 
     def send(
@@ -752,281 +687,6 @@ class MatrixAdapter(ChannelAdapter):
             )
 
 
-
-
-class IrcAdapter(ChannelAdapter):
-    """Classic IRC PRIVMSG delivery when IRC_HOST is configured (H33)."""
-
-    platform = "irc"
-
-    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
-        return ChannelMessage(
-            id=str(payload.get("id") or uuid.uuid4().hex[:8]),
-            platform=self.platform,
-            channel_id=str(payload.get("channel") or payload.get("channel_id") or ""),
-            user_id=str(payload.get("nick") or payload.get("user_id") or ""),
-            text=str(payload.get("text") or payload.get("message") or ""),
-            is_direct=str(payload.get("channel") or "").startswith("#") is False,
-            timestamp=float(payload.get("timestamp") or time.time()),
-        )
-
-    def send(
-        self,
-        channel_id: str,
-        text: str,
-        *,
-        thread_id: Optional[str] = None,
-        reply_to_id: Optional[str] = None,
-        media: Optional[List[ChannelMedia]] = None,
-    ) -> Dict[str, Any]:
-        host = (
-            str(self.config.get("host") or "").strip()
-            or str(os.environ.get("IRC_HOST") or os.environ.get("HOMUN_IRC_HOST") or "").strip()
-        )
-        port = int(self.config.get("port") or os.environ.get("IRC_PORT") or os.environ.get("HOMUN_IRC_PORT") or 6667)
-        nick = (
-            str(self.config.get("nick") or "").strip()
-            or str(os.environ.get("IRC_NICK") or os.environ.get("HOMUN_IRC_NICK") or "homun").strip()
-        )
-        if not host or not channel_id:
-            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
-        password = str(self.config.get("password") or os.environ.get("IRC_PASSWORD") or os.environ.get("HOMUN_IRC_PASSWORD") or "")
-        timeout = float(self.config.get("timeout") or 15.0)
-        try:
-            with socket.create_connection((host, port), timeout=timeout) as sock:
-                sock.settimeout(timeout)
-                def _send(line: str) -> None:
-                    sock.sendall((line + "\r\n").encode("utf-8"))
-                if password:
-                    _send(f"PASS {password}")
-                _send(f"NICK {nick}")
-                _send(f"USER {nick} 0 * :Homun")
-                # Drain banner briefly without blocking forever.
-                sock.settimeout(2.0)
-                try:
-                    while True:
-                        chunk = sock.recv(4096)
-                        if not chunk:
-                            break
-                        for raw in chunk.decode("utf-8", errors="replace").splitlines():
-                            if raw.upper().startswith("PING"):
-                                _send("PONG " + raw.split(" ", 1)[1])
-                except socket.timeout:
-                    pass
-                sock.settimeout(timeout)
-                if channel_id.startswith("#"):
-                    _send(f"JOIN {channel_id}")
-                # IRC messages should stay under ~400 bytes; split defensively.
-                for i in range(0, len(text), 350):
-                    _send(f"PRIVMSG {channel_id} :{text[i:i+350]}")
-                _send("QUIT :homun")
-            return _http_delivery_result(
-                platform=self.platform,
-                channel_id=channel_id,
-                text=text,
-                thread_id=thread_id,
-                reply_to_id=reply_to_id,
-                media=media,
-                delivered=True,
-                status_code=200,
-            )
-        except Exception as exc:
-            return _http_delivery_result(
-                platform=self.platform,
-                channel_id=channel_id,
-                text=text,
-                thread_id=thread_id,
-                reply_to_id=reply_to_id,
-                media=media,
-                delivered=False,
-                error=str(exc),
-            )
-
-
-class SignalAdapter(ChannelAdapter):
-    """signal-cli REST API outbound (when SIGNAL_CLI_REST_URL is set)."""
-
-    platform = "signal"
-
-    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
-        envelope = payload.get("envelope") or payload
-        data = envelope.get("dataMessage") or {}
-        return ChannelMessage(
-            id=str(envelope.get("timestamp") or uuid.uuid4().hex[:8]),
-            platform=self.platform,
-            channel_id=str(envelope.get("source") or payload.get("channel_id") or ""),
-            user_id=str(envelope.get("sourceNumber") or envelope.get("source") or ""),
-            text=str(data.get("message") or payload.get("text") or ""),
-            is_direct=True,
-            timestamp=float(envelope.get("timestamp") or time.time()) / (
-                1000.0 if envelope.get("timestamp") and envelope.get("timestamp") > 10_000_000_000 else 1.0
-            ),
-        )
-
-    def send(
-        self,
-        channel_id: str,
-        text: str,
-        *,
-        thread_id: Optional[str] = None,
-        reply_to_id: Optional[str] = None,
-        media: Optional[List[ChannelMedia]] = None,
-    ) -> Dict[str, Any]:
-        base = (
-            str(self.config.get("rest_url") or "").strip()
-            or str(os.environ.get("SIGNAL_CLI_REST_URL") or os.environ.get("HOMUN_SIGNAL_CLI_REST_URL") or "").strip()
-        )
-        number = (
-            str(self.config.get("number") or "").strip()
-            or str(os.environ.get("SIGNAL_CLI_NUMBER") or os.environ.get("HOMUN_SIGNAL_NUMBER") or "").strip()
-        )
-        if not base or not number:
-            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
-        url = f"{base.rstrip('/')}/v2/send"
-        payload = {"message": text, "number": number, "recipients": [channel_id]}
-        try:
-            with httpx.Client(timeout=float(self.config.get("timeout") or 20.0)) as client:
-                resp = client.post(url, json=payload)
-            if resp.status_code >= 400:
-                return _http_delivery_result(
-                    platform=self.platform,
-                    channel_id=channel_id,
-                    text=text,
-                    thread_id=thread_id,
-                    reply_to_id=reply_to_id,
-                    media=media,
-                    delivered=False,
-                    error=f"Signal REST HTTP {resp.status_code}",
-                    status_code=resp.status_code,
-                )
-            return _http_delivery_result(
-                platform=self.platform,
-                channel_id=channel_id,
-                text=text,
-                thread_id=thread_id,
-                reply_to_id=reply_to_id,
-                media=media,
-                delivered=True,
-                status_code=resp.status_code,
-            )
-        except Exception as exc:
-            return _http_delivery_result(
-                platform=self.platform,
-                channel_id=channel_id,
-                text=text,
-                thread_id=thread_id,
-                reply_to_id=reply_to_id,
-                media=media,
-                delivered=False,
-                error=str(exc),
-            )
-
-
-class EmailAdapter(ChannelAdapter):
-    """SMTP outbound email (Hermes messaging catalog: email)."""
-
-    platform = "email"
-
-    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
-        return ChannelMessage(
-            id=str(payload.get("message_id") or uuid.uuid4().hex[:8]),
-            platform=self.platform,
-            channel_id=str(payload.get("to") or payload.get("channel_id") or ""),
-            user_id=str(payload.get("from") or payload.get("user_id") or ""),
-            text=str(payload.get("subject") or "") + "\n" + str(payload.get("text") or payload.get("body") or ""),
-            is_direct=True,
-            timestamp=float(payload.get("timestamp") or time.time()),
-        )
-
-    def send(
-        self,
-        channel_id: str,
-        text: str,
-        *,
-        thread_id: Optional[str] = None,
-        reply_to_id: Optional[str] = None,
-        media: Optional[List[ChannelMedia]] = None,
-    ) -> Dict[str, Any]:
-        host = (
-            str(self.config.get("smtp_host") or "").strip()
-            or str(os.environ.get("HOMUN_SMTP_HOST") or os.environ.get("SMTP_HOST") or "").strip()
-        )
-        port = int(self.config.get("smtp_port") or os.environ.get("HOMUN_SMTP_PORT") or os.environ.get("SMTP_PORT") or 587)
-        user = (
-            str(self.config.get("smtp_user") or "").strip()
-            or str(os.environ.get("HOMUN_SMTP_USER") or os.environ.get("SMTP_USER") or "").strip()
-        )
-        password = (
-            str(self.config.get("smtp_password") or "").strip()
-            or str(os.environ.get("HOMUN_SMTP_PASSWORD") or os.environ.get("SMTP_PASSWORD") or "").strip()
-        )
-        mail_from = (
-            str(self.config.get("from") or "").strip()
-            or str(os.environ.get("HOMUN_SMTP_FROM") or user or "").strip()
-        )
-        if not host or not mail_from or not channel_id:
-            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
-
-        subject = str(self.config.get("subject") or thread_id or "Homun")
-        msg = EmailMessage()
-        msg["Subject"] = subject
-        msg["From"] = mail_from
-        msg["To"] = channel_id
-        if reply_to_id:
-            msg["In-Reply-To"] = reply_to_id
-        msg.set_content(text)
-        try:
-            with smtplib.SMTP(host, port, timeout=float(self.config.get("timeout") or 20.0)) as smtp:
-                smtp.ehlo()
-                if self.config.get("starttls", True):
-                    smtp.starttls()
-                    smtp.ehlo()
-                if user and password:
-                    smtp.login(user, password)
-                smtp.send_message(msg)
-            return _http_delivery_result(
-                platform=self.platform,
-                channel_id=channel_id,
-                text=text,
-                thread_id=thread_id,
-                reply_to_id=reply_to_id,
-                media=media,
-                delivered=True,
-                status_code=250,
-            )
-        except Exception as exc:
-            return _http_delivery_result(
-                platform=self.platform,
-                channel_id=channel_id,
-                text=text,
-                thread_id=thread_id,
-                reply_to_id=reply_to_id,
-                media=media,
-                delivered=False,
-                error=str(exc),
-            )
-
-
-
-from homun.application.channel_adapters_catalog import (
-    BlueBubblesAdapter,
-    DingTalkAdapter,
-    FeishuChannelAdapter,
-    GoogleChatAdapter,
-    LineAdapter,
-    MattermostAdapter,
-    A2AAdapter,
-    BuzzAdapter,
-    PhotonAdapter,
-    RaftAdapter,
-    QqBotAdapter,
-    SimplexAdapter,
-    SmsAdapter,
-    TeamsAdapter,
-    WeComAdapter,
-    WeixinAdapter,
-)
-
 class ChannelRegistry:
     """Registry and dispatcher for multi-platform channel adapters."""
 
@@ -1037,34 +697,24 @@ class ChannelRegistry:
     ):
         self.pairing_manager = pairing_manager or GatewayPairingManager()
         self.lease_manager = lease_manager or TurnLeaseManager()
-        self._adapters: Dict[str, ChannelAdapter] = {
-            "telegram": TelegramAdapter(),
-            "discord": DiscordAdapter(),
-            "slack": SlackAdapter(),
-            "whatsapp": WhatsAppAdapter(),
-            "webhook": WebhookRelayAdapter(),
-            "ntfy": NtfyAdapter(),
-            "matrix": MatrixAdapter(),
-            "email": EmailAdapter(),
-            "signal": SignalAdapter(),
-            "irc": IrcAdapter(),
-            "feishu": FeishuChannelAdapter(),
-            "mattermost": MattermostAdapter(),
-            "google_chat": GoogleChatAdapter(),
-            "dingtalk": DingTalkAdapter(),
-            "wecom": WeComAdapter(),
-            "line": LineAdapter(),
-            "teams": TeamsAdapter(),
-            "sms": SmsAdapter(),
-            "bluebubbles": BlueBubblesAdapter(),
-            "weixin": WeixinAdapter(),
-            "qqbot": QqBotAdapter(),
-            "simplex": SimplexAdapter(),
-            "photon": PhotonAdapter(),
-            "a2a": A2AAdapter(),
-            "buzz": BuzzAdapter(),
-            "raft": RaftAdapter(),
-        }
+        core: List[ChannelAdapter] = [
+            TelegramAdapter(), DiscordAdapter(), SlackAdapter(), WhatsAppAdapter(),
+            WebhookRelayAdapter(), NtfyAdapter(), MatrixAdapter(), EmailAdapter(),
+            SignalAdapter(), IrcAdapter(), FeishuChannelAdapter(), MattermostAdapter(),
+            GoogleChatAdapter(), DingTalkAdapter(), WeComAdapter(), LineAdapter(),
+            TeamsAdapter(), SmsAdapter(), BlueBubblesAdapter(), WeixinAdapter(),
+            QqBotAdapter(), SimplexAdapter(), PhotonAdapter(), A2AAdapter(),
+            BuzzAdapter(), RaftAdapter(), HomeAssistantAdapter(), MSGraphWebhookAdapter(),
+            OpenWebUIAdapter(), TeamsMeetingsAdapter(), WeComCallbackAdapter(),
+            WhatsAppCloudAdapter(), YuanbaoAdapter(),
+        ]
+        self._adapters: Dict[str, ChannelAdapter] = {a.platform.lower(): a for a in core}
+        self._adapters["msgraph_webhook"] = self._adapters["msgraph"]
+        self._adapters["open-webui"] = self._adapters["open_webui"]
+        self._adapters["teams-meetings"] = self._adapters["teams_meetings"]
+        self._adapters["wecom-callback"] = self._adapters["wecom_callback"]
+        self._adapters["whatsapp-cloud"] = self._adapters["whatsapp_cloud"]
+
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:
         self._adapters[adapter.platform.lower()] = adapter
@@ -1091,7 +741,7 @@ class ChannelRegistry:
                 "status": "unauthorized",
                 "platform": message.platform,
                 "user_id": message.user_id,
-                "message": f"Unauthorized sender. To pair, send a pairing request code.",
+                "message": "Unauthorized sender. To pair, send a pairing request code.",
             }
 
         # 2. Turn lease serialization: resolve session/routing key

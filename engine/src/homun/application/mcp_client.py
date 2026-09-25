@@ -81,16 +81,16 @@ def filtered_tools(server: ExternalServer, tools: list[dict[str, Any]]) -> list[
 
 
 
-def _require_transport_auth(server: ExternalServer) -> None:
-    """Refuse OAuth until a real token broker exists; allow configured mTLS paths."""
+def _require_transport_auth(server: ExternalServer) -> Optional[str]:
+    """Resolve OAuth access token via real token broker if declared; refuse on missing credentials."""
     if str(getattr(server, "oauth_client_id", "") or "").strip() or str(
         getattr(server, "oauth_token_url", "") or ""
     ).strip():
-        raise RuntimeError(
-            "MCP OAuth is declared but Homun has no token broker yet; "
-            "refusing the session instead of inventing bearer tokens "
-            "(code=backend_unavailable)"
-        )
+        from homun.application.mcp_oauth import get_mcp_oauth_broker
+
+        broker = get_mcp_oauth_broker()
+        return broker.get_access_token(server)
+    return None
 
 
 def _httpx_mtls_cert(server: ExternalServer):
@@ -105,7 +105,7 @@ def _httpx_mtls_cert(server: ExternalServer):
 
 @asynccontextmanager
 async def _transport(server: ExternalServer):
-    _require_transport_auth(server)
+    bearer_token = _require_transport_auth(server)
     if server.transport == "stdio":
         # SDK merges its safe baseline. Explicitly blank its other inherited keys
         # so only PATH/HOME and the person's declarations carry values.
@@ -117,8 +117,11 @@ async def _transport(server: ExternalServer):
             async with stdio_client(params, errlog=errlog) as streams:
                 yield streams[0], streams[1]
     elif server.transport == "http":
+        headers = dict(server.headers)
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
         cert = _httpx_mtls_cert(server)
-        async with httpx.AsyncClient(headers=server.headers, timeout=PROBE_TIMEOUT_SECONDS,
+        async with httpx.AsyncClient(headers=headers, timeout=PROBE_TIMEOUT_SECONDS,
                                      follow_redirects=False, cert=cert) as client:
             async with streamable_http_client(server.url, http_client=client) as streams:
                 yield streams[0], streams[1]

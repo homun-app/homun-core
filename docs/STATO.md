@@ -384,6 +384,8 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
   sotto per quelle righe sono storiche e non sostituiscono la matrice corretta.
 
 - **Da fare successivamente (UI i18n)**: localizzazione multilingua di tutti i copy dell'interfaccia utente (UI copy) in modo che ciascun utente possa fruirne nella propria lingua. Registrato per la fase successiva alla parità funzionale con Hermes.
+- **H36 MCP OAuth broker (2026-09-25)**: `MCPOAuthBroker` manages client credentials and refresh token flows with in-memory TTL caching, direct injection into MCP HTTP transport, and typed refusal (`backend_unavailable`).
+- **H33 catalogo messaging completo (2026-09-25)**: tutti i 34 canali Hermes coperti con architettura DAG a moduli separati (<800 righe ciascuno, 0 cicli di import): Home Assistant, MS Graph Webhook, OpenWebUI, Teams Meetings, WeCom Callback, WhatsApp Cloud, Yuanbao, oltre a Telegram, Discord, Slack, WhatsApp, ntfy, Matrix, Email, Signal, IRC, Feishu, Mattermost, Google Chat, DingTalk, WeCom, LINE, Teams, SMS, BlueBubbles, Weixin, QQBot, SimpleX, Photon, A2A, Buzz, Raft, e Webhook relay.
 - **H10 managed Modal HTTP (2026-09-25)**: `ManagedModalJobs` POSTs `{image,command}` to `HOMUN_MANAGED_MODAL_URL` when `HOMUN_MANAGED_MODAL_ALLOW_LIVE=1`.
 - **H10 Vercel REST bridge (2026-09-25)**: `VercelJobs` creates sandboxes via `api.vercel.com/v2/sandboxes` when token+project id and `HOMUN_VERCEL_ALLOW_LIVE=1` are set.
 - **H36 product MCP sampling (2026-09-25)**: opt-in `HOMUN_MCP_SAMPLING=1` installs engine model completion as createMessage callback; default remains refuse-by-default. Fixed HTTP transport import (`httpx`).

@@ -6,7 +6,7 @@ from homun.application import agent_native
 from homun.application.agent_runs import authority, lookup
 from homun.application.workspace_checkpoints import note_agent_write, snapshot_before_write
 from homun.application.workspace_file_baseline import full_baseline, seen_current
-from homun.application.workspace_files import root_for
+from homun.application.workspace_file_contracts import root_for
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from homun.domain.models import CommandRecord, utc_now
 from homun.execution.contracts import digest

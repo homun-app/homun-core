@@ -2857,6 +2857,35 @@
         "title": "FileEditList",
         "type": "object"
       },
+      "FireDueRequest": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "now": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Now"
+          },
+          "workspace_id": {
+            "default": "default",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "title": "FireDueRequest",
+        "type": "object"
+      },
       "HACallRequest": {
         "properties": {
           "domain": {
@@ -5295,6 +5324,18 @@
             "title": "Command Id",
             "type": "string"
           },
+          "cwd": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cwd"
+          },
           "expected_version": {
             "minimum": 1.0,
             "title": "Expected Version",
@@ -5408,7 +5449,12 @@
                 "enum": [
                   "docker",
                   "local",
-                  "ssh"
+                  "ssh",
+                  "modal",
+                  "managed_modal",
+                  "singularity",
+                  "daytona",
+                  "vercel"
                 ],
                 "type": "string"
               },
@@ -5434,6 +5480,18 @@
             "default": false,
             "title": "Web Pages",
             "type": "boolean"
+          },
+          "workspace_root": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Root"
           }
         },
         "required": [
@@ -6038,6 +6096,68 @@
           "system_prompt"
         ],
         "title": "ShippedSkill",
+        "type": "object"
+      },
+      "SideQuestionRequest": {
+        "properties": {
+          "question": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "SideQuestionRequest",
+        "type": "object"
+      },
+      "SideQuestionView": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "attempted_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Attempted Tools",
+            "type": "array"
+          },
+          "main_transcript_unchanged": {
+            "default": true,
+            "title": "Main Transcript Unchanged",
+            "type": "boolean"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage"
+          },
+          "work_id": {
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "answer",
+          "run_id",
+          "work_id"
+        ],
+        "title": "SideQuestionView",
         "type": "object"
       },
       "SkillActionRequest": {
@@ -6837,7 +6957,12 @@
             "enum": [
               "docker-offline-v1",
               "local-private-v1",
-              "ssh-v1"
+              "ssh-v1",
+              "cloud-singularity-v1",
+              "cloud-modal-v1",
+              "cloud-managed_modal-v1",
+              "cloud-daytona-v1",
+              "cloud-vercel-v1"
             ],
             "title": "Policy",
             "type": "string"
@@ -7009,7 +7134,7 @@
           "image": {
             "anyOf": [
               {
-                "pattern": "^sha256:[0-9a-f]{64}$",
+                "maxLength": 4000,
                 "type": "string"
               },
               {
@@ -7023,7 +7148,12 @@
             "enum": [
               "docker-offline-v1",
               "local-private-v1",
-              "ssh-v1"
+              "ssh-v1",
+              "cloud-singularity-v1",
+              "cloud-modal-v1",
+              "cloud-managed_modal-v1",
+              "cloud-daytona-v1",
+              "cloud-vercel-v1"
             ],
             "title": "Policy",
             "type": "string"
@@ -8732,6 +8862,133 @@
         "summary": "Report Credential",
         "tags": [
           "providers"
+        ]
+      }
+    },
+    "/v1/cron/due": {
+      "get": {
+        "operationId": "get_due_jobs_v1_cron_due_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "now",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Now"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Due Jobs V1 Cron Due Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Due Jobs",
+        "tags": [
+          "cron"
+        ]
+      }
+    },
+    "/v1/cron/fire-due": {
+      "post": {
+        "operationId": "post_fire_due_v1_cron_fire_due_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FireDueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Fire Due V1 Cron Fire Due Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Fire Due",
+        "tags": [
+          "cron"
+        ]
+      }
+    },
+    "/v1/cron/providers/chronos": {
+      "get": {
+        "operationId": "chronos_status_v1_cron_providers_chronos_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Chronos Status V1 Cron Providers Chronos Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Chronos Status",
+        "tags": [
+          "cron"
         ]
       }
     },
@@ -12191,6 +12448,30 @@
           }
         },
         "summary": "Export Profile",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/operations/terminal-backends": {
+      "get": {
+        "description": "H10 catalog: local/docker/ssh are product-ready; cloud adapters report honest status.",
+        "operationId": "list_terminal_backends_v1_operations_terminal_backends_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Terminal Backends V1 Operations Terminal Backends Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Terminal Backends",
         "tags": [
           "operations"
         ]
@@ -19101,6 +19382,109 @@
           }
         },
         "summary": "Control Run",
+        "tags": [
+          "agent-runs"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/works/{work_id}/agent-runs/{run_id}/side-question": {
+      "post": {
+        "description": "Answer a detached /btw question without mutating the main run transcript (H03).",
+        "operationId": "side_question_v1_workspaces__workspace_id__works__work_id__agent_runs__run_id__side_question_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SideQuestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SideQuestionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Side Question",
         "tags": [
           "agent-runs"
         ]

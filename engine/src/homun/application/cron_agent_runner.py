@@ -41,7 +41,8 @@ class CronAgentRunner:
                 display_name="Homun Cron",
             )
 
-        from homun.application.agent_runs import propose
+        import importlib
+        propose = importlib.import_module("homun.application.agent_runs").propose
 
         cmd = uuid4().hex[:10]
         try:

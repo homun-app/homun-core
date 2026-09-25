@@ -14,6 +14,7 @@ from homun.application.deliverable_ledger import (
     DeliverableLedger,
     get_deliverable_ledger,
     reset_deliverable_ledger,
+    set_deliverable_ledger,
 )
 from homun.application.deliverable_policy import (
     BLOCKED_DELIVERABLE_EXTENSIONS,
@@ -24,10 +25,12 @@ from homun.application.deliverable_policy import (
 
 
 @pytest.fixture(autouse=True)
-def clean_deliverable_environment():
-    reset_deliverable_ledger()
+def clean_deliverable_environment(tmp_path):
+    ledger = DeliverableLedger(db_path=tmp_path / "test_ledger.sqlite")
+    set_deliverable_ledger(ledger)
     yield
     reset_deliverable_ledger()
+
 
 
 # 1. Deliverable Policy
