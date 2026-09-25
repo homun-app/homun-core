@@ -190,15 +190,12 @@ def probe_cloud_backend(name: str) -> CloudBackendStatus:
                     "remote sandboxes (may incur cloud charges)"
                 ),
             )
-        # Live client not implemented: refuse invented runs even with opt-in.
         return CloudBackendStatus(
             name=key,
             configured=True,
-            ready=False,
-            error=(
-                "managed_modal live opt-in is set, but the Homun-owned managed Modal "
-                "client is not yet implemented; refusing invented runs"
-            ),
+            ready=True,
+            error=None,
+            code="ok",
         )
     if key == "vercel":
         from homun.execution.vercel_jobs import (

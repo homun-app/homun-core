@@ -50,6 +50,20 @@ def backend_for(ctx, proposal=None):
             if status.ready:
                 return DaytonaJobs(root)
             return UnavailableCloudJobs(name)
+        if name == 'vercel':
+            from homun.execution.cloud_backends import probe_cloud_backend
+            from homun.execution.vercel_jobs import VercelJobs
+            status = probe_cloud_backend('vercel')
+            if status.ready:
+                return VercelJobs(root)
+            return UnavailableCloudJobs(name)
+        if name == 'managed_modal':
+            from homun.execution.cloud_backends import probe_cloud_backend
+            from homun.execution.managed_modal_jobs import ManagedModalJobs
+            status = probe_cloud_backend('managed_modal')
+            if status.ready:
+                return ManagedModalJobs(root)
+            return UnavailableCloudJobs(name)
         if name in CLOUD_BACKENDS:
             return UnavailableCloudJobs(name)
     return DockerJobs(root)
