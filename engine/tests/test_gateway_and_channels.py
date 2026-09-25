@@ -839,3 +839,80 @@ def test_irc_send_uses_socket_when_configured(monkeypatch):
     assert out["delivered"] is True
     assert any("PRIVMSG #homun :hello" in s for s in sent)
     assert any(s.startswith("NICK bot") for s in sent)
+
+
+def test_feishu_mattermost_google_chat_require_credentials():
+    from homun.application.channel_adapters import (
+        DingTalkAdapter,
+        FeishuChannelAdapter,
+        GoogleChatAdapter,
+        MattermostAdapter,
+        WeComAdapter,
+    )
+
+    assert FeishuChannelAdapter().send("oc_chat", "hi")["delivered"] is False
+    assert MattermostAdapter().send("chan", "hi")["delivered"] is False
+    assert GoogleChatAdapter().send("spaces/abc", "hi")["delivered"] is False
+    assert DingTalkAdapter().send("not-a-url", "hi")["delivered"] is False
+    assert WeComAdapter().send("not-a-url", "hi")["delivered"] is False
+
+
+def test_mattermost_and_webhook_adapters_post(monkeypatch):
+    from homun.application.channel_adapters import (
+        DingTalkAdapter,
+        FeishuChannelAdapter,
+        GoogleChatAdapter,
+        MattermostAdapter,
+        WeComAdapter,
+    )
+
+    class FakeResp:
+        def __init__(self, status_code=200, payload=None):
+            self.status_code = status_code
+            self.content = b"{}"
+            self._payload = payload or {"code": 0, "errcode": 0, "id": "p1", "data": {"message_id": "m1"}}
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            self.calls = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, json=None, headers=None, content=None):
+            self.calls.append((url, json, headers))
+            FakeClient.last = self.calls[-1]
+            return FakeResp()
+
+    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", FakeClient)
+
+    mm = MattermostAdapter(config={"base_url": "https://mm.example", "token": "t"})
+    assert mm.send("C1", "hello")["delivered"] is True
+    assert FakeClient.last[0].endswith("/api/v4/posts")
+
+    fs = FeishuChannelAdapter(config={"token": "t"})
+    assert fs.send("oc_x", "hi")["delivered"] is True
+    assert "open-apis/im/v1/messages" in FakeClient.last[0]
+
+    gc = GoogleChatAdapter(config={"webhook_url": "https://chat.googleapis.com/hooks/x"})
+    assert gc.send("ignored", "hi")["delivered"] is True
+
+    dt = DingTalkAdapter(config={"webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=x"})
+    assert dt.send("ignored", "hi")["delivered"] is True
+
+    wc = WeComAdapter(config={"webhook_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x"})
+    assert wc.send("ignored", "hi")["delivered"] is True
+
+
+def test_channel_registry_includes_new_messaging_catalog():
+    from homun.application.channel_adapters import ChannelRegistry
+
+    reg = ChannelRegistry()
+    for name in ("feishu", "mattermost", "google_chat", "dingtalk", "wecom", "irc"):
+        assert reg.get_adapter(name) is not None

@@ -13,6 +13,7 @@ import socket
 import os
 import smtplib
 import time
+import json
 import uuid
 from email.message import EmailMessage
 from typing import Any, Callable, Dict, List, Optional
@@ -1006,6 +1007,423 @@ class EmailAdapter(ChannelAdapter):
             )
 
 
+
+class FeishuChannelAdapter(ChannelAdapter):
+    """Feishu/Lark IM message send (Hermes messaging catalog: feishu).
+
+    Distinct from application.integration_feishu.FeishuAdapter (docs/comments).
+    """
+
+    platform = "feishu"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        event = payload.get("event") or payload
+        message = event.get("message") or {}
+        sender = (event.get("sender") or {}).get("sender_id") or {}
+        content = message.get("content") or {}
+        if isinstance(content, str):
+            text = content
+        else:
+            text = str(content.get("text") or payload.get("text") or "")
+        return ChannelMessage(
+            id=str(message.get("message_id") or payload.get("message_id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(message.get("chat_id") or payload.get("channel_id") or ""),
+            user_id=str(sender.get("user_id") or sender.get("open_id") or payload.get("user_id") or ""),
+            text=text,
+            is_direct=str(message.get("chat_type") or "") == "p2p",
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        token = _token_from(
+            self.config,
+            "FEISHU_TENANT_ACCESS_TOKEN",
+            "HOMUN_FEISHU_TENANT_ACCESS_TOKEN",
+            "LARK_TENANT_ACCESS_TOKEN",
+        )
+        base = (
+            str(self.config.get("base_url") or "").strip()
+            or str(os.environ.get("HOMUN_FEISHU_BASE_URL") or "https://open.feishu.cn").strip()
+        )
+        if not token or not channel_id:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        receive_id_type = str(self.config.get("receive_id_type") or "chat_id")
+        url = f"{base.rstrip('/')}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
+        # Feishu expects JSON-encoded content string for text messages.
+        body: Dict[str, Any] = {
+            "receive_id": channel_id,
+            "msg_type": "text",
+            "content": json.dumps({"text": text}),
+        }
+        if reply_to_id:
+            body["reply_message_id"] = reply_to_id
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, json=body, headers=headers)
+            data = resp.json() if resp.content else {}
+            code = data.get("code") if isinstance(data, dict) else None
+            if resp.status_code >= 400 or (code not in (None, 0)):
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=f"Feishu IM HTTP {resp.status_code} code={code}",
+                    status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+                extra={"message_id": (data.get("data") or {}).get("message_id") if isinstance(data, dict) else None},
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
+
+
+class MattermostAdapter(ChannelAdapter):
+    """Mattermost API v4 posts (Hermes messaging catalog: mattermost)."""
+
+    platform = "mattermost"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        post = payload.get("data") or payload.get("post") or payload
+        if isinstance(post, str):
+            try:
+                post = json.loads(post)
+            except Exception:
+                post = {"message": post}
+        return ChannelMessage(
+            id=str(post.get("id") or payload.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(post.get("channel_id") or payload.get("channel_id") or ""),
+            user_id=str(post.get("user_id") or payload.get("user_id") or ""),
+            text=str(post.get("message") or payload.get("text") or ""),
+            is_direct=False,
+            timestamp=float(post.get("create_at") or time.time()) / (
+                1000.0 if post.get("create_at") and post.get("create_at") > 10_000_000_000 else 1.0
+            ),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        base = (
+            str(self.config.get("base_url") or "").strip()
+            or str(os.environ.get("MATTERMOST_URL") or os.environ.get("HOMUN_MATTERMOST_URL") or "").strip()
+        )
+        token = _token_from(self.config, "MATTERMOST_TOKEN", "HOMUN_MATTERMOST_TOKEN")
+        if not base or not token or not channel_id:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        url = f"{base.rstrip('/')}/api/v4/posts"
+        body: Dict[str, Any] = {"channel_id": channel_id, "message": text}
+        if thread_id or reply_to_id:
+            body["root_id"] = thread_id or reply_to_id
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, json=body, headers=headers)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=f"Mattermost HTTP {resp.status_code}",
+                    status_code=resp.status_code,
+                )
+            data = resp.json() if resp.content else {}
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+                extra={"post_id": data.get("id") if isinstance(data, dict) else None},
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
+
+
+class GoogleChatAdapter(ChannelAdapter):
+    """Google Chat spaces.messages.create or incoming webhook."""
+
+    platform = "google_chat"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        message = payload.get("message") or payload
+        sender = message.get("sender") or {}
+        space = payload.get("space") or {}
+        return ChannelMessage(
+            id=str(message.get("name") or payload.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(space.get("name") or payload.get("channel_id") or ""),
+            user_id=str(sender.get("name") or sender.get("email") or ""),
+            text=str(message.get("text") or payload.get("text") or ""),
+            is_direct=str(space.get("type") or "") == "DM",
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        webhook = (
+            str(self.config.get("webhook_url") or "").strip()
+            or str(os.environ.get("GOOGLE_CHAT_WEBHOOK_URL") or os.environ.get("HOMUN_GOOGLE_CHAT_WEBHOOK_URL") or "").strip()
+        )
+        token = _token_from(self.config, "GOOGLE_CHAT_TOKEN", "HOMUN_GOOGLE_CHAT_TOKEN")
+        if webhook:
+            url = webhook
+            headers = {"Content-Type": "application/json"}
+            body: Dict[str, Any] = {"text": text}
+        elif token and channel_id:
+            space = channel_id if channel_id.startswith("spaces/") else f"spaces/{channel_id}"
+            url = f"https://chat.googleapis.com/v1/{space}/messages"
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            body = {"text": text}
+            if thread_id:
+                body["thread"] = {"name": thread_id}
+        else:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, json=body, headers=headers)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=f"Google Chat HTTP {resp.status_code}",
+                    status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
+
+
+class DingTalkAdapter(ChannelAdapter):
+    """DingTalk custom robot webhook send."""
+
+    platform = "dingtalk"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        text_obj = payload.get("text") or {}
+        return ChannelMessage(
+            id=str(payload.get("msgId") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(payload.get("conversationId") or payload.get("channel_id") or ""),
+            user_id=str(payload.get("senderStaffId") or payload.get("senderId") or ""),
+            text=str(text_obj.get("content") if isinstance(text_obj, dict) else text_obj or payload.get("text") or ""),
+            is_direct=str(payload.get("conversationType") or "") == "1",
+            timestamp=float(payload.get("createAt") or time.time()) / (
+                1000.0 if payload.get("createAt") and float(payload.get("createAt")) > 10_000_000_000 else 1.0
+            ),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        webhook = (
+            str(self.config.get("webhook_url") or channel_id or "").strip()
+            or str(os.environ.get("DINGTALK_WEBHOOK_URL") or os.environ.get("HOMUN_DINGTALK_WEBHOOK_URL") or "").strip()
+        )
+        if not webhook.startswith("http"):
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        body = {"msgtype": "text", "text": {"content": text}}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(webhook, json=body)
+            data = resp.json() if resp.content else {}
+            errcode = data.get("errcode") if isinstance(data, dict) else None
+            if resp.status_code >= 400 or (errcode not in (None, 0)):
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=f"DingTalk HTTP {resp.status_code} errcode={errcode}",
+                    status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
+
+
+class WeComAdapter(ChannelAdapter):
+    """WeCom (WeChat Work) group robot webhook send."""
+
+    platform = "wecom"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        return ChannelMessage(
+            id=str(payload.get("msgid") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(payload.get("chatid") or payload.get("channel_id") or ""),
+            user_id=str(payload.get("from") or payload.get("user_id") or ""),
+            text=str((payload.get("text") or {}).get("content") if isinstance(payload.get("text"), dict) else payload.get("text") or ""),
+            is_direct=False,
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        webhook = (
+            str(self.config.get("webhook_url") or channel_id or "").strip()
+            or str(os.environ.get("WECOM_WEBHOOK_URL") or os.environ.get("HOMUN_WECOM_WEBHOOK_URL") or "").strip()
+        )
+        if not webhook.startswith("http"):
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        body = {"msgtype": "text", "text": {"content": text}}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(webhook, json=body)
+            data = resp.json() if resp.content else {}
+            errcode = data.get("errcode") if isinstance(data, dict) else None
+            if resp.status_code >= 400 or (errcode not in (None, 0)):
+                return _http_delivery_result(
+                    platform=self.platform,
+                    channel_id=channel_id,
+                    text=text,
+                    thread_id=thread_id,
+                    reply_to_id=reply_to_id,
+                    media=media,
+                    delivered=False,
+                    error=f"WeCom HTTP {resp.status_code} errcode={errcode}",
+                    status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
+
+
 class ChannelRegistry:
     """Registry and dispatcher for multi-platform channel adapters."""
 
@@ -1027,6 +1445,11 @@ class ChannelRegistry:
             "email": EmailAdapter(),
             "signal": SignalAdapter(),
             "irc": IrcAdapter(),
+            "feishu": FeishuChannelAdapter(),
+            "mattermost": MattermostAdapter(),
+            "google_chat": GoogleChatAdapter(),
+            "dingtalk": DingTalkAdapter(),
+            "wecom": WeComAdapter(),
         }
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:

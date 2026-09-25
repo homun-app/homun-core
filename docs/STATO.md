@@ -384,6 +384,7 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
   sotto per quelle righe sono storiche e non sostituiscono la matrice corretta.
 
 - **Da fare successivamente (UI i18n)**: localizzazione multilingua di tutti i copy dell'interfaccia utente (UI copy) in modo che ciascun utente possa fruirne nella propria lingua. Registrato per la fase successiva alla parità funzionale con Hermes.
+- **H33 Feishu/Mattermost/Google Chat/DingTalk/WeCom (2026-09-25)**: channel adapters for Feishu IM, Mattermost posts, Google Chat webhook/API, DingTalk and WeCom robot webhooks; unconfigured → `backend_unavailable`.
 - **H33 IRC (2026-09-25)**: `IrcAdapter` opens a TCP IRC session (NICK/USER/JOIN/PRIVMSG) when `host` is configured; unconfigured → `backend_unavailable`.
 - **H16 Linux bridge (2026-09-25)**: `computer_use_linux_bridge` auto-wires on Linux via xdotool/wmctrl + import/scrot/gnome-screenshot; `ready` only with DISPLAY/WAYLAND_DISPLAY and helpers present.
 - **H36 MCP discovery reconnect (2026-09-25)**: probe retries once on transient transport failure before any tools/call; tool/resource/prompt calls stay single-attempt.
