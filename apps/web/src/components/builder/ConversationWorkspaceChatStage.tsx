@@ -359,7 +359,7 @@ export function ConversationWorkspaceChatStage({
           </div>
         </div>
       </section>
-      {details}
+      {panelOpen && details}
     </div>
   );
 }

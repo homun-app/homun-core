@@ -9,17 +9,16 @@
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 12px 16px;
-  border-radius: 12px;
-  background: #fbfcf9;
-  border: 1px solid #dce4d5;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: transparent;
+  border: 1px solid #e6ebe1;
   transition: all 0.2s ease;
 }
 
 .cw-relay-timeline__milestone.is-running {
-  background: #fdfefe;
+  background: #fafcf9;
   border-color: #687a59;
-  box-shadow: 0 2px 10px rgba(104, 122, 89, 0.08);
 }
 
 .cw-relay-timeline__icon {

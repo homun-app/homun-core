@@ -441,10 +441,12 @@
 }
 .cw-message.you {
   margin-left: auto;
-  background: #eaf0df;
+  background: #f3f6f0;
+  border: 1px solid #e3eadd;
   border-radius: 16px 16px 3px 16px;
-  padding: 15px 19px;
+  padding: 14px 18px;
   max-width: 86%;
+  color: #1a2a1f;
 }
 .cw-message.agent {
   padding-right: 15px;
