@@ -1667,6 +1667,124 @@ class BlueBubblesAdapter(ChannelAdapter):
             )
 
 
+
+class WeixinAdapter(ChannelAdapter):
+    """Weixin (WeChat Official Account) customer-service message send."""
+
+    platform = "weixin"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        xmlish = payload.get("xml") or payload
+        return ChannelMessage(
+            id=str(xmlish.get("MsgId") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(xmlish.get("FromUserName") or payload.get("channel_id") or ""),
+            user_id=str(xmlish.get("FromUserName") or payload.get("user_id") or ""),
+            text=str(xmlish.get("Content") or payload.get("text") or ""),
+            is_direct=True,
+            timestamp=float(xmlish.get("CreateTime") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        token = _token_from(self.config, "WEIXIN_ACCESS_TOKEN", "HOMUN_WEIXIN_ACCESS_TOKEN")
+        if not token or not channel_id:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        url = f"https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token={token}"
+        body = {"touser": channel_id, "msgtype": "text", "text": {"content": text}}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, json=body)
+            data = resp.json() if resp.content else {}
+            errcode = data.get("errcode") if isinstance(data, dict) else None
+            if resp.status_code >= 400 or (errcode not in (None, 0)):
+                return _http_delivery_result(
+                    platform=self.platform, channel_id=channel_id, text=text,
+                    thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                    delivered=False, error=f"Weixin HTTP {resp.status_code} errcode={errcode}",
+                    status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=True, status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=False, error=str(exc),
+            )
+
+
+class QqBotAdapter(ChannelAdapter):
+    """QQ Bot (qqbot) channel message send via bot API."""
+
+    platform = "qqbot"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        d = payload.get("d") or payload
+        author = d.get("author") or {}
+        return ChannelMessage(
+            id=str(d.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(d.get("channel_id") or d.get("group_openid") or ""),
+            user_id=str(author.get("id") or author.get("member_openid") or ""),
+            text=str(d.get("content") or payload.get("text") or ""),
+            is_direct=False,
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        token = _token_from(self.config, "QQBOT_TOKEN", "HOMUN_QQBOT_TOKEN")
+        appid = (
+            str(self.config.get("app_id") or "").strip()
+            or str(os.environ.get("QQBOT_APP_ID") or os.environ.get("HOMUN_QQBOT_APP_ID") or "").strip()
+        )
+        if not token or not appid or not channel_id:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        url = f"https://api.sgroup.qq.com/channels/{channel_id}/messages"
+        headers = {"Authorization": f"Bot {appid}.{token}", "Content-Type": "application/json"}
+        body: Dict[str, Any] = {"content": text}
+        if reply_to_id:
+            body["msg_id"] = reply_to_id
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, json=body, headers=headers)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform, channel_id=channel_id, text=text,
+                    thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                    delivered=False, error=f"QQBot HTTP {resp.status_code}", status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=True, status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=False, error=str(exc),
+            )
+
+
 class ChannelRegistry:
     """Registry and dispatcher for multi-platform channel adapters."""
 
@@ -1697,6 +1815,8 @@ class ChannelRegistry:
             "teams": TeamsAdapter(),
             "sms": SmsAdapter(),
             "bluebubbles": BlueBubblesAdapter(),
+            "weixin": WeixinAdapter(),
+            "qqbot": QqBotAdapter(),
         }
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:

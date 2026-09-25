@@ -387,6 +387,7 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
 - **H10 managed Modal HTTP (2026-09-25)**: `ManagedModalJobs` POSTs `{image,command}` to `HOMUN_MANAGED_MODAL_URL` when `HOMUN_MANAGED_MODAL_ALLOW_LIVE=1`.
 - **H10 Vercel REST bridge (2026-09-25)**: `VercelJobs` creates sandboxes via `api.vercel.com/v2/sandboxes` when token+project id and `HOMUN_VERCEL_ALLOW_LIVE=1` are set.
 - **H36 product MCP sampling (2026-09-25)**: opt-in `HOMUN_MCP_SAMPLING=1` installs engine model completion as createMessage callback; default remains refuse-by-default. Fixed HTTP transport import (`httpx`).
+- **H33 Weixin/QQBot (2026-09-25)**: Weixin custom service messages + QQ channel bot send when tokens set.
 - **H33 BlueBubbles (2026-09-25)**: iMessage send via BlueBubbles REST when URL configured.
 - **H33 LINE/Teams/SMS (2026-09-25)**: LINE Messaging API push, Teams incoming webhook, Twilio SMS.
 - **H33 Feishu/Mattermost/Google Chat/DingTalk/WeCom (2026-09-25)**: channel adapters for Feishu IM, Mattermost posts, Google Chat webhook/API, DingTalk and WeCom robot webhooks; unconfigured → `backend_unavailable`.

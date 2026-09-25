@@ -914,7 +914,7 @@ def test_channel_registry_includes_new_messaging_catalog():
     from homun.application.channel_adapters import ChannelRegistry
 
     reg = ChannelRegistry()
-    for name in ("feishu", "mattermost", "google_chat", "dingtalk", "wecom", "irc", "line", "teams", "sms", "bluebubbles"):
+    for name in ("feishu", "mattermost", "google_chat", "dingtalk", "wecom", "irc", "line", "teams", "sms", "bluebubbles", "weixin", "qqbot"):
         assert reg.get_adapter(name) is not None
 
 
@@ -999,3 +999,43 @@ def test_bluebubbles_http_send(monkeypatch):
     )
     assert out["delivered"] is True
     assert FakeClient.last[0].endswith("/api/v1/message/text")
+
+
+def test_weixin_qqbot_require_credentials():
+    from homun.application.channel_adapters import QqBotAdapter, WeixinAdapter
+
+    assert WeixinAdapter().send("openid", "hi")["delivered"] is False
+    assert QqBotAdapter().send("channel", "hi")["delivered"] is False
+
+
+def test_weixin_qqbot_http_send(monkeypatch):
+    from homun.application.channel_adapters import QqBotAdapter, WeixinAdapter
+
+    class FakeResp:
+        status_code = 200
+        content = b'{"errcode":0}'
+
+        def json(self):
+            return {"errcode": 0}
+
+    class FakeClient:
+        last = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, json=None, headers=None):
+            FakeClient.last = (url, json, headers)
+            return FakeResp()
+
+    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", FakeClient)
+    assert WeixinAdapter(config={"token": "t"}).send("o1", "hi")["delivered"] is True
+    assert "api.weixin.qq.com" in FakeClient.last[0]
+    assert QqBotAdapter(config={"token": "t", "app_id": "a"}).send("c1", "hi")["delivered"] is True
+    assert "api.sgroup.qq.com" in FakeClient.last[0]
