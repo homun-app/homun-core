@@ -146,6 +146,9 @@ async def chat_completions(
         created_ts = int(time.time())
 
         async def sse_generator() -> AsyncIterator[str]:
+            if await request.is_disconnected():
+                return
+
             # Initial role chunk
             chunk_role = ChatCompletionChunk(
                 id=cmpl_id,
@@ -157,6 +160,9 @@ async def chat_completions(
                 )],
             )
             yield f"data: {chunk_role.model_dump_json()}\n\n"
+
+            if await request.is_disconnected():
+                return
 
             # Content chunk if content exists
             if res.message.content:
@@ -171,9 +177,14 @@ async def chat_completions(
                 )
                 yield f"data: {chunk_content.model_dump_json()}\n\n"
 
+            if await request.is_disconnected():
+                return
+
             # Tool calls chunks if any
             if res.message.tool_calls:
                 for idx, tc in enumerate(res.message.tool_calls):
+                    if await request.is_disconnected():
+                        return
                     tc_delta = {
                         "index": idx,
                         "id": tc.id,
@@ -193,6 +204,9 @@ async def chat_completions(
                         )],
                     )
                     yield f"data: {chunk_tc.model_dump_json()}\n\n"
+
+            if await request.is_disconnected():
+                return
 
             # Finish chunk
             finish = "tool_calls" if res.message.tool_calls else "stop"

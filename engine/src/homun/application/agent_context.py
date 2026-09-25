@@ -43,9 +43,15 @@ def prepare(ctx,run,tools):
     policy=run.get('_context_policy')
     if not policy:
         return messages
+    micro_policy = policy.get('micro_compaction')
+    plan_kwargs = {k: v for k, v in policy.items() if k != 'micro_compaction'}
     plan=plan_context(messages,tools,checkpoint=run.get('_context_checkpoint'),
-                      force=bool(run.get('_force_context_compaction')),**policy)
+                      force=bool(run.get('_force_context_compaction')),**plan_kwargs)
     if plan.cut is None:
+        if micro_policy:
+            from homun.models.micro_compaction import micro_compact_messages
+            kwargs = micro_policy if isinstance(micro_policy, dict) else {}
+            return micro_compact_messages(plan.messages, **kwargs)
         return plan.messages
     actor=Actor.model_validate(run['_actor'])
     output_tokens=min(2000,max(256,policy['context_window']//10),policy['max_output_tokens'])
@@ -111,4 +117,9 @@ def prepare(ctx,run,tools):
         ctx.service.store=store
     if deferred:
         raise ContextPreparationDeferred()
-    return project_checkpoint(messages,candidate)
+    projected = project_checkpoint(messages, candidate)
+    if micro_policy:
+        from homun.models.micro_compaction import micro_compact_messages
+        kwargs = micro_policy if isinstance(micro_policy, dict) else {}
+        return micro_compact_messages(projected, **kwargs)
+    return projected

@@ -289,6 +289,7 @@ class ModelRegistry:
         connection_id: str | None = None,
         provider_id: str | None = None,
         model_id: str | None = None,
+        cancel_check: Any | None = None,
     ) -> Iterator[str]:
         pid = connection_id or provider_id or self.active_provider_id
         provider = self._providers.get(pid)
@@ -305,9 +306,17 @@ class ModelRegistry:
             size = 24
             for i in range(0, len(text), size):
                 yield text[i : i + size]
+                if cancel_check is not None and callable(cancel_check) and cancel_check():
+                    break
             return
-        for chunk in stream_fn(messages, model_id=model_id):
+        try:
+            stream_iter = stream_fn(messages, model_id=model_id, cancel_check=cancel_check)
+        except TypeError:
+            stream_iter = stream_fn(messages, model_id=model_id)
+        for chunk in stream_iter:
             yield chunk
+            if cancel_check is not None and callable(cancel_check) and cancel_check():
+                break
         last = getattr(provider, "last_stream_result", None)
         if last is not None and isinstance(last, CompletionResult):
             self.usage.append(last.usage)

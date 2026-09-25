@@ -195,11 +195,13 @@ class OwnedBrowser:
         probe.close()
         body = body[:length]
         pages = [item for item in json.loads(body) if item.get("type") == "page" and item.get("webSocketDebuggerUrl")]
-        if not pages:
-            raise OSError("browser has no page")
         self._page = _Page(_websocket(pages[0]["webSocketDebuggerUrl"]))
         self._page.call("Page.enable")
         self._page.call("Runtime.enable")
+        try:
+            self._page.call("Log.enable")
+        except Exception:
+            pass
         return self._page
 
     def _dismiss_dialogs(self) -> list[dict]:
@@ -226,17 +228,71 @@ class OwnedBrowser:
                 "action": "dismiss",
             })
 
-    def wait_document(self, *, dismiss_dialogs: bool) -> dict:
-        """Wait until the current public page has loaded. A read does not accept dialogs."""
+    def handle_dialog(self, *, accept: bool = True, prompt_text: str = "") -> dict:
+        """Explicitly accept or dismiss a pending native JavaScript dialog with optional prompt text."""
+        page = self._page
+        if page is None:
+            return {"handled": False, "error_code": "no_page"}
+        index = next((i for i, event in enumerate(page.events)
+                      if event.get("method") == "Page.javascriptDialogOpening"), None)
+        if index is None:
+            return {"handled": False, "message": "No pending dialog"}
+        params = page.events.pop(index).get("params") or {}
+        kind = str(params.get("type") or "")
+        dialog_params = {"accept": accept}
+        if prompt_text:
+            dialog_params["promptText"] = prompt_text
+        page.call("Page.handleJavaScriptDialog", dialog_params)
+        return {
+            "handled": True,
+            "type": kind,
+            "message": str(params.get("message") or ""),
+            "action": "accept" if accept else "dismiss",
+        }
+
+    def get_console_logs(self) -> list[dict]:
+        """Collect and return console log messages emitted by the page."""
+        page = self._page
+        if page is None:
+            return []
+        logs: list[dict] = []
+        for event in page.events:
+            method = event.get("method")
+            params = event.get("params") or {}
+            if method == "Runtime.consoleAPICalled":
+                args = params.get("args") or []
+                text = " ".join(str(a.get("value") or "") for a in args)
+                logs.append({
+                    "type": params.get("type", "log"),
+                    "text": text[:500],
+                    "timestamp": params.get("timestamp"),
+                })
+            elif method == "Log.entryAdded":
+                entry = params.get("entry") or {}
+                logs.append({
+                    "level": entry.get("level", "info"),
+                    "text": str(entry.get("text") or "")[:500],
+                    "source": entry.get("source"),
+                    "timestamp": entry.get("timestamp"),
+                })
+        return logs
+
+    def wait_document(self, *, dismiss_dialogs: bool = True, accept_dialogs: bool = False, prompt_text: str = "") -> dict:
+        """Wait until the current public page has loaded."""
         page = self._page
         if page is None:
             return {"error_code": "web_fetch_failed", "message": "The browser has no page"}
         dialogs: list[dict] = []
 
         def notice() -> None:
-            dialogs.extend(self._dismiss_dialogs())
+            if accept_dialogs:
+                res = self.handle_dialog(accept=True, prompt_text=prompt_text)
+                if res.get("handled"):
+                    dialogs.append(res)
+            elif dismiss_dialogs:
+                dialogs.extend(self._dismiss_dialogs())
 
-        watcher = notice if dismiss_dialogs else None
+        watcher = notice if (dismiss_dialogs or accept_dialogs) else None
         try:
             deadline = time.monotonic() + 15
             href = ""
@@ -267,20 +323,29 @@ class OwnedBrowser:
             settled["dialogs"] = dialogs
         return settled
 
-    def read(self, url: str, *, dismiss_dialogs: bool = False) -> dict:
+    def read(self, url: str, *, dismiss_dialogs: bool = False, accept_dialogs: bool = False, prompt_text: str = "") -> dict:
         _classify(url)
         page = self._page_socket()
         self.refs = {}
         early: list[dict] = []
 
         def notice() -> None:
-            early.extend(self._dismiss_dialogs())
+            if accept_dialogs:
+                res = self.handle_dialog(accept=True, prompt_text=prompt_text)
+                if res.get("handled"):
+                    early.append(res)
+            elif dismiss_dialogs:
+                early.extend(self._dismiss_dialogs())
 
         try:
-            page.call("Page.navigate", {"url": url}, notice=notice if dismiss_dialogs else None)
+            page.call("Page.navigate", {"url": url}, notice=notice if (dismiss_dialogs or accept_dialogs) else None)
         except _TooManyDialogs:
             return {"error_code": "web_fetch_failed", "message": "The page opened too many dialogs"}
-        settled = self.wait_document(dismiss_dialogs=dismiss_dialogs)
+        settled = self.wait_document(
+            dismiss_dialogs=dismiss_dialogs,
+            accept_dialogs=accept_dialogs,
+            prompt_text=prompt_text,
+        )
         if "error_code" in settled:
             return settled
         if early:

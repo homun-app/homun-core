@@ -261,6 +261,33 @@ def test_nested_hints_discovery(tmp_path: Path):
     assert content == "API instructions"
 
 
+def test_discover_nested_hints_recursive_from_root(tmp_path: Path):
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "AGENTS.md").write_text("Project root rules", encoding="utf-8")
+
+    d1 = root / "services" / "auth"
+    d1.mkdir(parents=True)
+    (d1 / "AGENTS.md").write_text("Auth microservice rules", encoding="utf-8")
+
+    d2 = root / "docs"
+    d2.mkdir()
+    (d2 / "CLAUDE.md").write_text("Documentation style guide", encoding="utf-8")
+
+    # Excluded directories must be ignored
+    venv_dir = root / ".venv" / "lib"
+    venv_dir.mkdir(parents=True)
+    (venv_dir / "AGENTS.md").write_text("Noisy vendor rules", encoding="utf-8")
+
+    # From root, discover all nested hints down the tree
+    hints = discover_nested_hints(cwd=root, workspace_root=root)
+    rel_paths = {rel for rel, _, _ in hints}
+
+    assert "services/auth/AGENTS.md" in rel_paths
+    assert "docs/CLAUDE.md" in rel_paths
+    assert not any(".venv" in r for r in rel_paths)
+
+
 def test_list_context_file_sources_manifest(tmp_path: Path):
     root = tmp_path / "workspace"
     root.mkdir()

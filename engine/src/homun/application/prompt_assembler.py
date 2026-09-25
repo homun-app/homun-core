@@ -101,11 +101,28 @@ def discover_workspace_instructions(
     return None, None, None
 
 
+EXCLUDED_SUBDIR_NAMES: Set[str] = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    "dist",
+    "build",
+}
+
+
 def discover_nested_hints(
     cwd: Path,
     workspace_root: Path,
+    *,
+    max_depth: int = 3,
 ) -> List[Tuple[str, Path, str]]:
-    """Walk from workspace_root down to cwd, gathering subdirectory instructions."""
+    """Walk from workspace_root down to cwd, and scan nested subdirectories for instructions."""
     try:
         resolved_cwd = cwd.resolve()
         resolved_root = workspace_root.resolve()
@@ -114,7 +131,7 @@ def discover_nested_hints(
     except Exception:
         return []
 
-    # Build directory chain from root to cwd
+    # 1. Build directory chain from root to cwd (ancestor path)
     chain: List[Path] = []
     curr = resolved_cwd
     while curr != resolved_root and curr != curr.parent:
@@ -138,6 +155,33 @@ def discover_nested_hints(
                         break
                 except Exception as exc:
                     logger.warning("Failed reading nested hint %s: %s", candidate, exc)
+
+    # 2. Descend into subdirectories under cwd (bounded depth)
+    def _scan_subdirs(base: Path, current_depth: int) -> None:
+        if current_depth > max_depth:
+            return
+        try:
+            subdirs = sorted([p for p in base.iterdir() if p.is_dir()])
+        except Exception:
+            return
+        for sd in subdirs:
+            if sd.name in EXCLUDED_SUBDIR_NAMES or sd.name.startswith("."):
+                continue
+            for filename in SUBDIR_INSTRUCTION_FILENAMES:
+                candidate = (sd / filename).resolve()
+                if candidate.exists() and candidate.is_file() and candidate not in seen_paths:
+                    try:
+                        content = candidate.read_text(encoding="utf-8", errors="replace").strip()
+                        if content:
+                            rel_path = candidate.relative_to(resolved_root)
+                            results.append((str(rel_path), candidate, content))
+                            seen_paths.add(candidate)
+                            break
+                    except Exception as exc:
+                        logger.warning("Failed reading nested hint %s: %s", candidate, exc)
+            _scan_subdirs(sd, current_depth + 1)
+
+    _scan_subdirs(resolved_cwd, current_depth=1)
     return results
 
 

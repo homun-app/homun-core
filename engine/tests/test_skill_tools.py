@@ -153,3 +153,52 @@ def test_agent_run_advances_with_skill_tools(setup):
     obs = cmd.result["observations"][-1]
     assert obs["tool"] == "skill_search"
     assert any(sk["name"] == "SintesiStandard" for sk in obs["result"]["skills"])
+
+
+def test_skill_bundle_export_and_atomic_install(setup):
+    from homun.application.skill_bundle import (
+        export_skill_bundle,
+        validate_skill_bundle,
+        install_skill_bundle,
+    )
+
+    ctx, actor, work, _ = setup
+
+    raw_skills = [
+        {
+            "name": "FormattaMarkdown",
+            "description": "Standard di formattazione markdown",
+            "body": "Regole di formattazione...",
+            "tags": ["markdown"],
+        },
+        {
+            "name": "AuditSicurezza",
+            "description": "Checklist sicurezza comandi",
+            "body": "Linee guida di sicurezza...",
+            "tags": ["security", "audit"],
+        },
+    ]
+
+    bundle = export_skill_bundle(raw_skills, "ProductivityPack", description="Pacchetto produttività")
+    assert bundle["bundle_version"] == "1.0"
+    assert bundle["skills_count"] == 2
+    assert bundle["checksum"]
+
+    valid, err = validate_skill_bundle(bundle)
+    assert valid is True
+    assert err is None
+
+    # Install into workspace
+    res = install_skill_bundle(ctx, actor, bundle, status="staged")
+    assert res["installed_count"] == 2
+    assert res["skipped_count"] == 0
+
+    store = ctx.repository.load()
+    names = {s.name for s in store.skills.values()}
+    assert "FormattaMarkdown" in names
+    assert "AuditSicurezza" in names
+
+    # Second install skips existing names
+    res_dup = install_skill_bundle(ctx, actor, bundle, status="staged")
+    assert res_dup["installed_count"] == 0
+    assert res_dup["skipped_count"] == 2

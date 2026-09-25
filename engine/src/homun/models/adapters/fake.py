@@ -86,8 +86,11 @@ class FakeModelAdapter:
         messages: list[ChatMessage],
         *,
         connection_id: str | None = None,
+        cancel_check: Any | None = None,
     ) -> Iterator[str]:
-        for chunk in self._provider.stream(messages):
+        for chunk in self._provider.stream(messages, cancel_check=cancel_check):
+            if cancel_check is not None and callable(cancel_check) and cancel_check():
+                break
             yield chunk
         last = getattr(self._provider, "last_stream_result", None)
         if last is not None:

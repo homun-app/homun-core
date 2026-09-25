@@ -181,3 +181,16 @@ def test_version_5_populates_iframe_and_version_4_ignores_it(tmp_path):
     finally:
         close_browser("v4-v5-proof")
 
+
+def test_owned_browser_accepts_native_dialog_and_collects_console_logs(tmp_path):
+    browser = OwnedBrowser(tmp_path / "browser")
+    try:
+        page = browser._page_socket()
+        page.call("Page.addScriptToEvaluateOnNewDocument", {"source": "console.log('homun-console-msg'); prompt('Enter code:', 'initial');"})
+        result = browser.read("https://example.com/", accept_dialogs=True, prompt_text="homun-code-42")
+        logs = browser.get_console_logs()
+    finally:
+        browser.close()
+    assert any(d.get("action") == "accept" for d in result.get("dialogs", []))
+    assert any("homun-console-msg" in log.get("text", "") for log in logs)
+

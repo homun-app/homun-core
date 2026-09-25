@@ -222,7 +222,13 @@ class OpenAICompatibleProvider:
             usage=usage,
         )
 
-    def stream(self, messages: list[ChatMessage], *, model_id: str | None = None) -> Iterator[str]:
+    def stream(
+        self,
+        messages: list[ChatMessage],
+        *,
+        model_id: str | None = None,
+        cancel_check: Any | None = None,
+    ) -> Iterator[str]:
         """Yield text deltas from the provider; set last_stream_result when finished."""
         api_key = self._api_key()
         if not api_key:
@@ -233,38 +239,38 @@ class OpenAICompatibleProvider:
         pieces: list[str] = []
         input_tokens: int | None = None
         output_tokens: int | None = None
+        interrupted = False
 
-        if self._ollama_native_root() is not None:
-            for piece, usage_bits in self._iter_ollama_stream(model, chat_messages):
-                if piece:
-                    pieces.append(piece)
-                    yield piece
-                if usage_bits.get("input_tokens") is not None:
-                    input_tokens = int(usage_bits["input_tokens"])
-                if usage_bits.get("output_tokens") is not None:
-                    output_tokens = int(usage_bits["output_tokens"])
-        else:
-            for piece, usage_bits in self._iter_openai_sse_stream(model, chat_messages, api_key=api_key):
-                if piece:
-                    pieces.append(piece)
-                    yield piece
-                if usage_bits.get("input_tokens") is not None:
-                    input_tokens = int(usage_bits["input_tokens"])
-                if usage_bits.get("output_tokens") is not None:
-                    output_tokens = int(usage_bits["output_tokens"])
+        stream_iter = (
+            self._iter_ollama_stream(model, chat_messages)
+            if self._ollama_native_root() is not None
+            else self._iter_openai_sse_stream(model, chat_messages, api_key=api_key)
+        )
+        for piece, usage_bits in stream_iter:
+            if piece:
+                pieces.append(piece)
+                yield piece
+            if cancel_check is not None and callable(cancel_check) and cancel_check():
+                interrupted = True
+                break
+            if usage_bits.get("input_tokens") is not None:
+                input_tokens = int(usage_bits["input_tokens"])
+            if usage_bits.get("output_tokens") is not None:
+                output_tokens = int(usage_bits["output_tokens"])
 
         text = "".join(pieces)
+        note = "Stream interrupted by cancellation." if interrupted else "Streamed completion; unknown tokens stay null."
         usage = UsageEntry(
             id=new_id("usage"),
             provider_id=self.provider_id,
             model_id=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            status="ok" if text else "unknown",
-            notes="Streamed completion; unknown tokens stay null.",
+            status="cancelled" if interrupted else ("ok" if text else "unknown"),
+            notes=note,
         )
         self.last_stream_result = CompletionResult(
-            text=text or "(empty completion)",
+            text=text or ("(interrupted completion)" if interrupted else "(empty completion)"),
             model_id=model,
             provider_id=self.provider_id,
             usage=usage,

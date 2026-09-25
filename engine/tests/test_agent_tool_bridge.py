@@ -194,3 +194,41 @@ def test_catalog_hint_allows_missing_optional_description():
     from homun.application.agent_tool_bridge import search_description
     run={'_mcp_bindings':[{'name':'mcp_read','server_name':'Records','tool':'read','descriptor':{'description':None}}]}
     assert 'Records · read' in search_description(run)
+
+
+def test_visible_definitions_filters_by_surface_and_toolset():
+    from homun.application.agent_tool_bridge import visible_definitions
+    from homun.models.agent_turn import ToolDefinition
+    from homun.tools.registry import ToolRegistry, ToolEntry
+
+    from homun.application.agent_tools import NoArguments
+
+    registry = ToolRegistry()
+    registry.register(ToolEntry(ToolDefinition(name='read_file', description='', input_schema={}), 'files', '1', NoArguments, None))
+    registry.register(ToolEntry(ToolDefinition(name='write_file', description='', input_schema={}), 'files', '1', NoArguments, None))
+    registry.register(ToolEntry(ToolDefinition(name='desktop_click', description='', input_schema={}), 'desktop', '1', NoArguments, None))
+    registry.register(ToolEntry(ToolDefinition(name='tool_search', description='', input_schema={}), 'discovery', '1', NoArguments, None))
+
+    # 1. Readonly toolset excludes write_file
+    readonly_defs = visible_definitions({"toolset": "readonly"}, registry)
+    names = {d.name for d in readonly_defs}
+    assert "read_file" in names
+    assert "tool_search" in names
+    assert "write_file" not in names
+
+    # 2. bot_screen surface excludes desktop_click
+    bot_defs = visible_definitions({"surface": "bot_screen"}, registry)
+    bot_names = {d.name for d in bot_defs}
+    assert "read_file" in bot_names
+    assert "desktop_click" not in bot_names
+
+    # 3. Explicit allowed_tools whitelist
+    allowed_defs = visible_definitions({"allowed_tools": ["tool_search"]}, registry)
+    assert [d.name for d in allowed_defs] == ["tool_search"]
+
+    # 4. Explicit denied_tools blacklist
+    denied_defs = visible_definitions({"denied_tools": ["write_file", "desktop_click"]}, registry)
+    denied_names = {d.name for d in denied_defs}
+    assert "write_file" not in denied_names
+    assert "desktop_click" not in denied_names
+    assert "read_file" in denied_names

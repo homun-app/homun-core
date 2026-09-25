@@ -25,11 +25,16 @@ def deferred_names(run):
 
 
 def visible_definitions(run, registry):
+    from homun.application.surface_toolset_policy import filter_definitions_for_surface
     hidden = deferred_names(run)
-    return [d for d in registry.definitions() if d.name not in hidden]
+    active = [d for d in registry.definitions() if d.name not in hidden]
+    return filter_definitions_for_surface(active, run)
 
 
 def resolve_call(run, call):
+    from homun.application.surface_toolset_policy import is_tool_allowed_for_surface
+    if not is_tool_allowed_for_surface(call.name, run):
+        raise ValidationError(f"Tool '{call.name}' is not permitted by current surface/toolset policy")
     if call.name != 'tool_call' or run.get('_tool_bridge_version') != 1:
         return call
     try:
@@ -38,6 +43,8 @@ def resolve_call(run, call):
         raise ValidationError('Invalid deferred tool call arguments') from exc
     if args.name not in deferred_names(run):
         raise ValidationError('Target is not an approved deferred tool; use directly listed tools without tool_call')
+    if not is_tool_allowed_for_surface(args.name, run):
+        raise ValidationError(f"Target tool '{args.name}' is not permitted by current surface/toolset policy")
     return call.model_copy(update={'name': args.name, 'arguments': args.arguments})
 
 

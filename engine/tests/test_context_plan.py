@@ -179,3 +179,30 @@ def test_forced_compaction_refuses_unknown_capacity_or_no_safe_prefix():
     for window in (None,16384):
         with pytest.raises(ContextPressureError):
             plan_context(messages,[],context_window=window,max_output_tokens=2048,force=True)
+
+
+def test_micro_compaction_truncates_older_tools_preserving_recent():
+    from homun.models.micro_compaction import micro_compact_messages
+    rows = transcript(rounds=4, size=3000)
+
+    # 4 rounds of tool calls:
+    # Round 0 (c0): older -> should be micro-compacted
+    # Round 1 (c1): older -> should be micro-compacted
+    # Round 2 (c2): recent -> protected
+    # Round 3 (c3): recent -> protected
+    compacted = micro_compact_messages(rows, max_tool_chars=600, keep_recent_groups=2)
+
+    assert len(compacted) == len(rows)
+
+    # Round 0 tool result (index 3) is compacted
+    assert "micro-compacted for context efficiency" in compacted[3].content
+    assert len(compacted[3].content) < 1000
+
+    # Round 1 tool result (index 5) is compacted
+    assert "micro-compacted for context efficiency" in compacted[5].content
+
+    # Round 2 and 3 tool results (index 7 and 9) are kept intact
+    assert "micro-compacted for context efficiency" not in compacted[7].content
+    assert len(compacted[7].content) == 3000
+    assert "micro-compacted for context efficiency" not in compacted[9].content
+    assert len(compacted[9].content) == 3000
