@@ -82,3 +82,30 @@ def test_driver_auto_wires_macos_bridge(monkeypatch):
     assert status["driver"] == "macos-bridge"
     assert status["ready"] is True
     assert any(a["app"] == "TextEdit" for a in driver.list_apps())
+
+
+def test_ax_elements_parsed_from_osascript(monkeypatch):
+    from homun.application import computer_use_macos_bridge as bridge
+
+    monkeypatch.setattr(
+        bridge,
+        "probe_macos_computer_use",
+        lambda: {"accessibility": True, "screen_recording": False},
+    )
+    monkeypatch.setattr(bridge, "_OSASCRIPT", "/usr/bin/osascript")
+
+    class Reply:
+        returncode = 0
+        stdout = "button|OK, static text|Hello"
+        stderr = ""
+
+    monkeypatch.setattr(bridge, "_run", lambda *a, **k: Reply())
+    elems = bridge._list_ax_elements("TextEdit")
+    assert len(elems) == 2
+    assert elems[0].role == "button"
+    assert elems[0].label == "OK"
+    assert elems[1].label == "Hello"
+
+    cap = bridge.capture_macos("TextEdit", "ax")
+    assert cap.png_b64 is None
+    assert len(cap.elements) == 2

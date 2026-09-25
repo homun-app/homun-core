@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from homun.application.computer_use_macos import probe_macos_computer_use
-from homun.application.desktop_contracts import DesktopActionResult, DesktopCaptureResult
+from homun.application.desktop_contracts import DesktopActionResult, DesktopCaptureResult, DesktopUIElement
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +84,98 @@ def list_macos_windows(app: Optional[str] = None) -> List[Dict[str, Any]]:
     return [{"id": None, "app": app or "unknown", "title": text[:200], "pid": None, "bounds": None, "z_index": 0}]
 
 
+def _list_ax_elements(app: Optional[str] = None) -> List[DesktopUIElement]:
+    """Best-effort AX/SoM element list via System Events (requires Accessibility)."""
+    probe = probe_macos_computer_use()
+    if probe.get("accessibility") is not True or not _OSASCRIPT:
+        return []
+    target = (app or "").replace('"', "")
+    if target:
+        script = (
+            'tell application "System Events"\n'
+            f'  tell process "{target}"\n'
+            "    set elems to {}\n"
+            "    try\n"
+            "      set uiElems to entire contents of front window\n"
+            "      set lim to 40\n"
+            "      set i to 0\n"
+            "      repeat with e in uiElems\n"
+            "        set i to i + 1\n"
+            "        if i > lim then exit repeat\n"
+            "        try\n"
+            '          set r to role of e\n'
+            '          set n to name of e\n'
+            '          set end of elems to (r as text) & "|" & (n as text)\n'
+            "        end try\n"
+            "      end repeat\n"
+            "    end try\n"
+            "    return elems\n"
+            "  end tell\n"
+            "end tell\n"
+        )
+    else:
+        script = (
+            'tell application "System Events"\n'
+            "  set frontProc to first process whose frontmost is true\n"
+            "  set elems to {}\n"
+            "  try\n"
+            "    tell frontProc\n"
+            "      set uiElems to entire contents of front window\n"
+            "      set lim to 40\n"
+            "      set i to 0\n"
+            "      repeat with e in uiElems\n"
+            "        set i to i + 1\n"
+            "        if i > lim then exit repeat\n"
+            "        try\n"
+            '          set r to role of e\n'
+            '          set n to name of e\n'
+            '          set end of elems to (r as text) & "|" & (n as text)\n'
+            "        end try\n"
+            "      end repeat\n"
+            "    end tell\n"
+            "  end try\n"
+            "  return elems\n"
+            "end tell\n"
+        )
+    reply = _run([_OSASCRIPT, "-e", script], timeout=20.0)
+    if reply.returncode != 0:
+        return []
+    out: List[DesktopUIElement] = []
+    raw = (reply.stdout or "").strip()
+    parts = [p.strip() for p in raw.split(", ") if p.strip()] if raw else []
+    for idx, part in enumerate(parts):
+        if "|" in part:
+            role, label = part.split("|", 1)
+        else:
+            role, label = "unknown", part
+        out.append(
+            DesktopUIElement(
+                index=idx,
+                role=role.strip() or "unknown",
+                label=label.strip(),
+                app=target or "",
+                attributes={"source": "system-events"},
+            )
+        )
+    return out
+
+
 def capture_macos(app: Optional[str], mode: str) -> DesktopCaptureResult:
     probe = probe_macos_computer_use()
     if probe.get("screen_recording") is not True:
+        if mode in {"ax", "som"}:
+            elements = _list_ax_elements(app)
+            if elements:
+                return DesktopCaptureResult(
+                    mode=mode,
+                    width=0,
+                    height=0,
+                    elements=elements,
+                    app=app or "",
+                    note=f"AX-only capture (no Screen Recording); elements={len(elements)}",
+                    image_mime_type=None,
+                    png_b64=None,
+                )
         return DesktopCaptureResult(
             mode=mode,
             width=0,
@@ -122,15 +211,19 @@ def capture_macos(app: Optional[str], mode: str) -> DesktopCaptureResult:
         if len(raw) >= 24 and raw[:8] == b"\x89PNG\r\n\x1a\n":
             width = int.from_bytes(raw[16:20], "big")
             height = int.from_bytes(raw[20:24], "big")
+        elements = _list_ax_elements(app) if mode in {"ax", "som"} else []
+        note = "Captured via macOS screencapture"
+        if mode in {"ax", "som"}:
+            note = f"{note}; AX elements={len(elements)}"
         return DesktopCaptureResult(
             mode=mode,
             width=width,
             height=height,
             png_b64=base64.b64encode(raw).decode("ascii"),
-            elements=[],
+            elements=elements,
             app=app or "",
             window_title="",
-            note="Captured via macOS screencapture",
+            note=note,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return DesktopCaptureResult(
