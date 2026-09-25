@@ -1,244 +1,195 @@
-# Rapporto di Parità Funzionale Motore Homun e Prontezza Integrazione UI
+# Rapporto di Riconciliazione Parità Motore Homun, Stato Canonico H01–H46 e Gap Aperti
 
 **Data:** 25 settembre 2026  
-**Stato:** Motore verificato al 100%, contratti applicativi allineati, zero fallback mascherati  
-**Commit di riferimento:** `ab441a75` (`main` / `fabio/hermes-parity`)  
+**Stato complessivo:** Parità completa **non raggiunta**. Integrazione UI **sospesa**.  
+**Checkpoint codice:** commit `ab441a75` con integrazione test `test_agent_runs_api.py` (5 test passati).  
 **Repository:** `/Users/fabio/Projects/Homun/homun2`  
 
 ---
 
-## 1. Sintesi Esecutiva e Conferma Architetturale
+## 1. Verdetto Esecutivo e Vincoli
 
-Il motore Homun è stato verificato in modo esaustivo per raggiungere la piena parità funzionale rispetto ai requisiti operativi identificati nello studio dei sistemi agentici (Hermes / OpenHands), mantenendo l'architettura **100% Homun-owned**:
-- **Nessuna dipendenza runtime da Hermes, OpenHands o stack esterni.**
-- **Nessun fallback opaco o simulazione mascherata:** gli errori di sistema, le mancanze di credenziali o l'assenza di backend hardware/cloud restituiscono codici di errore tipizzati (`HomunClientError`, `HomunErrorNotice`, codici `400` / `422` / `503`).
-- **Nessun file monolitico o violazione architetturale:** validato da `tools/check_architecture.py`.
-- **Contratti API unificati e tipizzati:** esportazione OpenAPI sincronizzata con `contracts/openapi/v1-engine.json` e client TypeScript `apps/web/src/lib/engine-agent-run-client.ts` allineato campo per campo.
-
-Tutti i 46 requisiti funzionali della matrice **H01–H46** sono stati analizzati sul codice sorgente reale, riconciliati rispetto ai contratti esposti e coperti da suite di test automatizzati.
-
----
-
-## 2. Stato Riconciliato della Matrice di Parità H01–H46
-
-I requisiti sono classificati nei quattro stati operativi rigorosi:
-1. **Implementato e verificato (40/46):** Codice presente, integrato nel flusso applicativo, serializzabile via HTTP e verificato con test automatizzati passati.
-2. **Implementato ma non sufficientemente verificato (0/46):** Azzerato dopo l'introduzione della suite `engine/tests/test_agent_runs_api.py`.
-3. **Incompleto o non raggiungibile dal percorso applicativo (0/46):** Azzerato dopo la riconciliazione delle route FastAPI (`RunRequest`/`RunView`), la gestione di `plugins` in `application/agent_runs.py` e il re-export di `ToolEntry` in `agent_tool_contracts.py`.
-4. **Prova bloccata da credenziali/servizi esterni (6/46):** Logica core, handshake e gestione errori tipizzati completamente implementati e verificati con mock/stub locali; l'esecuzione *live* contro provider terzi richiede credenziali o hardware dedicato (OAuth, API key, gateway remoti).
-
-### 2.1 Tabella Sinottica H01–H46
-
-| ID | Nome Requisito | Stato Effettivo | Note e Meccanismo di Verifica |
-| :--- | :--- | :--- | :--- |
-| **H01** | Tool execution loop | **Implementato e verificato** | Orchestrato da `AgentLoop`, batching tool, budget guard, persistence SQLite. |
-| **H02** | Message history compaction | **Implementato e verificato** | `CompactStrategy`, trimming messaggi, test di preservazione e rollback. |
-| **H03** | Side-question context injection | **Implementato e verificato** | Route dedicata `/v1/side-question`, prompt template e test di isolamento. |
-| **H04** | Prompt assembler & `@`-refs | **Implementato e verificato** | `PromptAssembler` confinato alla workspace root, risoluzione riferimenti file. |
-| **H05** | Capability & Skill manifest | **Implementato e verificato** | Esportato via `/v1/agent-runs`, filtraggio dinamico su flag `skills: bool`. |
-| **H06** | Subagent delegation | **Implementato e verificato** | Subagent tree, timeout, depth check, tool `subagent_delegate`. |
-| **H07** | Clarification questions | **Implementato e verificato** | Struttura interattiva domanda/opzioni, blocco run fino a risposta. |
-| **H08** | Goal setting & tracking | **Implementato e verificato** | Tool `goal_set`, `goal_status`, `goal_complete`, `goal_cancel`, `goal_wait` via SQLite. |
-| **H09** | Session management | **Implementato e verificato** | Tool `session_list`, `session_resume`, `session_fork`, persistenza SQLite. |
-| **H10** | Terminal & cloud execution | **Implementato e verificato (Live bloccato)** | 7 backend (Local, Docker, Singularity, Modal, Daytona, Vercel, Managed Modal). Verificato con mock; spend gate e token per live. |
-| **H11** | Code execution sandbox | **Implementato e verificato** | Esecuzione python/bash confinata, timeout, cattura output e exit status. |
-| **H12** | Workspace write checkpoints | **Implementato e verificato** | Snapshot filesystem prima di write operations approvate, rollback automatico. |
-| **H13** | File search & globbing | **Implementato e verificato** | Ripgrep/glob integrati, esclusione automatica di ignore folders. |
-| **H14** | Workspace edits | **Implementato e verificato** | Strumenti di sostituzione esatta e patch unificate con validazione pre-scrittura. |
-| **H15** | Web browsing / scraping | **Implementato e verificato** | Client HTTP scraping headless, markdown parsing, fallback leggibilità. |
-| **H16** | Computer Use | **Implementato e verificato (Live bloccato)** | Adapter macOS (osascript/screencapture/AX), Linux (xdotool), Windows (onesto: `ready=false`). Bloccato da TCC permissions su macOS live. |
-| **H17** | Multimodal Vision | **Implementato e verificato** | Endpoint vision, adapter Ollama/Claude/GPT, test unitari su payload base64. |
-| **H18** | Text-to-Speech (TTS) | **Implementato e verificato** | Driver macOS `say`, fallback WAV, test di generazione e parametri. |
-| **H19** | Model Registry & Fallbacks | **Implementato e verificato** | `ProviderRegistry`, routing provider primario/secondario su errore transiente. |
-| **H20** | Model Steering | **Implementato e verificato** | Modifica dinamica della system instruction e vincoli operativi per step. |
-| **H21** | Model Overrides | **Implementato e verificato** | Override puntuali per agente e per tool di temperatura, top_p, max_tokens. |
-| **H22** | Provider Switching | **Implementato e verificato** | Failover automatico tra provider configurati in caso di rate-limiting (`429`). |
-| **H23** | Model Capabilities | **Implementato e verificato** | Schede capacità modelli (vision, tool calling, context window, json mode). |
-| **H24** | Model Limits & Budget | **Implementato e verificato** | Token counting, enforcement del budget massimo di run, stop controllato. |
-| **H25** | Agent Run Engine | **Implementato e verificato** | Ciclo vitale run (`proposed` -> `running` -> `completed` / `failed`), state machine. |
-| **H26** | Context Injection on Claim | **Implementato e verificato** | Iniezione metadati di sessione e autorizzazioni all'atto del lock/claim del run. |
-| **H27** | Heartbeat & Tick Completion | **Implementato e verificato** | Heartbeat persistente, auto-recovery di run orfani, `complete_tick`. |
-| **H28** | Cron Scheduling | **Implementato e verificato** | `CronStore` SQLite, parser cron espressioni, fire endpoint `/v1/cron/fire`. |
-| **H29** | Cron Job Persistence | **Implementato e verificato** | Persistenza job su SQLite, ripristino al riavvio, cron history. |
-| **H30** | Interactive Session Gateway | **Implementato e verificato** | Gateway WebSocket/SSE, streaming eventi, canali multiplexati. |
-| **H31** | Agent Delegation Routing | **Implementato e verificato** | Routing dei payload delegati, isolamento workspace subagenti. |
-| **H32** | Pairing & Hosted Rooms | **Implementato e verificato** | Gestione room multi-utente e handshake di pairing con SQLite persistence. |
-| **H33** | Messaging Channel Adapters | **Implementato e verificato (Live bloccato)** | 20 canali implementati con invio HTTP/TCP tipizzato. Live bloccato da token/webhook reali. |
-| **H34** | Gateway Event Steering | **Implementato e verificato** | Inoltro eventi asincroni da gateway verso la coda `agent_run`. |
-| **H35** | MCP Tool Runner & Idempotency | **Implementato e verificato** | Idempotenza transazioni SQLite, gating `pending_approval` per tool ad alto impatto. |
-| **H36** | MCP Resources & Discovery | **Implementato e verificato** | List & read di risorse/prompt MCP, sampling/elicitation refuse-by-default. |
-| **H37** | Dynamic Tool Registration | **Implementato e verificato** | Registrazione a runtime di tool via MCP server esterni o script utente. |
-| **H38** | Plugin Framework | **Implementato e verificato** | Flag `plugins` via HTTP route, caricamento estensioni v1. |
-| **H39** | Copilot ACP Protocol | **Implementato e verificato (Live bloccato)** | `StdioAcpTransport` con JSON-RPC 2.0. Live bloccato da CLI Copilot/binary. |
-| **H40** | Approval Ledger | **Implementato e verificato** | Ledger autorizzazioni e audit trail immutabile su SQLite. |
-| **H41** | Security Policies | **Implementato e verificato** | Enforcement blacklist comandi, path containment, token masking. |
-| **H42** | Deliverable Ledger | **Implementato e verificato** | Tracciamento file generati, artefatti e checksum per sessione. |
-| **H43** | Safe Execution Guards | **Implementato e verificato** | Prevenzione loop infiniti, kill-switch processo terminale, timeout rigidi. |
-| **H44** | OAuth Lifecycle | **Implementato e verificato (Live bloccato)** | Flow OAuth PKCE, refresh token, expiry. Live bloccato da Client ID/Secret provider. |
-| **H45** | Auth Credential Storage | **Implementato e verificato** | Storage cifrato a riposo con key derivation, rotazione chiavi. |
-| **H46** | Multi-Agent Coordination (MoA)| **Implementato e verificato** | Architettura Mixture of Agents, sintesi aggregata, flag `moa` esposto via HTTP. |
+1. **Parità non raggiunta:** L'audit approfondito del codice e delle prove conferma che il motore Homun **non ha raggiunto la parità funzionale completa** con la matrice canonica Hermes Agent (`c9dca726`). La precedente dichiarazione di parità completa è revocata.
+2. **Integrazione UI sospesa:** Nessuna attività di integrazione o redesign dell'interfaccia utente deve essere avviata prima di aver riconciliato formalmente tutti i contratti e risolto i gap locali del motore.
+3. **Conservazione delle correzioni contrattuali (commit `ab441a75`):** Restano confermati e pienamente validi gli allineamenti contrattuali apportati tra route HTTP FastAPI, serializer applicativo e client TypeScript:
+   - Preservazione di tutte le capability flags (`memory`, `skills`, `delegation`, `clarify`, `goals`, `cron`, `session_management`, `gateway`, `code_execution`, `plugins`, `moa`) in `RunRequest` e `RunView` (`engine/src/homun/routes/agent_runs.py`).
+   - Esposizione di `terminal_wait_id` in `RunView` per run in stato `waiting_external`.
+   - Supporto del parametro `plugins` in `engine/src/homun/application/agent_runs.py` per abilitare `extensible-plugins-v1`.
+   - Risoluzione dell'import circolare di `ToolEntry` in `engine/src/homun/application/agent_tool_contracts.py` (re-export da `homun.tools.registry`).
+   - Allineamento del client `apps/web/src/lib/engine-agent-run-client.ts` e snapshot `contracts/openapi/v1-engine.json`.
+4. **Architettura 100% Homun-owned:** Nessuna dipendenza runtime esterna da Hermes o OpenHands. Ogni rifiuto o indisponibilità restituisce errori tipizzati (`HomunClientError`, `HomunErrorNotice`, codici `400`/`422`/`503`).
 
 ---
 
-## 3. Cataloghi Dettagliati dei Sottosistemi
+## 2. Matrice Canonica H01–H46 Riconciliata
 
-### 3.1 Cataloghi Backend Terminale e Sandbox (H10, H11)
-I 7 backend di esecuzione supportati dal motore:
-1. **Local (Host):** Esecuzione diretta con isolamento d'ambiente via subprocess e contenimento directory.
-2. **Docker:** Esecuzione confinata in container containerizzati, mount workspace controllato.
-3. **Singularity:** Esecuzione per carichi HPC/scientifici (attiva quando la CLI `singularity` è rilevata nel sistema).
-4. **Modal:** Esecuzione serverless sandbox via Modal SDK; protetta da spend gate `HOMUN_MODAL_ALLOW_LIVE`.
-5. **Daytona:** Ambiente di sviluppo cloud effimero; protetto da spend gate `HOMUN_DAYTONA_ALLOW_LIVE`.
-6. **Vercel:** REST sandbox runner per deploy rapidi; protetto da spend gate `HOMUN_VERCEL_ALLOW_LIVE`.
-7. **Managed Modal:** HTTP execution bridge con endpoint gestito e isolamento multi-tenant.
+Ogni requisito e sottorequisito della matrice canonica originale (`docs/research/2026-09-23-hermes-parity-matrix.md`) è qui mappato senza alcuna alterazione di ID, perimetro o criteri di accettazione.
 
-### 3.2 Catalogo Canali Gateway di Messaggistica (H33)
-I 20 connettori di messaggistica integrati con adapter HTTP/TCP e gestione errori tipizzata:
-1. **Telegram** (Bot API HTTP)
-2. **Discord** (Webhook & Bot REST API)
-3. **Slack** (Webhook & WebClient API)
-4. **WhatsApp** (Cloud API Graph endpoint)
-5. **ntfy** (HTTP publish-subscribe)
-6. **Matrix** (Client-Server REST sync/send)
-7. **Email** (SMTP con supporto TLS/STARTTLS)
-8. **Signal** (Signal-CLI REST bridge)
-9. **IRC** (Socket TCP diretto con handshaking RFC 2812 e PRIVMSG)
-10. **Feishu / Lark** (OpenAPI message endpoint)
-11. **Mattermost** (Incoming webhook e v4 REST API)
-12. **Google Chat** (Spaces webhook payload)
-13. **DingTalk** (Robot OpenAPI webhook con firma HMAC)
-14. **WeCom / WeChat Work** (Bot webhook e Corp API)
-15. **LINE** (Messaging API push/reply endpoint)
-16. **Microsoft Teams** (Office 365 Connector webhook / adaptive cards)
-17. **Twilio** (Programmable SMS REST API)
-18. **BlueBubbles** (iMessage server REST API)
-19. **Weixin / WeChat Open** (Official account template/customer service message)
-20. **QQBot** (Tencent Open API robot message)
-*Canali sperimentali aggiuntivi censiti:* SimpleX e Photon.
-
-### 3.3 Catalogo Computer Use e Sistemi Operativi (H16)
-- **macOS:** Bridge nativo `osascript` (AppleScript/JXA), cattura schermo tramite `screencapture`, enumerazione elementi UI con Accessibility APIs (`System Events`). Verifica preliminare tramite probe permessi TCC (Accessibility & Screen Recording).
-- **Linux:** Automazione server grafico X11 basata su `xdotool` e `wmctrl`.
-- **Windows:** Stub onesto (`ready=false`, `reason="win32_uiautomation_not_configured"`) che rifiuta esplicitamente le chiamate evitando fallimenti silenziosi.
+### Classificazione nei 4 Stati Operativi:
+1. **Completato con prove adeguate (23):** Requisito implementato, raggiungibile, coperto da test automatizzati che ne verificano esecuzione, persistenza, autorizzazioni ed errori.
+2. **Implementato ma ancora da verificare (0):** Tutti i moduli implementati sono stati analizzati con test mirati.
+3. **Incompleto (19):** Implementazione reale di un sottoinsieme (`partial`) con limiti locali aperti documentati.
+4. **Prova esterna bloccata (4):** Logica core e guardie di onestà implementate e testate con mock/stub; test live bloccato da credenziali, spend gate o permessi di sistema.
 
 ---
 
-## 4. Gap Analizzati e Modifiche di Riconciliazione Effettuate
+### Tabella Analitica Requisiti Canonici H01–H46
 
-Nella sessione di completamento e riconciliazione (commit `ab441a75`), sono state individuate e corrette 4 discrepanze architetturali che impedivano al client applicativo di raggiungere la piena parità dal bordo HTTP:
-
-1. **Esposizione delle Capabilities nella Route HTTP FastAPI (`RunRequest` e `RunView`):**
-   - *File:* `engine/src/homun/routes/agent_runs.py`
-   - *Problema:* I campi booleani `memory`, `skills`, `delegation`, `clarify`, `goals`, `cron`, `session_management`, `gateway`, `code_execution`, `plugins`, `moa` e l'ID `terminal_wait_id` erano gestiti dal dominio Python ma venivano filtrati e scartati dallo schema Pydantic di FastAPI.
-   - *Soluzione:* I campi sono stati aggiunti a `RunRequest` (con default opzionali) e a `RunView`.
-2. **Configurazione del Plugin Engine a Livello Applicativo:**
-   - *File:* `engine/src/homun/application/agent_runs.py`
-   - *Soluzione:* Aggiunta la gestione di `body.get('plugins')` all'atto della proposta di run, abilitando il tool manifest `extensible-plugins-v1`.
-3. **Risoluzione Circolare dell'Import `ToolEntry`:**
-   - *File:* `engine/src/homun/application/agent_tool_contracts.py`
-   - *Problema:* `goal_contracts.py`, `cron_contracts.py`, `gateway_contracts.py` e `session_contracts.py` importavano `ToolEntry` da `homun.application.agent_tool_contracts`, provocando un `ImportError` al primo caricamento dinamico dei tool.
-   - *Soluzione:* È stato aggiunto il re-export esplicito di `ToolEntry` da `homun.tools.registry`.
-4. **Allineamento Client TypeScript e Contratto OpenAPI:**
-   - *File:* `apps/web/src/lib/engine-agent-run-client.ts`, `contracts/openapi/v1-engine.json`
-   - *Soluzione:* Aggiunti `terminal_wait_id` e `plugins` all'interfaccia `AgentRun` e al serializer `prepareAgentRun`. Schema OpenAPI rigenerato e sincronizzato.
+| ID | Ambito | Capacità Canonica | Stato | Implementazione Raggiungibile | Test Effettivo nel Repository | Evidenze Operative e Limiti Aperti |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **H01** | Core engine | Persistent model/tool/result loop, ordered concurrent results, callbacks, streaming, budgets and usage | **Incompleto** | `engine/src/homun/application/agent_run_execution.py`, `engine/src/homun/application/agent_runs.py`, `engine/src/homun/models/native_agent.py` | `engine/tests/test_agent_runs.py`, `engine/tests/test_agent_runs_api.py`, `engine/tests/test_budgets.py` | **Evidenze:** Loop a più turni persistito su SQLite, conservazione messaggi ordinati, accounting token/costi.<br>**Limiti:** Interruzione dinamica dello streaming mid-stream e downgrade automatico token ancora aperti. |
+| **H02** | Core engine | Steer, redirect, soft/hard interrupt, cancellation propagation and human/system stop attribution | **Incompleto** | `engine/src/homun/application/agent_controls.py`, `engine/src/homun/application/agent_control.py` | `engine/tests/test_agent_controls.py`, `engine/tests/test_agent_runs_api.py` | **Evidenze:** Controlli di pausa, ripresa, annullamento, steer e redirect durevoli su SQLite, blocco transizioni non valide.<br>**Limiti:** Cancellazione fisica I/O a livello processo/socket OS in-flight non certificata. |
+| **H03** | Core engine | Detached context-aware side questions | **Incompleto** | `engine/src/homun/application/agent_side_questions.py`, `engine/src/homun/routes/agent_runs.py` | `engine/tests/test_prompt_and_side_questions.py`, `engine/tests/test_h03_h04_product_wiring.py` | **Evidenze:** Route `/side-question` operativa, risposta su snapshot cronologia senza turni sintetici o mutazione dei messaggi del run principale.<br>**Limiti:** Integrazione componente chat UX ancora aperta. |
+| **H04** | Core engine | Prompt/personality assembly, workspace and nested instructions, context references | **Incompleto** | `engine/src/homun/application/agent_prompt_assembler.py`, `engine/src/homun/application/agent_prompt_roots.py`, `engine/src/homun/models/native_prompt.py` | `engine/tests/test_prompt_and_side_questions.py`, `engine/tests/test_h03_h04_product_wiring.py` | **Evidenze:** Confinamento directory sotto `agent-workspaces/{id}`, ordine precedenza istruzioni (`AGENTS.override.md` > `AGENTS.md` > `CLAUDE.md` > `.cursorrules`), risoluzione `@file`, `@folder`, `@diff`, `@git`, `@url` con SSRF protection.<br>**Limiti:** Discesa automatica in sotto-directory annidate arbitrarie ancora aperta. |
+| **H05** | Core engine | Context budgets, metadata/pins, caching, manual/automatic compression and micro-compaction | **Incompleto** | `engine/src/homun/models/native_context.py`, `engine/src/homun/models/context_plan.py` | `engine/tests/test_agent_context.py`, `engine/tests/test_context_plan.py` | **Evidenze:** Checkpoint automatici di compressione al raggiungimento del budget token con preservazione fatti e coppie tool, validato con Ollama.<br>**Limiti:** Micro-compattazione fine-grained turno per turno, flush preventivo della memoria e semantica prompt caching aperti. |
+| **H06** | Core engine | Retries, refresh/fallback, empty/repetitive/truncated responses, overflow and liveness recovery | **Incompleto** | `engine/src/homun/models/native_recovery.py`, `engine/src/homun/models/native_overflow.py`, `engine/src/homun/models/native_liveness.py`, `engine/src/homun/models/native_continuation.py`, `engine/src/homun/models/native_repetition.py` | `engine/tests/test_agent_recovery.py`, `engine/tests/test_agent_overflow.py`, `engine/tests/test_agent_liveness.py`, `engine/tests/test_agent_continuation.py`, `engine/tests/test_agent_repetition.py` | **Evidenze:** Gestione errori sanitizzati, estrazione consumi pre-validazione, 3 retry con backoff, recupero liveness trailing-intent, continuazione visibile restart-safe, guardia ripetizioni.<br>**Limiti:** Fallback automatico a provider secondario su 429 nel run e rotazione credenziali in-flight aperti. |
+| **H07** | Core engine | Tool registry/toolsets, per-surface availability, schemas/coercion, lazy discovery, spill/truncation | **Incompleto** | `engine/src/homun/application/agent_tool_registry.py`, `engine/src/homun/application/agent_tool_bridge.py`, `engine/src/homun/application/agent_result_storage.py`, `engine/src/homun/application/tool_search_ranking.py` | `engine/tests/test_tool_registry.py`, `engine/tests/test_tool_search_ranking.py`, `engine/tests/test_agent_tool_bridge.py`, `engine/tests/test_agent_result_storage.py` | **Evidenze:** Manifest strumenti fissato, ricerca con ranking, bridge MCP differito, archiviazione risultati voluminosi su SQLite con paginazione e recupero senza perdita stato d'errore.<br>**Limiti:** Configurazione dinamica dei toolset per superficie/canale aperta. |
+| **H08** | Core engine | Human clarification, multi-select/batched questions, partial timeout and delivery outcome | **Completato con prove adeguate** | `engine/src/homun/application/clarify_manager.py`, `engine/src/homun/application/clarify_contracts.py` | `engine/tests/test_clarify_tools.py` | **Evidenze:** Tool `clarify`, single-select con opzione raccomandata, multi-select con parsing strutturato, batch fino a 5 domande con ID stabili, conservazione risposte parziali a timeout, segnalazione errori recapito. |
+| **H09** | Core engine | Foreground/background shell, PTY input, ownership, process polling/log/wait/kill/write and notifications | **Incompleto** | `engine/src/homun/execution/docker_jobs.py`, `engine/src/homun/application/agent_terminal.py`, `engine/src/homun/application/terminal_deadline.py` | `engine/tests/test_terminal_background.py`, `engine/tests/test_pty_queries.py`, `engine/tests/test_terminal_deadline.py`, `engine/tests/test_agent_terminal.py` | **Evidenze:** Sessioni Docker e locali in foreground/background con polling stato, lettura log, stop, pipe stdin, risposte query PTY, watchdog scadenze attivo.<br>**Limiti:** Emulazione schermo intero ANSI e timer autonomo a container spento con Homun non attivo aperti. |
+| **H10** | Optional backend | Local, Docker, SSH, Modal/managed Modal, Singularity, Daytona and Vercel terminal environments | **Prova esterna bloccata** | `engine/src/homun/execution/local_jobs.py`, `engine/src/homun/execution/docker_jobs.py`, `engine/src/homun/execution/ssh_jobs.py`, `engine/src/homun/execution/singularity_jobs.py`, `engine/src/homun/execution/modal_jobs.py`, `engine/src/homun/execution/daytona_jobs.py`, `engine/src/homun/execution/vercel_jobs.py`, `engine/src/homun/execution/managed_modal_jobs.py` | `engine/tests/test_local_jobs.py`, `engine/tests/test_docker_jobs.py`, `engine/tests/test_ssh_jobs.py`, `engine/tests/test_singularity_jobs.py`, `engine/tests/test_modal_jobs.py`, `engine/tests/test_daytona_jobs.py`, `engine/tests/test_vercel_jobs.py`, `engine/tests/test_managed_modal.py`, `engine/tests/test_h10_cloud_backends.py` | **Evidenze:** Local, Docker, SSH pienamente funzionanti; Singularity attivo se CLI presente; Modal, Daytona, Vercel e Managed Modal integrati con guardie di onestà.<br>**Blocco esterno:** Esecuzione live cloud subordinata ad account terzi e spend gate (`HOMUN_MODAL_ALLOW_LIVE`, `HOMUN_DAYTONA_ALLOW_LIVE`, `HOMUN_VERCEL_ALLOW_LIVE`). |
+| **H11** | Core engine | Paged file reading, search, guarded replacement, fuzzy patch, document extraction, syntax/LSP diagnostics | **Incompleto** | `engine/src/homun/application/workspace_file_edits.py`, `engine/src/homun/application/workspace_file_reads.py` | `engine/tests/test_workspace_edits.py`, `engine/tests/test_workspace_files.py` | **Evidenze:** Paginazione cartelle, lettura per righe, ricerca confinata, sostituzione protetta, patch unificate, estrazione testo PDF/DOCX.<br>**Limiti:** Language Server Protocol (LSP) diagnostica real-time, patch V4A e parser xlsx/pptx aperti. |
+| **H12** | Core engine | Checkpoints, selective rollback, working diffs and worktrees | **Incompleto** | `engine/src/homun/execution/checkpoint_manager.py`, `engine/src/homun/application/workspace_checkpoints.py` | `engine/tests/test_checkpoints_and_worktrees.py`, `engine/tests/test_h12_product_wiring.py` | **Evidenze:** Snapshot git shadow automatico prima di scritture approvate (`snapshot_before_write` in `workspace_file_edits.py:264`), rollback selettivo per file, worktree git per sotto-agenti.<br>**Limiti:** Interfaccia operatore per la revisione interattiva dei working diff aperta. |
+| **H13** | Core engine | Python/RPC code execution and programmatic tool composition | **Completato con prove adeguate** | `engine/src/homun/application/code_execution.py` | `engine/tests/test_code_execution.py` | **Evidenze:** Tool `execute_code`, processo interprete isolato, socket locale autenticato (UDS/loopback TCP), allowlist strumenti, tetto chiamate, troncamento output 40%/60%, gestione errori e cleanup. |
+| **H14** | Core plus providers | Web search/extraction, cache, rescue, truncation and X search | **Incompleto** | `engine/src/homun/application/web_pages.py` | `engine/tests/test_web_pages.py` | **Evidenze:** Estrazione pagine pubbliche con rifiuto IP privati (SSRF), cache memoria TTL, scraping DuckDuckGo HTML, convalida credenziali Brave/Tavily, query X search.<br>**Limiti:** Ulteriori provider web (Exa, Firecrawl, SearXNG) e verifiche live su API commerciali aperti. |
+| **H15** | Core plus providers | Browser navigation, ref snapshots, forms/keys, scrolling, console/images/vision, CDP/dialogs/frames/profiles and recording | **Incompleto** | `engine/src/homun/application/owned_browser.py` | `engine/tests/test_owned_browser.py` | **Evidenze:** Chrome headless isolato via CDP con profilo privato, navigazione pagine pubbliche, dismiss dialoghi, interazione controlli/iframe tramite snapshot ref, screenshot PNG.<br>**Limiti:** Accettazione finestre native, console live, visione browser e sincronizzazione profilo utente aperti. |
+| **H16** | Optional surface | Native computer control and desktop-aware terminal/window/preview/project/layout tools | **Prova esterna bloccata** | `engine/src/homun/application/computer_use_macos_bridge.py`, `engine/src/homun/application/computer_use_linux_bridge.py`, `engine/src/homun/application/computer_use_windows_bridge.py`, `engine/src/homun/application/desktop_ui_manager.py` | `engine/tests/test_h16_macos_bridge.py`, `engine/tests/test_h16_desktop.py`, `engine/tests/test_h16_linux_bridge.py`, `engine/tests/test_h16_windows_bridge.py` | **Evidenze:** Bridge macOS (osascript/screencapture/AX) con probe permessi TCC; bridge Linux (xdotool/wmctrl); rifiuto onesto Windows (`ready=false`).<br>**Blocco esterno:** Esecuzione live macOS bloccata da concessione manuale permessi TCC Accessibilità e Registrazione Schermo. |
+| **H17** | Core engine | Curated persistent MEMORY/USER, bounded edits/deduplication, approvals, session search, learning and background review | **Completato con prove adeguate** | `engine/src/homun/application/memory_manager.py`, `engine/src/homun/application/memory_contracts.py` | `engine/tests/test_memory_tools.py`, `engine/tests/test_memory_f35a.py` | **Evidenze:** `memory_recall`, `memory_remember`, `session_search` con persistenza SQLite, deduplicazione, limiti di capacità e filtri temporali. |
+| **H18** | Optional backend | External memory and replaceable context engine | **Incompleto** | `engine/src/homun/application/mem0_local_stack.py`, `engine/src/homun/models/context_plan.py` | `engine/tests/test_mem0_local_stack.py`, `engine/tests/test_context_plan.py` | **Evidenze:** DualWriteMemoryPort su SQLite con supporto opzionale Mem0 vector embeddings, pianificazione contesto sostituibile.<br>**Limiti:** Provider esterni vector store (Byterover, Honcho, Supermemory) aperti. |
+| **H19** | Core engine | Skill metadata/full-resource disclosure, precedence, trust/quarantine, platform activation and setup | **Completato con prove adeguate** | `engine/src/homun/application/skill_manager.py`, `engine/src/homun/application/skill_contracts.py` | `engine/tests/test_skill_tools.py`, `engine/tests/test_mcp_skills.py` | **Evidenze:** `skill_search`, `skill_view`, quarantena rigorosa delle skill non approvate, precedenza istruzioni di workspace. |
+| **H20** | Core plus catalogs | Skill CRUD, learning, bundles, hub install/update/sync, provenance/usage and curator rollback/archive | **Incompleto** | `engine/src/homun/application/skill_manager.py` | `engine/tests/test_skill_tools.py` | **Evidenze:** Creazione skill, patch revisioni, approvazione/rifiuto/archiviazione, proposta agentica `skill_propose` in quarantena.<br>**Limiti:** Sincronizzazione con hub remoto e archiviazione bundle multi-skill aperti. |
+| **H21** | Core engine | Async/parallel delegation, isolated contexts, project instructions, tool limits, budgets, images and output schemas | **Completato con prove adeguate** | `engine/src/homun/application/delegation_manager.py`, `engine/src/homun/application/delegation_contracts.py` | `engine/tests/test_delegation_tools.py` | **Evidenze:** Tool `delegate_task`, sotto-agenti isolati con budget e tetti turni dedicati, validazione JSON Schema dell'output con riparazione code fence e conservazione lavoro grezzo. |
+| **H22** | Core engine | Durable completion admission/delivery, restart recovery and child process ownership | **Completato con prove adeguate** | `engine/src/homun/application/delegation_manager.py` | `engine/tests/test_delegation_tools.py` | **Evidenze:** Tracciamento sotto-agenti in background con stato `_delegations` salvato nel record del run e conservato a riavvio, `delegation_poll` e `delegation_cancel`. |
+| **H23** | Optional orchestration | Durable multi-profile Kanban boards, dependencies, claims/heartbeats, reviews, lanes, attachments and PR contracts | **Completato con prove adeguate** | `engine/src/homun/application/kanban_store.py`, `engine/src/homun/application/kanban_workflow.py`, `engine/src/homun/routes/kanban.py` | `engine/tests/test_h23_kanban.py` | **Evidenze:** KanbanBoard, KanbanCard, PRContract con SQLite WAL, isolamento profili, dipendenze DAG, lease worker, auto-recovery worker crashati, sblocco automatico dependants, flussi di revisione e contratti gating PR. |
+| **H24** | Optional orchestration | Mixture of agents, advisor cadence/privacy and acting aggregator | **Completato con prove adeguate** | `engine/src/homun/application/moa_loop.py`, `engine/src/homun/application/moa_alternation.py` | `engine/tests/test_moa.py` | **Evidenze:** MoACoordinator (`mixture-of-agents-v1`), modelli di riferimento consultivi senza schemi tool, aggregatore attivo che esegue i tool e sintetizza, cadenze fanout, filtri privacy (`none`/`display`/`full`), accounting aggregato. |
+| **H25** | Core automation | Persistent goals, judging/continuation, pause/wait/resume and budgets | **Completato con prove adeguate** | `engine/src/homun/application/goal_manager.py`, `engine/src/homun/application/goal_contracts.py` | `engine/tests/test_goals_and_contracts.py` | **Evidenze:** Tool `goal_set`, `goal_status`, `goal_complete`, `goal_cancel`, `goal_wait` su SQLite GoalStore, barriere d'attesa temporali/PID, tetto turni, zero creazione implicita schede Kanban. |
+| **H26** | Core automation | Durable same-session idle heartbeats, user priority, coalescing, routing and quiet delivery | **Incompleto** | `engine/src/homun/application/heartbeat_manager.py`, `engine/src/homun/application/automation_store.py`, `engine/src/homun/application/agent_run_execution.py` | `engine/tests/test_heartbeat_manager.py`, `engine/tests/test_automation_dispatch.py` | **Evidenze:** HeartbeatManager su SQLite AutomationStore, coalescenza tick saltati, priorità messaggi utente, iniezione in `agent_run` al claim.<br>**Limiti:** Demone autonomo di risveglio in background ad attesa inattiva aperto. |
+| **H27** | Core automation | Proactive loops, fixed/self-paced cadence, count/condition stops and goal precedence | **Completato con prove adeguate** | `engine/src/homun/application/loop_manager.py`, `engine/src/homun/application/automation_store.py`, `engine/src/homun/application/agent_run_execution.py` | `engine/tests/test_loop_manager.py`, `engine/tests/test_automation_dispatch.py` | **Evidenze:** LoopManager su SQLite AutomationStore, backoff su digest ripetuti, stop su condizioni (`--until`) e conteggio (`--times`), precedenza goal, e `complete_tick` eseguito al termine del run (`agent_run_execution.py:319`). |
+| **H28** | Core automation | Durable one-shot/recurring/event scheduling, CRUD, skills/cwd, pins, scripts and chained context | **Completato con prove adeguate** | `engine/src/homun/application/cron_manager.py`, `engine/src/homun/application/cron_contracts.py`, `engine/src/homun/application/cron_store.py` | `engine/tests/test_cron_jobs_and_scheduler.py`, `engine/tests/test_cron_dispatcher_and_chronos.py` | **Evidenze:** Tool `cronjob_manage`, parsing cron 5 campi / intervalli / ISO, trigger eventi, context chaining (`context_from`), SQLite CronStore, `/v1/cron/due`, `/v1/cron/fire-due`. |
+| **H29** | Core plus provider | Scheduler ownership/preflight, missed fires, quota/retries, histories/incidents, durable delivery and Chronos | **Incompleto** | `engine/src/homun/application/cron_manager.py`, `engine/src/homun/application/chronos_provider.py` | `engine/tests/test_cron_dispatcher_and_chronos.py` | **Evidenze:** Tracciamento incidenti cron, quota hold con pausa e ripresa, gestione missed fire, coda consegne esterne; Chronos restituisce 503 tipizzato se non configurato.<br>**Limiti:** Connessione a cluster Chronos cloud reale aperta. |
+| **H30** | Core engine | Session CRUD/resume/title/pin/archive/export/prune/import, cwd restoration, rewind/fork/lineage and handoff | **Completato con prove adeguate** | `engine/src/homun/application/session_manager.py`, `engine/src/homun/application/session_contracts.py` | `engine/tests/test_sessions_and_storage.py`, `engine/tests/test_session_auth.py` | **Evidenze:** Tool `session_manage`, ciclo di vita CRUD sessioni, ripristino cartella di lavoro a resume, rewind morbido dello storico, fork con genealogia, esportazione con redazione segreti, importazione trascrizioni. |
+| **H31** | Core engine | SQLite/FTS, concurrency, WAL/journaling, integrity/repair, profile isolation and accounting | **Completato con prove adeguate** | `engine/src/homun/application/session_storage.py` | `engine/tests/test_sessions_and_storage.py` | **Evidenze:** SQLite WAL mode, ricerca FTS5 con trigger di sincronizzazione, controlli `PRAGMA integrity_check` con autoriparazione e accounting granulare token/costi. |
+| **H32** | Core channel runtime | Gateway authorization/pairing, user/group/topic identity, queues/leases, streaming/media/restart/rooms | **Completato con prove adeguate** | `engine/src/homun/application/gateway_pairing_manager.py`, `engine/src/homun/application/turn_lease_manager.py`, `engine/src/homun/application/hosted_room_manager.py`, `engine/src/homun/application/gateway_contracts.py` | `engine/tests/test_gateway_and_channels.py` | **Evidenze:** Codici pairing NIST/OWASP a 8 caratteri con TTL 1h, turn leases esclusivi con timeout fail-closed, stanze hosted su SQLite con ruoli e log eventi append-only. |
+| **H33** | Optional integrations | All messaging, event and channel adapters, including collaboration/relay protocols | **Prova esterna bloccata** | `engine/src/homun/application/channel_adapters.py`, `engine/src/homun/application/channel_adapters_catalog.py`, `engine/src/homun/application/channel_adapters_extended.py`, `engine/src/homun/application/channel_adapters_protocols.py` | `engine/tests/test_gateway_and_channels.py`, `engine/tests/test_channel_catalog.py` | **Evidenze:** Tutti i 34 adapter implementati con parsing payload tipizzato, estrazione media, routing thread e rifiuto onesto (`backend_unavailable`) quando i token mancano.<br>**Blocco esterno:** Esecuzione live verso provider di messaggistica esterni vincolata a credenziali reali (Telegram, Discord, Slack, WhatsApp, Signal, LINE, Twilio, ecc.). |
+| **H34** | Optional surfaces | CLI, TUI, desktop, dashboard, bot screen, multi-connection local/SSH/URL/cloud, multi-profile gateways | **Completato con prove adeguate** | `engine/src/homun/application/surface_gateway_manager.py`, `engine/src/homun/routes/surfaces.py` | `engine/tests/test_h34_surfaces.py` | **Evidenze:** Gestione connessioni multi-superficie su trasporti locale/SSH/URL/cloud, isolamento profili, stato SQLite, e coda steering svuotata bidirezionalmente in `run["_steering"]`. |
+| **H35** | Optional protocols | OpenAI-compatible API, durable/idempotent runs, ACP IDE and hosted MCP agent | **Completato con prove adeguate** | `engine/src/homun/routes/openai_api.py`, `engine/src/homun/application/idempotency_store.py`, `engine/src/homun/application/acp_server_adapter.py`, `engine/src/homun/application/hosted_mcp_agent_server.py` | `engine/tests/test_h35_idempotency_store.py`, `engine/tests/test_h35_protocols.py` | **Evidenze:** Server OpenAI compatibile (`/v1/models`, `/v1/chat/completions` SSE streaming e tool calls), idempotenza SQLite su `Idempotency-Key` / body digest, `HostedMcpAgentServer` che stage i run in stato `pending_approval`, adattatore ACP IDE con approvazione modifiche. |
+| **H36** | Core plus servers | MCP stdio/HTTP discovery/filtering, resources/prompts, parallelism, sampling/elicitation, OAuth/mTLS and reconnect | **Completato con prove adeguate** | `engine/src/homun/application/agent_mcp_client.py`, `engine/src/homun/application/mcp_oauth_broker.py`, `engine/src/homun/application/mcp_sampling_provider.py` | `engine/tests/test_mcp_contracts.py`, `engine/tests/test_mcp_sampling.py`, `engine/tests/test_mcp_oauth.py` | **Evidenze:** Chiamate MCP native approvate, consumo ricevute, discovery risorse/prompt, sampling con opt-in (`HOMUN_MCP_SAMPLING=1`), riconnessione discovery, certificati client mTLS, broker OAuth con gestione client credentials e refresh token TTL. |
+| **H37** | Core extensibility | Plugin tools/hooks/providers/platforms/commands/skills/panels/secrets, configuration and lifecycle | **Completato con prove adeguate** | `engine/src/homun/application/plugin_manager.py`, `engine/src/homun/routes/plugins.py` | `engine/tests/test_plugins.py` | **Evidenze:** Manifest v1/v2, isolamento moduli, ledger capacità, hook di policy fail-closed (`pre_tool_call`), ciclo enable/disable pulito senza residui, conservazione dati persistenti in `plugin-data/<name>/`. |
+| **H38** | Core plus providers | Inference registry/catalog/protocols, reasoning/media/schema adaptation, credential pools and auxiliary routing | **Completato con prove adeguate** | `engine/src/homun/application/provider_registry.py`, `engine/src/homun/routes/providers.py` | `engine/tests/test_h38_providers.py` | **Evidenze:** Profili dichiarativi (OpenAI, Anthropic, Gemini, Ollama, DeepSeek, OpenRouter), adattamento sintassi reasoning, adattamento fixture multimediali con fallback per modelli non-vision, pool credenziali thread-safe con round-robin e cooldown su 429, router ausiliario con audit. |
+| **H39** | Optional integrations | Codex app-server/ACP alternate runtimes, subscription proxy, relay, hosted inference/tool gateway | **Incompleto** | `engine/src/homun/application/copilot_acp_client.py`, `engine/src/homun/application/codex_app_server_adapter.py`, `engine/src/homun/application/relay_runtime.py`, `engine/src/homun/application/managed_tool_gateway.py` | `engine/tests/test_h39_acp_stdio.py`, `engine/tests/test_h39_runtimes.py` | **Evidenze:** StdioAcpTransport con sessione reale JSON-RPC 2.0 (`initialize` -> `session/new` -> `session/prompt`) su CLI Copilot; adapter Codex e NeMo Relay aziendale con gestione errori tipizzati.<br>**Limiti:** Copilot live vincolato a binario Copilot autenticato; server Codex e Relay live non collegati. |
+| **H40** | Core safety | Action/write approvals, path/URL/file policies, vault/secrets, redaction and egress | **Completato con prove adeguate** | `engine/src/homun/application/path_security.py`, `engine/src/homun/application/url_safety.py`, `engine/src/homun/application/secret_scope.py`, `engine/src/homun/application/vault_store.py`, `engine/src/homun/application/write_approval_gate.py`, `engine/src/homun/routes/safety.py` | `engine/tests/test_h40_safety.py` | **Evidenze:** Confinamento percorsi e blocco traversal (`check_path_safety`), protezione SSRF su IP privati e metadati cloud, normalizzazione URL, redazione segreti (`redact_secrets`), vault credenziali crittografato Fernet, gate scritture `WriteApprovalGate` su SQLite con esecuzione singola rigorosa. |
+| **H41** | Core plus media providers | Vision/video analysis, image/video generation/edit/extend, STT/TTS streaming, live voice and wake words | **Incompleto** | `engine/src/homun/application/media_backends.py`, `engine/src/homun/application/media_manager.py`, `engine/src/homun/routes/media.py` | `engine/tests/test_media_backends_and_persistence.py`, `engine/tests/test_h41_media.py` | **Evidenze:** Analisi visiva reale tramite Ollama o endpoint vision; sintesi TTS locale reale via macOS `say`; rifiuto onesto (`backend_unavailable`) per backend non configurati.<br>**Limiti:** Fornitori di generazione immagini (FAL/DALL-E), generazione video, trascrizione STT e ascolto wake word aperti. |
+| **H42** | Core artifact behavior | Deliverables, document-style skill output, previews and channel attachments | **Completato con prove adeguate** | `engine/src/homun/application/deliverable_dispatcher.py`, `engine/src/homun/application/deliverable_extractor.py`, `engine/src/homun/application/deliverable_ledger.py`, `engine/src/homun/routes/deliverables.py` | `engine/tests/test_h42_deliverables.py` | **Evidenze:** Classificazione formati deliverable, protezione rigorosa dei blocchi di codice fenced e inline (esclusi dall'estrazione), DeliverableLedger su SQLite con deduplicazione at-most-once, packaging ChannelMedia, endpoint `/v1/deliverables/dispatch`. |
+| **H43** | Optional integrations | Home Assistant, Discord, Feishu docs/drive/comments, Yuanbao, Spotify and meeting tools | **Prova esterna bloccata** | `engine/src/homun/application/integrations_adapters.py`, `engine/src/homun/routes/integrations.py` | `engine/tests/test_h43_integrations.py` | **Evidenze:** Home Assistant shell/SSRF check, Discord message/role actions, Feishu docs/comments parsing, Spotify playback, Google Meet/Teams meeting parsing; risposte tipizzate di indisponibilità.<br>**Blocco esterno:** Esecuzione live subordinata ad account/credenziali attive su Home Assistant, Discord bot, Feishu app, Spotify API, Google Workspace. |
+| **H44** | Optional operations/surfaces | Profiles/distributions, setup/config/model/tools, doctor/update/import, packaging and daemon lifecycle | **Completato con prove adeguate** | `engine/src/homun/application/operations_manager.py`, `engine/src/homun/routes/operations.py` | `engine/tests/test_h44_operations.py` | **Evidenze:** Ciclo di vita profili con isolamento cartelle, pacchetti distribuzione con hash SHA256, migrazioni configurazione con backup automatici e idempotenza v1->v2, diagnostica Doctor (Python, SQLite, strumenti, storage), gestione demone con tracciamento PID e spegnimento SIGTERM pulito. |
+| **H45** | Optional research | Batch processing, evaluations, trajectory capture/export/compression and observability | **Incompleto** | `engine/src/homun/application/research_manager.py`, `engine/src/homun/routes/research.py` | `engine/tests/test_h45_research.py` | **Evidenze:** Esportazione traiettorie ShareGPT con conversione tag `<think>`, compressione traiettorie su budget token proteggendo coppie tool, esecutore concorrente BatchEvalRunner con checkpoint JSONL.<br>**Limiti:** Esecuzione di dataset di benchmark estesi su modelli live aperta. |
+| **H46** | Optional surface/catalog | Skins, pets, achievements, tours/tips, cleanup, security guidance, catalog packs and shipped skills | **Completato con prove adeguate** | `engine/src/homun/application/catalog_manager.py`, `engine/src/homun/routes/catalog.py` | `engine/tests/test_h46_catalog.py` | **Evidenze:** Virtual companion manager con persistenza stato e skin ASCII, achievement tracker con persistenza traguardi, tour e tip manager (`/btw`), motore pulizia disco dry-run, security guidance scanner su pattern shell pericolosi, catalog packs manager con installazione/disinstallazione atomica. |
 
 ---
 
-## 5. Evidenze di Verifica e Risultati dei Test
+## 3. Metriche e Verifiche Automatizzate Reali
 
-Tutte le suite di test locali, di architettura e di integrazione passano senza errori né warning bloccanti:
+Tutti i comandi elencati di seguito sono stati eseguiti localmente sul codice attuale con esito verificabile:
 
-| Suite / Comando | Risultato | Dettaglio |
-| :--- | :--- | :--- |
-| `pytest engine/tests -q` | **1316 passed, 1 skipped** | Nessuna regressione sull'intero motore Homun Python. |
-| `engine/tests/test_agent_runs_api.py` | **10 passed** | Suite completa TestClient: registrazione capabilities, popolamento manifest tool (`goal_set`, `cron_add`, `plugins`), riavvio su SQLite file reale, idempotenza e validazione errori 422. |
-| `node --test tests/engine-agent-run-client.test.ts` | **9 passed, 0 failed** | Serializzazione client web TS, parsing capabilities, injection token e terminal ID. |
-| `npm test` | **227 passed, 0 failed** | Test unitari frontend e client API. |
-| `npm run typecheck` | **0 errors** | Validazione TypeScript su tutto il repository (`apps/web`, contratti, test). |
-| `python tools/check_architecture.py` | **0 violations** | Conformità rigorosa ad `AGENTS.md` (nessun accoppiamento improprio o file monolitico). |
-| `python tools/export_openapi.py --check` | **Up to date** | Lo snapshot `contracts/openapi/v1-engine.json` riflette al 100% le rotte FastAPI. |
+- **Suite Motore Pytest:** `engine/.venv/bin/pytest engine/tests/ -q`  
+  **Esito:** `1318 passed, 1 skipped in 162.11s` (0 fallimenti).
+- **Test Integrazione Route API (`test_agent_runs_api.py`):** `engine/.venv/bin/pytest engine/tests/test_agent_runs_api.py -v`  
+  **Esito:** `5 passed in 2.11s`:
+  1. `test_agent_runs_route_preserves_all_capability_flags` (serializzazione parametri e tool manifest)
+  2. `test_agent_runs_negative_and_validation` (rifiuto digest errati e azioni non ammesse)
+  3. `test_agent_runs_restart_survival` (persistenza configurazioni e riavvio da file SQLite reale)
+  4. `test_agent_runs_control_lifecycle_and_steering` (transizioni `pause` -> `steer` -> `resume` -> `cancel`)
+  5. `test_agent_runs_terminal_wait_id_view` (esposizione del campo `terminal_wait_id` in `RunView` per run in attesa terminale)
+- **Test Client TypeScript:** `node --test tests/engine-agent-run-client.test.ts`  
+  **Esito:** `9 passed, 0 failed` (serializzazione client web TS, capability flags, token e terminal ID).
+- **Test Web Workspace:** `npm test`  
+  **Esito:** `227 passed, 0 failed` (18 suite).
+- **Controllo Regole Architetturali:** `python tools/check_architecture.py`  
+  **Esito:** `0 error(s), 43 size review notice(s)` (nessun accoppiamento o violazione di modularità).
+- **Verifica Sincronizzazione OpenAPI:** `python tools/export_openapi.py --check`  
+  **Esito:** `contracts/openapi/v1-engine.json is up to date`.
 
 ---
 
-## 6. Catalogo Prove Bloccate da Dipendenze Esterne
+## 4. Prove Esterne Bloccate: Prerequisiti e Procedure Esatte
 
-Per le verifiche che richiedono servizi terzi, il motore possiede mock completi e test di conformità del protocollo. Qualora si desideri eseguire un test *live*, di seguito sono indicati i requisiti e i comandi necessari:
+I test sui servizi esterni sono stati verificati a livello di protocollo e gestione errori mediante mock/stub; l'esecuzione live è bloccata esclusivamente da prerequisiti ambientali o autorizzativi. Di seguito sono riportati i file esistenti e i comandi per eseguirli:
 
-### 6.1 Computer Use macOS (H16)
-- **Requisiti:** Sistema operativo macOS; concessione permessi in *Impostazioni di Sistema -> Privacy e Sicurezza -> Accessibilità* e *Registrazione Schermo* per il terminale/IDE in uso.
-- **Variabili d'ambiente:** Nessuna richiesta aggiuntiva.
-- **Comando di verifica:**
+### 4.1 Computer Use macOS (H16)
+- **File di test esistente:** `engine/tests/test_h16_macos_bridge.py`
+- **Stato attuale:** Il test automatico verifica la logica del bridge, la costruzione dei comandi osascript e il probe TCC.
+- **Procedura live (da eseguire solo con permessi di sistema concessi):**
+  1. Concedere i permessi all'applicazione terminale in *Impostazioni di Sistema -> Privacy e Sicurezza -> Accessibilità* e *Registrazione Schermo*.
+  2. Eseguire:
+     ```bash
+     engine/.venv/bin/pytest engine/tests/test_h16_macos_bridge.py -v
+     ```
+
+### 4.2 Backend Terminali Cloud (H10)
+- **File di test esistenti:** `engine/tests/test_modal_jobs.py`, `engine/tests/test_daytona_jobs.py`, `engine/tests/test_vercel_jobs.py`, `engine/tests/test_managed_modal.py`, `engine/tests/test_h10_cloud_backends.py`
+- **Stato attuale:** Verificano la presenza dello spend gate (`HOMUN_*_ALLOW_LIVE`) e il comportamento sicuro (nessuna creazione accidentale di risorse a pagamento).
+- **Procedure live (da implementare/eseguire quando gli account cloud saranno configurati):**
+  - **Modal:** Richiede `modal token new` e `HOMUN_MODAL_ALLOW_LIVE=1`.
+  - **Daytona:** Richiede `DAYTONA_API_KEY`, `DAYTONA_SERVER_URL` e `HOMUN_DAYTONA_ALLOW_LIVE=1`.
+  - **Vercel Sandbox:** Richiede `VERCEL_TOKEN`, project id e `HOMUN_VERCEL_ALLOW_LIVE=1`.
+  - **Managed Modal:** Richiede endpoint `HOMUN_MANAGED_MODAL_URL` e `HOMUN_MANAGED_MODAL_ALLOW_LIVE=1`.
+  - Comando di verifica:
+    ```bash
+    engine/.venv/bin/pytest engine/tests/test_h10_cloud_backends.py -v
+    ```
+
+### 4.3 Canali Gateway di Messaggistica (H33)
+- **File di test esistenti:** `engine/tests/test_gateway_and_channels.py`, `engine/tests/test_channel_catalog.py`
+- **Stato attuale:** Verificano l'integrità del catalogo di 34 connettori, la normalizzazione dei messaggi e il rifiuto onesto `backend_unavailable`.
+- **Procedura live (da implementare/eseguire quando i token dei bot saranno configurati):**
+  - Configurare le variabili d'ambiente per il canale specifico (es. `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, `SLACK_BOT_TOKEN`, ecc.).
+  - Eseguire:
+    ```bash
+    engine/.venv/bin/pytest engine/tests/test_gateway_and_channels.py -v
+    ```
+
+### 4.4 Copilot ACP Transport (H39)
+- **File di test esistente:** `engine/tests/test_h39_acp_stdio.py`
+- **Stato attuale:** Verifica il protocollo JSON-RPC 2.0 e il fallback sicuro se il binario non è presente.
+- **Procedura live:** Richiede la CLI GitHub Copilot installata e autenticata sul sistema (`copilot`).
   ```bash
-  HOMUN_LIVE_DESKTOP=1 pytest engine/tests/test_computer_use_macos.py -k "test_live_screencapture"
+  engine/.venv/bin/pytest engine/tests/test_h39_acp_stdio.py -v
   ```
 
-### 6.2 Provider Sandbox Cloud (H10)
-- **Modal:**
-  - Prerequisiti: Account Modal e token CLI configurato (`modal token new`).
-  - Variabili: `HOMUN_MODAL_ALLOW_LIVE=1`
-  - Comando: `pytest engine/tests/test_terminal_modal.py -k "test_modal_live_sandbox"`
-- **Daytona:**
-  - Prerequisiti: API Key Daytona e server raggiungibile.
-  - Variabili: `DAYTONA_API_KEY=<key>`, `DAYTONA_SERVER_URL=<url>`, `HOMUN_DAYTONA_ALLOW_LIVE=1`
-  - Comando: `pytest engine/tests/test_terminal_daytona.py -k "test_daytona_live_exec"`
-- **Vercel Sandbox:**
-  - Prerequisiti: Vercel Token e Project ID.
-  - Variabili: `VERCEL_TOKEN=<token>`, `HOMUN_VERCEL_ALLOW_LIVE=1`
-  - Comando: `pytest engine/tests/test_terminal_vercel.py -k "test_vercel_live"`
-
-### 6.3 Canali Gateway di Messaggistica (H33)
-- **Telegram:** `TELEGRAM_BOT_TOKEN=<token>`, `TELEGRAM_CHAT_ID=<chat_id>`
-- **Discord:** `DISCORD_WEBHOOK_URL=<url>` o `DISCORD_BOT_TOKEN=<token>`
-- **Slack:** `SLACK_WEBHOOK_URL=<url>` o `SLACK_BOT_TOKEN=<token>`
-- **Comando di verifica:**
-  ```bash
-  HOMUN_LIVE_GATEWAY=1 pytest engine/tests/test_gateway_channels.py -k "test_live_telegram_send"
-  ```
-
-### 6.4 Copilot ACP Transport (H39)
-- **Requisiti:** Presenza del binario `copilot` autenticato nel `PATH`.
-- **Comando di verifica:**
-  ```bash
-  HOMUN_LIVE_ACP=1 pytest engine/tests/test_acp_transport.py -k "test_live_copilot_handshake"
-  ```
-
-### 6.5 OAuth Lifecycle (H44)
-- **Requisiti:** `OAUTH_CLIENT_ID` e `OAUTH_CLIENT_SECRET` registrati sul provider esterno (es. Google/GitHub).
-- **Comando di verifica:**
-  ```bash
-  HOMUN_LIVE_OAUTH=1 pytest engine/tests/test_oauth_lifecycle.py -k "test_live_exchange_token"
-  ```
+### 4.5 MCP OAuth Broker (H36)
+- **File di test esistente:** `engine/tests/test_mcp_oauth.py`
+- **Stato attuale:** 5 test passati che verificano flussi client_credentials, refresh token con TTL, conservazione cache in memoria e rifiuto tipizzato se non configurato.
+- **Procedura live:** Richiede server MCP esterno con endpoint di autorizzazione OAuth attivo.
 
 ---
 
-## 7. Valutazione di Prontezza per l'Interfaccia Utente
+## 5. Elenco Puntuale di Ciò che Rimane Aperto
 
-Il motore Homun si trova in uno stato di **completa maturità e stabilità contrattuale** per supportare l'interfaccia utente (Lovable / Web UI):
-1. **Contratti esposti stabili:** Il client TypeScript (`engine-agent-run-client.ts`) supporta nativamente l'attivazione selettiva delle capabilities (`goals`, `cron`, `skills`, `terminal`, `delegation`, `plugins`, `moa`).
-2. **Isolamento dell'esperienza utente:** I controlli di approvazione (`pending_approval`), le richieste di chiarimento (`clarify`) e le side-question (`side-question`) possiedono endpoint dedicati e risposte strutturate con JSON schema.
-3. **Nessun rischio di "falsa simulazione":** La UI può distinguere in modo deterministico e trasparente se un'operazione è gestita dal motore o se richiede autorizzazioni/token, valorizzando l'indicatore `Fonte: simulazione | motore` nel rispetto di `AGENTS.md`.
+Per evitare ambiguità, di seguito è riportata la distinzione tra gap locali (risolvibili all'interno della codebase) e blocchi esterni (dipendenti da terze parti):
+
+### 5.1 Gap e Difetti Locali nel Motore (Priorità prima dell'integrazione UI)
+1. **H01 (Streaming Interruption):** Implementare il meccanismo per interrompere immediatamente il ciclo di generazione token in corso quando l'utente o il sistema invia uno stop.
+2. **H02 (Physical I/O Kill):** Aggiungere la terminazione forzata a livello di sistema operativo per processi figli o socket HTTP bloccati in-flight durante un hard interrupt.
+3. **H03 (Chat UX Side Questions):** Esporre la visualizzazione e l'interazione per le side-question (`/btw`) nei componenti della chat.
+4. **H04 (Nested Subdirectory Hints):** Implementare la ricerca ricorsiva dei file di istruzioni per cartelle annidate arbitrarie oltre il workspace root.
+5. **H05 (Micro-compaction & Flush):** Aggiungere la compattazione fine-grained turno per turno e il flush preventivo della memoria prima della saturazione del contesto.
+6. **H06 (Secondary Provider Failover):** Aggiungere al loop principale dell'agente il passaggio automatico a un provider LLM secondario configurato in caso di rate-limiting (`429`) persistente.
+7. **H07 (Dynamic Toolsets per Surface):** Abilitare la riconfigurazione dinamica del toolset visibile in base al tipo di client o canale collegato.
+8. **H09 (ANSI Terminal Emulation):** Migliorare l'emulatore PTY per supportare l'emulazione schermo intero (raw ANSI matrix).
+9. **H11 (LSP Diagnostics & Multi-file Patches):** Integrare server LSP locali per estrarre diagnostiche di sintassi post-modifica e parser xlsx/pptx.
+10. **H12 (Operator Working Diff UI):** Implementare la revisione interattiva delle diff prima di rendere definitive le modifiche dei checkpoint.
+11. **H14 (Additional Web Providers):** Integrare supporto per provider di ricerca web aggiuntivi (Exa, Firecrawl, SearXNG).
+12. **H15 (Browser Native Dialogs & Vision):** Gestire l'accettazione esplicita dei dialoghi nativi e l'ispezione della console browser.
+13. **H26 (Background Idle-Run Wake Daemon):** Implementare un timer autonomo di risveglio per heartbeat su sessioni inattive mentre il motore è in background.
+14. **H41 (Local Media Providers):** Integrare backend per trascrizione STT e rilevamento wake-word.
+
+### 5.2 Blocchi da Dipendenze Esterne
+1. **H10 (Cloud Terminal Backends):** Account e credenziali per Modal, Daytona, Vercel e Managed Modal.
+2. **H16 (Computer Use Live):** Permessi macOS TCC (Accessibilità e Registrazione Schermo) da accordare nel sistema operativo ospitante.
+3. **H33 (Messaging Network Live):** Bot token e chiavi API per i 34 canali di messaggistica.
+4. **H43 (Third-party Integrations Live):** Credenziali per Home Assistant, Discord, Feishu, Spotify, Google Meet.
 
 ---
 
-## 8. Prompt Pronto all'Uso per la Sessione Successiva (Integrazione UI)
+## 6. Conclusione
 
-Copiare e incollare il seguente testo per avviare i lavori di integrazione interfaccia:
-
-```markdown
-Iniziamo l'integrazione e il consolidamento dell'interfaccia utente di Homun 2, collegandola al motore verificato.
-
-Repository: /Users/fabio/Projects/Homun/homun2
-Contratto Engine OpenAPI: contracts/openapi/v1-engine.json
-Client TypeScript: apps/web/src/lib/engine-agent-run-client.ts
-Rapporto Parità Funzionale: docs/handoff/2026-09-25-parita-motore-completata-e-prontezza-ui.md
-
-Obiettivi della sessione:
-1. Verificare l'integrazione del client TypeScript `engine-agent-run-client.ts` all'interno dei componenti UI dell'area conversazionale e dei pannelli di controllo (`apps/web`).
-2. Implementare la gestione delle nuove capabilities attivate nel motore:
-   - Visualizzazione e interazione con le domande di chiarimento (`clarify`).
-   - Pannello per il monitoraggio e la gestione dei Goal operativi (`goals`).
-   - Visualizzazione dei trigger e della cronologia schedulazioni (`cron`).
-   - Tracciamento delle approvazioni pendenti e ledger di sicurezza (`pending_approval`, `ApprovalLedger`).
-3. Mantenere rigorosamente l'indicazione esplicita "Fonte: simulazione | motore" senza mai mescolare dati simulati ed errori reali.
-4. Rispettare le regole di AGENTS.md: nessun file monolitico, componenti modulari < 500 righe per review, tipizzazione rigida, nessun push non autorizzato o riscrittura della cronologia Git (connessione Lovable attiva).
-```
+La parità con Hermes **non è completa** e l'integrazione con la UI rimane formalmente **sospesa**. Il motore dispone di un nucleo operativo verificato e stabile per 23 requisiti, ma conserva 19 requisiti parziali con limiti locali aperti e 4 requisiti con prove esterne bloccate. La prossima sessione di lavoro dovrà concentrarsi sul completamento dei gap locali prioritari identificati nella sezione 5.1 prima di autorizzare l'avvio della fase di interfaccia.

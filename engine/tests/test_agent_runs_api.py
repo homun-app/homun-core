@@ -198,3 +198,104 @@ def test_agent_runs_restart_survival(tmp_path, monkeypatch):
     assert reloaded["goals"] == {"policy": "persistent-goals-v1", "version": 1}
     ctx2.close()
 
+
+def test_agent_runs_control_lifecycle_and_steering(api_setup):
+    ctx, actor, work_id, client, headers = api_setup
+    base_url = f"/v1/workspaces/{ctx.workspace_id}/works/{work_id}/agent-runs"
+
+    payload = {
+        "command_id": "run_ctrl_test",
+        "expected_version": 1,
+        "material_ids": [],
+    }
+    resp = client.post(base_url, headers=headers, json=payload)
+    assert resp.status_code == 200
+    run_data = resp.json()
+
+    # Approve the run
+    appr_resp = client.post(
+        f"{base_url}/{run_data['id']}/approve",
+        headers=headers,
+        json={
+            "command_id": "appr_ctrl_test",
+            "expected_version": run_data["expected_version"],
+            "digest": run_data["digest"],
+        },
+    )
+    assert appr_resp.status_code == 200
+
+    # 1. Pause
+    work_ver = ctx.repository.load().works[work_id].version
+    pause_resp = client.post(
+        f"{base_url}/{run_data['id']}/control",
+        headers=headers,
+        json={"command_id": "ctrl_pause", "expected_version": work_ver, "action": "pause"},
+    )
+    assert pause_resp.status_code == 200
+    assert pause_resp.json()["status"] == "paused"
+
+    # 2. Steer while paused
+    work_ver = ctx.repository.load().works[work_id].version
+    steer_resp = client.post(
+        f"{base_url}/{run_data['id']}/control",
+        headers=headers,
+        json={
+            "command_id": "ctrl_steer",
+            "expected_version": work_ver,
+            "action": "steer",
+            "text": "Focus on section 2",
+        },
+    )
+    assert steer_resp.status_code == 200
+
+    # 3. Resume
+    work_ver = ctx.repository.load().works[work_id].version
+    resume_resp = client.post(
+        f"{base_url}/{run_data['id']}/control",
+        headers=headers,
+        json={"command_id": "ctrl_resume", "expected_version": work_ver, "action": "resume"},
+    )
+    assert resume_resp.status_code == 200
+    assert resume_resp.json()["status"] == "queued"
+
+    # 4. Cancel
+    work_ver = ctx.repository.load().works[work_id].version
+    cancel_resp = client.post(
+        f"{base_url}/{run_data['id']}/control",
+        headers=headers,
+        json={"command_id": "ctrl_cancel", "expected_version": work_ver, "action": "cancel"},
+    )
+    assert cancel_resp.status_code == 200
+    assert cancel_resp.json()["status"] == "cancelled"
+
+
+def test_agent_runs_terminal_wait_id_view(api_setup):
+    ctx, actor, work_id, client, headers = api_setup
+    base_url = f"/v1/workspaces/{ctx.workspace_id}/works/{work_id}/agent-runs"
+
+    payload = {
+        "command_id": "run_term_wait",
+        "expected_version": 1,
+        "material_ids": [],
+    }
+    resp = client.post(base_url, headers=headers, json=payload)
+    assert resp.status_code == 200
+    run_id = resp.json()["id"]
+
+    # In store, simulate transition to waiting_external with terminal_wait_id
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            run = store.commands[run_id].result
+            run["status"] = "waiting_external"
+            run["terminal_wait_id"] = "term_sess_xyz"
+        ctx.service.store = store
+
+    # GET list_runs returns terminal_wait_id in RunView
+    list_resp = client.get(base_url, headers=headers)
+    assert list_resp.status_code == 200
+    matching = [r for r in list_resp.json()["items"] if r["id"] == run_id]
+    assert len(matching) == 1
+    assert matching[0]["status"] == "waiting_external"
+    assert matching[0]["terminal_wait_id"] == "term_sess_xyz"
+
+
