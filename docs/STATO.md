@@ -1,14 +1,17 @@
 # Stato verificato di Homun 2
 
-Aggiornato il 25 settembre 2026: integrazione completa del percorso supervisionato del motore Homun nell'interfaccia utente.
+Aggiornato il 25 settembre 2026: integrazione completa del percorso supervisionato del motore Homun nell'interfaccia utente, canali esterni, i18n e packaging standalone.
 - Allegati file in chat: invio e ingestione automatica dei file allegati nel progetto di lavoro tramite `ingestWorkAttachments` e associazione al turno del motore.
 - Domande a margine (/btw): routing dedicato da chat senza alterare il transcript principale dell'esecuzione in corso via `handleEngineSend` e `askEngineSideQuestion`.
 - Chiarimenti interattivi strutturati: componente `EngineClarifyCard` con parser per domande singole/multiple, badge per opzione consigliata `(Consigliato)`, campo note aggiuntive e file allegati, integrato direttamente in `ConversationContribution`.
 - Capacità canoniche dell'agente: `EngineAgentRun` abilita e passa `memory`, `skills`, `delegation`, `clarify`, `codeExecution` con preselezione automatica dei materiali associati al lavoro e sezione dedicata di configurazione avanzata.
-- Architettura modulare: raggruppamento delle responsabilità in moduli dedicati (`engine-send-handler`, `engine-clarify-parser`, `engine-side-question`, `engine-workspace-attachments`, `conversation-freework`), riducendo la dimensione di `ConversationWorkspace.tsx` a 1391 righe (al di sotto del limite di 1425).
+- Revisione Deliverable & Risultati: componente `EngineArtifactReview` che unifica anteprima ricca formattata con Streamdown/Markdown, toggle sorgente grezzo, copia istantanea, lista dei file prodotti fisici scaricabili (`EngineWorkOutputs`) e controlli di approvazione/rifiuto/riapertura.
+- Gateway & Canali di Supervisione Esterna: API FastAPI `/v1/gateway/pairing` e client tipizzato per accoppiamento pairing code a 8 caratteri (Telegram, Slack, Mobile), gestione richieste pendenti, approvazione/rifiuto e revoca integrata in Impostazioni -> Notifiche e canali (`ConversationGatewayChannelsSection`).
+- Internazionalizzazione (i18n): motore i18n leggero e tipizzato con supporto IT ed EN, persistenza in preferenze, selettore lingua in Impostazioni e parità dizionari al 100%.
+- Packaging Desktop Standalone: bundle macOS arm64 (`Homun-darwin-arm64` e `Homun-0.2.1001-macos-arm64.zip`) generato e verificato con hash receipt completo e suite Electron passata al 100%.
+- Architettura modulare: raggruppamento delle responsabilità in moduli dedicati (`engine-send-handler`, `engine-clarify-parser`, `engine-side-question`, `engine-workspace-attachments`, `engine-artifact-review`, `conversation-freework`, `i18n`), mantenendo `ConversationWorkspace.tsx` sotto i vincoli architetturali (1391 righe).
 
-Suite motore: 1335 passed, 1 skipped in 169.25s (0 errori). Suite web: 238 passed in 1.62s (18 suite). Controllo architettura: 0 errori. OpenAPI sincronizzato.
-Matrice canonica H01–H46 completata al 100% per tutti i gap locali: 42 completati e verificati con prove adeguate, 0 incompleti, 4 prove esterne bloccate da credenziali/permessi (H10, H16, H33, H43). Contratti dell'engine e domain client pronti per l'integrazione UI.
+Suite motore: 1335 passed, 1 skipped in 169.25s (0 errori). Suite web: 246 passed (18 suite). Suite desktop: 11 passed (0 errori). Controllo architettura: 0 errori. OpenAPI sincronizzato. Packaging macOS arm64: verificato.
 
 Rapporto di handoff e audit aggiornato: [Rapporto parità motore e prontezza UI](handoff/2026-09-25-parita-motore-completata-e-prontezza-ui.md).
 Lo stato precedente e i rapporti datati conservano le prove storiche.
