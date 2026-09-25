@@ -131,3 +131,20 @@ def test_deadline_reason_reaches_model_even_if_process_exits_zero(setup,monkeypa
     assert resume(ctx,p['id'])
     receipt=ctx.repository.load().commands[p['id']].result['observations'][-1]['result']
     assert receipt['timed_out'] and receipt['is_error'] and receipt['exit_code']==0
+
+
+def test_cancel_run_stops_active_terminal_process(setup, monkeypatch):
+    from homun.application.agent_control import control
+    s = start(setup, monkeypatch); ctx, actor, work, p, backend = s; job = choose(s)
+    terminal_jobs.approve(ctx, actor, work, job['id'], {'digest': job['digest']})
+    assert any(c[0] == 'start' for c in backend.calls)
+    assert not any(c[0] == 'stop' for c in backend.calls)
+
+    control(ctx, actor, work, p['id'], {'command_id': 'cancel_in_flight', 'action': 'cancel', 'expected_version': ctx.repository.load().works[work].version})
+
+    assert any(c[0] == 'stop' for c in backend.calls)
+    current_job = ctx.repository.load().commands[job['id']].result
+    assert current_job['status'] == 'exited'
+    current_run = ctx.repository.load().commands[p['id']].result
+    assert current_run['status'] == 'cancelled'
+

@@ -85,9 +85,28 @@ class AutomationStore:
             )
             self._conn.commit()
 
+    def list_all(self, kind: str) -> list[tuple[str, dict[str, Any]]]:
+        if not kind:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT session_id, payload FROM automation_state WHERE kind = ?",
+                (kind,),
+            ).fetchall()
+        results: list[tuple[str, dict[str, Any]]] = []
+        for r in rows:
+            try:
+                data = json.loads(r["payload"])
+                if isinstance(data, dict):
+                    results.append((r["session_id"], data))
+            except Exception as exc:
+                logger.warning("Failed to decode entry for %s: %s", kind, exc)
+        return results
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
 
 
 _GLOBAL: Optional[AutomationStore] = None

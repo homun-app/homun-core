@@ -253,3 +253,20 @@ class HeartbeatManager:
         self._last_claim = None
         save_heartbeat(self.session_id, s)
         return True
+
+
+def find_due_heartbeats(now: Optional[float] = None) -> list[tuple[str, HeartbeatState]]:
+    """Scan all stored heartbeats and return active sessions whose heartbeat is due."""
+    from homun.application.automation_store import get_automation_store
+    items = get_automation_store().list_all(_KIND)
+    due: list[tuple[str, HeartbeatState]] = []
+    curr = time.time() if now is None else now
+    for session_id, data in items:
+        try:
+            state = HeartbeatState.from_dict(data)
+            if state.status == "active" and state.is_due(curr):
+                due.append((session_id, state))
+        except Exception as exc:
+            logger.warning("Failed parsing heartbeat state for %s: %s", session_id, exc)
+    return due
+

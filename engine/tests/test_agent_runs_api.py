@@ -299,3 +299,82 @@ def test_agent_runs_terminal_wait_id_view(api_setup):
     assert matching[0]["terminal_wait_id"] == "term_sess_xyz"
 
 
+def test_agent_runs_fallback_connection_and_failover(api_setup, monkeypatch):
+    from types import SimpleNamespace
+    from homun.models.port import Connection
+    from homun.models.native_errors import NativeModelError, RATE_LIMITED
+    from homun.models.native_turn import NativeMessage
+    from homun.application.agent_run_execution import advance
+
+    ctx, actor, work_id, client, headers = api_setup
+    base_url = f"/v1/workspaces/{ctx.workspace_id}/works/{work_id}/agent-runs"
+
+    secondary_conn = Connection(
+        id="secondary_provider",
+        kind="openai_compatible",
+        display_name="Secondary Provider",
+        model_id="secondary-model",
+        active=True,
+    )
+    orig_get_connection = ctx.models.get_connection
+    def custom_get_connection(cid):
+        if cid == "secondary_provider":
+            return secondary_conn
+        return orig_get_connection(cid)
+    monkeypatch.setattr(ctx.models, "get_connection", custom_get_connection)
+
+    # 1. Propose run with fallback_connection_id
+    payload = {
+        "command_id": "run_with_failover",
+        "expected_version": 1,
+        "material_ids": [],
+        "fallback_connection_id": "secondary_provider",
+    }
+    resp = client.post(base_url, headers=headers, json=payload)
+    assert resp.status_code == 200, resp.text
+    run_view = resp.json()
+    assert run_view["id"] == "run_with_failover"
+    assert run_view["connection_id"] == "openai_compatible"
+    assert run_view["fallback_connection_id"] == "secondary_provider"
+
+    # 2. Approve run
+    approve_resp = client.post(
+        f"{base_url}/run_with_failover/approve",
+        headers=headers,
+        json={
+            "command_id": "appr_failover",
+            "expected_version": run_view["expected_version"],
+            "digest": run_view["digest"],
+        },
+    )
+    assert approve_resp.status_code == 200
+
+    # 3. Simulate complete_tools: primary fails with 429 RATE_LIMITED, secondary succeeds
+    attempts = []
+    def mock_complete_tools(messages, **kwargs):
+        conn_id = kwargs.get("connection_id")
+        attempts.append(conn_id)
+        if conn_id != "secondary_provider":
+            raise NativeModelError(RATE_LIMITED, "Rate limit exceeded (429)", status_code=429)
+        return SimpleNamespace(message=NativeMessage(role="assistant", content="Answer from secondary"), usage=None)
+
+    monkeypatch.setattr(ctx.models, "complete_tools", mock_complete_tools)
+
+    # 4. Advance execution turn
+    outcome = advance(ctx, "run_with_failover")
+    assert outcome == "completed"
+    assert attempts == ["openai_compatible", "secondary_provider"]
+
+    # 5. Verify persisted run and RunView
+    list_resp = client.get(base_url, headers=headers)
+    assert list_resp.status_code == 200
+    run_after = next(r for r in list_resp.json()["items"] if r["id"] == "run_with_failover")
+    assert run_after["connection_id"] == "secondary_provider"
+    assert run_after["fallback_connection_id"] == "secondary_provider"
+    assert "recovery" in run_after
+    assert run_after["recovery"]["failover"]["from_connection"] == "openai_compatible"
+    assert run_after["recovery"]["failover"]["to_connection"] == "secondary_provider"
+    assert run_after["recovery"]["failover"]["reason"] == RATE_LIMITED
+
+
+

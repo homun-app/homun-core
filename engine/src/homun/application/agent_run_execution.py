@@ -15,7 +15,14 @@ from homun.application.agent_usage import charge
 from homun.domain.errors import DomainError, ValidationError
 from homun.domain.models import Actor, BudgetCounters, utc_now
 from homun.models.agent_turn import AgentDecision, decide
-from homun.models.native_errors import NativeModelError
+from homun.models.native_errors import (
+    NETWORK,
+    RATE_LIMITED,
+    SERVER,
+    TIMEOUT,
+    NativeModelError,
+)
+
 
 LEASE_SECONDS = 180
 
@@ -160,16 +167,60 @@ def _decision(ctx, run):
                     aggregator_executor=_agg_exec,
                 )
             else:
-                result = ctx.models.complete_tools(messages, tools=tools,
-                                                   connection_id=run['connection_id'], **run.get('_context_policy',{}))
+                conn_id = run['connection_id']
+                try:
+                    result = ctx.models.complete_tools(messages, tools=tools,
+                                                       connection_id=conn_id, **run.get('_context_policy',{}))
+                except NativeModelError as exc:
+                    fallback_id = run.get('fallback_connection_id')
+                    if fallback_id and fallback_id != conn_id and exc.code in {RATE_LIMITED, SERVER, TIMEOUT, NETWORK}:
+                        failover_record = {
+                            'from_connection': conn_id,
+                            'to_connection': fallback_id,
+                            'reason': exc.code,
+                            'at': utc_now().isoformat(),
+                        }
+                        run.setdefault('_recovery', {}).setdefault('failovers', []).append(failover_record)
+                        run['connection_id'] = fallback_id
+                        run['recovery'] = dict(run.get('recovery') or {})
+                        run['recovery']['failover'] = failover_record
+                        fallback_conn = ctx.models.get_connection(fallback_id)
+                        run['_context_policy'] = {
+                            'context_window': fallback_conn.context_window,
+                            'max_output_tokens': fallback_conn.max_output_tokens
+                        }
+                        result = ctx.models.complete_tools(messages, tools=tools,
+                                                           connection_id=fallback_id, **run.get('_context_policy',{}))
+                    else:
+                        raise
             agent_native.append_round(run, result.message)
             decision = agent_native.decision(run)
             from homun.application.agent_continuation_state import complete_decision
             decision = complete_decision(run, decision)
         else:
-            decision, result = decide(ctx.models, objective=run['_objective'], tools=tools,
-                observations=run['observations'], connection_id=run['connection_id'],
-                instructions=run['_instructions'])
+            conn_id = run['connection_id']
+            try:
+                decision, result = decide(ctx.models, objective=run['_objective'], tools=tools,
+                    observations=run['observations'], connection_id=conn_id,
+                    instructions=run['_instructions'])
+            except NativeModelError as exc:
+                fallback_id = run.get('fallback_connection_id')
+                if fallback_id and fallback_id != conn_id and exc.code in {RATE_LIMITED, SERVER, TIMEOUT, NETWORK}:
+                    failover_record = {
+                        'from_connection': conn_id,
+                        'to_connection': fallback_id,
+                        'reason': exc.code,
+                        'at': utc_now().isoformat(),
+                    }
+                    run.setdefault('_recovery', {}).setdefault('failovers', []).append(failover_record)
+                    run['connection_id'] = fallback_id
+                    run['recovery'] = dict(run.get('recovery') or {})
+                    run['recovery']['failover'] = failover_record
+                    decision, result = decide(ctx.models, objective=run['_objective'], tools=tools,
+                        observations=run['observations'], connection_id=fallback_id,
+                        instructions=run['_instructions'])
+                else:
+                    raise
     except NativeModelError as exc:
         charge(ctx, actor, run, reservation, exc.usage)
         raise _ModelFailure(exc) from exc
@@ -184,6 +235,11 @@ def _decision(ctx, run):
             if current.get('_lease_token') != run['_lease_token']:
                 raise ValidationError('Run lease changed')
             current['_decision'] = decision.model_dump()
+            current['connection_id'] = run['connection_id']
+            if 'recovery' in run:
+                current['recovery'] = run['recovery']
+            if '_recovery' in run:
+                current['_recovery'] = run['_recovery']
             if agent_native.enabled(run):
                 current['_messages'] = run['_messages']
                 current.pop('_continuation', None)

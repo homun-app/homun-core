@@ -58,3 +58,42 @@ def note_agent_write(working_dir: str | Path, file_path: str | Path) -> None:
         get_checkpoint_manager().record_agent_write(working_dir, file_path)
     except Exception as exc:
         logger.warning("Agent write ledger update failed: %s", exc)
+
+
+def list_workspace_checkpoints(working_dir: str | Path) -> list[dict]:
+    """List snapshots for a directory from most recent to oldest."""
+    try:
+        return get_checkpoint_manager().list_checkpoints(working_dir)
+    except Exception as exc:
+        logger.warning("Listing checkpoints failed: %s", exc)
+        return []
+
+
+def get_workspace_working_diff(working_dir: str | Path, commit_hash: Optional[str] = None) -> dict:
+    """Show diff between a checkpoint (default: latest checkpoint) and current working tree."""
+    mgr = get_checkpoint_manager()
+    if commit_hash is None:
+        cps = mgr.list_checkpoints(working_dir)
+        if not cps:
+            return {"success": True, "stat": "", "diff": "", "checkpoint": None}
+        commit_hash = cps[0]["hash"]
+    res = mgr.diff(working_dir, commit_hash)
+    res["checkpoint"] = commit_hash
+    return res
+
+
+def plan_workspace_restore(working_dir: str | Path, commit_hash: str) -> dict:
+    """Classify files into restore vs skipped (preserving subsequent user edits)."""
+    return get_checkpoint_manager().safe_restore_plan(working_dir, commit_hash)
+
+
+def restore_workspace_checkpoint(
+    working_dir: str | Path,
+    commit_hash: str,
+    file_path: Optional[str | Path] = None,
+    safe: bool = False,
+) -> dict:
+    """Restore working directory files to the specified checkpoint state."""
+    return get_checkpoint_manager().restore(working_dir, commit_hash, file_path=file_path, safe=safe)
+
+

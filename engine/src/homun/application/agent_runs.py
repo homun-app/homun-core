@@ -170,9 +170,19 @@ def propose(ctx, actor, work_id, body):
                                              'constraints': (brief or {}).get('constraints', []),
                                              'revision': revision_context(store, work),
                                              'organization_context': organization_background(store, actor)}, ensure_ascii=False), '_epoch': 0}
+            fallback_conn_id = body.get('fallback_connection_id')
+            if fallback_conn_id:
+                try:
+                    fallback_conn = ctx.models.get_connection(fallback_conn_id)
+                    if not fallback_conn.active:
+                        raise ValidationError('Fallback model connection must be active')
+                except NotFoundError:
+                    raise ValidationError('Fallback model connection not found')
+                run['fallback_connection_id'] = fallback_conn_id
             # Pin the protocol in the approval scope; never downgrade on provider failure.
             connection = ctx.models.get_connection(connection_id)
             run['_protocol'] = agent_native.PROTOCOL if connection.kind == 'openai_compatible' else 'json-decision-v1'
+
             if agent_native.enabled(run):
                 run['_result_storage_version'] = 1
                 run['_tool_bridge_version'] = 1

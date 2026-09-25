@@ -41,6 +41,7 @@ class RunRequest(BaseModel):
     person_id: str | None = Field(default=None, min_length=1, max_length=160)
     cwd: str | None = Field(default=None, max_length=4096)
     workspace_root: str | None = Field(default=None, max_length=4096)
+    fallback_connection_id: str | None = Field(default=None, max_length=160)
 
 
 class RunApproval(BaseModel):
@@ -83,6 +84,7 @@ class RunView(BaseModel):
     assignee_id: str
     executor_name: str
     connection_id: str
+    fallback_connection_id: str | None = None
     observations: list[dict]
     context: dict | None = None
     recovery: dict | None = None

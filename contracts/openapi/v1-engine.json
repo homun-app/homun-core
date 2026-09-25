@@ -5482,6 +5482,18 @@
             "title": "Expected Version",
             "type": "integer"
           },
+          "fallback_connection_id": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Connection Id"
+          },
           "gateway": {
             "default": false,
             "title": "Gateway",
@@ -5828,6 +5840,17 @@
               }
             ],
             "title": "External Tools"
+          },
+          "fallback_connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Connection Id"
           },
           "file_edit_request_id": {
             "anyOf": [

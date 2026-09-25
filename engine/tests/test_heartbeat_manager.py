@@ -145,3 +145,45 @@ def test_heartbeat_session_boundaries_and_reset():
     reset_session_heartbeats(child)
     assert load_heartbeat(child) is None
     assert load_heartbeat(replacement) is None
+
+
+def test_find_due_heartbeats_across_sessions():
+    from homun.application.heartbeat_manager import find_due_heartbeats
+
+    t0 = 5000.0
+    mgr1 = HeartbeatManager("session-1", min_seconds=10)
+    mgr1.set("Check 1", interval_seconds=60)
+    mgr1.state.created_at = t0
+    save_heartbeat("session-1", mgr1.state)
+
+    mgr2 = HeartbeatManager("session-2", min_seconds=10)
+    mgr2.set("Check 2", interval_seconds=120)
+    mgr2.state.created_at = t0
+    save_heartbeat("session-2", mgr2.state)
+
+    mgr3 = HeartbeatManager("session-3", min_seconds=10)
+    mgr3.set("Check 3", interval_seconds=60)
+    mgr3.state.created_at = t0
+    mgr3.pause()
+
+    mgr4 = HeartbeatManager("session-4", min_seconds=10)
+    mgr4.set("Check 4", interval_seconds=60)
+    mgr4.state.created_at = t0
+    mgr4.clear()
+
+
+    # At t0 + 30: none are due
+    due_30 = find_due_heartbeats(now=t0 + 30)
+    assert due_30 == []
+
+    # At t0 + 70: only session-1 is due
+    due_70 = find_due_heartbeats(now=t0 + 70)
+    assert len(due_70) == 1
+    assert due_70[0][0] == "session-1"
+    assert due_70[0][1].prompt == "Check 1"
+
+    # At t0 + 130: both session-1 and session-2 are due
+    due_130 = find_due_heartbeats(now=t0 + 130)
+    session_ids = {item[0] for item in due_130}
+    assert session_ids == {"session-1", "session-2"}
+

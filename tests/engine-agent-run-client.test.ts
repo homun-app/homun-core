@@ -175,3 +175,27 @@ test('preparation includes capability flags in request body', async () => {
   } finally { globalThis.fetch = old; }
 });
 
+test('preparation includes fallback_connection_id in request body when provided', async () => {
+  const old = globalThis.fetch; let calls = 0;
+  globalThis.fetch = async (_url, init) => {
+    if (++calls === 1) return Response.json({items:[]});
+    if (calls === 2) return Response.json({items:[{id:'w',version:3}]});
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.fallback_connection_id, 'sec_provider');
+    return Response.json({
+      id: 'r_fallback', status: 'pending_approval', connection_id: 'primary', fallback_connection_id: 'sec_provider'
+    });
+  };
+  try {
+    const res = await prepareAgentRun(
+      {id:'w'} as never, [], 'r_fallback', undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined,
+      false, false, false, false, false, false, false, false, false, false, false,
+      'sec_provider'
+    );
+    assert.equal(res.id, 'r_fallback');
+    assert.equal(res.fallback_connection_id, 'sec_provider');
+  } finally { globalThis.fetch = old; }
+});
+
+

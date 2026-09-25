@@ -1,12 +1,12 @@
 # Stato verificato di Homun 2
 
-Aggiornato il 24 settembre 2026: correzione dei falsi successi di parità Hermes
-(H16/H33/H35/H39/H41/H43/H45) e backend terminale Docker del nucleo nativo.
+Aggiornato il 25 settembre 2026: risoluzione dei gap e difetti locali prioritari H02 (terminazione fisica processi terminali su annullamento run), H06 (failover automatico su provider secondario per rate limit 429/5xx con fallback_connection_id e audit), H12 (calcolo working diff su checkpoint e piano di ripristino selettivo con salvaguardia modifiche utente) e H26 (scansione multi-sessione heartbeat in scadenza find_due_heartbeats).
+Suite motore: 1322 passed, 1 skipped in 159.01s (0 errori). Suite web: 228 passed in 1.55s. Client TypeScript: 10 passed. Controllo architettura: 0 errori. OpenAPI sincronizzato.
+Matrice canonica H01–H46 riconciliata: 27 completati con prove adeguate, 15 incompleti (con limiti documentati), 4 prove esterne bloccate da credenziali/permessi. Integrazione UI formalmente sospesa.
+
+Rapporto di handoff e audit aggiornato: [Rapporto parità motore e prontezza UI](handoff/2026-09-25-parita-motore-completata-e-prontezza-ui.md).
 Lo stato precedente e i rapporti datati conservano le prove storiche.
 Una verifica del sorgente non aggiorna l'app installata.
-
-Passaggio operativo corrente: [continuare la parità completa con Hermes](handoff/2026-09-24-parita-hermes-continuazione.md).
-Include checkpoint, limiti, intero obiettivo e prompt per una nuova chat.
 
 ## Capacità presenti
 

@@ -82,6 +82,21 @@ def control_in_store(ctx,store,actor,work_id,run_id,body,*,echo=True):
         service.apply(actor,body['command_id']+':cancel','work.cancel',{'work_id':work.id,'expected_version':work.version})
         if run.get('request_id') and store.contributions[run['request_id']].status=='pending':
             store.contributions[run['request_id']].status='rejected'
+        from homun.application import terminal_jobs
+        to_stop = []
+        if run.get('terminal_wait_id'):
+            to_stop.append(run['terminal_wait_id'])
+        for record in store.commands.values():
+            if record.type == terminal_jobs.TYPE:
+                prop = record.result
+                if prop.get('work_id') == work.id:
+                    binding = prop.get('_agent_binding') or {}
+                    if binding.get('run_id') == run_id:
+                        if prop.get('status') not in {'exited', 'dead', 'outcome_unknown', 'pending_approval', 'dispatching'}:
+                            if prop['id'] not in to_stop:
+                                to_stop.append(prop['id'])
+        if to_stop:
+            run['_terminal_to_stop'] = to_stop
         run.update(status='cancelled')
         _fence(run,actor)
     run.setdefault('_controls',[]).append({'action':action,'text':text,'actor_id':actor.id,'command_id':body['command_id']})
@@ -97,8 +112,16 @@ def control_in_store(ctx,store,actor,work_id,run_id,body,*,echo=True):
 
 
 def control(ctx,actor,work_id,run_id,body):
+    from homun.application import terminal_jobs
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             result=control_in_store(ctx,store,actor,work_id,run_id,body)
+            run_cmd = store.commands.get(run_id)
+            to_stop = list(run_cmd.result.pop('_terminal_to_stop', [])) if run_cmd else []
         ctx.service.store=store
+    for term_id in to_stop:
+        try:
+            terminal_jobs.stop(ctx, actor, work_id, term_id)
+        except Exception:
+            pass
     return result
