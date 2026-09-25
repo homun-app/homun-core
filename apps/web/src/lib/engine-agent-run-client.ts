@@ -9,6 +9,7 @@ export type AgentRun = {
   status: 'pending_approval' | 'queued' | 'running' | 'waiting_input' | 'waiting_external' | 'completed' | 'failed' | 'blocked' | 'paused' | 'cancelled';
   external_request_id?: string;
   terminal_request_id?: string;
+  terminal_wait_id?: string;
   file_edit_request_id?: string;
   terminal?: {image?: string; policy: string; host?: string; user?: string; port?: number};
   web_pages?: {policy: string; version: number};
@@ -22,6 +23,7 @@ export type AgentRun = {
   session_management?: {policy: string; version: number};
   gateway?: {policy: string; version: number};
   code_execution?: {policy: string; version: number};
+  plugins?: {policy: string; version: number};
   moa?: {policy: string; version: number; preset?: string; fanout?: string; privacy_filter?: string};
   external_tools?: {server_id: string; server_name: string; tool: string; name: string; description: string}[];
   tool_version: string;
@@ -50,12 +52,12 @@ async function request(workId: string, suffix = '', body?: unknown) {
 export async function listAgentRuns(workId: string): Promise<AgentRun[]> {
   return (await request(workId)).items;
 }
-export async function prepareAgentRun(work: Work, materialIds: string[], commandId: string, teamId?: string, personId?: string, serverIds?: string[], terminalImage?: string, terminalBackend?: 'local' | 'ssh', ssh?: {host: string; user: string; port: number; hostKey: string; keyPath: string}, webPages?: boolean, browser?: boolean, memory?: boolean, skills?: boolean, delegation?: boolean, clarify?: boolean, goals?: boolean, cron?: boolean, sessionManagement?: boolean, gateway?: boolean, codeExecution?: boolean, moa?: boolean | {preset?: string; fanout?: string; privacy_filter?: string}): Promise<AgentRun> {
+export async function prepareAgentRun(work: Work, materialIds: string[], commandId: string, teamId?: string, personId?: string, serverIds?: string[], terminalImage?: string, terminalBackend?: 'local' | 'ssh', ssh?: {host: string; user: string; port: number; hostKey: string; keyPath: string}, webPages?: boolean, browser?: boolean, memory?: boolean, skills?: boolean, delegation?: boolean, clarify?: boolean, goals?: boolean, cron?: boolean, sessionManagement?: boolean, gateway?: boolean, codeExecution?: boolean, plugins?: boolean, moa?: boolean | {preset?: string; fanout?: string; privacy_filter?: string}): Promise<AgentRun> {
   const existing = (await listAgentRuns(work.id)).find(p => p.id === commandId);
   if (existing) return existing;
   const current = (await listEngineWorks()).find(w => w['id'] === work.id);
   if (!current) throw homunErrorFromHttp(404, {detail:'Lavoro non accessibile'}, 'Lavoro non accessibile');
-  return request(work.id, '', { command_id: commandId, expected_version: current['version'], material_ids: materialIds, ...(terminalBackend === 'local' ? {terminal_backend: 'local'} : terminalBackend === 'ssh' && ssh ? {terminal_backend: 'ssh', ssh_host: ssh.host, ssh_user: ssh.user, ssh_port: ssh.port, ssh_host_key: ssh.hostKey, ssh_key_path: ssh.keyPath} : terminalImage ? {terminal_image: terminalImage} : {}), ...(serverIds?.length ? {server_ids: serverIds} : {}), ...(teamId ? {team_id: teamId} : {}), ...(personId ? {person_id: personId} : {}), ...(webPages ? {web_pages: true} : {}), ...(browser ? {browser: true} : {}), ...(memory ? {memory: true} : {}), ...(skills ? {skills: true} : {}), ...(delegation ? {delegation: true} : {}), ...(clarify ? {clarify: true} : {}), ...(goals ? {goals: true} : {}), ...(cron ? {cron: true} : {}), ...(sessionManagement ? {session_management: true} : {}), ...(gateway ? {gateway: true} : {}), ...(codeExecution ? {code_execution: true} : {}), ...(moa ? {moa: typeof moa === 'object' ? moa : true} : {}) });
+  return request(work.id, '', { command_id: commandId, expected_version: current['version'], material_ids: materialIds, ...(terminalBackend === 'local' ? {terminal_backend: 'local'} : terminalBackend === 'ssh' && ssh ? {terminal_backend: 'ssh', ssh_host: ssh.host, ssh_user: ssh.user, ssh_port: ssh.port, ssh_host_key: ssh.hostKey, ssh_key_path: ssh.keyPath} : terminalImage ? {terminal_image: terminalImage} : {}), ...(serverIds?.length ? {server_ids: serverIds} : {}), ...(teamId ? {team_id: teamId} : {}), ...(personId ? {person_id: personId} : {}), ...(webPages ? {web_pages: true} : {}), ...(browser ? {browser: true} : {}), ...(memory ? {memory: true} : {}), ...(skills ? {skills: true} : {}), ...(delegation ? {delegation: true} : {}), ...(clarify ? {clarify: true} : {}), ...(goals ? {goals: true} : {}), ...(cron ? {cron: true} : {}), ...(sessionManagement ? {session_management: true} : {}), ...(gateway ? {gateway: true} : {}), ...(codeExecution ? {code_execution: true} : {}), ...(plugins ? {plugins: true} : {}), ...(moa ? {moa: typeof moa === 'object' ? moa : true} : {}) });
 }
 export function approveAgentRun(workId: string, run: AgentRun, commandId: string): Promise<AgentRun> {
   return request(workId, `/${encodeURIComponent(run.id)}/approve`, {

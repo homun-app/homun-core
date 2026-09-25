@@ -121,3 +121,57 @@ test('control does not POST when the work is no longer accessible', async () => 
   try { await prepareAgentRun({id:'w'} as never, [], 'r', undefined, undefined, ['s1','s2']); }
   finally { globalThis.fetch = old; }
 });
+
+test('preparation includes capability flags in request body', async () => {
+  const old = globalThis.fetch; let calls = 0;
+  globalThis.fetch = async (_url, init) => {
+    if (++calls === 1) return Response.json({items:[]});
+    if (calls === 2) return Response.json({items:[{id:'w',version:2}]});
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.memory, true);
+    assert.equal(body.skills, true);
+    assert.equal(body.delegation, true);
+    assert.equal(body.clarify, true);
+    assert.equal(body.goals, true);
+    assert.equal(body.cron, true);
+    assert.equal(body.session_management, true);
+    assert.equal(body.gateway, true);
+    assert.equal(body.code_execution, true);
+    assert.equal(body.plugins, true);
+    assert.deepEqual(body.moa, {preset: 'fast'});
+    return Response.json({
+      id: 'r_caps', status: 'pending_approval',
+      memory: {policy: 'scoped-workspace-v1', version: 1},
+      skills: {policy: 'workspace-catalog-v1', version: 1},
+      delegation: {policy: 'isolated-subagent-v1', version: 1},
+      clarify: {policy: 'structured-clarify-v1', version: 1},
+      goals: {policy: 'persistent-goals-v1', version: 1},
+      cron: {policy: 'durable-cron-v1', version: 1},
+      session_management: {policy: 'durable-sessions-v1', version: 1},
+      gateway: {policy: 'core-gateway-v1', version: 1},
+      code_execution: {policy: 'programmatic-v1', version: 1},
+      plugins: {policy: 'extensible-plugins-v1', version: 1},
+      moa: {policy: 'mixture-of-agents-v1', version: 1},
+    });
+  };
+  try {
+    const res = await prepareAgentRun(
+      {id:'w'} as never, [], 'r_caps', undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined,
+      true, true, true, true, true, true, true, true, true, true, {preset: 'fast'}
+    );
+    assert.equal(res.id, 'r_caps');
+    assert.equal(res.memory?.policy, 'scoped-workspace-v1');
+    assert.equal(res.skills?.policy, 'workspace-catalog-v1');
+    assert.equal(res.delegation?.policy, 'isolated-subagent-v1');
+    assert.equal(res.clarify?.policy, 'structured-clarify-v1');
+    assert.equal(res.goals?.policy, 'persistent-goals-v1');
+    assert.equal(res.cron?.policy, 'durable-cron-v1');
+    assert.equal(res.session_management?.policy, 'durable-sessions-v1');
+    assert.equal(res.gateway?.policy, 'core-gateway-v1');
+    assert.equal(res.code_execution?.policy, 'programmatic-v1');
+    assert.equal(res.plugins?.policy, 'extensible-plugins-v1');
+    assert.equal(res.moa?.policy, 'mixture-of-agents-v1');
+  } finally { globalThis.fetch = old; }
+});
+

@@ -5439,11 +5439,26 @@
             "title": "Browser",
             "type": "boolean"
           },
+          "clarify": {
+            "default": false,
+            "title": "Clarify",
+            "type": "boolean"
+          },
+          "code_execution": {
+            "default": false,
+            "title": "Code Execution",
+            "type": "boolean"
+          },
           "command_id": {
             "maxLength": 160,
             "minLength": 1,
             "title": "Command Id",
             "type": "string"
+          },
+          "cron": {
+            "default": false,
+            "title": "Cron",
+            "type": "boolean"
           },
           "cwd": {
             "anyOf": [
@@ -5457,10 +5472,25 @@
             ],
             "title": "Cwd"
           },
+          "delegation": {
+            "default": false,
+            "title": "Delegation",
+            "type": "boolean"
+          },
           "expected_version": {
             "minimum": 1.0,
             "title": "Expected Version",
             "type": "integer"
+          },
+          "gateway": {
+            "default": false,
+            "title": "Gateway",
+            "type": "boolean"
+          },
+          "goals": {
+            "default": false,
+            "title": "Goals",
+            "type": "boolean"
           },
           "material_ids": {
             "items": {
@@ -5469,6 +5499,26 @@
             "maxItems": 12,
             "title": "Material Ids",
             "type": "array"
+          },
+          "memory": {
+            "default": false,
+            "title": "Memory",
+            "type": "boolean"
+          },
+          "moa": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moa"
           },
           "person_id": {
             "anyOf": [
@@ -5483,6 +5533,11 @@
             ],
             "title": "Person Id"
           },
+          "plugins": {
+            "default": false,
+            "title": "Plugins",
+            "type": "boolean"
+          },
           "server_ids": {
             "items": {
               "type": "string"
@@ -5490,6 +5545,16 @@
             "maxItems": 4,
             "title": "Server Ids",
             "type": "array"
+          },
+          "session_management": {
+            "default": false,
+            "title": "Session Management",
+            "type": "boolean"
+          },
+          "skills": {
+            "default": false,
+            "title": "Skills",
+            "type": "boolean"
           },
           "ssh_host": {
             "anyOf": [
@@ -5651,6 +5716,30 @@
             ],
             "title": "Browser"
           },
+          "clarify": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarify"
+          },
+          "code_execution": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code Execution"
+          },
           "connection_id": {
             "title": "Connection Id",
             "type": "string"
@@ -5666,6 +5755,30 @@
               }
             ],
             "title": "Context"
+          },
+          "cron": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron"
+          },
+          "delegation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delegation"
           },
           "digest": {
             "title": "Digest",
@@ -5727,6 +5840,30 @@
             ],
             "title": "File Edit Request Id"
           },
+          "gateway": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gateway"
+          },
+          "goals": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goals"
+          },
           "history_redacted": {
             "default": false,
             "title": "History Redacted",
@@ -5748,6 +5885,30 @@
             },
             "title": "Materials",
             "type": "array"
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory"
+          },
+          "moa": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moa"
           },
           "model_attempts": {
             "title": "Model Attempts",
@@ -5773,6 +5934,18 @@
             ],
             "title": "Person"
           },
+          "plugins": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plugins"
+          },
           "recovery": {
             "anyOf": [
               {
@@ -5795,6 +5968,30 @@
               }
             ],
             "title": "Request Id"
+          },
+          "session_management": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Management"
+          },
+          "skills": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skills"
           },
           "status": {
             "title": "Status",
@@ -5834,6 +6031,17 @@
               }
             ],
             "title": "Terminal Request Id"
+          },
+          "terminal_wait_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Wait Id"
           },
           "tool_version": {
             "title": "Tool Version",

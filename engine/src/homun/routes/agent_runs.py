@@ -24,6 +24,17 @@ class RunRequest(BaseModel):
     ssh_key_path: str | None = Field(default=None, max_length=4096)
     web_pages: bool = False
     browser: bool = False
+    memory: bool = False
+    skills: bool = False
+    delegation: bool = False
+    clarify: bool = False
+    goals: bool = False
+    cron: bool = False
+    session_management: bool = False
+    gateway: bool = False
+    code_execution: bool = False
+    plugins: bool = False
+    moa: bool | dict | None = None
     server_ids: list[str] = Field(default_factory=list, max_length=4)
     material_ids: list[str] = Field(default_factory=list, max_length=12)
     team_id: str | None = Field(default=None, max_length=160)
@@ -51,10 +62,22 @@ class RunView(BaseModel):
     external_tools: list[dict] | None = None
     external_request_id: str | None = None
     terminal_request_id: str | None = None
+    terminal_wait_id: str | None = None
     file_edit_request_id: str | None = None
     terminal: dict | None = None
     web_pages: dict | None = None
     browser: dict | None = None
+    memory: dict | None = None
+    skills: dict | None = None
+    delegation: dict | None = None
+    clarify: dict | None = None
+    goals: dict | None = None
+    cron: dict | None = None
+    session_management: dict | None = None
+    gateway: dict | None = None
+    code_execution: dict | None = None
+    plugins: dict | None = None
+    moa: dict | None = None
     tools: list[dict] | None = None
     tool_version: str
     assignee_id: str

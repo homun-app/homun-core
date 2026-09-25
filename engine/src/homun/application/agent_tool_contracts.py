@@ -2,6 +2,7 @@
 from pydantic import Field, field_validator
 from homun.application import agent_tools
 from homun.models.agent_turn import ToolDefinition
+from homun.tools.registry import ToolEntry
 
 PROTOCOL = 'native-tools-v1'
 QUESTION = ToolDefinition(name='request_user_input', description='Ask for required information unavailable through tools. Execution waits for the authorized human response.',

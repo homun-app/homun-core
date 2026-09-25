@@ -318,6 +318,10 @@ def propose(ctx, actor, work_id, body):
                     'reference_models': ref_models,
                     'aggregator': aggregator,
                 }
+            if body.get('plugins'):
+                if not agent_native.enabled(run):
+                    raise ValidationError('Plugin tools require native model support')
+                run['plugins'] = {'policy': 'extensible-plugins-v1', 'version': 1}
             run['_mcp_bindings'] = bindings
             run['external_tools'] = [{k: b[k] for k in ('server_id', 'server_name', 'tool', 'name')} | {'description': b['descriptor'].get('description', '')} for b in bindings]
             run['_registry_version'] = 1
