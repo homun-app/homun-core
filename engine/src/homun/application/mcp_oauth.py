@@ -1,6 +1,5 @@
 """Real OAuth2 token broker for MCP servers (H36).
 
-Derived from Hermes tools/mcp_oauth_manager.py and hermes_cli/auth_oauth_grants.py
 at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Manages OAuth tokens for declared external MCP servers:
 - Executes client credentials grant (grant_type=client_credentials)

@@ -1,6 +1,5 @@
 """Surface adapter contracts for Multi-Surface Gateway (H34).
 
-Derived from Hermes tui_gateway/contracts/, cli.py, and ui-tui/ at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Defines surface kinds (CLI, TUI, Desktop, Web/Dashboard, BotScreen, Headless), connection transports
 (local, SSH, URL, Cloud), multi-profile surface session leases, coherent steering, approval requests,
 and live session synchronization snapshots.

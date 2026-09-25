@@ -1,6 +1,5 @@
 """Working-tree git diff collection (H12).
 
-Derived from Hermes tools/working_diff.py (MIT).
 Collects diffs across working (unstaged + untracked), staged, or all states.
 Untracked files are rendered via git diff --no-index against os.devnull.
 """

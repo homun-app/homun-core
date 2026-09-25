@@ -1,6 +1,6 @@
 """Product wiring for filesystem checkpoints around authorized workspace writes (H12).
 
-Hermes treats checkpoints as infrastructure owned by the file-mutating path, not as a
+Checkpoints are infrastructure owned by the file-mutating path, not as a
 model-visible tool. Homun mirrors that: snapshots run before approved writes and agent
 writes are recorded for selective rollback.
 """

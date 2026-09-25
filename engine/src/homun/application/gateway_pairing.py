@@ -1,6 +1,5 @@
 """Gateway DM pairing and authorization management (H32).
 
-Derived from Hermes gateway/pairing.py and gateway/authz_mixin.py
 at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun manages code-based DM pairing following NIST SP 800-63-4 / OWASP principles:
 8-character unambiguous codes, 1-hour expiry, rate limiting, failed attempt lockout,

@@ -1,7 +1,7 @@
 """Durable recovery for native model calls: persisted attempts, waits, fences.
 
-Adapts the retry placement of Hermes agent/turn_api_error.py and
-agent/turn_recovery.py (MIT; see homun/notices/hermes-agent.txt): three total
+Structured retry placement and recovery strategy.
+agent/turn_recovery.py: three total
 attempts per phase, Retry-After (capped 600s) or jittered base-2 backoff, and
 counters that live in the run record so process restarts and DBOS replay never
 reset them. Waits hold no lease or transaction: the workflow re-claims through

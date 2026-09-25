@@ -1,6 +1,5 @@
 """Privacy and sensitive data filter for MoA advisor outputs (H24).
 
-Derived from Hermes agent/moa_loop.py and agent/moa_trace.py
 at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Masks credential shapes, bearer tokens, API keys, emails, and formatted phone numbers
 while conservatively preserving git SHAs, line numbers, IP addresses, and code snippets.

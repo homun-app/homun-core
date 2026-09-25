@@ -1,6 +1,5 @@
 """Optional Chronos-compatible cron provider adapter (H29).
 
-Derived conceptually from Hermes plugins/cron_providers/chronos/ at
 c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT). Homun does not invent remote
 schedule state: without HOMUN_CHRONOS_URL the adapter reports unavailable.
 """

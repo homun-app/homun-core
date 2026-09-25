@@ -1,6 +1,5 @@
-"""Provider-safe control boundaries, derived from Hermes interrupt/redirect logic.
+"""Provider-safe control boundaries and interrupt/redirect logic.
 
-See homun/notices/hermes-agent.txt. User corrections remain user messages;
 interrupted calls always get explicit results, never fabricated successful ones.
 """
 import json

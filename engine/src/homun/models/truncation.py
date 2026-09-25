@@ -1,7 +1,6 @@
-"""Visible text continuation contracts derived from Hermes turn_truncation.py.
+"""Visible text continuation contracts.
 
 No partial tool arguments or reasoning-only output is accepted for continuation.
-See notices/hermes-agent.txt for attribution.
 """
 import re
 

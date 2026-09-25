@@ -1,7 +1,6 @@
 """Lossless run-scoped output storage with bounded model-facing projections.
 
-Derived design: Hermes tools/tool_result_storage.py and tool_output_truncate.py.
-See notices/hermes-agent.txt. SQLite run persistence replaces host spill paths.
+Tool result storage and scoped output paging.
 """
 import hashlib
 import json

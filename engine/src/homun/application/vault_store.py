@@ -1,6 +1,5 @@
 """Encrypted credential vault store (H40).
 
-Derived from Hermes agent/vault_store.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Provides profile-scoped, Fernet-encrypted credential storage at rest for login,
 payment, and address secrets. The model only ever interacts with opaque handles
 and metadata; plaintext secret payloads are resolved server-side and automatically

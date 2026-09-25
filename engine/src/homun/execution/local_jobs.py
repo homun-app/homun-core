@@ -1,7 +1,7 @@
 """Owned local commands: one process, a private directory, and no inherited environment.
 
 This is not a container. Absolute paths and the network remain reachable.
-Stdin and a terminal are not provided. See homun/notices/hermes-agent.txt.
+Stdin and a terminal are not provided.
 """
 from __future__ import annotations
 

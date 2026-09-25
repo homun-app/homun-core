@@ -1,6 +1,5 @@
 """CronManager: durable scheduling, lifecycle, preflight, chained context, and incident tracking (H28/H29).
 
-Derived from Hermes cron/jobs.py, cron/executions.py, cron/incidents.py, cron/quota_hold.py,
 and tools/cronjob_tools.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun executes scheduled jobs with inference pins, chained context injection,
 deterministic preflight verification, script and skill dispatch, quota hold,

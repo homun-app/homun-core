@@ -1,6 +1,5 @@
 """Side-channel trace persistence for Mixture of Agents runs (H24).
 
-Derived from Hermes agent/moa_trace.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Appends JSONL records to `<homun_traces>/moa-traces/<session_id>.jsonl` when enabled.
 Side-channel only: never enters the database messages table or corrupts chat history.
 """

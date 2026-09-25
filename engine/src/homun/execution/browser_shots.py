@@ -1,6 +1,6 @@
 """Save one PNG of the owned browser's current public page.
 
-Hermes captures a screenshot for visual inspection (MIT). Homun saves the PNG
+Captures a screenshot for visual inspection; saves the PNG
 from the engine-owned browser and does not read the person's screen.
 """
 import base64

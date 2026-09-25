@@ -1,6 +1,5 @@
 """Text-to-speech (TTS) speech synthesis adapter (H41).
 
-Derived from Hermes tools/tts_tool.py and tts_streaming.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Normalizes text and dispatches synthesis only through an explicit backend.
 """
 from __future__ import annotations

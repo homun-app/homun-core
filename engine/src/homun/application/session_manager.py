@@ -1,7 +1,5 @@
 """SessionManager: lifecycle, cwd restoration, rewind, fork lineage, and export/import (H30/H31).
 
-Derived from Hermes hermes_state_sessions.py, hermes_state_rewind.py, hermes_state_timeline.py,
-hermes_cli/session_export.py, and hermes_cli/foreign_sessions.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun maintains sessions with working directory restoration, carrier-aware turn rewind,
 forked branching with lineage tracking, secret-redacted export, transcript import without
 identity drift, and SQLite FTS-backed storage with integrity repair and usage accounting.

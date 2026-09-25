@@ -1,6 +1,5 @@
 """Durable same-session idle heartbeats (H26).
 
-Derived from Hermes hermes_cli/heartbeat.py, gateway/run_heartbeat_acceptance.py,
 and gateway/run_heartbeat_restore.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun maintains idle recurring session heartbeats with human input preemption,
 tick coalescing, claim abandon/rewind on unexecuted admission, and strict conversation

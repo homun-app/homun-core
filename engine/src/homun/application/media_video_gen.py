@@ -1,6 +1,5 @@
 """Video generation provider adapter (H41).
 
-Derived from Hermes tools/video_generation_tool.py and xai_video_tools.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Dispatches prompt-to-video generation through an explicit backend only.
 """
 from __future__ import annotations

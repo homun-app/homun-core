@@ -1,6 +1,6 @@
 """Capability registry: the single source of truth for what the engine can run.
 
-Being registered, existing and authorized are distinct concepts (the Hermes
+Being registered, existing and authorized are distinct concepts (the
 lesson): this module only *describes* capabilities. Policies decide access,
 approval binds arguments and revisions, execution writes effects. Nothing here
 grants permissions.

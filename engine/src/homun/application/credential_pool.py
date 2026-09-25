@@ -1,6 +1,5 @@
 """Multi-credential pool for same-provider failover and rate-limit rotation (H38).
 
-Derived from Hermes agent/credential_pool.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Maintains multiple credentials per provider, rotates healthy keys, tracks cooldowns
 for rate-limits (429/quota), and marks dead revoked tokens.
 """

@@ -1,6 +1,5 @@
 """Contracts, schemas and presets for Mixture of Agents (MoA) orchestration (H24).
 
-Derived from Hermes agent/moa_loop.py, agent/moa_alternation.py, and agent/moa_trace.py
 at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun provides native Mixture of Agents orchestration where reference models advise
 in parallel without tool schemas, and an acting aggregator executes tools and emits

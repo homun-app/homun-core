@@ -1,6 +1,5 @@
 """Contracts and profile specifications for inference providers (H38).
 
-Derived from Hermes providers/base.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Declarative profiles capture provider-specific quirks: reasoning syntax, media/vision
 support, schema adaptations, endpoints, and auxiliary models.
 """

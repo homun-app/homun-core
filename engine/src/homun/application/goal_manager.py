@@ -1,6 +1,5 @@
 """GoalManager: lifecycle, quality gates, wait barriers, and continuation judging for persistent goals (H25).
 
-Derived from Hermes hermes_cli/goals.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun manages multi-turn goals with deterministic gate evaluation, wait barriers
 on background processes or sessions, fail-open auxiliary judging, and budget backstops
 without mutating the system prompt or creating implicit Kanban cards.

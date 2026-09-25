@@ -1,11 +1,11 @@
 """Pure, non-destructive context projections for Homun's native conversation.
 
-Estimator and protected-context principles derived from Hermes Agent commit
+Estimator and protected-context principles.
 c9dca726514b709cf6e677d236a79fc8d0627f37, agent/model_metadata.py and
 agent/context_compressor.py. Copyright (c) 2025 Nous Research, MIT License;
-full permission notice: homun/notices/hermes-agent.txt. No upstream imports.
+No upstream imports.
 
-Small Homun windows use a 75% input-budget trigger without Hermes's 64k floor.
+Small Homun windows use a 75% input-budget trigger without fixed large floor.
 Canonical messages and billing usage are never modified by this module.
 """
 from __future__ import annotations

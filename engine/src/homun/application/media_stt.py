@@ -1,6 +1,5 @@
 """Speech-to-text (STT) audio transcription adapter (H41).
 
-Derived from Hermes tools/transcription_tools.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Validates audio inputs and dispatches transcription only through an explicit backend.
 """
 from __future__ import annotations

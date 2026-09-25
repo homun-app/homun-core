@@ -309,7 +309,7 @@ class BudgetAllocation(BaseModel):
     """Delegate sub-cap inside the work envelope: own limit, own counters.
 
     A delegate that exhausts its allocation stops even when the work envelope
-    still has room; other actors are unaffected (the Hermes subagent lesson).
+    still has room; other actors are unaffected (subagent isolation pattern).
     """
 
     actor_id: str

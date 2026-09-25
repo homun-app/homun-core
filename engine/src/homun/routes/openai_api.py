@@ -1,6 +1,5 @@
 """OpenAI-compatible chat completions and models API (H35).
 
-Derived from Hermes gateway/platforms/api_server_openai_routes.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Provides standard OpenAI-compatible endpoints:
 - GET /v1/models: lists available model connections and MoA presets
 - POST /v1/chat/completions: supports non-streaming JSON and streaming SSE,

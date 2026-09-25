@@ -1,6 +1,5 @@
 """Filesystem checkpoint snapshots, selective rollback, and agent-write tracking (H12).
 
-Derived from Hermes tools/checkpoint_manager.py (MIT).
 Transparent shadow git store snapshots working directories before mutations.
 Tracks agent writes in a ledger so selective rollback preserves later user edits.
 """

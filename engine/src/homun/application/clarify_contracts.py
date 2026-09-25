@@ -1,6 +1,5 @@
 """Tool contracts for human clarification, batched questions, and multi-select (H08).
 
-Derived from Hermes tools/clarify_tool.py and tools/clarify_gateway.py (MIT).
 """
 from __future__ import annotations
 

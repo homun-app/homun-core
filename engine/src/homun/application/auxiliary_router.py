@@ -1,6 +1,5 @@
 """Auxiliary client routing with audited fallback chains (H38).
 
-Derived from Hermes agent/auxiliary_client.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Manages auxiliary tasks (compression, titling, side questions, vision, verification)
 with automatic fallback through a prioritized provider chain, preserving a complete
 audit trail of all failover events.

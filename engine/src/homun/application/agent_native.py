@@ -1,6 +1,6 @@
-"""Durable native rounds; source/provenance in homun/notices/hermes-agent.txt.
+"""Durable native rounds.
 
-Like Hermes, persist an assistant round before executing its calls. Unlike a
+Persist an assistant round before executing its calls. Unlike a
 request-time reconstruction, pending calls survive input and process restarts.
 """
 import json

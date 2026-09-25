@@ -1,4 +1,4 @@
-"""Hermes messaging catalog adapters (H33).
+"""Messaging catalog adapters (H33).
 
 Split from channel_adapters to keep the core registry module bounded.
 Adapters here follow the same ChannelAdapter honesty contract: refusal without real credentials.
@@ -44,7 +44,7 @@ from homun.application.gateway_contracts import ChannelMedia, ChannelMessage
 
 
 class FeishuChannelAdapter(ChannelAdapter):
-    """Feishu/Lark IM message send (Hermes messaging catalog: feishu).
+    """Feishu/Lark IM message send (Messaging catalog: feishu).
 
     Distinct from application.integration_feishu.FeishuAdapter (docs/comments).
     """
@@ -143,7 +143,7 @@ class FeishuChannelAdapter(ChannelAdapter):
 
 
 class MattermostAdapter(ChannelAdapter):
-    """Mattermost API v4 posts (Hermes messaging catalog: mattermost)."""
+    """Mattermost API v4 posts (Messaging catalog: mattermost)."""
 
     platform = "mattermost"
 
@@ -563,7 +563,7 @@ class TeamsAdapter(ChannelAdapter):
 
 
 class WeixinAdapter(ChannelAdapter):
-    """Weixin / WeChat Official Account custom message send (Hermes messaging catalog: weixin)."""
+    """Weixin / WeChat Official Account custom message send (Messaging catalog: weixin)."""
 
     platform = "weixin"
 
@@ -632,7 +632,7 @@ class WeixinAdapter(ChannelAdapter):
 
 
 class QqBotAdapter(ChannelAdapter):
-    """QQ Bot OpenAPI v2 channel message send (Hermes messaging catalog: qqbot)."""
+    """QQ Bot OpenAPI v2 channel message send (Messaging catalog: qqbot)."""
 
     platform = "qqbot"
 

@@ -1,6 +1,5 @@
 """Stdio JSON-RPC transport for Copilot ACP (H39).
 
-Derived from Hermes agent/copilot_acp_client.py session wire at
 c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT). Homun-owned: spawns the CLI,
 speaks initialize → session/new → session/prompt, and never invents text when
 the process fails or times out.

@@ -1,6 +1,5 @@
 """Execution of persistent goal tools for agent runs (H25).
 
-Derived from Hermes hermes_cli/goals.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun provides agents with explicit control over multi-turn goals, subgoals,
 quality gates, and wait barriers without implicit Kanban board manipulation.
 """

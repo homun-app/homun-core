@@ -1,6 +1,5 @@
 """Managed-tool gateway for hosted vendor tool passthrough (H39).
 
-Derived from Hermes tools/managed_tool_gateway.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Provides authentication, token scoping, origin routing, and explicit unavailable
 boundaries for cloud-hosted vendor tools.
 """

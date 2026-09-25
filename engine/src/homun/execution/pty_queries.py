@@ -1,7 +1,6 @@
 """Answer a bounded set of PTY status queries.
 
-Derived from Hermes tools/pty_query_responder.py (MIT) at the pinned commit,
-which ports openai/codex terminal query replies. See homun/notices/hermes-agent.txt.
+which ports openai/codex terminal query replies.
 This is not a screen emulator: cursor position is reported as home.
 """
 from __future__ import annotations

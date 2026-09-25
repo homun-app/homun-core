@@ -1,6 +1,5 @@
 """Execution of isolated subagent delegation, output schemas, and durable tracking (H21/H22).
 
-Derived from Hermes tools/delegate_tool.py, tools/delegation_output_schema.py,
 and tools/async_delegation.py (MIT).
 Homun executes delegated tasks within the parent work envelope, allocates subagent
 budgets, enforces isolated context, validates structured output schemas (preserving raw

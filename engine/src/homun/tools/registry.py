@@ -1,6 +1,6 @@
 """Run-scoped tool contracts, validation and dispatch.
 
-Architecture derived from Hermes tools/registry.py (MIT): one entry owns its
+Tool registry architecture: one entry owns its
 schema, toolset and handler. Homun deliberately has no global registration,
 module discovery, availability probes, or exception-to-success conversion.
 """

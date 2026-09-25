@@ -1,6 +1,5 @@
 """Native computer use and desktop control contracts (H16).
 
-Derived from Hermes tools/computer_use/ at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Defines UI element representations, capture results, action requests, security filters,
 and safety policies for desktop computer use.
 """

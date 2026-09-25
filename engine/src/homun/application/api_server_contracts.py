@@ -1,6 +1,5 @@
 """Contracts and schemas for OpenAI-compatible API and idempotent runs (H35).
 
-Derived from Hermes gateway/platforms/api_server*.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun provides external clients (OpenAI SDK, IDEs, curl) with standard endpoints:
 - POST /v1/chat/completions (streaming SSE + non-streaming JSON, tool calls, usage)
 - GET /v1/models

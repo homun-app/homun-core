@@ -1,6 +1,6 @@
-"""Conservative runaway-output guard derived from Hermes agent/repetition_guard.py.
+"""Conservative runaway-output guard for response repetition.
 
-MIT copyright 2025 Nous Research; see notices/hermes-agent.txt. The line-diversity
+The line-diversity
 check preserves distinct batch rows even when they share long exact prefixes.
 """
 from collections import Counter

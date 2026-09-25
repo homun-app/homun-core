@@ -1,6 +1,5 @@
 """Multi-Surface Gateway and Cross-Surface Synchronization Engine (H34).
 
-Derived from Hermes tui_gateway/server.py, tui_gateway/session_lifecycle.py, and cli.py
 at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Manages multi-connection transports (local, SSH, URL, cloud), surface session registration,
 coherent task steering, distributed approval queues, deliverable artifact registry,

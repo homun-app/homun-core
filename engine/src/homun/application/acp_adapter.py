@@ -1,6 +1,5 @@
 """Agent Client Protocol (ACP) adapter for IDE integration (H35).
 
-Derived from Hermes acp_adapter/ at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Provides:
 - ACP session lifecycle (initialize, new_session, prompt, cancel)
 - Client edit approval flow for IDE file modifications

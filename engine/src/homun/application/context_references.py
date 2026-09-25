@@ -1,6 +1,5 @@
 """Context @-reference expansion with size and security boundaries (H04).
 
-Derived from Hermes agent/context_references.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun expands inline @-references:
   - @file:<path>[:start[-end]]  (file content with optional line ranges)
   - @folder:<path>              (directory listing)

@@ -1,6 +1,5 @@
 """Messaging platform and channel adapters for gateway routing (H33).
 
-Derived from Hermes gateway/platforms/ and gateway/platform_registry.py
 at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun maintains pluggable channel adapters for Telegram, Discord, Slack,
 WhatsApp, and Webhook relays, supporting inbound parsing, media handling,

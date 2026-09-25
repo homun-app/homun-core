@@ -1,6 +1,5 @@
 """Proactive execution loops with fixed and self-paced cadence and goal precedence (H27).
 
-Derived from Hermes hermes_cli/loops.py and cli_loops_mixin.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun supports recurring proactive execution loops with self-paced exponential backoff,
 stop markers (LOOP_COMPLETE), count caps (--times), evidence-based stop conditions (--until),
 and strict goal precedence: active running goals defer loop ticks, while waiting/parked

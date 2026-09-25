@@ -1,4 +1,4 @@
-"""Extended Hermes messaging adapters (H33).
+"""Extended messaging adapters (H33).
 
 Includes A2A, Buzz, Home Assistant, MS Graph webhook, Open WebUI,
 Photon, and Raft adapters, plus re-exports for relay adapters.
@@ -29,7 +29,7 @@ from homun.application.gateway_contracts import ChannelMedia, ChannelMessage
 
 
 class A2AAdapter(ChannelAdapter):
-    """Agent-to-Agent (A2A) protocol HTTP transport (Hermes messaging catalog: a2a)."""
+    """Agent-to-Agent (A2A) protocol HTTP transport (Messaging catalog: a2a)."""
 
     platform = "a2a"
 
@@ -120,7 +120,7 @@ class A2AAdapter(ChannelAdapter):
 
 
 class BuzzAdapter(ChannelAdapter):
-    """Buzz HTTP webhook send (Hermes messaging catalog: buzz)."""
+    """Buzz HTTP webhook send (Messaging catalog: buzz)."""
 
     platform = "buzz"
 
@@ -193,7 +193,7 @@ class BuzzAdapter(ChannelAdapter):
 
 
 class PhotonAdapter(ChannelAdapter):
-    """Photon chat HTTP webhook send (Hermes messaging catalog: photon)."""
+    """Photon chat HTTP webhook send (Messaging catalog: photon)."""
 
     platform = "photon"
 
@@ -268,7 +268,7 @@ class PhotonAdapter(ChannelAdapter):
 
 
 class RaftAdapter(ChannelAdapter):
-    """Raft event/channel HTTP publish (Hermes messaging catalog: raft)."""
+    """Raft event/channel HTTP publish (Messaging catalog: raft)."""
 
     platform = "raft"
 
@@ -343,7 +343,7 @@ class RaftAdapter(ChannelAdapter):
 
 
 class HomeAssistantAdapter(ChannelAdapter):
-    """Home Assistant notification / event service bridge (Hermes: homeassistant)."""
+    """Home Assistant notification / event service bridge (homeassistant)."""
 
     platform = "homeassistant"
 
@@ -427,7 +427,7 @@ class HomeAssistantAdapter(ChannelAdapter):
 
 
 class MSGraphWebhookAdapter(ChannelAdapter):
-    """Microsoft Graph webhook and chat message adapter (Hermes: msgraph-webhook)."""
+    """Microsoft Graph webhook and chat message adapter (msgraph-webhook)."""
 
     platform = "msgraph"
 
@@ -505,7 +505,7 @@ class MSGraphWebhookAdapter(ChannelAdapter):
 
 
 class OpenWebUIAdapter(ChannelAdapter):
-    """Open WebUI webhook and chat integration (Hermes messaging: open-webui)."""
+    """Open WebUI webhook and chat integration (Messaging: open-webui)."""
 
     platform = "open_webui"
 

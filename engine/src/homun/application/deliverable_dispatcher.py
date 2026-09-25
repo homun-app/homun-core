@@ -1,6 +1,5 @@
 """Deliverable dispatcher for messaging gateway channels (H42).
 
-Derived from Hermes gateway/delivery.py and website/docs/user-guide/features/deliverable-mode.md
 at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Coordinates text deliverable extraction, code-block protection, deduplication against
 DeliverableLedger (at-most-once delivery), ChannelMedia preparation, channel adapter delivery,

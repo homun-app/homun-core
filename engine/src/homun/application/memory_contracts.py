@@ -1,6 +1,5 @@
 """Tool contracts for curated persistent memory and session search (H17/H18).
 
-Derived from Hermes agent/memory_manager.py, tools/memory_tool.py, and
 tools/session_search_tool.py (MIT).
 """
 from __future__ import annotations

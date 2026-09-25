@@ -1,6 +1,5 @@
 """Execution of gateway_manage tool for agent runs (H32/H33).
 
-Derived from Hermes gateway/pairing.py, gateway/hosted_rooms.py, and
 gateway/platforms/ at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun provides a unified gateway_manage tool allowing agent runs and operators
 to manage DM pairing, turn leases, hosted multi-agent rooms, and channel adapters.

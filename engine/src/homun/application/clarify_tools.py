@@ -1,6 +1,5 @@
 """Implementation of human clarification, multi-select, batched questions, and partial timeouts (H08).
 
-Derived from Hermes tools/clarify_tool.py and tools/clarify_gateway.py (MIT).
 """
 from __future__ import annotations
 

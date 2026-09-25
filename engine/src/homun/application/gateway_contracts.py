@@ -1,6 +1,5 @@
 """Contracts and data models for gateway authorization, pairing, turn leases, rooms, and channel adapters (H32/H33).
 
-Derived from Hermes gateway/pairing.py, gateway/authz_mixin.py, gateway/turn_lease.py,
 gateway/hosted_rooms.py, and gateway/platforms/ at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun maintains core channel runtime with code-based pairing, strict topic/user isolation,
 atomic turn serialization leases, multi-agent hosted rooms, and pluggable messaging adapters.

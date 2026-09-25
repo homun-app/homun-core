@@ -1,6 +1,5 @@
 """Desktop UI event bridge and preview/window/terminal pane tools (H16).
 
-Derived from Hermes tools/desktop_ui.py, tools/read_window_tool.py, tools/read_terminal_tool.py,
 tools/preview_tool.py, tools/drive_preview_tool.py, and tools/annotate_preview_tool.py at
 c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Provides in-memory event dispatch to desktop renderers, window inspection underneath the app,

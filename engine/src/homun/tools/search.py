@@ -1,6 +1,5 @@
-"""Bounded local BM25 catalog search, derived from Hermes tool_search_catalog.py.
+"""Bounded local BM25 catalog search.
 
-See notices/hermes-agent.txt. Unicode tokenization; no remote lookup or execution.
 """
 from collections import Counter
 import math

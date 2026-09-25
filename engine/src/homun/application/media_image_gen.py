@@ -1,6 +1,5 @@
 """Image generation and editing provider adapter (H41).
 
-Derived from Hermes tools/image_generation_tool.py and image_generation_catalog.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Normalizes aspect ratios and dispatches image creation through an explicit backend.
 Without a backend, returns a typed unavailability error — never a fabricated URL.
 """

@@ -1,6 +1,5 @@
 """Modal cloud terminal backend (H10).
 
-Derived conceptually from Hermes tools/environments/modal.py at
 c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT). Homun never invents sandbox IDs.
 Live Modal Sandbox.create is gated by HOMUN_MODAL_ALLOW_LIVE=1 so unpaid /
 unapproved cloud spend cannot happen by accident.

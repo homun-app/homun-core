@@ -1,6 +1,5 @@
 """Prompt and personality assembly with nested instructions and threat scanning (H04).
 
-Derived from Hermes agent/prompt_builder.py, agent/system_prompt.py,
 agent/context_file_sources.py, and agent/subdirectory_hints.py
 at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun builds layered prompts following documented precedence:

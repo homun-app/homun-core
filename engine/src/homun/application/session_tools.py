@@ -1,6 +1,5 @@
 """Execution of session_manage tool for agent runs (H30/H31).
 
-Derived from Hermes hermes_cli/sessions_cmd.py and hermes_state_sessions.py
 at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun provides a unified session_manage tool allowing agent tasks to inspect,
 resume, fork, rewind, export, import, repair, and account for conversation sessions.

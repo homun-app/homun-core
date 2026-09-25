@@ -1,6 +1,5 @@
 """Deliverable delivery ledger and receipt manager (H42).
 
-Derived from Hermes gateway/delivery_ledger.py and tools/bot_live_delivery.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Maintains at-most-once delivery state across messaging channels, ensuring artifacts are
 not re-uploaded on replay or turn resumption, with durable delivery receipts.
 """

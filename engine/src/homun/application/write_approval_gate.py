@@ -1,6 +1,5 @@
 """Write approval gate and pending execution ledger (H40).
 
-Derived from Hermes tools/write_approval.py and tools/approval.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Provides approval boundaries for cross-session writes across memory, skills, workspace,
 and external side-effects. Denied actions produce zero side effects with an auditable
 refusal; approved actions execute strictly once.

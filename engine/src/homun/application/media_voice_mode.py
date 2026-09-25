@@ -1,7 +1,6 @@
 """Voice mode, live turn-taking, and wake word detection (H41).
 
-Derived from Hermes tools/voice_mode.py, voice_live.py, and wake_word.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
-Coordinates hands-free acoustic phrase triggering ("Hey Homun" / "Hey Hermes"), confirmation
+Coordinates hands-free acoustic phrase triggering ("Hey Homun"), confirmation
 thresholds, audio stream pause/resume, and user barge-in speech interruption.
 """
 from __future__ import annotations
@@ -14,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_WAKE_WORDS = frozenset({"hey homun", "hey hermes", "homun", "hermes"})
+SUPPORTED_WAKE_WORDS = frozenset({"hey homun", "homun"})
 
 
 @dataclass
@@ -28,7 +27,7 @@ class WakeWordDetector:
     """Acoustic wake phrase detector."""
 
     def __init__(self, wake_words: Optional[List[str]] = None) -> None:
-        self.wake_words = set(wake_words or ["hey homun", "hey hermes"])
+        self.wake_words = set(wake_words or ["hey homun"])
         self._last_fire_time: float = 0.0
         self._cooldown_seconds: float = 2.0
 

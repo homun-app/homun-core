@@ -1,6 +1,5 @@
 """Protocol-level and niche messaging adapters (H33).
 
-Derived from Hermes gateway/platforms and user-guide/messaging at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Includes Email (SMTP), IRC, Signal (signal-cli REST), SimpleX Chat,
 BlueBubbles (iMessage), LINE, and SMS (Twilio).
 """
@@ -29,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class EmailAdapter(ChannelAdapter):
-    """SMTP outbound email (Hermes messaging catalog: email)."""
+    """SMTP outbound email (Messaging catalog: email)."""
 
     platform = "email"
 
@@ -357,7 +356,7 @@ class SimplexAdapter(ChannelAdapter):
 
 
 class BlueBubblesAdapter(ChannelAdapter):
-    """BlueBubbles iMessage REST bridge send (Hermes messaging catalog: bluebubbles)."""
+    """BlueBubbles iMessage REST bridge send (Messaging catalog: bluebubbles)."""
 
     platform = "bluebubbles"
 

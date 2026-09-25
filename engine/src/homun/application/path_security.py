@@ -1,6 +1,5 @@
 """Path security validation and traversal prevention (H40).
 
-Derived from Hermes tools/path_security.py and file_tools_paths.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Confines path resolution within allowed root directories, detects directory traversal (..),
 filters dangerous control characters, and blocks access to sensitive system/credential paths.
 """

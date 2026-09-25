@@ -1,6 +1,5 @@
 """Host-side RPC server for programmatic code execution tool calls (H13).
 
-Derived from Hermes tools/code_execution_rpc.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Listens on a secure local Unix Domain Socket (or loopback TCP), authenticating
 requests with a cryptographic token, enforcing tool whitelists and invocation budgets,
 and dispatching calls back into Homun's tool registry.

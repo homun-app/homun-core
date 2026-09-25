@@ -65,7 +65,7 @@ async def _refuse_elicitation(context, params: types.ElicitRequestParams):
 
 
 def filtered_tools(server: ExternalServer, tools: list[dict[str, Any]]) -> list[str]:
-    """The declared surface: include wins over exclude (Hermes semantics)."""
+    """The declared surface: include wins over exclude (precedence semantics)."""
     names = []
     for tool in tools:
         name = str(tool.get("name") or "")

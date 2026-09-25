@@ -1,6 +1,5 @@
 """Deliverable artifact extraction from assistant message text (H42).
 
-Derived from Hermes gateway/delivery.py and website/docs/user-guide/features/deliverable-mode.md
 at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Scans agent responses for generated deliverables (PDFs, charts, spreadsheets, audio) while strictly
 ignoring paths inside fenced code blocks or backtick expressions, ensuring code examples are never

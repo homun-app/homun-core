@@ -1,8 +1,8 @@
-"""Typed sanitized failures for native model calls; Hermes-derived heuristics.
+"""Typed sanitized failures for native model calls; Native failure heuristics.
 
-Adapts the classification taxonomy of Hermes agent/error_classifier.py and the
+Classification taxonomy of error types and recovery.
 Retry-After / jittered base-2 backoff of agent/retry_utils.py and
-agent/turn_recovery.py (MIT; see homun/notices/hermes-agent.txt). Homun keeps a
+agent/turn_recovery.py. Homun keeps a
 smaller code set: provider bodies are only pattern-matched, never persisted, and
 the carried usage is whatever the provider reported before validation failed.
 Overload/5xx share one code here; a distinct overload reason arrives with the
@@ -45,7 +45,7 @@ _LABELS = {
     TRUNCATED: 'Model response was truncated', MALFORMED: 'Model response was malformed',
 }
 
-# Subsets of Hermes error_classifier pattern tables, lowercased substrings.
+# Error classifier pattern tables, lowercased substrings.
 _BILLING_PATTERNS = (
     'insufficient_quota', 'insufficient credits', 'insufficient balance', 'credit balance',
     'credits exhausted', 'payment required', 'exceeded your current quota', 'billing hard limit',
@@ -95,7 +95,7 @@ class NativeModelError(RuntimeError):
 
 
 def parse_retry_after(value) -> float | None:
-    """Adapts Hermes retry_utils: numeric or HTTP-date seconds, clamped at 0.
+    """Retry utilities: numeric or HTTP-date seconds, clamped at 0.
 
     Accepts a raw value or a headers mapping (both casings tried); ``None``
     when absent or unparseable.
@@ -151,7 +151,7 @@ def retry_after_from_text(text) -> float | None:
 
 
 def retry_delay(attempts, error, *, base_delay=2.0, max_delay=60.0, jitter_ratio=0.5) -> float:
-    """Hermes compute_error_backoff order: Retry-After (capped) wins, else
+    """Backoff computation order: Retry-After (capped) wins, else
     jittered base-2 backoff min(base*2^(attempts-1), max) + U[0, jitter*delay].
     A zero/expired Retry-After is treated as absent so we never hot-loop."""
     retry_after = error.retry_after_seconds
@@ -212,7 +212,7 @@ def classify_response(exc, *, usage=None) -> NativeModelError:
 
     Truncated and content-filtered replies are not retried here. Eligible visible
     text is carried to the durable application continuation handler. Empty and malformed replies are retried,
-    as Hermes empty-response and transient-parse handling does.
+    as empty-response and transient-parse handling does.
     """
     text = sanitize(exc)
     lowered = text.lower()

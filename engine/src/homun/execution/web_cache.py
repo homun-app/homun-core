@@ -1,6 +1,5 @@
 """Result caching for web_search and web_extract with TTL and query normalization.
 
-Derived from Hermes tools/web_result_cache.py (MIT). Homun keeps cached items in
 memory with thread-safe access and TTL expiration.
 """
 from __future__ import annotations

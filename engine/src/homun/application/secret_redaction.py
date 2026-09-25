@@ -1,6 +1,5 @@
 """Secret and credential redaction engine (H40).
 
-Derived from Hermes agent/redact.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Masks known API tokens, private keys, authorization headers, and dynamically registered
 vault secrets from model transcripts, tool outputs, and logs.
 """

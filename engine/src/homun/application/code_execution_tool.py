@@ -1,6 +1,5 @@
 """Programmatic Code Execution Tool with child RPC bridge (H13).
 
-Derived from Hermes tools/code_execution_tool.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun runs Python scripts in an isolated child interpreter with a injected
 `call_tool(tool_name, args)` bridge communicating back to the host RPC server,
 allowing programmatic tool composition, client-side filtering, and output reduction.

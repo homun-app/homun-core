@@ -1,6 +1,5 @@
 """Persist bounded text continuation before the next model request.
 
-Derived from Hermes turn_truncation.py; Homun retains its own budgets, authority,
 canonical transcript, epoch/lease fencing and durable retry phase accounting.
 """
 from homun.application.agent_runs import lookup, authority

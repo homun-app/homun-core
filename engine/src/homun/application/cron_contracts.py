@@ -1,6 +1,5 @@
 """Contracts and data models for durable scheduling, cron jobs, occurrences, and incidents (H28/H29).
 
-Derived from Hermes cron/jobs.py, cron/executions.py, cron/incidents.py, cron/quota_hold.py,
 and tools/cronjob_tools.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun maintains scheduled jobs as durable entities supporting prompt-based, skill-based,
 and script-only execution, inference pins, chained context from prior runs, preflight

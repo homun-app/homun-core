@@ -1,6 +1,5 @@
 """Named search providers and one-shot rescue.
 
-Derived from Hermes plugins/web/ and tools/web_tools_rescue.py (MIT).
 Homun does not invent results and refuses private addresses. Credential-requiring
 providers require explicit keys in the environment.
 """

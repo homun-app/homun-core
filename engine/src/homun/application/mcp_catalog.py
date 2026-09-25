@@ -2,7 +2,7 @@
 
 Presence here means vetting, not installation: every entry stays inert until
 the person declares it, and the command/source is always visible up front
-(the Hermes rule — read the manifest before you run anything).
+(read manifest before invocation).
 """
 from __future__ import annotations
 from typing import Any

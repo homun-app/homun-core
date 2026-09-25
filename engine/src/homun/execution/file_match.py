@@ -1,7 +1,7 @@
 """Fuzzy replacement for model edits.
 
-Behavior is derived from Hermes tools/fuzzy_match.py (MIT, Nous Research) at
-the pinned commit recorded in homun/notices/hermes-agent.txt. Homun applies the
+Fuzzy line matching implementation applying the exact rule
+Homun applies the
 same ordered strategies on text already read from an owned workspace; it does
 not shell out and it does not write.
 """

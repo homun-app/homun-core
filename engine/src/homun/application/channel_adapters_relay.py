@@ -22,7 +22,7 @@ from homun.application.gateway_contracts import ChannelMedia, ChannelMessage
 
 
 class TeamsMeetingsAdapter(ChannelAdapter):
-    """Teams meetings webhook integration (Hermes messaging: teams-meetings)."""
+    """Teams meetings webhook integration (Messaging: teams-meetings)."""
 
     platform = "teams_meetings"
 
@@ -98,7 +98,7 @@ class TeamsMeetingsAdapter(ChannelAdapter):
 
 
 class WeComCallbackAdapter(ChannelAdapter):
-    """WeCom callback webhook integration (Hermes messaging: wecom-callback)."""
+    """WeCom callback webhook integration (Messaging: wecom-callback)."""
 
     platform = "wecom_callback"
 
@@ -170,7 +170,7 @@ class WeComCallbackAdapter(ChannelAdapter):
 
 
 class WhatsAppCloudAdapter(ChannelAdapter):
-    """WhatsApp Cloud (Meta Graph) API adapter (Hermes messaging: whatsapp-cloud)."""
+    """WhatsApp Cloud (Meta Graph) API adapter (Messaging: whatsapp-cloud)."""
 
     platform = "whatsapp_cloud"
 
@@ -260,7 +260,7 @@ class WhatsAppCloudAdapter(ChannelAdapter):
 
 
 class YuanbaoAdapter(ChannelAdapter):
-    """Tencent Yuanbao bot API / webhook adapter (Hermes messaging: yuanbao)."""
+    """Tencent Yuanbao bot API / webhook adapter (Messaging: yuanbao)."""
 
     platform = "yuanbao"
 

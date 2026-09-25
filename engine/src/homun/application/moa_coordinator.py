@@ -1,6 +1,5 @@
 """Coordinator for Mixture of Agents (MoA) execution (H24).
 
-Derived from Hermes agent/moa_loop.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun ensures that:
 1. Advisory reference models run without tools (advisors only advise).
 2. The aggregator is the acting model that executes tools and writes the response.

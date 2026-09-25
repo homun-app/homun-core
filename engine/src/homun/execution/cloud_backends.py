@@ -1,6 +1,5 @@
 """Optional cloud/container terminal backends for H10 (Modal, Daytona, Singularity, Vercel).
 
-Derived conceptually from Hermes tools/environments/{modal,daytona,singularity,vercel_sandbox,managed_modal}.py
 at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT). Homun-owned adapters refuse execution with a typed
 ExecutionUnavailable until credentials and SDKs are configured — never invent sandbox IDs or exit codes.
 """

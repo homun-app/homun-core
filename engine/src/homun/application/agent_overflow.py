@@ -1,6 +1,5 @@
 """Persist bounded compression intent after a provider context rejection.
 
-Derived from Hermes agent/turn_overflow.py (MIT; homun/notices/hermes-agent.txt).
 No guessed context limit, blind replay, output-cap increase or recursive summary
 recovery. The existing context planner proves a safe cut and meaningful reduction.
 """

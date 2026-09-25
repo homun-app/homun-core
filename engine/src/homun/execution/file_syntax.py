@@ -1,6 +1,6 @@
 """In-process syntax delta for workspace edits.
 
-Derived from the lint-delta rule in Hermes tools/file_operations_lint.py
+Syntax and lint delta verification rule
 (MIT, Nous Research): report errors introduced by an edit, and refuse JSON/TOML
 that does not parse. Homun does not run a language server or a shell linter.
 """

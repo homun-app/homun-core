@@ -1,6 +1,5 @@
 """Contracts and data models for persistent goals, contracts, and quality gates (H25).
 
-Derived from Hermes hermes_cli/goals.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun maintains goals as first-class multi-turn contracts with deterministic quality gates,
 wait barriers (pid/session/time), fail-open auxiliary judging, and budget backstops
 without implicit Kanban card creation.

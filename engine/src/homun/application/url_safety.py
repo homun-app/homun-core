@@ -1,6 +1,5 @@
 """URL safety validation and SSRF prevention (H40).
 
-Derived from Hermes tools/url_safety.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Prevents Server-Side Request Forgery (SSRF) to private networks, loopback interfaces,
 and cloud metadata endpoints (169.254.169.254, metadata.google.internal). Detects
 credentials embedded in URLs (userinfo) and credential-bearing query parameters.

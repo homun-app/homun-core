@@ -1,6 +1,5 @@
 """X Search tool backed by xAI API.
 
-Derived from Hermes tools/x_search_tool.py (MIT).
 Validates queries, date filters, and handles client-side. Requires explicit
 XAI_API_KEY in the environment.
 """

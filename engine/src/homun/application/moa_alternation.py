@@ -1,6 +1,5 @@
 """Reactive same-role message merge for MoA aggregator requests (H24).
 
-Derived from Hermes agent/moa_alternation.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 When guidance is attached as an adjacent user turn or when strict-alternation
 chat backends reject adjacent user turns, this folds consecutive user messages
 into a single combined user turn so strict chat templates do not fail with HTTP 400.

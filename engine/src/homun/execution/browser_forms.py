@@ -1,8 +1,8 @@
 """Fill and press controls on one owned browser page.
 
-Refs come from the page accessibility tree. Hermes browser tools (MIT) use the
+Refs come from the page accessibility tree. Browser tools use the
 same navigate, snapshot, type, click and press sequence. Homun does not copy
-the Hermes supervisor, and it does not use the person's browser profile.
+the browser supervisor, and it does not use the person's browser profile.
 """
 from homun.execution.owned_browser import TEXT_LIMIT, OwnedBrowser
 from homun.execution.web_pages import PageRefusal, _classify

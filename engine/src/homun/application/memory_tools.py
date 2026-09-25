@@ -1,6 +1,5 @@
 """Execution of memory and session search tools in agent runs (H17/H18).
 
-Derived from Hermes agent/memory_manager.py, tools/memory_tool.py, and
 tools/session_search_tool.py (MIT).
 Homun maintains SQLite as the authoritative memory ledger and checks project
 and conversation authorization before returning messages or facts.

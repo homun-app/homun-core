@@ -1,6 +1,5 @@
 """Tool contracts for procedural skills discovery, disclosure, and proposal (H19/H20).
 
-Derived from Hermes tools/skills_tool.py, tools/skill_manager.py, and
 tools/skills_guard.py (MIT).
 """
 from __future__ import annotations

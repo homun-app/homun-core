@@ -1,6 +1,5 @@
 """Git worktree isolation for subagents (H12).
 
-Derived from Hermes tools/subagent_worktree.py (MIT).
 Creates isolated worktree branches under <repo>/.worktrees/subagent-<id>.
 Prunes worktrees safely upon verifying zero uncommitted/unmerged changes.
 """

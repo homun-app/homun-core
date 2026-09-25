@@ -1,6 +1,5 @@
 """Codex App-Server runtime adapter (H39).
 
-Derived from Hermes agent/codex_runtime.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Translates between Homun's agent turn contracts and the Codex App-Server JSON-RPC
 protocol, mapping streaming items, tool notifications, file changes, and interruptions.
 """

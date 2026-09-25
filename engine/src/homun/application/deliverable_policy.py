@@ -1,6 +1,5 @@
 """Deliverable media policy and allowed extension validator (H42).
 
-Derived from Hermes gateway/media_policy.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Defines categories of user-facing deliverables (PDF, images, spreadsheets, audio, presentations),
 confines delivery paths to authorized scratch/workspace roots, and rejects code files (.py, .sh, .env)
 from auto-delivery.

@@ -1,6 +1,5 @@
 """Execution of skill discovery, progressive disclosure, and learning tools (H19/H20).
 
-Derived from Hermes tools/skills_tool.py, tools/skill_manager.py, and
 tools/skills_guard.py (MIT).
 Homun keeps untrusted or newly proposed skills in a staged quarantine until
 approved by a human person. Staged skills cannot be executed or viewed as trusted guidance.

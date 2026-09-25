@@ -1,4 +1,4 @@
-"""Progressive MCP disclosure derived from Hermes tool_search.py (MIT notice).
+"""Progressive MCP tool search and schema deferral bridge.
 
 The catalog is pinned per run. A bridge call resolves to one approved tool;
 canonical history keeps the wrapper and its original call ID.

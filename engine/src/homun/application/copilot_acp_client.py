@@ -1,6 +1,5 @@
 """GitHub Copilot ACP alternate client adapter (H39).
 
-Derived from Hermes agent/copilot_acp_client.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Communicates with `copilot --acp` over stdio / JSON-RPC, extracting tool calls from
 `<tool_call>{...}</tool_call>` blocks and providing clean fallback when unavailable.
 """
@@ -39,7 +38,7 @@ class CopilotAcpClient:
         self.command = (
             command
             or os.getenv("HOMUN_COPILOT_ACP_COMMAND")
-            or os.getenv("HERMES_COPILOT_ACP_COMMAND")
+            
             or "copilot"
         )
         self.args = args or ["--acp", "--stdio"]

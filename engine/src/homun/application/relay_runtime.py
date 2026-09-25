@@ -1,6 +1,5 @@
 """NeMo Relay / Enterprise subscription proxy adapter (H39).
 
-Derived from Hermes agent/relay_runtime.py and agent/relay_llm.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Provides corporate relay session isolation, operation mapping, header injection
 (x-dynamo-session-id), and explicit unavailable service state when unconfigured.
 """

@@ -1,7 +1,5 @@
 """SQLite storage engine with WAL journaling, FTS5 search, integrity checks, and repair (H31).
 
-Derived from Hermes hermes_state.py, hermes_state_fts.py, hermes_state_repair.py,
-and hermes_state_usage.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun maintains transactional SQLite persistence for sessions and transcripts with WAL mode,
 FTS5 full-text indexing, forensic integrity validation, and self-healing repair.
 """

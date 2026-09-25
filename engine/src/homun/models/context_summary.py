@@ -1,6 +1,5 @@
-"""Bounded checkpoint prompt adapted from Hermes context_compressor.py (MIT).
+"""Bounded checkpoint prompt and context compression.
 
-Copyright (c) 2025 Nous Research. Full license: homun/notices/hermes-agent.txt.
 """
 import json
 from homun.domain.errors import DomainError

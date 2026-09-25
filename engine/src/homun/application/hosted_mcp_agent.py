@@ -1,6 +1,5 @@
 """Hosted MCP Agent server exposing Homun capabilities as MCP tools (H35).
 
-Derived from Hermes mcp_serve.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Allows external MCP clients (Claude Code, Cursor, Codex, Goose, VS Code) to invoke
 Homun as an autonomous agent tool or resource over stdio or JSON-RPC.
 """

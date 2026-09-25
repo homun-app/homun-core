@@ -1,6 +1,5 @@
 """Singularity/Apptainer terminal backend (H10).
 
-Derived from Hermes tools/environments/singularity.py at
 c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT). Homun-owned spawn-per-call
 execution: each start() runs `apptainer|singularity exec --containall --no-home`
 without inventing instance IDs when the CLI is missing.

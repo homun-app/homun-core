@@ -1,6 +1,5 @@
 """Execution of cronjob_manage tool for agent runs (H28/H29).
 
-Derived from Hermes tools/cronjob_tools.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun exposes a single unified cronjob_manage tool to minimize context bloat while
 providing full CRUD, manual runs, chained context, and incident inspection.
 """

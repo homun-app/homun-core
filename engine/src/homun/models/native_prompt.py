@@ -1,6 +1,5 @@
-"""Adapted from Hermes prompt_builder.py execution guidance (MIT).
+"""Native execution guidance and prompt building.
 
-Copyright (c) 2025 Nous Research. Full license: notices/hermes-agent.txt.
 The prompt is pinned in each proposal so a resumed run keeps its instructions.
 """
 from __future__ import annotations

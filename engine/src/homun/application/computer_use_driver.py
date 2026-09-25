@@ -1,6 +1,5 @@
 """Computer use backend, permissions readiness, and platform safety controls (H16).
 
-Derived from Hermes tools/computer_use/cua_backend.py, cua_backend_capture.py, cua_backend_input.py,
 permissions.py, and doctor.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Without a verified OS driver, Homun reports unavailability — never fabricated windows,
 permissions, screenshots, or input success.

@@ -1,6 +1,5 @@
 """Tool contracts for isolated async/parallel subagent delegation (H21/H22).
 
-Derived from Hermes tools/delegate_tool.py, tools/delegation_output_schema.py,
 and tools/async_delegation.py (MIT).
 """
 from __future__ import annotations

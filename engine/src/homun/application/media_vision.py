@@ -1,6 +1,5 @@
 """Vision and video frame analysis adapter (H41).
 
-Derived from Hermes tools/vision_tools.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Resolves images and video frames from URLs, data URIs, and local files, normalizing
 dimensions and validating formats. Analysis requires an explicit vision backend;
 missing inputs or backends are reported as errors, never as synthetic success.

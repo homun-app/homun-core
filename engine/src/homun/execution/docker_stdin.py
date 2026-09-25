@@ -1,8 +1,7 @@
 """Write bytes to an already running container stdin. Never starts a container.
 
-The delivery rule follows Hermes process-registry write_stdin (MIT): raw bytes,
+Delivery rule: raw bytes,
 no added newline, and no automatic repeat after an uncertain send.
-See homun/notices/hermes-agent.txt. This is a pipe, not a PTY.
 """
 from __future__ import annotations
 

@@ -1,6 +1,5 @@
 """Hosted room management: multi-agent and multi-user discussion rooms (H32).
 
-Derived from Hermes gateway/hosted_rooms.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun maintains gateway-hosted discussion rooms with membership roles, append-only
 event logging, strict topic isolation, and moderated turn settlement.
 Rooms and events persist under HOMUN_DATA_DIR/gateway/rooms-<workspace>.sqlite.

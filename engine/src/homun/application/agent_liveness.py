@@ -1,7 +1,7 @@
-"""Bounded final-answer liveness derived from Hermes turn_final_response.py.
+"""Bounded final-answer liveness and turn response validation.
 
 The narrow trailing-intent detector is from agent_runtime_helpers.py, extended
-for the observed Italian promise tail. See notices/hermes-agent.txt.
+for the observed Italian promise tail.
 """
 import re
 from homun.domain.errors import DomainError

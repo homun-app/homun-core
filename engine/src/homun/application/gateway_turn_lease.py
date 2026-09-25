@@ -1,6 +1,5 @@
 """Turn lease management: per-session serialization of execution turns (H32).
 
-Derived from Hermes gateway/turn_lease.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun serializes execution turns per session/routing key, ensuring race-free transcript
 updates, fail-closed timeouts, and identity-checked releases.
 """

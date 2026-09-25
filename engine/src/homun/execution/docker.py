@@ -1,7 +1,6 @@
 """Reconnectable container jobs with durable, at-most-once dispatch intent.
 
-Docker hardening and ownership patterns informed by Hermes Agent (MIT);
-see homun/notices/hermes-agent.txt. No Hermes runtime dependency.
+Docker hardening, unprivileged user execution, and persistent intent boundaries.
 """
 from __future__ import annotations
 

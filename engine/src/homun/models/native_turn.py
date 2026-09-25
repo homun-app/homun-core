@@ -1,7 +1,6 @@
 """Canonical tool conversation and transport projection owned by Homun.
 
-Architecture follows Hermes agent/conversation_loop.py and turn_tool_round.py;
-see homun/notices/hermes-agent.txt for provenance and upstream MIT license.
+Architecture follows conversation loop and tool execution turns.
 """
 import json
 from typing import Any, Literal

@@ -1,6 +1,5 @@
 """Contracts and schemas for Programmatic Tool Calling (PTC) via code execution (H13).
 
-Derived from Hermes tools/code_execution_tool.py and tools/code_execution_rpc.py
 at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun enables models to write Python scripts that invoke tools programmatically
 over an authenticated local RPC socket, collapsing multi-step workflows into

@@ -1,6 +1,5 @@
 """Context-aware detached side questions (H03).
 
-Derived from Hermes agent/side_question.py at c9dca726514b709cf6e677d236a79fc8d0627f37 (MIT).
 Homun answers side questions (/btw) about the active conversation without
 affecting main conversation state: no synthetic turns, no role-alternation risk,
 no prompt-cache invalidation, tools strictly denied, and token usage attributed

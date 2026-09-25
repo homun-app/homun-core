@@ -1,7 +1,7 @@
 """Background terminal sessions on an already approved Docker job.
 
 Poll, wait, stop and one completion notice follow the process-registry
-behavior of Hermes Agent (MIT); see homun/notices/hermes-agent.txt.
+behavior for background jobs.
 No PTY, stdin write, or second dispatch.
 """
 import hashlib
