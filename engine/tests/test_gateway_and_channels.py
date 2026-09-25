@@ -914,5 +914,51 @@ def test_channel_registry_includes_new_messaging_catalog():
     from homun.application.channel_adapters import ChannelRegistry
 
     reg = ChannelRegistry()
-    for name in ("feishu", "mattermost", "google_chat", "dingtalk", "wecom", "irc"):
+    for name in ("feishu", "mattermost", "google_chat", "dingtalk", "wecom", "irc", "line", "teams", "sms"):
         assert reg.get_adapter(name) is not None
+
+
+def test_line_teams_sms_require_credentials():
+    from homun.application.channel_adapters import LineAdapter, SmsAdapter, TeamsAdapter
+
+    assert LineAdapter().send("Uxxx", "hi")["delivered"] is False
+    assert TeamsAdapter().send("conv", "hi")["delivered"] is False
+    assert SmsAdapter().send("+1555", "hi")["delivered"] is False
+
+
+def test_line_teams_sms_http_send(monkeypatch):
+    from homun.application.channel_adapters import LineAdapter, SmsAdapter, TeamsAdapter
+
+    class FakeResp:
+        status_code = 200
+        content = b"{}"
+
+        def json(self):
+            return {}
+
+    class FakeClient:
+        last = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, json=None, headers=None, data=None, auth=None):
+            FakeClient.last = (url, json, data, auth)
+            return FakeResp()
+
+    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", FakeClient)
+
+    assert LineAdapter(config={"token": "t"}).send("U1", "hi")["delivered"] is True
+    assert "api.line.me" in FakeClient.last[0]
+
+    assert TeamsAdapter(config={"webhook_url": "https://outlook.office.com/webhook/x"}).send("c", "hi")["delivered"] is True
+
+    sms = SmsAdapter(config={"account_sid": "ACxx", "token": "tok", "from": "+1000"})
+    assert sms.send("+15551212", "hi")["delivered"] is True
+    assert "twilio.com" in FakeClient.last[0]

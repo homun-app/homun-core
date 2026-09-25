@@ -1424,6 +1424,185 @@ class WeComAdapter(ChannelAdapter):
             )
 
 
+
+class LineAdapter(ChannelAdapter):
+    """LINE Messaging API push (Hermes messaging catalog: line)."""
+
+    platform = "line"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        events = payload.get("events") or [payload]
+        event = events[0] if events else {}
+        source = event.get("source") or {}
+        message = event.get("message") or {}
+        return ChannelMessage(
+            id=str(event.get("replyToken") or event.get("webhookEventId") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(source.get("groupId") or source.get("roomId") or source.get("userId") or ""),
+            user_id=str(source.get("userId") or ""),
+            text=str(message.get("text") or payload.get("text") or ""),
+            is_direct=str(source.get("type") or "") == "user",
+            timestamp=float(event.get("timestamp") or time.time()) / (
+                1000.0 if event.get("timestamp") and float(event.get("timestamp")) > 10_000_000_000 else 1.0
+            ),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        token = _token_from(self.config, "LINE_CHANNEL_ACCESS_TOKEN", "HOMUN_LINE_CHANNEL_ACCESS_TOKEN")
+        if not token or not channel_id:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        url = "https://api.line.me/v2/bot/message/push"
+        body = {"to": channel_id, "messages": [{"type": "text", "text": text}]}
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, json=body, headers=headers)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform, channel_id=channel_id, text=text,
+                    thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                    delivered=False, error=f"LINE HTTP {resp.status_code}", status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=True, status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=False, error=str(exc),
+            )
+
+
+class TeamsAdapter(ChannelAdapter):
+    """Microsoft Teams incoming webhook or Bot Framework reply URL."""
+
+    platform = "teams"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        from_ = payload.get("from") or {}
+        conv = payload.get("conversation") or {}
+        return ChannelMessage(
+            id=str(payload.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(conv.get("id") or payload.get("channel_id") or ""),
+            user_id=str(from_.get("id") or payload.get("user_id") or ""),
+            text=str(payload.get("text") or ""),
+            is_direct=str(conv.get("conversationType") or "") == "personal",
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        webhook = (
+            str(self.config.get("webhook_url") or "").strip()
+            or str(os.environ.get("TEAMS_WEBHOOK_URL") or os.environ.get("HOMUN_TEAMS_WEBHOOK_URL") or "").strip()
+        )
+        # channel_id may itself be an incoming webhook URL
+        if not webhook.startswith("http") and channel_id.startswith("http"):
+            webhook = channel_id
+        if not webhook.startswith("http"):
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        body = {"text": text}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(webhook, json=body)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform, channel_id=channel_id, text=text,
+                    thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                    delivered=False, error=f"Teams HTTP {resp.status_code}", status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=True, status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=False, error=str(exc),
+            )
+
+
+class SmsAdapter(ChannelAdapter):
+    """Twilio Messages API SMS send (Hermes messaging catalog: sms)."""
+
+    platform = "sms"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        return ChannelMessage(
+            id=str(payload.get("MessageSid") or payload.get("SmsSid") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(payload.get("From") or payload.get("channel_id") or ""),
+            user_id=str(payload.get("From") or payload.get("user_id") or ""),
+            text=str(payload.get("Body") or payload.get("text") or ""),
+            is_direct=True,
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        account = (
+            str(self.config.get("account_sid") or "").strip()
+            or str(os.environ.get("TWILIO_ACCOUNT_SID") or os.environ.get("HOMUN_TWILIO_ACCOUNT_SID") or "").strip()
+        )
+        token = _token_from(self.config, "TWILIO_AUTH_TOKEN", "HOMUN_TWILIO_AUTH_TOKEN")
+        from_number = (
+            str(self.config.get("from") or "").strip()
+            or str(os.environ.get("TWILIO_FROM_NUMBER") or os.environ.get("HOMUN_TWILIO_FROM_NUMBER") or "").strip()
+        )
+        if not account or not token or not from_number or not channel_id:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{account}/Messages.json"
+        data = {"To": channel_id, "From": from_number, "Body": text}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, data=data, auth=(account, token))
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform, channel_id=channel_id, text=text,
+                    thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                    delivered=False, error=f"Twilio SMS HTTP {resp.status_code}", status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=True, status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=False, error=str(exc),
+            )
+
+
 class ChannelRegistry:
     """Registry and dispatcher for multi-platform channel adapters."""
 
@@ -1450,6 +1629,9 @@ class ChannelRegistry:
             "google_chat": GoogleChatAdapter(),
             "dingtalk": DingTalkAdapter(),
             "wecom": WeComAdapter(),
+            "line": LineAdapter(),
+            "teams": TeamsAdapter(),
+            "sms": SmsAdapter(),
         }
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:
