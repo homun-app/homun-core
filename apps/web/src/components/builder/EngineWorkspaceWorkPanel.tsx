@@ -1,6 +1,8 @@
 import { EngineWorkOutputs } from "./EngineWorkOutputs";
 import { EngineAskPerson } from "./EngineAskPerson";
 import { EngineContributionInvitations } from "./EngineContributionInvitations";
+import { EngineWorkProposalPanel } from "./EngineWorkProposalPanel";
+import { WorkTitleEditor } from "./WorkTitleEditor";
 /** Compact, source-explicit summary of an engine-backed work. */
 import { useState, type ReactNode } from "react";
 import type { Work } from "./conversation-types";
@@ -66,106 +68,107 @@ export function EngineWorkspaceWorkPanel({
   const materials = { items: sources.materials.slice(0, 5), count: sources.materials.length };
   const proposal = intake.proposal;
   const awaitingConfirmation = work.engineIntakePending && proposal;
+
+  if (awaitingConfirmation && proposal) {
+    return (
+      <EngineWorkProposalPanel
+        work={work}
+        proposal={proposal}
+        intake={intake}
+        busy={busy}
+        onRename={onRename}
+      />
+    );
+  }
+
   return (
     <aside className="cw-workspace cw-engine-summary" aria-label="Riepilogo del lavoro">
       <div className="cw-panel-top">
         <span className="cw-overline">IL LAVORO, ADESSO</span>
         <span className={`cw-status ${work.phase}`}>
-          {awaitingConfirmation
-            ? "In attesa della tua conferma"
-            : work.engineStatus === "draft"
-              ? engineDraftStatusLabel(Boolean(work.engineIntakeConfirmed))
-              : engineStatusLabel(work.engineStatus)}
+          {work.engineStatus === "draft"
+            ? engineDraftStatusLabel(Boolean(work.engineIntakeConfirmed))
+            : engineStatusLabel(work.engineStatus)}
         </span>
       </div>
       <h2 title={work.title}>{work.title}</h2>
       {onRename && (
         <WorkTitleEditor key={`title:${work.id}`} title={work.title} busy={busy} onRename={onRename} />
       )}
-      {awaitingConfirmation ? (
-        <section className="cw-engine-summary__next" aria-label="Proposta in attesa">
-          <p className="cw-engine-summary__hint">
-            La proposta di accordo è aperta nella conversazione: verifica i dettagli e confermala direttamente in chat per iniziare.
-          </p>
+      {work.engineObjectiveProposed ? (
+        <section className="cw-engine-objective">
+          <div className="cw-engine-summary__section-heading">
+            <h3>Risultato atteso</h3>
+          </div>
+          <div className="cw-engine-objective__reading">
+            <p>{work.engineObjective}</p>
+          </div>
         </section>
       ) : (
-        <>
-          {work.engineObjectiveProposed ? (
-            <section className="cw-engine-objective">
-              <div className="cw-engine-summary__section-heading">
-                <h3>Risultato atteso</h3>
-              </div>
-              <div className="cw-engine-objective__reading">
-                <p>{work.engineObjective}</p>
-              </div>
-            </section>
-          ) : (
-            <EngineWorkObjectiveEditor
-              key={`objective:${work.id}`}
-              currentObjective={work.engineObjective || ""}
-              busy={busy}
-              onPreviewApply={onApplyObjectivePatch}
-            />
-          )}
-          {!work.engineObjective && !work.engineObjectiveProposed && (
-            <p className="cw-engine-summary__hint">
-              L'obiettivo concordato comparirà qui una volta avviato il lavoro.
-            </p>
-          )}
-          <dl className="cw-engine-summary__facts">
-            <div>
-              <dt>Responsabile</dt>
-              <dd>
-                {work.engineProposedAgentName ? (
-                  <>
-                    {work.engineProposedAgentName}
-                    <span className="cw-engine-summary__hint"> · da confermare</span>
-                  </>
-                ) : (
-                  <>
-                    {ownerName || "Homun"}
-                    {!ownerName && <span className="cw-engine-summary__hint"> lavora direttamente con te</span>}
-                  </>
-                )}
-              </dd>
-            </div>
-            {work.projectId && (
-              <div>
-                <dt>Progetto</dt>
-                <dd>
-                  <button
-                    className="cs-link"
-                    onClick={() => onOpenSpace("Progetti", "", work.projectId)}
-                  >
-                    {spaceData.projects.find((project) => project.id === work.projectId)?.name ||
-                      "Caricamento…"}{" "}
-                    ↗
-                  </button>
-                </dd>
-              </div>
-            )}
-          </dl>
-          {materials.items.length > 0 && (
-            <section className="cw-engine-summary__materials">
-              <h3>Materiali del lavoro</h3>
-              <ul>
-                {materials.items.map((material) => (
-                  <li key={material.id} title={material.content_hash ?? undefined}>
-                    {material.origin_name ?? material.title} · v{material.version}
-                  </li>
-                ))}
-              </ul>
-              {materials.count > materials.items.length && (
-                <p className="cw-intake-note">+{materials.count - materials.items.length} altri nel progetto</p>
-              )}
-            </section>
-          )}
-          <section className="cw-engine-summary__next">
-            <h3>Prossimo passo</h3>
-            <p>{engineWorkPanelMessage(work.engineStatus ?? "", proposal)}</p>
-          </section>
-        </>
+        <EngineWorkObjectiveEditor
+          key={`objective:${work.id}`}
+          currentObjective={work.engineObjective || ""}
+          busy={busy}
+          onPreviewApply={onApplyObjectivePatch}
+        />
       )}
+      {!work.engineObjective && !work.engineObjectiveProposed && (
+        <p className="cw-engine-summary__hint">
+          L'obiettivo concordato comparirà qui una volta avviato il lavoro.
+        </p>
+      )}
+      <dl className="cw-engine-summary__facts">
+        <div>
+          <dt>Responsabile</dt>
+          <dd>
+            {work.engineProposedAgentName ? (
+              <>
+                {work.engineProposedAgentName}
+                <span className="cw-engine-summary__hint"> · da confermare</span>
+              </>
+            ) : (
+              <>
+                {ownerName || "Homun"}
+                {!ownerName && <span className="cw-engine-summary__hint"> lavora direttamente con te</span>}
+              </>
+            )}
+          </dd>
+        </div>
+        {work.projectId && (
+          <div>
+            <dt>Progetto</dt>
+            <dd>
+              <button
+                className="cs-link"
+                onClick={() => onOpenSpace("Progetti", "", work.projectId)}
+              >
+                {spaceData.projects.find((project) => project.id === work.projectId)?.name ||
+                  "Caricamento…"}{" "}
+                ↗
+              </button>
+            </dd>
+          </div>
+        )}
+      </dl>
+      {materials.items.length > 0 && (
+        <section className="cw-engine-summary__materials">
+          <h3>Materiali del lavoro</h3>
+          <ul>
+            {materials.items.map((material) => (
+              <li key={material.id} title={material.content_hash ?? undefined}>
+                {material.origin_name ?? material.title} · v{material.version}
+              </li>
+            ))}
+          </ul>
+          {materials.count > materials.items.length && (
+            <p className="cw-intake-note">+{materials.count - materials.items.length} altri nel progetto</p>
+          )}
+        </section>
+      )}
+      <section className="cw-engine-summary__next">
+        <h3>Prossimo passo</h3>
+        <p>{engineWorkPanelMessage(work.engineStatus ?? "", proposal)}</p>
+      </section>
       <PhaseLadder
         work={work}
         agentNames={agentNames}
@@ -567,78 +570,6 @@ function CloseWorkSection({
       {closing && <p role="status">Chiusura in corso…</p>}
       <HomunErrorNotice error={error} />
     </section>
-  );
-}
-
-function WorkTitleEditor({
-  title,
-  busy,
-  onRename,
-}: {
-  title: string;
-  busy: boolean;
-  onRename: (title: string) => Promise<void>;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(title);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  if (!editing)
-    return (
-      <button
-        type="button"
-        className="cs-link"
-        disabled={busy}
-        onClick={() => {
-          setDraft(title);
-          setError(null);
-          setEditing(true);
-        }}
-      >
-        Rinomina
-      </button>
-    );
-  return (
-    <form
-      className="cw-engine-summary__rename"
-      onSubmit={(event) => {
-        event.preventDefault();
-        setSaving(true);
-        setError(null);
-        void onRename(draft.trim())
-          .then(() => setEditing(false))
-          .catch(setError)
-          .finally(() => setSaving(false));
-      }}
-    >
-      <label>
-        Titolo
-        <input
-          value={draft}
-          maxLength={120}
-          disabled={busy || saving}
-          autoFocus
-          onChange={(event) => setDraft(event.target.value)}
-        />
-      </label>
-      <div className="cs-actions">
-        <button
-          className="cw-primary"
-          disabled={busy || saving || !draft.trim() || draft.trim() === title}
-        >
-          Salva titolo
-        </button>
-        <button
-          type="button"
-          className="cw-secondary"
-          disabled={saving}
-          onClick={() => setEditing(false)}
-        >
-          Annulla
-        </button>
-      </div>
-      <HomunErrorNotice error={error} />
-    </form>
   );
 }
 

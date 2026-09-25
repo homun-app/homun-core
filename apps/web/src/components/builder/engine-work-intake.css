@@ -110,3 +110,33 @@
   background: white;
   resize: vertical;
 }
+
+.cw-intake-chat-notice {
+  margin: 14px 0 20px;
+  padding: 16px 20px;
+  border: 1px solid #dce3d5;
+  border-left: 4px solid #687a59;
+  border-radius: 14px;
+  background: #fbfcf9;
+  color: #283e36;
+}
+.cw-intake-chat-notice__badge {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  font-weight: 650;
+  color: #687a59;
+  margin-bottom: 6px;
+}
+.cw-intake-chat-notice__title {
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 6px;
+  color: #1e2d24;
+}
+.cw-intake-chat-notice__hint {
+  font-size: 12px;
+  color: #687a64;
+  line-height: 1.5;
+  margin: 0;
+}
+

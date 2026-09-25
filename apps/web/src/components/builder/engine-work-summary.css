@@ -135,3 +135,68 @@
   user-select: none;
 }
 
+.cw-engine-summary__phase-list {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+  display: grid;
+  gap: 8px;
+}
+.cw-engine-summary__phase-list li {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f4f6f1;
+  border: 1px solid #e1e7dc;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.cw-engine-summary__phase-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #24352a;
+}
+.cw-engine-summary__phase-num {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #687a59;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.cw-engine-summary__phase-output {
+  font-size: 11px;
+  color: #687a59;
+  padding-left: 26px;
+  line-height: 1.4;
+}
+.cw-engine-summary__proposal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #dce2d3;
+}
+.cw-engine-summary__proposal-actions .cw-primary {
+  width: 100%;
+  padding: 11px 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.cw-engine-summary__requirements {
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 6px 0;
+  color: #4b5d4f;
+}
+
+
