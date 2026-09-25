@@ -54,3 +54,19 @@ export function formatString(template: string, params?: Record<string, string | 
     return key in params ? String(params[key]) : `{${key}}`;
   });
 }
+
+/** Translates a dot-notated key with optional parameter formatting. */
+export function t(path: string, params?: Record<string, string | number>): string {
+  const dict = getDictionary();
+  const keys = path.split(".");
+  let current: any = dict;
+  for (const k of keys) {
+    if (current && typeof current === "object" && k in current) {
+      current = current[k];
+    } else {
+      return path;
+    }
+  }
+  return typeof current === "string" ? formatString(current, params) : path;
+}
+

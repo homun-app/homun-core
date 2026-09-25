@@ -1,0 +1,102 @@
+/** Styling for GoalManager dashboard (H25) */
+.cw-goal-dashboard {
+  margin-top: 16px;
+}
+
+.cw-goal-dashboard__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.cw-goal-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cw-goal-card {
+  background: #ffffff;
+  border: 1px solid var(--cw-border, #d9e0d6);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.cw-goal-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.cw-goal-card__title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--cw-text-main, #243027);
+  margin: 0;
+}
+
+.cw-goal-card__session {
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: #718096;
+}
+
+.cw-goal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.cw-goal-badge--active {
+  background: #eef5fc;
+  color: #1f6feb;
+}
+
+.cw-goal-badge--completed {
+  background: #eaf5eb;
+  color: #1a7f37;
+}
+
+.cw-goal-badge--cleared {
+  background: #fbf0ea;
+  color: #bc4c00;
+}
+
+.cw-goal-contract {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--cw-bg-subtle, #f6f8f5);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.cw-goal-contract__row {
+  margin-bottom: 4px;
+}
+
+.cw-goal-contract__row strong {
+  color: #4a5568;
+}
+
+.cw-goal-gates {
+  margin-top: 8px;
+  padding-left: 16px;
+  font-size: 0.8rem;
+}
+
+.cw-goal-empty {
+  padding: 24px;
+  text-align: center;
+  color: #718096;
+  background: #ffffff;
+  border: 1px dashed var(--cw-border, #d9e0d6);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}

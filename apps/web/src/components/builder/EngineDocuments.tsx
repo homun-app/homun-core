@@ -5,6 +5,7 @@ import { listEngineArtifacts } from "@/lib/engine-domain-client";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { ConversationSelectField } from "./ConversationSelect";
 import { FileText, Download, Search } from "lucide-react";
+import { t } from "@/lib/i18n";
 import "./engine-documents.css";
 
 type ProjectOption = { id: string; name: string };
@@ -35,42 +36,41 @@ export function EngineDocuments({ projects }: { projects: ProjectOption[] }) {
   }, [docs, query, project]);
 
   return (
-    <section className="cw-workspace cw-documents" aria-label="Documenti">
+    <section className="cw-workspace cw-documents" aria-label={t("documents.title")}>
       <div className="cw-panel-top">
-        <h2>Documenti</h2>
+        <h2>{t("documents.title")}</h2>
         <span className="cw-hint">
-          {docs?.length ?? "…"} {docs?.length === 1 ? "risultato verificato" : "risultati verificati"}
+          {docs?.length ?? "…"} {docs?.length === 1 ? t("documents.verified_single") : t("documents.verified_multiple")}
         </span>
       </div>
       <p className="cw-hint">
-        Ogni documento qui dentro è un risultato approvato da te: confronti, sintesi, consegne
-        finali. Restano nel motore, pronti quando servono.
+        {t("documents.subtitle")}
       </p>
       <div className="cw-documents__filters">
         <label>
           <Search size={14} />
           <input
-            aria-label="Cerca documenti"
-            placeholder="Cerca per titolo, lavoro o contenuto…"
+            aria-label={t("documents.search_placeholder")}
+            placeholder={t("documents.search_placeholder")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
         <ConversationSelectField
-          aria-label="Filtra per progetto"
+          aria-label={t("documents.filter_project")}
           value={project}
           onChange={(event) => setProject(event.target.value)}
         >
-          <option value="">Tutti i progetti</option>
+          <option value="">{t("documents.filter_project")}</option>
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </ConversationSelectField>
       </div>
-      {docs === null && !error && <p role="status">Apro l'archivio dei risultati…</p>}
+      {docs === null && !error && <p role="status">{t("common.loading")}</p>}
       {docs !== null && filtered.length === 0 && (
         <p className="cw-documents__empty">
           {docs.length === 0
-            ? "Nessun risultato verificato: quando approvi l'esito di un lavoro, compare qui."
-            : "Nessun documento con questi filtri."}
+            ? t("documents.no_documents")
+            : t("documents.no_documents")}
         </p>
       )}
       <div className="cw-documents__list">

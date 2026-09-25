@@ -1,0 +1,128 @@
+/** Styling for delegated subagents monitor (H21/H22) */
+.cw-delegation-list {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--cw-bg-subtle, #f6f8f5);
+  border: 1px solid var(--cw-border, #d9e0d6);
+  border-radius: 8px;
+}
+
+.cw-delegation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.cw-delegation-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--cw-text-main, #243027);
+}
+
+.cw-delegation-badge {
+  font-size: 0.75rem;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: #e2e8df;
+  color: #3d4a3e;
+}
+
+.cw-delegation-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cw-delegation-card {
+  background: #ffffff;
+  border: 1px solid var(--cw-border, #d9e0d6);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+}
+
+.cw-delegation-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.cw-delegation-id {
+  font-family: monospace;
+  font-weight: 600;
+  color: #4a5c4d;
+}
+
+.cw-delegation-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.cw-delegation-status--running {
+  background: #eef5fc;
+  color: #1f6feb;
+}
+
+.cw-delegation-status--completed {
+  background: #eaf5eb;
+  color: #1a7f37;
+}
+
+.cw-delegation-status--cancelled {
+  background: #fbf0ea;
+  color: #bc4c00;
+}
+
+.cw-delegation-status--failed {
+  background: #ffebe9;
+  color: #cf222e;
+}
+
+.cw-delegation-task {
+  margin: 4px 0 8px 0;
+  color: #243027;
+  line-height: 1.4;
+}
+
+.cw-delegation-structured {
+  margin-top: 8px;
+  padding: 8px;
+  background: #f8faf7;
+  border: 1px solid #e1e7de;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.8rem;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.cw-delegation-details-toggle {
+  margin-top: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.8rem;
+  color: #2b6cb0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.cw-delegation-raw {
+  margin-top: 6px;
+  padding: 8px;
+  background: #fdfdfd;
+  border-left: 2px solid #cbd3c5;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

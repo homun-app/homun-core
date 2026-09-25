@@ -129,5 +129,7 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(cron_api.router)
     from homun.routes import gateway_pairing_api
     app.include_router(gateway_pairing_api.router)
+    from homun.routes import goals_api
+    app.include_router(goals_api.router)
     return app
 

@@ -83,6 +83,22 @@ class GoalStore:
             self._conn.execute("DELETE FROM goals WHERE session_id = ?", (session_id,))
             self._conn.commit()
 
+    def list_all(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT session_id, payload, updated_at FROM goals ORDER BY updated_at DESC"
+            ).fetchall()
+        results = []
+        for row in rows:
+            try:
+                data = json.loads(row["payload"])
+                data["session_id"] = row["session_id"]
+                data["updated_at"] = row["updated_at"]
+                results.append(data)
+            except Exception:
+                continue
+        return results
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()

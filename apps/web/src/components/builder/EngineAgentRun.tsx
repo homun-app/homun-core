@@ -14,6 +14,7 @@ import { EngineAgentExternalApproval } from './EngineAgentExternalApproval';
 import { EngineAgentTerminalApproval } from './EngineAgentTerminalApproval';
 import { EngineWorkspaceEditApproval } from './EngineWorkspaceEditApproval';
 import { EngineAgentControls } from './EngineAgentControls';
+import { EngineDelegationList } from './EngineDelegationList';
 
 export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () => Promise<void> }) {
   const [terminalImage, setTerminalImage] = useState('');
@@ -173,6 +174,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       await onChanged();
     }} />}
     {p?.history_redacted && <p>Lo storico delle fonti non è accessibile con i permessi attuali.</p>}
+    <EngineDelegationList observations={p?.observations} />
     {p?.observations.length ? <details><summary>Attività svolte</summary><ol>
       {p.observations.map((step, i) => <li key={i}>{step.message ?? (step.tool === 'human_input' ? 'Chiarimento ricevuto' : step.tool)}</li>)}
     </ol></details> : null}

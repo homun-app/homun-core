@@ -5,6 +5,8 @@ import { listEngineRoutines, previewEngineCron, routineEngineAction } from "@/li
 import { cadenceToCron } from "@/lib/cadence-language";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { ConversationSelectField } from "./ConversationSelect";
+import { EngineGoalDashboard } from "./EngineGoalDashboard";
+import { t } from "@/lib/i18n";
 import "./engine-routines.css";
 
 function describeCron(cron: string): string {
@@ -29,6 +31,7 @@ export function EngineRoutines({
 }) {
   const refresh = onChanged ?? (async () => {});
   const [actionError, setActionError] = useState<unknown>(null);
+  const [tab, setTab] = useState<"routines" | "goals">("routines");
 
   async function act(routine: EngineRoutine, action: "pause" | "resume" | "stop") {
     try {
@@ -41,23 +44,42 @@ export function EngineRoutines({
   }
 
   return (
-    <section className="cw-workspace cw-routines" aria-label="Automazioni">
+    <section className="cw-workspace cw-routines" aria-label={t("routines.title")}>
       <div className="cw-panel-top">
-        <h2>Automazioni</h2>
-        <span className="cw-hint">
-          {routines.filter((r) => r.status === "active").length} attive
-        </span>
+        <h2>{tab === "routines" ? t("routines.title") : t("goals.title")}</h2>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            className={tab === "routines" ? "cw-primary" : "cw-secondary"}
+            style={{ padding: "4px 10px", fontSize: "0.8rem" }}
+            onClick={() => setTab("routines")}
+          >
+            {t("routines.title")} ({routines.filter((r) => r.status === "active").length})
+          </button>
+          <button
+            type="button"
+            className={tab === "goals" ? "cw-primary" : "cw-secondary"}
+            style={{ padding: "4px 10px", fontSize: "0.8rem" }}
+            onClick={() => setTab("goals")}
+          >
+            {t("goals.title")}
+          </button>
+        </div>
       </div>
-      <p className="cw-hint">
-        Ogni routine ripete l'affidamento, mai l'approvazione: a ogni ricorrenza nasce un
-        lavoro vero che aspetta il tuo via, con revisione finale.
-      </p>
-      {routines.length === 0 && (
-        <p className="cw-routines__empty">
-          Nessuna routine. Apri un lavoro riuscito e scegli «Rendi ripetibile» dal suo riepilogo.
-        </p>
-      )}
-      <div className="cw-routines__list">
+
+      {tab === "goals" ? (
+        <EngineGoalDashboard />
+      ) : (
+        <>
+          <p className="cw-hint">
+            {t("routines.subtitle")}
+          </p>
+          {routines.length === 0 && (
+            <p className="cw-routines__empty">
+              {t("routines.empty")}
+            </p>
+          )}
+          <div className="cw-routines__list">
         {routines.map((routine) => (
           <article key={routine.id} className="cw-routine" data-status={routine.status}>
             <header>
@@ -99,8 +121,10 @@ export function EngineRoutines({
           </article>
         ))}
       </div>
-      <HomunErrorNotice error={actionError} />
-    </section>
+    </>
+  )}
+  <HomunErrorNotice error={actionError} />
+</section>
   );
 }
 
