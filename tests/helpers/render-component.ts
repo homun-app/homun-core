@@ -13,7 +13,10 @@ export async function componentRenderer(path: string, name: string) {
     cacheDir,
     logLevel: "error",
     server: { middlewareMode: true, watch: null, ws: false },
-    resolve: { alias: { "@": resolve("apps/web/src") } },
+    resolve: { alias: {
+      "@homun/ui": resolve("packages/ui/src"),
+      "@": resolve("apps/web/src"),
+    } },
     optimizeDeps: { noDiscovery: true, include: [] },
     esbuild: { jsx: "automatic" },
   });

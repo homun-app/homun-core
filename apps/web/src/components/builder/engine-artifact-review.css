@@ -1,0 +1,151 @@
+/* Deliverable and artifact review styling for Homun */
+
+.cw-artifact-review-card {
+  margin: 18px 0 24px;
+  padding: 22px;
+  border: 1px solid #dce3d5;
+  border-radius: 18px;
+  background: #f7f8f3;
+  color: #283e36;
+  max-width: 100%;
+}
+
+.cw-artifact-review-inline {
+  margin: 14px 0 18px;
+  padding: 16px;
+  border: 1px solid #dce3d5;
+  border-radius: 14px;
+  background: #f9faf6;
+  color: #283e36;
+}
+
+.cw-artifact-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.cw-artifact-header h3 {
+  font-size: 20px;
+  line-height: 1.3;
+  margin: 4px 0 0;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+}
+
+.cw-artifact-header h4 {
+  font-size: 16px;
+  line-height: 1.3;
+  margin: 4px 0 0;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.cw-artifact-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.cw-artifact-toolbar button {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #d0d8c8;
+  background: #ffffff;
+  color: #4b6056;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cw-artifact-toolbar button:hover {
+  background: #f0f4ed;
+  color: #20362e;
+}
+
+.cw-artifact-toolbar button.is-active {
+  background: #1e382f;
+  color: #ffffff;
+  border-color: #1e382f;
+  font-weight: 600;
+}
+
+.cw-artifact-content {
+  margin: 14px 0;
+  border: 1px solid #dce3d5;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 16px;
+  overflow-x: auto;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.cw-artifact-markdown {
+  font-size: 13px;
+  line-height: 1.65;
+  color: #1f2e27;
+}
+
+.cw-artifact-markdown h1,
+.cw-artifact-markdown h2,
+.cw-artifact-markdown h3,
+.cw-artifact-markdown h4 {
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  color: #111a18;
+}
+
+.cw-artifact-markdown h1 { font-size: 18px; }
+.cw-artifact-markdown h2 { font-size: 16px; }
+.cw-artifact-markdown h3 { font-size: 14px; }
+
+.cw-artifact-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 12px;
+}
+
+.cw-artifact-markdown th,
+.cw-artifact-markdown td {
+  border: 1px solid #dce3d5;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.cw-artifact-markdown th {
+  background: #f4f6f1;
+  font-weight: 600;
+}
+
+.cw-artifact-raw {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #263830;
+}
+
+.cw-artifact-outputs-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #e0e6db;
+}
+
+.cw-artifact-outputs-section h4 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #556b60;
+  margin-bottom: 8px;
+}
