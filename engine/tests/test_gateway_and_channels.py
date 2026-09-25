@@ -800,3 +800,42 @@ def test_signal_send_posts_when_rest_configured(monkeypatch):
     assert out["delivered"] is True
     assert calls[0]["url"].endswith("/v2/send")
     assert calls[0]["json"]["recipients"] == ["+1555"]
+
+
+def test_irc_send_without_host_unavailable():
+    from homun.application.channel_adapters import IrcAdapter
+
+    out = IrcAdapter().send("#homun", "hi")
+    assert out["delivered"] is False
+    assert out.get("code") == "backend_unavailable"
+
+
+def test_irc_send_uses_socket_when_configured(monkeypatch):
+    from homun.application.channel_adapters import IrcAdapter
+
+    sent = []
+
+    class FakeSock:
+        def settimeout(self, t):
+            return None
+
+        def sendall(self, data):
+            sent.append(data.decode())
+
+        def recv(self, n):
+            raise __import__("socket").timeout()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(
+        "homun.application.channel_adapters.socket.create_connection",
+        lambda *a, **k: FakeSock(),
+    )
+    out = IrcAdapter(config={"host": "irc.example", "nick": "bot"}).send("#homun", "hello")
+    assert out["delivered"] is True
+    assert any("PRIVMSG #homun :hello" in s for s in sent)
+    assert any(s.startswith("NICK bot") for s in sent)

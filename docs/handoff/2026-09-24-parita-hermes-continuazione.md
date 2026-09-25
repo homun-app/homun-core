@@ -1,10 +1,10 @@
 # Continuazione: parità completa Homun / Hermes
 
-Data: 25 settembre 2026. Checkpoint del codice: `2c3a3350` (locale `main` / `fabio/hermes-parity`, nessun push).
+Data: 25 settembre 2026. Checkpoint del codice: vedi HEAD locale `fabio/hermes-parity` / `main` (nessun push).
 Questo documento trasferisce il lavoro a un'altra chat. Non certifica parità raggiunta.
 
 
-## Progresso 24 settembre 2026 (sera)
+## Progresso 24–25 settembre 2026
 
 Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 
@@ -28,10 +28,11 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 18. H10: Vercel probe + HOMUN_VERCEL_ALLOW_LIVE honesty (client not implemented yet).
 19. H10: managed Modal probe + HOMUN_MANAGED_MODAL_ALLOW_LIVE honesty.
 20. H33: email SMTP + Signal REST adapters.
+21. H33: IRC TCP PRIVMSG adapter; H16 Linux xdotool/wmctrl bridge; H36 discovery-only MCP reconnect.
 
-**Prossimo passo eseguibile:** Vercel/managed Modal live clients; resto catalogo messaging (IRC, Matrix E2EE, …); H16 Linux/Windows + AX SoM; MCP OAuth/mTLS/reconnect + product sampling wiring; resto catalogo messaging Hermes (email, signal, …); prove provider con credenziali. Parità completa H01–H46 ancora aperta.
+**Prossimo passo eseguibile:** Vercel/managed Modal live clients; resto catalogo messaging (Feishu, Mattermost, Google Chat, …); H16 Windows + AX SoM; MCP OAuth/mTLS + product sampling wiring; prove provider con credenziali. Parità completa H01–H46 ancora aperta.
 
-**Blocchi esterni (non inventare):** token canali reali; TCC Accessibility/Screen Recording per prove H16 live; `HOMUN_MODAL_ALLOW_LIVE` / `HOMUN_DAYTONA_ALLOW_LIVE` + SDK per prove cloud a pagamento; Copilot CLI con `--acp` per prova H39 live.
+**Blocchi esterni (non inventare):** token canali reali; TCC Accessibility/Screen Recording per prove H16 live macOS; DISPLAY + xdotool su Linux; `HOMUN_MODAL_ALLOW_LIVE` / `HOMUN_DAYTONA_ALLOW_LIVE` + SDK per prove cloud a pagamento; Copilot CLI con `--acp` per prova H39 live.
 
 
 ## 1. Obiettivo e decisioni già prese

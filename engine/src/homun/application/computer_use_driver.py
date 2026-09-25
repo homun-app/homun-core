@@ -57,15 +57,24 @@ class ComputerUseDriver:
 
         if (
             auto_probe
-            and sys.platform == "darwin"
             and apps_provider is None
             and windows_provider is None
             and capture_provider is None
             and action_provider is None
         ):
-            from homun.application.computer_use_macos_bridge import attach_macos_providers
+            if sys.platform == "darwin":
+                from homun.application.computer_use_macos_bridge import attach_macos_providers
 
-            attach_macos_providers(self)
+                attach_macos_providers(self)
+            elif sys.platform.startswith("linux"):
+                from homun.application.computer_use_linux_bridge import (
+                    attach_linux_providers,
+                    probe_linux_computer_use,
+                )
+
+                if self._status_probe is None:
+                    self._status_probe = probe_linux_computer_use
+                attach_linux_providers(self)
 
     def get_status(self) -> Dict[str, Any]:
         """Return platform readiness only after a real permission/driver probe."""
@@ -87,7 +96,12 @@ class ComputerUseDriver:
                 if not probed.get("error"):
                     probed["error"] = BACKEND_UNAVAILABLE
             else:
-                probed["driver"] = "macos-bridge"
+                if sys.platform == "darwin":
+                    probed["driver"] = "macos-bridge"
+                elif sys.platform.startswith("linux"):
+                    probed["driver"] = "linux-bridge"
+                else:
+                    probed["driver"] = "os-bridge"
             return probed
 
         return {

@@ -177,3 +177,21 @@ def test_read_resource_and_get_prompt(tmp_path):
     prompt = mcp_client.get_prompt(decl, "summarize")
     assert prompt["name"] == "summarize"
     assert prompt["messages"][0]["content"]["text"] == "prompt:summarize"
+
+
+def test_probe_reconnects_once_on_transient_failure(tmp_path, monkeypatch):
+    """Discovery-only reconnect; tools/call must not auto-retry after start."""
+    calls = {"n": 0}
+    original = mcp_client._operation
+
+    async def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient transport death")
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(mcp_client, "_operation", flaky)
+    # Use a real local server so the second attempt succeeds.
+    result = mcp_client.probe_server(server(tmp_path))
+    assert result["tools"] == ["first", "second"]
+    assert calls["n"] == 2

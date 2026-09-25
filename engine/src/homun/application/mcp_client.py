@@ -23,6 +23,7 @@ from homun.domain.models import ExternalServer
 PROBE_TIMEOUT_SECONDS = 10.0
 MAX_DISCOVERY_PAGES = 100
 MCP_PROTOCOL_VERSION = "2025-06-18"  # SDK negotiates supported protocol versions.
+PROBE_RECONNECT_ATTEMPTS = 2  # discovery-only reconnect; never after tools/call starts
 
 SamplingCallback = Callable[[Any, types.CreateMessageRequestParams], Awaitable[Any]]
 ElicitationCallback = Callable[[Any, types.ElicitRequestParams], Awaitable[Any]]
@@ -232,21 +233,31 @@ def _run(server: ExternalServer, tool_name: str | None, arguments: dict[str, Any
     if server.status != "enabled":
         raise RuntimeError("Server is disabled")
     dispatch_state = {"started": False}
-    try:
-        return asyncio.run(_operation(
-            server, tool_name, arguments, expected_descriptor, dispatch_state,
-            resource_uri=resource_uri, prompt_name=prompt_name, prompt_arguments=prompt_arguments,
-        ))
-    except Exception as exc:
-        if expected_descriptor is not None and not dispatch_state["started"]:
-            raise MCPPreflightError("Tool contract preflight failed; no call sent") from exc
-        # Exception groups from transport teardown often conceal the useful leaf.
-        leaf = exc
-        while isinstance(leaf, BaseExceptionGroup) and leaf.exceptions:
-            leaf = leaf.exceptions[0]
-        if isinstance(leaf, MCPPreflightError):
-            raise leaf from exc
-        raise RuntimeError(f"MCP operation failed: {type(leaf).__name__}: {leaf}") from exc
+    discovery_only = tool_name is None and resource_uri is None and prompt_name is None
+    attempts = PROBE_RECONNECT_ATTEMPTS if discovery_only else 1
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        dispatch_state["started"] = False
+        try:
+            return asyncio.run(_operation(
+                server, tool_name, arguments, expected_descriptor, dispatch_state,
+                resource_uri=resource_uri, prompt_name=prompt_name, prompt_arguments=prompt_arguments,
+            ))
+        except Exception as exc:
+            last_exc = exc
+            if expected_descriptor is not None and not dispatch_state["started"]:
+                raise MCPPreflightError("Tool contract preflight failed; no call sent") from exc
+            leaf = exc
+            while isinstance(leaf, BaseExceptionGroup) and leaf.exceptions:
+                leaf = leaf.exceptions[0]
+            if isinstance(leaf, MCPPreflightError):
+                raise leaf from exc
+            # Reconnect only for discovery before any external effect.
+            if discovery_only and attempt + 1 < attempts and not dispatch_state["started"]:
+                continue
+            raise RuntimeError(f"MCP operation failed: {type(leaf).__name__}: {leaf}") from exc
+    assert last_exc is not None
+    raise RuntimeError(f"MCP operation failed after reconnect: {last_exc}") from last_exc
 
 
 def probe_server(server: ExternalServer) -> dict[str, Any]:

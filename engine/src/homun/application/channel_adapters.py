@@ -9,6 +9,7 @@ thread routing, authorization gates, and turn lease acquisition.
 from __future__ import annotations
 
 import logging
+import socket
 import os
 import smtplib
 import time
@@ -751,6 +752,96 @@ class MatrixAdapter(ChannelAdapter):
 
 
 
+
+class IrcAdapter(ChannelAdapter):
+    """Classic IRC PRIVMSG delivery when IRC_HOST is configured (H33)."""
+
+    platform = "irc"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        return ChannelMessage(
+            id=str(payload.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(payload.get("channel") or payload.get("channel_id") or ""),
+            user_id=str(payload.get("nick") or payload.get("user_id") or ""),
+            text=str(payload.get("text") or payload.get("message") or ""),
+            is_direct=str(payload.get("channel") or "").startswith("#") is False,
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        host = (
+            str(self.config.get("host") or "").strip()
+            or str(os.environ.get("IRC_HOST") or os.environ.get("HOMUN_IRC_HOST") or "").strip()
+        )
+        port = int(self.config.get("port") or os.environ.get("IRC_PORT") or os.environ.get("HOMUN_IRC_PORT") or 6667)
+        nick = (
+            str(self.config.get("nick") or "").strip()
+            or str(os.environ.get("IRC_NICK") or os.environ.get("HOMUN_IRC_NICK") or "homun").strip()
+        )
+        if not host or not channel_id:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        password = str(self.config.get("password") or os.environ.get("IRC_PASSWORD") or os.environ.get("HOMUN_IRC_PASSWORD") or "")
+        timeout = float(self.config.get("timeout") or 15.0)
+        try:
+            with socket.create_connection((host, port), timeout=timeout) as sock:
+                sock.settimeout(timeout)
+                def _send(line: str) -> None:
+                    sock.sendall((line + "\r\n").encode("utf-8"))
+                if password:
+                    _send(f"PASS {password}")
+                _send(f"NICK {nick}")
+                _send(f"USER {nick} 0 * :Homun")
+                # Drain banner briefly without blocking forever.
+                sock.settimeout(2.0)
+                try:
+                    while True:
+                        chunk = sock.recv(4096)
+                        if not chunk:
+                            break
+                        for raw in chunk.decode("utf-8", errors="replace").splitlines():
+                            if raw.upper().startswith("PING"):
+                                _send("PONG " + raw.split(" ", 1)[1])
+                except socket.timeout:
+                    pass
+                sock.settimeout(timeout)
+                if channel_id.startswith("#"):
+                    _send(f"JOIN {channel_id}")
+                # IRC messages should stay under ~400 bytes; split defensively.
+                for i in range(0, len(text), 350):
+                    _send(f"PRIVMSG {channel_id} :{text[i:i+350]}")
+                _send("QUIT :homun")
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=True,
+                status_code=200,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform,
+                channel_id=channel_id,
+                text=text,
+                thread_id=thread_id,
+                reply_to_id=reply_to_id,
+                media=media,
+                delivered=False,
+                error=str(exc),
+            )
+
+
 class SignalAdapter(ChannelAdapter):
     """signal-cli REST API outbound (when SIGNAL_CLI_REST_URL is set)."""
 
@@ -935,6 +1026,7 @@ class ChannelRegistry:
             "matrix": MatrixAdapter(),
             "email": EmailAdapter(),
             "signal": SignalAdapter(),
+            "irc": IrcAdapter(),
         }
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:
