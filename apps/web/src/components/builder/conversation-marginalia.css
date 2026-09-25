@@ -1,0 +1,105 @@
+/* Marginalia Spine & Floating Dash Notes */
+.cw-marginalia-spine {
+  position: fixed;
+  right: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 40;
+  pointer-events: none;
+}
+
+.cw-marginalia-track {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+  pointer-events: auto;
+}
+
+.cw-marginalia-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.cw-marginalia-dash {
+  width: 14px;
+  height: 2.5px;
+  border-radius: 2px;
+  background: #aab8ab;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cw-marginalia-dash:hover,
+.cw-marginalia-dash.is-active {
+  width: 22px;
+  height: 3px;
+  background: #283a2e;
+}
+
+/* Floating Popover on Hover (Dark Floating Card as in reference image) */
+.cw-marginalia-popover {
+  position: absolute;
+  right: calc(100% + 14px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 280px;
+  background: #232724;
+  color: #f1f4ed;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 13px 15px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 50;
+  animation: marginalia-fade-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes marginalia-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+}
+
+.cw-marginalia-popover__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.cw-marginalia-popover__category {
+  font-size: 11px;
+  color: #9aa89d;
+  font-weight: 500;
+}
+
+.cw-marginalia-popover__icon {
+  color: #8fa093;
+}
+
+.cw-marginalia-popover__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  line-height: 1.35;
+}
+
+.cw-marginalia-popover__detail {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #cfd8d0;
+  margin: 0;
+}

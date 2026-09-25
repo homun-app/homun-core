@@ -5,6 +5,7 @@
 
 import { EngineWorkIntake } from "./EngineWorkIntake";
 import { EnginePlanRelayTimeline } from "./EnginePlanRelayTimeline";
+import { ConversationMarginaliaSpine } from "./ConversationMarginaliaSpine";
 import { Check, Sparkles, X } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 import { ConversationAgentWait } from "./ConversationAgentWait";
@@ -359,6 +360,7 @@ export function ConversationWorkspaceChatStage({
           </div>
         </div>
       </section>
+      {!panelOpen && <ConversationMarginaliaSpine work={work} intake={engineIntake} />}
       {panelOpen && details}
     </div>
   );
