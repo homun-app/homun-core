@@ -36,25 +36,25 @@ export function EngineWorkIntake({
       </p>
     );
   if (intake.error && !p) return <HomunErrorNotice error={intake.error} />;
-  // Legacy work keeps its existing tool and results; it is never silently reassigned.
-  if (!p)
-    return work.title === PLACEHOLDER_WORK_TITLE ? (
-      <section className="cw-intake-card">
-        {work.messages.length > 0 ? (
-          <p>
-            Qui stiamo scambiando domande e risposte: nessun lavoro è stato avviato e nessun
-            collaboratore è stato assegnato. Quando vuoi un risultato concreto, descrivilo in chat
-            e ti proporrò un accordo da confermare.
-          </p>
-        ) : (
-          <p>La richiesta non è stata elaborata. Scrivila nuovamente nella chat per riprovare.</p>
-        )}
-      </section>
-    ) : work.engineStatus === "review" && work.engineLatestArtifact ? (
+  if (!p) {
+    if (work.title === PLACEHOLDER_WORK_TITLE) {
+      if (work.engineIntakePending || intake.busy) {
+        return (
+          <section className="cw-intake-card" aria-label="Elaborazione proposta">
+            <p className="cw-hint" role="status">
+              Homun sta preparando la proposta di lavoro…
+            </p>
+          </section>
+        );
+      }
+      return null;
+    }
+    return work.engineStatus === "review" && work.engineLatestArtifact ? (
       <EngineArtifactReview work={work} onChanged={onChanged} />
     ) : (
       <EnginePriceComparison work={work} onChanged={onChanged} />
     );
+  }
   const confirmed = p.status === "confirmed";
   const failed = p.status === "failed";
   const agent = p.suggested_agent ?? p.new_agent;
@@ -68,7 +68,7 @@ export function EngineWorkIntake({
     <>
       <section className="cw-intake-card" aria-label="Proposta di lavoro">
         <div className="cw-intake-eyebrow">
-          {confirmed ? "ACCORDO DI LAVORO" : failed ? "DA RIPRENDERE" : "PRIMA DI COMINCIARE"}
+          {confirmed ? "ACCORDO DI LAVORO" : failed ? "DA RIPRENDERE" : "PROPOSTA DI LAVORO"}
         </div>
         {failed ? (
           <>
@@ -122,16 +122,29 @@ export function EngineWorkIntake({
               </div>
             )}
             <dl className="cw-intake-facts">
-              <div><dt>Attività prevista</dt><dd>{p.capability === 'compare_csv' ? 'Confronto prezzi fra due CSV' : p.capability === 'read_material' ? 'Lettura autorizzata di un materiale' : p.capability === 'agent_run' ? 'Esecuzione adattiva con letture e ricerche nei documenti scelti' : p.capability === 'synthesize' ? 'Sintesi scritta da Homun o dal collaboratore scelto, bozza in revisione' : 'Preparazione del lavoro, senza esecuzione automatica'}</dd></div>
+              {p.capability !== 'general' && p.capability !== 'agent_run' && (
+                <div>
+                  <dt>Attività prevista</dt>
+                  <dd>
+                    {p.capability === 'compare_csv'
+                      ? 'Confronto prezzi fra due CSV'
+                      : p.capability === 'read_material'
+                      ? 'Lettura autorizzata di un materiale'
+                      : p.capability === 'synthesize'
+                      ? 'Sintesi scritta da Homun'
+                      : p.capability}
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt>Risultato atteso</dt>
                 <dd>{p.output}</dd>
               </div>
               <div>
-                <dt>{confirmed ? "Responsabile" : "Ti propongo"}</dt>
+                <dt>{confirmed ? "Responsabile" : "Collaboratore proposto"}</dt>
                 <dd>
                   <strong>{agent?.name ?? "Homun"}</strong>
-                  {agent && <span>{agent.role}</span>}
+                  {agent && <span> · {agent.role}</span>}
                 </dd>
               </div>
             </dl>

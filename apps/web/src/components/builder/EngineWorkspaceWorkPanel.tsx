@@ -82,103 +82,90 @@ export function EngineWorkspaceWorkPanel({
       {onRename && (
         <WorkTitleEditor key={`title:${work.id}`} title={work.title} busy={busy} onRename={onRename} />
       )}
-      {work.engineObjectiveProposed ? (
-        <section className="cw-engine-objective">
-          <div className="cw-engine-summary__section-heading">
-            <h3>Risultato atteso</h3>
-          </div>
-          <div className="cw-engine-objective__reading">
-            <p>{work.engineObjective}</p>
-          </div>
+      {awaitingConfirmation ? (
+        <section className="cw-engine-summary__next" aria-label="Proposta in attesa">
           <p className="cw-engine-summary__hint">
-            Dalla proposta in chat: diventa l’esito concordato quando confermi.
+            La proposta di accordo è aperta nella conversazione: verifica i dettagli e confermala direttamente in chat per iniziare.
           </p>
         </section>
       ) : (
-        <EngineWorkObjectiveEditor
-          key={`objective:${work.id}`}
-          currentObjective={work.engineObjective || ""}
-          busy={busy}
-          onPreviewApply={onApplyObjectivePatch}
-        />
-      )}
-      {!work.engineObjective && !work.engineObjectiveProposed && (
-        <p className="cw-engine-summary__hint">
-          L'obiettivo arriva dalla proposta di lavoro in chat: Homun la sta preparando o è in attesa
-          della tua conferma.
-        </p>
-      )}
-      <dl className="cw-engine-summary__facts">
-        <div>
-          <dt>Responsabile</dt>
-          <dd>
-            {work.engineProposedAgentName ? (
-              <>
-                {work.engineProposedAgentName}
-                <span className="cw-engine-summary__hint"> · da confermare</span>
-              </>
-            ) : (
-              <>
-                {ownerName || "Homun"}
-                {!ownerName && <span className="cw-engine-summary__hint"> lavora direttamente con te</span>}
-              </>
-            )}
-          </dd>
-        </div>
-        {work.projectId && (
-          <div>
-            <dt>Progetto</dt>
-            <dd>
-              <button
-                className="cs-link"
-                onClick={() => onOpenSpace("Progetti", "", work.projectId)}
-              >
-                {spaceData.projects.find((project) => project.id === work.projectId)?.name ||
-                  "Caricamento…"}{" "}
-                ↗
-              </button>
-            </dd>
-          </div>
-        )}
-      </dl>
-      {materials.items.length > 0 && (
-        <section className="cw-engine-summary__materials">
-          <h3>Materiali del lavoro</h3>
-          <ul>
-            {materials.items.map((material) => (
-              <li key={material.id} title={material.content_hash ?? undefined}>
-                {material.origin_name ?? material.title} · v{material.version}
-              </li>
-            ))}
-          </ul>
-          {materials.count > materials.items.length && (
-            <p className="cw-intake-note">+{materials.count - materials.items.length} altri nel progetto</p>
+        <>
+          {work.engineObjectiveProposed ? (
+            <section className="cw-engine-objective">
+              <div className="cw-engine-summary__section-heading">
+                <h3>Risultato atteso</h3>
+              </div>
+              <div className="cw-engine-objective__reading">
+                <p>{work.engineObjective}</p>
+              </div>
+            </section>
+          ) : (
+            <EngineWorkObjectiveEditor
+              key={`objective:${work.id}`}
+              currentObjective={work.engineObjective || ""}
+              busy={busy}
+              onPreviewApply={onApplyObjectivePatch}
+            />
           )}
-        </section>
-      )}
-      <section className="cw-engine-summary__next">
-        <h3>Prossimo passo</h3>
-        {awaitingConfirmation ? (
-          <>
-            <p>{engineWorkPanelMessage(work.engineStatus ?? "", proposal)}</p>
-            <div className="cs-actions">
-              <button
-                className="cw-primary"
-                disabled={intake.busy}
-                onClick={() => void intake.confirm()}
-              >
-                {intakeConfirmLabel(proposal)}
-              </button>
-            </div>
+          {!work.engineObjective && !work.engineObjectiveProposed && (
             <p className="cw-engine-summary__hint">
-              Vuoi cambiarla? Scrivi in chat cosa correggere: la proposta si aggiorna.
+              L'obiettivo concordato comparirà qui una volta avviato il lavoro.
             </p>
-            {intake.busy && <p role="status">Sto confermando la proposta…</p>}
-          </>
-        ) : (
-          <p>{engineWorkPanelMessage(work.engineStatus ?? "", proposal)}</p>
-        )}
-      </section>
+          )}
+          <dl className="cw-engine-summary__facts">
+            <div>
+              <dt>Responsabile</dt>
+              <dd>
+                {work.engineProposedAgentName ? (
+                  <>
+                    {work.engineProposedAgentName}
+                    <span className="cw-engine-summary__hint"> · da confermare</span>
+                  </>
+                ) : (
+                  <>
+                    {ownerName || "Homun"}
+                    {!ownerName && <span className="cw-engine-summary__hint"> lavora direttamente con te</span>}
+                  </>
+                )}
+              </dd>
+            </div>
+            {work.projectId && (
+              <div>
+                <dt>Progetto</dt>
+                <dd>
+                  <button
+                    className="cs-link"
+                    onClick={() => onOpenSpace("Progetti", "", work.projectId)}
+                  >
+                    {spaceData.projects.find((project) => project.id === work.projectId)?.name ||
+                      "Caricamento…"}{" "}
+                    ↗
+                  </button>
+                </dd>
+              </div>
+            )}
+          </dl>
+          {materials.items.length > 0 && (
+            <section className="cw-engine-summary__materials">
+              <h3>Materiali del lavoro</h3>
+              <ul>
+                {materials.items.map((material) => (
+                  <li key={material.id} title={material.content_hash ?? undefined}>
+                    {material.origin_name ?? material.title} · v{material.version}
+                  </li>
+                ))}
+              </ul>
+              {materials.count > materials.items.length && (
+                <p className="cw-intake-note">+{materials.count - materials.items.length} altri nel progetto</p>
+              )}
+            </section>
+          )}
+          <section className="cw-engine-summary__next">
+            <h3>Prossimo passo</h3>
+            <p>{engineWorkPanelMessage(work.engineStatus ?? "", proposal)}</p>
+          </section>
+        </>
+      )}
       <PhaseLadder
         work={work}
         agentNames={agentNames}
@@ -196,8 +183,13 @@ export function EngineWorkspaceWorkPanel({
       {work.engineStatus === "completed" && onCreateRoutine && (
         <EngineRoutineCreator defaultName={work.title} onCreateRoutine={onCreateRoutine} />
       )}
-      <WorkDueSection work={work} busy={busy} onSetDue={onSetDue} />
-      <WorkBudgetSection work={work} busy={busy} onSetBudget={onSetBudget} />
+      {work.engineIntakeConfirmed && (
+        <details className="cw-engine-summary__advanced">
+          <summary>Opzioni avanzate (scadenza e budget)</summary>
+          <WorkDueSection work={work} busy={busy} onSetDue={onSetDue} />
+          <WorkBudgetSection work={work} busy={busy} onSetBudget={onSetBudget} />
+        </details>
+      )}
       <CloseWorkSection work={work} busy={busy} onCloseWork={onCloseWork} />
       <HomunErrorNotice error={sources.error} />
       {contributionPanel}
