@@ -39,8 +39,9 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 29. H16: macOS AX/SoM element listing via System Events.
 30. H33: SimpleX + Photon channel adapters.
 31. H36: MCP OAuth refuse-until-broker + mTLS client certs on HTTP.
+32. refactor: channel_adapters_catalog split; H33 A2A adapter.
 
-**Prossimo passo eseguibile:** resto catalogo messaging (A2A, Raft, …); MCP OAuth token broker; prove live con credenziali; prove provider con credenziali. Parità completa H01–H46 ancora aperta.
+**Prossimo passo eseguibile:** resto catalogo messaging (Raft, Buzz, …); MCP OAuth token broker; prove live con credenziali; prove provider con credenziali. Parità completa H01–H46 ancora aperta.
 
 **Blocchi esterni (non inventare):** token canali reali; TCC Accessibility/Screen Recording per prove H16 live macOS; DISPLAY + xdotool su Linux; `HOMUN_MODAL_ALLOW_LIVE` / `HOMUN_DAYTONA_ALLOW_LIVE` + SDK per prove cloud a pagamento; Copilot CLI con `--acp` per prova H39 live.
 

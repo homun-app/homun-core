@@ -916,3 +916,63 @@ class PhotonAdapter(ChannelAdapter):
             )
 
 
+class A2AAdapter(ChannelAdapter):
+    """Agent-to-Agent (A2A) HTTP task message send."""
+
+    platform = "a2a"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        return ChannelMessage(
+            id=str(payload.get("messageId") or payload.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(payload.get("contextId") or payload.get("channel_id") or ""),
+            user_id=str(payload.get("from") or payload.get("user_id") or "peer"),
+            text=str(payload.get("text") or payload.get("message") or ""),
+            is_direct=True,
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        base = (
+            str(self.config.get("base_url") or channel_id or "").strip()
+            or str(os.environ.get("A2A_URL") or os.environ.get("HOMUN_A2A_URL") or "").strip()
+        )
+        token = _token_from(self.config, "A2A_TOKEN", "HOMUN_A2A_TOKEN")
+        if not base.startswith("http"):
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        url = f"{base.rstrip('/')}/message:send"
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        body = {"message": {"role": "user", "parts": [{"type": "text", "text": text}]}}
+        if thread_id:
+            body["contextId"] = thread_id
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 20.0)) as client:
+                resp = client.post(url, json=body, headers=headers)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform, channel_id=channel_id, text=text,
+                    thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                    delivered=False, error=f"A2A HTTP {resp.status_code}", status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=True, status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=False, error=str(exc),
+            )
+

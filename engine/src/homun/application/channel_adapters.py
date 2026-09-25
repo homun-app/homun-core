@@ -1015,6 +1015,7 @@ from homun.application.channel_adapters_catalog import (
     GoogleChatAdapter,
     LineAdapter,
     MattermostAdapter,
+    A2AAdapter,
     PhotonAdapter,
     QqBotAdapter,
     SimplexAdapter,
@@ -1058,6 +1059,7 @@ class ChannelRegistry:
             "qqbot": QqBotAdapter(),
             "simplex": SimplexAdapter(),
             "photon": PhotonAdapter(),
+            "a2a": A2AAdapter(),
         }
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:
