@@ -34,6 +34,7 @@ import { ConversationAgentsSettingsSection } from "./ConversationAgentsSettingsS
 import { ConversationProjectsSettingsSection } from "./ConversationProjectsSettingsSection";
 import { ConversationGatewayChannelsSection } from "./ConversationGatewayChannelsSection";
 import { type ConversationPreferences } from "./conversation-preferences";
+import { setLanguage } from "@/lib/i18n";
 import "./conversation-settings.css";
 const sections = [
   { id: "space", label: "Spazio e profilo", icon: UserRound },
@@ -186,6 +187,22 @@ export function ConversationSettings({
             <>
               <h3>Un’interfaccia comoda per te</h3>
               <p>Le preferenze valgono per questo browser.</p>
+              <label>
+                Lingua dell’interfaccia
+                <ConversationSelect
+                  label="Lingua dell’interfaccia"
+                  value={draft.language ?? "it"}
+                  options={[
+                    { value: "it", label: "Italiano" },
+                    { value: "en", label: "English" },
+                  ]}
+                  onChange={(v) => {
+                    const lang = v as "it" | "en";
+                    change("language", lang);
+                    setLanguage(lang);
+                  }}
+                />
+              </label>
               <label>
                 Dimensione del testo
                 <ConversationSelect
