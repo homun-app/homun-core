@@ -32,13 +32,14 @@ import { ConversationAutomationsSettingsSection } from "./ConversationAutomation
 import { ConversationMemorySettingsSection } from "./ConversationMemorySettingsSection";
 import { ConversationAgentsSettingsSection } from "./ConversationAgentsSettingsSection";
 import { ConversationProjectsSettingsSection } from "./ConversationProjectsSettingsSection";
+import { ConversationGatewayChannelsSection } from "./ConversationGatewayChannelsSection";
 import { type ConversationPreferences } from "./conversation-preferences";
 import "./conversation-settings.css";
 const sections = [
   { id: "space", label: "Spazio e profilo", icon: UserRound },
   { id: "people", label: "Persone e accessi", icon: UsersRound },
   { id: "preferences", label: "Preferenze", icon: Settings2 },
-  { id: "notifications", label: "Notifiche", icon: Bell },
+  { id: "notifications", label: "Notifiche e canali", icon: Bell },
   { id: "models", label: "Modelli", icon: Brain },
   { id: "budget", label: "Budget e routing", icon: Wallet },
   { id: "agents", label: "Agenti", icon: Bot },
@@ -247,6 +248,7 @@ export function ConversationSettings({
                   onChange={(e) => change("resultNotifications", e.target.checked)}
                 />
               </label>
+              <ConversationGatewayChannelsSection />
             </>
           )}
           {section === "models" && (
