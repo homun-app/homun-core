@@ -1287,9 +1287,8 @@ export function ConversationWorkspace() {
             onSend={send}
             onClearNotice={() => setNotice("")}
             engineMode={engine.backend === "engine"} engineIntake={engine.intake} onRefreshEngine={engine.refresh}
-            engineAgents={engine.backend === "engine" ? engine.agents : undefined}
-            engineBusy={engine.busy}
-            historyLoading={engine.historyLoading}
+            engineAgents={engine.backend === "engine" ? engine.agents : undefined} agentNames={engine.backend === "engine" ? Object.fromEntries(engine.agents.map((agent) => [agent.id, agent.name])) : undefined}
+            onStartWork={work?.source === "engine" ? () => engine.startWork(work) : undefined} engineBusy={engine.busy} historyLoading={engine.historyLoading}
             onConfirmPatch={(messageIndex) => {
               if (!work) return;
               void engine.confirmPatch(work, messageIndex).catch(() => {

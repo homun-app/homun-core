@@ -4,6 +4,7 @@
  */
 
 import { EngineWorkIntake } from "./EngineWorkIntake";
+import { EnginePlanRelayTimeline } from "./EnginePlanRelayTimeline";
 import { Check, Sparkles, X } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 import { ConversationAgentWait } from "./ConversationAgentWait";
@@ -54,6 +55,8 @@ type Props = {
   onSaveMemory?: ((messageIndex: number) => void) | undefined;
   onSaveSkill?: ((messageIndex: number) => void) | undefined;
   onCancelInFlight?: () => void;
+  agentNames?: Record<string, string> | undefined;
+  onStartWork?: (() => Promise<void>) | undefined;
 };
 
 export function ConversationWorkspaceChatStage({
@@ -91,6 +94,8 @@ export function ConversationWorkspaceChatStage({
   onSaveMemory,
   onSaveSkill,
   onCancelInFlight,
+  agentNames,
+  onStartWork,
 }: Props) {
   const mentionRefs = [
     ...scenarios
@@ -299,6 +304,14 @@ export function ConversationWorkspaceChatStage({
                 </div>
               )}
             </>
+          )}
+          {engineMode && work?.source === "engine" && work.enginePlan && work.enginePlan.length > 0 && (
+            <EnginePlanRelayTimeline
+              work={work}
+              agentNames={agentNames}
+              busy={engineBusy}
+              onStartWork={onStartWork}
+            />
           )}
           {engineMode && work?.source === "engine" && engineIntake && (
             <EngineWorkIntake key={work.id} work={work} intake={engineIntake} onChanged={onRefreshEngine} />
