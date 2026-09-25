@@ -93,26 +93,11 @@ export function EngineWorkIntake({
 
   return (
     <>
-      {work.engineStatus === "draft" && p.capability === "general" && p.missing_information.length > 0 && (
-        <EngineWorkNeedsCard work={work} items={p.missing_information} onChanged={onChanged} />
-      )}
       {work.engineStatus === "review" && work.engineLatestArtifact
         && ["general", "agent_run"].includes(lastSucceededCapability(work) ?? "") && (
         <EngineArtifactReview variant="inline" work={work} onChanged={onChanged} />
       )}
-      <PhaseTool work={work} onChanged={onChanged} />
-      {p.capability === "compare_csv" && (
-        <EnginePriceComparison initiallyOpen work={work} onChanged={onChanged} />
-      )}
-      {p.capability === "read_material" && (
-        <EngineMaterialRead initiallyOpen work={work} onChanged={onChanged} />
-      )}
-      {p.capability === "agent_run" && !work.enginePlan?.length && (
-        <EngineAgentRun work={work} onChanged={onChanged} />
-      )}
-      {p.capability === "synthesize" && (
-        <EngineSynthesis initiallyOpen work={work} onChanged={onChanged} />
-      )}
+      {!work.enginePlan?.length && <PhaseTool work={work} onChanged={onChanged} />}
       <HomunErrorNotice error={intake.error} />
     </>
   );

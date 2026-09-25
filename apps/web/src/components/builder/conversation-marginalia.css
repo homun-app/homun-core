@@ -11,9 +11,10 @@
 .cw-marginalia-track {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   align-items: flex-end;
   pointer-events: auto;
+  padding-right: 4px;
 }
 
 .cw-marginalia-item {
@@ -23,43 +24,75 @@
   justify-content: flex-end;
 }
 
-.cw-marginalia-dash {
-  width: 14px;
-  height: 2.5px;
-  border-radius: 2px;
-  background: #aab8ab;
+/* Generous, comfortable hit target: 32px wide by 20px tall */
+.cw-marginalia-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  background: transparent;
   border: none;
-  padding: 0;
+  padding: 8px 4px;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+  transition: transform 0.2s ease;
 }
 
-.cw-marginalia-dash:hover,
-.cw-marginalia-dash.is-active {
-  width: 22px;
+.cw-marginalia-dash {
+  display: block;
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: #9db0a0;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.cw-marginalia-btn:hover .cw-marginalia-dash,
+.cw-marginalia-btn.is-active .cw-marginalia-dash {
+  width: 24px;
   height: 3px;
-  background: #283a2e;
+  background: #1f3326;
+  box-shadow: 0 0 8px rgba(31, 51, 38, 0.25);
+}
+
+.cw-marginalia-item.has-badge .cw-marginalia-dash {
+  background: #55755e;
+}
+
+.cw-marginalia-item.has-badge .cw-marginalia-btn:hover .cw-marginalia-dash,
+.cw-marginalia-item.has-badge .cw-marginalia-btn.is-active .cw-marginalia-dash {
+  background: #172d1e;
 }
 
 /* Floating Popover on Hover (Dark Floating Card as in reference image) */
 .cw-marginalia-popover {
   position: absolute;
-  right: calc(100% + 14px);
+  right: calc(100% + 8px);
   top: 50%;
   transform: translateY(-50%);
   width: 280px;
-  background: #232724;
+  background: #1a221d;
   color: #f1f4ed;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 13px 15px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
   gap: 6px;
   z-index: 50;
   animation: marginalia-fade-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  pointer-events: none;
+  pointer-events: auto;
+}
+
+/* Generous bridge between button and popover so mouse never leaves */
+.cw-marginalia-popover::after {
+  content: "";
+  position: absolute;
+  right: -24px;
+  top: -20px;
+  bottom: -20px;
+  width: 32px;
 }
 
 @keyframes marginalia-fade-in {
@@ -82,12 +115,12 @@
 
 .cw-marginalia-popover__category {
   font-size: 11px;
-  color: #9aa89d;
+  color: #8fa896;
   font-weight: 500;
 }
 
 .cw-marginalia-popover__icon {
-  color: #8fa093;
+  color: #8fa896;
 }
 
 .cw-marginalia-popover__title {
@@ -102,4 +135,28 @@
   line-height: 1.5;
   color: #cfd8d0;
   margin: 0;
+}
+
+.cw-marginalia-popover__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2ede4;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 11.5px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: fit-content;
+}
+
+.cw-marginalia-popover__action:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateX(-2px);
 }

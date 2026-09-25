@@ -7,7 +7,7 @@ import { EngineWorkIntake } from "./EngineWorkIntake";
 import { EnginePlanRelayTimeline } from "./EnginePlanRelayTimeline";
 import { ConversationMarginaliaSpine } from "./ConversationMarginaliaSpine";
 import { Check, Sparkles, X } from "lucide-react";
-import type { ReactNode, RefObject } from "react";
+import { useEffect, type ReactNode, type RefObject } from "react";
 import { ConversationAgentWait } from "./ConversationAgentWait";
 import { ConversationAvatar } from "./ConversationAvatar";
 import type { CatalogPlan } from "./ConversationCatalogPlan";
@@ -124,6 +124,15 @@ export function ConversationWorkspaceChatStage({
         description: agent.role,
       })),
   ];
+
+  useEffect(() => {
+    if (historyRef.current && (work?.messages.length || engineIntake?.proposal)) {
+      historyRef.current.scrollTo({
+        top: historyRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [work?.messages.length, engineIntake?.proposal?.digest]);
 
   return (
     <div className={`cw-stage ${work && panelOpen ? "with-panel" : ""}`}>

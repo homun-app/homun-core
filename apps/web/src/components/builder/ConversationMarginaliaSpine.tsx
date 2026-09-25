@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Work } from "./conversation-types";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
-import { Bookmark, Sparkles, CheckCircle2, ShieldCheck, Layers, FileText } from "lucide-react";
+import { Bookmark, Sparkles, CheckCircle2, ShieldCheck, Layers, FileText, ArrowRight } from "lucide-react";
 import "./conversation-marginalia.css";
 
 export type SalientPoint = {
@@ -10,7 +10,8 @@ export type SalientPoint = {
   title: string;
   detail: string;
   icon?: typeof Sparkles;
-  targetMessageIndex?: number;
+  actionLabel: string;
+  targetSelector: string;
 };
 
 export function extractSalientPoints(work?: Work | undefined, intake?: WorkIntakeState | undefined): SalientPoint[] {
@@ -25,6 +26,8 @@ export function extractSalientPoints(work?: Work | undefined, intake?: WorkIntak
       title: work.title,
       detail: work.engineObjective ?? "Incarico principale definito con Homun.",
       icon: CheckCircle2,
+      actionLabel: "Vedi obiettivo concordato",
+      targetSelector: "#cw-intake-head",
     });
   }
 
@@ -37,6 +40,8 @@ export function extractSalientPoints(work?: Work | undefined, intake?: WorkIntak
       title: "Chiarimenti necessari",
       detail: reqs.join(" · "),
       icon: Sparkles,
+      actionLabel: "Rispondi ai chiarimenti",
+      targetSelector: "#cw-intake-needs",
     });
   }
 
@@ -50,6 +55,8 @@ export function extractSalientPoints(work?: Work | undefined, intake?: WorkIntak
       title: `${steps.length} fasi previste`,
       detail: `${doneCount} di ${steps.length} completate. Passaggi di consegne tracciati.`,
       icon: Layers,
+      actionLabel: "Visualizza passaggi staffetta",
+      targetSelector: work.enginePlan?.length ? "#cw-relay-timeline" : "#cw-intake-relay",
     });
   }
 
@@ -60,6 +67,8 @@ export function extractSalientPoints(work?: Work | undefined, intake?: WorkIntak
     title: "Cancello di controllo",
     detail: "Nessun comando critico o riavvio parte senza la tua esplicita autorizzazione.",
     icon: ShieldCheck,
+    actionLabel: "Vai alla supervisione",
+    targetSelector: "#cw-relay-checkpoint, #cw-intake-footer",
   });
 
   // 5. Vault / Output riutilizzabili
@@ -70,10 +79,28 @@ export function extractSalientPoints(work?: Work | undefined, intake?: WorkIntak
       title: "Artefatti riutilizzabili",
       detail: "Documenti e dataset depositati per essere usati come base in future lavorazioni.",
       icon: FileText,
+      actionLabel: "Vedi artefatti",
+      targetSelector: "#cw-artifact-review, .cw-composer",
     });
   }
 
   return points;
+}
+
+function navigateToPoint(point: SalientPoint) {
+  if (!point.targetSelector) return;
+  const target = document.querySelector(point.targetSelector);
+  if (target) {
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.add("cw-highlight-pulse");
+    setTimeout(() => target.classList.remove("cw-highlight-pulse"), 2200);
+
+    // If there is an input or textarea inside, focus it
+    const input = target.querySelector("input, textarea") as HTMLInputElement | HTMLTextAreaElement | null;
+    if (input) {
+      setTimeout(() => input.focus(), 350);
+    }
+  }
 }
 
 export function ConversationMarginaliaSpine({
@@ -98,15 +125,22 @@ export function ConversationMarginaliaSpine({
           return (
             <div
               key={point.id}
-              className="cw-marginalia-item"
+              className={`cw-marginalia-item ${point.id === "needs" ? "has-badge" : ""}`}
               onMouseEnter={() => setActivePointId(point.id)}
               onMouseLeave={() => setActivePointId(null)}
             >
               <button
                 type="button"
-                className={`cw-marginalia-dash ${isActive ? "is-active" : ""}`}
-                aria-label={`${point.category}: ${point.title}`}
-              />
+                className={`cw-marginalia-btn ${isActive ? "is-active" : ""}`}
+                aria-label={`${point.category}: ${point.title} — clicca per aprire`}
+                title={`${point.category}: ${point.title}`}
+                onClick={() => {
+                  setActivePointId((curr) => (curr === point.id ? null : point.id));
+                  navigateToPoint(point);
+                }}
+              >
+                <span className="cw-marginalia-dash" />
+              </button>
 
               {isActive && (
                 <div className="cw-marginalia-popover" role="tooltip">
@@ -122,6 +156,17 @@ export function ConversationMarginaliaSpine({
                   <p className="cw-marginalia-popover__detail">
                     {point.detail}
                   </p>
+                  <button
+                    type="button"
+                    className="cw-marginalia-popover__action"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigateToPoint(point);
+                    }}
+                  >
+                    <span>{point.actionLabel}</span>
+                    <ArrowRight size={11} />
+                  </button>
                 </div>
               )}
             </div>

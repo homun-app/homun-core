@@ -42,7 +42,7 @@ export function EnginePlanRelayTimeline({
   const authStep = waitingApproval || firstPending;
 
   return (
-    <div className="cw-relay-timeline" aria-label="Staffetta collaborativa nel flusso">
+    <div className="cw-relay-timeline" id="cw-relay-timeline" aria-label="Staffetta collaborativa nel flusso">
       {/* Succeeded Phases - Visible milestones of the handoff */}
       {succeededSteps.map((step, idx) => {
         const meta = capabilityMeta(step.capability);
@@ -123,7 +123,7 @@ export function EnginePlanRelayTimeline({
 
       {/* Human Gatekeeper Checkpoint */}
       {needsAuth && authStep && (
-        <div className="cw-relay-timeline__checkpoint" role="region" aria-label="Cancello di controllo umano">
+        <div className="cw-relay-timeline__checkpoint" id="cw-relay-checkpoint" role="region" aria-label="Cancello di controllo umano">
           <div className="cw-relay-timeline__checkpoint-header">
             <span className="cw-relay-timeline__checkpoint-badge">SUPERVISIONE RICHIESTA</span>
             <span className="cw-relay-timeline__checkpoint-phase">Fase: {authStep.title}</span>
