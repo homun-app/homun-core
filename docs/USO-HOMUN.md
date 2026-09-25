@@ -43,16 +43,24 @@ prima di confermare; il modello può classificare male la richiesta.
 Esempio: «Esplora queste note, cerca scadenze e responsabilità e prepara
 un riepilogo operativo. Se mancano informazioni chiedimele, senza inventarle».
 
-1. Nella conversazione del progetto descrivi risultato e vincoli.
+1. Nella conversazione del progetto descrivi risultato e vincoli. Puoi allegare
+   direttamente file o cartelle alla richiesta in chat: verranno archiviati
+   automaticamente nel progetto collegato e associati all'incarico.
 2. Leggi l'accordo proposto: obiettivo, Homun o collaboratore scelto e fasi. Correggi ciò che
    non corrisponde alla richiesta, quindi conferma.
-3. Seleziona i materiali richiesti dalla capacità. La libreria e il lavoro
-   condividono i riferimenti: un file già presente non richiede un secondo upload.
-4. Approva l'esecuzione proposta dopo aver verificato fonti e operazione.
-   Confermare l'accordo e autorizzare lo strumento sono oggi decisioni distinte.
-5. Apri il risultato. Usa la revisione per approvarlo oppure richiedere correzioni
+3. Seleziona i materiali richiesti dalla capacità (i file allegati in chat risultano già
+   preselezionati). La libreria e il lavoro condividono i riferimenti: un file già presente
+   non richiede un secondo upload.
+4. Approva l'esecuzione proposta dopo aver verificato fonti, capacità abilitate (memoria,
+   skill, deleghe, chiarimenti) e operazione.
+5. Durante l'esecuzione puoi inviare domande a margine con `/btw <domanda>` per chiedere
+   informazioni o stato senza interrompere l'incarico né alterare lo storico principale.
+6. Se Homun chiede chiarimenti, rispondi direttamente dalla scheda interattiva scegliendo
+   tra le opzioni proposte (con badge per quella consigliata), specificando scelte multiple o
+   inserendo note e file di approfondimento.
+7. Apri il risultato. Usa la revisione per approvarlo oppure richiedere correzioni
    motivate. Le fasi successive o la chiusura seguono lo stato del piano.
-6. Ritrova il lavoro in Compiti e i risultati approvati in Documenti.
+8. Ritrova il lavoro in Compiti e i risultati approvati in Documenti.
 
 Il risultato approvato non viene automaticamente inviato a un cliente o
 pubblicato in un sistema esterno. Un errore di versione o di permessi va letto

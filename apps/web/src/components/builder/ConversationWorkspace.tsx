@@ -49,7 +49,8 @@ import { useChatAutoScroll } from "@/hooks/useChatAutoScroll";
 import { useEngineWorkspace } from "@/hooks/useEngineWorkspace";
 import { useWorkDestinationScroll, type WorkDestination } from "@/hooks/useWorkDestinationScroll";
 import { isEngineBackedWork } from "@/lib/conversation-engine-bridge";
-import { sendEngineFirstMessage } from "@/lib/engine-first-send";
+import { handleEngineSend } from "@/lib/engine-send-handler";
+import { buildFreeWorkSpec } from "@/lib/conversation-freework";
 import { parseConversationNavigation } from "@/lib/conversation-navigation";
 import {
   parsePlanInsert,
@@ -639,29 +640,7 @@ export function ConversationWorkspace() {
       });
       return undefined;
     }
-    const spec = {
-      ...initialScenarios[0]!,
-      agent: name,
-      icon: name.slice(0, 1),
-      role: memberProfile(name, spaceData.profiles).role,
-      color: "sage",
-      custom: true,
-      title: text.slice(0, 100),
-      initial: text,
-      input: "Le informazioni necessarie per questo incarico",
-      help: "Allega materiali o descrivi vincoli, fonti e risultato atteso. Se non servono altri materiali, scrivilo qui.",
-      outcome: "Un risultato coerente con la richiesta, da verificare insieme.",
-      steps: [
-        "Concordare risultato, informazioni e vincoli",
-        "Preparare il lavoro e segnalare eventuali dubbi",
-        "Consegnare il risultato per la tua verifica",
-      ],
-      result: "Consegna dimostrativa",
-      body:
-        "# Consegna dimostrativa\n\n## Incarico\n" +
-        text +
-        "\n\n## Risultato\nIl motore non è collegato: nessun lavoro è stato eseguito. Questa scheda serve a provare revisione e approvazione.\n\n## Da verificare nel prodotto finale\nRisultato completo, materiali utilizzati, fonti, limiti e azioni proposte.",
-    };
+    const spec = buildFreeWorkSpec(name, text, spaceData);
     const index = scenarios.length;
     setScenarios((current) => [...current, spec]);
     return create(index, text, attachments, projectId, spec);
@@ -674,29 +653,17 @@ export function ConversationWorkspace() {
       return;
     }
 
-    if (engine.backend === "engine") {
-      if (engine.gateError || attachments.length) {
-        setNotice(engine.gateError ? "App locale non pronta: impossibile salvare." : "Per il confronto usa i due campi file nella scheda Confronta due listini della conversazione. Gli allegati non sono stati inviati.");
-        return;
-      }
-      // One turn at a time, said out loud: a second send would silently abort
-      // the turn in flight (single-flight engine contract).
-      if (engine.busy) {
-        setNotice(
-          "Homun sta ancora completando il turno precedente: attendi la risposta oppure premi Annulla.",
-        );
-        return;
-      }
-      if (work && isEngineBackedWork(work)) {
-        bumpOwnSend();
-        void engine
-          .postMessage(work, text)
-          .then(() => setNotice(""))
-          .catch(() => setNotice("Invio al motore non riuscito. Controlla il banner errori."));
-        return;
-      }
-      // First message of a new work: open immediately, then postMessage routes it.
-      sendEngineFirstMessage(engine, text, open, setNotice, bumpOwnSend);
+    if (
+      handleEngineSend({
+        engine,
+        work: work ?? null,
+        text,
+        attachments,
+        open,
+        setNotice,
+        bumpOwnSend,
+      })
+    ) {
       return;
     }
 

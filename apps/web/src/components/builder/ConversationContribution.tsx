@@ -1,7 +1,9 @@
 import { ConversationMemberPicker } from "./ConversationMemberPicker";
 import type { MemberProfile } from "./conversation-members";
-import { useRef, useState } from "react";
+import { useRef, useState, useMemo } from "react";
 import type { Work } from "./conversation-types";
+import { EngineClarifyCard } from "./EngineClarifyCard";
+import { parseClarifyNeed } from "@/lib/engine-clarify-parser";
 
 export function ConversationContribution({
   work,
@@ -66,6 +68,15 @@ export function ConversationContribution({
               Apri il contributo dell’agente ↗
             </button>
           ) : canReply ? (
+            parseClarifyNeed(request.need).isStructured ? (
+              <EngineClarifyCard
+                need={request.need}
+                onDeliver={(answer, uploadedFiles) => {
+                  onDeliver(answer, uploadedFiles, ids);
+                  setIds([]);
+                }}
+              />
+            ) : (
             <>
               <textarea
                 aria-label="Risposta alla richiesta"
@@ -132,6 +143,7 @@ export function ConversationContribution({
                 Invia contributo
               </button>
             </>
+            )
           ) : (
             <p className="cw-hint">
               {request.viaInvitation

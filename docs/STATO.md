@@ -1,7 +1,13 @@
 # Stato verificato di Homun 2
 
-Aggiornato il 25 settembre 2026: completamento e verifica dei 9 requisiti rimanenti H03 (domande laterali/side-question via endpoint e client TS senza mutare il transcript principale), H09 (emulazione terminale con matrice 2D ANSI VirtualTerminalScreen e gestione escape sequences), H11 (estrattori standard senza dipendenze per docx, xlsx, pptx), H14 (provider di ricerca web Exa, Firecrawl, SearXNG con classificazione SSRF e controlli credenziali), H18 (adapter per memorie vettoriali esterne Supermemory, Byterover, Honcho e DualWriteMemoryPort), H29 (CRUD su scheduler remoto Chronos: list, create, delete, trigger), H39 (runtime alternativi Codex, Copilot ACP, NeMo Relay e gateway strumenti), H41 (stack multimediale: vision, generazione/editing immagini, video, STT, TTS, modalità vocale), H45 (benchmark di valutazione BatchEvalRunner, storage e compressione traiettorie con invarianti, collector OpenTelemetry).
-Suite motore: 1335 passed, 1 skipped in 160.85s (0 errori). Suite web: 229 passed in 1.61s. Client TypeScript: 11 passed. Controllo architettura: 0 errori. OpenAPI sincronizzato.
+Aggiornato il 25 settembre 2026: integrazione completa del percorso supervisionato del motore Homun nell'interfaccia utente.
+- Allegati file in chat: invio e ingestione automatica dei file allegati nel progetto di lavoro tramite `ingestWorkAttachments` e associazione al turno del motore.
+- Domande a margine (/btw): routing dedicato da chat senza alterare il transcript principale dell'esecuzione in corso via `handleEngineSend` e `askEngineSideQuestion`.
+- Chiarimenti interattivi strutturati: componente `EngineClarifyCard` con parser per domande singole/multiple, badge per opzione consigliata `(Consigliato)`, campo note aggiuntive e file allegati, integrato direttamente in `ConversationContribution`.
+- Capacità canoniche dell'agente: `EngineAgentRun` abilita e passa `memory`, `skills`, `delegation`, `clarify`, `codeExecution` con preselezione automatica dei materiali associati al lavoro e sezione dedicata di configurazione avanzata.
+- Architettura modulare: raggruppamento delle responsabilità in moduli dedicati (`engine-send-handler`, `engine-clarify-parser`, `engine-side-question`, `engine-workspace-attachments`, `conversation-freework`), riducendo la dimensione di `ConversationWorkspace.tsx` a 1391 righe (al di sotto del limite di 1425).
+
+Suite motore: 1335 passed, 1 skipped in 169.25s (0 errori). Suite web: 238 passed in 1.62s (18 suite). Controllo architettura: 0 errori. OpenAPI sincronizzato.
 Matrice canonica H01–H46 completata al 100% per tutti i gap locali: 42 completati e verificati con prove adeguate, 0 incompleti, 4 prove esterne bloccate da credenziali/permessi (H10, H16, H33, H43). Contratti dell'engine e domain client pronti per l'integrazione UI.
 
 Rapporto di handoff e audit aggiornato: [Rapporto parità motore e prontezza UI](handoff/2026-09-25-parita-motore-completata-e-prontezza-ui.md).

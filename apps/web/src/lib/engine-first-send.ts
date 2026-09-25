@@ -2,7 +2,7 @@ import type { Work } from "@/components/builder/conversation-types";
 
 type FirstSendEngine = {
   createWork: (title: string, objective: string, draftOnly?: boolean) => Promise<Work | null>;
-  postMessage: (work: Work, text: string) => Promise<void>;
+  postMessage: (work: Work, text: string, attachments?: File[]) => Promise<void>;
 };
 
 /**
@@ -16,6 +16,7 @@ export function sendEngineFirstMessage(
   open: (id: string) => void,
   setNotice: (notice: string) => void,
   bumpOwnSend: () => void,
+  attachments?: File[],
 ): void {
   void engine.createWork("Nuova richiesta", text, true).then((created) => {
     if (!created) {
@@ -26,7 +27,7 @@ export function sendEngineFirstMessage(
     setNotice("");
     bumpOwnSend();
     void engine
-      .postMessage(created, text)
+      .postMessage(created, text, attachments)
       .catch(() => setNotice("Invio al motore non riuscito. Controlla il banner errori."));
   });
 }

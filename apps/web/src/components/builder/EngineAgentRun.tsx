@@ -28,12 +28,17 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
     ? Boolean(sshHost && sshUser && sshKeyPath && sshHostKey && Number(sshPort) >= 1)
     : localTerminal || !terminalImage || /^sha256:[0-9a-f]{64}$/.test(terminalImage);
   const [serverIds, setServerIds] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(() => work.materialIds ?? []);
   const [teams, setTeams] = useState<EngineTeam[]>([]);
   const [teamId, setTeamId] = useState('');
   const [personId, setPersonId] = useState('');
   const [webPages, setWebPages] = useState(false);
   const [ownedBrowser, setOwnedBrowser] = useState(false);
+  const [memory, setMemory] = useState(true);
+  const [skills, setSkills] = useState(true);
+  const [delegation, setDelegation] = useState(true);
+  const [clarify, setClarify] = useState(true);
+  const [codeExecution, setCodeExecution] = useState(false);
   const [personBusy, setPersonBusy] = useState(false);
   const [teamError, setTeamError] = useState<unknown>(null);
   useEffect(() => {
@@ -42,9 +47,14 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       .catch(error => { if (live) setTeamError(error); });
     return () => { live = false; };
   }, []);
+  useEffect(() => {
+    if (work.materialIds?.length && selected.length === 0) {
+      setSelected(work.materialIds);
+    }
+  }, [work.materialIds]);
   const run = useEngineExecution(work, onChanged, {
     list: listAgentRuns, approve: approveAgentRun,
-    prepare: (work: Work, id: string, materials: string[], team: string, person: string, servers: string[]) => prepareAgentRun(work, materials, id, team || undefined, person || undefined, servers, localTerminal || sshTerminal ? undefined : terminalImage || undefined, sshTerminal ? 'ssh' : localTerminal ? 'local' : undefined, sshTerminal ? {host: sshHost, user: sshUser, port: Number(sshPort), hostKey: sshHostKey, keyPath: sshKeyPath} : undefined, webPages, ownedBrowser),
+    prepare: (work: Work, id: string, materials: string[], team: string, person: string, servers: string[]) => prepareAgentRun(work, materials, id, team || undefined, person || undefined, servers, localTerminal || sshTerminal ? undefined : terminalImage || undefined, sshTerminal ? 'ssh' : localTerminal ? 'local' : undefined, sshTerminal ? {host: sshHost, user: sshUser, port: Number(sshPort), hostKey: sshHostKey, keyPath: sshKeyPath} : undefined, webPages, ownedBrowser, memory, skills, delegation, clarify, undefined, undefined, undefined, undefined, codeExecution),
   });
   const p = run.proposal;
   const revising = p?.status === 'completed' && work.engineStatus === 'ready';
@@ -94,6 +104,19 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
             </label>
             {!terminalValid && <p role="alert">Inserisci sha256: seguito dalle 64 cifre esadecimali dell’immagine.</p>}
           </>}
+      </details>
+      <details><summary>Capacità e strumenti avanzati</summary>
+        <p>Configura le capacità autonome abilitate per questo incarico:</p>
+        <label><input type="checkbox" checked={memory} disabled={run.busy}
+          onChange={e => { run.renew(); setMemory(e.target.checked); }} /> Memoria di progetto (consultazione e annotazione fatti)</label>
+        <label><input type="checkbox" checked={skills} disabled={run.busy}
+          onChange={e => { run.renew(); setSkills(e.target.checked); }} /> Competenze approvate e catalogo skill</label>
+        <label><input type="checkbox" checked={delegation} disabled={run.busy}
+          onChange={e => { run.renew(); setDelegation(e.target.checked); }} /> Deleghe a sotto-agenti specializzati</label>
+        <label><input type="checkbox" checked={clarify} disabled={run.busy}
+          onChange={e => { run.renew(); setClarify(e.target.checked); }} /> Chiarimenti strutturati interattivi</label>
+        <label><input type="checkbox" checked={codeExecution} disabled={run.busy}
+          onChange={e => { run.renew(); setCodeExecution(e.target.checked); }} /> Esecuzione programmatica script Python</label>
       </details>
       <EngineMaterialSelection work={work} filter={eligibleForRead} uploadExtensions={READ_UPLOAD_EXTENSIONS}
         selected={selected} maxSelected={12} disabled={run.busy}

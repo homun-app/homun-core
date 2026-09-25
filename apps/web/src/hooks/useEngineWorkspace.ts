@@ -26,6 +26,7 @@ import {
   ingestEngineMaterial,
   provideEngineContribution,
 } from "@/lib/engine-projects-client";
+import { ingestWorkAttachments } from "@/lib/engine-workspace-attachments";
 import { useEngineStatus } from "@/hooks/useEngineStatus";
 import type { EngineDataSource } from "@/lib/engine-client";
 import { isHomunClientError } from "@/lib/homun-errors";
@@ -71,7 +72,7 @@ export type EngineWorkspaceState = {
   updateRoutine: (routineId: string, expectedVersion: number, changes: { name?: string; cron?: string }) => Promise<void>;
   revisePlan: (work: Work, action: { insertAfterStepId?: string | null; newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string }; removeStepId?: string }) => Promise<void>;
   createWork: (title: string, objective: string, draftOnly?: boolean) => Promise<Work | null>;
-  postMessage: (work: Work, text: string) => Promise<void>;
+  postMessage: (work: Work, text: string, attachments?: File[]) => Promise<void>;
   confirmPatch: (work: Work, messageIndex: number) => Promise<void>;
   discardPatch: (work: Work, messageIndex: number) => void;
   applyObjectivePatch: (work: Work, nextObjective: string) => Promise<void>;
@@ -190,18 +191,34 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     } finally { endRequest(signal); }
   }
 
-  async function postMessage(work: Work, text: string): Promise<void> {
+  async function postMessage(work: Work, text: string, attachments?: File[]): Promise<void> {
     if (backend !== "engine" || work.source !== "engine" || !work.engineConversationId) {
       throw new Error("postMessage requires an engine-backed work");
     }
     const signal = beginRequest();
+    let effectiveText = text;
+    if (attachments && attachments.length > 0) {
+      try {
+        await ingestWorkAttachments(work, attachments);
+        const fileNames = attachments.map((f) => f.name).join(", ");
+        effectiveText = text
+          ? `${text}\n\n📎 Allegati archiviati: ${fileNames}`
+          : `📎 Allegati archiviati: ${fileNames}`;
+      } catch (err) {
+        if (!isHomunClientError(err) || err.code !== "request_cancelled") {
+          setError(err);
+        }
+        endRequest(signal);
+        throw err;
+      }
+    }
     const prior = messageOverlay[work.id] ?? work.messages;
     const startedAt = Date.now();
     setMessageOverlay((current) => ({
       ...current,
       [work.id]: [
         ...(current[work.id] ?? work.messages),
-        { who: "you", sender: "Fabio", text },
+        { who: "you", sender: "Fabio", text: effectiveText },
         {
           who: "agent",
           sender: "Homun",
@@ -216,7 +233,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
       // message (and its language) before a work proposal is forced. Any
       // routing failure keeps today's durable propose path, which surfaces its
       // own typed errors.
-      const routed = (await routeEngineFirstMessage(work, text, signal).catch((cause) => {
+      const routed = (await routeEngineFirstMessage(work, effectiveText, signal).catch((cause) => {
         if (isHomunClientError(cause) && cause.code === "request_cancelled") throw cause;
         return { route: "propose" as const };
       })) as FirstMessageRoute;
@@ -231,7 +248,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
               : message,
           ),
         }));
-        await proposeWorkIntake(work.id, text, work.revision, crypto.randomUUID(), signal, routed.language);
+        await proposeWorkIntake(work.id, effectiveText, work.revision, crypto.randomUUID(), signal, routed.language);
         bumpIntakeSeq();
         await refresh();
         // The request is durable (the engine posts it before synthesis) and
@@ -480,39 +497,8 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     setError(null);
     try {
       const actor = defaultLocalActor();
-      let projectId = work.projectId;
-      if (!projectId && work.engineConversationId) {
-        const conversations = await listEngineConversations();
-        const conversation = conversations.find((c) => c.id === work.engineConversationId);
-        if (conversation?.project_id) {
-          projectId = conversation.project_id;
-        } else if (conversation) {
-          const ensured = await ensureEngineProjectForConversation({
-            conversationId: conversation.id,
-            expectedVersion: conversation.version,
-            name: work.title,
-            actor,
-          });
-          projectId = ensured.projectId;
-        }
-      }
-      if (!projectId) {
-        throw new Error("Work has no project for material ingest");
-      }
-      const ingestedIds: string[] = [...materialIds];
-      for (const file of files) {
-        const relativePath =
-          "webkitRelativePath" in file && file.webkitRelativePath
-            ? String(file.webkitRelativePath)
-            : undefined;
-        const ingested = await ingestEngineMaterial({
-          projectId,
-          file,
-          ...(relativePath ? { relativePath } : {}),
-          actor,
-        });
-        ingestedIds.push(ingested.materialId);
-      }
+      const ingested = await ingestWorkAttachments(work, files);
+      const ingestedIds = [...materialIds, ...ingested.map((item) => item.materialId)];
       await provideEngineContribution({
         requestId,
         expectedVersion: work.revision,
