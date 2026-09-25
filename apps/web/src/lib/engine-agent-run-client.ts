@@ -82,3 +82,17 @@ export async function controlAgentRun(
     action, ...(text !== undefined ? {text} : {}),
   });
 }
+
+export type SideQuestionResult = {
+  answer: string;
+  usage: { prompt_tokens: number; completion_tokens: number; cost_estimate?: number };
+  attempted_tools?: string[];
+  run_id: string;
+  work_id: string;
+  main_transcript_unchanged: boolean;
+};
+
+export function sideQuestionAgentRun(workId: string, runId: string, question: string): Promise<SideQuestionResult> {
+  return request(workId, `/${encodeURIComponent(runId)}/side-question`, { question });
+}
+

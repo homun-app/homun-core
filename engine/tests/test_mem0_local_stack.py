@@ -176,3 +176,92 @@ def test_live_mem0_add_recall(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     )
     hits = port.recall("PDF", project_id="proj_live", limit=5)
     assert any(h.id == note.id for h in hits)
+
+
+def test_external_vector_backends_status_and_building(monkeypatch: pytest.MonkeyPatch) -> None:
+    from homun.memory.external_vector_backends import (
+        ExternalMemoryUnavailableError,
+        build_external_vector_client,
+        describe_external_memory_backend,
+    )
+    from homun.memory.mem0_port import build_memory_port
+
+    # 1. Missing keys report not ok
+    monkeypatch.delenv("SUPERMEMORY_API_KEY", raising=False)
+    monkeypatch.delenv("BYTEROVER_API_KEY", raising=False)
+    monkeypatch.delenv("HONCHO_API_KEY", raising=False)
+
+    st_sm = describe_external_memory_backend("supermemory")
+    assert st_sm["backend"] == "supermemory"
+    assert st_sm["ok"] is False
+
+    with pytest.raises(ExternalMemoryUnavailableError, match="Missing API key"):
+        build_external_vector_client("supermemory")
+
+    # 2. Present keys report ok
+    monkeypatch.setenv("SUPERMEMORY_API_KEY", "sm-secret")
+    st_sm_ok = describe_external_memory_backend("supermemory")
+    assert st_sm_ok["ok"] is True
+
+    client = build_external_vector_client("supermemory")
+    assert client.backend_name == "supermemory"
+    assert client.api_key == "sm-secret"
+
+    # 3. DualWriteMemoryPort wrapping via build_memory_port
+    monkeypatch.setenv("HOMUN_MEMORY_BACKEND", "supermemory")
+    conn = sqlite3.connect(":memory:")
+    ledger = SqliteMemoryPort(conn, "ws_ext")
+    port = build_memory_port(ledger)
+    assert isinstance(port, DualWriteMemoryPort)
+
+
+def test_external_vector_client_mock_add_search_delete(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+    import urllib.request
+    from homun.memory.external_vector_backends import SupermemoryClient
+
+    client = SupermemoryClient(api_key="mock-key", base_url="https://api.supermemory.mock")
+
+    # Mock HTTP response
+    class MockResp:
+        def __init__(self, data: bytes):
+            self._data = data
+        def read(self):
+            return self._data
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    records: list[dict[str, Any]] = []
+
+    def mock_urlopen(req: urllib.request.Request, timeout: float = 10.0):
+        url = req.full_url
+        method = req.get_method()
+        if "/memories/search" in url and method == "POST":
+            return MockResp(json.dumps({"results": records}).encode("utf-8"))
+        if "/memories" in url and method == "POST":
+            body = json.loads(req.data.decode("utf-8"))
+            rec = {"id": "sm-123", "text": body["text"], "metadata": body["metadata"]}
+            records.append(rec)
+            return MockResp(json.dumps({"id": "sm-123"}).encode("utf-8"))
+        if method == "DELETE":
+            return MockResp(b"{}")
+        return MockResp(b"{}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
+
+    conn = sqlite3.connect(":memory:")
+    ledger = SqliteMemoryPort(conn, "ws_ext_test")
+    port = DualWriteMemoryPort(ledger, mem0=client)
+
+    note = port.add_approved(text="Important remote fact", actor_id="user_fabio", project_id="p1")
+    assert note.text == "Important remote fact"
+
+    hits = port.recall("remote", project_id="p1")
+    assert len(hits) == 1
+    assert hits[0].id == note.id
+
+    port.delete(note.id, actor_id="user_fabio")
+    assert port.recall("remote", project_id="p1") == []
+

@@ -76,14 +76,106 @@ def _call_tavily(query: str, api_key: str, limit: int = 5) -> dict:
         return {"error_code": "web_fetch_failed", "message": f"Tavily search failed: {exc}"}
 
 
+def _call_exa(query: str, api_key: str, limit: int = 5) -> dict:
+    url = "https://api.exa.ai/search"
+    payload = json.dumps({"query": query, "numResults": limit}).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json", "x-api-key": api_key},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = []
+            for item in data.get("results") or []:
+                link = str(item.get("url") or "")
+                try:
+                    _classify(link)
+                except PageRefusal:
+                    continue
+                results.append({
+                    "url": link,
+                    "title": str(item.get("title") or "")[:200],
+                    "snippet": str(item.get("text") or item.get("snippet") or "")[:300],
+                })
+                if len(results) >= limit:
+                    break
+            return {"provider": "exa", "query": query, "results": results}
+    except Exception as exc:
+        return {"error_code": "web_fetch_failed", "message": f"Exa search failed: {exc}"}
+
+
+def _call_firecrawl(query: str, api_key: str, limit: int = 5) -> dict:
+    url = "https://api.firecrawl.dev/v1/search"
+    payload = json.dumps({"query": query, "limit": limit}).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = []
+            raw_items = data.get("data") if isinstance(data.get("data"), list) else (data.get("results") or [])
+            for item in raw_items:
+                link = str(item.get("url") or "")
+                try:
+                    _classify(link)
+                except PageRefusal:
+                    continue
+                results.append({
+                    "url": link,
+                    "title": str(item.get("title") or "")[:200],
+                    "snippet": str(item.get("description") or item.get("content") or "")[:300],
+                })
+                if len(results) >= limit:
+                    break
+            return {"provider": "firecrawl", "query": query, "results": results}
+    except Exception as exc:
+        return {"error_code": "web_fetch_failed", "message": f"Firecrawl search failed: {exc}"}
+
+
+def _call_searxng(query: str, base_url: str, limit: int = 5) -> dict:
+    url = f"{base_url.rstrip('/')}/search?q={urllib.parse.quote(query)}&format=json"
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = []
+            for item in data.get("results") or []:
+                link = str(item.get("url") or "")
+                try:
+                    _classify(link)
+                except PageRefusal:
+                    continue
+                results.append({
+                    "url": link,
+                    "title": str(item.get("title") or "")[:200],
+                    "snippet": str(item.get("content") or "")[:300],
+                })
+                if len(results) >= limit:
+                    break
+            return {"provider": "searxng", "query": query, "results": results}
+    except Exception as exc:
+        return {"error_code": "web_fetch_failed", "message": f"SearXNG search failed: {exc}"}
+
+
 def execute_provider_search(provider_name: str, query: str, limit: int = 5) -> dict:
     name = (provider_name or "").strip().lower()
     if name in {"duckduckgo-html", "duckduckgo", "default"}:
         return search_public(query)
+    if name == "searxng":
+        url = os.environ.get("SEARXNG_URL", "").strip()
+        if not url:
+            return {
+                "error_code": "web_provider_credentials_missing",
+                "message": "No instance URL configured for SearXNG. Set SEARXNG_URL.",
+            }
+        return _call_searxng(query, url, limit)
     if name not in _PROVIDER_ENV_KEYS:
         return {
             "error_code": "web_provider_unavailable",
-            "message": f"Unknown search provider: {name}. Supported: duckduckgo-html, {', '.join(sorted(_PROVIDER_ENV_KEYS))}",
+            "message": f"Unknown search provider: {name}. Supported: duckduckgo-html, searxng, {', '.join(sorted(_PROVIDER_ENV_KEYS))}",
         }
     env_var = _PROVIDER_ENV_KEYS[name]
     api_key = os.environ.get(env_var, "").strip()
@@ -96,6 +188,10 @@ def execute_provider_search(provider_name: str, query: str, limit: int = 5) -> d
         return _call_brave(query, api_key, limit)
     if name == "tavily":
         return _call_tavily(query, api_key, limit)
+    if name == "exa":
+        return _call_exa(query, api_key, limit)
+    if name == "firecrawl":
+        return _call_firecrawl(query, api_key, limit)
     return {
         "error_code": "web_provider_unavailable",
         "message": f"Provider '{name}' is configured with credentials but live adapter is not yet connected.",

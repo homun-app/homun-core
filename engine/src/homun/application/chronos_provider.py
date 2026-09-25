@@ -86,3 +86,41 @@ class ChronosProvider:
         if isinstance(data, dict) and isinstance(data.get("jobs"), list):
             return data["jobs"]
         return []
+
+    def create_remote_job(self, spec: Dict[str, Any]) -> Dict[str, Any]:
+        st = self.status()
+        if not st.ready:
+            raise RuntimeError(st.error or "Chronos unavailable")
+        import httpx
+
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(f"{self.base_url}/v1/jobs", json=spec)
+            resp.raise_for_status()
+            data = resp.json()
+        return data if isinstance(data, dict) else {"job": data}
+
+    def delete_remote_job(self, job_id: str) -> bool:
+        st = self.status()
+        if not st.ready:
+            raise RuntimeError(st.error or "Chronos unavailable")
+        import httpx
+
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.delete(f"{self.base_url}/v1/jobs/{job_id}")
+            if resp.status_code == 404:
+                return False
+            resp.raise_for_status()
+            return True
+
+    def trigger_remote_job(self, job_id: str) -> Dict[str, Any]:
+        st = self.status()
+        if not st.ready:
+            raise RuntimeError(st.error or "Chronos unavailable")
+        import httpx
+
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(f"{self.base_url}/v1/jobs/{job_id}/trigger")
+            resp.raise_for_status()
+            data = resp.json()
+        return data if isinstance(data, dict) else {"result": data}
+

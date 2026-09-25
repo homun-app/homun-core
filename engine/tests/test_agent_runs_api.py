@@ -377,4 +377,56 @@ def test_agent_runs_fallback_connection_and_failover(api_setup, monkeypatch):
     assert run_after["recovery"]["failover"]["reason"] == RATE_LIMITED
 
 
+def test_agent_runs_side_question_endpoint(api_setup, monkeypatch):
+    from types import SimpleNamespace
+    from homun.models.native_turn import NativeMessage
 
+    ctx, actor, work_id, client, headers = api_setup
+    base_url = f"/v1/workspaces/{ctx.workspace_id}/works/{work_id}/agent-runs"
+
+    # 1. Propose and approve run
+    resp = client.post(base_url, headers=headers, json={"command_id": "run_side_q", "expected_version": 1, "material_ids": []})
+    assert resp.status_code == 200
+    rv = resp.json()
+    appr = client.post(
+        f"{base_url}/run_side_q/approve",
+        headers=headers,
+        json={"command_id": "appr_side", "expected_version": rv["expected_version"], "digest": rv["digest"]},
+    )
+    assert appr.status_code == 200
+
+    # 2. Put run in active running state with messages
+    with ctx.repository.transaction() as store:
+        store.commands["run_side_q"].result["status"] = "running"
+        store.commands["run_side_q"].result["_messages"] = [
+            {"role": "user", "content": "Process invoices"},
+            {"role": "assistant", "content": "I found 5 invoices."},
+        ]
+
+    # 3. Mock complete_summary for side question
+    monkeypatch.setattr(
+        ctx.models,
+        "complete_summary",
+        lambda msgs, **kw: SimpleNamespace(
+            message=NativeMessage(role="assistant", content="The total is 5 invoices."),
+            usage=SimpleNamespace(input_tokens=15, output_tokens=8, estimated_cost=0.0002),
+        ),
+    )
+
+    # 4. Ask side question via HTTP endpoint
+    side_resp = client.post(
+        f"{base_url}/run_side_q/side-question",
+        headers=headers,
+        json={"question": "What is the count?"},
+    )
+    assert side_resp.status_code == 200, side_resp.text
+    side_data = side_resp.json()
+    assert side_data["answer"] == "The total is 5 invoices."
+    assert side_data["main_transcript_unchanged"] is True
+    assert side_data["usage"]["prompt_tokens"] == 15
+    assert side_data["usage"]["completion_tokens"] == 8
+
+    # 5. Verify main run messages remain intact
+    store = ctx.repository.load()
+    main_run = store.commands["run_side_q"].result
+    assert len(main_run["_messages"]) == 2

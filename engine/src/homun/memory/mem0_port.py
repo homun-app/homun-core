@@ -11,6 +11,11 @@ import os
 from typing import Any
 
 from homun.domain.errors import ValidationError
+from homun.memory.external_vector_backends import (
+    SUPPORTED_EXTERNAL_BACKENDS,
+    build_external_vector_client,
+    describe_external_memory_backend,
+)
 from homun.memory.sqlite_port import SqliteMemoryPort
 from homun.memory.types import MemoryNote
 
@@ -19,8 +24,13 @@ class Mem0UnavailableError(RuntimeError):
     """Raised when Mem0 backend was requested but is not usable."""
 
 
+def active_memory_backend() -> str:
+    return os.environ.get("HOMUN_MEMORY_BACKEND", "sqlite").strip().lower()
+
+
 def mem0_requested() -> bool:
-    return os.environ.get("HOMUN_MEMORY_BACKEND", "sqlite").strip().lower() == "mem0"
+    return active_memory_backend() == "mem0"
+
 
 
 def _env(name: str, default: str) -> str:
@@ -71,6 +81,9 @@ def build_local_mem0_config() -> dict[str, Any]:
 
 def describe_memory_backend(*, mem0_client: Any | None = None) -> dict[str, Any]:
     """Operator-facing status for Settings / GET /v1/memory/status."""
+    backend = active_memory_backend()
+    if backend in SUPPORTED_EXTERNAL_BACKENDS:
+        return describe_external_memory_backend(backend)
     if not mem0_requested():
         return {
             "backend": "sqlite",
@@ -287,6 +300,10 @@ def try_build_mem0_client() -> Any:
 
 
 def build_memory_port(ledger: SqliteMemoryPort) -> SqliteMemoryPort | DualWriteMemoryPort:
+    backend = active_memory_backend()
+    if backend in SUPPORTED_EXTERNAL_BACKENDS:
+        ext_client = build_external_vector_client(backend)
+        return DualWriteMemoryPort(ledger, ext_client)
     if not mem0_requested():
         return ledger
     client = try_build_mem0_client()

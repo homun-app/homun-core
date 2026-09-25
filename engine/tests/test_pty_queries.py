@@ -41,3 +41,30 @@ def test_unread_suffix_does_not_replay_a_shifted_window():
     assert unread("", "alpha") == "alpha"
     assert unread("alpha", "alphabet") == "bet"
     assert unread("alphabet", "bet") is None
+
+
+def test_virtual_terminal_screen_ansi_matrix():
+    from homun.execution.pty_queries import VirtualTerminalScreen
+
+    term = VirtualTerminalScreen(rows=5, cols=20)
+    term.feed("Hello World!\r\nLine 2")
+    screen = term.render_screen()
+    assert "Hello World!" in screen
+    assert "Line 2" in screen
+    assert term.cursor_position() == (1, 6)
+
+    # Test carriage return overwrite
+    term.feed("\rOverwritten")
+    lines = term.render_screen().splitlines()
+    assert lines[1] == "Overwritten"
+
+    # Test cursor positioning and line clear
+    term.feed("\x1b[1;1H\x1b[2KTop Line")
+    lines = term.render_screen().splitlines()
+    assert lines[0] == "Top Line"
+
+    # Test clear screen
+    term.feed("\x1b[2JNew Clean")
+    screen = term.render_screen()
+    assert screen == "New Clean"
+

@@ -63,7 +63,10 @@ def answer_side_question(
     """Answer /btw against a run snapshot without mutating the main transcript."""
     store = ctx.repository.load()
     run = lookup(store, run_id, work_id)
-    authority(store, actor, run)
+    try:
+        authority(ctx, store, actor, run)
+    except TypeError:
+        authority(store, actor, run)
     if run.get("status") in {"completed", "failed", "cancelled"}:
         raise ValidationError("Side questions require an active agent run")
 

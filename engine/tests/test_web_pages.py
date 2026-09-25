@@ -191,3 +191,85 @@ def test_x_search_validation_and_credentials():
         if old_key is not None:
             os.environ["XAI_API_KEY"] = old_key
 
+
+def test_exa_firecrawl_searxng_providers(monkeypatch):
+    import io
+    import json
+    import os
+    import urllib.request
+    from homun.execution.web_providers import execute_provider_search
+
+    # 1. Missing credentials
+    old_exa = os.environ.pop("EXA_API_KEY", None)
+    old_fc = os.environ.pop("FIRECRAWL_API_KEY", None)
+    old_sx = os.environ.pop("SEARXNG_URL", None)
+    try:
+        assert execute_provider_search("exa", "test")["error_code"] == "web_provider_credentials_missing"
+        assert execute_provider_search("firecrawl", "test")["error_code"] == "web_provider_credentials_missing"
+        assert execute_provider_search("searxng", "test")["error_code"] == "web_provider_credentials_missing"
+
+        # 2. Exa mock with private IP filtering
+        os.environ["EXA_API_KEY"] = "fake-exa-key"
+        exa_response_data = json.dumps({
+            "results": [
+                {"url": "https://example.com/article", "title": "Example", "text": "Snippet text"},
+                {"url": "http://127.0.0.1/private", "title": "Evil", "text": "Private"},
+            ]
+        }).encode("utf-8")
+
+        class MockResp:
+            def __init__(self, data):
+                self._data = data
+            def read(self):
+                return self._data
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+
+        monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=15: MockResp(exa_response_data))
+        res_exa = execute_provider_search("exa", "quantum")
+        assert res_exa["provider"] == "exa"
+        assert len(res_exa["results"]) == 1
+        assert res_exa["results"][0]["url"] == "https://example.com/article"
+
+        # 3. Firecrawl mock
+        os.environ["FIRECRAWL_API_KEY"] = "fake-fc-key"
+        fc_response_data = json.dumps({
+            "data": [
+                {"url": "https://example.com/firecrawl", "title": "FC Test", "description": "FC snippet"}
+            ]
+        }).encode("utf-8")
+        monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=15: MockResp(fc_response_data))
+        res_fc = execute_provider_search("firecrawl", "web search")
+        assert res_fc["provider"] == "firecrawl"
+        assert len(res_fc["results"]) == 1
+        assert res_fc["results"][0]["url"] == "https://example.com/firecrawl"
+
+        # 4. SearXNG mock
+        os.environ["SEARXNG_URL"] = "https://example.com"
+        sx_response_data = json.dumps({
+            "results": [
+                {"url": "https://example.com/searxng", "title": "SearX Result", "content": "SearX snippet"}
+            ]
+        }).encode("utf-8")
+        monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=15: MockResp(sx_response_data))
+        res_sx = execute_provider_search("searxng", "open source")
+        assert res_sx["provider"] == "searxng"
+        assert len(res_sx["results"]) == 1
+        assert res_sx["results"][0]["url"] == "https://example.com/searxng"
+    finally:
+        if old_exa is not None:
+            os.environ["EXA_API_KEY"] = old_exa
+        else:
+            os.environ.pop("EXA_API_KEY", None)
+        if old_fc is not None:
+            os.environ["FIRECRAWL_API_KEY"] = old_fc
+        else:
+            os.environ.pop("FIRECRAWL_API_KEY", None)
+        if old_sx is not None:
+            os.environ["SEARXNG_URL"] = old_sx
+        else:
+            os.environ.pop("SEARXNG_URL", None)
+
+

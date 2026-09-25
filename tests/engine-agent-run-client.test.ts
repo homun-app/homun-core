@@ -198,4 +198,30 @@ test('preparation includes fallback_connection_id in request body when provided'
   } finally { globalThis.fetch = old; }
 });
 
+test('sideQuestionAgentRun posts question and returns detached answer with usage', async () => {
+  const { sideQuestionAgentRun } = await import('../apps/web/src/lib/engine-agent-run-client.ts');
+  const old = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.match(String(url), /\/agent-runs\/run_123\/side-question$/);
+    assert.equal(init?.method, 'POST');
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.question, 'What is the current status?');
+    return Response.json({
+      answer: 'Currently scanning files.',
+      usage: { prompt_tokens: 20, completion_tokens: 6, cost_estimate: 0.0001 },
+      run_id: 'run_123',
+      work_id: 'w_test',
+      main_transcript_unchanged: true,
+    });
+  };
+  try {
+    const res = await sideQuestionAgentRun('w_test', 'run_123', 'What is the current status?');
+    assert.equal(res.answer, 'Currently scanning files.');
+    assert.equal(res.main_transcript_unchanged, true);
+    assert.equal(res.usage.prompt_tokens, 20);
+    assert.equal(res.usage.completion_tokens, 6);
+  } finally { globalThis.fetch = old; }
+});
+
+
 
