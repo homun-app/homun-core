@@ -43,8 +43,9 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 33. H33: Buzz + Raft channel adapters.
 34. H33: Home Assistant, MS Graph Webhook, OpenWebUI, Teams Meetings, WeCom Callback, WhatsApp Cloud, Yuanbao adapters (full 34/34 messaging catalog complete).
 35. H36: MCPOAuthBroker (client credentials & refresh flow with TTL caching and typed refusal) wired into MCP client; H42 deliverable ledger idempotency fix.
+36. H42: deliverable_dispatcher (code block protection, at-most-once ledger, ChannelMedia packaging, channel adapter send, /v1/deliverables/dispatch); H34: multi-surface steering bridge verified into run["_steering"]; H35: OpenAI-compatible streaming SSE API & ACP IDE verified.
 
-**Prossimo passo eseguibile:** prove live con credenziali; prove provider con credenziali; H34 / H35 / H39 / H40 / H41 / H43 / H45 continuazione parità verso chiusura integrale H01–H46.
+**Prossimo passo eseguibile:** prove live con credenziali; prove provider con credenziali; H39 / H40 / H41 / H43 / H45 continuazione parità verso chiusura integrale H01–H46.
 
 **Blocchi esterni (non inventare):** token canali reali; TCC Accessibility/Screen Recording per prove H16 live macOS; DISPLAY + xdotool su Linux; `HOMUN_MODAL_ALLOW_LIVE` / `HOMUN_DAYTONA_ALLOW_LIVE` + SDK per prove cloud a pagamento; Copilot CLI con `--acp` per prova H39 live.
 

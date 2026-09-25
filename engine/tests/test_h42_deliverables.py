@@ -6,6 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
+from homun.application.deliverable_dispatcher import (
+    DeliverableTurnResult,
+    dispatch_deliverables_for_turn,
+)
 from homun.application.deliverable_extractor import (
     DeliverableAttachment,
     extract_deliverables_from_text,
@@ -179,3 +183,121 @@ def test_deliverables_api_routes():
     assert resp_rcp.status_code == 200
     assert len(resp_rcp.json()) == 1
     assert resp_rcp.json()[0]["filename"] == "invoice.pdf"
+
+    # 4. POST /v1/deliverables/dispatch
+    resp_disp = client.post(
+        "/v1/deliverables/dispatch",
+        json={
+            "session_id": "sess_api_dispatch",
+            "channel": "generic",
+            "recipient_id": "user_456",
+            "text": "Your report is ready at /tmp/summary.pdf and script ```python\n# /tmp/fake.py\n```",
+        },
+    )
+    assert resp_disp.status_code == 200
+    disp_data = resp_disp.json()
+    assert disp_data["extracted_count"] == 1
+    assert disp_data["new_deliverables_count"] == 1
+    assert "[summary.pdf]" in disp_data["cleaned_text"]
+    assert "# /tmp/fake.py" in disp_data["cleaned_text"]
+    assert len(disp_data["receipts"]) == 1
+
+
+# 5. Deliverable Dispatcher & At-most-once Media packaging
+def test_deliverable_dispatcher():
+    from homun.application.channel_contracts import ChannelAdapter
+    from homun.application.gateway_contracts import ChannelMedia
+
+    sent_calls = []
+
+    class MockAdapter(ChannelAdapter):
+        platform = "mock_chat"
+
+        def send(self, channel_id, text, *, thread_id=None, reply_to_id=None, media=None):
+            sent_calls.append({
+                "channel_id": channel_id,
+                "text": text,
+                "media": media or [],
+            })
+            return {"delivered": True, "platform": self.platform, "media_count": len(media or [])}
+
+    mock_adapter = MockAdapter()
+    text = (
+        "Here are your outputs:\n"
+        "- Document: /tmp/analysis_report.pdf\n"
+        "- Chart: /tmp/growth_chart.png\n"
+        "And snippet:\n"
+        "```sh\ncat /tmp/debug.log\n```\n"
+        "Check `cat /tmp/other.pdf` too."
+    )
+
+    # First turn: 2 new deliverables extracted and dispatched
+    res1 = dispatch_deliverables_for_turn(
+        session_id="sess_turn_1",
+        platform="mock_chat",
+        destination_id="dest_999",
+        text=text,
+        adapter=mock_adapter,
+    )
+
+    assert res1.extracted_count == 2
+    assert len(res1.new_deliverables) == 2
+    assert len(res1.already_delivered) == 0
+    assert len(res1.receipts) == 2
+    assert "[analysis_report.pdf]" in res1.cleaned_text
+    assert "[growth_chart.png]" in res1.cleaned_text
+    assert "cat /tmp/debug.log" in res1.cleaned_text
+    assert "cat /tmp/other.pdf" in res1.cleaned_text
+
+    assert len(sent_calls) == 1
+    assert len(sent_calls[0]["media"]) == 2
+    media_names = [m.file_name for m in sent_calls[0]["media"]]
+    assert "analysis_report.pdf" in media_names
+    assert "growth_chart.png" in media_names
+
+    # Second turn with same text in same session: at-most-once deduplication prevents re-dispatching media
+    res2 = dispatch_deliverables_for_turn(
+        session_id="sess_turn_1",
+        platform="mock_chat",
+        destination_id="dest_999",
+        text=text,
+        adapter=mock_adapter,
+    )
+    assert res2.extracted_count == 2
+    assert len(res2.new_deliverables) == 0
+    assert len(res2.already_delivered) == 2
+    assert len(sent_calls) == 2
+    # No media re-attached on replay
+    assert len(sent_calls[1]["media"]) == 0
+
+
+# 6. Gateway Manage Adapter Send with Deliverable Mode
+def test_gateway_manage_adapter_send_deliverables():
+    from homun.application.gateway_tools import execute, reset_gateway_state
+
+    reset_gateway_state()
+
+    ctx = None
+    actor = {"id": "user_1"}
+    run = {"id": "run_gw_1", "gateway": {"policy": "core-gateway-v1"}}
+
+    # Send with deliverable mode via generic adapter
+    res = execute(
+        ctx,
+        actor,
+        run,
+        "gateway_manage",
+        {
+            "action": "adapter_send",
+            "platform": "webhook",
+            "channel_id": "https://example.com/webhook",
+            "text": "File generated: /tmp/invoice.pdf\n```\n/tmp/not_a_deliverable.pdf\n```",
+            "deliverable_mode": True,
+        },
+    )
+
+    assert res["deliverables_extracted"] == 1
+    assert "[invoice.pdf]" in res["cleaned_text"]
+    assert "/tmp/not_a_deliverable.pdf" in res["cleaned_text"]
+    assert len(res["receipts"]) == 1
+

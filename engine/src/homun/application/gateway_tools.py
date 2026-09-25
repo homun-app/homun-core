@@ -166,12 +166,42 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         adapter = _GLOBAL_CHANNEL_REG.get_adapter(platform)
         if not adapter:
             raise ValidationError(f"Adapter not available for platform: {platform}")
-        res = adapter.send(channel_id, text, thread_id=args.get("thread_id"))
-        delivered = bool(res.get("delivered"))
-        return {
-            "status": "sent" if delivered else "failed",
-            "delivery": res,
-        }
+
+        session_id = str(args.get("session_id") or run.get("id") or "default_session")
+        deliverable_mode = bool(args.get("deliverable_mode", True))
+
+        if deliverable_mode:
+            from homun.application.deliverable_dispatcher import dispatch_deliverables_for_turn
+
+            turn_result = dispatch_deliverables_for_turn(
+                session_id=session_id,
+                platform=platform,
+                destination_id=channel_id,
+                text=text,
+                adapter=adapter,
+                thread_id=args.get("thread_id"),
+                reply_to_id=args.get("reply_to_id"),
+            )
+            delivered = bool(turn_result.delivery_response.get("delivered"))
+            return {
+                "status": "sent" if delivered else "failed",
+                "delivery": turn_result.delivery_response,
+                "cleaned_text": turn_result.cleaned_text,
+                "deliverables_extracted": turn_result.extracted_count,
+                "receipts": [r.receipt_id for r in turn_result.receipts],
+            }
+        else:
+            res = adapter.send(
+                channel_id,
+                text,
+                thread_id=args.get("thread_id"),
+                reply_to_id=args.get("reply_to_id"),
+            )
+            delivered = bool(res.get("delivered"))
+            return {
+                "status": "sent" if delivered else "failed",
+                "delivery": res,
+            }
 
     if action == "adapter_status":
         adapters = list(_GLOBAL_CHANNEL_REG._adapters.keys())

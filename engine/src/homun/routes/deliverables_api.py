@@ -59,6 +59,28 @@ class DeliveryReceiptResponse(BaseModel):
     delivered_at: float
 
 
+class DispatchDeliverablesRequest(BaseModel):
+    session_id: str
+    channel: str
+    recipient_id: str
+    text: str
+    thread_id: Optional[str] = None
+    reply_to_id: Optional[str] = None
+    check_exists: Optional[bool] = False
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class DispatchDeliverablesResponse(BaseModel):
+    cleaned_text: str
+    extracted_count: int
+    new_deliverables_count: int
+    already_delivered_count: int
+    receipts: List[DeliveryReceiptResponse]
+    delivery_status: str
+    delivery_response: Dict[str, Any]
+
+
+
 @router.post("/scan", response_model=ScanDeliverablesResponse)
 def scan_deliverables(req: ScanDeliverablesRequest) -> ScanDeliverablesResponse:
     """Scan message text for generated deliverable artifacts, ignoring code blocks."""
@@ -121,3 +143,52 @@ def list_delivery_receipts(session_id: Optional[str] = None) -> List[DeliveryRec
         )
         for r in receipts
     ]
+
+
+@router.post("/dispatch", response_model=DispatchDeliverablesResponse)
+def dispatch_deliverables(req: DispatchDeliverablesRequest) -> DispatchDeliverablesResponse:
+    """Scan message text, protect code blocks, deduplicate against ledger, and dispatch to channel."""
+    from homun.application.channel_adapters import ChannelRegistry
+    from homun.application.deliverable_dispatcher import dispatch_deliverables_for_turn
+
+    reg = ChannelRegistry()
+    adapter = reg.get_adapter(req.channel)
+
+    turn_res = dispatch_deliverables_for_turn(
+        session_id=req.session_id,
+        platform=req.channel,
+        destination_id=req.recipient_id,
+        text=req.text,
+        adapter=adapter,
+        thread_id=req.thread_id,
+        reply_to_id=req.reply_to_id,
+        check_exists=req.check_exists or False,
+        metadata=req.metadata,
+    )
+
+    delivery_status = "sent" if turn_res.delivery_response.get("delivered") else (
+        "unconfigured" if adapter is None else "failed"
+    )
+
+    return DispatchDeliverablesResponse(
+        cleaned_text=turn_res.cleaned_text,
+        extracted_count=turn_res.extracted_count,
+        new_deliverables_count=len(turn_res.new_deliverables),
+        already_delivered_count=len(turn_res.already_delivered),
+        receipts=[
+            DeliveryReceiptResponse(
+                receipt_id=r.receipt_id,
+                channel=r.channel,
+                session_id=r.session_id,
+                path=r.path,
+                filename=r.filename,
+                category=r.category,
+                status=r.status,
+                delivered_at=r.delivered_at,
+            )
+            for r in turn_res.receipts
+        ],
+        delivery_status=delivery_status,
+        delivery_response=turn_res.delivery_response,
+    )
+

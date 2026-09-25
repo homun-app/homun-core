@@ -173,16 +173,28 @@ def test_surface_gateway_survives_reopen(tmp_path):
 
 
 def test_surface_steering_imports_into_agent_run_queue(tmp_path):
-    from homun.application.surface_contracts import SurfaceKind
+    from homun.application.surface_agent_bridge import import_surface_steering_into_run
     from homun.application.surface_gateway_manager import (
         SurfaceGatewayManager,
         set_surface_gateway_manager,
     )
+    from homun.domain.models import Actor
 
     mgr = SurfaceGatewayManager(db_path=tmp_path / "gw.sqlite")
     set_surface_gateway_manager(mgr)
     mgr.queue_steering_guidance("run-xyz", "Prefer Italian summaries")
-    drained = mgr.drain_steering_guidance("run-xyz")
-    assert len(drained) == 1
-    assert "Italian" in drained[0].guidance
+
+    run = {"id": "run-xyz"}
+    actor = Actor(id="actor-1", kind="human", display_name="Operator", workspace_id="ws-1")
+    imported_count = import_surface_steering_into_run(run, actor)
+
+    assert imported_count == 1
+    assert len(run["_steering"]) == 1
+    assert run["_steering"][0]["text"] == "Prefer Italian summaries"
+    assert run["_steering"][0]["source"] == "surface_gateway"
+    assert run["_steering"][0]["actor_id"] == "actor-1"
+
+    # Second import finds queue drained
+    assert import_surface_steering_into_run(run, actor) == 0
     set_surface_gateway_manager(None)
+

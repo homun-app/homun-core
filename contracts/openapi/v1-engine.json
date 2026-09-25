@@ -2472,6 +2472,127 @@
         "title": "DiscordActionRequest",
         "type": "object"
       },
+      "DispatchDeliverablesRequest": {
+        "properties": {
+          "channel": {
+            "title": "Channel",
+            "type": "string"
+          },
+          "check_exists": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "title": "Check Exists"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "recipient_id": {
+            "title": "Recipient Id",
+            "type": "string"
+          },
+          "reply_to_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply To Id"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
+          }
+        },
+        "required": [
+          "session_id",
+          "channel",
+          "recipient_id",
+          "text"
+        ],
+        "title": "DispatchDeliverablesRequest",
+        "type": "object"
+      },
+      "DispatchDeliverablesResponse": {
+        "properties": {
+          "already_delivered_count": {
+            "title": "Already Delivered Count",
+            "type": "integer"
+          },
+          "cleaned_text": {
+            "title": "Cleaned Text",
+            "type": "string"
+          },
+          "delivery_response": {
+            "additionalProperties": true,
+            "title": "Delivery Response",
+            "type": "object"
+          },
+          "delivery_status": {
+            "title": "Delivery Status",
+            "type": "string"
+          },
+          "extracted_count": {
+            "title": "Extracted Count",
+            "type": "integer"
+          },
+          "new_deliverables_count": {
+            "title": "New Deliverables Count",
+            "type": "integer"
+          },
+          "receipts": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryReceiptResponse"
+            },
+            "title": "Receipts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cleaned_text",
+          "extracted_count",
+          "new_deliverables_count",
+          "already_delivered_count",
+          "receipts",
+          "delivery_status",
+          "delivery_response"
+        ],
+        "title": "DispatchDeliverablesResponse",
+        "type": "object"
+      },
       "DoctorFinding": {
         "properties": {
           "category": {
@@ -9029,6 +9150,48 @@
           }
         },
         "summary": "Record Artifact Delivery",
+        "tags": [
+          "deliverables"
+        ]
+      }
+    },
+    "/v1/deliverables/dispatch": {
+      "post": {
+        "description": "Scan message text, protect code blocks, deduplicate against ledger, and dispatch to channel.",
+        "operationId": "dispatch_deliverables_v1_deliverables_dispatch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispatchDeliverablesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchDeliverablesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dispatch Deliverables",
         "tags": [
           "deliverables"
         ]
