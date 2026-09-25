@@ -390,6 +390,7 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
 - **H33 LINE/Teams/SMS (2026-09-25)**: LINE Messaging API push, Teams incoming webhook, Twilio SMS.
 - **H33 Feishu/Mattermost/Google Chat/DingTalk/WeCom (2026-09-25)**: channel adapters for Feishu IM, Mattermost posts, Google Chat webhook/API, DingTalk and WeCom robot webhooks; unconfigured → `backend_unavailable`.
 - **H33 IRC (2026-09-25)**: `IrcAdapter` opens a TCP IRC session (NICK/USER/JOIN/PRIVMSG) when `host` is configured; unconfigured → `backend_unavailable`.
+- **H16 Windows honesty bridge (2026-09-25)**: win32 auto-wires refuse-by-default providers; `ready=false` until a real Win32/UIA driver exists.
 - **H16 Linux bridge (2026-09-25)**: `computer_use_linux_bridge` auto-wires on Linux via xdotool/wmctrl + import/scrot/gnome-screenshot; `ready` only with DISPLAY/WAYLAND_DISPLAY and helpers present.
 - **H36 MCP discovery reconnect (2026-09-25)**: probe retries once on transient transport failure before any tools/call; tool/resource/prompt calls stay single-attempt.
 - **H33 ntfy + Matrix (2026-09-24)**: `NtfyAdapter` POSTs to topic servers; `MatrixAdapter` PUTs `m.room.message` when homeserver+token set.

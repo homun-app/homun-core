@@ -33,8 +33,9 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 23. H10: Vercel REST sandbox bridge; H36: product MCP sampling opt-in; httpx MCP HTTP fix.
 24. H10: managed Modal HTTP exec bridge wired into terminal backend_for.
 25. H33: LINE, Teams webhook, Twilio SMS adapters.
+26. H16: Windows honesty bridge (ready=false until Win32/UIA).
 
-**Prossimo passo eseguibile:** resto catalogo messaging (BlueBubbles, Mattermost E2EE gaps, Weixin, …); H16 Windows + AX SoM; MCP OAuth/mTLS; prove live con credenziali; prove provider con credenziali. Parità completa H01–H46 ancora aperta.
+**Prossimo passo eseguibile:** resto catalogo messaging (BlueBubbles, Weixin, …); H16 AX SoM; MCP OAuth/mTLS; prove live con credenziali; prove provider con credenziali. Parità completa H01–H46 ancora aperta.
 
 **Blocchi esterni (non inventare):** token canali reali; TCC Accessibility/Screen Recording per prove H16 live macOS; DISPLAY + xdotool su Linux; `HOMUN_MODAL_ALLOW_LIVE` / `HOMUN_DAYTONA_ALLOW_LIVE` + SDK per prove cloud a pagamento; Copilot CLI con `--acp` per prova H39 live.
 

@@ -75,6 +75,15 @@ class ComputerUseDriver:
                 if self._status_probe is None:
                     self._status_probe = probe_linux_computer_use
                 attach_linux_providers(self)
+            elif sys.platform == "win32":
+                from homun.application.computer_use_windows_bridge import (
+                    attach_windows_providers,
+                    probe_windows_computer_use,
+                )
+
+                if self._status_probe is None:
+                    self._status_probe = probe_windows_computer_use
+                attach_windows_providers(self)
 
     def get_status(self) -> Dict[str, Any]:
         """Return platform readiness only after a real permission/driver probe."""
@@ -100,6 +109,8 @@ class ComputerUseDriver:
                     probed["driver"] = "macos-bridge"
                 elif sys.platform.startswith("linux"):
                     probed["driver"] = "linux-bridge"
+                elif sys.platform == "win32":
+                    probed["driver"] = "windows-bridge-unavailable"
                 else:
                     probed["driver"] = "os-bridge"
             return probed
