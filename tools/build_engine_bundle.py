@@ -54,7 +54,7 @@ def main():
     dist.mkdir(exist_ok=True)
     def engine_inputs():
         sources = sorted((ROOT / 'engine/src/homun').rglob('*.py'))
-        prompts = sorted((ROOT / 'engine/src/homun/prompts').rglob('*.txt'))
+        prompts = sorted((ROOT / 'engine/src/homun').rglob('*.txt'))
         return sources, prompts
 
     sources, prompt_files = engine_inputs()
@@ -82,7 +82,7 @@ def main():
     current_sources = {path.relative_to(ROOT).as_posix()
                        for path in (ROOT / 'engine/src/homun').rglob('*.py')}
     current_sources |= {path.relative_to(ROOT).as_posix()
-                        for path in (ROOT / 'engine/src/homun/prompts').rglob('*.txt')}
+                        for path in (ROOT / 'engine/src/homun').rglob('*.txt')}
     expected_sources = {name for name in inputs if name.startswith('engine/src/')}
     if current_sources != expected_sources or any(
         not (ROOT / name).is_file() or hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest
