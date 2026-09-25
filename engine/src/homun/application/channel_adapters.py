@@ -1603,6 +1603,70 @@ class SmsAdapter(ChannelAdapter):
             )
 
 
+
+class BlueBubblesAdapter(ChannelAdapter):
+    """BlueBubbles iMessage REST send (Hermes messaging catalog: bluebubbles)."""
+
+    platform = "bluebubbles"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        data = payload.get("data") or payload
+        return ChannelMessage(
+            id=str(data.get("guid") or data.get("tempGuid") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(data.get("chatGuid") or data.get("channel_id") or ""),
+            user_id=str(data.get("handle", {}).get("address") if isinstance(data.get("handle"), dict) else data.get("handle") or ""),
+            text=str(data.get("text") or data.get("message") or ""),
+            is_direct=True,
+            timestamp=float(data.get("dateCreated") or time.time()) / (
+                1000.0 if data.get("dateCreated") and float(data.get("dateCreated")) > 10_000_000_000 else 1.0
+            ),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        base = (
+            str(self.config.get("base_url") or "").strip()
+            or str(os.environ.get("BLUEBUBBLES_URL") or os.environ.get("HOMUN_BLUEBUBBLES_URL") or "").strip()
+        )
+        password = (
+            str(self.config.get("password") or "").strip()
+            or str(os.environ.get("BLUEBUBBLES_PASSWORD") or os.environ.get("HOMUN_BLUEBUBBLES_PASSWORD") or "").strip()
+        )
+        if not base or not channel_id:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        url = f"{base.rstrip('/')}/api/v1/message/text"
+        params = {"password": password} if password else None
+        body = {"chatGuid": channel_id, "text": text, "method": "apple-script"}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 20.0)) as client:
+                resp = client.post(url, params=params, json=body)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform, channel_id=channel_id, text=text,
+                    thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                    delivered=False, error=f"BlueBubbles HTTP {resp.status_code}", status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=True, status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=False, error=str(exc),
+            )
+
+
 class ChannelRegistry:
     """Registry and dispatcher for multi-platform channel adapters."""
 
@@ -1632,6 +1696,7 @@ class ChannelRegistry:
             "line": LineAdapter(),
             "teams": TeamsAdapter(),
             "sms": SmsAdapter(),
+            "bluebubbles": BlueBubblesAdapter(),
         }
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:

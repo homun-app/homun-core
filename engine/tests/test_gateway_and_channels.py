@@ -914,7 +914,7 @@ def test_channel_registry_includes_new_messaging_catalog():
     from homun.application.channel_adapters import ChannelRegistry
 
     reg = ChannelRegistry()
-    for name in ("feishu", "mattermost", "google_chat", "dingtalk", "wecom", "irc", "line", "teams", "sms"):
+    for name in ("feishu", "mattermost", "google_chat", "dingtalk", "wecom", "irc", "line", "teams", "sms", "bluebubbles"):
         assert reg.get_adapter(name) is not None
 
 
@@ -962,3 +962,40 @@ def test_line_teams_sms_http_send(monkeypatch):
     sms = SmsAdapter(config={"account_sid": "ACxx", "token": "tok", "from": "+1000"})
     assert sms.send("+15551212", "hi")["delivered"] is True
     assert "twilio.com" in FakeClient.last[0]
+
+
+def test_bluebubbles_requires_url():
+    from homun.application.channel_adapters import BlueBubblesAdapter
+
+    assert BlueBubblesAdapter().send("chat;+;iMessage;-;+1", "hi")["delivered"] is False
+
+
+def test_bluebubbles_http_send(monkeypatch):
+    from homun.application.channel_adapters import BlueBubblesAdapter
+
+    class FakeResp:
+        status_code = 200
+        content = b"{}"
+
+    class FakeClient:
+        last = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, params=None, json=None):
+            FakeClient.last = (url, params, json)
+            return FakeResp()
+
+    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", FakeClient)
+    out = BlueBubblesAdapter(config={"base_url": "http://127.0.0.1:1234", "password": "p"}).send(
+        "chat;+;iMessage;-;+1555", "hello"
+    )
+    assert out["delivered"] is True
+    assert FakeClient.last[0].endswith("/api/v1/message/text")
