@@ -1785,6 +1785,125 @@ class QqBotAdapter(ChannelAdapter):
             )
 
 
+
+class SimplexAdapter(ChannelAdapter):
+    """SimpleX Chat websocket/HTTP bridge send when SIMPLE_X_URL is set."""
+
+    platform = "simplex"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        return ChannelMessage(
+            id=str(payload.get("msgId") or payload.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(payload.get("contact") or payload.get("channel_id") or ""),
+            user_id=str(payload.get("contact") or payload.get("user_id") or ""),
+            text=str(payload.get("msgBody") or payload.get("text") or ""),
+            is_direct=True,
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        base = (
+            str(self.config.get("base_url") or "").strip()
+            or str(os.environ.get("SIMPLEX_URL") or os.environ.get("HOMUN_SIMPLEX_URL") or "").strip()
+        )
+        token = _token_from(self.config, "SIMPLEX_TOKEN", "HOMUN_SIMPLEX_TOKEN")
+        if not base or not channel_id:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        url = f"{base.rstrip('/')}/send"
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        body = {"contact": channel_id, "text": text}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, json=body, headers=headers)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform, channel_id=channel_id, text=text,
+                    thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                    delivered=False, error=f"SimpleX HTTP {resp.status_code}", status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=True, status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=False, error=str(exc),
+            )
+
+
+class PhotonAdapter(ChannelAdapter):
+    """Photon chat HTTP webhook send (Hermes messaging catalog: photon)."""
+
+    platform = "photon"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        return ChannelMessage(
+            id=str(payload.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(payload.get("room") or payload.get("channel_id") or ""),
+            user_id=str(payload.get("sender") or payload.get("user_id") or ""),
+            text=str(payload.get("message") or payload.get("text") or ""),
+            is_direct=False,
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        webhook = (
+            str(self.config.get("webhook_url") or "").strip()
+            or str(os.environ.get("PHOTON_WEBHOOK_URL") or os.environ.get("HOMUN_PHOTON_WEBHOOK_URL") or "").strip()
+        )
+        if not webhook.startswith("http") and channel_id.startswith("http"):
+            webhook = channel_id
+        if not webhook.startswith("http"):
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        body = {"room": channel_id if not channel_id.startswith("http") else None, "text": text}
+        body = {k: v for k, v in body.items() if v is not None}
+        if "room" not in body:
+            body["text"] = text
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(webhook, json=body)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform, channel_id=channel_id, text=text,
+                    thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                    delivered=False, error=f"Photon HTTP {resp.status_code}", status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=True, status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=False, error=str(exc),
+            )
+
+
 class ChannelRegistry:
     """Registry and dispatcher for multi-platform channel adapters."""
 
@@ -1817,6 +1936,8 @@ class ChannelRegistry:
             "bluebubbles": BlueBubblesAdapter(),
             "weixin": WeixinAdapter(),
             "qqbot": QqBotAdapter(),
+            "simplex": SimplexAdapter(),
+            "photon": PhotonAdapter(),
         }
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:

@@ -37,8 +37,9 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 27. H33: BlueBubbles iMessage REST adapter.
 28. H33: Weixin + QQBot channel adapters.
 29. H16: macOS AX/SoM element listing via System Events.
+30. H33: SimpleX + Photon channel adapters.
 
-**Prossimo passo eseguibile:** resto catalogo messaging (SimpleX, Photon, A2A, …); MCP OAuth/mTLS; prove live con credenziali; prove provider con credenziali. Parità completa H01–H46 ancora aperta.
+**Prossimo passo eseguibile:** resto catalogo messaging (A2A, Raft, …); MCP OAuth/mTLS; prove live con credenziali; prove provider con credenziali. Parità completa H01–H46 ancora aperta.
 
 **Blocchi esterni (non inventare):** token canali reali; TCC Accessibility/Screen Recording per prove H16 live macOS; DISPLAY + xdotool su Linux; `HOMUN_MODAL_ALLOW_LIVE` / `HOMUN_DAYTONA_ALLOW_LIVE` + SDK per prove cloud a pagamento; Copilot CLI con `--acp` per prova H39 live.
 
