@@ -1,6 +1,6 @@
 # Continuazione: parità completa Homun / Hermes
 
-Data: 25 settembre 2026. Checkpoint del codice: vedi HEAD locale `fabio/hermes-parity` / `main` (nessun push).
+Data: 25 settembre 2026. Checkpoint del codice: `98888297` (locale main / fabio/hermes-parity, nessun push).
 Questo documento trasferisce il lavoro a un'altra chat. Non certifica parità raggiunta.
 
 
