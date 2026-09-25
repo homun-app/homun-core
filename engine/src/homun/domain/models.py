@@ -251,6 +251,12 @@ class ExternalServer(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     url: str = ""
     headers: dict[str, str] = Field(default_factory=dict)
+    # OAuth/mTLS (H36): optional; OAuth remains refuse-until-wired, mTLS uses client certs.
+    oauth_client_id: str = ""
+    oauth_token_url: str = ""
+    oauth_scopes: list[str] = Field(default_factory=list)
+    mtls_cert_path: str = ""
+    mtls_key_path: str = ""
     tools_include: list[str] = Field(default_factory=list)
     tools_exclude: list[str] = Field(default_factory=list)
     status: str = "enabled"  # enabled | disabled

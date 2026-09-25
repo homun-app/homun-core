@@ -44,6 +44,11 @@ def _external_create(ctx: CommandContext, actor: Actor, command_id: str, payload
         env={str(k): str(v) for k, v in (payload.get("env") or {}).items()},
         url=str(payload.get("url") or "").strip(),
         headers={str(k): str(v) for k, v in (payload.get("headers") or {}).items()},
+        oauth_client_id=str(payload.get("oauth_client_id") or "").strip(),
+        oauth_token_url=str(payload.get("oauth_token_url") or "").strip(),
+        oauth_scopes=[str(s) for s in (payload.get("oauth_scopes") or [])],
+        mtls_cert_path=str(payload.get("mtls_cert_path") or "").strip(),
+        mtls_key_path=str(payload.get("mtls_key_path") or "").strip(),
         tools_include=[str(t) for t in (payload.get("tools_include") or [])],
         tools_exclude=[str(t) for t in (payload.get("tools_exclude") or [])],
         status="enabled" if str(payload.get("status") or "enabled") == "enabled" else "disabled",
@@ -63,6 +68,8 @@ def _external_update(ctx: CommandContext, actor: Actor, command_id: str, payload
     ctx._require_expected_version(server.revision, payload.get("expected_version"))
     merged = {**server.model_dump(), **{k: v for k, v in payload.items()
               if k in ("name", "transport", "command", "args", "env", "url", "headers",
+                       "oauth_client_id", "oauth_token_url", "oauth_scopes",
+                       "mtls_cert_path", "mtls_key_path",
                        "tools_include", "tools_exclude", "status")}}
     _validate_server_payload(merged)
     for key in ("name", "transport", "command", "url", "status"):
@@ -76,6 +83,11 @@ def _external_update(ctx: CommandContext, actor: Actor, command_id: str, payload
     for key in ("env", "headers"):
         if key in payload:
             setattr(server, key, {str(k): str(v) for k, v in (payload.get(key) or {}).items()})
+    for key in ("oauth_client_id", "oauth_token_url", "mtls_cert_path", "mtls_key_path"):
+        if key in payload:
+            setattr(server, key, str(payload.get(key) or "").strip())
+    if "oauth_scopes" in payload:
+        server.oauth_scopes = [str(s) for s in (payload.get("oauth_scopes") or [])]
     if str(payload.get("status") or server.status) not in ("enabled", "disabled"):
         raise ValidationError("status must be enabled or disabled")
     server.revision += 1

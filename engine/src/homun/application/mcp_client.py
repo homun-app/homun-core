@@ -80,8 +80,32 @@ def filtered_tools(server: ExternalServer, tools: list[dict[str, Any]]) -> list[
     return names
 
 
+
+def _require_transport_auth(server: ExternalServer) -> None:
+    """Refuse OAuth until a real token broker exists; allow configured mTLS paths."""
+    if str(getattr(server, "oauth_client_id", "") or "").strip() or str(
+        getattr(server, "oauth_token_url", "") or ""
+    ).strip():
+        raise RuntimeError(
+            "MCP OAuth is declared but Homun has no token broker yet; "
+            "refusing the session instead of inventing bearer tokens "
+            "(code=backend_unavailable)"
+        )
+
+
+def _httpx_mtls_cert(server: ExternalServer):
+    cert = str(getattr(server, "mtls_cert_path", "") or "").strip()
+    key = str(getattr(server, "mtls_key_path", "") or "").strip()
+    if cert and key:
+        return (cert, key)
+    if cert:
+        return cert
+    return None
+
+
 @asynccontextmanager
 async def _transport(server: ExternalServer):
+    _require_transport_auth(server)
     if server.transport == "stdio":
         # SDK merges its safe baseline. Explicitly blank its other inherited keys
         # so only PATH/HOME and the person's declarations carry values.
@@ -93,8 +117,9 @@ async def _transport(server: ExternalServer):
             async with stdio_client(params, errlog=errlog) as streams:
                 yield streams[0], streams[1]
     elif server.transport == "http":
+        cert = _httpx_mtls_cert(server)
         async with httpx.AsyncClient(headers=server.headers, timeout=PROBE_TIMEOUT_SECONDS,
-                                     follow_redirects=False) as client:
+                                     follow_redirects=False, cert=cert) as client:
             async with streamable_http_client(server.url, http_client=client) as streams:
                 yield streams[0], streams[1]
     else:

@@ -396,6 +396,7 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
 - **H16 macOS AX/SoM (2026-09-25)**: capture modes `ax`/`som` populate UI elements via System Events when Accessibility is granted.
 - **H16 Windows honesty bridge (2026-09-25)**: win32 auto-wires refuse-by-default providers; `ready=false` until a real Win32/UIA driver exists.
 - **H16 Linux bridge (2026-09-25)**: `computer_use_linux_bridge` auto-wires on Linux via xdotool/wmctrl + import/scrot/gnome-screenshot; `ready` only with DISPLAY/WAYLAND_DISPLAY and helpers present.
+- **H36 MCP OAuth/mTLS (2026-09-25)**: OAuth fields refuse sessions until a token broker exists; HTTP transport accepts `mtls_cert_path`/`mtls_key_path`.
 - **H36 MCP discovery reconnect (2026-09-25)**: probe retries once on transient transport failure before any tools/call; tool/resource/prompt calls stay single-attempt.
 - **H33 ntfy + Matrix (2026-09-24)**: `NtfyAdapter` POSTs to topic servers; `MatrixAdapter` PUTs `m.room.message` when homeserver+token set.
 - **H39 Copilot ACP stdio (2026-09-24)**: `StdioAcpTransport` runs real initialize → session/new → session/prompt over the Copilot CLI when present; failures are typed, never synthesized replies.

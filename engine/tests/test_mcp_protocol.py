@@ -195,3 +195,40 @@ def test_probe_reconnects_once_on_transient_failure(tmp_path, monkeypatch):
     result = mcp_client.probe_server(server(tmp_path))
     assert result["tools"] == ["first", "second"]
     assert calls["n"] == 2
+
+
+def test_oauth_declared_refuses_without_token_broker(tmp_path):
+    from homun.domain.models import ExternalServer
+    from homun.application import mcp_client
+
+    server = ExternalServer(
+        id="mcp_x",
+        workspace_id="w",
+        name="oauth-srv",
+        transport="http",
+        url="https://example.invalid/mcp",
+        oauth_client_id="cid",
+        oauth_token_url="https://example.invalid/token",
+    )
+    try:
+        mcp_client.probe_server(server)
+        assert False, "expected refusal"
+    except RuntimeError as exc:
+        assert "OAuth" in str(exc)
+        assert "backend_unavailable" in str(exc)
+
+
+def test_mtls_cert_tuple_helper():
+    from homun.domain.models import ExternalServer
+    from homun.application.mcp_client import _httpx_mtls_cert
+
+    server = ExternalServer(
+        id="mcp_y",
+        workspace_id="w",
+        name="mtls",
+        transport="http",
+        url="https://example.invalid/mcp",
+        mtls_cert_path="/tmp/client.crt",
+        mtls_key_path="/tmp/client.key",
+    )
+    assert _httpx_mtls_cert(server) == ("/tmp/client.crt", "/tmp/client.key")
