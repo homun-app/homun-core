@@ -1016,7 +1016,9 @@ from homun.application.channel_adapters_catalog import (
     LineAdapter,
     MattermostAdapter,
     A2AAdapter,
+    BuzzAdapter,
     PhotonAdapter,
+    RaftAdapter,
     QqBotAdapter,
     SimplexAdapter,
     SmsAdapter,
@@ -1060,6 +1062,8 @@ class ChannelRegistry:
             "simplex": SimplexAdapter(),
             "photon": PhotonAdapter(),
             "a2a": A2AAdapter(),
+            "buzz": BuzzAdapter(),
+            "raft": RaftAdapter(),
         }
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:

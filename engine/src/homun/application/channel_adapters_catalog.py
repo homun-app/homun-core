@@ -976,3 +976,119 @@ class A2AAdapter(ChannelAdapter):
                 delivered=False, error=str(exc),
             )
 
+
+class BuzzAdapter(ChannelAdapter):
+    """Buzz HTTP webhook send (Hermes messaging catalog: buzz)."""
+
+    platform = "buzz"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        return ChannelMessage(
+            id=str(payload.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(payload.get("channel") or payload.get("channel_id") or ""),
+            user_id=str(payload.get("user") or payload.get("user_id") or ""),
+            text=str(payload.get("text") or payload.get("message") or ""),
+            is_direct=False,
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        webhook = (
+            str(self.config.get("webhook_url") or "").strip()
+            or str(os.environ.get("BUZZ_WEBHOOK_URL") or os.environ.get("HOMUN_BUZZ_WEBHOOK_URL") or "").strip()
+        )
+        if not webhook.startswith("http") and channel_id.startswith("http"):
+            webhook = channel_id
+        if not webhook.startswith("http"):
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        body = {"channel": channel_id if not channel_id.startswith("http") else None, "text": text}
+        body = {k: v for k, v in body.items() if v is not None}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(webhook, json=body)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform, channel_id=channel_id, text=text,
+                    thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                    delivered=False, error=f"Buzz HTTP {resp.status_code}", status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=True, status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=False, error=str(exc),
+            )
+
+
+class RaftAdapter(ChannelAdapter):
+    """Raft event/channel HTTP publish (Hermes messaging catalog: raft)."""
+
+    platform = "raft"
+
+    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
+        return ChannelMessage(
+            id=str(payload.get("id") or uuid.uuid4().hex[:8]),
+            platform=self.platform,
+            channel_id=str(payload.get("topic") or payload.get("channel_id") or ""),
+            user_id=str(payload.get("publisher") or payload.get("user_id") or ""),
+            text=str(payload.get("payload") or payload.get("text") or ""),
+            is_direct=False,
+            timestamp=float(payload.get("timestamp") or time.time()),
+        )
+
+    def send(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        thread_id: Optional[str] = None,
+        reply_to_id: Optional[str] = None,
+        media: Optional[List[ChannelMedia]] = None,
+    ) -> Dict[str, Any]:
+        base = (
+            str(self.config.get("base_url") or "").strip()
+            or str(os.environ.get("RAFT_URL") or os.environ.get("HOMUN_RAFT_URL") or "").strip()
+        )
+        token = _token_from(self.config, "RAFT_TOKEN", "HOMUN_RAFT_TOKEN")
+        if not base or not channel_id:
+            return super().send(channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media)
+        url = f"{base.rstrip('/')}/topics/{channel_id}/publish"
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        body = {"text": text}
+        try:
+            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
+                resp = client.post(url, json=body, headers=headers)
+            if resp.status_code >= 400:
+                return _http_delivery_result(
+                    platform=self.platform, channel_id=channel_id, text=text,
+                    thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                    delivered=False, error=f"Raft HTTP {resp.status_code}", status_code=resp.status_code,
+                )
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=True, status_code=resp.status_code,
+            )
+        except Exception as exc:
+            return _http_delivery_result(
+                platform=self.platform, channel_id=channel_id, text=text,
+                thread_id=thread_id, reply_to_id=reply_to_id, media=media,
+                delivered=False, error=str(exc),
+            )
+

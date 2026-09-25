@@ -914,7 +914,7 @@ def test_channel_registry_includes_new_messaging_catalog():
     from homun.application.channel_adapters import ChannelRegistry
 
     reg = ChannelRegistry()
-    for name in ("feishu", "mattermost", "google_chat", "dingtalk", "wecom", "irc", "line", "teams", "sms", "bluebubbles", "weixin", "qqbot", "simplex", "photon", "a2a"):
+    for name in ("feishu", "mattermost", "google_chat", "dingtalk", "wecom", "irc", "line", "teams", "sms", "bluebubbles", "weixin", "qqbot", "simplex", "photon", "a2a", "buzz", "raft"):
         assert reg.get_adapter(name) is not None
 
 
@@ -1110,3 +1110,39 @@ def test_a2a_http_send(monkeypatch):
     out = A2AAdapter(config={"base_url": "https://a2a.example"}).send("ignored", "hi")
     assert out["delivered"] is True
     assert FakeClient.last.endswith("/message:send")
+
+
+def test_buzz_raft_require_config():
+    from homun.application.channel_adapters_catalog import BuzzAdapter, RaftAdapter
+
+    assert BuzzAdapter().send("ch", "hi")["delivered"] is False
+    assert RaftAdapter().send("topic", "hi")["delivered"] is False
+
+
+def test_buzz_raft_http_send(monkeypatch):
+    from homun.application.channel_adapters_catalog import BuzzAdapter, RaftAdapter
+
+    class FakeResp:
+        status_code = 200
+        content = b"{}"
+
+    class FakeClient:
+        last = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, json=None, headers=None):
+            FakeClient.last = url
+            return FakeResp()
+
+    monkeypatch.setattr("homun.application.channel_adapters_catalog.httpx.Client", FakeClient)
+    assert BuzzAdapter(config={"webhook_url": "https://buzz.example/h"}).send("c", "hi")["delivered"] is True
+    assert RaftAdapter(config={"base_url": "https://raft.example"}).send("t1", "hi")["delivered"] is True
+    assert "/topics/t1/publish" in FakeClient.last
