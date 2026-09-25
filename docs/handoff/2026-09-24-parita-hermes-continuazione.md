@@ -30,8 +30,9 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 20. H33: email SMTP + Signal REST adapters.
 21. H33: IRC TCP PRIVMSG adapter; H16 Linux xdotool/wmctrl bridge; H36 discovery-only MCP reconnect.
 22. H33: Feishu IM, Mattermost, Google Chat, DingTalk, WeCom channel adapters.
+23. H10: Vercel REST sandbox bridge; H36: product MCP sampling opt-in; httpx MCP HTTP fix.
 
-**Prossimo passo eseguibile:** Vercel/managed Modal live clients; resto catalogo messaging (Line, SMS, Teams, …); H16 Windows + AX SoM; MCP OAuth/mTLS + product sampling wiring; prove provider con credenziali. Parità completa H01–H46 ancora aperta.
+**Prossimo passo eseguibile:** managed Modal live client; resto catalogo messaging (Line, SMS, Teams, …); H16 Windows + AX SoM; MCP OAuth/mTLS; prove provider con credenziali. Parità completa H01–H46 ancora aperta.
 
 **Blocchi esterni (non inventare):** token canali reali; TCC Accessibility/Screen Recording per prove H16 live macOS; DISPLAY + xdotool su Linux; `HOMUN_MODAL_ALLOW_LIVE` / `HOMUN_DAYTONA_ALLOW_LIVE` + SDK per prove cloud a pagamento; Copilot CLI con `--acp` per prova H39 live.
 

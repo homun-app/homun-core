@@ -34,6 +34,21 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 reset_context_for_tests(create_context())
             ctx = get_context()
             recover_materials(ctx)
+            try:
+                from homun.application.mcp_sampling import install_product_sampling
+                from homun.models.port import ChatMessage
+
+                def _complete(messages, model_id=None):
+                    chats = [
+                        ChatMessage(role=m.get("role") or "user", content=m.get("content") or "")
+                        for m in messages
+                    ]
+                    result = ctx.models.complete(chats)
+                    return str(getattr(result, "text", None) or getattr(result, "content", None) or result)
+
+                install_product_sampling(_complete)
+            except Exception:
+                pass
             async with runtime_lifespan(ctx):
                 yield
         finally:

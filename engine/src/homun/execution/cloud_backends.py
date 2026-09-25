@@ -204,7 +204,7 @@ def probe_cloud_backend(name: str) -> CloudBackendStatus:
         from homun.execution.vercel_jobs import (
             vercel_credentials_present,
             vercel_live_allowed,
-            vercel_sdk_available,
+            vercel_project_id,
         )
 
         if not vercel_credentials_present():
@@ -214,31 +214,29 @@ def probe_cloud_backend(name: str) -> CloudBackendStatus:
                 ready=False,
                 error="Vercel credentials missing (VERCEL_TOKEN or HOMUN_VERCEL_TOKEN)",
             )
+        if not vercel_project_id():
+            return CloudBackendStatus(
+                name=key,
+                configured=True,
+                ready=False,
+                error="Vercel project id missing (VERCEL_PROJECT_ID or HOMUN_VERCEL_PROJECT_ID)",
+            )
         if not vercel_live_allowed():
             return CloudBackendStatus(
                 name=key,
                 configured=True,
                 ready=False,
                 error=(
-                    "Vercel credentials present; set HOMUN_VERCEL_ALLOW_LIVE=1 after the "
-                    "Homun sandbox client is implemented (may incur cloud charges)"
+                    "Vercel credentials present; set HOMUN_VERCEL_ALLOW_LIVE=1 to permit "
+                    "sandbox creation (may incur cloud charges)"
                 ),
-            )
-        if not vercel_sdk_available():
-            return CloudBackendStatus(
-                name=key,
-                configured=True,
-                ready=False,
-                error="Vercel live opt-in set but no Homun-compatible Vercel sandbox SDK is installed",
             )
         return CloudBackendStatus(
             name=key,
             configured=True,
-            ready=False,
-            error=(
-                "Vercel credentials and live opt-in are present, but the Homun-owned "
-                "sandbox client is not yet implemented; refusing invented runs"
-            ),
+            ready=True,
+            error=None,
+            code="ok",
         )
     if not _env_present(keys):
         return CloudBackendStatus(

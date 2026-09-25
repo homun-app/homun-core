@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable, Optional
 
 import anyio
-import httpx2
+import httpx
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client, get_default_environment
 from mcp.client.streamable_http import streamable_http_client
@@ -93,7 +93,7 @@ async def _transport(server: ExternalServer):
             async with stdio_client(params, errlog=errlog) as streams:
                 yield streams[0], streams[1]
     elif server.transport == "http":
-        async with httpx2.AsyncClient(headers=server.headers, timeout=PROBE_TIMEOUT_SECONDS,
+        async with httpx.AsyncClient(headers=server.headers, timeout=PROBE_TIMEOUT_SECONDS,
                                      follow_redirects=False) as client:
             async with streamable_http_client(server.url, http_client=client) as streams:
                 yield streams[0], streams[1]
