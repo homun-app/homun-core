@@ -7,6 +7,7 @@ import { EngineSynthesis } from "./EngineSynthesis";
 import { EnginePriceComparison } from "./EnginePriceComparison";
 import { EngineArtifactReview } from "./EngineArtifactReview";
 import { EngineWorkNeedsCard } from "./EngineWorkNeedsCard";
+import { EngineIntakeCoordinatorCard } from "./EngineIntakeCoordinatorCard";
 import { PLACEHOLDER_WORK_TITLE } from "@/lib/engine-intake-display";
 import "./engine-work-intake.css";
 
@@ -87,20 +88,7 @@ export function EngineWorkIntake({
         </section>
       );
     }
-    return (
-      <aside className="cw-intake-chat-notice" aria-label="Proposta di lavoro pronta">
-        <div className="cw-intake-chat-notice__badge">PROPOSTA DI LAVORO</div>
-        <p className="cw-intake-chat-notice__title">
-          Ho predisposto la proposta per <strong>{p.title}</strong>
-          {(p.plan_steps?.length ?? 0) > 0 && ` con ${p.plan_steps!.length} fasi operative`}.
-        </p>
-        <p className="cw-intake-chat-notice__hint">
-          Trovi la scheda completa dell'accordo e i passaggi nel pannello a destra: confermala per iniziare, oppure chiedimi qui se vuoi apportare modifiche.
-        </p>
-        {intake.busy && <p className="cw-intake-note" role="status">Sto aggiornando la proposta…</p>}
-        <HomunErrorNotice error={intake.error} />
-      </aside>
-    );
+    return <EngineIntakeCoordinatorCard proposal={p} intake={intake} />;
   }
 
   return (

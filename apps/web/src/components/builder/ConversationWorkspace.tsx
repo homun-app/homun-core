@@ -80,7 +80,7 @@ export function ConversationWorkspace() {
   const [works, setWorks] = useState<Work[]>(() => demoBootstrap.works);
   const [workListOpen, setWorkListOpen] = useState(true);
   const [squadListOpen, setSquadListOpen] = useState(true);
-  const [panel, setPanel] = useState(true);
+  const [panel, setPanel] = useState(false);
   const searchShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K";
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 800);
   const [notifications, setNotifications] = useState(false);
@@ -210,7 +210,6 @@ export function ConversationWorkspace() {
     setContribution("");
     setFiles([]);
     setNotice("");
-    setPanel(true);
   }
   // Anchored follow while reading at the bottom; an own send always follows.
   const [ownSendSeq, bumpOwnSend] = useReducer((count: number) => count + 1, 0);
