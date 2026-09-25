@@ -36,7 +36,12 @@ class CopilotAcpClient:
     """Client adapter driving the GitHub Copilot CLI in ACP mode."""
 
     def __init__(self, command: Optional[str] = None, args: Optional[List[str]] = None) -> None:
-        self.command = command or os.getenv("HERMES_COPILOT_ACP_COMMAND") or "copilot"
+        self.command = (
+            command
+            or os.getenv("HOMUN_COPILOT_ACP_COMMAND")
+            or os.getenv("HERMES_COPILOT_ACP_COMMAND")
+            or "copilot"
+        )
         self.args = args or ["--acp", "--stdio"]
 
     def is_available(self) -> bool:
