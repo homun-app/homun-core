@@ -61,8 +61,12 @@ class SqliteMemoryPort:
                 continue
             if work_id is not None and note.work_id != work_id:
                 continue
-            if project_id is not None and note.project_id != project_id:
-                continue
+            if project_id is not None:
+                if project_id == "global":
+                    if note.project_id not in (None, "", "global"):
+                        continue
+                elif note.project_id != project_id:
+                    continue
             out.append(note)
         out.sort(key=lambda n: n.created_at)
         return out
@@ -128,11 +132,16 @@ class SqliteMemoryPort:
         needle = query.strip().lower()
         if not needle:
             return []
-        matches = [
-            note
-            for note in self.list(project_id=project_id, include_deleted=False)
-            if needle in note.text.lower()
-        ]
+        matches = []
+        for note in self._all():
+            if note.status == "deleted":
+                continue
+            if project_id is not None:
+                if not (note.project_id == project_id or note.project_id in (None, "", "global")):
+                    continue
+            if needle in note.text.lower():
+                matches.append(note)
+        matches.sort(key=lambda n: n.created_at)
         return matches[: max(1, min(limit, 50))]
 
     def _all(self) -> list[MemoryNote]:

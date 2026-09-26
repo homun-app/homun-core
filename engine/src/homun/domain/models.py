@@ -39,6 +39,7 @@ class AgentProfile(BaseModel):
     avatar: str | None = None
     instructions: str = ""
     preferred_connection_id: str | None = None
+    fallback_connection_id: str | None = None
     status: str = "active"  # draft | active | paused | retired
     # Professional identity (structured, queryable, versioned).
     responsibility: str = ""
@@ -64,6 +65,8 @@ class Project(BaseModel):
     member_ids: list[str] = Field(default_factory=list)
     conversation_ids: list[str] = Field(default_factory=list)
     status: str = "active"  # active | archived
+    agent_model_overrides: dict[str, str] = Field(default_factory=dict)
+    agent_tool_overrides: dict[str, list[str]] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

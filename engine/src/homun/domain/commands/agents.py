@@ -99,6 +99,7 @@ def _agent_create(ctx: CommandContext, actor: Actor, command_id: str, payload: d
     if not name:
         raise ValidationError("Agent name is required")
     connection_id = _validate_connection_id(ctx, payload.get("preferred_connection_id"))
+    fallback_connection_id = _validate_connection_id(ctx, payload.get("fallback_connection_id"))
     avatar_raw = payload.get("avatar")
     avatar = str(avatar_raw).strip() if avatar_raw is not None and str(avatar_raw).strip() else None
     agent = AgentProfile(
@@ -109,6 +110,7 @@ def _agent_create(ctx: CommandContext, actor: Actor, command_id: str, payload: d
         avatar=avatar,
         instructions=str(payload.get("instructions", "") or ""),
         preferred_connection_id=connection_id,
+        fallback_connection_id=fallback_connection_id,
         status=_parse_agent_status(ctx, payload.get("status"), default="active"),
     )
     _identity_from_payload(payload, agent, create=True)
@@ -170,6 +172,10 @@ def _agent_update(ctx: CommandContext, actor: Actor, command_id: str, payload: d
         agent.preferred_connection_id = _validate_connection_id(ctx,
             payload.get("preferred_connection_id")
         )
+    if "fallback_connection_id" in payload:
+        agent.fallback_connection_id = _validate_connection_id(ctx,
+            payload.get("fallback_connection_id")
+        )
     if "status" in payload:
         agent.status = _parse_agent_status(ctx, payload.get("status"), default=agent.status)
     _identity_from_payload(payload, agent, create=False)
@@ -187,6 +193,7 @@ def _agent_update(ctx: CommandContext, actor: Actor, command_id: str, payload: d
             "role": agent.role,
             "status": agent.status,
             "preferred_connection_id": agent.preferred_connection_id,
+            "fallback_connection_id": agent.fallback_connection_id,
         },
     )
     return {
@@ -196,6 +203,7 @@ def _agent_update(ctx: CommandContext, actor: Actor, command_id: str, payload: d
         "role": agent.role,
         "instructions": agent.instructions,
         "preferred_connection_id": agent.preferred_connection_id,
+        "fallback_connection_id": agent.fallback_connection_id,
         "status": agent.status,
         "avatar": agent.avatar,
         "responsibility": agent.responsibility,

@@ -13,7 +13,7 @@ import type { SpaceProject } from "../ConversationSpace";
 import type { Work } from "../conversation-types";
 import { useEngineStatus } from "@/hooks/useEngineStatus";
 import {
-  listEngineProjects, createEngineProject, listEngineMaterials, createEngineMaterial,
+  listEngineProjects, createEngineProject, updateEngineProject, listEngineMaterials, createEngineMaterial,
   ingestEngineMaterial, archiveEngineMaterial, type EngineProject, type EngineMaterial,
 } from "@/lib/engine-projects-client";
 import {
@@ -82,7 +82,7 @@ export function ProjectHubView({
           listEngineProjects(),
           listEngineAgents().catch(() => [] as EngineAgentProfile[]),
           listModelConnections().catch(() => null),
-          listEngineMemories({ projectId: null }).catch(() => [] as EngineMemoryNote[]),
+          listEngineMemories({ projectId: "global" }).catch(() => [] as EngineMemoryNote[]),
         ]);
         setEngineProjectsList(projs);
         setAllAgents(agts);
@@ -262,20 +262,25 @@ export function ProjectHubView({
 
   async function handlePromoteToGlobal(note: EngineMemoryNote) {
     if (isEngine) {
-      const globalNote = await addEngineMemory({
-        text: note.text,
-        actorId: "person_fabio",
-        projectId: null,
-      });
-      setGlobalMemories((prev) => [globalNote, ...prev]);
-      await deleteEngineMemory({
-        memoryId: note.id,
-        actorId: "person_fabio",
-      });
+      try {
+        const globalNote = await addEngineMemory({
+          text: note.text,
+          actorId: "person_fabio",
+          projectId: "global",
+        });
+        setGlobalMemories((prev) => [globalNote, ...prev]);
+        await deleteEngineMemory({
+          memoryId: note.id,
+          actorId: "person_fabio",
+        });
+        setProjectMemories((prev) => prev.filter((m) => m.id !== note.id));
+      } catch (err) {
+        setError(err);
+      }
     } else {
       setGlobalMemories((prev) => [{ ...note, id: `global_${note.id}`, project_id: null }, ...prev]);
+      setProjectMemories((prev) => prev.filter((m) => m.id !== note.id));
     }
-    setProjectMemories((prev) => prev.filter((m) => m.id !== note.id));
   }
 
   async function handleDeleteMemory(memoryId: string) {
@@ -289,13 +294,41 @@ export function ProjectHubView({
   }
 
   // Handlers for Agents
-  const currentAgentConfigs = agentConfigs[currentProjectId] || [
-    { agentId: "elio", modelOverride: "", enabledTools: ["web_search", "document_read"] },
-    { agentId: "vera", modelOverride: "", enabledTools: ["web_search"] },
-  ];
+  const currentAgentConfigs: ProjectAgentConfig[] = agentConfigs[currentProjectId] || (
+    activeEngineProj && allAgents.length > 0
+      ? allAgents.map((ag) => ({
+          agentId: ag.id,
+          modelOverride: activeEngineProj.agent_model_overrides?.[ag.id] ?? "",
+          enabledTools: activeEngineProj.agent_tool_overrides?.[ag.id] ?? ["web_search", "document_read"],
+        }))
+      : [
+          { agentId: "elio", modelOverride: "", enabledTools: ["web_search", "document_read"] },
+          { agentId: "vera", modelOverride: "", enabledTools: ["web_search"] },
+        ]
+  );
 
-  function handleSaveAgentConfigs(configs: ProjectAgentConfig[]) {
+  async function handleSaveAgentConfigs(configs: ProjectAgentConfig[]) {
     setAgentConfigs((prev) => ({ ...prev, [currentProjectId]: configs }));
+    if (isEngine && currentProjectId) {
+      try {
+        const agentModelOverrides: Record<string, string> = {};
+        const agentToolOverrides: Record<string, string[]> = {};
+        for (const cfg of configs) {
+          if (cfg.modelOverride) agentModelOverrides[cfg.agentId] = cfg.modelOverride;
+          if (cfg.enabledTools?.length) agentToolOverrides[cfg.agentId] = cfg.enabledTools;
+        }
+        await updateEngineProject({
+          projectId: currentProjectId,
+          expectedVersion: activeEngineProj?.version ?? 1,
+          agentModelOverrides,
+          agentToolOverrides,
+        });
+        const updatedList = await listEngineProjects();
+        setEngineProjectsList(updatedList);
+      } catch (err) {
+        setError(err);
+      }
+    }
   }
 
   // Handlers for RBAC

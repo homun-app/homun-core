@@ -24,6 +24,8 @@ def _project_create(ctx: CommandContext, actor: Actor, command_id: str, payload:
     status = str(payload.get("status", "active") or "active").strip()
     if status not in PROJECT_STATUSES:
         raise ValidationError(f"Invalid project status: {status}")
+    model_overrides = payload.get("agent_model_overrides") or {}
+    tool_overrides = payload.get("agent_tool_overrides") or {}
     project = Project(
         id=new_id("proj"),
         workspace_id=ctx.store.workspace_id,
@@ -32,6 +34,8 @@ def _project_create(ctx: CommandContext, actor: Actor, command_id: str, payload:
         member_ids=member_ids,
         team_ids=team_ids,
         status=status,
+        agent_model_overrides=dict(model_overrides) if isinstance(model_overrides, dict) else {},
+        agent_tool_overrides=dict(tool_overrides) if isinstance(tool_overrides, dict) else {},
     )
     ctx.store.projects[project.id] = project
     grant = _issue_admin_grant(ctx, actor=actor, project_id=project.id, command_id=command_id)
@@ -73,6 +77,12 @@ def _project_update(ctx: CommandContext, actor: Actor, command_id: str, payload:
         if status not in PROJECT_STATUSES:
             raise ValidationError(f"Invalid project status: {status}")
         project.status = status
+    if "agent_model_overrides" in payload:
+        m_overrides = payload.get("agent_model_overrides") or {}
+        project.agent_model_overrides = dict(m_overrides) if isinstance(m_overrides, dict) else {}
+    if "agent_tool_overrides" in payload:
+        t_overrides = payload.get("agent_tool_overrides") or {}
+        project.agent_tool_overrides = dict(t_overrides) if isinstance(t_overrides, dict) else {}
     project.version += 1
     project.updated_at = utc_now()
     ctx.store.projects[project.id] = project
@@ -93,6 +103,8 @@ def _project_update(ctx: CommandContext, actor: Actor, command_id: str, payload:
         "member_ids": list(project.member_ids),
         "team_ids": list(project.team_ids),
         "status": project.status,
+        "agent_model_overrides": dict(project.agent_model_overrides),
+        "agent_tool_overrides": dict(project.agent_tool_overrides),
     }
 
 

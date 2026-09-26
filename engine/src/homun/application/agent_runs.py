@@ -153,7 +153,13 @@ def propose(ctx, actor, work_id, body):
                 {'title': 'Svolgi la richiesta con gli strumenti disponibili',
                  'assignee_id': assignee_id, 'capability': 'agent_run',
                  'output_expected': 'Risultato da revisionare'})
-            connection_id = agent.preferred_connection_id if agent else None
+            connection_id = body.get('connection_id')
+            if not connection_id and work.project_id:
+                project = store.projects.get(work.project_id)
+                if project and getattr(project, 'agent_model_overrides', None):
+                    connection_id = project.agent_model_overrides.get(assignee_id)
+            if not connection_id and agent:
+                connection_id = agent.preferred_connection_id
             if not connection_id:
                 connection_id = next((c.id for c in ctx.models.list_connections() if c.active), None)
             if connection_id is None:
@@ -171,6 +177,8 @@ def propose(ctx, actor, work_id, body):
                                              'revision': revision_context(store, work),
                                              'organization_context': organization_background(store, actor)}, ensure_ascii=False), '_epoch': 0}
             fallback_conn_id = body.get('fallback_connection_id')
+            if not fallback_conn_id and agent and getattr(agent, 'fallback_connection_id', None):
+                fallback_conn_id = agent.fallback_connection_id
             if fallback_conn_id:
                 try:
                     fallback_conn = ctx.models.get_connection(fallback_conn_id)
