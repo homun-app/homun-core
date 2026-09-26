@@ -1,0 +1,447 @@
+/* Conversation Unified Settings & Models Styling - Homun Alpine Cream & Forest Palette */
+
+.cv-unified-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 100%;
+  color: #263832;
+}
+
+.cv-unified-section__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+}
+
+.cv-unified-section__title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: #1c2d22;
+  font-family: Manrope, sans-serif;
+}
+
+.cv-unified-section__subtitle {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.85rem;
+  color: #647a6d;
+  line-height: 1.45;
+}
+
+.cv-unified-section__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* Unified Buttons */
+.cv-unified-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  height: 32px;
+  padding: 0 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 550;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid #dce4d5;
+  background: #ffffff;
+  color: #263832;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cv-unified-btn:hover:not(:disabled) {
+  background: #edf2e7;
+  border-color: #c9d8c3;
+  color: #1c2d22;
+}
+
+.cv-unified-btn.is-primary {
+  background: #203c32;
+  border-color: #203c32;
+  color: #ffffff;
+}
+
+.cv-unified-btn.is-primary:hover:not(:disabled) {
+  background: #2c4d40;
+  border-color: #2c4d40;
+}
+
+.cv-unified-btn.is-subtle {
+  background: transparent;
+  border-color: transparent;
+  color: #647a6d;
+}
+
+.cv-unified-btn.is-subtle:hover:not(:disabled) {
+  background: #edf2e7;
+  color: #1c2d22;
+}
+
+.cv-unified-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Toolbar: Sub-tabs and Search */
+.cv-unified-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.cv-unified-tabs {
+  display: inline-flex;
+  align-items: center;
+  background: #edf2e7;
+  border: 1px solid rgba(104, 122, 89, 0.15);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.cv-unified-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 28px;
+  padding: 0 0.75rem;
+  font-size: 0.775rem;
+  font-weight: 500;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #556c5e;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cv-unified-tab:hover:not(.is-active) {
+  color: #1c2d22;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.cv-unified-tab.is-active {
+  background: #203c32;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(32, 60, 50, 0.2);
+}
+
+.cv-unified-tab__count {
+  font-size: 0.68rem;
+  opacity: 0.85;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.cv-unified-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 32px;
+  padding: 0 0.75rem;
+  background: #ffffff;
+  border: 1px solid #dce4d5;
+  border-radius: 8px;
+  min-width: 220px;
+  color: #647a6d;
+  transition: border-color 0.15s ease;
+}
+
+.cv-unified-search:focus-within {
+  border-color: #203c32;
+  background: #ffffff;
+}
+
+.cv-unified-search input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #1c2d22;
+  font-size: 0.8rem;
+  width: 100%;
+}
+
+.cv-unified-search input::placeholder {
+  color: #8c9e99;
+}
+
+/* Banner */
+.cv-unified-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+
+.cv-unified-banner.is-info {
+  background: #dcebd9;
+  border: 1px solid #b7d6b3;
+  color: #235940;
+}
+
+/* Unified List & Rows */
+.cv-unified-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.cv-unified-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 1rem 1.15rem;
+  background: #ffffff;
+  border: 1px solid #dce4d5;
+  border-radius: 11px;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cv-unified-row:hover {
+  background: #f7f9f5;
+  border-color: #97ac68;
+  box-shadow: 0 4px 16px rgba(32, 60, 50, 0.05);
+}
+
+.cv-unified-row__top-line {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.cv-unified-row__icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(32, 60, 50, 0.1);
+}
+
+.cv-unified-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.cv-unified-row__title-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.cv-unified-row__title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #1c2d22;
+}
+
+.cv-unified-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  font-size: 0.68rem;
+  font-weight: 500;
+  border-radius: 4px;
+  background: #edf2e7;
+  color: #556c5e;
+}
+
+.cv-unified-badge.is-active {
+  background: #203c32;
+  color: #ffffff;
+}
+
+.cv-unified-badge.is-ok {
+  background: #dcebd9;
+  color: #235940;
+}
+
+.cv-unified-row__desc {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #647a6d;
+  line-height: 1.45;
+}
+
+.cv-unified-row__models-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.15rem;
+}
+
+.cv-unified-model-pill {
+  font-size: 0.72rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #edf2e7;
+  border: 1px solid #dce4d5;
+  color: #263832;
+}
+
+.cv-unified-model-pill.is-default {
+  background: #dcebd9;
+  border-color: #b7d6b3;
+  color: #235940;
+  font-weight: 600;
+}
+
+.cv-unified-row__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.cv-unified-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #647a6d;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cv-unified-icon-btn:hover {
+  background: #edf2e7;
+  color: #1c2d22;
+}
+
+/* Modal Dialog for Configuration */
+.cv-unified-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(20, 38, 31, 0.45);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.cv-unified-modal {
+  width: 100%;
+  max-width: 500px;
+  background: #fbfbf8;
+  border: 1px solid #dce4d5;
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(32, 60, 50, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: cvModalFadeIn 0.16s ease-out;
+}
+
+@keyframes cvModalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.cv-unified-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.1rem 1.35rem;
+  border-bottom: 1px solid #e2e8dc;
+  background: #ffffff;
+}
+
+.cv-unified-modal__head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1c2d22;
+  font-family: Manrope, sans-serif;
+}
+
+.cv-unified-modal__body {
+  padding: 1.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  background: #fbfbf8;
+}
+
+.cv-unified-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.cv-unified-form-field label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #263832;
+}
+
+.cv-unified-form-field input,
+.cv-unified-form-field select,
+.cv-unified-form-field textarea {
+  height: 36px;
+  padding: 0 0.85rem;
+  background: #ffffff;
+  border: 1px solid #dce4d5;
+  border-radius: 7px;
+  color: #1c2d22;
+  font-size: 0.84rem;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.cv-unified-form-field input:focus,
+.cv-unified-form-field select:focus,
+.cv-unified-form-field textarea:focus {
+  border-color: #203c32;
+}
+
+.cv-unified-hint {
+  font-size: 0.74rem;
+  color: #647a6d;
+  margin-top: 0.15rem;
+  line-height: 1.45;
+}
+
+.cv-unified-modal__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  margin-top: 0.5rem;
+}

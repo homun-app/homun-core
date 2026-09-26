@@ -208,8 +208,7 @@ export function ConversationWorkspace() {
     setNotifications(false);
     setPreview(false);
     setContribution("");
-    setFiles([]);
-    setNotice("");
+    setFiles([]); setNotice(""); setPanel(false);
   }
   // Anchored follow while reading at the bottom; an own send always follows.
   const [ownSendSeq, bumpOwnSend] = useReducer((count: number) => count + 1, 0);

@@ -227,7 +227,26 @@ export function ConversationWorkspaceSidebar({
           <button className="cv-manage-team" onClick={() => onOpenSpace("Squadra")}>
             Tutti i collaboratori e team <ArrowUpRight size={14} />
           </button>
-          {engineAgents && engineAgents.filter(agent => agent.status === "active").map(agent => <button key={agent.id} onClick={() => onOpenSpace("Squadra", "", agent.id)}><ConversationAvatar name={agent.name}/><span>{agent.name}<small>{agent.role}</small></span></button>)}
+          {engineAgents &&
+            engineAgents
+              .filter((agent) => agent.status === "active")
+              .map((agent) => (
+                <button
+                  key={agent.id}
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent("homun:inspect-agent", { detail: agent })
+                    )
+                  }
+                  title={`Visualizza scheda di ${agent.name}`}
+                >
+                  <ConversationAvatar name={agent.name} />
+                  <span>
+                    {agent.name}
+                    <small>{agent.role}</small>
+                  </span>
+                </button>
+              ))}
           {engineAgents?.length === 0 && <p className="cw-nav-empty">I collaboratori che confermi compariranno qui.</p>}
           {!engineAgents && uniqueAgents.map((s) => (
             <button key={s.agent} onClick={() => onOpenSpace("Squadra", "", `person:${s.agent}`)}>

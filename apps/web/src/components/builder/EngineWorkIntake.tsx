@@ -15,10 +15,12 @@ export function EngineWorkIntake({
   work,
   intake,
   onChanged,
+  onInspectAgent,
 }: {
   work: Work;
   intake: WorkIntakeState;
   onChanged: () => Promise<void>;
+  onInspectAgent?: ((agentIdOrName: string) => void) | undefined;
 }) {
   const p = intake.proposal;
   if (!intake.loaded)
@@ -88,7 +90,7 @@ export function EngineWorkIntake({
         </section>
       );
     }
-    return <EngineIntakeCoordinatorCard proposal={p} intake={intake} />;
+    return <EngineIntakeCoordinatorCard proposal={p} intake={intake} onInspectAgent={onInspectAgent} />;
   }
 
   return (

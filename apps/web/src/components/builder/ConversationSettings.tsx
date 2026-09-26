@@ -18,16 +18,15 @@ import {
   Wallet,
   Puzzle,
   Zap,
+  ArrowLeft,
+  Search,
 } from "lucide-react";
 import { ConversationUpdateStatus } from "./ConversationUpdateStatus";
 import { ConversationSelect } from "./ConversationSelect";
-import {
-  ConversationModelsSettingsSection,
-  ConversationBudgetSettingsSection,
-} from "./ConversationModelsSettingsSection";
+import { ConversationUnifiedModelsSection } from "./ConversationUnifiedModelsSection";
+import { ConversationUnifiedPluginsSection } from "./ConversationUnifiedPluginsSection";
+import { ConversationBudgetSettingsSection } from "./ConversationModelsSettingsSection";
 import { ConversationPeopleSettingsSection } from "./ConversationPeopleSettingsSection";
-import { ConversationCapabilitiesSettingsSection } from "./ConversationCapabilitiesSettingsSection";
-import { ConversationMcpSettingsSection, ConversationSkillsSettingsSection } from "./EngineMcpSettings";
 import { ConversationAutomationsSettingsSection } from "./ConversationAutomationsSettingsSection";
 import { ConversationMemorySettingsSection } from "./ConversationMemorySettingsSection";
 import { ConversationAgentsSettingsSection } from "./ConversationAgentsSettingsSection";
@@ -36,22 +35,50 @@ import { ConversationGatewayChannelsSection } from "./ConversationGatewayChannel
 import { type ConversationPreferences } from "./conversation-preferences";
 import { setLanguage } from "@/lib/i18n";
 import "./conversation-settings.css";
-const sections = [
-  { id: "space", label: "Spazio e profilo", icon: UserRound },
-  { id: "people", label: "Persone e accessi", icon: UsersRound },
-  { id: "preferences", label: "Preferenze", icon: Settings2 },
-  { id: "notifications", label: "Notifiche e canali", icon: Bell },
-  { id: "models", label: "Modelli", icon: Brain },
-  { id: "budget", label: "Budget e routing", icon: Wallet },
-  { id: "agents", label: "Agenti", icon: Bot },
-  { id: "projects", label: "Progetti", icon: FolderKanban },
-  { id: "memory", label: "Memoria", icon: BookMarked },
-  { id: "plugins", label: "Plugin e capacità", icon: Puzzle },
-  { id: "skills", label: "Skill", icon: Sparkles },
-  { id: "automations", label: "Automazioni", icon: Zap },
-  { id: "archive", label: "Archivio", icon: Archive },
-  ...(import.meta.env.DEV ? [{ id: "data", label: "Dati della demo", icon: Database } as const] : []),
-  { id: "help", label: "Guida", icon: HelpCircle },
+
+type SettingsGroup = {
+  title: string;
+  items: Array<{
+    id: string;
+    label: string;
+    icon: typeof UserRound;
+  }>;
+};
+
+const settingGroups: SettingsGroup[] = [
+  {
+    title: "Infrastruttura & Modelli",
+    items: [
+      { id: "models", label: "Provider & Modelli LLM", icon: Brain },
+      { id: "budget", label: "Budget & Routing", icon: Wallet },
+      { id: "plugins", label: "Plugin e strumenti", icon: Puzzle },
+    ],
+  },
+  {
+    title: "Canali & Supervisione",
+    items: [
+      { id: "notifications", label: "Canali & Messaggistica", icon: Bell },
+      { id: "automations", label: "Automazioni di sfondo", icon: Zap },
+    ],
+  },
+  {
+    title: "Governance Aziendale",
+    items: [
+      { id: "people", label: "Directory Collaboratori", icon: UsersRound },
+      { id: "memory", label: "Policy & Memoria Globale", icon: BookMarked },
+      { id: "agents", label: "Catalogo Agenti dello Spazio", icon: Bot },
+    ],
+  },
+  {
+    title: "Spazio & Sistema",
+    items: [
+      { id: "space", label: "Spazio e profilo", icon: UserRound },
+      { id: "preferences", label: "Aspetto & Preferenze", icon: Settings2 },
+      { id: "archive", label: "Archivio", icon: Archive },
+      ...(import.meta.env.DEV ? [{ id: "data", label: "Dati della demo", icon: Database } as const] : []),
+      { id: "help", label: "Guida", icon: HelpCircle },
+    ],
+  },
 ];
 export function ConversationSettings({
   value,
@@ -78,6 +105,7 @@ export function ConversationSettings({
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [section, setSection] = useState("space");
+  const [navSearch, setNavSearch] = useState("");
   const [draft, setDraft] = useState(value);
   const [saved, setSaved] = useState(false);
   const [resetText, setResetText] = useState("");
@@ -112,6 +140,16 @@ export function ConversationSettings({
     draft.budget >= 0 &&
     draft.perWorkBudget >= 0 &&
     draft.perWorkBudget <= draft.budget;
+
+  const filteredGroups = settingGroups
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((item) =>
+        item.label.toLowerCase().includes(navSearch.trim().toLowerCase())
+      ),
+    }))
+    .filter((g) => g.items.length > 0);
+
   return (
     <dialog
       ref={dialog}
@@ -126,31 +164,53 @@ export function ConversationSettings({
       }}
     >
       <div className="cv-settings-layout">
-        <header>
-          <div>
-            <small>HOMUN</small>
-            <h2>Impostazioni</h2>
-          </div>
-          <button aria-label="Chiudi impostazioni" className="cw-icon" onClick={close}>
-            <X size={20} />
-          </button>
-        </header>
-        <nav aria-label="Categorie impostazioni">
-          {sections.map((s) => (
+        <aside className="cv-settings-sidebar">
+          <div className="cv-settings-sidebar__top">
             <button
-              key={s.id}
-              aria-current={section === s.id ? "page" : undefined}
-              onClick={() => {
-                setSection(s.id);
-                setError("");
-                setDiscard(false);
-              }}
+              type="button"
+              className="cv-settings-back-btn"
+              onClick={close}
             >
-              <s.icon size={17} />
-              {s.label}
+              <ArrowLeft size={16} />
+              <span>Torna all'app</span>
             </button>
-          ))}
-        </nav>
+            <div className="cv-settings-nav-search">
+              <Search size={14} />
+              <input
+                type="text"
+                placeholder="Cerca impostazioni…"
+                value={navSearch}
+                onChange={(e) => setNavSearch(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <nav className="cv-settings-sidebar__nav" aria-label="Categorie impostazioni">
+            {filteredGroups.map((group) => (
+              <div key={group.title} className="cv-settings-nav-group">
+                <span className="cv-settings-nav-group__title">{group.title}</span>
+                <div className="cv-settings-nav-group__items">
+                  {group.items.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={`cv-settings-nav-item ${section === s.id ? "is-active" : ""}`}
+                      aria-current={section === s.id ? "page" : undefined}
+                      onClick={() => {
+                        setSection(s.id);
+                        setError("");
+                        setDiscard(false);
+                      }}
+                    >
+                      <s.icon size={16} />
+                      <span>{s.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </nav>
+        </aside>
         <section className="cv-settings-body">
           {section === "space" && (
             <>
@@ -243,41 +303,20 @@ export function ConversationSettings({
             </>
           )}
           {section === "notifications" && (
-            <>
-              <h3>Solo ciò che ti serve</h3>
-              <p>
-                Le notifiche sono dentro lo spazio. Nessuna email o notifica di sistema viene
-                inviata.
-              </p>
-              <div className="cv-settings-card">
-                <strong>Richieste e approvazioni</strong>
-                <p>Restano sempre visibili per non perdere il lavoro che aspetta te.</p>
-              </div>
-              <label className="cv-settings-toggle">
-                <span>
-                  <strong>Risultati conclusi</strong>
-                  <small>Mostra nel centro notifiche anche le consegne già approvate.</small>
-                </span>
-                <input
-                  aria-label="Notifiche risultati conclusi"
-                  type="checkbox"
-                  checked={draft.resultNotifications}
-                  onChange={(e) => change("resultNotifications", e.target.checked)}
-                />
-              </label>
-              <ConversationGatewayChannelsSection />
-            </>
+            <ConversationGatewayChannelsSection
+              resultNotifications={draft.resultNotifications}
+              onToggleResultNotifications={(val) => change("resultNotifications", val)}
+            />
           )}
-          {section === "models" && (
-            <ConversationModelsSettingsSection draft={draft} onChange={change} />
-          )}
+          {section === "models" && <ConversationUnifiedModelsSection />}
           {section === "budget" && (
             <ConversationBudgetSettingsSection draft={draft} onChange={change} />
           )}
           {section === "people" && <ConversationPeopleSettingsSection />}
-          {section === "plugins" && <ConversationCapabilitiesSettingsSection />}
+          {(section === "plugins" || section === "skills") && (
+            <ConversationUnifiedPluginsSection />
+          )}
           {section === "automations" && <ConversationAutomationsSettingsSection />}
-          {section === "skills" && <ConversationSkillsSettingsSection />}
           {section === "agents" && <ConversationAgentsSettingsSection actorId="person_fabio" />}
           {section === "projects" && (
             <ConversationProjectsSettingsSection actorId="person_fabio" />

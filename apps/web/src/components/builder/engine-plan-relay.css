@@ -183,3 +183,34 @@
   font-weight: 600;
   align-self: flex-start;
 }
+
+/* Agent link button in timeline & checkpoint */
+.cw-agent-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 0 3px;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+  text-decoration: underline;
+  text-decoration-color: rgba(40, 70, 50, 0.35);
+  text-underline-offset: 2.5px;
+  transition: all 0.15s ease;
+}
+
+.cw-agent-link:hover {
+  background: rgba(104, 122, 89, 0.12);
+  color: #1a4d7d;
+  text-decoration-color: #1a4d7d;
+}
+
+.cw-agent-link:focus-visible {
+  outline: 2px solid #687a59;
+  outline-offset: 2px;
+}
+

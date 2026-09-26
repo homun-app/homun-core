@@ -1,0 +1,135 @@
+/* Unified Plugins & Tools section styling - Homun Alpine Cream & Forest Palette */
+
+.cv-unified-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 100;
+  min-width: 230px;
+  background: #ffffff;
+  border: 1px solid #dce4d5;
+  border-radius: 9px;
+  box-shadow: 0 12px 30px rgba(32, 60, 50, 0.15);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: cvMenuFade 0.14s ease-out;
+}
+
+@keyframes cvMenuFade {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.cv-unified-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.8rem;
+  color: #263832;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+
+.cv-unified-dropdown-item:hover {
+  background: #edf2e7;
+  color: #1c2d22;
+}
+
+.cv-unified-row__submeta {
+  font-size: 0.72rem;
+  color: #203c32;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cv-unified-empty {
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  color: #647a6d;
+  font-size: 0.84rem;
+  background: #f7f9f5;
+  border-radius: 10px;
+  border: 1px dashed #dce4d5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.cv-unified-code-preview {
+  background: #f4f7f0;
+  border: 1px solid #dce4d5;
+  border-radius: 8px;
+  padding: 0.85rem;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.cv-unified-code-preview pre {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #1c2d22;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Clarity & Explanation Box for MCP / Plugins ("Cosa accade") */
+.cv-unified-explain-box {
+  margin-top: 0.4rem;
+  padding: 0.75rem 0.95rem;
+  background: #edf2e7;
+  border: 1px solid rgba(104, 122, 89, 0.15);
+  border-radius: 8px;
+  font-size: 0.76rem;
+  color: #263832;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.cv-unified-explain-box strong {
+  color: #1c2d22;
+  font-size: 0.78rem;
+}
+
+.cv-unified-explain-box ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: #556c5e;
+}
+
+.cv-unified-explain-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-top: 0.2rem;
+}
+
+.cv-unified-explain-tool-pill {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #203c32;
+  border: 1px solid #dce4d5;
+}

@@ -1,0 +1,543 @@
+/**
+ * Homun Project Hub (Alpine Cream & Forest Design System)
+ * Surface-driven layout, zero border-soup, clear hierarchy & typography.
+ * Harmonized with Homun 2 canonical palette (#fbfbf8, #203c32, #edf2e7, #dce4d5).
+ */
+
+.ph-hub {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: #fbfbf8;
+  color: #263832;
+  overflow: hidden;
+  font-family: "DM Sans", sans-serif;
+}
+
+/* --- Context Bar (Breadcrumb & Project Switcher) --- */
+.ph-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 28px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8dc;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.ph-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #647a6d;
+}
+
+.ph-breadcrumb-link {
+  color: #435b4d;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  font-weight: 500;
+}
+
+.ph-breadcrumb-link:hover {
+  color: #1c2d22;
+  background: #edf2e7;
+}
+
+.ph-breadcrumb-sep {
+  color: #a6b8ad;
+  user-select: none;
+}
+
+.ph-switcher-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ph-source-badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.ph-source-badge--engine {
+  background: #dcebd9;
+  color: #235940;
+  border: 1px solid #b7d6b3;
+}
+
+.ph-source-badge--simulation {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+/* --- Project Header --- */
+.ph-header {
+  padding: 24px 28px 16px;
+  background: #fbfbf8;
+  border-bottom: 1px solid #e2e8dc;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ph-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.ph-header-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ph-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ph-title {
+  font-size: 24px;
+  font-weight: 750;
+  color: #1c2d22;
+  margin: 0;
+  letter-spacing: -0.02em;
+  font-family: Manrope, sans-serif;
+}
+
+.ph-brief {
+  font-size: 13.5px;
+  color: #556c5e;
+  max-width: 760px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ph-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ph-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #203c32;
+  color: #ffffff;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border: 1px solid #203c32;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ph-btn-primary:hover {
+  background: #2c4d40;
+  border-color: #2c4d40;
+}
+
+.ph-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #ffffff;
+  color: #263832;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 550;
+  border: 1px solid #dce4d5;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ph-btn-secondary:hover {
+  background: #edf2e7;
+  color: #1c2d22;
+}
+
+/* --- Project Navigation Tabs --- */
+.ph-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  border-bottom: 1px solid #e2e8dc;
+}
+
+.ph-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: transparent;
+  color: #647a6d;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.ph-tab:hover {
+  color: #1c2d22;
+  background: #edf2e7;
+  border-radius: 6px 6px 0 0;
+}
+
+.ph-tab--active {
+  color: #203c32;
+  border-bottom-color: #203c32;
+}
+
+.ph-tab-pill {
+  font-size: 11px;
+  background: #edf2e7;
+  color: #556c5e;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.ph-tab--active .ph-tab-pill {
+  background: #203c32;
+  color: #ffffff;
+}
+
+/* --- Tab Content Area --- */
+.ph-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px 40px;
+  background: #fbfbf8;
+}
+
+/* --- Common Card & Grid Surfaces --- */
+.ph-card {
+  background: #edf2e7;
+  border: 1px solid rgba(104, 122, 89, 0.12);
+  border-radius: 14px;
+  padding: 22px;
+  margin-bottom: 20px;
+}
+
+.ph-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 12px;
+}
+
+.ph-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1c2d22;
+  margin: 0;
+  font-family: Manrope, sans-serif;
+}
+
+.ph-card-subtitle {
+  font-size: 12.5px;
+  color: #647a6d;
+  margin: 3px 0 0;
+}
+
+/* --- Empty States --- */
+.ph-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  background: #ffffff;
+  border: 1px dashed #dce4d5;
+  border-radius: 14px;
+  color: #647a6d;
+  gap: 12px;
+}
+
+.ph-empty-icon {
+  width: 42px;
+  height: 42px;
+  color: #203c32;
+  opacity: 0.8;
+}
+
+.ph-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1c2d22;
+  margin: 0;
+}
+
+.ph-empty-desc {
+  font-size: 13px;
+  max-width: 440px;
+  margin: 0;
+  line-height: 1.5;
+  color: #647a6d;
+}
+
+/* --- Agent Card & LLM Override Layout --- */
+.ph-agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 16px;
+}
+
+.ph-agent-card {
+  background: #ffffff;
+  border: 1px solid #dce4d5;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: all 0.15s ease;
+}
+
+.ph-agent-card:hover {
+  border-color: #97ac68;
+  box-shadow: 0 4px 16px rgba(32, 60, 50, 0.05);
+}
+
+.ph-agent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ph-agent-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ph-agent-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #dcebd9;
+  color: #235940;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.ph-agent-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1c2d22;
+}
+
+.ph-agent-role {
+  font-size: 12px;
+  color: #647a6d;
+}
+
+.ph-override-box {
+  background: #f7f9f5;
+  border: 1px solid #e4eae0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ph-override-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #556c5e;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ph-override-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.ph-override-badge--default {
+  background: #edf2e7;
+  color: #435b4d;
+}
+
+/* --- Memory List & Scoping --- */
+.ph-memory-section {
+  margin-bottom: 24px;
+}
+
+.ph-memory-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #687a59;
+  margin-bottom: 10px;
+}
+
+.ph-memory-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid #dce4d5;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  gap: 16px;
+  transition: all 0.15s ease;
+}
+
+.ph-memory-item:hover {
+  border-color: #97ac68;
+}
+
+.ph-memory-item--global {
+  background: #f4f8f2;
+  border-color: #c9dbcd;
+}
+
+.ph-memory-text {
+  font-size: 13px;
+  color: #1c2d22;
+  line-height: 1.5;
+  flex: 1;
+}
+
+.ph-memory-meta {
+  font-size: 11px;
+  color: #72877a;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ph-btn-promote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: #edf2e7;
+  color: #203c32;
+  border: 1px solid #c8d8c3;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.ph-btn-promote:hover {
+  background: #203c32;
+  color: #ffffff;
+  border-color: #203c32;
+}
+
+/* --- Materials Table & Grounding --- */
+.ph-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: #ffffff;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #dce4d5;
+}
+
+.ph-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #556c5e;
+  background: #f7f9f5;
+  border-bottom: 1px solid #dce4d5;
+}
+
+.ph-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #eef2eb;
+  color: #263832;
+  vertical-align: middle;
+}
+
+.ph-table tr:hover td {
+  background: #f9fbf8;
+}
+
+.ph-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* --- RBAC & Work Capsules --- */
+.ph-capsule-box {
+  background: linear-gradient(135deg, #eaf2e8 0%, #edf4ec 100%);
+  border: 1px solid #c5dbca;
+  border-radius: 12px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.ph-capsule-text h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1c2d22;
+  margin: 0 0 4px;
+}
+
+.ph-capsule-text p {
+  font-size: 12px;
+  color: #4b6354;
+  margin: 0;
+  max-width: 580px;
+  line-height: 1.45;
+}

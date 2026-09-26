@@ -133,7 +133,7 @@ export function ConversationWorkspaceSpaceHost({
         />
       </>
     );
-  if (engineMode && space === "Progetti")
+  if (space === "Progetti")
     return (
       <EngineWorkspaceProjects
         projects={spaceData.projects}
@@ -141,6 +141,10 @@ export function ConversationWorkspaceSpaceHost({
         selected={spaceSelected}
         onProject={(id) => onOpenSpace("Progetti", "", id)}
         onWork={onOpenWork}
+        onCreateWork={(projId) =>
+          onCreateFreeWork("Nuovo lavoro", "Descrivi l'obiettivo di questa attività...", [], projId)
+        }
+        engineMode={engineMode}
       />
     );
 

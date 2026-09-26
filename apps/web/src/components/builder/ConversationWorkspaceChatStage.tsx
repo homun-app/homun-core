@@ -6,8 +6,9 @@
 import { EngineWorkIntake } from "./EngineWorkIntake";
 import { EnginePlanRelayTimeline } from "./EnginePlanRelayTimeline";
 import { ConversationMarginaliaSpine } from "./ConversationMarginaliaSpine";
+import { EngineAgentProfileModal } from "./EngineAgentProfileModal";
 import { Check, Sparkles, X } from "lucide-react";
-import { useEffect, type ReactNode, type RefObject } from "react";
+import { useEffect, useState, type ReactNode, type RefObject } from "react";
 import { ConversationAgentWait } from "./ConversationAgentWait";
 import { ConversationAvatar } from "./ConversationAvatar";
 import type { CatalogPlan } from "./ConversationCatalogPlan";
@@ -98,6 +99,69 @@ export function ConversationWorkspaceChatStage({
   agentNames,
   onStartWork,
 }: Props) {
+  const [inspectedAgent, setInspectedAgent] = useState<EngineAgentProfile | null>(null);
+
+  const handleInspectAgent = (agentOrIdOrName: string | EngineAgentProfile) => {
+    if (!agentOrIdOrName) return;
+    if (typeof agentOrIdOrName === "object" && "id" in agentOrIdOrName) {
+      setInspectedAgent(agentOrIdOrName);
+      return;
+    }
+    const idOrName = String(agentOrIdOrName).trim();
+    if (idOrName === "person_fabio" || idOrName.toLowerCase() === "homun") {
+      setInspectedAgent({
+        id: "homun",
+        workspace_id: "ws_local",
+        revision: 1,
+        name: "Homun",
+        role: "Coordinatore del lavoro",
+        responsibility: "Coordinamento della squadra, pianificazione e orchestrazione sicura dei flussi operativi.",
+        specializations: ["Orchestrazione collaborativa", "Coordinamento agenti", "Supervisione umana"],
+        status: "active",
+        autonomy_mode: "supervised",
+        capabilities: ["general"],
+        instructions: "Coordina l'esecuzione del lavoro nel rispetto delle autorizzazioni dell'utente, supervisiona i passaggi critici e gestisce le staffette tra collaboratori.",
+        method: "Collaborativo con supervisione umana.",
+      });
+      return;
+    }
+    const found = (engineAgents ?? []).find(
+      (a) =>
+        a.id === idOrName ||
+        a.name.toLowerCase() === idOrName.toLowerCase() ||
+        (agentNames?.[idOrName] && agentNames[idOrName].toLowerCase() === a.name.toLowerCase())
+    );
+    if (found) {
+      setInspectedAgent(found);
+      return;
+    }
+    const name = agentNames?.[idOrName] ?? idOrName;
+    setInspectedAgent({
+      id: idOrName,
+      workspace_id: "ws_local",
+      revision: 1,
+      name,
+      role: "Collaboratore Specializzato",
+      responsibility: "Collaboratore operativo nel flusso di lavoro.",
+      specializations: ["Attività operative", "Ricerca"],
+      status: "active",
+      autonomy_mode: "supervised",
+      capabilities: ["general"],
+      instructions: "Esegue le attività assegnate sotto la supervisione dell'utente.",
+      method: "Coordinato da Homun.",
+    });
+  };
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const customEvent = e as CustomEvent<string | EngineAgentProfile>;
+      if (customEvent.detail) {
+        handleInspectAgent(customEvent.detail);
+      }
+    };
+    window.addEventListener("homun:inspect-agent", handler);
+    return () => window.removeEventListener("homun:inspect-agent", handler);
+  }, [engineAgents, agentNames]);
   const mentionRefs = [
     ...scenarios
       .filter(
@@ -321,10 +385,17 @@ export function ConversationWorkspaceChatStage({
               agentNames={agentNames}
               busy={engineBusy}
               onStartWork={onStartWork}
+              onInspectAgent={handleInspectAgent}
             />
           )}
           {engineMode && work?.source === "engine" && engineIntake && (
-            <EngineWorkIntake key={work.id} work={work} intake={engineIntake} onChanged={onRefreshEngine} />
+            <EngineWorkIntake
+              key={work.id}
+              work={work}
+              intake={engineIntake}
+              onChanged={onRefreshEngine}
+              onInspectAgent={handleInspectAgent}
+            />
           )}
         </div>
         <div className="cw-composer">
@@ -371,6 +442,12 @@ export function ConversationWorkspaceChatStage({
       </section>
       {!panelOpen && <ConversationMarginaliaSpine work={work} intake={engineIntake} />}
       {panelOpen && details}
+      {inspectedAgent && (
+        <EngineAgentProfileModal
+          agent={inspectedAgent}
+          onClose={() => setInspectedAgent(null)}
+        />
+      )}
     </div>
   );
 }

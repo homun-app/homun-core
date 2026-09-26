@@ -23,11 +23,13 @@ export function EnginePlanRelayTimeline({
   agentNames,
   busy,
   onStartWork,
+  onInspectAgent,
 }: {
   work: Work;
   agentNames?: Record<string, string> | undefined;
   busy: boolean;
   onStartWork?: (() => Promise<void>) | undefined;
+  onInspectAgent?: ((agentIdOrName: string) => void) | undefined;
 }) {
   const steps = work.enginePlan;
   if (!steps?.length) return null;
@@ -60,7 +62,20 @@ export function EnginePlanRelayTimeline({
               <div className="cw-relay-timeline__title">
                 <strong>{step.title}</strong>
                 <span className="cw-relay-timeline__pill">
-                  <Icon size={11} /> {assignee} · {meta.label}
+                  <Icon size={11} />{" "}
+                  {onInspectAgent ? (
+                    <button
+                      type="button"
+                      className="cw-agent-link"
+                      title="Visualizza scheda collaboratore"
+                      onClick={() => onInspectAgent(step.assignee_id)}
+                    >
+                      {assignee}
+                    </button>
+                  ) : (
+                    assignee
+                  )}{" "}
+                  · {meta.label}
                 </span>
               </div>
               {step.output_expected && (
@@ -71,7 +86,21 @@ export function EnginePlanRelayTimeline({
               {nextStep && (
                 <div className="cw-relay-timeline__handoff-arrow">
                   <ArrowRight size={11} />
-                  <span>Passaggio di consegne a <strong>{nextAssignee}</strong></span>
+                  <span>
+                    Passaggio di consegne a{" "}
+                    {onInspectAgent && nextAssignee ? (
+                      <button
+                        type="button"
+                        className="cw-agent-link"
+                        title="Visualizza scheda collaboratore"
+                        onClick={() => onInspectAgent(nextStep.assignee_id)}
+                      >
+                        <strong>{nextAssignee}</strong>
+                      </button>
+                    ) : (
+                      <strong>{nextAssignee}</strong>
+                    )}
+                  </span>
                 </div>
               )}
             </div>
@@ -89,7 +118,19 @@ export function EnginePlanRelayTimeline({
             <div className="cw-relay-timeline__title">
               <strong>In corso: {runningStep.title}</strong>
               <span className="cw-relay-timeline__pill is-active">
-                {agentNames?.[runningStep.assignee_id] ?? "Homun"} al lavoro
+                {onInspectAgent ? (
+                  <button
+                    type="button"
+                    className="cw-agent-link"
+                    title="Visualizza scheda collaboratore"
+                    onClick={() => onInspectAgent(runningStep.assignee_id)}
+                  >
+                    {agentNames?.[runningStep.assignee_id] ?? "Homun"}
+                  </button>
+                ) : (
+                  agentNames?.[runningStep.assignee_id] ?? "Homun"
+                )}{" "}
+                al lavoro
               </span>
             </div>
             {runningStep.output_expected && (
@@ -129,8 +170,20 @@ export function EnginePlanRelayTimeline({
             <span className="cw-relay-timeline__checkpoint-phase">Fase: {authStep.title}</span>
           </div>
           <p className="cw-relay-timeline__checkpoint-desc">
-            Assegnata a <strong>{agentNames?.[authStep.assignee_id] ?? (authStep.assignee_id === defaultLocalActor().id ? "Homun" : "Collaboratore")}</strong>.
-            Nessuna operazione o scrittura sul sistema verrà eseguita senza il tuo esplicito via libera.
+            Assegnata a{" "}
+            {onInspectAgent ? (
+              <button
+                type="button"
+                className="cw-agent-link"
+                title="Visualizza scheda collaboratore"
+                onClick={() => onInspectAgent(authStep.assignee_id)}
+              >
+                <strong>{agentNames?.[authStep.assignee_id] ?? (authStep.assignee_id === defaultLocalActor().id ? "Homun" : "Collaboratore")}</strong>
+              </button>
+            ) : (
+              <strong>{agentNames?.[authStep.assignee_id] ?? (authStep.assignee_id === defaultLocalActor().id ? "Homun" : "Collaboratore")}</strong>
+            )}
+            . Nessuna operazione o scrittura sul sistema verrà eseguita senza il tuo esplicito via libera.
           </p>
           {onStartWork && work.engineStatus === "ready" && (
             <button

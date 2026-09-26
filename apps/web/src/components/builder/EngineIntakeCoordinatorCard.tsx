@@ -7,9 +7,11 @@ import { Check, Sparkles, Bot, Globe, Layers, ArrowRight, CornerDownLeft } from 
 export function EngineIntakeCoordinatorCard({
   proposal,
   intake,
+  onInspectAgent,
 }: {
   proposal: WorkIntake;
   intake: WorkIntakeState;
+  onInspectAgent?: ((agentIdOrName: string) => void) | undefined;
 }) {
   const [customClarify, setCustomClarify] = useState("");
   const steps = proposal.plan_steps ?? [];
@@ -43,7 +45,21 @@ export function EngineIntakeCoordinatorCard({
                 <div className="cw-intake-coordinator-card__step-content">
                   <strong>{step.title}</strong>
                   <div className="cw-intake-coordinator-card__step-meta">
-                    <span>Esecutore: <strong>{step.assignee || "Homun"}</strong></span>
+                    <span>
+                      Esecutore:{" "}
+                      {onInspectAgent ? (
+                        <button
+                          type="button"
+                          className="cw-agent-link"
+                          title="Visualizza scheda collaboratore"
+                          onClick={() => onInspectAgent(step.assignee || "Homun")}
+                        >
+                          <strong>{step.assignee || "Homun"}</strong>
+                        </button>
+                      ) : (
+                        <strong>{step.assignee || "Homun"}</strong>
+                      )}
+                    </span>
                     {step.output_expected && <span> · Consegna: <em>{step.output_expected}</em></span>}
                   </div>
                 </div>

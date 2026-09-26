@@ -28,6 +28,7 @@ import {
   type GrantCapability,
   type MaterialKind,
 } from "@/lib/engine-projects-client";
+import { SettingsCustomSelect } from "./SettingsCustomSelect";
 
 type Props = {
   actorId?: string;
@@ -220,18 +221,15 @@ export function ConversationProjectsSettingsSection({ actorId = "person_fabio" }
         </fieldset>
         <label>
           Coordinatore
-          <select
+          <SettingsCustomSelect
             value={coordinatorId}
-            onChange={(e) => setCoordinatorId(e.target.value)}
-            aria-label="Coordinatore team"
-          >
-            <option value="">Nessuno</option>
-            {teamMemberIds.map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
-          </select>
+            onChange={setCoordinatorId}
+            options={[
+              { value: "", label: "Nessuno" },
+              ...teamMemberIds.map((id) => ({ value: id, label: id })),
+            ]}
+            placeholder="Seleziona coordinatore..."
+          />
         </label>
         <button
           type="button"
@@ -424,29 +422,25 @@ export function ConversationProjectsSettingsSection({ actorId = "person_fabio" }
           )}
           <label>
             Soggetto
-            <select
+            <SettingsCustomSelect
               value={grantSubjectId}
-              onChange={(e) => setGrantSubjectId(e.target.value)}
-              aria-label="Soggetto grant"
-            >
-              {memberChoices.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+              onChange={setGrantSubjectId}
+              options={memberChoices.map((m) => ({ value: m.id, label: m.label }))}
+              placeholder="Seleziona soggetto..."
+            />
           </label>
           <label>
             Capacità
-            <select
+            <SettingsCustomSelect
               value={grantCapability}
-              onChange={(e) => setGrantCapability(e.target.value as GrantCapability)}
-              aria-label="Capacità grant"
-            >
-              <option value="read">read</option>
-              <option value="write">write</option>
-              <option value="admin">admin</option>
-            </select>
+              onChange={(val) => setGrantCapability(val as GrantCapability)}
+              options={[
+                { value: "read", label: "Lettura (read)", subtitle: "Consultazione di note e deliverable" },
+                { value: "write", label: "Scrittura (write)", subtitle: "Modifica e creazione artefatti" },
+                { value: "admin", label: "Amministrazione (admin)", subtitle: "Gestione completa del progetto" },
+              ]}
+              placeholder="Seleziona capacità..."
+            />
           </label>
           <button
             type="button"
@@ -626,15 +620,16 @@ export function ConversationProjectsSettingsSection({ actorId = "person_fabio" }
           </label>
           <label>
             Tipo
-            <select
+            <SettingsCustomSelect
               value={materialKind}
-              onChange={(e) => setMaterialKind(e.target.value as MaterialKind)}
-              aria-label="Tipo materiale"
-            >
-              <option value="note">note</option>
-              <option value="link">link</option>
-              <option value="file_ref">file_ref</option>
-            </select>
+              onChange={(val) => setMaterialKind(val as MaterialKind)}
+              options={[
+                { value: "note", label: "Nota / Testo (note)", subtitle: "Appunto testuale o contesto inline" },
+                { value: "link", label: "Collegamento Web (link)", subtitle: "URL verso documentazione esterna" },
+                { value: "file_ref", label: "Riferimento File (file_ref)", subtitle: "Percorso o file locale" },
+              ]}
+              placeholder="Seleziona tipo materiale..."
+            />
           </label>
           {materialKind === "note" ? (
             <label>
