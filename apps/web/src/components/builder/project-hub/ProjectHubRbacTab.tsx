@@ -110,7 +110,7 @@ export function ProjectHubRbacTab({
         <div className="ph-card-header">
           <div>
             <h3 className="ph-card-title">
-              <UsersRound size={16} className="text-[#8fe3d0]" />
+              <UsersRound size={16} className="text-[#157a6e]" />
               Squadra Umana & Permessi (RBAC)
             </h3>
             <p className="ph-card-subtitle">
@@ -127,18 +127,18 @@ export function ProjectHubRbacTab({
           <div
             style={{
               padding: "10px 14px",
-              background: "rgba(21, 122, 110, 0.15)",
-              border: "1px solid rgba(143, 227, 208, 0.25)",
+              background: "#edf2e7",
+              border: "1px solid #dce4d5",
               borderRadius: 8,
               fontSize: 13,
-              color: "#8fe3d0",
+              color: "#203c32",
               marginBottom: 16,
               display: "flex",
               alignItems: "center",
               gap: 8,
             }}
           >
-            <CheckCircle2 size={16} />
+            <CheckCircle2 size={16} className="text-[#157a6e]" />
             {notice}
           </div>
         )}
@@ -162,20 +162,20 @@ export function ProjectHubRbacTab({
                         width: 32,
                         height: 32,
                         borderRadius: "50%",
-                        background: "rgba(255, 255, 255, 0.08)",
+                        background: "#edf2e7",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                         fontSize: 13,
                         fontWeight: 600,
-                        color: "#f4f1ee",
+                        color: "#203c32",
                       }}
                     >
                       {m.name.slice(0, 1).toUpperCase()}
                     </div>
                     <div>
-                      <div style={{ fontWeight: 600, color: "#f4f1ee" }}>{m.name}</div>
-                      <div style={{ fontSize: 11, color: "#7d918c" }}>{m.email}</div>
+                      <div style={{ fontWeight: 600, color: "#1c2d22" }}>{m.name}</div>
+                      <div style={{ fontSize: 11, color: "#647a6d" }}>{m.email}</div>
                     </div>
                   </div>
                 </td>
@@ -205,7 +205,7 @@ export function ProjectHubRbacTab({
         <div className="ph-capsule-box">
           <div className="ph-capsule-text">
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <Laptop size={16} className="text-[#8fe3d0]" />
+              <Laptop size={16} className="text-[#157a6e]" />
               <h4 style={{ margin: 0 }}>Deleghe Remote: Homun Work Capsules</h4>
             </div>
             <p>

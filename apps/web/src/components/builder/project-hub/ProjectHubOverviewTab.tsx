@@ -21,31 +21,19 @@ export function ProjectHubOverviewTab({
   return (
     <div className="ph-tab-content">
       {/* Quick Stats Banner */}
-      <div className="ph-card" style={{ padding: "16px 20px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
-          <div>
-            <span style={{ fontSize: 11, color: "#8c9e99", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>
-              Lavori in corso
-            </span>
-            <div style={{ fontSize: 24, fontWeight: 700, color: "#8fe3d0", marginTop: 4 }}>
-              {activeWorks.length}
-            </div>
-          </div>
-          <div>
-            <span style={{ fontSize: 11, color: "#8c9e99", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>
-              Deliverable completati
-            </span>
-            <div style={{ fontSize: 24, fontWeight: 700, color: "#f4f1ee", marginTop: 4 }}>
-              {completedWorks.length}
-            </div>
-          </div>
-          <div>
-            <span style={{ fontSize: 11, color: "#8c9e99", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>
-              Stato complessivo
-            </span>
-            <div style={{ fontSize: 14, fontWeight: 600, color: activeWorks.length ? "#8fe3d0" : "#9db3ad", marginTop: 8 }}>
-              {activeWorks.length ? "Operativo · Task attivi" : "In attesa di nuovi compiti"}
-            </div>
+      <div className="ph-overview-stats">
+        <div className="ph-stat-metric">
+          <span className="ph-stat-metric-label">Lavori in corso</span>
+          <div className="ph-stat-metric-val">{activeWorks.length}</div>
+        </div>
+        <div className="ph-stat-metric">
+          <span className="ph-stat-metric-label">Deliverable completati</span>
+          <div className="ph-stat-metric-val">{completedWorks.length}</div>
+        </div>
+        <div className="ph-stat-metric">
+          <span className="ph-stat-metric-label">Stato complessivo</span>
+          <div className="ph-stat-metric-sub">
+            {activeWorks.length ? "Operativo · Task attivi" : "In attesa di nuovi compiti"}
           </div>
         </div>
       </div>
@@ -55,7 +43,7 @@ export function ProjectHubOverviewTab({
         <div className="ph-card-header">
           <div>
             <h3 className="ph-card-title">
-              <Clock size={16} className="text-[#8fe3d0]" />
+              <Clock size={16} className="text-[#157a6e]" />
               Incarichi e Conversazioni del Progetto
             </h3>
             <p className="ph-card-subtitle">

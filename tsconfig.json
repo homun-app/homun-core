@@ -4,8 +4,7 @@
     "apps/web/src/**/*.tsx",
     "packages/ui/src/**/*.ts",
     "packages/ui/src/**/*.tsx",
-    "apps/web/vite.config.ts",
-    "vite.prototype.config.ts"
+    "apps/web/vite.config.ts"
   ],
   "compilerOptions": {
     "target": "ES2022",

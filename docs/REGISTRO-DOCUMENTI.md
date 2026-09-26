@@ -11,7 +11,7 @@ Documenti censiti: **225**. Punto di ingresso: [indice](README.md).
 
 | Documento | Ruolo |
 | --- | --- |
-| [.lovable/plan/homun-assistenti-operativi-per-piccole-aziende-2026-09-15.md](../.lovable/plan/homun-assistenti-operativi-per-piccole-aziende-2026-09-15.md) | Riferimento corrente |
+| [docs/archive/homun-assistenti-operativi-per-piccole-aziende-2026-09-15.md](archive/homun-assistenti-operativi-per-piccole-aziende-2026-09-15.md) | Documento storico (archivio) |
 | [AGENTS.md](../AGENTS.md) | Istruzioni repository |
 | [CHANGELOG.md](../CHANGELOG.md) | Versioni pubblicate e Unreleased |
 | [README.md](../README.md) | Riferimento corrente |

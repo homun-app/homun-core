@@ -97,7 +97,7 @@ export function ProjectHubAgentsTab({
         <div className="ph-card-header">
           <div>
             <h3 className="ph-card-title">
-              <Bot size={16} className="text-[#8fe3d0]" />
+              <Bot size={16} className="text-[#157a6e]" />
               Agenti Assegnati a {projectName}
             </h3>
             <p className="ph-card-subtitle">
@@ -116,19 +116,20 @@ export function ProjectHubAgentsTab({
         {assigning && (
           <div
             style={{
-              padding: "14px 16px",
-              background: "#0a1310",
-              border: "1px solid rgba(143, 227, 208, 0.2)",
-              borderRadius: 10,
-              marginBottom: 16,
+              padding: "16px 20px",
+              background: "#ffffff",
+              border: "1px solid #dce4d5",
+              borderRadius: 12,
+              marginBottom: 20,
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              gap: 12,
+              gap: 16,
+              boxShadow: "0 2px 10px rgba(32, 60, 50, 0.04)",
             }}
           >
             <div>
-              <strong style={{ fontSize: 13, color: "#f4f1ee" }}>Seleziona un collaboratore artificiale:</strong>
+              <strong style={{ fontSize: 13, color: "#1c2d22" }}>Seleziona un collaboratore artificiale:</strong>
               <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
                 {unassignedAgents.map((agent) => (
                   <button
@@ -207,10 +208,10 @@ export function ProjectHubAgentsTab({
 
                   {/* Tool Capabilities for this Project */}
                   <div>
-                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "#8c9e99" }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#647a6d" }}>
                       Strumenti autorizzati nel progetto
                     </span>
-                    <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                       {[
                         { id: "web_search", label: "Web Search", icon: Globe },
                         { id: "document_read", label: "Grounding Documenti", icon: Brain },
@@ -223,26 +224,11 @@ export function ProjectHubAgentsTab({
                             key={tool.id}
                             type="button"
                             onClick={() => handleToggleTool(config.agentId, tool.id)}
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 6,
-                              padding: "4px 8px",
-                              borderRadius: 6,
-                              fontSize: 11,
-                              fontWeight: 500,
-                              cursor: "pointer",
-                              transition: "all 0.15s ease",
-                              border: enabled
-                                ? "1px solid rgba(143, 227, 208, 0.3)"
-                                : "1px solid rgba(255, 255, 255, 0.06)",
-                              background: enabled ? "rgba(21, 122, 110, 0.2)" : "rgba(255, 255, 255, 0.03)",
-                              color: enabled ? "#8fe3d0" : "#8c9e99",
-                            }}
+                            className={`ph-tool-chip ${enabled ? "ph-tool-chip--enabled" : ""}`}
                           >
-                            <Icon size={12} />
-                            {tool.label}
-                            {enabled && <Check size={11} />}
+                            <Icon size={12} className={enabled ? "text-[#157a6e]" : "text-[#7a8e83]"} />
+                            <span>{tool.label}</span>
+                            {enabled && <Check size={11} className="text-[#157a6e]" />}
                           </button>
                         );
                       })}

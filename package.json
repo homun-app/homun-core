@@ -6,8 +6,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite --config apps/web/vite.config.ts",
-    "dev:prototype": "vite --config vite.prototype.config.ts --open /prototypes/first-work.html",
-    "build:prototype": "vite build --config vite.prototype.config.ts",
     "build": "vite build --config apps/web/vite.config.ts",
     "build:dev": "vite build --config apps/web/vite.config.ts --mode development",
     "preview": "vite preview --config apps/web/vite.config.ts",
@@ -15,7 +13,7 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "check": "npm run typecheck && npm test && npm run build && npm run build:prototype",
+    "check": "npm run typecheck && npm test && npm run build",
     "architecture:check": "python3 tools/check_architecture.py",
     "engine:install": "cd engine && uv venv .venv --python 3.13.12 && uv pip sync requirements.lock --only-binary :all: --require-hashes --python .venv/bin/python && uv pip install --no-deps --no-build-isolation -e . --python .venv/bin/python && uv pip check --python .venv/bin/python",
     "engine:dev": "engine/.venv/bin/python -m homun serve --dev-insecure",
@@ -35,7 +33,6 @@
     "@ai-sdk/openai-compatible": "^3.0.48",
     "@ai-sdk/react": "^4.0.102",
     "@hookform/resolvers": "^5.2.2",
-    "@lovable.dev/cloud-auth-js": "^1.1.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-aspect-ratio": "^1.1.8",
@@ -103,7 +100,6 @@
   "devDependencies": {
     "@electron/packager": "20.3.0",
     "@eslint/js": "^9.32.0",
-    "@lovable.dev/vite-tanstack-config": "^2.20.0",
     "@types/node": "^22.16.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",

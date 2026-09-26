@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { FolderGit2, MessageSquare, Bot, FileText, BookMarked, UsersRound, Plus } from "lucide-react";
 import "./project-hub.css";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
-import type { SelectOption } from "../SettingsCustomSelect";
-import { ProjectHubContextBar } from "./ProjectHubContextBar";
+import { SettingsCustomSelect, type SelectOption } from "../SettingsCustomSelect";
+import { ProjectCreateModal } from "./ProjectHubContextBar";
 import { ProjectHubOverviewTab } from "./ProjectHubOverviewTab";
 import { ProjectHubAgentsTab, type ProjectAgentConfig } from "./ProjectHubAgentsTab";
 import { ProjectHubMaterialsTab } from "./ProjectHubMaterialsTab";
@@ -51,6 +51,7 @@ export function ProjectHubView({
   const [currentProjectId, setCurrentProjectId] = useState<string>(
     selectedId || (simProjects[0]?.id ?? ""),
   );
+  const [creatingProject, setCreatingProject] = useState(false);
 
   // Engine Domain State
   const [engineProjectsList, setEngineProjectsList] = useState<EngineProject[]>([]);
@@ -123,15 +124,43 @@ export function ProjectHubView({
   // Resolve current active project info
   const activeEngineProj = engineProjectsList.find((p) => p.id === currentProjectId);
   const activeSimProj = simProjects.find((p) => p.id === currentProjectId);
-  const projectName = activeEngineProj?.name || activeSimProj?.name || "Progetto";
-  const projectBrief = activeEngineProj?.description || activeSimProj?.brief || "Spazio di lavoro contestuale Homun.";
 
-  // Project items for switcher dropdown
-  const projectOptions: SelectOption[] = (isEngine ? engineProjectsList : simProjects).map((p) => ({
-    value: p.id,
-    label: p.name,
-    desc: "brief" in p ? p.brief : p.description,
-  }));
+  // Project items for switcher dropdown with disambiguation
+  const rawList = isEngine ? engineProjectsList : simProjects;
+  const nameCounts = new Map<string, number>();
+  for (const p of rawList) {
+    nameCounts.set(p.name, (nameCounts.get(p.name) || 0) + 1);
+  }
+
+  const projectOptions: SelectOption[] = rawList.map((p) => {
+    const rawName = p.name || p.id;
+    let label = rawName;
+    const childWorks = works.filter((w) => w.projectId === p.id);
+    const briefDesc = "brief" in p ? p.brief : p.description;
+
+    const firstChild = childWorks[0];
+    if ((nameCounts.get(rawName) || 0) > 1) {
+      if (firstChild) {
+        const distinctPart = firstChild.title.replace(rawName, "").replace(/^[·\s-]+/, "");
+        label = distinctPart ? `${rawName} · ${distinctPart}` : `${rawName} (${firstChild.title})`;
+      } else if (briefDesc) {
+        label = `${rawName} · ${briefDesc}`;
+      } else {
+        label = `${rawName} · ${p.id.slice(-6)}`;
+      }
+    }
+
+    return {
+      value: p.id,
+      label,
+      desc: childWorks.length > 0 ? `${childWorks.length} ${childWorks.length === 1 ? "lavoro" : "lavori"}: ${childWorks.map((w) => w.title).join(", ")}` : briefDesc || undefined,
+      badge: childWorks.length > 0 ? `${childWorks.length}` : undefined,
+    };
+  });
+
+  const currentOption = projectOptions.find((opt) => opt.value === currentProjectId);
+  const projectName = currentOption?.label || activeEngineProj?.name || activeSimProj?.name || "Progetto";
+  const projectBrief = activeEngineProj?.description || activeSimProj?.brief || "Spazio di lavoro contestuale Homun.";
 
   // Handlers for Materials
   async function handleAddTextMaterial(title: string, text: string) {
@@ -327,51 +356,81 @@ export function ProjectHubView({
 
   return (
     <div className="ph-hub" aria-label={`Hub di Progetto: ${projectName}`}>
-      {/* 1. Context Bar */}
-      <ProjectHubContextBar
-        projectName={projectName}
-        isEngine={isEngine}
-        currentProjectId={currentProjectId}
-        projectOptions={projectOptions}
-        onSelectProject={(id) => {
-          if (id) {
-            setCurrentProjectId(id);
-            onSelectProject(id);
-          } else {
-            onSelectProject("");
-          }
-        }}
-        onCreateProject={handleCreateProject}
-      />
-
       {error ? (
         <div style={{ padding: "8px 24px" }}>
           <HomunErrorNotice error={error} />
         </div>
       ) : null}
 
-      {/* 2. Project Header */}
+      {/* Unified Project Header */}
       <div className="ph-header">
         <div className="ph-header-top">
           <div className="ph-header-titles">
             <div className="ph-title-row">
-              <FolderGit2 size={24} className="text-[#8fe3d0]" />
-              <h1 className="ph-title">{projectName}</h1>
+              <FolderGit2 size={22} className="text-[#157a6e] shrink-0" />
+              {projectOptions.length > 1 ? (
+                <div className="ph-title-heading-wrapper">
+                  <SettingsCustomSelect
+                    variant="heading"
+                    searchable={true}
+                    searchPlaceholder="Cerca progetto per nome o contenuto..."
+                    value={currentProjectId}
+                    onChange={(val) => {
+                      if (val) {
+                        setCurrentProjectId(val);
+                        onSelectProject(val);
+                      }
+                    }}
+                    options={projectOptions}
+                    placeholder={projectName}
+                    footerAction={{
+                      label: "Nuovo Progetto",
+                      onClick: () => setCreatingProject(true),
+                    }}
+                    footerMeta={`${projectOptions.length} ${
+                      projectOptions.length === 1 ? "progetto" : "progetti"
+                    }`}
+                  />
+                </div>
+              ) : (
+                <h1 className="ph-title">{projectName}</h1>
+              )}
+              <span
+                className={
+                  isEngine
+                    ? "ph-source-badge ph-source-badge--engine"
+                    : "ph-source-badge ph-source-badge--simulation"
+                }
+              >
+                Fonte: {isEngine ? "motore" : "simulazione"}
+              </span>
             </div>
-            <p className="ph-brief">{projectBrief}</p>
+            {projectBrief && <p className="ph-brief">{projectBrief}</p>}
           </div>
+
           <div className="ph-header-actions">
             <button
+              type="button"
+              className="ph-btn-secondary"
+              onClick={() => setCreatingProject(true)}
+              title="Crea un nuovo progetto nello spazio"
+            >
+              <Plus size={13} />
+              <span>Nuovo Progetto</span>
+            </button>
+            <button
+              type="button"
               className="ph-btn-primary"
               onClick={() => (onCreateWork ? onCreateWork(currentProjectId) : null)}
+              title="Avvia una nuova sessione di lavoro per questo progetto"
             >
               <Plus size={14} />
-              Nuovo Lavoro
+              <span>Nuovo Lavoro</span>
             </button>
           </div>
         </div>
 
-        {/* 3. Tab Bar Navigation */}
+        {/* Tab Bar Navigation */}
         <nav className="ph-tabs" aria-label="Sezioni del Progetto">
           <button
             className={`ph-tab ${activeTab === "overview" ? "ph-tab--active" : ""}`}
@@ -480,6 +539,12 @@ export function ProjectHubView({
           />
         )}
       </div>
+
+      <ProjectCreateModal
+        isOpen={creatingProject}
+        onClose={() => setCreatingProject(false)}
+        onCreateProject={handleCreateProject}
+      />
     </div>
   );
 }

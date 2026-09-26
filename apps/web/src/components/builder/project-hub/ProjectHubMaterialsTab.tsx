@@ -58,7 +58,7 @@ export function ProjectHubMaterialsTab({
         <div className="ph-card-header">
           <div>
             <h3 className="ph-card-title">
-              <FileText size={16} className="text-[#8fe3d0]" />
+              <FileText size={16} className="text-[#157a6e]" />
               Documenti & Materiali di {projectName}
             </h3>
             <p className="ph-card-subtitle">
@@ -180,17 +180,17 @@ export function ProjectHubMaterialsTab({
                 <tr key={m.id}>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <FileCode size={16} className="text-[#8fe3d0]" />
+                      <FileCode size={16} className="text-[#157a6e]" />
                       <div>
-                        <div style={{ fontWeight: 600, color: "#f4f1ee" }}>{m.title}</div>
+                        <div style={{ fontWeight: 600, color: "#1c2d22" }}>{m.title}</div>
                         {m.origin_name && (
-                          <div style={{ fontSize: 11, color: "#7d918c" }}>{m.origin_name}</div>
+                          <div style={{ fontSize: 11, color: "#647a6d" }}>{m.origin_name}</div>
                         )}
                       </div>
                     </div>
                   </td>
                   <td>
-                    <span style={{ fontSize: 12, textTransform: "capitalize", color: "#9db3ad" }}>
+                    <span style={{ fontSize: 12, textTransform: "capitalize", color: "#556c5e" }}>
                       {m.kind || "documento"}
                     </span>
                   </td>
@@ -203,12 +203,12 @@ export function ProjectHubMaterialsTab({
                         fontSize: 11,
                         padding: "3px 8px",
                         borderRadius: 999,
-                        background: "rgba(21, 122, 110, 0.15)",
-                        color: "#8fe3d0",
+                        background: "#edf2e7",
+                        color: "#203c32",
                         fontWeight: 600,
                       }}
                     >
-                      <CheckCircle2 size={12} />
+                      <CheckCircle2 size={12} className="text-[#157a6e]" />
                       Ingerito & Pronto
                     </span>
                   </td>

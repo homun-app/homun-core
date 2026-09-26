@@ -18,9 +18,8 @@ Nuova base di Homun: interfaccia React, applicazione installabile Electron e mot
 
 Usare npm e Node 24 o successivo. Installare con `npm ci`. `.npmrc` conserva la compatibilità con i peer dependency del template storico; riallinearli prima della fase release.
 
-- `npm run dev`: nuova app su http://127.0.0.1:4183.
-- `npm run dev:prototype`: riferimento su http://127.0.0.1:4182.
-- `npm run check`: TypeScript, test, build app e build prototipi.
+- `npm run dev`: applicazione web su http://127.0.0.1:4183.
+- `npm run check`: TypeScript, suite di test e build web.
 - `npm run engine:install` poi `npm run engine:dev`: motore locale su http://127.0.0.1:8765 (`GET /v1/health`, `GET /v1/capabilities`). Richiede `uv` per il venv in `engine/.venv`.
 - `npm run desktop:dev`: build web e shell Electron; richiede il virtualenv del motore.
 - `npm run desktop:build`: candidato macOS arm64 con Python incluso, senza firma di distribuzione.
@@ -29,8 +28,6 @@ Usare npm e Node 24 o successivo. Installare con `npm ci`. `.npmrc` conserva la 
 - `npm run architecture:check`: confini dei moduli, cicli e limiti di crescita dei file.
 
 Il percorso di produzione usa il motore. La diagnostica e gli errori rendono visibile la connessione; il selettore della simulazione è uno strumento di sviluppo, non il percorso di primo avvio. Un motore indisponibile non viene sostituito da dati demo.
-
-La separazione dei sorgenti permette di evolvere la nuova app conservando il riferimento UX. Le due versioni condividono per ora dipendenze e risorse pubbliche. I vecchi collegamenti ai sorgenti `src/` nella documentazione storica corrispondono ora a `prototypes/reference/src/`; il codice destinato alla nuova app è in `apps/web/src/`.
 
 ## Stato reale — 23 settembre 2026
 
@@ -57,6 +54,4 @@ conserva debito precedente; controlli e limiti sono nel rapporto di consolidamen
 Il vecchio prodotto in `../app` resta indipendente; la migrazione segue
 [criteri dedicati](docs/development/transizione-homun.md). La pipeline di
 [release](docs/release.md) reagisce ai tag e pubblica draft: un commit locale
-non distribuisce una release. Il branch collegato a Lovable mantiene la sua
-storia; rispettare `AGENTS.md`. Le dipendenze del riferimento storico non
-costituiscono una scelta di backend per Homun 2.
+non distribuisce una release. Rispettare `AGENTS.md` per le regole architetturali.

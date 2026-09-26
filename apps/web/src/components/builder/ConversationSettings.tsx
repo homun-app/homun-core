@@ -441,7 +441,6 @@ export function ConversationSettings({
                       Demo con 18 lavori ↗
                     </a>
                     <a href="/">Spazio libero ↗</a>
-                    <a href="http://127.0.0.1:4182/prototypes/first-work.html">Versione precedente ↗</a>
                   </div>
                 </>
               )}

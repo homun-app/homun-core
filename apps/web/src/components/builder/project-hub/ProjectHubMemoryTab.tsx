@@ -62,7 +62,7 @@ export function ProjectHubMemoryTab({
         <div className="ph-card-header">
           <div>
             <h3 className="ph-card-title">
-              <BookMarked size={16} className="text-[#8fe3d0]" />
+              <BookMarked size={16} className="text-[#157a6e]" />
               Memoria & Vincoli di Progetto
             </h3>
             <p className="ph-card-subtitle">
@@ -168,7 +168,7 @@ export function ProjectHubMemoryTab({
             globalMemories.map((note) => (
               <div key={note.id} className="ph-memory-item ph-memory-item--global">
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1 }}>
-                  <Globe size={16} className="text-[#8fe3d0]" style={{ flexShrink: 0, marginTop: 2 }} />
+                  <Globe size={16} className="text-[#157a6e]" style={{ flexShrink: 0, marginTop: 2 }} />
                   <div>
                     <div className="ph-memory-text">{note.text}</div>
                     <div className="ph-memory-meta">
