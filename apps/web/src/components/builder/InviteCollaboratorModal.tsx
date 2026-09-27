@@ -113,7 +113,7 @@ export function InviteCollaboratorModal({
               <UserPlus size={20} />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white m-0 tracking-tight" style={{ fontFamily: "Manrope, sans-serif" }}>
+              <h3 className="text-lg font-bold text-white m-0 tracking-tight">
                 {initialData ? "Modifica Collaboratore" : "Invita un Membro nel Team"}
               </h3>
               <p className="text-xs text-[#a2b7a9] m-0 mt-0.5 leading-relaxed">

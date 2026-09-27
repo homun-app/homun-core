@@ -1,59 +1,60 @@
 .cv-settings-dialog {
   color-scheme: light;
-  width: min(1400px, calc(100vw - 32px));
+  width: min(1200px, calc(100vw - 48px));
   max-width: none;
-  height: min(920px, calc(100dvh - 36px));
+  height: min(840px, calc(100dvh - 48px));
   max-height: none;
   padding: 0;
-  border: 1px solid #dce4d5;
-  border-radius: 22px;
-  background: #fbfbf8;
-  color: #263832;
-  box-shadow: 0 32px 100px rgba(32, 60, 50, 0.28);
+  border: 1px solid var(--color-border, #e3e7e5);
+  border-radius: var(--radius-xl, 12px);
+  background: var(--color-background, #fdfefd);
+  color: var(--color-foreground, #131a17);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
   overflow: hidden;
+  font-family: var(--font-sans);
 }
 .cv-settings-dialog * {
   scrollbar-width: thin;
-  scrollbar-color: #cbd7c7 transparent;
+  scrollbar-color: var(--color-border, #e3e7e5) transparent;
 }
 .cv-settings-dialog *::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 .cv-settings-dialog *::-webkit-scrollbar-track {
   background: transparent;
 }
 .cv-settings-dialog *::-webkit-scrollbar-thumb {
-  background: #cbd7c7;
+  background: var(--color-border, #e3e7e5);
   border-radius: 999px;
 }
 .cv-settings-dialog *::-webkit-scrollbar-thumb:hover {
-  background: #97ac68;
+  background: var(--color-ring, #579481);
 }
 .cv-settings-dialog::backdrop {
-  background: rgba(20, 38, 31, 0.55);
-  backdrop-filter: blur(12px);
+  background: rgba(15, 23, 20, 0.4);
+  backdrop-filter: blur(8px);
 }
 .cv-settings-layout {
   height: 100%;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
 }
 .cv-settings-sidebar {
   display: flex;
   flex-direction: column;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-  background: #203c32;
-  color: #eaf0e7;
+  border-right: 1px solid var(--color-sidebar-border, #e3e7e5);
+  background: var(--color-sidebar, #f5f9f7);
+  color: var(--color-sidebar-foreground, #28302d);
   overflow: hidden;
 }
 .cv-settings-sidebar__top {
-  padding: 16px 14px 12px;
+  padding: 14px 12px 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 8px;
+  border-bottom: 1px solid var(--color-sidebar-border, #e3e7e5);
 }
 .cv-settings-back-btn {
   display: inline-flex;
@@ -61,52 +62,52 @@
   gap: 8px;
   font-size: 13px;
   font-weight: 500;
-  color: #dce7d5;
+  color: var(--color-muted-foreground, #656e6b);
   background: transparent;
   border: none;
   cursor: pointer;
   padding: 6px 8px;
-  border-radius: 6px;
-  transition: all 0.15s ease;
+  border-radius: var(--radius-md, 6px);
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 .cv-settings-back-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #ffffff;
+  background: var(--color-sidebar-accent, #e9eeec);
+  color: var(--color-foreground, #131a17);
 }
 .cv-settings-nav-search {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 7px;
-  color: #dce7d5;
+  padding: 6px 8px;
+  background: var(--color-card, #ffffff);
+  border: 1px solid var(--color-border, #e3e7e5);
+  border-radius: var(--radius-md, 6px);
+  color: var(--color-muted-foreground, #656e6b);
 }
 .cv-settings-nav-search input {
   background: transparent;
   border: none;
   outline: none;
   font-size: 12px;
-  color: #ffffff;
+  color: var(--color-foreground, #131a17);
   width: 100%;
 }
 .cv-settings-nav-search input::placeholder {
-  color: #92a99b;
+  color: var(--color-muted-foreground, #656e6b);
 }
 .cv-settings-sidebar__nav {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 10px;
+  padding: 10px 8px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 .cv-settings-sidebar__nav::-webkit-scrollbar {
   width: 4px;
 }
 .cv-settings-sidebar__nav::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--color-border, #e3e7e5);
   border-radius: 4px;
 }
 .cv-settings-sidebar__nav::-webkit-scrollbar-track {
@@ -115,61 +116,60 @@
 .cv-settings-nav-group {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 .cv-settings-nav-group__title {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #92a99b;
+  letter-spacing: 0.06em;
+  color: var(--color-muted-foreground, #656e6b);
   padding: 4px 8px;
 }
 .cv-settings-nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 6px 8px;
   font-size: 13px;
   font-weight: 500;
-  color: #dce7d5;
-  border-radius: 7px;
+  color: var(--color-sidebar-foreground, #28302d);
+  border-radius: var(--radius-md, 6px);
   background: transparent;
   border: none;
   cursor: pointer;
   text-align: left;
   width: 100%;
-  transition: all 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 .cv-settings-nav-item:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #ffffff;
+  background: var(--color-sidebar-accent, #e9eeec);
 }
 .cv-settings-nav-item.is-active {
-  background: #2c4d40;
-  color: #ffffff;
+  background: var(--color-sidebar-accent, #e9eeec);
+  color: var(--color-primary, #206553);
   font-weight: 600;
 }
 .cv-settings-body {
-  padding: 28px 36px;
+  padding: 24px 32px;
   overflow: auto;
   min-width: 0;
-  background: #fbfbf8;
-  color: #263832;
+  background: var(--color-background, #fdfefd);
+  color: var(--color-foreground, #131a17);
 }
 .cv-settings-body h3 {
-  font-size: 22px;
-  font-weight: 700;
-  margin: 0 0 10px;
-  letter-spacing: -0.02em;
-  color: #1c2d22;
-  font-family: Manrope, sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  letter-spacing: -0.015em;
+  color: var(--color-foreground, #131a17);
+  font-family: var(--font-sans);
 }
 .cv-settings-body p {
   font-size: 13px;
-  line-height: 1.6;
-  color: #647a6d;
-  margin: 6px 0 20px;
+  line-height: 1.5;
+  color: var(--color-muted-foreground, #656e6b);
+  margin: 4px 0 16px;
 }
 .cv-settings-body label {
   display: block;

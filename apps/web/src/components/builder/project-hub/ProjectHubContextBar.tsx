@@ -75,7 +75,7 @@ export function ProjectCreateModal({ isOpen, onClose, onCreateProject }: Props) 
             >
               <FolderGit2 size={18} />
             </div>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#1c2d22", fontFamily: "Manrope, sans-serif" }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#1c2d22" }}>
               Crea Nuovo Progetto
             </h3>
           </div>

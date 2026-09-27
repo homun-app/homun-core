@@ -272,7 +272,7 @@ export function ProjectHubMaterialsTab({
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ margin: 0, fontSize: 16, color: "#1c2d22", fontFamily: "Manrope, sans-serif" }}>{previewMaterial.title}</h3>
+              <h3 style={{ margin: 0, fontSize: 16, color: "#1c2d22" }}>{previewMaterial.title}</h3>
               <button className="ph-btn-secondary" onClick={() => setPreviewMaterial(null)}>
                 Chiudi
               </button>

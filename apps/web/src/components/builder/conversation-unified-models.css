@@ -23,7 +23,7 @@
   font-weight: 700;
   letter-spacing: -0.015em;
   color: #1c2d22;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .cv-unified-section__subtitle {
@@ -388,7 +388,7 @@
   font-size: 1.05rem;
   font-weight: 700;
   color: #1c2d22;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .cv-unified-modal__body {

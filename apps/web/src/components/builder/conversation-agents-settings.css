@@ -17,7 +17,7 @@
   color: #1c2d22;
   margin: 0 0 6px;
   letter-spacing: -0.01em;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .cv-agents-header p {
@@ -124,7 +124,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .cv-agent-card__role {
@@ -236,7 +236,7 @@
   font-weight: 700;
   color: #1c2d22;
   margin: 0;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .cv-agent-editor__card-desc {

@@ -325,7 +325,7 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
           <Brain size={18} />
         </div>
         <div className="space-y-1">
-          <strong className="text-xs font-bold text-[#1c2d22] block" style={{ fontFamily: "Manrope, sans-serif" }}>
+          <strong className="text-xs font-bold text-[#1c2d22] block">
             {activeLevel === "space"
               ? "Ambito Globale: Regole Non Negoziabili per Tutti gli Agenti"
               : `Ambito Circoscritto: Regole per ${selectedProjName || "il Progetto"}`}
@@ -366,7 +366,7 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
 
       {/* Modulo Aggiunta Ricordo */}
       <div className="p-4 rounded-xl bg-[#edf2e7] border border-[rgba(104,122,89,0.12)] space-y-3">
-        <strong className="text-xs font-bold text-[#1c2d22] block" style={{ fontFamily: "Manrope, sans-serif" }}>
+        <strong className="text-xs font-bold text-[#1c2d22] block">
           Aggiungi Nuova Regola Approvata (
           {activeLevel === "space" ? "Spazio Globale" : selectedProjName}
           )
@@ -397,7 +397,7 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
       {/* Ricerca / Recall */}
       <div className="p-4 rounded-xl bg-[#edf2e7] border border-[rgba(104,122,89,0.12)] space-y-3">
         <div className="flex items-center justify-between">
-          <strong className="text-xs font-bold text-[#1c2d22] flex items-center gap-1.5" style={{ fontFamily: "Manrope, sans-serif" }}>
+          <strong className="text-xs font-bold text-[#1c2d22] flex items-center gap-1.5">
             <Search size={14} className="text-[#203c32]" />
             <span>Verifica & Ricerca (Recall Semantico / Substring)</span>
           </strong>

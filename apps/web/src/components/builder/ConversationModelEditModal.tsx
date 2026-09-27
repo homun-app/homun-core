@@ -1,10 +1,15 @@
 import { useState } from "react";
-import { X, Check, RefreshCw, AlertCircle, Sparkles } from "lucide-react";
+import { X, Check, RefreshCw, AlertCircle, Sparkles, Sliders, ChevronDown, ChevronRight } from "lucide-react";
 import {
   applyOllamaPreset,
   setOpenAICompatibleCredentials,
   verifyModelProvider,
 } from "@/lib/engine-models-client";
+import {
+  getProviderGranularConfig,
+  setProviderGranularConfig,
+  type ProviderGranularConfig,
+} from "@/lib/engine-granular-settings";
 
 export type EditingProviderState = {
   id: string;
@@ -28,6 +33,10 @@ export function ConversationModelEditModal({
   onSaved: (name: string) => void;
 }) {
   const [form, setForm] = useState({ ...provider });
+  const [granular, setGranular] = useState<ProviderGranularConfig>(() =>
+    getProviderGranularConfig(provider.id),
+  );
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [isCustomModel, setIsCustomModel] = useState(
     !provider.availableModels.includes(provider.model) && Boolean(provider.model)
   );
@@ -97,6 +106,7 @@ export function ConversationModelEditModal({
           defaultModel: form.model.trim() || "gpt-4o",
         });
       }
+      setProviderGranularConfig(form.id, granular);
       onSaved(form.name);
       onClose();
     } catch (cause) {
@@ -114,7 +124,7 @@ export function ConversationModelEditModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="cv-unified-modal" role="dialog" aria-modal="true">
+      <div className="cv-unified-modal" role="dialog" aria-modal="true" style={{ maxWidth: "560px" }}>
         <header className="cv-unified-modal__head">
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <Sparkles size={16} color="#8fe3d0" />
@@ -203,6 +213,133 @@ export function ConversationModelEditModal({
               <span className="cv-unified-hint">
                 La chiave viene custodita nel Vault locale crittografato sul tuo dispositivo.
               </span>
+            </div>
+          )}
+
+          {/* Granular Parameters Toggle */}
+          <div style={{ margin: "0.75rem 0 0.25rem" }}>
+            <button
+              type="button"
+              className="cv-unified-btn is-subtle"
+              style={{ width: "100%", justifyContent: "space-between", fontSize: "12px", padding: "8px 12px" }}
+              onClick={() => setShowAdvanced(!showAdvanced)}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <Sliders size={13} />
+                <span>Parametri Granulari di Inferenza & Ragionamento</span>
+              </span>
+              {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </button>
+          </div>
+
+          {showAdvanced && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+                padding: "12px",
+                borderRadius: "8px",
+                backgroundColor: "var(--color-secondary, #f0f5f2)",
+                border: "1px solid var(--color-border, #e3e7e5)",
+              }}
+            >
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                    <label style={{ fontWeight: 500 }}>Temperatura</label>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px" }}>{granular.temperature.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1.5"
+                    step="0.05"
+                    value={granular.temperature}
+                    onChange={(e) => setGranular({ ...granular, temperature: parseFloat(e.target.value) })}
+                    style={{ width: "100%" }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "var(--color-muted-foreground)" }}>
+                    <span>Preciso (0.0)</span>
+                    <span>Creativo (1.5)</span>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                    <label style={{ fontWeight: 500 }}>Top P (Nucleus)</label>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px" }}>{granular.topP.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    value={granular.topP}
+                    onChange={(e) => setGranular({ ...granular, topP: parseFloat(e.target.value) })}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div className="cv-unified-form-field" style={{ margin: 0 }}>
+                  <label style={{ fontSize: "12px" }}>Livello Ragionamento (Thinking)</label>
+                  <select
+                    value={granular.reasoningEffort}
+                    onChange={(e) =>
+                      setGranular({
+                        ...granular,
+                        reasoningEffort: e.target.value as ProviderGranularConfig["reasoningEffort"],
+                      })
+                    }
+                    style={{ padding: "6px 8px", fontSize: "12px" }}
+                  >
+                    <option value="none">Disattivato (none)</option>
+                    <option value="low">Basso (low)</option>
+                    <option value="medium">Medio (medium - consigliato)</option>
+                    <option value="high">Approfondito (high)</option>
+                  </select>
+                </div>
+
+                <div className="cv-unified-form-field" style={{ margin: 0 }}>
+                  <label style={{ fontSize: "12px" }}>Max Output Tokens</label>
+                  <select
+                    value={granular.maxTokens}
+                    onChange={(e) => setGranular({ ...granular, maxTokens: parseInt(e.target.value, 10) })}
+                    style={{ padding: "6px 8px", fontSize: "12px" }}
+                  >
+                    <option value={4096}>4.096 token</option>
+                    <option value={8192}>8.192 token (default)</option>
+                    <option value={16384}>16.384 token</option>
+                    <option value={32768}>32.768 token</option>
+                    <option value={65536}>65.536 token</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "4px" }}>
+                <label style={{ fontSize: "12px", display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={granular.stream}
+                    onChange={(e) => setGranular({ ...granular, stream: e.target.checked })}
+                  />
+                  <span>Streaming token in tempo reale</span>
+                </label>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" }}>
+                  <span>Timeout:</span>
+                  <input
+                    type="number"
+                    min="10"
+                    max="300"
+                    value={granular.timeoutSeconds}
+                    onChange={(e) => setGranular({ ...granular, timeoutSeconds: parseInt(e.target.value, 10) || 60 })}
+                    style={{ width: "60px", padding: "4px 6px", fontSize: "11px", textAlign: "center" }}
+                  />
+                  <span>s</span>
+                </div>
+              </div>
             </div>
           )}
 

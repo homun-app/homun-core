@@ -265,7 +265,7 @@ export function ProjectHubMemoryTab({
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <Globe size={20} className="text-[#203c32]" />
-              <h3 style={{ margin: 0, fontSize: 16, color: "#1c2d22", fontFamily: "Manrope, sans-serif" }}>
+              <h3 style={{ margin: 0, fontSize: 16, color: "#1c2d22" }}>
                 Promuovi a Policy Globale Aziendale
               </h3>
             </div>

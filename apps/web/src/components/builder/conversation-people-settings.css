@@ -17,7 +17,7 @@
   color: #1c2d22;
   margin: 0 0 6px;
   letter-spacing: -0.02em;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .cv-people-header p {
@@ -171,5 +171,5 @@
   font-weight: 700;
   color: #1c2d22;
   letter-spacing: -0.01em;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
 }

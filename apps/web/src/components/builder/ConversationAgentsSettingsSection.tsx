@@ -251,7 +251,7 @@ export function ConversationAgentsSettingsSection({ actorId = "person_fabio" }: 
           <div className="p-8 rounded-xl bg-white border border-[#dce4d5] text-center space-y-4">
             <Bot size={36} className="text-[#203c32] mx-auto opacity-70" />
             <div>
-              <strong className="text-sm font-semibold text-[#1c2d22] block" style={{ fontFamily: "Manrope, sans-serif" }}>
+              <strong className="text-sm font-semibold text-[#1c2d22] block">
                 Nessun collaboratore configurato
               </strong>
               <p className="text-xs text-[#647a6d] mt-1">

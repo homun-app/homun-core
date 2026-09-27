@@ -1,16 +1,13 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;550;600;650;700&family=Manrope:wght@400;500;600;650;700;750;800&display=swap");
 .cw {
-  --ink: #263832;
-  --muted: #819087;
-  --accent: #285644;
+  --ink: var(--color-foreground, #131a17);
+  --muted: var(--color-muted-foreground, #656e6b);
+  --accent: var(--color-primary, #206553);
   color: var(--ink);
-  background: #fbfbf8;
-  font:
-    14px/1.55 "DM Sans",
-    sans-serif;
+  background: var(--color-background, #fdfefd);
+  font: 13px/1.5 var(--font-sans);
   height: 100dvh;
   display: grid;
-  grid-template-columns: 238px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   color-scheme: light;
 }
 .cw * {
@@ -24,8 +21,8 @@
 .cw button {
   cursor: pointer;
   transition:
-    background 0.18s,
-    transform 0.18s;
+    background 0.15s ease,
+    transform 0.15s ease;
 }
 .cw button:disabled {
   opacity: 0.4;
@@ -33,11 +30,11 @@
 }
 .cw button:focus-visible,
 .cw a:focus-visible {
-  outline: 2px solid #97ac68;
-  outline-offset: 3px;
+  outline: 2px solid var(--color-ring, #579481);
+  outline-offset: 2px;
 }
 .cw button:hover:not(:disabled) {
-  filter: brightness(0.96);
+  filter: brightness(0.98);
 }
 .cw a {
   color: inherit;
@@ -52,54 +49,61 @@
 .cw h1,
 .cw h2,
 .cw h3 {
-  font-family: Manrope, sans-serif;
-  letter-spacing: -0.045em;
+  font-family: var(--font-sans);
+  letter-spacing: -0.015em;
   line-height: 1.25;
 }
 .cw-sidebar {
-  background: #203c32;
-  color: #eaf0e7;
+  background: var(--color-sidebar, #f5f9f7);
+  color: var(--color-sidebar-foreground, #28302d);
+  border-right: 1px solid var(--color-sidebar-border, #e3e7e5);
   display: flex;
   flex-direction: column;
-  padding: 28px 18px 16px;
+  padding: 16px 12px 14px;
   min-height: 0;
 }
 .cw-brand {
   display: flex;
   align-items: center;
-  gap: 9px;
-  font: 700 26px Manrope;
-  letter-spacing: -1px;
-  padding: 0 8px 34px;
+  gap: 8px;
+  font: 600 15px var(--font-sans);
+  letter-spacing: -0.01em;
+  padding: 4px 8px 16px;
+  color: var(--color-sidebar-foreground, #131a17);
 }
 .cw-mark {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 32px;
-  background: #d6e6be;
-  color: #274832;
-  border-radius: 10px;
-  font-family: Georgia;
-  font-size: 29px;
+  width: 22px;
+  height: 22px;
+  background: var(--color-primary, #206553);
+  color: var(--color-primary-foreground, #fafdfb);
+  border-radius: 6px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
 }
 .cw-version {
-  font: 500 9px "DM Sans";
-  letter-spacing: 1px;
-  color: #a2b7a9;
+  font: 500 10px var(--font-mono);
+  letter-spacing: 0.5px;
+  color: var(--color-muted-foreground, #656e6b);
   margin-left: auto;
 }
 .cw-new {
-  background: #dce9c8;
-  color: #294333;
+  background: var(--color-primary, #206553);
+  color: var(--color-primary-foreground, #fafdfb);
   border: 0;
-  border-radius: 10px;
-  padding: 11px 12px;
+  border-radius: var(--radius-md, 8px);
+  padding: 8px 12px;
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-  font-weight: 600 !important;
-  font-size: 12px !important;
+  font-weight: 500 !important;
+  font-size: 13px !important;
+  transition: opacity 0.15s ease;
+}
+.cw-new:hover:not(:disabled) {
+  opacity: 0.92;
 }
 .cw-search {
   display: flex;
@@ -122,37 +126,48 @@
 .cw-nav-label {
   display: flex;
   justify-content: space-between;
-  font-size: 9px;
-  letter-spacing: 1.7px;
-  color: #99b0a0;
-  padding: 0 9px 12px;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-muted-foreground, #656e6b);
+  padding: 4px 8px 8px;
 }
 .cw-nav-label span {
   letter-spacing: 0;
 }
 .cw-work-list {
-  min-height: 80px;
+  min-height: 40px;
   overflow-y: auto;
   scrollbar-width: thin;
   flex: 1;
-  margin-bottom: 26px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 .cw-work-list button,
 .cw-team button {
   display: flex;
   align-items: center;
   width: 100%;
-  gap: 10px;
+  gap: 8px;
   text-align: left;
-  padding: 12px 9px;
+  padding: 6px 8px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md, 6px);
   background: transparent;
-  color: inherit;
-  font-size: 12px;
+  color: var(--color-sidebar-foreground, #28302d);
+  font-size: 13px;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.cw-work-list button:hover,
+.cw-team button:hover {
+  background: var(--color-sidebar-accent, #e9eeec);
 }
 .cw-work-list button.selected {
-  background: #345144;
+  background: var(--color-sidebar-accent, #e9eeec);
+  color: var(--color-sidebar-foreground, #131a17);
+  font-weight: 500;
 }
 .cw-work-list button > span:nth-child(2) {
   flex: 1;
@@ -161,59 +176,71 @@
 .cw-work-list small,
 .cw-team small {
   display: block;
-  font-size: 10px;
-  color: #a7bcae;
-  margin-top: 2px;
+  font-size: 11px;
+  color: var(--color-muted-foreground, #656e6b);
+  margin-top: 1px;
 }
 .cw-work-list i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #e6b077;
+  background: var(--color-warning, #e09036);
 }
 .cw-nav-empty {
   font-size: 11px;
-  color: #8ca695;
-  padding: 10px;
-  line-height: 1.8;
+  color: var(--color-muted-foreground, #656e6b);
+  padding: 8px;
+  line-height: 1.5;
 }
 .cw-team {
-  margin-bottom: 25px;
+  margin-bottom: 20px;
 }
 .cw-team button > svg {
   margin-left: auto;
-  color: #a4b7aa;
+  color: var(--color-muted-foreground, #656e6b);
 }
 .cw-sidebar-foot > a {
   display: flex;
   gap: 8px;
   align-items: center;
-  color: #a7baab;
-  font-size: 10px;
-  padding: 14px 9px;
+  color: var(--color-muted-foreground, #656e6b);
+  font-size: 11px;
+  padding: 10px 8px;
 }
 .cw-sidebar-foot > button {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 12px 8px;
+  padding: 6px 8px;
   background: none;
   border: 0;
-  color: inherit;
+  border-radius: var(--radius-md, 6px);
+  color: var(--color-sidebar-foreground, #28302d);
   text-align: left;
+  transition: background-color 0.12s ease;
+}
+.cw-sidebar-foot > button:hover {
+  background: var(--color-sidebar-accent, #e9eeec);
 }
 .cw-sidebar-foot small {
   display: block;
-  color: #92a99b;
-  font-size: 10px;
+  color: var(--color-muted-foreground, #656e6b);
+  font-size: 11px;
 }
 .cw-sidebar-foot svg:last-child {
   margin-left: auto;
 }
 .cw-user {
   border-radius: 50%;
-  background: #496252;
+  background: var(--color-accent, #e5f4ee);
+  color: var(--color-accent-foreground, #124739);
+  font-weight: 600;
+  font-size: 12px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
   width: 30px;
   height: 30px;
   display: grid;
@@ -224,7 +251,7 @@
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  font: 650 12px Manrope;
+  font: 650 12px var(--font-sans);
   border-radius: 10px;
   width: 30px;
   height: 30px;
@@ -255,13 +282,15 @@
   min-height: 0;
 }
 .cw-topbar {
-  height: 74px;
+  height: 48px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 34px;
-  font-size: 12px;
+  padding: 0 20px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--color-border, #e3e7e5);
+  background: var(--color-background, #fdfefd);
 }
 .cw-topbar > div,
 .cw-preview header > div {
@@ -294,7 +323,7 @@
   right: -2px;
   background: #b87947;
   color: white;
-  font: 600 9px "DM Sans";
+  font: 600 9px var(--font-sans);
   min-width: 15px;
   height: 15px;
   border-radius: 10px;
@@ -1176,26 +1205,36 @@ dialog.cw-overlay:not([open]) {
 }
 .cs-space-links {
   display: grid;
-  gap: 3px;
-  margin: 0 0 25px;
+  gap: 2px;
+  margin: 0 0 20px;
 }
 .cs-space-links button {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   border: 0;
-  background: none;
-  color: #b9ccbf;
-  padding: 8px 10px;
+  background: transparent;
+  color: var(--color-sidebar-foreground, #28302d);
+  padding: 6px 8px;
   text-align: left;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-md, 6px);
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.cs-space-links button:hover {
+  background: var(--color-sidebar-accent, #e9eeec);
 }
 .cs-space-links button.active {
-  background: #345144;
-  border-radius: 8px;
-  color: white;
+  background: var(--color-sidebar-accent, #e9eeec);
+  color: var(--color-primary, #206553);
+  font-weight: 600;
 }
 .cs-space-links span {
-  opacity: 0.6;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted-foreground, #656e6b);
+  opacity: 1;
 }
 .cs-title {
   font-size: 32px;
@@ -2124,9 +2163,7 @@ dialog.cw-overlay:not([open]) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font:
-    550 13px "DM Sans",
-    sans-serif;
+  font: 550 13px var(--font-sans);
 }
 .cv-avatar.large {
   width: 42px;
@@ -2193,9 +2230,7 @@ dialog.cw-overlay:not([open]) {
   border-radius: 8px;
 }
 .cw-sidebar-tools kbd {
-  font:
-    10px "DM Sans",
-    sans-serif;
+  font: 10px var(--font-sans);
   color: #91a998;
 }
 .cw-sidebar-fixed .cw-new {

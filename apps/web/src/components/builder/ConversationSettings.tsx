@@ -5,6 +5,7 @@ import {
   UserRound,
   Bell,
   Brain,
+  Cpu,
   Database,
   HelpCircle,
   Archive,
@@ -31,6 +32,7 @@ import { ConversationAutomationsSettingsSection } from "./ConversationAutomation
 import { ConversationMemorySettingsSection } from "./ConversationMemorySettingsSection";
 import { ConversationAgentsSettingsSection } from "./ConversationAgentsSettingsSection";
 import { ConversationGatewayChannelsSection } from "./ConversationGatewayChannelsSection";
+import { ConversationEngineMaintenanceSection } from "./ConversationEngineMaintenanceSection";
 import { type ConversationPreferences } from "./conversation-preferences";
 import { setLanguage } from "@/lib/i18n";
 import "./conversation-settings.css";
@@ -73,6 +75,7 @@ const settingGroups: SettingsGroup[] = [
     items: [
       { id: "space", label: "Spazio e profilo", icon: UserRound },
       { id: "preferences", label: "Aspetto & Preferenze", icon: Settings2 },
+      { id: "engine", label: "Motore & Manutenzione", icon: Cpu },
       { id: "archive", label: "Archivio", icon: Archive },
       ...(import.meta.env.DEV ? [{ id: "data", label: "Dati della demo", icon: Database } as const] : []),
       { id: "help", label: "Guida", icon: HelpCircle },
@@ -336,6 +339,7 @@ export function ConversationSettings({
           {section === "memory" && (
             <ConversationMemorySettingsSection actorId="person_fabio" />
           )}
+          {section === "engine" && <ConversationEngineMaintenanceSection />}
           {section === "archive" && (
             <>
               <h3>Conversazioni archiviate</h3>

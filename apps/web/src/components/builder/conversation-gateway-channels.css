@@ -17,7 +17,7 @@
   color: #1c2d22;
   margin: 0 0 6px;
   letter-spacing: -0.01em;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .cv-gateway-header p {
@@ -138,7 +138,7 @@
   font-weight: 700;
   color: #1c2d22;
   margin: 0;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .cv-gateway-wizard__badge {
@@ -321,7 +321,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .cv-gateway-connected-list {

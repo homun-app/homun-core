@@ -12,7 +12,7 @@
   background: #fbfbf8;
   color: #263832;
   overflow: hidden;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-sans);
 }
 
 /* --- Context Bar (Breadcrumb & Project Switcher) --- */
@@ -119,7 +119,7 @@
   color: #1c2d22;
   margin: 0;
   letter-spacing: -0.02em;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .ph-switcher-wrapper {
@@ -134,7 +134,7 @@
 }
 
 .ph-title-heading-wrapper button {
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
   letter-spacing: -0.02em;
   font-size: 22px;
   font-weight: 750;
@@ -280,7 +280,7 @@
   font-weight: 700;
   color: #1c2d22;
   margin: 0;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
   letter-spacing: -0.02em;
 }
 
@@ -321,7 +321,7 @@
   font-size: 28px;
   font-weight: 800;
   color: #1c2d22;
-  font-family: Manrope, sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.1;
   margin-top: 2px;
 }
