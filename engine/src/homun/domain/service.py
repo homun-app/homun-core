@@ -46,6 +46,7 @@ from homun.domain.commands.reviews import _work_review
 from homun.domain.commands.work import _work_pause
 from homun.domain.commands.work import _work_cancel
 from homun.domain.commands.work import _work_set_due
+from homun.domain.commands.work import _work_set_project
 from homun.domain.commands.routines import _routine_create, _routine_pause, _routine_resume, _routine_stop, _routine_skip_next, _routine_update
 from homun.domain.commands.external import (
     _external_create, _external_update, _external_remove,
@@ -94,6 +95,7 @@ HANDLERS = {
     "work.pause": _work_pause,
     "work.cancel": _work_cancel,
     "work.set_due": _work_set_due,
+    "work.set_project": _work_set_project,
     "routine.create": _routine_create,
     "routine.pause": _routine_pause,
     "routine.resume": _routine_resume,

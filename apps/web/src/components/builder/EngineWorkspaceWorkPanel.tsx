@@ -135,21 +135,52 @@ export function EngineWorkspaceWorkPanel({
             )}
           </dd>
         </div>
-        {work.projectId && (
-          <div>
-            <dt>Progetto</dt>
-            <dd>
+        <div>
+          <dt>Progetto</dt>
+          <dd>
+            {work.projectId ? (
               <button
                 className="cs-link"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: "#157a6e",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
                 onClick={() => onOpenSpace("Progetti", "", work.projectId)}
+                title="Apri nel Project Hub"
               >
-                {spaceData.projects.find((project) => project.id === work.projectId)?.name ||
-                  "Caricamento…"}{" "}
-                ↗
+                <span>{spaceData.projects.find((project) => project.id === work.projectId)?.name || "Caricamento…"}</span>
+                <span style={{ fontSize: 11, color: "#8a9a86" }}>↗ Hub</span>
               </button>
-            </dd>
-          </div>
-        )}
+            ) : (
+              <button
+                className="cs-link"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontSize: 12,
+                  color: "#8a9a86",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+                onClick={() => onOpenSpace("Progetti")}
+                title="Assegna a un progetto nel Project Hub"
+              >
+                <span>Nessuno · Assegna a progetto ↗</span>
+              </button>
+            )}
+          </dd>
+        </div>
       </dl>
       {materials.items.length > 0 && (
         <section className="cw-engine-summary__materials">

@@ -500,7 +500,8 @@ export function ConversationWorkspace() {
   }
   function moveConversation(id: string, projectId: string) {
     if (engine.backend === "engine") {
-      setNotice("Spostamento progetto: non ancora collegato al motore.");
+      const target = engine.works.find((w) => w.id === id);
+      if (target) void engine.setProject(target, projectId || null).catch(() => setNotice("Assegnazione progetto non riuscita."));
       return;
     }
     if (projectId && !spaceData.projects.some((p) => p.id === projectId)) return;
@@ -511,12 +512,10 @@ export function ConversationWorkspace() {
       return (
         <ConversationActions
           title={w.title}
-          projects={[]}
-          current=""
-          onRename={() =>
-            setNotice("Rinomina non ancora disponibile.")
-          }
-          onMove={() => setNotice("Spostamento progetto non ancora disponibile.")}
+          projects={spaceData.projects}
+          current={w.projectId || ""}
+          onRename={() => setNotice("Rinomina non ancora disponibile.")}
+          onMove={(projId) => moveConversation(w.id, projId)}
           onCreate={() => setNotice("Promozione a progetto non ancora collegata al motore.")}
           onRepeat={() => setNotice("Automazioni motore: non in questo slice.")}
         />

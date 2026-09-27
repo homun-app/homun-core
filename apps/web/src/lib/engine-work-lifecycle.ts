@@ -108,3 +108,17 @@ export async function setEngineWorkDue(
     actor: defaultLocalActor(),
   });
 }
+
+/** Assigns or clears the project for a work. */
+export async function setEngineWorkProject(
+  workId: string,
+  expectedVersion: number,
+  projectId: string | null,
+): Promise<void> {
+  await postEngineCommand({
+    type: "work.set_project",
+    payload: { work_id: workId, expected_version: expectedVersion, project_id: projectId },
+    actor: defaultLocalActor(),
+  });
+}
+

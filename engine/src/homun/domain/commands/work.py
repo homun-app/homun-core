@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from typing import Any
-from homun.domain.errors import ValidationError
+from homun.domain.errors import NotFoundError, ValidationError
 from homun.domain.ids import new_id
 from homun.domain.effects import cancel_work_intents
 from homun.domain.models import Actor, Work, utc_now
@@ -133,3 +133,26 @@ def _work_set_due(ctx: CommandContext, actor: Actor, command_id: str, payload: d
         payload={"due_date": due},
     )
     return {"work_id": work.id, "due_date": due, "version": work.version}
+ 
+ 
+def _work_set_project(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Assign or move work to a project (or detach it with None)."""
+    work = ctx.get_work(str(payload.get("work_id", "")))
+    ctx._require_expected_version(work.version, payload.get("expected_version"))
+    raw_proj = payload.get("project_id")
+    if raw_proj in (None, ""):
+        project_id = None
+    else:
+        project_id = str(raw_proj).strip()
+        if project_id not in ctx.store.projects:
+            raise NotFoundError(f"Project not found: {project_id}")
+    work.project_id = project_id
+    work.version += 1
+    work.updated_at = utc_now()
+    ctx._emit(
+        actor=actor, command_id=command_id, aggregate_id=work.id, aggregate_type="work",
+        aggregate_version=work.version, event_type="work.project_set",
+        payload={"project_id": project_id},
+    )
+    return {"work_id": work.id, "project_id": project_id, "version": work.version}
+

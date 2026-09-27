@@ -30,7 +30,6 @@ import { ConversationPeopleSettingsSection } from "./ConversationPeopleSettingsS
 import { ConversationAutomationsSettingsSection } from "./ConversationAutomationsSettingsSection";
 import { ConversationMemorySettingsSection } from "./ConversationMemorySettingsSection";
 import { ConversationAgentsSettingsSection } from "./ConversationAgentsSettingsSection";
-import { ConversationProjectsSettingsSection } from "./ConversationProjectsSettingsSection";
 import { ConversationGatewayChannelsSection } from "./ConversationGatewayChannelsSection";
 import { type ConversationPreferences } from "./conversation-preferences";
 import { setLanguage } from "@/lib/i18n";
@@ -95,7 +94,7 @@ export function ConversationSettings({
   value: ConversationPreferences;
   onSave: (p: ConversationPreferences) => void;
   onClose: () => void;
-  onNavigate: (page: "Squadra" | "Plugin" | "Materiali") => void;
+  onNavigate: (page: "Squadra" | "Plugin" | "Materiali" | "Progetti") => void;
   onExport: () => void;
   onReset: () => Promise<void>;
   onRestore: (id: string) => void;
@@ -319,7 +318,20 @@ export function ConversationSettings({
           {section === "automations" && <ConversationAutomationsSettingsSection />}
           {section === "agents" && <ConversationAgentsSettingsSection actorId="person_fabio" />}
           {section === "projects" && (
-            <ConversationProjectsSettingsSection actorId="person_fabio" />
+            <div className="cv-settings-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Project Hub</h3>
+              <p style={{ margin: 0, color: "#5a6e5a" }}>I progetti sono ora gestiti in modo dedicato nel nuovo Project Hub.</p>
+              <button
+                type="button"
+                className="cv-settings-btn-primary"
+                onClick={() => {
+                  onClose();
+                  onNavigate("Progetti");
+                }}
+              >
+                Apri Project Hub →
+              </button>
+            </div>
           )}
           {section === "memory" && (
             <ConversationMemorySettingsSection actorId="person_fabio" />

@@ -38,7 +38,7 @@ import { useWorkIntake, type WorkIntakeState } from "./useWorkIntake";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import type { EngineTeam } from "@/lib/engine-projects-client";
 import { renameEngineWork } from "@/lib/engine-work-naming";
-import { closeEngineWork, reviseEnginePlan, setEngineWorkBudget, setEngineWorkDue, startEngineWork, submitEngineArtifact } from "@/lib/engine-work-lifecycle";
+import { closeEngineWork, reviseEnginePlan, setEngineWorkBudget, setEngineWorkDue, setEngineWorkProject, startEngineWork, submitEngineArtifact } from "@/lib/engine-work-lifecycle";
 import { createEngineRoutine, routineEngineAction, updateEngineRoutine, type EngineRoutine } from "@/lib/engine-routines-client";
 import { createEngineSkill } from "@/lib/engine-mcp-client";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
@@ -67,6 +67,7 @@ export type EngineWorkspaceState = {
   submitArtifact: (work: Work, title: string, content: string) => Promise<void>;
   setWorkBudget: (work: Work, modelAttempts: number) => Promise<void>;
   setDue: (work: Work, dueDate: string | null) => Promise<void>;
+  setProject: (work: Work, projectId: string | null) => Promise<void>;
   createRoutine: (input: { name: string; cron: string; conversationId: string; template: EngineRoutine["template"] }) => Promise<void>;
   routineAction: (routineId: string, action: "pause" | "resume" | "stop" | "skip_next", expectedVersion: number) => Promise<void>;
   updateRoutine: (routineId: string, expectedVersion: number, changes: { name?: string; cron?: string }) => Promise<void>;
@@ -559,6 +560,10 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     },
     setDue: async (work, dueDate) => {
       await setEngineWorkDue(work.id, work.revision, dueDate);
+      await refresh();
+    },
+    setProject: async (work, projectId) => {
+      await setEngineWorkProject(work.id, work.revision, projectId);
       await refresh();
     },
     createRoutine: async (input) => {

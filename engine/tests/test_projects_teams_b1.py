@@ -216,3 +216,55 @@ def test_project_agent_overrides_and_agent_fallback(service: tuple[DomainService
     # Verify tool overrides were preserved if not updated
     assert proj_updated.agent_tool_overrides == {agent_id: ["web_search", "document_read"]}
 
+
+def test_work_set_project(service: tuple[DomainService, Actor]) -> None:
+    svc, actor = service
+    conv = svc.apply(actor, "cmd_c1", "conversation.create", {"title": "Conversazione Lavoro"})
+    conv_id = str(conv["conversation_id"])
+
+    work = svc.apply(
+        actor,
+        "cmd_w1",
+        "work.create",
+        {
+            "conversation_id": conv_id,
+            "title": "Analisi Listini",
+            "objective": "Verifica prezzi",
+        },
+    )
+    work_id = str(work["work_id"])
+    w_entity = svc.get_work(work_id)
+    assert w_entity.project_id is None
+
+    proj = svc.apply(actor, "cmd_pr1", "project.create", {"name": "Progetto Retail"})
+    proj_id = str(proj["project_id"])
+
+    # Move work to project
+    res = svc.apply(
+        actor,
+        "cmd_w2",
+        "work.set_project",
+        {
+            "work_id": work_id,
+            "expected_version": w_entity.version,
+            "project_id": proj_id,
+        },
+    )
+    assert res["project_id"] == proj_id
+    assert svc.get_work(work_id).project_id == proj_id
+
+    # Detach work from project
+    res_detached = svc.apply(
+        actor,
+        "cmd_w3",
+        "work.set_project",
+        {
+            "work_id": work_id,
+            "expected_version": svc.get_work(work_id).version,
+            "project_id": None,
+        },
+    )
+    assert res_detached["project_id"] is None
+    assert svc.get_work(work_id).project_id is None
+
+
