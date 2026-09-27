@@ -71,6 +71,8 @@ export function ConversationContribution({
             parseClarifyNeed(request.need).isStructured ? (
               <EngineClarifyCard
                 need={request.need}
+                deadline={work.due || undefined}
+                requestId={work.engineContributionRequestId || undefined}
                 onDeliver={(answer, uploadedFiles) => {
                   onDeliver(answer, uploadedFiles, ids);
                   setIds([]);
