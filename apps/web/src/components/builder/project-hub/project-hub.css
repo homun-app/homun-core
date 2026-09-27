@@ -224,8 +224,7 @@
 
 .ph-tab:hover {
   color: #1c2d22;
-  background: #edf2e7;
-  border-radius: 6px 6px 0 0;
+  background: transparent;
 }
 
 .ph-tab--active {
@@ -235,16 +234,16 @@
 
 .ph-tab-pill {
   font-size: 11px;
-  background: #edf2e7;
-  color: #556c5e;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-weight: 700;
+  background: transparent;
+  color: #8a9d92;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-weight: 500;
 }
 
 .ph-tab--active .ph-tab-pill {
-  background: #203c32;
-  color: #ffffff;
+  background: transparent;
+  color: #647a6d;
 }
 
 /* --- Tab Content Area --- */
@@ -252,7 +251,7 @@
   flex: 1;
   overflow-y: auto;
   padding: 24px 28px 40px;
-  background: #fbfbf8;
+  background: #ffffff;
 }
 
 /* --- Common Card & Grid Surfaces (Braun Style: clean surfaces, no border soup) --- */
@@ -276,8 +275,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
   color: #1c2d22;
   margin: 0;
   font-family: var(--font-sans);
@@ -294,13 +293,13 @@
 /* --- Overview Stats (Braun Typographic Chronograph) --- */
 .ph-overview-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
-  background: #ffffff;
-  border: 1px solid #e2e8dc;
-  border-radius: 12px;
-  padding: 20px 24px;
-  margin-bottom: 28px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 32px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin-bottom: 32px;
 }
 
 .ph-stat-metric {
@@ -318,8 +317,8 @@
 }
 
 .ph-stat-metric-val {
-  font-size: 28px;
-  font-weight: 800;
+  font-size: 22px;
+  font-weight: 700;
   color: #1c2d22;
   font-family: var(--font-sans);
   line-height: 1.1;
@@ -341,8 +340,8 @@
   justify-content: center;
   padding: 44px 24px;
   text-align: center;
-  background: #ffffff;
-  border: 1px dashed #dce4d5;
+  background: transparent;
+  border: 1px dashed #d4dcd0;
   border-radius: 12px;
   color: #647a6d;
   gap: 10px;
@@ -378,19 +377,21 @@
 }
 
 .ph-agent-card {
-  background: #ffffff;
-  border: 1px solid #e2e8dc;
-  border-radius: 12px;
-  padding: 20px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #e8ece6;
+  border-radius: 0;
+  padding: 16px 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  transition: all 0.15s ease;
+  gap: 12px;
+  transition: background 0.1s ease;
 }
 
 .ph-agent-card:hover {
-  border-color: #c4d4bd;
-  box-shadow: 0 4px 16px rgba(32, 60, 50, 0.04);
+  background: rgba(0,0,0,0.015);
+  border-color: #e8ece6;
+  box-shadow: none;
 }
 
 .ph-agent-head {
@@ -410,7 +411,7 @@
   width: 36px;
   height: 36px;
   border-radius: 8px;
-  background: #edf2e7;
+  background: #f0f0ef;
   color: #203c32;
   display: flex;
   align-items: center;
@@ -456,8 +457,8 @@
   padding: 1px 6px;
   border-radius: 4px;
   font-weight: 600;
-  background: #edf2e7;
-  color: #203c32;
+  background: #f0f0ef;
+  color: #4a5a4e;
 }
 
 .ph-override-badge--default {
@@ -470,26 +471,26 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 9px;
-  border-radius: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
-  background: #ffffff;
-  border: 1px solid #e2e8dc;
+  transition: all 0.1s ease;
+  background: transparent;
+  border: 1px solid #dce4d5;
   color: #647a6d;
 }
 
 .ph-tool-chip:hover {
-  border-color: #97ac68;
+  border-color: #1c2d22;
   color: #1c2d22;
 }
 
 .ph-tool-chip--enabled {
-  background: #edf2e7;
-  border-color: #dce4d5;
-  color: #203c32;
+  background: transparent;
+  border-color: #1c2d22;
+  color: #1c2d22;
   font-weight: 600;
 }
 
@@ -514,22 +515,24 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 14px 16px;
-  background: #ffffff;
-  border: 1px solid #dce4d5;
-  border-radius: 10px;
-  margin-bottom: 8px;
+  padding: 12px 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #e8ece6;
+  border-radius: 0;
+  margin-bottom: 0;
   gap: 16px;
-  transition: all 0.15s ease;
+  transition: background 0.1s ease;
 }
 
 .ph-memory-item:hover {
-  border-color: #97ac68;
+  border-color: #e8ece6;
+  background: rgba(0,0,0,0.015);
 }
 
 .ph-memory-item--global {
-  background: #f4f8f2;
-  border-color: #c9dbcd;
+  background: transparent;
+  border-color: #e8ece6;
 }
 
 .ph-memory-text {
@@ -553,21 +556,21 @@
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  font-weight: 600;
-  padding: 5px 10px;
-  border-radius: 6px;
-  background: #edf2e7;
-  color: #203c32;
-  border: 1px solid #c8d8c3;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: transparent;
+  color: #4a5a4e;
+  border: 1px solid #dce4d5;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.1s ease;
   white-space: nowrap;
 }
 
 .ph-btn-promote:hover {
-  background: #203c32;
+  background: #1c2d22;
   color: #ffffff;
-  border-color: #203c32;
+  border-color: #1c2d22;
 }
 
 /* --- Materials Table & Grounding --- */
@@ -575,27 +578,26 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
-  background: #ffffff;
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid #dce4d5;
+  background: transparent;
+  border-radius: 0;
+  border: none;
 }
 
 .ph-table th {
   text-align: left;
-  padding: 10px 14px;
+  padding: 8px 0;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #556c5e;
-  background: #f7f9f5;
-  border-bottom: 1px solid #dce4d5;
+  color: #8a9d92;
+  background: transparent;
+  border-bottom: 1px solid #e8ece6;
 }
 
 .ph-table td {
-  padding: 12px 14px;
-  border-bottom: 1px solid #eef2eb;
+  padding: 10px 0;
+  border-bottom: 1px solid #e8ece6;
   color: #263832;
   vertical-align: middle;
 }

@@ -45,7 +45,7 @@
 }
 
 .cv-unified-dropdown-item:hover {
-  background: #edf2e7;
+  background: #f5f5f4;
   color: #1c2d22;
 }
 
@@ -60,9 +60,9 @@
   text-align: center;
   color: #647a6d;
   font-size: 0.84rem;
-  background: #f7f9f5;
+  background: transparent;
   border-radius: 10px;
-  border: 1px dashed #dce4d5;
+  border: 1px dashed #d4dcd0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -70,8 +70,8 @@
 }
 
 .cv-unified-code-preview {
-  background: #f4f7f0;
-  border: 1px solid #dce4d5;
+  background: rgba(0,0,0,0.03);
+  border: 1px solid #e8ece6;
   border-radius: 8px;
   padding: 0.85rem;
   max-height: 280px;
@@ -91,10 +91,11 @@
 /* Clarity & Explanation Box for MCP / Plugins ("Cosa accade") */
 .cv-unified-explain-box {
   margin-top: 0.4rem;
-  padding: 0.75rem 0.95rem;
-  background: #edf2e7;
-  border: 1px solid rgba(104, 122, 89, 0.15);
-  border-radius: 8px;
+  padding: 4px 12px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid #dce4d5;
+  border-radius: 0;
   font-size: 0.76rem;
   color: #263832;
   display: flex;
@@ -129,7 +130,7 @@
   font-size: 0.7rem;
   padding: 1px 6px;
   border-radius: 4px;
-  background: #ffffff;
+  background: #f5f5f4;
   color: #203c32;
   border: 1px solid #dce4d5;
 }

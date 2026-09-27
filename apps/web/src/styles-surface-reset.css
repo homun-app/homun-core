@@ -1,0 +1,358 @@
+/*
+ * STYLES-SURFACE-RESET.CSS
+ * ========================
+ * Removes all green-tint card containers and heavy borders from content areas.
+ * Philosophy: Linear/Cursor — whitespace is the only separator.
+ * Import this LAST in styles.css so it wins without !important where possible.
+ */
+
+/* ---- ph- (Project Hub) surfaces ---- */
+
+/* Stats box: remove the bordered box, let stats flow */
+.ph-overview-stats {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  gap: 32px;
+  margin-bottom: 32px;
+}
+
+.ph-stat-metric-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.ph-stat-metric-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Tab bar: underline only, no background on active/hover */
+.ph-tabs {
+  border-bottom: 1px solid var(--color-border);
+  gap: 0;
+  padding-bottom: 0;
+}
+
+.ph-tab {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-muted-foreground);
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  margin-bottom: -1px;
+}
+
+.ph-tab:hover {
+  background: transparent;
+  color: var(--foreground);
+  border-radius: 0;
+}
+
+.ph-tab--active {
+  color: var(--foreground);
+  border-bottom-color: var(--foreground);
+  font-weight: 600;
+}
+
+/* Tab pill count: smaller and muted */
+.ph-tab-pill {
+  font-size: 10px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  padding: 0;
+  border-radius: 0;
+}
+
+.ph-tab--active .ph-tab-pill {
+  background: transparent;
+  color: var(--color-muted-foreground);
+}
+
+/* Body: white background */
+.ph-body {
+  background: #ffffff;
+  padding: 28px 32px 48px;
+}
+
+/* Card title: smaller */
+.ph-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+/* Card subtitle */
+.ph-card-subtitle {
+  font-size: 13px;
+  color: var(--color-muted-foreground);
+}
+
+/* Agent cards: flat, no border */
+.ph-agent-card {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  padding: 16px 0;
+}
+
+.ph-agent-card:hover {
+  border-color: var(--color-border);
+  box-shadow: none;
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* Agent avatar: subtle */
+.ph-agent-avatar {
+  background: var(--color-sidebar-accent);
+  color: var(--foreground);
+}
+
+/* Memory items: flat list */
+.ph-memory-item {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  padding: 12px 0;
+  margin-bottom: 0;
+}
+
+.ph-memory-item:hover {
+  border-color: var(--color-border);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.ph-memory-item--global {
+  background: transparent;
+  border-color: var(--color-border);
+}
+
+/* Empty state: no border box */
+.ph-empty {
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  padding: 48px 24px;
+}
+
+.ph-empty-icon {
+  color: var(--color-muted-foreground);
+  opacity: 0.5;
+}
+
+/* Tool chips: minimal */
+.ph-tool-chip {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-muted-foreground);
+  font-size: 11px;
+}
+
+.ph-tool-chip:hover {
+  border-color: var(--foreground);
+  color: var(--foreground);
+}
+
+.ph-tool-chip--enabled {
+  background: transparent;
+  border-color: var(--foreground);
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+/* Table: minimal */
+.ph-table {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.ph-table th {
+  background: transparent;
+  border-bottom: 1px solid var(--color-border);
+  padding: 8px 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ph-table td {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--foreground);
+}
+
+.ph-table tr:last-child td {
+  border-bottom: none;
+}
+
+.ph-table tr:hover td {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* Promote button */
+.ph-btn-promote {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--foreground);
+}
+
+.ph-btn-promote:hover {
+  background: var(--foreground);
+  color: #ffffff;
+  border-color: var(--foreground);
+}
+
+/* Context bar */
+.ph-context-bar {
+  background: #ffffff;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Header */
+.ph-header {
+  background: #ffffff;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Override badge */
+.ph-override-badge {
+  background: var(--color-sidebar-accent);
+  color: var(--foreground);
+}
+
+/* ---- cv-people surfaces ---- */
+
+.cv-people-onboard {
+  background: transparent;
+  border: 1px dashed var(--color-border);
+}
+
+.cv-people-card {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  padding: 14px 0;
+}
+
+.cv-people-card:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.cv-people-card__avatar {
+  background: var(--color-sidebar-accent);
+  color: var(--foreground);
+}
+
+.cv-people-card__badge-role {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-muted-foreground);
+}
+
+.cv-people-card__badge-admin {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--foreground);
+}
+
+/* Invite button */
+.cv-people-invite {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--foreground);
+}
+
+/* ---- cv-unified (plugins) surfaces ---- */
+
+.cv-unified-empty {
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  color: var(--color-muted-foreground);
+}
+
+.cv-unified-code-preview {
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--color-border);
+}
+
+.cv-unified-explain-box {
+  background: transparent;
+  border: none;
+  border-left: 2px solid var(--color-border);
+  border-radius: 0;
+  padding: 4px 12px;
+  margin-top: 8px;
+}
+
+.cv-unified-dropdown-item:hover {
+  background: var(--color-sidebar-accent);
+  color: var(--foreground);
+}
+
+.cv-unified-explain-tool-pill {
+  background: var(--color-sidebar-accent);
+  border: 1px solid var(--color-border);
+  color: var(--foreground);
+}
+
+/* ---- cv-settings-card (used across all settings sections) ---- */
+
+.cv-settings-card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  padding-bottom: 24px;
+  margin-bottom: 24px;
+}
+
+.cv-settings-card:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+/* ---- People section banner (Team build) ---- */
+.cv-people-build-banner,
+[class*='build-banner'],
+[class*='cta-banner'] {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+/* ---- Error / status text: inline, no background ---- */
+[class*='-error'],
+[class*='-unreachable'],
+[class*='-notice'] {
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: inline;
+}
+
+/* ---- Engine maintenance section ---- */
+[class*='engine-card'],
+[class*='maintenance-card'] {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  padding-bottom: 24px;
+  margin-bottom: 24px;
+}

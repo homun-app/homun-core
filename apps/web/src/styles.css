@@ -225,3 +225,36 @@
     radial-gradient(50rem 26rem at 10% -10%, color-mix(in oklab, var(--color-primary) 12%, transparent), transparent 70%),
     radial-gradient(40rem 24rem at 90% 4%, color-mix(in oklab, var(--color-chart-2) 10%, transparent), transparent 70%);
 }
+
+/* ============================================================
+   SURFACE RESET — Linear/Cursor spatial language
+   Whitespace is the only separator. No tint containers.
+   ============================================================ */
+
+/* Global background: pure white */
+body {
+  background: #ffffff;
+}
+
+/* Content headings in main areas: smaller, lighter */
+.cw-main h1, .cw-main h2, .cw-main h3,
+.cv-settings-body h1, .cv-settings-body h2, .cv-settings-body h3,
+.ph-body h1, .ph-body h2, .ph-body h3 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+  margin-bottom: 4px;
+}
+
+/* Section label style (uppercase muted 11px) */
+.section-label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted-foreground);
+  margin-bottom: 12px;
+}
+
+@import './styles-surface-reset.css';
