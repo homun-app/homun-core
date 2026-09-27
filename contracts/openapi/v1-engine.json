@@ -4134,6 +4134,54 @@
         "title": "MemoryNote",
         "type": "object"
       },
+      "MemoryReviewRequest": {
+        "properties": {
+          "action": {
+            "default": "preview",
+            "description": "'preview' or 'prune'",
+            "title": "Action",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "min_similarity": {
+            "default": 0.75,
+            "maximum": 1.0,
+            "minimum": 0.1,
+            "title": "Min Similarity",
+            "type": "number"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          }
+        },
+        "title": "MemoryReviewRequest",
+        "type": "object"
+      },
       "ModelInfo": {
         "properties": {
           "created": {
@@ -18732,6 +18780,76 @@
           }
         },
         "summary": "Recall Memories",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/memories/review": {
+      "post": {
+        "operationId": "review_memories_v1_workspaces__workspace_id__memories_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Review Memories V1 Workspaces  Workspace Id  Memories Review Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Memories",
         "tags": [
           "memory"
         ]

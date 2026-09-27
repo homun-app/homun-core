@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { SettingsToggleSwitch } from "./SettingsToggleSwitch";
 import { SettingsCustomSelect } from "./SettingsCustomSelect";
+import { ConversationChannelQueueStatusCard } from "./ConversationChannelQueueStatusCard";
 import "./conversation-gateway-channels.css";
 
 type ChannelTab = "telegram" | "whatsapp" | "slack";
@@ -692,6 +693,10 @@ export function ConversationGatewayChannelsSection({
             </div>
           )}
         </div>
+      </div>
+
+      <div className="mt-5">
+        <ConversationChannelQueueStatusCard />
       </div>
     </div>
   );

@@ -34,6 +34,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { SettingsCustomSelect } from "./SettingsCustomSelect";
+import { ConversationMemoryReviewModal } from "./ConversationMemoryReviewModal";
 
 type Props = {
   actorId: string;
@@ -59,6 +60,7 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
 
@@ -249,17 +251,37 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
             Solo principi esplicitamente approvati dall'utente. Nessuna cattura automatica silenziosa.
           </p>
         </div>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void onExport()}
-          className="cv-unified-btn is-subtle text-xs"
-          title="Esporta memoria in formato JSON"
-        >
-          <Download size={13} />
-          <span>Esporta JSON</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setReviewOpen(true)}
+            className="cv-unified-btn is-subtle text-xs flex items-center gap-1.5"
+            title="Analizza e pulisci memorie ridondanti"
+          >
+            <Sparkles size={13} className="text-amber-500" />
+            <span>Revisione Duplicati</span>
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void onExport()}
+            className="cv-unified-btn is-subtle text-xs"
+            title="Esporta memoria in formato JSON"
+          >
+            <Download size={13} />
+            <span>Esporta JSON</span>
+          </button>
+        </div>
       </div>
+
+      <ConversationMemoryReviewModal
+        isOpen={reviewOpen}
+        onClose={() => setReviewOpen(false)}
+        actorId={actorId}
+        projectId={effectiveProjectId}
+        onMemoriesUpdated={() => void refresh()}
+      />
 
       <HomunErrorNotice error={error} />
       {info && (

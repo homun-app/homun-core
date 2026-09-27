@@ -32,10 +32,11 @@ import {
 } from "@/lib/engine-mcp-client";
 import { SettingsToggleSwitch } from "./SettingsToggleSwitch";
 import { AddMcpServerModal, AddSkillModal, ViewSkillModal } from "./ConversationPluginModals";
+import { ConversationSkillPacksSection } from "./ConversationSkillPacksSection";
 import "./conversation-unified-models.css";
 import "./conversation-unified-plugins.css";
 
-type TabKind = "plugins" | "apps" | "mcp" | "skills";
+type TabKind = "plugins" | "apps" | "mcp" | "skills" | "packs";
 
 type UnifiedToolItem = {
   id: string;
@@ -478,6 +479,18 @@ export function ConversationUnifiedPluginsSection() {
           >
             Skill <span className="cv-unified-tab__count">{skillItems.length}</span>
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "packs"}
+            className={`cv-unified-tab ${activeTab === "packs" ? "is-active" : ""}`}
+            onClick={() => {
+              setMenuOpen(false);
+              setActiveTab("packs");
+            }}
+          >
+            Pacchetti
+          </button>
         </div>
 
         <div className="cv-unified-search">
@@ -499,7 +512,12 @@ export function ConversationUnifiedPluginsSection() {
       )}
       <HomunErrorNotice error={error} />
 
-      {/* Unified Rows matching ChatGPT / Desktop pattern */}
+      {activeTab === "packs" ? (
+        <div className="mt-4">
+          <ConversationSkillPacksSection onPackInstalled={() => void loadAll()} />
+        </div>
+      ) : (
+      /* Unified Rows matching ChatGPT / Desktop pattern */
       <div className="cv-unified-list">
         {filtered.length === 0 ? (
           <div className="cv-unified-empty">
@@ -657,6 +675,7 @@ export function ConversationUnifiedPluginsSection() {
           })
         )}
       </div>
+      )}
 
       {/* Modals extracted to subcomponents */}
       {mcpModalOpen && (

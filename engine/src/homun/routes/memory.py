@@ -22,6 +22,14 @@ class RectifyMemoryRequest(BaseModel):
     text: str
 
 
+class MemoryReviewRequest(BaseModel):
+    action: str = Field(default="preview", description="'preview' or 'prune'")
+    min_similarity: float = Field(default=0.75, ge=0.1, le=1.0)
+    project_id: str | None = None
+    query: str | None = None
+    limit: int = Field(default=20, ge=1, le=100)
+
+
 class MemoryListResponse(BaseModel):
     memories: list[MemoryNote] = Field(default_factory=list)
 
@@ -141,3 +149,30 @@ def delete_memory(
         return ctx.memory.delete(memory_id, actor_id=_actor_id(x_homun_actor_id))
     except (ValidationError, NotFoundError) as exc:
         raise _http_error(exc) from exc
+
+
+@router.post("/review")
+def review_memories(
+    workspace_id: str,
+    body: MemoryReviewRequest,
+    x_homun_actor_id: str | None = Header(default=None),
+) -> dict:
+    _require_workspace(workspace_id)
+    ctx = get_context()
+    if not hasattr(ctx, "memory") or ctx.memory is None:
+        raise HTTPException(status_code=503, detail={"code": "memory_unavailable", "message": "Memory store is not available"})
+
+    from homun.application.memory_review_core import perform_memory_review
+
+    try:
+        return perform_memory_review(
+            memory_port=ctx.memory,
+            action=body.action,
+            min_similarity=body.min_similarity,
+            project_id=body.project_id,
+            query=body.query,
+            limit=body.limit,
+            actor_id=_actor_id(x_homun_actor_id),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "validation_error", "message": str(exc)})
