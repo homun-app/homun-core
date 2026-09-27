@@ -444,3 +444,46 @@ def meet_leave(req: MeetLeaveRequest) -> Dict[str, Any]:
 @router.post("/meetings/teams/parse")
 def teams_parse(req: TeamsParseRequest) -> Dict[str, Optional[str]]:
     return parse_teams_meeting_resource(req.resource_uri)
+
+
+class IntegrationConfigureRequest(BaseModel):
+    homeassistant_token: Optional[str] = None
+    homeassistant_base_url: Optional[str] = None
+    discord_bot_token: Optional[str] = None
+    feishu_access_token: Optional[str] = None
+    feishu_base_url: Optional[str] = None
+    yuanbao_connected: Optional[bool] = None
+    spotify_access_token: Optional[str] = None
+
+
+@router.post("/configure", response_model=Dict[str, Any])
+def configure_integrations(req: IntegrationConfigureRequest) -> Dict[str, Any]:
+    """Configure credentials and endpoints for optional integrations."""
+    if req.homeassistant_token is not None:
+        _ha_adapter.token = req.homeassistant_token.strip()
+    if req.homeassistant_base_url:
+        _ha_adapter.base_url = req.homeassistant_base_url.rstrip("/")
+    if req.discord_bot_token is not None:
+        _discord_adapter.token = req.discord_bot_token.strip()
+    if req.feishu_access_token is not None:
+        _feishu_adapter.token = req.feishu_access_token.strip()
+    if req.feishu_base_url:
+        _feishu_adapter.base_url = req.feishu_base_url.rstrip("/")
+    if req.yuanbao_connected is not None:
+        _yuanbao_adapter.connected = req.yuanbao_connected
+    if req.spotify_access_token is not None:
+        _spotify_adapter.access_token = req.spotify_access_token.strip()
+    return {"status": "ok", "configured": True}
+
+
+@router.get("/status", response_model=Dict[str, Any])
+def integrations_status() -> Dict[str, Any]:
+    """Return configured status of optional integrations without exposing secrets."""
+    return {
+        "homeassistant": bool(getattr(_ha_adapter, "token", None)),
+        "discord": bool(getattr(_discord_adapter, "token", None)),
+        "feishu": bool(getattr(_feishu_adapter, "token", None)),
+        "yuanbao": bool(getattr(_yuanbao_adapter, "connected", False)),
+        "spotify": bool(getattr(_spotify_adapter, "access_token", None)),
+        "meetings": bool(getattr(_meeting_manager, "_browser_backend", None)),
+    }

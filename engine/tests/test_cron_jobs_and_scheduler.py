@@ -305,7 +305,8 @@ def test_cron_tool_execution():
         "cron": {"policy": "durable-cron-v1", "version": 1},
     }
     ctx = MagicMock()
-    actor = MagicMock()
+    from homun.domain.models import Actor
+    actor = Actor(id="person_cron_test", workspace_id="ws-tool", display_name="Cron test")
 
     # 1. Add job
     res_add = cron_execute(ctx, actor, run, "cronjob_manage", {
@@ -345,11 +346,11 @@ def test_cron_tool_execution():
     res_resume = cron_execute(ctx, actor, run, "cronjob_manage", {"action": "resume", "job_id": job_id})
     assert res_resume["status"] == "active"
 
-    # 6. Run job with mock ctx: runner is attempted but fails honestly (no synthetic success)
+    # 6. A mock context provides no real workspace authority; dispatch is refused.
     res_run = cron_execute(ctx, actor, run, "cronjob_manage", {"action": "run", "job_id": job_id})
-    assert res_run["status"] == "executed"
+    assert res_run["status"] == res_run["occurrence"]["status"]
     assert res_run["occurrence"]["status"] == "failed"
-    assert res_run["occurrence"]["error"] in {"backend_unavailable", "execution_failed"}
+    assert res_run["occurrence"]["error"] == "permission_denied"
     assert res_run["occurrence"]["output_preview"]
 
     # 7. History records the failed attempt

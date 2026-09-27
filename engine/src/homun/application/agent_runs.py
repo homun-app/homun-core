@@ -21,7 +21,7 @@ from homun.policy.intake import latest_intake
 from homun.policy.work import require_work_access
 
 PROPOSAL_TYPE = 'agent_run.propose'
-ACTIVE = {'pending_approval', 'queued', 'running', 'waiting_input', 'waiting_external', 'paused'}
+ACTIVE = {'pending_approval', 'queued', 'running', 'waiting_input', 'waiting_external', 'waiting_automation', 'paused'}
 from homun.domain.capabilities import AGENT_RUN
 LIMITS = AGENT_RUN.limits
 
@@ -36,8 +36,23 @@ def public(run):
 
 def public_for(store, actor, run):
     item = public(run)
-    if not history_is_readable(store, actor, run):
+    readable = history_is_readable(store, actor, run)
+    if readable:
+        from homun.application.session_dependencies import validate as validate_dependencies
+        try:
+            validate_dependencies(store, actor, run)
+        except DomainError:
+            readable = False
+    if readable and run.get('_session_context'):
+        from homun.application.session_history import validate_context
+        try:
+            validate_context(store, actor, run['_session_context'])
+        except DomainError:
+            readable = False
+    if not readable:
         item.update(materials=[], observations=[], history_redacted=True)
+        for field in ('clarify_request', 'automation_wait', 'workspace_transfer', 'execution_context'):
+            item.pop(field, None)
     return item
 
 
@@ -59,6 +74,9 @@ def _bind_person(store, actor, person_id):
 
 
 def authority(ctx, store, actor, run, *, approve=False, running=False):
+    if running and run.get('_delegation_parent'):
+        from homun.application.delegation_authority import validate_child
+        validate_child(store, run)
     work = require_work_access(store, actor, run['work_id'], 'write' if approve or running else 'read')
     if approve or running:
         if actor.kind != 'person' or actor.id not in {work.owner_id, work.reviewer_id}:
@@ -68,6 +86,13 @@ def authority(ctx, store, actor, run, *, approve=False, running=False):
     from homun.application.agent_mcp import validate_bindings
     validate_bindings(store, run.get("_mcp_bindings", []))
     validate_sources(ctx, store, actor, run['materials'])
+    from homun.application.session_history import authorize_run_context
+    authorize_run_context(ctx, store, actor, run)
+    from homun.application.session_workspace import authorize as authorize_workspace
+    authorize_workspace(ctx, store, actor, run)
+    from homun.application.runtime_selection import validate as validate_runtime
+    for selection in run.get('_runtime_routes', []):
+        validate_runtime(ctx.models, selection)
     validate_team(store, run.get('team'))
     if run.get('person'):
         try:
@@ -154,6 +179,9 @@ def propose(ctx, actor, work_id, body):
                  'assignee_id': assignee_id, 'capability': 'agent_run',
                  'output_expected': 'Risultato da revisionare'})
             connection_id = body.get('connection_id')
+            if body.get('provider_id'):
+                from homun.application.runtime_selection import resolve
+                connection_id = resolve(ctx.models, connection_id=connection_id, provider_id=body['provider_id'], model_id=body.get('model_id'))['connection_id']
             if not connection_id and work.project_id:
                 project = store.projects.get(work.project_id)
                 if project and getattr(project, 'agent_model_overrides', None):
@@ -172,18 +200,21 @@ def propose(ctx, actor, work_id, body):
                    'observations': [], 'turns': 0, 'model_attempts': 0,
                    '_executor_revision': agent.revision if agent else None,
                    '_instructions': agent.instructions if agent else '',
+                   '_usage_receipts_version': 1,
                    '_objective': json.dumps({'objective': work.objective, 'available_materials': materials, 'request_history': request_history(store, work_id), 'output': (brief or {}).get('output'),
                                              'constraints': (brief or {}).get('constraints', []),
                                              'revision': revision_context(store, work),
                                              'organization_context': organization_background(store, actor)}, ensure_ascii=False), '_epoch': 0}
+            from homun.application.surface_toolset_policy import pin_policy
+            run.update(pin_policy(body))
             fallback_conn_id = body.get('fallback_connection_id')
             if not fallback_conn_id and agent and getattr(agent, 'fallback_connection_id', None):
                 fallback_conn_id = agent.fallback_connection_id
             if fallback_conn_id:
                 try:
                     fallback_conn = ctx.models.get_connection(fallback_conn_id)
-                    if not fallback_conn.active:
-                        raise ValidationError('Fallback model connection must be active')
+                    if not fallback_conn.configured:
+                        raise ValidationError('Fallback model connection must be configured')
                 except NotFoundError:
                     raise ValidationError('Fallback model connection not found')
                 run['fallback_connection_id'] = fallback_conn_id
@@ -274,7 +305,12 @@ def propose(ctx, actor, work_id, body):
             if body.get('browser'):
                 if not agent_native.enabled(run):
                     raise ValidationError('The browser requires native model support')
-                run['browser'] = {'policy': 'owned-headless-v1', 'version': 5}
+                b_ver = 6 if (body.get('browser_extended') or (isinstance(body.get('browser'), dict) and body['browser'].get('version') == 6)) else 5
+                run['browser'] = {'policy': 'owned-headless-v1', 'version': b_ver}
+            if body.get('desktop') or body.get('computer'):
+                if not agent_native.enabled(run):
+                    raise ValidationError('Desktop computer use requires native model support')
+                run['desktop'] = {'policy': 'native-desktop-v1', 'version': 1}
             if body.get('memory'):
                 if not agent_native.enabled(run):
                     raise ValidationError('Memory tools require native model support')
@@ -342,8 +378,25 @@ def propose(ctx, actor, work_id, body):
                 run['plugins'] = {'policy': 'extensible-plugins-v1', 'version': 1}
             run['_mcp_bindings'] = bindings
             run['external_tools'] = [{k: b[k] for k in ('server_id', 'server_name', 'tool', 'name')} | {'description': b['descriptor'].get('description', '')} for b in bindings]
+            from homun.application.runtime_selection import bind as bind_runtime
+            bind_runtime(ctx, store, run, body)
             run['_registry_version'] = 1
             run['tools'] = registry_for(run).manifest()
+            if run.get('terminal', {}).get('policy') in {'local-private-v1', 'docker-offline-v1'}:
+                from homun.execution.workspace import owned_root
+                root = owned_root(ctx.data_dir.resolve()/'execution', actor.workspace_id, run['id'], create=False)
+                run['_instruction_cwd'] = run['_cwd']
+                run['_instruction_root'] = run['_workspace_root']
+                run['_cwd'] = str(root)
+                run['_workspace_root'] = str(root)
+                from homun.application.session_workspace_contracts import ExecutionContext
+                run['execution_context'] = ExecutionContext(backend=run['terminal']['policy']).model_dump()
+                run['_messages'][0]['content'] += ('\nExecution workspace: ' + str(root) +
+                    '\nExecution cwd: ' + str(root) + '\nInstruction sources above are read-only context, not the execution directory.')
+            from homun.application.session_history import bind_to_run
+            bind_to_run(ctx, store, actor, run, body)
+            from homun.application.session_workspace import bind as bind_workspace
+            bind_workspace(ctx, store, actor, run, body)
             run['digest'] = hashlib.sha256(json.dumps(run, sort_keys=True).encode()).hexdigest()
             save(store, actor, run['id'], PROPOSAL_TYPE, fingerprint, run)
         ctx.service.store = store
@@ -384,7 +437,7 @@ def list_runs(ctx, actor, work_id):
     require_work_access(store, actor, work_id, 'read')
     items = []
     for record in store.commands.values():
-        if record.type == PROPOSAL_TYPE and record.result['work_id'] == work_id:
+        if record.type == PROPOSAL_TYPE and record.result['work_id'] == work_id and not record.result.get('_delegation_parent'):
             items.append(public_for(store, actor, record.result))
     return {'items': items}
 
@@ -402,12 +455,18 @@ def resume_waiting(ctx, run_id):
             work, _ = authority(ctx, store, actor, run, approve=True)
             if work.status != 'ready' or work.version != run['_wait_version'] + 1:
                 raise ConflictError('Work changed while awaiting input')
+            result = {'question': request.need, 'text': request.response_text}
+            if run.get('clarify_request'):
+                from homun.application.agent_clarification import answer
+                result = answer(run['clarify_request'], request.response_text, resolution=request.resolution)
             service = ctx.service.for_store(store)
             service.apply(actor, f'{run_id}:resume:{run["_epoch"]}', 'work.start',
                           {'work_id': work.id, 'expected_version': work.version, 'durable': False})
-            result = {'question': request.need, 'text': request.response_text}
             if agent_native.enabled(run):
                 result = agent_native.append_result(run, result)
+            run.pop('clarify_request', None)
+            run.pop('clarify_deadline_at', None)
+            run.pop('_clarify_wait', None)
             run['observations'].append({'tool': 'human_input', 'result': result})
             run['_epoch'] += 1
             run.update(status='queued', _run_version=work.version,

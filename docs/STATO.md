@@ -1,5 +1,27 @@
 # Stato verificato di Homun 2
 
+## Aggiornamento del 27 settembre 2026 — parity ancora parziale
+
+Ultima verifica C3c1: ripristino approvato di file e cwd su esecuzione locale, con manifest immutabile, ricevuta durevole, recupero dopo interruzione, controlli aggiornati di sorgente/destinazione e continuazioni da fork multipli. Spec e quality review passate. Suite generale congelata **1704 passati, 1 saltato** (214,24 s; avviso FastMCP preesistente); OpenAPI, typecheck, architettura e diff check passati. Docker verificato nei contratti di mount/cwd/replay, non in un container vivo: daemon locale indisponibile. Avviata C3c2 per scelta modello/provider; questo conteggio precede le nuove modifiche. Altri backend, compatibilità import, retention/search/repair e handoff fra profili restano aperti. Main pulito e app installata non aggiornati.
+
+L'audit sui percorsi eseguibili ha smentito la precedente dichiarazione globale di parità. Le correzioni sul branch `fabio/engine-parity-completion` collegano delega, automazioni e chiarimenti al runtime canonico e rendono veritieri consegne, approvazioni e runtime alternativi. La tranche B5 aggiunge streaming nativo interrompibile e letture locali concorrenti come opzioni approvate esplicite, con accounting separato del fallback. Il follow-through B4 collega i quality gate ai job terminale approvati e rende persistente l’esito dei processi locali anche dopo la chiusura del processo avviatore; approvazione via API, card UI ancora da collegare. Restano funzionalità locali da implementare oltre alle prove che richiedono autenticazione.
+
+Ricognizione branch: i branch Homun2 storici sono già antenati del main locale; vedere [provenienza, moduli riutilizzabili e collegamenti mancanti](research/2026-09-27-branch-reconciliation.md).
+
+Checkpoint C3b successivo: ricevute persistenti per chiamata, attribuzione ai run e query dei consumi con permessi ereditati; coperti fallback, compattazione, consultazioni, judge, domande a margine, MoA e figli delegati. Misure mancanti restano sconosciute, ammissioni negate non incrementano i tentativi e le ricevute sopravvivono al riavvio. Spec e quality review passate; suite generale congelata **1657 passati, 1 saltato** (208,58 s, un avviso FastMCP preesistente). OpenAPI, typecheck, architettura e diff check passati. Iniziata C3c1 per ripristino approvato di file/cwd; questo conteggio precede tali nuove modifiche. Main e app installata non aggiornati, nessuna nuova prova live di provider remoti.
+
+Ultimo checkpoint verificato C3a: cronologia canonica dei run, fork/rewind immutabili e continuazioni con nuova approvazione; permessi delle fonti ereditati anche nelle letture via tool e nelle viste ordinarie. Revoca verificata su chiarimenti e motivazioni generate. Suite motore **1621 passati, 1 saltato** (205,87 s); OpenAPI, typecheck e architettura passati, revisioni spec/qualità passate. Il conteggio precede C3b, ora in lavorazione per ricevute persistenti dei consumi. Ripristino filesystem/pin e manutenzione sessioni C3c restano aperti; nessuna dichiarazione di parity globale. Worktree dedicata, main e app installata invariati.
+
+Continuazione B2: scadenze opzionali durevoli dei chiarimenti e salvataggio risposte parziali del destinatario, con ripresa canonica dopo riavvio. Gateway senza dispatcher restituisce indisponibilità tipizzata invece di successo. Verifica corrente: **1570 test motore passati, 1 saltato**; typecheck, OpenAPI e architettura passati (31 avvisi dimensionali). Modifiche ancora nella worktree dedicata; app installata e main non aggiornati. Draft e scadenze non hanno ancora i nuovi controlli UI.
+
+Continuazione C1a successiva: i nuovi job locali conservano il timeout anche dopo chiusura del motore; il supervisore possiede anche i segnali di cancellazione e registra l'esito. Job storici compatibili, perdita supervisore esplicitamente incerta. **1589 test motore passati, 1 saltato**, revisioni funzionale e qualità passate; OpenAPI e architettura verificati. Sessioni canoniche in lavorazione dopo questo checkpoint. L'obiettivo autonomo resta aperto fino alla parity del motore; discussione UI rinviata a quella chiusura.
+
+Riferimenti correnti: [audit](research/2026-09-27-engine-parity-audit.md), [implementazione, verifiche e limiti residui](research/2026-09-27-engine-parity-completion.md), [piano aperto](superpowers/plans/2026-09-27-engine-parity-completion.md).
+
+Le sezioni successive conservano lo stato storico del 25 settembre. I loro conteggi e le dichiarazioni di completamento non certificano la parity attuale né aggiornano l'app installata.
+
+## Stato storico del 25 settembre 2026
+
 Aggiornato il 25 settembre 2026: integrazione completa del percorso supervisionato del motore Homun nell'interfaccia utente, canali esterni, i18n e packaging standalone.
 - Allegati file in chat: invio e ingestione automatica dei file allegati nel progetto di lavoro tramite `ingestWorkAttachments` e associazione al turno del motore.
 - Domande a margine (/btw): routing dedicato da chat senza alterare il transcript principale dell'esecuzione in corso via `handleEngineSend` e `askEngineSideQuestion`.
@@ -409,11 +431,6 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
 - **Sottosistema H44 (Operazioni, profili e daemon)**: operazioni, profili e ciclo di vita daemon (`ProfileOperationsManager`, `ConfigLifecycleManager`, `DoctorDiagnostics`, `DaemonManager`, endpoint `/v1/operations`), gestione ciclo di vita profili con isolamento cartelle e nomi alfanumerici, pacchetti di distribuzione con verifica integrità SHA256 e import/export sicuro, migrazioni schema di configurazione con backup automatici e supporto v1->v2 idempotente, diagnostica di sistema (Doctor) con controlli piattaforma (Python, SQLite JSON1/FTS5), strumenti sviluppatore (git, ripgrep, node), backend terminale (Docker, shell locale, SSH), permessi storage e integrità database con autoriparazione, e gestione del daemon con tracciamento PID, rilevamento PID obsoleti, terminazione pulita SIGTERM e riavvio controllato.
 - **Sottosistema H45 (Ricerca ed evals)**: ricerca opzionale, benchmark, compressione traiettorie e osservabilità (`TrajectoryStore`, `TrajectoryCompressor`, `BatchEvalRunner`, `ObservabilityCollector`, endpoint `/v1/research`), persistenza sicura file-lock (flock) in formato ShareGPT con conversione tag scratchpad (`<REASONING_SCRATCHPAD>` a `<think>`) e rilevamento incompleti, compressione traiettorie su budget token con protezione della testa (sistema, primo utente, prima azione gpt, primo tool) e della coda senza spezzare mai le coppie `<tool_call>`/`<tool_response>`, esecutore concorrente di dataset di benchmark con pool di worker configurabile, checkpointing JSONL per ripresa (`--resume`) e aggregazione statistica dei tool, e tracciamento distribuito (span e trace) con esportazione compatibile OpenTelemetry e Langfuse.
 - **Sottosistema H46 (Catalogo e compagno virtuale)**: catalogo e superfici opzionali (`CompanionManager`, `AchievementTracker`, `TourAndTipManager`, `DiskCleanupEngine`, `SecurityGuidanceScanner`, `CatalogPacksManager`, endpoint `/v1/catalog`), compagno virtuale persistente con meccanica dei bisogni, livelli ed estetiche skin ASCII con toggle esplicito, registro e sblocco traguardi (achievements) con calcolo punteggio, tour guidato di onboarding e consigli contestuali (`/btw`, menzioni selettive), pulizia disco del workspace con scansione dry-run dei file temporanei/cache/log e rimozione selettiva sicura, guida di sicurezza contro pattern pericolosi (piping curl a shell, chmod 777, token in chiaro), e manifesto completo dei pacchetti di competenze del catalogo con installazione e disinstallazione atomica senza omissione di extra.
-
-
-
-
-
 
 
 

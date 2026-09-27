@@ -198,9 +198,124 @@ class MCPOAuthBroker:
             "or pre-authorized grant is available (code=backend_unavailable)"
         )
 
+    @staticmethod
+    def generate_pkce() -> tuple[str, str]:
+        """Generate RFC 7636 compliant (code_verifier, code_challenge) with S256."""
+        import base64
+        import hashlib
+        import secrets
+
+        verifier = secrets.token_urlsafe(64)
+        digest = hashlib.sha256(verifier.encode("ascii")).digest()
+        challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+        return verifier, challenge
+
+    def get_authorization_url(
+        self,
+        server: ExternalServer,
+        redirect_uri: str,
+        state: str,
+        code_challenge: str,
+    ) -> str:
+        """Build interactive browser authorization URL with PKCE challenge."""
+        import urllib.parse
+
+        auth_url = str(
+            getattr(server, "oauth_authorization_url", "")
+            or getattr(server, "oauth_auth_url", "")
+            or server.env.get("OAUTH_AUTH_URL")
+            or ""
+        ).strip()
+        if not auth_url:
+            raise RuntimeError(
+                f"Interactive OAuth declared for server '{server.name}' but oauth_authorization_url is not configured "
+                "(code=backend_unavailable)"
+            )
+        client_id = str(getattr(server, "oauth_client_id", "") or "").strip()
+        scopes = getattr(server, "oauth_scopes", None) or []
+
+        params = {
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "state": state,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
+        }
+        if scopes:
+            params["scope"] = " ".join(scopes)
+        sep = "&" if "?" in auth_url else "?"
+        return f"{auth_url}{sep}{urllib.parse.urlencode(params)}"
+
+    def exchange_authorization_code(
+        self,
+        server: ExternalServer,
+        code: str,
+        code_verifier: str,
+        redirect_uri: str,
+    ) -> OAuthToken:
+        """Exchange authorization code with code_verifier for access and refresh tokens."""
+        token_url = str(getattr(server, "oauth_token_url", "") or "").strip()
+        if not token_url:
+            raise RuntimeError(
+                f"MCP OAuth token_url is missing for server '{server.name}' (code=backend_unavailable)"
+            )
+        client_id = str(getattr(server, "oauth_client_id", "") or "").strip()
+        srv_prefix = server.id.replace("-", "_").upper()
+        client_secret = (
+            str(server.headers.get("client_secret") or "").strip()
+            or str(server.env.get("OAUTH_CLIENT_SECRET") or "").strip()
+            or str(os.environ.get(f"HOMUN_MCP_OAUTH_{srv_prefix}_CLIENT_SECRET") or "").strip()
+            or str(os.environ.get("HOMUN_MCP_OAUTH_CLIENT_SECRET") or "").strip()
+        )
+
+        data: Dict[str, Any] = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": code_verifier,
+            "redirect_uri": redirect_uri,
+        }
+        if client_id:
+            data["client_id"] = client_id
+        if client_secret:
+            data["client_secret"] = client_secret
+
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.post(token_url, data=data)
+            if resp.status_code >= 400:
+                raise RuntimeError(
+                    f"OAuth authorization code exchange failed with HTTP {resp.status_code}: {resp.text} "
+                    "(code=backend_unavailable)"
+                )
+            res_data = resp.json()
+            access_token = res_data.get("access_token")
+            if not access_token:
+                raise RuntimeError(
+                    f"OAuth token response from {token_url} missing access_token (code=backend_unavailable)"
+                )
+            expires_in = res_data.get("expires_in")
+            expires_at = (time.time() + float(expires_in)) if expires_in is not None else None
+            token_obj = OAuthToken(
+                access_token=str(access_token),
+                token_type=str(res_data.get("token_type") or "Bearer"),
+                expires_at=expires_at,
+                refresh_token=res_data.get("refresh_token"),
+                scope=res_data.get("scope"),
+            )
+            self.store_token(server, token_obj)
+            return token_obj
+        except Exception as exc:
+            if "backend_unavailable" in str(exc):
+                raise
+            raise RuntimeError(
+                f"OAuth code exchange failed for server '{server.name}': {exc} (code=backend_unavailable)"
+            ) from exc
+
 
 _DEFAULT_BROKER = MCPOAuthBroker()
 
 
 def get_mcp_oauth_broker() -> MCPOAuthBroker:
     return _DEFAULT_BROKER
+

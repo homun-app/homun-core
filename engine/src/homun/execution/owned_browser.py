@@ -36,6 +36,32 @@ def chrome_path() -> Path | None:
     return None
 
 
+_FORBIDDEN_PROFILE_SUBSTRINGS = (
+    "Application Support/Google/Chrome",
+    "Application Support/Chromium",
+    ".config/google-chrome",
+    ".config/chromium",
+    "AppData/Local/Google/Chrome",
+    "AppData\\Local\\Google\\Chrome",
+)
+
+
+def validate_profile_path(profile_path: Path | str, *, allowed_root: Path | str | None = None) -> Path:
+    """Ensure browser profile directory is isolated and never touches user's personal browser data."""
+    resolved = Path(profile_path).expanduser().resolve()
+    resolved_str = str(resolved)
+    for forbidden in _FORBIDDEN_PROFILE_SUBSTRINGS:
+        if forbidden in resolved_str:
+            raise ValueError(f"User browser profile path is strictly forbidden: {forbidden}")
+    if allowed_root is not None:
+        root_resolved = Path(allowed_root).expanduser().resolve()
+        try:
+            resolved.relative_to(root_resolved)
+        except ValueError:
+            raise ValueError(f"Profile path {resolved} is outside allowed root {root_resolved}")
+    return resolved
+
+
 def _read_exact(sock: socket.socket, count: int) -> bytes:
     buf = b""
     while len(buf) < count:
@@ -150,6 +176,7 @@ class OwnedBrowser:
             raise PageRefusal("browser_unavailable", "No owned browser is installed")
         self.root = confine_directory(Path(root).absolute())
         profile = confine_directory(self.root / "profile")
+        validate_profile_path(profile)
         self.argv = [
             str(binary), "--headless=new", "--disable-gpu", "--no-first-run",
             "--no-default-browser-check", "--disable-extensions", "--disable-sync",
@@ -358,6 +385,66 @@ class OwnedBrowser:
         if settled.get("dialogs"):
             result["dialogs"] = settled["dialogs"]
         return result
+
+    def scroll(self, *, direction: str = "down", amount: int = 300, backend_node_id: int | None = None) -> dict:
+        """Scroll the public page or a specific element into view."""
+        page = self._page_socket()
+        if backend_node_id is not None:
+            resolved = page.call("DOM.resolveNode", {"backendNodeId": backend_node_id})
+            object_id = ((resolved.get("result") or {}).get("object") or {}).get("objectId")
+            if object_id:
+                page.call("Runtime.callFunctionOn", {
+                    "objectId": object_id,
+                    "functionDeclaration": "function(){ this.scrollIntoView({behavior: 'smooth', block: 'center'}); return true; }",
+                    "returnByValue": True,
+                })
+                time.sleep(0.1)
+                return {"scrolled": True, "target": "element"}
+        dx = amount if direction == "right" else (-amount if direction == "left" else 0)
+        dy = amount if direction == "down" else (-amount if direction == "up" else 0)
+        page.call("Runtime.evaluate", {"expression": f"window.scrollBy({dx}, {dy});", "returnByValue": True})
+        time.sleep(0.05)
+        return {"scrolled": True, "direction": direction, "amount": amount}
+
+    def capture_vision(self, *, format: str = "jpeg", quality: int = 75, clip: dict | None = None) -> dict:
+        """Capture compressed screenshot optimized for vision models and token budgeting."""
+        page = self._page_socket()
+        fmt = "jpeg" if format.lower() in ("jpeg", "jpg") else "png"
+        params: dict = {"format": fmt}
+        if fmt == "jpeg":
+            params["quality"] = max(10, min(100, int(quality)))
+        if clip is not None:
+            params["clip"] = clip
+        res = page.call("Page.captureScreenshot", params)
+        data = (res.get("result") or {}).get("data") or ""
+        mime_type = "image/jpeg" if fmt == "jpeg" else "image/png"
+        return {"mime_type": mime_type, "data": data, "bytes_length": len(data) * 3 // 4 if data else 0}
+
+    def profile_info(self) -> dict:
+        """Inspect the current isolated browser profile lifecycle and storage."""
+        profile_dir = self.root / "profile"
+        total_size = 0
+        if profile_dir.is_dir():
+            try:
+                total_size = sum(f.stat().st_size for f in profile_dir.glob("**/*") if f.is_file())
+            except Exception:
+                pass
+        return {"isolated": True, "profile_path": str(profile_dir), "size_bytes": total_size, "active": self.process.poll() is None}
+
+    def clear_profile_data(self, *, clear_cookies: bool = True, clear_cache: bool = True) -> dict:
+        """Clear session cookies or cache without removing profile directory."""
+        page = self._page_socket()
+        if clear_cookies:
+            try:
+                page.call("Network.clearBrowserCookies")
+            except Exception:
+                pass
+        if clear_cache:
+            try:
+                page.call("Network.clearBrowserCache")
+            except Exception:
+                pass
+        return {"cleared_cookies": clear_cookies, "cleared_cache": clear_cache}
 
     def close(self) -> None:
         if self._page is not None:

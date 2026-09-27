@@ -6,7 +6,13 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from homun.application.media_backends import resolve_tts_dispatcher, resolve_vision_dispatcher
+from homun.application.media_backends import (
+    resolve_image_dispatcher,
+    resolve_stt_dispatcher,
+    resolve_tts_dispatcher,
+    resolve_video_dispatcher,
+    resolve_vision_dispatcher,
+)
 from homun.application.media_image_gen import ImageGenerator
 from homun.application.media_stt import SpeechToTextTranscriber
 from homun.application.media_tts import TextToSpeechSynthesizer
@@ -102,6 +108,7 @@ def generate_image(req: ImageGenerateRequest) -> Dict[str, Any]:
         aspect_ratio=req.aspect_ratio or "1:1",
         model=req.model,
         seed=req.seed,
+        backend_dispatcher=resolve_image_dispatcher(provider=req.model),
     )
     if res.error:
         meta = getattr(res, 'metadata', None)
@@ -124,6 +131,7 @@ def edit_image(req: ImageEditRequest) -> Dict[str, Any]:
         req.image_urls,
         aspect_ratio=req.aspect_ratio or "1:1",
         model=req.model,
+        backend_dispatcher=resolve_image_dispatcher(provider=req.model),
     )
     if res.error:
         meta = getattr(res, 'metadata', None)
@@ -145,6 +153,7 @@ def generate_video(req: VideoGenerateRequest) -> Dict[str, Any]:
         duration_seconds=req.duration_seconds or 5,
         aspect_ratio=req.aspect_ratio or "16:9",
         resolution=req.resolution or "720p",
+        backend_dispatcher=resolve_video_dispatcher(),
     )
     if res.error:
         meta = getattr(res, 'metadata', None)
@@ -166,6 +175,7 @@ def transcribe_stt(req: SttTranscribeRequest) -> Dict[str, Any]:
         req.audio_path,
         language=req.language,
         provider=req.provider,
+        backend_dispatcher=resolve_stt_dispatcher(provider=req.provider),
     )
     if res.error:
         meta = getattr(res, 'metadata', None)

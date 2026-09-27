@@ -51,72 +51,19 @@ def test_heartbeat_and_loop_survive_reopen(tmp_path):
     set_automation_store(None)
 
 
-def test_side_question_does_not_mutate_run_messages():
-    class FakeCtx:
-        class repository:
-            @staticmethod
-            def load():
-                return FakeStore()
+from test_agent_runs import setup
 
-            @staticmethod
-            def save(_store):
-                return None
 
-    class FakeStore:
-        commands = {}
-
-    # Use thin doubles via answer_side_question with injected invoker and monkeypatched lookup
-    from homun.application import agent_side_questions as mod
-
-    run = {
-        "id": "run1",
-        "work_id": "w1",
-        "status": "running",
-        "connection_id": "fake",
-        "_messages": [
-            {"role": "user", "content": "Count rows"},
-            {"role": "assistant", "content": "There are 3 rows"},
-        ],
-        "prompt_tokens": 0,
-        "completion_tokens": 0,
-        "cost_estimate": 0.0,
-    }
-
-    class Actor:
-        id = "a1"
-        workspace_id = "ws"
-
-    def fake_lookup(store, run_id, work_id=None):
-        return run
-
-    def fake_authority(store, actor, run):
-        return None
-
-    original_lookup = mod.lookup
-    original_authority = mod.authority
-    mod.lookup = fake_lookup
-    mod.authority = fake_authority
-    try:
-        out = answer_side_question(
-            FakeCtx(),
-            Actor(),
-            "w1",
-            "run1",
-            "How many rows?",
-            model_invoker=lambda messages, max_tokens=1024, tools=None: {
-                "text": "3",
-                "prompt_tokens": 5,
-                "completion_tokens": 1,
-                "cost_estimate": 0.0,
-            },
-        )
-        assert out["answer"] == "3"
-        assert out["main_transcript_unchanged"] is True
-        assert len(run["_messages"]) == 2
-        assert run["prompt_tokens"] == 5
-    finally:
-        mod.lookup = original_lookup
-        mod.authority = original_authority
+def test_side_question_does_not_mutate_run_messages(setup):
+    from test_native_agent import native_start
+    ctx, actor, work, material = setup
+    native_start(ctx, actor, work, material)
+    before = ctx.repository.load().commands['run'].result['_messages']
+    out = answer_side_question(ctx, actor, work, 'run', 'How many rows?',
+        model_invoker=lambda messages, max_tokens=1024, tools=None: {
+            'text': '3', 'prompt_tokens': 5, 'completion_tokens': 1, 'cost_estimate': 0.0})
+    assert out['answer'] == '3' and out['main_transcript_unchanged'] is True
+    assert ctx.repository.load().commands['run'].result['_messages'] == before
 
 
 def test_write_approval_gate_survives_reopen(tmp_path, monkeypatch):

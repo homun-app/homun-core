@@ -21,9 +21,7 @@ class ExecutionTimeout(DomainError):
     code = "execution_transport_timeout"
 
 
-def digest(value: object) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-
+from homun.execution.identity import digest
 
 class JobSpec(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
@@ -32,6 +30,14 @@ class JobSpec(BaseModel):
     call_id: str = Field(min_length=1, max_length=256)
     image: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     command: str = Field(min_length=1, max_length=16000)
+
+    cwd: str = '.'
+
+    @field_validator('cwd')
+    @classmethod
+    def valid_cwd(cls, value: str) -> str:
+        from homun.execution.workspace import relative_cwd
+        return relative_cwd(value)
 
     @field_validator("command", "workspace_id", "run_id", "call_id")
     @classmethod
@@ -50,7 +56,7 @@ class JobSpec(BaseModel):
 
     @property
     def contract(self) -> str:
-        return digest({"spec": self.model_dump(), "policy": "docker-offline-v1"})
+        return digest({"spec": self.model_dump(exclude={"cwd"} if self.cwd == "." else set()), "policy": "docker-offline-v1"})
 
     @property
     def name(self) -> str:
@@ -66,6 +72,26 @@ class LocalJobSpec(BaseModel):
     call_id: str = Field(min_length=1, max_length=256)
     command: str = Field(min_length=1, max_length=16000)
 
+    deadline_at: str | None = None
+
+    @field_validator("deadline_at")
+    @classmethod
+    def valid_deadline(cls, value: str | None) -> str | None:
+        if value is not None:
+            from datetime import datetime
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                raise ValueError("Local deadlines require a timezone")
+        return value
+
+    cwd: str = '.'
+
+    @field_validator('cwd')
+    @classmethod
+    def valid_cwd(cls, value: str) -> str:
+        from homun.execution.workspace import relative_cwd
+        return relative_cwd(value)
+
     @field_validator("command", "workspace_id", "run_id", "call_id")
     @classmethod
     def no_null(cls, value: str) -> str:
@@ -83,7 +109,7 @@ class LocalJobSpec(BaseModel):
 
     @property
     def contract(self) -> str:
-        return digest({"spec": self.model_dump(), "policy": "local-private-v1"})
+        return digest({"spec": self.model_dump(exclude_none=True, exclude={"cwd"} if self.cwd == "." else set()), "policy": "local-private-v1"})
 
 
 class SshJobSpec(BaseModel):

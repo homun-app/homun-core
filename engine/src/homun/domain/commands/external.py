@@ -137,6 +137,7 @@ def _skill_create(ctx: CommandContext, actor: Actor, command_id: str, payload: d
         description=str(payload.get("description") or "").strip()[:120],
         body=str(payload.get("body") or ""),
         tags=[str(t) for t in (payload.get("tags") or [])],
+        resources={str(k): str(v) for k, v in (payload.get("resources") or {}).items()},
         status=status,
         author_type=author_type,
         author_id=str(payload.get("author_id") or actor.id),
@@ -167,6 +168,8 @@ def _skill_patch(ctx: CommandContext, actor: Actor, command_id: str, payload: di
         skill.body = str(payload["body"] or "")
     if "tags" in payload:
         skill.tags = [str(t) for t in (payload.get("tags") or [])]
+    if "resources" in payload:
+        skill.resources = {str(k): str(v) for k, v in (payload.get("resources") or {}).items()}
     # An agent edit of an approved skill returns it to staging.
     if skill.status == "approved" and str(payload.get("author_type") or "person") == "agent":
         skill.status = "staged"

@@ -15,7 +15,7 @@ export function EngineAgentControls({ workId, run, onUpdated }: {
   const [notice, setNotice] = useState('');
   const pending = useRef<PendingControl | null>(null);
   if (run.tool_version !== 'adaptive-materials-native-v2'
-    || !['queued', 'running', 'waiting_input', 'waiting_external', 'paused'].includes(run.status)) return null;
+    || !['queued', 'running', 'waiting_input', 'waiting_external', 'waiting_automation', 'paused'].includes(run.status)) return null;
 
   async function send(action: AgentControlAction) {
     if (busy) return;

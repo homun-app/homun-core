@@ -141,3 +141,58 @@ class BatchEvalRunner:
         )
 
         return results, summary
+
+
+def create_canonical_batch_executor(
+    *,
+    data_dir: Optional[Path] = None,
+    trajectory_store: Optional[Any] = None,
+) -> Callable[[BatchItem], BatchItemResult]:
+    """Create a canonical task executor for batch evaluation items backed by engine ModelRegistry."""
+    from homun.storage.paths import default_data_dir
+    from homun.models.registry import ModelRegistry
+    from homun.models.types import ChatMessage
+
+    dir_path = data_dir or default_data_dir()
+    registry = ModelRegistry(data_dir=dir_path)
+
+    def _execute(item: BatchItem) -> BatchItemResult:
+        start_t = time.time()
+        messages = [ChatMessage(role="user", content=item.prompt)]
+        try:
+            res = registry.complete(messages)
+            duration = max(0.001, round(time.time() - start_t, 3))
+
+            # Record trajectory if store is available
+            if trajectory_store is not None and hasattr(trajectory_store, "record_trajectory"):
+                try:
+                    trajectory_store.record_trajectory(
+                        conversations=[
+                            {"role": "user", "content": item.prompt},
+                            {"role": "assistant", "content": res.text},
+                        ],
+                        model=res.model_id or "default",
+                        completed=True,
+                        metadata={"batch_item_id": item.id},
+                    )
+                except Exception:
+                    pass
+
+            return BatchItemResult(
+                id=item.id,
+                success=True,
+                output=res.text,
+                latency_seconds=duration,
+                tool_stats={},
+            )
+        except Exception as exc:
+            return BatchItemResult(
+                id=item.id,
+                success=False,
+                output="",
+                latency_seconds=max(0.001, round(time.time() - start_t, 3)),
+                error=str(exc),
+                tool_stats={},
+            )
+
+    return _execute

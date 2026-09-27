@@ -167,6 +167,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
     {p?.external_request_id && <EngineAgentExternalApproval active={p.status === 'waiting_external'} key={p.external_request_id ?? p.id} workId={work.id} requestId={p.external_request_id} />}
     {p?.terminal_request_id && <EngineAgentTerminalApproval key={p.terminal_request_id} workId={work.id} requestId={p.terminal_request_id} active={p.status === 'waiting_external'} />}
     {p?.file_edit_request_id && <EngineWorkspaceEditApproval key={p.file_edit_request_id} workId={work.id} requestId={p.file_edit_request_id} active={p.status === 'waiting_external'} />}
+    {p?.status === 'waiting_automation' && <p role="status">Homun attende il prossimo passaggio dell’automazione. Puoi mettere in pausa, correggere le indicazioni o interrompere il lavoro.</p>}
     {p?.status === 'paused' && <p role="status">Lavoro in pausa. Puoi correggere le indicazioni o riprendere.</p>}
     {p?.status === 'cancelled' && <p role="status">Esecuzione interrotta. Le attività già svolte restano consultabili.</p>}
     {p && <EngineAgentControls key={p.id} workId={work.id} run={p} onUpdated={async updated => {

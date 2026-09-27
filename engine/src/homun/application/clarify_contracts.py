@@ -40,6 +40,8 @@ CLARIFY_DESCRIPTION = (
 CLARIFY_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
+        "timeout_seconds": {"type":"integer", "minimum":1, "maximum":604800,
+            "description":"Optional input deadline, in seconds. Omit to wait indefinitely. Expiration is missing input, never consent or approval."},
         "questions": {
             "type": "array",
             "minItems": 1,
@@ -75,6 +77,7 @@ class ClarifyArguments(BaseModel):
     question: str | None = None
     choices: list[Any] | None = None
     multi_select: bool = False
+    timeout_seconds: int | None = Field(default=None, ge=1, le=604800, strict=True)
 
 
 def entries(handler, version=1):

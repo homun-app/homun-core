@@ -2,7 +2,7 @@
 import json
 from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from homun.models.intake import _extract_json_payload
+from homun.models.json_payload import extract_json_payload as _extract_json_payload
 from homun.models.prompt_store import prompts_for
 from homun.models.types import ChatMessage
 
@@ -32,7 +32,7 @@ class AgentDecision(BaseModel):
         return self
 
 
-def decide(models, *, objective, tools, observations, connection_id=None,
+def decide(models, *, objective, tools, observations, connection_id=None, model_id=None, expected_runtime=None,
            instructions='', language=None):
     """One typed turn, with no hidden retries or side effects beyond model IO.
 
@@ -46,8 +46,14 @@ def decide(models, *, objective, tools, observations, connection_id=None,
     result = models.complete([
         ChatMessage(role='system', content=system),
         ChatMessage(role='user', content=json.dumps(payload, ensure_ascii=False)),
-    ], connection_id=connection_id)
-    decision = AgentDecision.model_validate_json(_extract_json_payload(result.text))
-    if decision.kind == 'tool' and decision.tool not in {tool.name for tool in tools}:
-        raise ValueError('Model requested a tool outside the available catalog')
+    ], connection_id=connection_id, **({"model_id": model_id} if model_id is not None else {}),
+       **({"expected_runtime": expected_runtime} if expected_runtime is not None else {}))
+    try:
+        decision = AgentDecision.model_validate_json(_extract_json_payload(result.text))
+        if decision.kind == 'tool' and decision.tool not in {tool.name for tool in tools}:
+            raise ValueError('Model requested a tool outside the available catalog')
+    except ValueError as exc:
+        error = ValueError(str(exc))
+        error.usage = getattr(result, 'usage', None)
+        raise error from exc
     return decision, result

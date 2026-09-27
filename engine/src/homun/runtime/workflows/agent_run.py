@@ -59,6 +59,14 @@ def deliver_agent_runs(ctx):
         if record.type != PROPOSAL_TYPE:
             continue
         run = record.result
+        if run['status'] == 'waiting_automation' and run.get('automation_wait', {}).get('reason') == 'goal_gate_pending':
+            from homun.application.goal_terminal import resume as resume_goal_gate
+            try:
+                resume_goal_gate(ctx, run['id'])
+            except DomainError as exc:
+                fail(ctx, run['id'], exc.code, blocked=True, epoch=run['_epoch'],
+                     expected_steering=run.get('_steering', []))
+            run = ctx.repository.load().commands[run['id']].result
         if run['status'] == 'waiting_external':
             from homun.application.agent_external import resume_external
             try:
@@ -78,9 +86,11 @@ def deliver_agent_runs(ctx):
             run = ctx.repository.load().commands[run['id']].result
         if run['status'] == 'waiting_input':
             try:
+                from homun.application.clarification_deadlines import expire_waiting
+                expire_waiting(ctx, run['id'])
                 resume_waiting(ctx, run['id'])
             except DomainError as exc:
-                fail(ctx, run['id'], exc.code, blocked=True)
+                fail(ctx, run['id'], exc.code, blocked=True, epoch=run['_epoch'])
             run = ctx.repository.load().commands[run['id']].result
         if run['status'] not in {'queued', 'running'}:
             continue

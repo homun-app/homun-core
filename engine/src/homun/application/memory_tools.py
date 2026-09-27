@@ -131,4 +131,101 @@ def execute(ctx, actor, run, tool, args):
         results = matches[:limit]
         return {"results": results, "count": len(results)}
 
+    if tool == "memory_review":
+        if not hasattr(ctx, "memory") or ctx.memory is None:
+            return {"error_code": "memory_unavailable", "message": "Memory store is not available"}
+
+        action = (args.get("action") or "preview").strip().lower()
+        if action not in ("preview", "prune"):
+            return {"error_code": "invalid_action", "message": f"Action must be 'preview' or 'prune' (got {action!r})"}
+
+        min_sim = float(args.get("min_similarity", 0.75))
+        min_sim = max(0.1, min(1.0, min_sim))
+        limit = max(1, min(args.get("limit", 20), 100))
+        target_project_id = args.get("project_id") or project_id
+
+        all_notes = ctx.memory.list(project_id=target_project_id, include_deleted=False)
+
+        q = (args.get("query") or "").strip().lower()
+        if q:
+            notes = [n for n in all_notes if q in n.text.lower()]
+        else:
+            notes = all_notes
+
+        import re
+
+        def _tokenize(text: str) -> set[str]:
+            return set(re.findall(r"\w+", text.lower()))
+
+        tokenized = [(n, _tokenize(n.text)) for n in notes]
+        clusters: list[dict[str, Any]] = []
+        assigned_ids: set[str] = set()
+
+        for i in range(len(tokenized)):
+            note_a, tokens_a = tokenized[i]
+            if note_a.id in assigned_ids:
+                continue
+            group_redundant: list[dict[str, Any]] = []
+            max_similarity = 0.0
+
+            for j in range(i + 1, len(tokenized)):
+                note_b, tokens_b = tokenized[j]
+                if note_b.id in assigned_ids:
+                    continue
+
+                sim = 0.0
+                if note_a.text.strip().lower() == note_b.text.strip().lower():
+                    sim = 1.0
+                elif tokens_a or tokens_b:
+                    union = tokens_a | tokens_b
+                    sim = len(tokens_a & tokens_b) / len(union) if union else 0.0
+
+                if sim >= min_sim:
+                    max_similarity = max(max_similarity, sim)
+                    group_redundant.append({
+                        "id": note_b.id,
+                        "text": note_b.text,
+                        "similarity": round(sim, 3),
+                        "created_at": note_b.created_at.isoformat() if hasattr(note_b.created_at, "isoformat") else str(note_b.created_at),
+                    })
+                    assigned_ids.add(note_b.id)
+
+            if group_redundant:
+                assigned_ids.add(note_a.id)
+                clusters.append({
+                    "canonical_id": note_a.id,
+                    "canonical_text": note_a.text,
+                    "canonical_created_at": note_a.created_at.isoformat() if hasattr(note_a.created_at, "isoformat") else str(note_a.created_at),
+                    "redundant_notes": group_redundant,
+                    "max_similarity": round(max_similarity, 3),
+                })
+                if len(clusters) >= limit:
+                    break
+
+        if action == "preview":
+            return {
+                "status": "preview",
+                "action": "preview",
+                "total_reviewed": len(notes),
+                "duplicate_clusters": len(clusters),
+                "candidates": clusters,
+            }
+
+        # action == "prune"
+        pruned_ids: list[str] = []
+        for cluster in clusters:
+            for red in cluster["redundant_notes"]:
+                ctx.memory.delete(red["id"], actor_id=actor.id)
+                pruned_ids.append(red["id"])
+
+        return {
+            "status": "pruned",
+            "action": "prune",
+            "total_reviewed": len(notes),
+            "duplicate_clusters": len(clusters),
+            "pruned_count": len(pruned_ids),
+            "pruned_ids": pruned_ids,
+            "candidates": clusters,
+        }
+
     raise ValidationError(f"Unknown memory tool: {tool}")

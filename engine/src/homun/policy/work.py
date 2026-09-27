@@ -57,7 +57,7 @@ def require_work_command_authority(store, actor, command_type, payload):
         require_workspace_actor(actor, store.workspace_id)
     elif command_type.startswith(('work.', 'plan.')):
         work_id = payload.get('work_id', '')
-        if command_type == 'work.provide_contribution':
+        if command_type in {'work.provide_contribution', 'work.save_contribution_draft'}:
             request = store.contributions.get(str(payload.get('request_id', '')))
             if request is None:
                 raise NotFoundError('Contribution request not found')
@@ -65,7 +65,7 @@ def require_work_command_authority(store, actor, command_type, payload):
             # The invitation application authenticated a one-request, text-only
             # capability. It never supplies general project access.
             from homun.policy.contribution_scope import permits
-            if permits(store, actor, payload):
+            if command_type == 'work.provide_contribution' and permits(store, actor, payload):
                 return
         require_work_access(store, actor, work_id)
         if command_type == 'work.link_conversation':

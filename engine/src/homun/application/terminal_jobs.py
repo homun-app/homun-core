@@ -113,6 +113,10 @@ def propose(ctx, actor, work_id, body, *, agent_binding=None, ssh_key_path=None)
         result = dict(id=request.command_id,work_id=work_id,command=request.command,
                       expected_version=request.expected_version,timeout_seconds=request.timeout_seconds,policy=request.policy,created_by=actor.id,
                       created_at=utc_now().isoformat(),status='pending_approval')
+        if request.cwd != '.':
+            if request.policy not in {'local-private-v1', 'docker-offline-v1'}:
+                raise ValidationError('This backend does not support a relative execution cwd')
+            result['cwd'] = request.cwd
         if request.image:result['image']=request.image
         if request.background:result['background']=True
         if request.stdin:result['stdin']=True
@@ -143,7 +147,11 @@ def propose(ctx, actor, work_id, body, *, agent_binding=None, ssh_key_path=None)
             if agent_binding:
                 from homun.application.agent_terminal_link import validate_link
                 run=validate_link(ctx,store,actor,result,staging=True)
-                run.update(status='waiting_external',terminal_request_id=result['id'])
+                if agent_binding.get('kind') == 'goal_gate':
+                    from homun.application.goal_terminal_link import bind_wait
+                    bind_wait(run, result)
+                else:
+                    run.update(status='waiting_external',terminal_request_id=result['id'])
                 for key in ('_lease_token','_lease_until','_active_call_id'):run.pop(key,None)
             store.commands[request.command_id] = CommandRecord(command_id=request.command_id,type=TYPE,
                 actor_id=actor.id,workspace_id=store.workspace_id,result=result)
@@ -169,6 +177,8 @@ def approve(ctx, actor, work_id, proposal_id, body):
             if linked is not None:linked['_active_call_id']=proposal['_agent_binding']['call_id']
             if proposal.get('timeout_seconds') is not None:
                 proposal['deadline_at']=(utc_now()+timedelta(seconds=proposal['timeout_seconds'])).isoformat()
+                if proposal.get('policy') == 'local-private-v1':
+                    proposal['_local_deadline_supervised'] = True
             proposal.update(status='dispatching',_approved_by=actor.id,_approved_at=utc_now().isoformat(),_io_epoch=1)
             snapshot = deepcopy(proposal)
         ctx.service.store = store
@@ -221,59 +231,108 @@ def _observe(ctx, actor, work_id, proposal_id, *, stop=False):
 
 
 def refresh(ctx, actor, work_id, proposal_id):
-    observed = _observe(ctx,actor,work_id,proposal_id)
-    _answer_pty(ctx,actor,work_id,proposal_id)
+    store = ctx.repository.load()
+    require_work_access(store, actor, work_id, 'read')
+    observed = _observe(ctx, actor, work_id, proposal_id)
+    _answer_pty(ctx, actor, work_id, proposal_id)
+    with ctx.repository.transaction() as store_after:
+        require_work_access(store_after, actor, work_id, 'read')
     current = ctx.repository.load().commands.get(proposal_id)
     return public(current.result) if current is not None else observed
 
 
 def _answer_pty(ctx, actor, work_id, proposal_id):
-    """Reply once to each new PTY query. Never starts a container."""
-    store = ctx.repository.load()
-    record = store.commands.get(proposal_id)
-    proposal = record.result if record is not None and record.type == TYPE else None
-    if proposal is None or not proposal.get('pty') or proposal['status'] in {'pending_approval', 'dispatching'}:
-        return
+    """Reply once to each new PTY query using VirtualTerminalScreen and atomicity. Never starts a container."""
+    from homun.execution.pty_queries import VirtualTerminalScreen
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            require_work_access(store, actor, work_id, 'read')
+            record = store.commands.get(proposal_id)
+            proposal = record.result if record is not None and record.type == TYPE else None
+            if proposal is None or not proposal.get('pty') or proposal['status'] in {'pending_approval', 'dispatching'}:
+                return
+            snapshot = deepcopy(proposal)
     try:
-        logs = backend_for(ctx, proposal).logs(job_spec(ctx, proposal))
+        logs = backend_for(ctx, snapshot).logs(job_spec(ctx, snapshot))
     except TRANSPORT_ERRORS:
         return
     raw = logs.get('text') or ''
-    delta = unread(proposal.get('_pty_raw', ''), raw)
-    if not delta:
-        _restore_pty_text(ctx, proposal_id)
-        return
-    responder = PtyQueryResponder()
-    responder._pending[:] = bytes.fromhex(proposal.get('_pty_pending') or '')
-    visible_delta, replies = responder.process(delta.encode())
-    if proposal['status'] in {'exited', 'dead'}:
-        visible_delta += responder.flush()
-    if replies and proposal['status'] not in {'exited', 'dead'}:
-        try:
-            backend_for(ctx, proposal).write_stdin(job_spec(ctx, proposal), replies)
-        except TRANSPORT_ERRORS:
-            return
+    has_replies = False
+    replies = b''
+
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             current = store.commands[proposal_id].result
-            if current.get('_pty_raw', '') != proposal.get('_pty_raw', ''):
+            prev_raw = current.get('_pty_raw', '')
+            if raw == prev_raw:
+                _restore_pty_text_locked(current)
+                ctx.service.store = store
                 return
+            delta = unread(prev_raw, raw)
+            if delta is None:
+                if isinstance(current.get('logs'), dict):
+                    current['logs']['incomplete'] = True
+                    current['logs']['error_code'] = 'log_window_truncated'
+                current['_pty_raw'] = raw
+                ctx.service.store = store
+                return
+            rows = current.get('pty_rows', 24)
+            cols = current.get('pty_cols', 80)
+            screen = VirtualTerminalScreen(rows=rows, cols=cols)
+            if current.get('_pty_screen'):
+                screen.load_state(current['_pty_screen'])
+            responder = PtyQueryResponder(
+                rows=rows,
+                cols=cols,
+                cursor_fn=screen.cursor_position,
+                feed_fn=screen.feed,
+            )
+            responder._pending[:] = bytes.fromhex(current.get('_pty_pending') or '')
+            visible_delta, replies = responder.process(delta.encode())
+            if current['status'] in {'exited', 'dead'}:
+                visible_delta += responder.flush()
+
             current['_pty_raw'] = raw
             current['_pty_pending'] = bytes(responder._pending).hex()
-            visible = current.get('_pty_visible', '') + visible_delta.decode()
-            current['_pty_visible'] = visible
+            current['_pty_screen'] = screen.dump_state()
+            current['_pty_cursor'] = {'row': screen.cursor_row, 'col': screen.cursor_col}
+            rendered = screen.render_screen(trim_trailing=True)
+            current['_pty_visible'] = rendered
             if isinstance(current.get('logs'), dict):
-                current['logs']['text'] = visible
-        ctx.service.store = store
+                current['logs']['text'] = rendered
+                current['logs']['cursor'] = current['_pty_cursor']
+                current['logs']['incomplete'] = False
+
+            has_replies = bool(replies) and current['status'] not in {'exited', 'dead'}
+            if has_replies:
+                current['_pty_pending_reply'] = replies.hex()
+            ctx.service.store = store
+
+    if has_replies:
+        try:
+            backend_for(ctx, snapshot).write_stdin(job_spec(ctx, snapshot), replies)
+            with ctx.repository.locked():
+                with ctx.repository.transaction() as store:
+                    cur = store.commands.get(proposal_id).result
+                    cur.pop('_pty_pending_reply', None)
+                    ctx.service.store = store
+        except TRANSPORT_ERRORS:
+            return
+
+
+def _restore_pty_text_locked(current):
+    visible = current.get('_pty_visible')
+    if isinstance(visible, str) and isinstance(current.get('logs'), dict):
+        current['logs']['text'] = visible
+        if current.get('_pty_cursor'):
+            current['logs']['cursor'] = current['_pty_cursor']
 
 
 def _restore_pty_text(ctx, proposal_id):
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             current = store.commands[proposal_id].result
-            visible = current.get('_pty_visible')
-            if isinstance(visible, str) and isinstance(current.get('logs'), dict):
-                current['logs']['text'] = visible
+            _restore_pty_text_locked(current)
         ctx.service.store = store
 
 

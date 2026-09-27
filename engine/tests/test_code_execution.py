@@ -220,3 +220,35 @@ def test_code_execution_contract_entry():
     assert len(entries) == 1
     assert entries[0].definition.name == "execute_code"
     assert entries[0].toolset == "code_execution"
+
+
+def test_child_does_not_inherit_engine_secrets(tmp_path, monkeypatch):
+    monkeypatch.setenv('HOMUN_TEST_SECRET', 'private-engine-value')
+    result = run_code_with_rpc("import os; print(os.getenv('HOMUN_TEST_SECRET', 'absent'))", set(), lambda *a: None, cwd=tmp_path)
+    assert result.exit_code == 0
+    assert result.stdout.strip() == 'absent'
+
+
+def test_timeout_kills_descendants_that_keep_output_open(tmp_path):
+    import time
+    code = "import subprocess,sys,time; subprocess.Popen([sys.executable,'-c','import time; time.sleep(5)']); time.sleep(5)"
+    started = time.monotonic()
+    result = run_code_with_rpc(code, set(), lambda *a: None, cwd=tmp_path, timeout=.2)
+    assert result.error and 'timed out' in result.error
+    assert time.monotonic() - started < 3
+
+
+def test_code_execution_can_be_cancelled(tmp_path):
+    import time
+    started = time.monotonic()
+    result = run_code_with_rpc('import time; time.sleep(10)', set(), lambda *a: None, cwd=tmp_path,
+                              cancelled=lambda: time.monotonic() - started > .1)
+    assert result.error == 'Execution cancelled'
+    assert time.monotonic() - started < 3
+
+
+def test_execute_code_registry_handler_has_correct_runtime_signature(tmp_path):
+    from homun.application.agent_tool_registry import registry_for
+    run={'assignee_id':'a', 'materials':[], 'code_execution':{'policy':'programmatic-v1','version':1}, '_cwd':str(tmp_path)}
+    result=registry_for(run).dispatch('execute_code', {'code':'print("through registry")'},ctx=None,actor=None,run=run)
+    assert result['exit_code']==0 and 'through registry' in result['stdout']

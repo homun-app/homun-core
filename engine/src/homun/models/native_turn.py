@@ -94,3 +94,9 @@ def _parse_response(response, *, ollama=False):
     if not result.tool_calls and not result.content.strip():
         raise ValueError('Agent response contains neither tools nor a final answer')
     return result
+
+
+def pending_call(messages):
+    """First persisted tool call lacking a corresponding result."""
+    answered = {message.tool_call_id for message in messages if message.role == 'tool'}
+    return next((call for message in messages for call in message.tool_calls if call.id not in answered), None)

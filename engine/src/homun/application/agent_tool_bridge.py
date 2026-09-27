@@ -52,6 +52,8 @@ def describe(run, registry, names):
     if any(name not in deferred_names(run) for name in names):
         raise ValidationError('Description requested for an unavailable deferred tool')
     definitions = {d.name: d for d in registry.definitions()}
+    if any(name not in definitions for name in names):
+        raise ValidationError('Description requested for a tool excluded by the approved policy')
     return {'tools': [definitions[name].model_dump(mode='json') for name in dict.fromkeys(names)]}
 
 
@@ -67,9 +69,11 @@ def entries(run, registry):
 
 
 def search_description(run):
+    from homun.application.surface_toolset_policy import is_tool_allowed_for_surface
     # Names and bounded hints make external capabilities discoverable without schemas.
     lines = [f"{b['name']}: {b['server_name'][:80]} · {(b['descriptor'].get('description') or b['tool'])[:160]}"
-             for b in run.get('_mcp_bindings', [])]
+             for b in run.get('_mcp_bindings', [])
+             if is_tool_allowed_for_surface(b['name'], run, metadata={'replay': 'never'})]
     return ('Find tools in the approved catalog by keywords. Returns input schemas without executing tools. '
             'Call deferred tools through tool_call using their exact name and arguments. '
             'If no results, retry with fewer specific keywords. Deferred catalog:\n' + '\n'.join(lines))

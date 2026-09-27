@@ -9,6 +9,7 @@ from homun.models.openai_compat import SECRET_KEY, OpenAICompatibleProvider
 from homun.models.port import (Connection, ConnectionKind, ContextLimits, UNSET_PIN, UnsetPin,
                                effective_context_window)
 from pydantic import ValidationError as SchemaError
+from homun.models.runtime_binding import bound_provider
 from homun.models.secrets import SecretStore
 from homun.models.types import ChatMessage, CompletionResult, UsageEntry, VerifyResult
 
@@ -121,20 +122,24 @@ class OpenAICompatModelAdapter:
         messages: list[ChatMessage],
         *,
         connection_id: str | None = None,
+        model_id: str | None = None,
+        expected_runtime: dict | None = None,
     ) -> CompletionResult:
         if connection_id is not None and connection_id != self._connection_id:
             raise NotFoundError(f"Unknown connection: {connection_id}")
-        result = self._provider.complete(messages)
+        provider = bound_provider(self._provider, self._connection_id, expected_runtime)
+        result = provider.complete(messages, model_id=model_id)
         self.usage.append(result.usage)
         return result
 
-    def complete_tools(self, messages, *, tools=None, connection_id=None, model_id=None, context_window=None, max_output_tokens=8192):
+    def complete_tools(self, messages, *, tools=None, connection_id=None, model_id=None, expected_runtime=None, context_window=None, max_output_tokens=8192):
         from homun.models.native_errors import NativeModelError
         from homun.models.native_transport import complete_tools
         if connection_id is not None:
             self.get_connection(connection_id)
+        provider = bound_provider(self._provider, self._connection_id, expected_runtime)
         try:
-            result = complete_tools(self._provider, messages, tools=tools, model_id=model_id, context_window=context_window,
+            result = complete_tools(provider, messages, tools=tools, model_id=model_id, context_window=context_window,
                                     max_output_tokens=max_output_tokens)
         except NativeModelError as exc:
             if isinstance(exc.usage, UsageEntry):
@@ -143,13 +148,14 @@ class OpenAICompatModelAdapter:
         self.usage.append(result.usage)
         return result
 
-    def complete_summary(self, messages, *, connection_id=None, context_window=None, max_output_tokens=8192):
+    def complete_summary(self, messages, *, connection_id=None, model_id=None, expected_runtime=None, context_window=None, max_output_tokens=8192):
         from homun.models.native_errors import NativeModelError
         from homun.models.native_transport import complete_summary
         if connection_id is not None:
             self.get_connection(connection_id)
+        provider = bound_provider(self._provider, self._connection_id, expected_runtime)
         try:
-            result = complete_summary(self._provider, messages, context_window=context_window,
+            result = complete_summary(provider, messages, model_id=model_id, context_window=context_window,
                                       max_output_tokens=max_output_tokens)
         except NativeModelError as exc:
             if isinstance(exc.usage, UsageEntry):

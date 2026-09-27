@@ -95,7 +95,9 @@ class SessionManager:
         now: Optional[float] = None,
     ) -> SessionRecord:
         curr = time.time() if now is None else float(now)
-        session_id = f"session-{uuid.uuid4().hex[:8]}"
+        if parent_id is not None:
+            self._require_session(parent_id)
+        session_id = f"session-{uuid.uuid4().hex}"
 
         session = SessionRecord(
             id=session_id,
@@ -118,7 +120,14 @@ class SessionManager:
         return session
 
     def get_session(self, session_id: str) -> Optional[SessionRecord]:
-        return self.storage.get_session(session_id)
+        session = self.storage.get_session(session_id)
+        return session if session and session.workspace_id == self.workspace_id else None
+
+    def _require_session(self, session_id: str) -> SessionRecord:
+        session = self.get_session(session_id)
+        if session is None or session.status == 'cleared':
+            raise ValueError(f'Session not found: {session_id}')
+        return session
 
     def update_session(
         self,
@@ -167,6 +176,7 @@ class SessionManager:
         return self.storage.list_sessions(self.workspace_id, include_archived=include_archived, query=query)
 
     def delete_session(self, session_id: str, hard: bool = False) -> bool:
+        self._require_session(session_id)
         return self.storage.delete_session(session_id, hard=hard)
 
     # --- Resume & Working Directory Restoration (H30) ---
@@ -278,6 +288,7 @@ class SessionManager:
         return msg
 
     def get_messages(self, session_id: str, *, only_active: bool = True) -> List[SessionMessage]:
+        self._require_session(session_id)
         return self.storage.get_messages(session_id, only_active=only_active)
 
     # --- Carrier-aware Rewind (H30) ---
@@ -380,7 +391,11 @@ class SessionManager:
         if fmt_norm == "jsonl":
             lines = []
             header = {"type": "session_meta", "session": session.to_dict()}
-            lines.append(json.dumps(header))
+            if redact:
+                header_str = redact_secrets(json.dumps(header, ensure_ascii=False))
+                lines.append(header_str)
+            else:
+                lines.append(json.dumps(header, ensure_ascii=False))
             for m in messages:
                 content = redact_secrets(m.content) if redact else m.content
                 rec = {
@@ -394,14 +409,27 @@ class SessionManager:
                     "tool_name": m.tool_name,
                     "tool_call_id": m.tool_call_id,
                 }
-                lines.append(json.dumps(rec))
+                if m.tool_calls is not None:
+                    tool_calls_val = m.tool_calls
+                    if redact and isinstance(tool_calls_val, str):
+                        tool_calls_val = redact_secrets(tool_calls_val)
+                    rec["tool_calls"] = tool_calls_val
+                if m.metadata:
+                    meta_val = m.metadata
+                    if redact:
+                        meta_val = json.loads(redact_secrets(json.dumps(meta_val, ensure_ascii=False)))
+                    rec["metadata"] = meta_val
+                lines.append(json.dumps(rec, ensure_ascii=False))
             return "\n".join(lines) + "\n"
 
         if fmt_norm in {"markdown", "md"}:
+            raw_title = session.title or session.id
+            display_title = redact_secrets(raw_title) if redact else raw_title
+            display_cwd = redact_secrets(session.cwd or 'none') if redact else (session.cwd or 'none')
             md_lines = [
-                f"# Session: {session.title or session.id}",
+                f"# Session: {display_title}",
                 f"- **ID:** `{session.id}`",
-                f"- **CWD:** `{session.cwd or 'none'}`",
+                f"- **CWD:** `{display_cwd}`",
                 f"- **Status:** `{session.status}`",
                 f"- **Messages:** {len(messages)}",
                 "",
@@ -412,7 +440,11 @@ class SessionManager:
                 content = redact_secrets(m.content) if redact else m.content
                 md_lines.append(f"### Turn {m.turn_index} [{m.role.upper()}]")
                 if m.tool_name:
-                    md_lines.append(f"*Tool: {m.tool_name}*")
+                    tname = redact_secrets(m.tool_name) if redact else m.tool_name
+                    md_lines.append(f"*Tool: {tname}*")
+                if m.tool_calls:
+                    tcalls = redact_secrets(m.tool_calls) if redact else m.tool_calls
+                    md_lines.append(f"```json\n{tcalls}\n```")
                 md_lines.append(content)
                 md_lines.append("")
             return "\n".join(md_lines)
@@ -448,9 +480,9 @@ class SessionManager:
                 imported_messages.append(rec)
 
         orig_id = (session_meta.get("id") if session_meta else "") or f"session-{uuid.uuid4().hex[:8]}"
-        existing = self.get_session(orig_id)
-        # Avoid identity drift: if ID exists, generate fresh unique ID
-        target_id = f"import-{uuid.uuid4().hex[:8]}" if existing else orig_id
+        # Caller-supplied IDs are provenance, never storage identity. This also
+        # prevents ownership swaps during concurrent delete/import operations.
+        target_id = f"import-{uuid.uuid4().hex}"
         target_title = title or (session_meta.get("title") if session_meta else None) or f"Imported Session {target_id[:12]}"
         target_cwd = (session_meta.get("cwd") if session_meta else "") or ""
 
@@ -480,6 +512,8 @@ class SessionManager:
                 timestamp=float(m.get("timestamp") or curr),
                 tool_name=m.get("tool_name"),
                 tool_call_id=m.get("tool_call_id"),
+                tool_calls=(json.dumps(m["tool_calls"], ensure_ascii=False) if isinstance(m.get("tool_calls"), (dict, list)) else m.get("tool_calls")),
+                metadata=dict(m.get("metadata") or {}),
                 active=1,
             ))
 
@@ -513,9 +547,12 @@ class SessionManager:
     # --- Token Accounting and Repair (H31) ---
 
     def record_usage(self, session_id: str, prompt_tokens: int, completion_tokens: int, cost: float) -> None:
+        self._require_session(session_id)
         self.storage.record_usage(session_id, prompt_tokens, completion_tokens, cost)
 
     def get_usage(self, session_id: Optional[str] = None) -> SessionUsage:
+        if session_id is not None:
+            self._require_session(session_id)
         return self.storage.get_usage(self.workspace_id, session_id)
 
     def check_integrity(self) -> Dict[str, Any]:

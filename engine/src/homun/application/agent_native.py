@@ -5,7 +5,7 @@ request-time reconstruction, pending calls survive input and process restarts.
 """
 import json
 from homun.models.agent_turn import AgentDecision
-from homun.models.native_turn import NativeMessage
+from homun.models.native_turn import NativeMessage, pending_call
 
 from homun.application.agent_tool_contracts import PROTOCOL, QUESTION
 
@@ -19,9 +19,7 @@ def history(run):
 
 
 def pending(run):
-    messages = history(run)
-    answered = {m.tool_call_id for m in messages if m.role == 'tool'}
-    return next((c for m in messages for c in m.tool_calls if c.id not in answered), None)
+    return pending_call(history(run))
 
 
 def decision_model(run):
@@ -35,6 +33,12 @@ def decision(run):
     model = decision_model(run)
     call = pending(run)
     if call:
+        if call.name == 'clarify':
+            from homun.application.agent_tool_registry import registry_for
+            from homun.application.agent_clarification import questions
+            args = registry_for(run).validate(call.name, call.arguments)
+            normalized = questions(args)
+            return model(kind='ask', message='\n'.join(item['question'] for item in normalized))
         if call.name == QUESTION.name:
             from homun.application.agent_tool_registry import registry_for
             args = registry_for(run).validate(call.name, call.arguments)

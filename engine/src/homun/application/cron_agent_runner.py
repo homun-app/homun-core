@@ -1,107 +1,88 @@
-"""Run due cron prompt/skills jobs by staging real Homun agent-run proposals (H28/H29).
-
-Script jobs continue to use subprocess. Prompt jobs without an EngineContext remain
-backend_unavailable (see CronManager); this runner is the product-owned executor.
-"""
+"""Idempotently stage supervised canonical agent proposals for cron occurrences."""
 from __future__ import annotations
 
-import logging
-from typing import Any, Dict, Optional, Tuple
-from uuid import uuid4
-
-from homun.domain.errors import ValidationError
+from homun.application.cron_contracts import CronExecutionResult
+from homun.domain.errors import DomainError
 from homun.domain.models import Actor
-
-logger = logging.getLogger(__name__)
 
 
 class CronAgentRunner:
-    """Stage a pending_approval agent run for a cron prompt payload."""
+    recovery_safe = True
 
-    def __init__(self, *, default_actor_id: str = "person_cron") -> None:
-        self.default_actor_id = default_actor_id
-
-    def __call__(self, payload: Dict[str, Any]) -> Tuple[int, str, Optional[str]]:
-        ctx = payload.get("ctx")
-        if ctx is None:
-            return (
-                -1,
-                "Cron agent runner requires EngineContext in payload['ctx']",
-                "backend_unavailable",
-            )
-        prompt = str(payload.get("prompt") or "").strip()
-        if not prompt:
-            return -1, "Cron job prompt is empty", "validation_error"
-
-        actor = payload.get("actor")
-        if actor is None:
-            actor = Actor(
-                id=self.default_actor_id,
-                workspace_id=ctx.workspace_id,
-                display_name="Homun Cron",
-            )
-
-        import importlib
-        propose = importlib.import_module("homun.application.agent_runs").propose
-
-        cmd = uuid4().hex[:10]
+    def __call__(self, payload):
+        ctx = payload.get('ctx')
+        if ctx is None or not isinstance(ctx.workspace_id, str):
+            return CronExecutionResult('failed', output='Cron agent runner requires EngineContext', error='backend_unavailable', exit_code=-1)
+        occurrence_id = payload.get('occurrence_id')
+        if not occurrence_id:
+            return CronExecutionResult('failed', error='cron_occurrence_required', exit_code=-1)
+        actor_data = payload.get('actor') or payload.get('owner_actor')
+        if not actor_data:
+            return CronExecutionResult('failed', error='cron_actor_required', exit_code=-1)
         try:
-            project = ctx.service.apply(
-                actor,
-                f"cron-p-{cmd}",
-                "project.create",
-                {"name": "Cron jobs"},
-            )
-            project_id = project["project_id"] if isinstance(project, dict) else project
-            conv = ctx.service.apply(
-                actor,
-                f"cron-c-{cmd}",
-                "conversation.create",
-                {"title": f"Cron {payload.get('job_id') or cmd}", "project_id": project_id},
-            )
-            conversation_id = conv["conversation_id"] if isinstance(conv, dict) else conv
-            work = ctx.service.apply(
-                actor,
-                f"cron-w-{cmd}",
-                "work.create",
-                {
-                    "conversation_id": conversation_id,
-                    "title": (prompt[:80] or "Cron task"),
-                    "objective": prompt,
-                },
-            )
-            work_id = work["work_id"] if isinstance(work, dict) else work
-            ctx.persist()
-            store = ctx.repository.load()
-            work_obj = store.works[work_id]
-            body = {
-                "command_id": f"cron-run-{cmd}",
-                "expected_version": work_obj.version,
-                "material_ids": [],
-            }
-            if payload.get("model_pin"):
-                body["model"] = payload["model_pin"]
+            actor = actor_data if isinstance(actor_data, Actor) else Actor.model_validate(actor_data)
+        except (ValueError, TypeError):
+            return CronExecutionResult('failed', error='cron_actor_invalid', exit_code=-1)
+        if actor.workspace_id != ctx.workspace_id:
+            return CronExecutionResult('failed', error='cron_actor_workspace_mismatch', exit_code=-1)
+        if actor.kind != 'person':
+            return CronExecutionResult('failed', error='cron_actor_invalid', exit_code=-1)
+        if payload.get('source_work_id'):
+            from homun.policy.work import require_work_access
+            try:
+                require_work_access(ctx.repository.load(), actor, payload['source_work_id'], 'write')
+            except DomainError as exc:
+                return CronExecutionResult('failed', error=exc.code, exit_code=-1)
+        prefix = f'cron:{occurrence_id}'
+        run_id = prefix + ':proposal'
+        prior = ctx.repository.load().commands.get(run_id)
+        if prior:
+            return CronExecutionResult('awaiting_approval', agent_run_id=run_id,
+                                       work_id=prior.result['work_id'])
+        prompt = str(payload.get('prompt') or '').strip()
+        if not prompt:
+            return CronExecutionResult('failed', error='validation_error', exit_code=-1)
+        # These restrictions cannot yet be bound into canonical proposal authority.
+        if payload.get('workdir') or payload.get('skills'):
+            return CronExecutionResult('failed', error='cron_capability_unavailable', exit_code=-1)
+        body = {'command_id': run_id, 'material_ids': []}
+        if payload.get('model_pin') or payload.get('provider_pin'):
+            connections = [c for c in ctx.models.list_connections() if c.active
+                and (not payload.get('model_pin') or c.model_id == payload['model_pin'])
+                and (not payload.get('provider_pin') or payload['provider_pin'] in {
+                    c.kind, c.pydantic_provider})]
+            if not connections:
+                return CronExecutionResult('failed', error='cron_model_binding_unavailable', exit_code=-1)
+            body['connection_id'] = connections[0].id
+        from homun.application.agent_runs import propose
+        try:
+            # Each creation commits independently. Replay reuses the exact command
+            # fingerprint, including after a crash before the proposal exists.
+            def apply(suffix, kind, arguments):
+                with ctx.repository.locked():
+                    with ctx.repository.transaction() as store:
+                        service = ctx.service.for_store(store)
+                        result = service.apply(actor, prefix + suffix, kind, arguments)
+                    ctx.service.store = store
+                return result
+            project = apply(':project', 'project.create', {'name': 'Cron jobs'})
+            conversation = apply(':conversation', 'conversation.create', {
+                'title': f'Cron {payload.get("job_id")}', 'project_id': project['project_id']})
+            work = apply(':work', 'work.create', {'conversation_id': conversation['conversation_id'],
+                'title': prompt[:80], 'objective': prompt})
+            work_id = work['work_id']
+            body['expected_version'] = ctx.repository.load().works[work_id].version
             proposal = propose(ctx, actor, work_id, body)
-            ctx.persist()
-            summary = (
-                f"Staged agent run {proposal.get('id')} for work {work_id} "
-                f"(status=pending_approval digest={proposal.get('digest')})"
-            )
-            return 0, summary, None
-        except (ValidationError, Exception) as exc:
-            logger.warning("Cron agent runner failed: %s", exc)
-            return -1, str(exc), "execution_failed"
+            return CronExecutionResult('awaiting_approval',
+                output=f'Staged agent run {proposal["id"]} (pending approval)',
+                agent_run_id=proposal['id'], work_id=work_id)
+        except DomainError as exc:
+            return CronExecutionResult('failed', error=exc.code, exit_code=-1)
 
 
-def make_cron_runner(ctx, actor: Optional[Actor] = None) -> CronAgentRunner:
-    """Bind ctx/actor into a callable suitable for CronManager.run_job(custom_runner=...)."""
+def make_cron_runner(ctx, actor=None):
     base = CronAgentRunner()
-
-    def _bound(payload: Dict[str, Any]) -> Tuple[int, str, Optional[str]]:
-        enriched = dict(payload)
-        enriched["ctx"] = ctx
-        if actor is not None:
-            enriched["actor"] = actor
-        return base(enriched)
-
-    return _bound  # type: ignore[return-value]
+    def bound(payload):
+        return base({**payload, 'ctx': ctx, 'actor': actor})
+    bound.recovery_safe = True
+    return bound

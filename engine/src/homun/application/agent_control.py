@@ -7,7 +7,7 @@ from homun.domain.errors import ConflictError, PermissionDeniedError, Validation
 from homun.policy.work import require_work_access
 
 CONTROL='agent_run.control'
-ACTIVE={'queued','running','paused'}
+ACTIVE={'queued','running','paused','waiting_automation'}
 
 
 def _owner(store,actor,run):
@@ -17,20 +17,14 @@ def _owner(store,actor,run):
     return work
 
 
-def _fence(run,actor,*,preserve_active=False):
-    run['_epoch']+=1
-    run['_workflow_id']=f'agent:{actor.workspace_id}:{run["id"]}:{run["_epoch"]}'
-    run.pop('_lease_token',None)
-    run.pop('_lease_until',None)
-    # A new control generation fences any unresolved retry; it starts fresh.
-    agent_recovery.interrupt(run)
-    if not preserve_active:
-        run.pop('_active_call_id',None)
+from homun.application.agent_run_fencing import _fence
 
 
 def control_in_store(ctx,store,actor,work_id,run_id,body,*,echo=True):
     run=lookup(store,run_id,work_id)
     work=_owner(store,actor,run)
+    if run.get('_delegation_parent'):
+        raise ValidationError('Control delegated work through its parent supervisor')
     record,fingerprint=cached(store,actor,body['command_id'],CONTROL,{**body,'work_id':work_id,'run_id':run_id})
     if record:
         return public_for(store,actor,record.result)
@@ -57,11 +51,17 @@ def control_in_store(ctx,store,actor,work_id,run_id,body,*,echo=True):
             raise ConflictError('Paused work changed')
         if run['status']!='paused' and (work.status!='running' or work.version!=run['_run_version']):
             raise ConflictError('Approved work changed')
+        from homun.application.automation_projection import invalidate_evaluation
+        invalidate_evaluation(run)
         if action=='steer':
             if len(run.get('_steering',[]))>=20:
                 raise ValidationError('Too many pending corrections; wait for the next round')
             agent_recovery.interrupt(run)
             run.setdefault('_steering',[]).append({'text':text,'command_id':body['command_id'],'actor_id':actor.id})
+            if run['status']=='waiting_automation':
+                _fence(run,actor)
+                run['status']='queued'
+                run.pop('automation_wait',None)
         else:
             redirect_history(run,text)
             _fence(run,actor)

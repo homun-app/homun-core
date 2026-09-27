@@ -158,7 +158,7 @@ class GoalGate:
         return cls(
             command=str(data.get("command") or ""),
             timeout_seconds=int(data.get("timeout_seconds") or DEFAULT_GATE_TIMEOUT_SECONDS),
-            max_retries=int(data.get("max_retries") or DEFAULT_GATE_MAX_RETRIES),
+            max_retries=int(data["max_retries"]) if data.get("max_retries") is not None else DEFAULT_GATE_MAX_RETRIES,
             attempts=int(data.get("attempts") or 0),
             last_exit_code=(int(data["last_exit_code"]) if data.get("last_exit_code") is not None else None),
             last_output_tail=str(data.get("last_output_tail") or ""),
@@ -191,6 +191,7 @@ def run_gate(gate: GoalGate, *, cwd: Optional[str] = None) -> Tuple[bool, int, s
 class GoalState:
     """Serializable persistent goal state."""
     goal: str
+    revision: int = 0
     status: str = "active"          # active | paused | done | cleared
     turns_used: int = 0
     max_turns: int = DEFAULT_MAX_TURNS
@@ -227,6 +228,8 @@ class GoalState:
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
+        if self.revision == 0:
+            d.pop("revision")  # Preserve legacy payload equality until its first update.
         return d
 
     @classmethod
@@ -236,6 +239,7 @@ class GoalState:
         contract = GoalContract.from_dict(data.get("contract"))
         return cls(
             goal=str(data.get("goal") or ""),
+            revision=int(data.get("revision") or 0),
             status=str(data.get("status") or "active"),
             turns_used=int(data.get("turns_used") or 0),
             max_turns=int(data.get("max_turns") or DEFAULT_MAX_TURNS),
@@ -292,8 +296,8 @@ class SubgoalRemoveArguments(BaseModel):
 
 class GoalGateAddArguments(BaseModel):
     command: str = Field(description="Shell command that must exit 0 before goal can be marked done.")
-    timeout_seconds: Optional[int] = Field(default=DEFAULT_GATE_TIMEOUT_SECONDS, description="Execution timeout in seconds.")
-    max_retries: Optional[int] = Field(default=DEFAULT_GATE_MAX_RETRIES, description="Max retries before auto-pausing.")
+    timeout_seconds: Optional[int] = Field(default=DEFAULT_GATE_TIMEOUT_SECONDS, ge=1, le=3600, description="Execution timeout in seconds.")
+    max_retries: Optional[int] = Field(default=DEFAULT_GATE_MAX_RETRIES, ge=0, description="Max retries before auto-pausing.")
 
 
 class GoalGateRemoveArguments(BaseModel):

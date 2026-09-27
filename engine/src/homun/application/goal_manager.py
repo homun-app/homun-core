@@ -21,6 +21,7 @@ from homun.application.goal_contracts import (
     DEFAULT_MAX_TURNS,
     GoalContract,
     GoalGate,
+    GoalGateAddArguments,
     GoalState,
     _MAX_BARRIER_WAIT_S,
     run_gate,
@@ -181,8 +182,9 @@ def _decision(
 class GoalManager:
     """Per-session goal management and turn evaluation."""
 
-    def __init__(self, session_id: str, *, default_max_turns: int = DEFAULT_MAX_TURNS):
+    def __init__(self, session_id: str, *, default_max_turns: int = DEFAULT_MAX_TURNS, persist: bool = True):
         self.session_id = str(session_id)
+        self._persist_state = persist
         self.default_max_turns = int(default_max_turns or DEFAULT_MAX_TURNS)
         self._state: Optional[GoalState] = load_goal(self.session_id)
 
@@ -200,7 +202,9 @@ class GoalManager:
         return self._state is not None and self._state.has_contract()
 
     def _save(self) -> GoalState:
-        save_goal(self.session_id, self._state)
+        self._state.revision += 1
+        if self._persist_state:
+            save_goal(self.session_id, self._state)
         return self._state
 
     def _require_goal(self) -> GoalState:
@@ -338,11 +342,10 @@ class GoalManager:
         command = (command or "").strip()
         if not command:
             raise ValueError("gate command is empty")
-        gate = GoalGate(
-            command=command,
-            timeout_seconds=int(timeout_seconds) if timeout_seconds else 300,
-            max_retries=int(max_retries) if max_retries else DEFAULT_GATE_MAX_RETRIES,
-        )
+        limits = GoalGateAddArguments.model_validate({"command":command, **{
+            key:value for key, value in {"timeout_seconds":timeout_seconds, "max_retries":max_retries}.items()
+            if value is not None}})
+        gate = GoalGate(command=command, timeout_seconds=limits.timeout_seconds, max_retries=limits.max_retries)
         state.gates.append(gate)
         self._save()
         return gate
@@ -363,13 +366,13 @@ class GoalManager:
         self._save()
         return prev
 
-    def _check_gates(self) -> Optional[Dict[str, Any]]:
+    def _check_gates(self, gate_runner=None) -> Optional[Dict[str, Any]]:
         state = self._state
         if state is None or not state.gates:
             return None
 
         for gate in state.gates:
-            passed, exit_code, tail = run_gate(gate)
+            passed, exit_code, tail = (gate_runner or run_gate)(gate)
             gate.last_exit_code = exit_code
             gate.last_output_tail = tail
             if passed:
@@ -457,10 +460,11 @@ class GoalManager:
         self._save()
         return True
 
-    def is_waiting(self, *, live_delegations: int = 0, session_waiting_check: Optional[Callable[[str], bool]] = None) -> bool:
+    def is_waiting(self, *, live_delegations: int = 0, session_waiting_check: Optional[Callable[[str], bool]] = None, now: Optional[float] = None) -> bool:
         s = self._state
         if s is None:
             return False
+        current_time = time.time() if now is None else now
         if s.waiting_on_session is not None:
             if session_waiting_check is not None:
                 still = session_waiting_check(s.waiting_on_session)
@@ -469,14 +473,14 @@ class GoalManager:
         elif s.waiting_on_pid is not None:
             still = _check_pid_alive(s.waiting_on_pid)
         elif s.waiting_until:
-            still = time.time() < s.waiting_until
+            still = current_time < s.waiting_until
             if still and s.waiting_on_delegations > 0:
                 if live_delegations < s.waiting_on_delegations:
                     still = False
         else:
             return False
 
-        if still and s.waiting_since and s.waiting_until == 0.0 and (time.time() - s.waiting_since) > _MAX_BARRIER_WAIT_S:
+        if still and s.waiting_since and s.waiting_until == 0.0 and (current_time - s.waiting_since) > _MAX_BARRIER_WAIT_S:
             logger.info("goal: wait barrier exceeded %ds; resuming judging", _MAX_BARRIER_WAIT_S)
             still = False
 
@@ -508,6 +512,7 @@ class GoalManager:
         background_processes: Optional[List[Dict[str, Any]]] = None,
         active_delegations: int = 0,
         session_waiting_check: Optional[Callable[[str], bool]] = None,
+        gate_runner: Optional[Callable] = None,
     ) -> Dict[str, Any]:
         """Evaluate agent response against quality gates, barriers, and judge."""
         state = self._state
@@ -527,7 +532,7 @@ class GoalManager:
         state.last_turn_at = time.time()
 
         # Deterministic gates execute BEFORE judge
-        gate_decision = self._check_gates()
+        gate_decision = self._check_gates(gate_runner)
         if gate_decision is not None:
             if gate_decision.get("should_continue") and state.turns_used >= state.max_turns:
                 state.status = "paused"

@@ -94,8 +94,8 @@ def test_document_extractors_docx_xlsx_pptx():
         )
     res_xlsx = extract_text(xlsx_buf.getvalue(), filename="table.xlsx")
     assert res_xlsx.status == EXTRACTED
-    assert "Item A, 100" in res_xlsx.text
-    assert "Item B, 200" in res_xlsx.text
+    assert "A1=Item A, B1=100" in res_xlsx.text
+    assert "A2=Item B, B2=200" in res_xlsx.text
 
     # 3. Test PPTX
     pptx_buf = io.BytesIO()

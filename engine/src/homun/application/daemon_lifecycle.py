@@ -58,6 +58,12 @@ class DaemonManager:
         if pid <= 0:
             return False
         try:
+            try:
+                res, _ = os.waitpid(pid, os.WNOHANG)
+                if res == pid:
+                    return False
+            except (ChildProcessError, OSError):
+                pass
             os.kill(pid, 0)
             return True
         except OSError:
@@ -115,14 +121,50 @@ class DaemonManager:
         # Force kill if still alive
         try:
             os.kill(pid, signal.SIGKILL)
+            try:
+                os.waitpid(pid, 0)
+            except (ChildProcessError, OSError):
+                pass
             self.clear_pid()
             return {"success": True, "message": "Daemon forcibly terminated", "stopped_pid": pid}
         except OSError as exc:
             return {"success": False, "message": f"Failed to SIGKILL: {exc}", "pid": pid}
 
-    def restart(self, timeout_seconds: float = 5.0) -> Dict[str, Any]:
-        """Stop running daemon and signal restart readiness."""
+    def start(self, cmd: Optional[list[str]] = None, cwd: Optional[str] = None) -> Dict[str, Any]:
+        """Start daemon process if not already running, writing PID."""
+        curr_pid = self.read_pid()
+        if curr_pid and self.is_pid_alive(curr_pid):
+            return {"success": False, "message": "Daemon already running", "pid": curr_pid}
+
+        import subprocess
+        run_cmd = cmd or [sys.executable, "-m", "homun.app"]
+        self._last_cmd = run_cmd
+        try:
+            proc = subprocess.Popen(
+                run_cmd,
+                cwd=cwd or str(self.run_dir),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            self.write_pid(proc.pid)
+            return {"success": True, "message": "Daemon started", "pid": proc.pid}
+        except Exception as exc:
+            return {"success": False, "message": f"Failed to start daemon: {exc}"}
+
+    def restart(self, timeout_seconds: float = 5.0, start_cmd: Optional[list[str]] = None, cwd: Optional[str] = None) -> Dict[str, Any]:
+        """Stop running daemon and respawn with new PID if start command is provided or known."""
         stop_res = self.stop(timeout_seconds=timeout_seconds)
+        cmd = start_cmd or getattr(self, "_last_cmd", None)
+        if cmd:
+            start_res = self.start(cmd=cmd, cwd=cwd)
+            return {
+                "success": start_res.get("success", False),
+                "action": "restart",
+                "previous_status": stop_res,
+                "new_pid": start_res.get("pid"),
+                "ready_for_start": True,
+            }
         return {
             "success": stop_res.get("success", False),
             "action": "restart",

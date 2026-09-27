@@ -196,3 +196,87 @@ def press(browser: OwnedBrowser, key: str) -> dict:
     if "error_code" not in listed:
         listed["pressed"] = key
     return listed
+
+
+def dialog(browser: OwnedBrowser, action: str = "inspect", prompt_text: str = "") -> dict:
+    settled = browser.wait_document(dismiss_dialogs=False)
+    if "error_code" in settled:
+        return settled
+    if action == "inspect":
+        page = browser._page_socket()
+        pending = next((e.get("params") for e in page.events if e.get("method") == "Page.javascriptDialogOpening"), None)
+        return {
+            "has_pending_dialog": pending is not None,
+            "dialog": pending,
+            "dialog_history": getattr(browser, "_dialog_history", []),
+        }
+    accept = (action == "accept")
+    return browser.handle_dialog(accept=accept, prompt_text=prompt_text)
+
+
+def console(browser: OwnedBrowser, clear: bool = False) -> dict:
+    settled = browser.wait_document(dismiss_dialogs=True)
+    if "error_code" in settled:
+        return settled
+    logs = browser.get_console_logs()
+    if clear:
+        page = browser._page_socket()
+        page.events = [e for e in page.events if e.get("method") not in ("Runtime.consoleAPICalled", "Log.entryAdded")]
+    return {"logs": logs, "count": len(logs), "cleared": clear}
+
+
+def scroll(browser: OwnedBrowser, direction: str = "down", amount: int = 300, ref: str | None = None) -> dict:
+    settled = browser.wait_document(dismiss_dialogs=True)
+    if "error_code" in settled:
+        return settled
+    backend_id = None
+    if ref:
+        item = _field(browser, ref)
+        if item is None:
+            return {"error_code": "browser_ref_unknown", "message": "That ref is not in the latest snapshot"}
+        backend_id = item.get("backend")
+    scrolled = browser.scroll(direction=direction, amount=amount, backend_node_id=backend_id)
+    browser.refs = {}
+    listed = snapshot(browser)
+    if "error_code" not in listed:
+        listed["scroll"] = scrolled
+    return listed
+
+
+def vision(browser: OwnedBrowser, format: str = "jpeg", quality: int = 75, ref: str | None = None) -> dict:
+    settled = browser.wait_document(dismiss_dialogs=True)
+    if "error_code" in settled:
+        return settled
+    clip = None
+    if ref:
+        item = _field(browser, ref)
+        if item is None:
+            return {"error_code": "browser_ref_unknown", "message": "That ref is not in the latest snapshot"}
+        page = _enable(browser)
+        box = page.call("DOM.getBoxModel", {"backendNodeId": item["backend"]})
+        quad = ((box.get("result") or {}).get("model") or {}).get("content") or []
+        if len(quad) >= 8:
+            xs = quad[0::2]
+            ys = quad[1::2]
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            clip = {"x": min_x, "y": min_y, "width": max_x - min_x, "height": max_y - min_y, "scale": 1}
+    shot = browser.capture_vision(format=format, quality=quality, clip=clip)
+    return {
+        "url": settled["url"],
+        "mime_type": shot["mime_type"],
+        "data": shot["data"],
+        "bytes_length": shot["bytes_length"],
+        "clip": clip,
+    }
+
+
+def profile(browser: OwnedBrowser, action: str = "status") -> dict:
+    if action == "status":
+        return browser.profile_info()
+    if action == "clear_cookies":
+        return browser.clear_profile_data(clear_cookies=True, clear_cache=False)
+    if action == "clear_cache":
+        return browser.clear_profile_data(clear_cookies=False, clear_cache=True)
+    return browser.profile_info()
+

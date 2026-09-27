@@ -17,7 +17,7 @@ class DelegateTaskArguments(BaseModel):
     tools_include: list[str] | None = Field(default=None, max_length=20)
     max_turns: int = Field(default=3, ge=1, le=10)
     output_schema: dict[str, Any] | None = None
-    run_in_background: bool = Field(default=False)
+    run_in_background: bool = Field(default=False, description="When false, park the parent until the admitted child returns a result.")
 
 
 class DelegationPollArguments(BaseModel):
@@ -35,7 +35,7 @@ def entries(handler, version=1):
         name="delegate_task",
         description=(
             "Delegate a task to an isolated subagent with its own context, tool subset, "
-            "turn limit, and optional structured output schema. Can run synchronously or in the background."
+            "turn limit, and optional structured output schema. The child runs independently; foreground delegation parks the parent until its durable result arrives."
         ),
         input_schema=DelegateTaskArguments.model_json_schema(),
     )

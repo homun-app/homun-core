@@ -39,6 +39,9 @@ class AutomationStore:
             )
             """
         )
+        self._conn.execute("""CREATE TABLE IF NOT EXISTS automation_wakes (
+            wake_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+            payload TEXT NOT NULL, acknowledged INTEGER NOT NULL DEFAULT 0)""")
         self._conn.commit()
 
     def get(self, kind: str, session_id: str) -> Optional[dict[str, Any]]:

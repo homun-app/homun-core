@@ -7,16 +7,26 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from homun.application.cron_agent_runner import make_cron_runner
 from homun.application.cron_manager import CronManager
 from homun.domain.errors import ValidationError
 
 
-def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
+def execute(ctx, actor, run, tool: str, args: Dict[str, Any], *, runner_factory=None) -> Dict[str, Any]:
     if run.get("cron", {}).get("policy") != "durable-cron-v1":
         raise ValidationError("Cron scheduling tools are not enabled for this run")
 
-    mgr = CronManager(workspace_id=run.get("work_id") or "default")
+    mgr = CronManager(workspace_id=actor.workspace_id)
+
+    def accessible(job):
+        return (job is not None and job.source_work_id == run.get('work_id')
+                and (job.owner_actor or {}).get('id') == actor.id)
+
+    target = args.get('job_id')
+    if target and not accessible(mgr.get_job(str(target))):
+        raise ValidationError('Cron job is outside this run scope')
+    for prior_id in args.get('context_from') or []:
+        if not accessible(mgr.get_job(prior_id)):
+            raise ValidationError('Cron context source is outside this run scope')
     action = str(args.get("action") or "").strip().lower()
 
     if action == "add":
@@ -26,6 +36,8 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         try:
             job = mgr.create_job(
                 schedule=schedule,
+                owner_actor=actor.model_dump(mode="json"),
+                source_work_id=run.get("work_id"),
                 prompt=args.get("prompt"),
                 name=args.get("name"),
                 skills=args.get("skills"),
@@ -38,13 +50,13 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 repeat=args.get("repeat"),
                 deliver=str(args.get("deliver") or "local"),
             )
-            run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True)]
+            run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True) if accessible(j)]
             return {"status": "created", "job": job.to_dict()}
         except ValueError as exc:
             raise ValidationError(str(exc))
 
     if action == "list":
-        jobs = mgr.list_jobs()
+        jobs = [job for job in mgr.list_jobs() if accessible(job)]
         return {
             "count": len(jobs),
             "jobs": [j.to_dict() for j in jobs],
@@ -80,7 +92,7 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 deliver=args.get("deliver"),
                 reason=args.get("reason"),
             )
-            run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True)]
+            run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True) if accessible(j)]
             return {"status": "updated", "job": job.to_dict()}
         except ValueError as exc:
             raise ValidationError(str(exc))
@@ -93,7 +105,7 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         job = mgr.pause_job(job_id, reason=reason)
         if not job:
             raise ValidationError(f"Job not found: {job_id}")
-        run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True)]
+        run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True) if accessible(j)]
         return {"status": "paused", "job": job.to_dict()}
 
     if action == "resume":
@@ -103,7 +115,7 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         job = mgr.resume_job(job_id)
         if not job:
             raise ValidationError(f"Job not found: {job_id}")
-        run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True)]
+        run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True) if accessible(j)]
         return {"status": "active", "job": job.to_dict()}
 
     if action == "remove":
@@ -113,7 +125,7 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         removed = mgr.remove_job(job_id)
         if not removed:
             raise ValidationError(f"Job not found or already removed: {job_id}")
-        run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True)]
+        run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True) if accessible(j)]
         return {"status": "removed", "job_id": job_id}
 
     if action == "run":
@@ -123,11 +135,11 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         try:
             job = mgr.get_job(job_id)
             custom_runner = None
-            if job and not job.script and ctx is not None:
-                custom_runner = make_cron_runner(ctx, actor)
-            occ = mgr.run_job(job_id, custom_runner=custom_runner)
-            run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True)]
-            return {"status": "executed", "occurrence": occ.to_dict()}
+            if job and not job.script and ctx is not None and runner_factory is not None:
+                custom_runner = runner_factory(ctx, actor)
+            occ = mgr.run_job(job_id, custom_runner=custom_runner, ctx=ctx, actor=actor)
+            run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True) if accessible(j)]
+            return {"status": occ.status, "occurrence": occ.to_dict()}
         except ValueError as exc:
             raise ValidationError(str(exc))
 

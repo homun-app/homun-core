@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from homun.application.codex_runtime import CodexAppServerAdapter
 from homun.application.copilot_acp_client import CopilotAcpClient
@@ -18,19 +18,19 @@ router = APIRouter(prefix="/v1/runtimes", tags=["alternate_runtimes"])
 
 class CodexTurnRequest(BaseModel):
     messages: List[Dict[str, Any]]
-    events: Optional[List[Dict[str, Any]]] = None
+    model_config = ConfigDict(extra="forbid")
 
 
 class CopilotAcpRequest(BaseModel):
     prompt: str
-    simulated_response: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
 
 
 class RelayDispatchRequest(BaseModel):
     operation: str
     payload: Dict[str, Any]
     session_id: Optional[str] = None
-    enabled: bool = False
+    model_config = ConfigDict(extra="forbid")
 
 
 class ToolGatewayRequest(BaseModel):
@@ -63,6 +63,7 @@ def get_runtimes_status() -> Dict[str, Any]:
         "managed_tool_gateway": {
             "supported": True,
             "active": gateway.is_available(),
+            "configured": gateway.is_configured(),
             "vendor": gateway.config.vendor,
         },
     }
@@ -72,8 +73,10 @@ def get_runtimes_status() -> Dict[str, Any]:
 def run_codex_turn(req: CodexTurnRequest) -> Dict[str, Any]:
     """Execute a turn through the Codex App-Server protocol adapter."""
     adapter = CodexAppServerAdapter()
-    res = adapter.run_turn(req.messages, event_feed=req.events)
+    res = adapter.run_turn(req.messages)
     return {
+        "status": res.status, "source": res.source, "error_code": res.error_code,
+        "error": res.error, "thread_id": res.thread_id, "turn_id": res.turn_id,
         "text": res.text,
         "reasoning": res.reasoning,
         "tool_calls": res.tool_calls,
@@ -87,7 +90,7 @@ def run_codex_turn(req: CodexTurnRequest) -> Dict[str, Any]:
 def run_copilot_acp_turn(req: CopilotAcpRequest) -> Dict[str, Any]:
     """Execute a turn through the Copilot ACP client adapter."""
     client = CopilotAcpClient()
-    res = client.run_turn(req.prompt, simulated_response=req.simulated_response)
+    res = client.run_turn(req.prompt)
     return {
         "text": res.text,
         "tool_calls": res.tool_calls,
@@ -98,14 +101,15 @@ def run_copilot_acp_turn(req: CopilotAcpRequest) -> Dict[str, Any]:
 
 @router.post("/relay/dispatch", response_model=Dict[str, Any])
 def dispatch_relay_operation(req: RelayDispatchRequest) -> Dict[str, Any]:
-    """Dispatch an operation through the NeMo Relay proxy adapter."""
-    relay = RelayRuntime(enabled=req.enabled)
+    """Dispatch once through the configured HTTP Relay bridge."""
+    relay = RelayRuntime()
     res = relay.execute_operation(req.operation, req.payload, session_id=req.session_id)
     return {
         "success": res.success,
         "operation": res.operation,
         "output": res.output,
         "headers_injected": res.headers_injected,
+        "error_code": res.error_code, "source": res.source,
         "error": res.error,
     }
 
@@ -121,4 +125,5 @@ def invoke_tool_gateway(req: ToolGatewayRequest) -> Dict[str, Any]:
         "result": res.result,
         "vendor": res.vendor,
         "error": res.error,
+        "error_code": res.error_code,
     }

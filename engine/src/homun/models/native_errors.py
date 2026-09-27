@@ -19,6 +19,7 @@ from random import Random
 RETRY_AFTER_CAP = 600.0
 MESSAGE_LIMIT = 300
 
+CANCELLED = 'agent_model_cancelled'
 NETWORK = 'agent_model_network'
 TIMEOUT = 'agent_model_timeout'
 RATE_LIMITED = 'agent_model_rate_limited'
@@ -36,6 +37,7 @@ REPETITION = 'agent_model_repetition'
 RETRYABLE_CODES = frozenset({NETWORK, TIMEOUT, RATE_LIMITED, SERVER, EMPTY, MALFORMED})
 
 _LABELS = {
+    CANCELLED: 'Model stream was cancelled',
     REPETITION: 'Model output entered a repetition loop',
     NETWORK: 'Provider unreachable', TIMEOUT: 'Model call timed out',
     RATE_LIMITED: 'Provider rate limit', SERVER: 'Provider server error',
@@ -202,7 +204,10 @@ def classify_transport(exc) -> NativeModelError:
         return NativeModelError(TLS, detail or 'TLS failure')
     reason = getattr(exc, 'reason', None)
     reason_text = sanitize(reason) if reason is not None else detail
-    if 'timed out' in reason_text.lower() or 'timeout' in reason_text.lower():
+    if (isinstance(exc, (TimeoutError, asyncio.TimeoutError))
+            or 'timeout' in type(exc).__name__.lower()
+            or 'timed out' in reason_text.lower()
+            or 'timeout' in reason_text.lower()):
         return NativeModelError(TIMEOUT, reason_text or 'timed out')
     return NativeModelError(NETWORK, reason_text or 'network failure')
 

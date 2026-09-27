@@ -3,7 +3,18 @@ from pathlib import Path
 from secrets import token_hex
 
 from homun.domain.errors import ValidationError
-from homun.execution.browser_forms import click, fill, open_page, press, snapshot
+from homun.execution.browser_forms import (
+    click,
+    console,
+    dialog,
+    fill,
+    open_page,
+    press,
+    profile,
+    scroll,
+    snapshot,
+    vision,
+)
 from homun.execution.browser_sessions import close_browser, open_browser, require_browser
 from homun.execution.browser_shots import capture
 from homun.execution.owned_browser import chrome_path
@@ -32,7 +43,7 @@ def _once(browser, run, action):
 
 def execute(ctx, actor, run, tool, args):
     browser_run = run.get('browser', {})
-    if browser_run.get('policy') != 'owned-headless-v1' or browser_run.get('version') not in {3, 4, 5}:
+    if browser_run.get('policy') != 'owned-headless-v1' or browser_run.get('version') not in {3, 4, 5, 6}:
         raise ValidationError('The browser is not enabled for this run')
     if tool == 'browser_close':
         close_browser(run['id'])
@@ -62,7 +73,17 @@ def execute(ctx, actor, run, tool, args):
         return _once(browser, run, lambda: click(browser, args['ref']))
     if tool == 'browser_press':
         return _once(browser, run, lambda: press(browser, args['key']))
-    if tool == 'browser_screenshot' and browser_run.get('version') in {4, 5}:
+    if tool == 'browser_screenshot' and browser_run.get('version') in {4, 5, 6}:
         dest = Path(ctx.data_dir) / 'execution' / 'browser-shots' / run['id'] / f'{token_hex(8)}.png'
         return _once(browser, run, lambda: capture(browser, dest))
+    if tool == 'browser_dialog' and browser_run.get('version') == 6:
+        return _once(browser, run, lambda: dialog(browser, args.get('action', 'inspect'), args.get('prompt_text', '')))
+    if tool == 'browser_console' and browser_run.get('version') == 6:
+        return _once(browser, run, lambda: console(browser, args.get('clear', False)))
+    if tool == 'browser_scroll' and browser_run.get('version') == 6:
+        return _once(browser, run, lambda: scroll(browser, args.get('direction', 'down'), args.get('amount', 300), args.get('ref')))
+    if tool == 'browser_vision' and browser_run.get('version') == 6:
+        return _once(browser, run, lambda: vision(browser, args.get('format', 'jpeg'), args.get('quality', 75), args.get('ref')))
+    if tool == 'browser_profile' and browser_run.get('version') == 6:
+        return _once(browser, run, lambda: profile(browser, args.get('action', 'status')))
     raise ValidationError('Unknown browser tool')

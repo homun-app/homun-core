@@ -17,6 +17,7 @@ ENTITY_TYPES = {
     "artifact": ("artifacts", models.ArtifactVersion),
     "review": ("reviews", models.Review),
     "work_budget": ("work_budgets", models.WorkBudget),
+    "budget_usage_receipt": ("budget_usage_receipts", models.BudgetUsageReceipt),
     "routine": ("routines", models.Routine),
     "external_server": ("external_servers", models.ExternalServer),
     "skill": ("skills", models.Skill),

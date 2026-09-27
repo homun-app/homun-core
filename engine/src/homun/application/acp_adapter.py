@@ -14,6 +14,7 @@ import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
+from homun.domain.errors import BackendUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +49,11 @@ class AcpSession:
 class AcpServerAdapter:
     """Adapter implementing the Agent Client Protocol (ACP) for Homun."""
 
-    def __init__(self, workspace_id: str = "ws_local"):
+    def __init__(self, workspace_id: str = "ws_local", *, runner=None, ctx=None, actor=None):
         self.workspace_id = workspace_id
+        self._runner = runner
+        self._ctx = ctx
+        self._actor = actor
         self._sessions: Dict[str, AcpSession] = {}
         self.approval_callbacks: Dict[str, asyncio.Future] = {}
 
@@ -63,7 +67,7 @@ class AcpServerAdapter:
             },
             "capabilities": {
                 "editApproval": True,
-                "streaming": True,
+                "streaming": False,
                 "multiSession": True,
             },
         }
@@ -123,33 +127,24 @@ class AcpServerAdapter:
         return False
 
     async def prompt(
-        self,
-        session_id: str,
-        text: str,
-        event_callback: Optional[Callable[[str, Any], None]] = None,
+        self, session_id: str, text: str,
+        event_callback: Optional[Callable[[str, Any], None]] = None, *,
+        command_id: Optional[str] = None, allow_tools: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Handle a prompt from the IDE and stream event updates."""
+        """Stage a canonical supervised run; never synthesize execution success."""
         sess = self.get_session(session_id)
         if not sess:
             raise KeyError(f"Unknown ACP session: {session_id}")
-
+        if self._ctx is None:
+            raise BackendUnavailableError("ACP requires an EngineContext")
+        runner = self._runner
+        if runner is None:
+            from homun.application.hosted_mcp_runner import HostedMcpEngineRunner
+            runner = HostedMcpEngineRunner()
+        result = await asyncio.to_thread(runner.run_task, text, ctx=self._ctx,
+                                         actor=self._actor, command_id=command_id,
+                                         allow_tools=allow_tools)
         sess.messages.append({"role": "user", "content": text})
-
-        # Emit message start
         if event_callback:
-            event_callback("message_chunk", {"delta": "Analyzing request..."})
-
-        await asyncio.sleep(0.01)
-
-        reply_content = f"Homun completed: {text}"
-        sess.messages.append({"role": "assistant", "content": reply_content})
-
-        if event_callback:
-            event_callback("message_chunk", {"delta": f"\n{reply_content}"})
-            event_callback("plan_update", {"status": "completed"})
-
-        return {
-            "session_id": session_id,
-            "status": "completed",
-            "reply": reply_content,
-        }
+            event_callback("plan_update", result)
+        return {"session_id": session_id, "source": "engine", **result}

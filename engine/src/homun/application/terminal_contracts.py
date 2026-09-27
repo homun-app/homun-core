@@ -14,6 +14,7 @@ class TerminalProposalRequest(BaseModel):
     command_id: str = Field(min_length=1, max_length=160)
     image: str | None = Field(default=None, max_length=4000)
     command: str = Field(min_length=1, max_length=16000)
+    cwd: str = '.'
     expected_version: int = Field(ge=1)
     timeout_seconds: int = Field(default=300,ge=1,le=3600)
     background: bool = False
@@ -59,6 +60,7 @@ class TerminalProposal(BaseModel):
     work_id: str
     image: str | None = None
     command: str
+    cwd: str | None = None
     expected_version: int
     policy: Literal[
         'docker-offline-v1',
@@ -102,6 +104,7 @@ def consent(proposal: dict) -> str:
     fields=('id','work_id','image','command','expected_version','policy','created_by')
     bound={k:proposal[k] for k in fields if k in proposal}
     if 'timeout_seconds' in proposal:bound['timeout_seconds']=proposal['timeout_seconds']
+    if proposal.get('cwd', '.') != '.':bound['cwd']=proposal['cwd']
     if proposal.get('background'):bound['background']=True
     if proposal.get('stdin'):bound['stdin']=True
     if proposal.get('pty'):bound['pty']=True
@@ -115,7 +118,7 @@ def job_spec(ctx, proposal: dict) -> JobSpec | LocalJobSpec | SshJobSpec | Singu
     common=dict(workspace_id=ctx.workspace_id,run_id=proposal.get('_agent_binding',{}).get('run_id',proposal['work_id']),
                 call_id=proposal['id'],command=proposal['command'])
     if proposal.get('policy')=='local-private-v1':
-        return LocalJobSpec(**common)
+        return LocalJobSpec(**common, cwd=proposal.get('cwd', '.'), deadline_at=proposal.get("deadline_at") if proposal.get("_local_deadline_supervised") else None)
     if proposal.get('policy')=='ssh-v1':
         return SshJobSpec(**common, host=proposal['ssh_host'], user=proposal['ssh_user'], port=proposal['ssh_port'],
                           host_key=proposal['ssh_host_key'], key_fingerprint=proposal['ssh_key_fingerprint'],
@@ -135,7 +138,7 @@ def job_spec(ctx, proposal: dict) -> JobSpec | LocalJobSpec | SshJobSpec | Singu
         if not image:
             raise ValidationError('Daytona image reference is required')
         return DaytonaJobSpec(**common, image=image)
-    return JobSpec(**common,image=proposal['image'])
+    return JobSpec(**common,image=proposal['image'],cwd=proposal.get('cwd', '.'))
 
 
 def public(proposal: dict) -> dict:

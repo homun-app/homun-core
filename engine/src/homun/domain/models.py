@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -10,8 +10,7 @@ from pydantic import BaseModel, Field
 from homun.domain.states import StepStatus, WorkStatus
 
 
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+from homun.domain.timestamps import utc_now
 
 
 class Actor(BaseModel):
@@ -166,8 +165,11 @@ class ContributionRequest(BaseModel):
     step_id: str
     to_actor_id: str
     need: str
+    questions: list[dict] | None = None
     status: str = "pending"  # pending | resolved | rejected
     response_text: str | None = None
+    draft_response_text: str | None = None
+    resolution: str | None = None  # answered | expired; expiry is not human consent
     response_material_ids: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
     resolved_at: datetime | None = None
@@ -256,6 +258,7 @@ class ExternalServer(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
     # OAuth/mTLS (H36): optional; OAuth remains refuse-until-wired, mTLS uses client certs.
     oauth_client_id: str = ""
+    oauth_authorization_url: str = ""
     oauth_token_url: str = ""
     oauth_scopes: list[str] = Field(default_factory=list)
     mtls_cert_path: str = ""
@@ -276,6 +279,7 @@ class Skill(BaseModel):
     description: str = Field(default="", max_length=120)
     body: str = ""
     tags: list[str] = Field(default_factory=list)
+    resources: dict[str, str] = Field(default_factory=dict)
     status: str = "staged"  # staged | approved | archived
     author_type: str = "person"  # person | agent
     author_id: str = ""
@@ -284,61 +288,8 @@ class Skill(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
-class BudgetCounters(BaseModel):
-    """Unknown usage stays unknown: absent values are never filled with zero."""
-
-    attempts: int = 0
-    input_tokens: int = 0
-    output_tokens: int = 0
-
-
-class BudgetCaps(BaseModel):
-    model_attempts: int = 40
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-
-
-class BudgetReservation(BaseModel):
-    """In-flight estimate held before a provider call; reconciled or recovered."""
-
-    id: str
-    created_at: datetime = Field(default_factory=utc_now)
-    estimate: BudgetCounters = Field(default_factory=BudgetCounters)
-    purpose: str = ""
-    actor_id: str = ""
-
-
-class BudgetAllocation(BaseModel):
-    """Delegate sub-cap inside the work envelope: own limit, own counters.
-
-    A delegate that exhausts its allocation stops even when the work envelope
-    still has room; other actors are unaffected (subagent isolation pattern).
-    """
-
-    actor_id: str
-    model_attempts: int = 10
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    reserved: BudgetCounters = Field(default_factory=BudgetCounters)
-    spent: BudgetCounters = Field(default_factory=BudgetCounters)
-    unknown: BudgetCounters = Field(default_factory=BudgetCounters)
-
-
-class WorkBudget(BaseModel):
-    """Persisted per-work spend envelope over model attempts and tokens."""
-
-    id: str
-    workspace_id: str
-    work_id: str
-    version: int = 1
-    caps: BudgetCaps = Field(default_factory=BudgetCaps)
-    reserved: BudgetCounters = Field(default_factory=BudgetCounters)
-    spent: BudgetCounters = Field(default_factory=BudgetCounters)
-    unknown: BudgetCounters = Field(default_factory=BudgetCounters)
-    pending: list[BudgetReservation] = Field(default_factory=list)
-    allocations: dict[str, BudgetAllocation] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
+from homun.domain.budget_models import (BudgetCounters, BudgetCaps, BudgetReservation,
+    BudgetUsageReceipt, BudgetAllocation, WorkBudget)
 
 
 class Run(BaseModel):

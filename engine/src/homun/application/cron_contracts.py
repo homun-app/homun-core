@@ -42,6 +42,8 @@ class CronJob:
     consecutive_errors: int = 0
     quota_hold: bool = False
     last_output: Optional[str] = None
+    owner_actor: Optional[Dict[str, Any]] = None
+    source_work_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -75,6 +77,8 @@ class CronJob:
             consecutive_errors=int(data.get("consecutive_errors") or 0),
             quota_hold=bool(data.get("quota_hold") or False),
             last_output=data.get("last_output"),
+            owner_actor=data.get("owner_actor"),
+            source_work_id=data.get("source_work_id"),
         )
 
 
@@ -90,6 +94,17 @@ class CronOccurrence:
     output_preview: str = ""
     error: Optional[str] = None
     duration_s: float = 0.0
+    claim_token: Optional[str] = None
+    lease_until: float = 0.0
+    activation_id: Optional[str] = None
+    recovery_safe: bool = False
+    agent_run_id: Optional[str] = None
+    work_id: Optional[str] = None
+
+    @property
+    def id(self) -> str:
+        """Compatibility for callers inspecting the claimed job identity."""
+        return self.job_id
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -106,7 +121,24 @@ class CronOccurrence:
             output_preview=str(data.get("output_preview") or ""),
             error=data.get("error"),
             duration_s=float(data.get("duration_s") or 0.0),
+            claim_token=data.get("claim_token"),
+            lease_until=float(data.get("lease_until") or 0),
+            activation_id=data.get("activation_id"),
+            recovery_safe=bool(data.get("recovery_safe")),
+            agent_run_id=data.get("agent_run_id"),
+            work_id=data.get("work_id"),
         )
+
+
+@dataclass
+class CronExecutionResult:
+    """Staging is not execution success; unresolved effects stay unknown."""
+    status: str
+    output: str = ""
+    error: Optional[str] = None
+    exit_code: Optional[int] = None
+    agent_run_id: Optional[str] = None
+    work_id: Optional[str] = None
 
 
 @dataclass

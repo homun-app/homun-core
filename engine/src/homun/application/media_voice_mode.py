@@ -97,3 +97,61 @@ class VoiceSession:
         with self._lock:
             if self.state == "model_speaking":
                 self.state = "listening"
+
+    def cancel_playback(self) -> None:
+        """Explicitly cancel active model playback (e.g. barge-in or stop requested)."""
+        self.user_started_speaking()
+
+    def bind_audio_pipeline(
+        self,
+        *,
+        stt_transcriber: Optional[Any] = None,
+        tts_synthesizer: Optional[Any] = None,
+        playback_cancel: Optional[Callable[[], None]] = None,
+    ) -> None:
+        """Bind STT, TTS and audio playback cancellation primitives to this voice session."""
+        self._stt = stt_transcriber
+        self._tts = tts_synthesizer
+        if playback_cancel:
+            self.on_interrupt(playback_cancel)
+
+    def feed_audio_chunk(
+        self,
+        audio_data: bytes,
+        *,
+        sample_rate: int = 16000,
+        text_hint: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Ingest an incoming audio chunk, detect speech/wake word, and manage turn taking."""
+        if not audio_data and not text_hint:
+            return {"state": self.state, "detected": False, "text": ""}
+
+        # Signal user speech began
+        self.user_started_speaking()
+
+        text = text_hint or ""
+        if not text and getattr(self, "_stt", None) is not None and callable(getattr(self._stt, "transcribe", None)):
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                f.write(audio_data)
+                f.flush()
+                try:
+                    res = self._stt.transcribe(f.name)
+                    text = getattr(res, "text", "") or ""
+                finally:
+                    try:
+                        import os
+                        os.unlink(f.name)
+                    except OSError:
+                        pass
+
+        wake_evt = None
+        if text:
+            wake_evt = self.trigger_wake(text)
+
+        return {
+            "state": self.state,
+            "detected": wake_evt is not None,
+            "wake_word": wake_evt.wake_word if wake_evt else None,
+            "text": text,
+        }

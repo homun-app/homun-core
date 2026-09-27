@@ -38,7 +38,7 @@ def reconcile(ctx,*,now=None,limit=4):
                 raise ConflictError('Terminal consent changed')
             backend=terminal_jobs.backend_for(ctx, snapshot);spec=job_spec(ctx,snapshot)
             state=backend.inspect(spec)
-            if state['status'] not in {'exited','dead'}:
+            if state['status'] not in {'exited','dead'} and not snapshot.get('_local_deadline_supervised'):
                 # Persist the stop reason before IO, even if stop times out/crashes.
                 with ctx.repository.locked():
                     with ctx.repository.transaction() as store:

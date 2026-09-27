@@ -1,7 +1,8 @@
+from homun.application.runtime_calls import complete_summary
 """Budgeted context checkpoint preparation; canonical run history is never replaced."""
 from homun.application import agent_native, agent_recovery, budgets
 from homun.application.agent_runs import authority, lookup
-from homun.application.agent_usage import charge
+from homun.application.agent_usage import charge, reserve as reserve_usage
 from homun.domain.errors import ValidationError
 from homun.domain.models import Actor, BudgetCounters, utc_now
 from homun.models.context_plan import plan_context, build_checkpoint, project_checkpoint
@@ -43,7 +44,7 @@ def prepare(ctx,run,tools):
     policy=run.get('_context_policy')
     if not policy:
         return messages
-    micro_policy = policy.get('micro_compaction')
+    micro_policy = policy.get('micro_compaction', run.get('micro_compaction', False))
     plan_kwargs = {k: v for k, v in policy.items() if k != 'micro_compaction'}
     plan=plan_context(messages,tools,checkpoint=run.get('_context_checkpoint'),
                       force=bool(run.get('_force_context_compaction')),**plan_kwargs)
@@ -68,16 +69,15 @@ def prepare(ctx,run,tools):
                 raise ValidationError('Insufficient model attempts for compaction and continuation')
             budgets.check_capacity(store,actor,run['work_id'],BudgetCounters(attempts=2),
                                    accounting_actor_id=run['assignee_id'])
+            reservation=reserve_usage(ctx, actor, current, purpose='agent_run.compact', store=store)
             agent_recovery.begin(current,'summary')
             current['model_attempts']+=1
         ctx.service.store=store
-    reservation=budgets.reserve(ctx,actor,run['work_id'],BudgetCounters(attempts=1),
-        purpose='agent_run.compact',accounting_actor_id=run['assignee_id'])
     try:
-        result=ctx.models.complete_summary(request,connection_id=run['connection_id'],
+        result=complete_summary(ctx, run, request,connection_id=run['connection_id'],
             context_window=policy['context_window'],max_output_tokens=output_tokens)
     except NativeModelError as exc:
-        charge(ctx,actor,run,reservation,exc.usage)
+        charge(ctx,actor,run,reservation,exc.usage,reason=exc.code)
         if not exc.retryable:
             _defer_if_stale(ctx,run)
             raise ContextSummaryError('Context summary generation failed; history was retained') from exc
@@ -88,7 +88,7 @@ def prepare(ctx,run,tools):
         # The wait holds no lease; the workflow's busy path resumes preparation when due.
         raise ContextPreparationDeferred() from exc
     except Exception as exc:
-        budgets.reconcile_unknown(ctx,actor,run['work_id'],reservation)
+        charge(ctx, actor, run, reservation, getattr(exc, 'usage', None))
         _defer_if_stale(ctx,run)
         raise ContextSummaryError('Context summary generation failed; history was retained') from exc
     charge(ctx,actor,run,reservation,getattr(result,'usage',None))
@@ -123,3 +123,9 @@ def prepare(ctx,run,tools):
         kwargs = micro_policy if isinstance(micro_policy, dict) else {}
         return micro_compact_messages(projected, **kwargs)
     return projected
+
+
+def provider_policy(run):
+    """Keep context projection settings out of provider call arguments."""
+    policy = run.get('_context_policy', {})
+    return {key: policy[key] for key in ('context_window', 'max_output_tokens') if key in policy}

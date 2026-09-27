@@ -18,6 +18,8 @@ class ShippedSkill(BaseModel):
     description: str
     tags: List[str] = Field(default_factory=list)
     system_prompt: str
+    license: str = "MIT"
+    resources: Dict[str, str] = Field(default_factory=dict)
 
 
 class SkillPack(BaseModel):
@@ -26,30 +28,99 @@ class SkillPack(BaseModel):
     version: str = "1.0.0"
     category: str
     description: str
+    license: str = "MIT"
     skills: List[ShippedSkill] = Field(default_factory=list)
     is_installed: bool = False
 
 
 BUILTIN_PACKS: List[SkillPack] = [
     SkillPack(
+        id="productivity",
+        name="Office & Document Productivity",
+        category="productivity",
+        description="Comprehensive PDF and Office document processing and extraction tools",
+        license="Apache-2.0",
+        skills=[
+            ShippedSkill(
+                id="pdf_toolkit",
+                name="PDF Toolkit",
+                description="Extracts text, forms, tables, and metadata from PDF files using python tools",
+                tags=["pdf", "office", "extraction"],
+                license="Apache-2.0",
+                system_prompt=(
+                    "You are a PDF processing specialist. Use python to read, slice, parse forms, "
+                    "and extract text and table data from PDF files accurately without fabricating content."
+                ),
+                resources={
+                    "scripts/pdf_extract.py": (
+                        "# PDF extraction helper\nimport pypdf\ndef extract_text(path):\n"
+                        "    reader = pypdf.PdfReader(path)\n"
+                        "    return '\n'.join(p.extract_text() or '' for p in reader.pages)\n"
+                    )
+                },
+            ),
+            ShippedSkill(
+                id="office_extractor",
+                name="Office Document Extractor",
+                description="Extracts structured paragraphs and tables from DOCX, XLSX, and PPTX files",
+                tags=["office", "docx", "xlsx", "pptx"],
+                license="Apache-2.0",
+                system_prompt="Extract text, table headers, and rows from modern Office documents truthfully.",
+                resources={},
+            ),
+        ],
+    ),
+    SkillPack(
+        id="research",
+        name="Research & Web Synthesis",
+        category="research",
+        description="Structured web queries, source deduplication, and scientific literature digest",
+        license="MIT",
+        skills=[
+            ShippedSkill(
+                id="web_search_curator",
+                name="Web Search Curator",
+                description="Performs multi-query search, ranks canonical domains, and filters noise",
+                tags=["research", "search", "curation"],
+                license="MIT",
+                system_prompt="Execute targeted web queries, rank authoritative sources, and provide cited summaries.",
+                resources={},
+            ),
+            ShippedSkill(
+                id="literature_digest",
+                name="Literature Digest",
+                description="Synthesizes academic preprints, methodologies, and citation links",
+                tags=["research", "papers", "science"],
+                license="MIT",
+                system_prompt="Summarize research papers, extract methodologies, and outline experimental findings.",
+                resources={},
+            ),
+        ],
+    ),
+    SkillPack(
         id="dev_essentials",
         name="Developer Essentials Pack",
         category="development",
         description="Core programming, code linting, and testing skills",
+        license="MIT",
         skills=[
             ShippedSkill(
                 id="code_reviewer",
                 name="Code Reviewer",
                 description="Analyzes pull request diffs for logic bugs and style compliance",
                 tags=["coding", "git", "review"],
+                license="MIT",
                 system_prompt="Review provided code diffs meticulously for correctness and security.",
+                resources={},
             ),
             ShippedSkill(
                 id="test_generator",
                 name="Test Generator",
                 description="Generates comprehensive pytest and node unit test suites",
                 tags=["coding", "testing"],
+                license="MIT",
                 system_prompt="Generate isolated, robust unit tests with high boundary condition coverage.",
+                resources={},
             ),
         ],
     ),
@@ -58,13 +129,16 @@ BUILTIN_PACKS: List[SkillPack] = [
         name="Data Analysis & Tables",
         category="data",
         description="Dataset inspection, statistical summaries, and tabular deliverables",
+        license="MIT",
         skills=[
             ShippedSkill(
                 id="csv_summarizer",
                 name="CSV Summarizer",
                 description="Summarizes CSV datasets with columns, distributions, and null stats",
                 tags=["data", "csv", "summary"],
+                license="MIT",
                 system_prompt="Analyze CSV data structure, identify statistical anomalies, and format markdown tables.",
+                resources={},
             ),
         ],
     ),
@@ -73,13 +147,16 @@ BUILTIN_PACKS: List[SkillPack] = [
         name="System Administration & DevOps",
         category="operations",
         description="Container diagnostics, log analysis, and system health verification",
+        license="MIT",
         skills=[
             ShippedSkill(
                 id="log_analyzer",
                 name="Log Analyzer",
                 description="Parses server log files to identify exception stack traces and traffic spikes",
                 tags=["sysadmin", "logs", "troubleshooting"],
+                license="MIT",
                 system_prompt="Extract error patterns, timestamps, and frequencies from server logs.",
+                resources={},
             ),
         ],
     ),
@@ -129,9 +206,26 @@ class CatalogPacksManager:
         pack_dir.mkdir(parents=True, exist_ok=True)
 
         for skill in pack.skills:
-            skill_file = pack_dir / f"{skill.id}.md"
-            content = f"# Skill: {skill.name}\n\n{skill.description}\n\n## Instructions\n{skill.system_prompt}\n"
+            skill_dir = pack_dir / skill.id
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            skill_file = skill_dir / "SKILL.md"
+            tags_str = ", ".join(f'"{t}"' for t in skill.tags)
+            frontmatter = (
+                f"---\nname: \"{skill.name}\"\ndescription: \"{skill.description}\"\n"
+                f"tags: [{tags_str}]\nlicense: \"{skill.license}\"\n---\n\n"
+            )
+            content = f"{frontmatter}# {skill.name}\n\n{skill.description}\n\n## Instructions\n{skill.system_prompt}\n"
             skill_file.write_text(content, encoding="utf-8")
+
+            # Legacy single-file compatibility
+            compat_file = pack_dir / f"{skill.id}.md"
+            compat_file.write_text(content, encoding="utf-8")
+
+            # Write resource files (scripts, templates)
+            for res_path, res_content in skill.resources.items():
+                target_res = skill_dir / res_path
+                target_res.parent.mkdir(parents=True, exist_ok=True)
+                target_res.write_text(res_content, encoding="utf-8")
 
         self._installed_ids.add(clean_id)
         self._save_installed()

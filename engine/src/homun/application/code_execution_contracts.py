@@ -39,11 +39,11 @@ class CodeExecutionArguments(BaseModel):
         description="Python code to execute. Can call tools via `call_tool(tool_name, args)`."
     )
     timeout: Optional[int] = Field(
-        default=DEFAULT_TIMEOUT,
+        default=DEFAULT_TIMEOUT, ge=1, le=600,
         description="Execution timeout in seconds (default 300).",
     )
     max_tool_calls: Optional[int] = Field(
-        default=DEFAULT_MAX_TOOL_CALLS,
+        default=DEFAULT_MAX_TOOL_CALLS, ge=1, le=1000,
         description="Maximum number of programmatic tool calls allowed (default 50).",
     )
 
@@ -51,6 +51,9 @@ class CodeExecutionArguments(BaseModel):
 def entries(executor: Callable, version: int) -> list:
     from homun.application.agent_tool_contracts import ToolDefinition
     from homun.tools.registry import ToolEntry
+
+    def dispatch(ctx, actor, run, args):
+        return executor(ctx, actor, run, 'execute_code', args)
 
     return [
         ToolEntry(
@@ -62,6 +65,7 @@ def entries(executor: Callable, version: int) -> list:
             "code_execution",
             str(version),
             CodeExecutionArguments,
-            executor,
+            dispatch,
+            replay="never",
         ),
     ]

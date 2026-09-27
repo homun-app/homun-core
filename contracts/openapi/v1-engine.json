@@ -68,6 +68,26 @@
         "title": "ActionRequest",
         "type": "object"
       },
+      "ActivateEventRequest": {
+        "properties": {
+          "activation_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Activation Id",
+            "type": "string"
+          },
+          "workspace_id": {
+            "default": "ws_local",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "activation_id"
+        ],
+        "title": "ActivateEventRequest",
+        "type": "object"
+      },
       "ActiveProviderRequest": {
         "properties": {
           "provider_id": {
@@ -355,6 +375,72 @@
           "expected_version"
         ],
         "title": "AskPersonRequest",
+        "type": "object"
+      },
+      "AutomationCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "set",
+              "pause",
+              "resume",
+              "clear"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "interval_seconds": {
+            "anyOf": [
+              {
+                "maximum": 31536000.0,
+                "minimum": 60.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Seconds"
+          },
+          "max_ticks": {
+            "default": 100,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Max Ticks",
+            "type": "integer"
+          },
+          "prompt": {
+            "default": "",
+            "maxLength": 16000,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "times": {
+            "default": 0,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Times",
+            "type": "integer"
+          },
+          "until": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id",
+          "action"
+        ],
+        "title": "AutomationCommand",
         "type": "object"
       },
       "BatchItem": {
@@ -1225,22 +1311,8 @@
         "type": "object"
       },
       "CodexTurnRequest": {
+        "additionalProperties": false,
         "properties": {
-          "events": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Events"
-          },
           "messages": {
             "items": {
               "additionalProperties": true,
@@ -2001,21 +2073,11 @@
         "type": "object"
       },
       "CopilotAcpRequest": {
+        "additionalProperties": false,
         "properties": {
           "prompt": {
             "title": "Prompt",
             "type": "string"
-          },
-          "simulated_response": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Simulated Response"
           }
         },
         "required": [
@@ -2999,7 +3061,7 @@
             "title": "Now"
           },
           "workspace_id": {
-            "default": "default",
+            "default": "ws_local",
             "title": "Workspace Id",
             "type": "string"
           }
@@ -3592,6 +3654,89 @@
           "expected_version"
         ],
         "title": "IntakeRequest",
+        "type": "object"
+      },
+      "IntegrationConfigureRequest": {
+        "properties": {
+          "discord_bot_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discord Bot Token"
+          },
+          "feishu_access_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feishu Access Token"
+          },
+          "feishu_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feishu Base Url"
+          },
+          "homeassistant_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Homeassistant Base Url"
+          },
+          "homeassistant_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Homeassistant Token"
+          },
+          "spotify_access_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spotify Access Token"
+          },
+          "yuanbao_connected": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yuanbao Connected"
+          }
+        },
+        "title": "IntegrationConfigureRequest",
         "type": "object"
       },
       "InterpretRequest": {
@@ -5138,6 +5283,19 @@
         "title": "RecordTrajectoryRequest",
         "type": "object"
       },
+      "RecoverQueueResponse": {
+        "properties": {
+          "recovered_count": {
+            "title": "Recovered Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recovered_count"
+        ],
+        "title": "RecoverQueueResponse",
+        "type": "object"
+      },
       "RectifyMemoryRequest": {
         "properties": {
           "text": {
@@ -5178,12 +5336,8 @@
         "type": "object"
       },
       "RelayDispatchRequest": {
+        "additionalProperties": false,
         "properties": {
-          "enabled": {
-            "default": false,
-            "title": "Enabled",
-            "type": "boolean"
-          },
           "operation": {
             "title": "Operation",
             "type": "string"
@@ -5619,6 +5773,21 @@
       },
       "RunRequest": {
         "properties": {
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          },
           "browser": {
             "default": false,
             "title": "Browser",
@@ -5639,6 +5808,18 @@
             "minLength": 1,
             "title": "Command Id",
             "type": "string"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
           },
           "cron": {
             "default": false,
@@ -5661,6 +5842,14 @@
             "default": false,
             "title": "Delegation",
             "type": "boolean"
+          },
+          "denied_tools": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Denied Tools",
+            "type": "array"
           },
           "expected_version": {
             "minimum": 1.0,
@@ -5702,6 +5891,11 @@
             "title": "Memory",
             "type": "boolean"
           },
+          "micro_compaction": {
+            "default": true,
+            "title": "Micro Compaction",
+            "type": "boolean"
+          },
           "moa": {
             "anyOf": [
               {
@@ -5716,6 +5910,29 @@
               }
             ],
             "title": "Moa"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "native_stream": {
+            "default": false,
+            "title": "Native Stream",
+            "type": "boolean"
+          },
+          "parallel_read_tools": {
+            "default": false,
+            "title": "Parallel Read Tools",
+            "type": "boolean"
           },
           "person_id": {
             "anyOf": [
@@ -5734,6 +5951,19 @@
             "default": false,
             "title": "Plugins",
             "type": "boolean"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id"
           },
           "server_ids": {
             "items": {
@@ -5814,6 +6044,19 @@
             ],
             "title": "Ssh User"
           },
+          "surface": {
+            "default": "desktop",
+            "enum": [
+              "cli",
+              "tui",
+              "web",
+              "desktop",
+              "bot_screen",
+              "headless"
+            ],
+            "title": "Surface",
+            "type": "string"
+          },
           "team_id": {
             "anyOf": [
               {
@@ -5859,6 +6102,16 @@
             ],
             "title": "Terminal Image"
           },
+          "toolset": {
+            "default": "full",
+            "enum": [
+              "full",
+              "readonly",
+              "minimal"
+            ],
+            "title": "Toolset",
+            "type": "string"
+          },
           "web_pages": {
             "default": false,
             "title": "Web Pages",
@@ -5875,6 +6128,16 @@
               }
             ],
             "title": "Workspace Root"
+          },
+          "workspace_transfer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceTransferReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -5886,6 +6149,21 @@
       },
       "RunView": {
         "properties": {
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          },
           "artifact_id": {
             "anyOf": [
               {
@@ -5900,6 +6178,18 @@
           "assignee_id": {
             "title": "Assignee Id",
             "type": "string"
+          },
+          "automation_wait": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automation Wait"
           },
           "browser": {
             "anyOf": [
@@ -5924,6 +6214,32 @@
               }
             ],
             "title": "Clarify"
+          },
+          "clarify_deadline_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarify Deadline At"
+          },
+          "clarify_request": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarify Request"
           },
           "code_execution": {
             "anyOf": [
@@ -5977,6 +6293,14 @@
             ],
             "title": "Delegation"
           },
+          "denied_tools": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Denied Tools",
+            "type": "array"
+          },
           "digest": {
             "title": "Digest",
             "type": "string"
@@ -5991,6 +6315,18 @@
               }
             ],
             "title": "Error Code"
+          },
+          "execution_context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Context"
           },
           "executor_name": {
             "title": "Executor Name",
@@ -6106,6 +6442,11 @@
             ],
             "title": "Memory"
           },
+          "micro_compaction": {
+            "default": false,
+            "title": "Micro Compaction",
+            "type": "boolean"
+          },
           "moa": {
             "anyOf": [
               {
@@ -6122,6 +6463,11 @@
             "title": "Model Attempts",
             "type": "integer"
           },
+          "native_stream": {
+            "default": false,
+            "title": "Native Stream",
+            "type": "boolean"
+          },
           "observations": {
             "items": {
               "additionalProperties": true,
@@ -6129,6 +6475,11 @@
             },
             "title": "Observations",
             "type": "array"
+          },
+          "parallel_read_tools": {
+            "default": false,
+            "title": "Parallel Read Tools",
+            "type": "boolean"
           },
           "person": {
             "anyOf": [
@@ -6177,6 +6528,30 @@
             ],
             "title": "Request Id"
           },
+          "runtime_selection": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Selection"
+          },
+          "session_context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Context"
+          },
           "session_management": {
             "anyOf": [
               {
@@ -6203,6 +6578,31 @@
           },
           "status": {
             "title": "Status",
+            "type": "string"
+          },
+          "stream_progress": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Progress"
+          },
+          "surface": {
+            "default": "desktop",
+            "enum": [
+              "cli",
+              "tui",
+              "web",
+              "desktop",
+              "bot_screen",
+              "headless"
+            ],
+            "title": "Surface",
             "type": "string"
           },
           "team": {
@@ -6270,6 +6670,16 @@
             ],
             "title": "Tools"
           },
+          "toolset": {
+            "default": "full",
+            "enum": [
+              "full",
+              "readonly",
+              "minimal"
+            ],
+            "title": "Toolset",
+            "type": "string"
+          },
           "turns": {
             "title": "Turns",
             "type": "integer"
@@ -6289,6 +6699,18 @@
           "work_id": {
             "title": "Work Id",
             "type": "string"
+          },
+          "workspace_transfer": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Transfer"
           }
         },
         "required": [
@@ -6507,6 +6929,316 @@
         "title": "ServerCreateRequest",
         "type": "object"
       },
+      "SessionManageArguments": {
+        "properties": {
+          "action": {
+            "description": "Action to perform: create | get | list | update | resume | pin | unpin | archive | unarchive | prune | export | import | rewind | fork | handoff | repair | usage",
+            "title": "Action",
+            "type": "string"
+          },
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Archive status",
+            "title": "Archived"
+          },
+          "command_id": {
+            "anyOf": [
+              {
+                "maxLength": 140,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Idempotency key required for mutations",
+            "title": "Command Id"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Usage receipt cursor",
+            "title": "Cursor"
+          },
+          "cwd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Working directory path",
+            "title": "Cwd"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Serialized transcript text for import",
+            "title": "Data"
+          },
+          "execution_cwd": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Cwd"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Transcript revision to branch or continue",
+            "title": "Expected Revision"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Work version for paused run resume",
+            "title": "Expected Version"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "jsonl",
+            "description": "Export format: jsonl | markdown",
+            "title": "Format"
+          },
+          "include_archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "description": "Whether to include archived sessions in listing or pruning",
+            "title": "Include Archived"
+          },
+          "instruction": {
+            "anyOf": [
+              {
+                "maxLength": 16000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New request for an approved continuation",
+            "title": "Instruction"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Usage receipt page size",
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "model_pin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pinned model identifier",
+            "title": "Model Pin"
+          },
+          "older_than_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Age threshold in seconds for pruning",
+            "title": "Older Than Seconds"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Parent session identifier for forking",
+            "title": "Parent Id"
+          },
+          "pinned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pin status",
+            "title": "Pinned"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fresh run proposal options; ordinary validation and approval apply",
+            "title": "Proposal"
+          },
+          "provider_pin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pinned provider identifier",
+            "title": "Provider Pin"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Search query string for FTS message matching",
+            "title": "Query"
+          },
+          "redact_secrets": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": true,
+            "description": "When true, sanitizes API keys and bearer tokens on export",
+            "title": "Redact Secrets"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Canonical run or snapshot identifier within this work",
+            "title": "Session Id"
+          },
+          "target_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target workspace profile for handoff",
+            "title": "Target Profile"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Title for create, update, or fork",
+            "title": "Title"
+          },
+          "turn_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exclusive message count for a closed tool-call prefix when rewinding or forking",
+            "title": "Turn Index"
+          },
+          "workspace_mode": {
+            "default": "history_only",
+            "title": "Workspace Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "SessionManageArguments",
+        "type": "object"
+      },
       "SessionSyncRequest": {
         "properties": {
           "active_tools": {
@@ -6610,9 +7342,21 @@
             "title": "Id",
             "type": "string"
           },
+          "license": {
+            "default": "MIT",
+            "title": "License",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "resources": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Resources",
+            "type": "object"
           },
           "system_prompt": {
             "title": "System Prompt",
@@ -6789,6 +7533,11 @@
             "default": false,
             "title": "Is Installed",
             "type": "boolean"
+          },
+          "license": {
+            "default": "MIT",
+            "title": "License",
+            "type": "string"
           },
           "name": {
             "title": "Name",
@@ -7402,6 +8151,17 @@
             "title": "Created By",
             "type": "string"
           },
+          "cwd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cwd"
+          },
           "deadline_at": {
             "anyOf": [
               {
@@ -7661,6 +8421,11 @@
             "maxLength": 160,
             "minLength": 1,
             "title": "Command Id",
+            "type": "string"
+          },
+          "cwd": {
+            "default": ".",
+            "title": "Cwd",
             "type": "string"
           },
           "expected_version": {
@@ -8346,6 +9111,28 @@
           "phrase"
         ],
         "title": "WakeCheckRequest",
+        "type": "object"
+      },
+      "WorkspaceTransferReference": {
+        "additionalProperties": false,
+        "properties": {
+          "command_id": {
+            "maxLength": 140,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "digest": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id",
+          "digest"
+        ],
+        "title": "WorkspaceTransferReference",
         "type": "object"
       },
       "YuanbaoActionRequest": {
@@ -9411,7 +10198,7 @@
             "name": "workspace_id",
             "required": false,
             "schema": {
-              "default": "default",
+              "default": "ws_local",
               "title": "Workspace Id",
               "type": "string"
             }
@@ -9430,6 +10217,38 @@
                 }
               ],
               "title": "Now"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
             }
           }
         ],
@@ -9466,6 +10285,40 @@
     "/v1/cron/fire-due": {
       "post": {
         "operationId": "post_fire_due_v1_cron_fire_due_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9501,6 +10354,88 @@
           }
         },
         "summary": "Post Fire Due",
+        "tags": [
+          "cron"
+        ]
+      }
+    },
+    "/v1/cron/jobs/{job_id}/activate": {
+      "post": {
+        "operationId": "activate_cron_event_v1_cron_jobs__job_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Cron Event",
         "tags": [
           "cron"
         ]
@@ -10342,6 +11277,231 @@
         ]
       }
     },
+    "/v1/gateway/channels/queue": {
+      "get": {
+        "operationId": "list_inbound_queue_items_v1_gateway_channels_queue_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "platform",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Platform"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Inbound Queue Items V1 Gateway Channels Queue Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Inbound Queue Items",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
+    "/v1/gateway/channels/queue/recover": {
+      "post": {
+        "operationId": "recover_stale_inbound_queue_v1_gateway_channels_queue_recover_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "max_age_seconds",
+            "required": false,
+            "schema": {
+              "default": 60.0,
+              "minimum": 1.0,
+              "title": "Max Age Seconds",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoverQueueResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recover Stale Inbound Queue",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
+    "/v1/gateway/channels/{platform}/inbound": {
+      "post": {
+        "description": "Ingress webhook for messaging platforms: persists to queue, checks pairing, leases turn, and delivers response.",
+        "operationId": "ingest_channel_inbound_v1_gateway_channels__platform__inbound_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "platform",
+            "required": true,
+            "schema": {
+              "title": "Platform",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ingest Channel Inbound V1 Gateway Channels  Platform  Inbound Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Channel Inbound",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
+    "/v1/gateway/channels/{platform}/poll-once": {
+      "post": {
+        "description": "Execute a single polling iteration for polling-capable channels (e.g. Telegram getUpdates).",
+        "operationId": "poll_channel_once_v1_gateway_channels__platform__poll_once_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "platform",
+            "required": true,
+            "schema": {
+              "title": "Platform",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timeout",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 30,
+              "minimum": 1,
+              "title": "Timeout",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Poll Channel Once V1 Gateway Channels  Platform  Poll Once Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Poll Channel Once",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
     "/v1/gateway/pairing": {
       "get": {
         "operationId": "list_pairing_requests_v1_gateway_pairing_get",
@@ -10704,6 +11864,50 @@
         "summary": "Health",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/integrations/configure": {
+      "post": {
+        "description": "Configure credentials and endpoints for optional integrations.",
+        "operationId": "configure_integrations_v1_integrations_configure_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationConfigureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Configure Integrations V1 Integrations Configure Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Configure Integrations",
+        "tags": [
+          "integrations"
         ]
       }
     },
@@ -11398,6 +12602,30 @@
           }
         },
         "summary": "Spotify Action",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/v1/integrations/status": {
+      "get": {
+        "description": "Return configured status of optional integrations without exposing secrets.",
+        "operationId": "integrations_status_v1_integrations_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Integrations Status V1 Integrations Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Integrations Status",
         "tags": [
           "integrations"
         ]
@@ -14209,7 +15437,7 @@
     },
     "/v1/runtimes/relay/dispatch": {
       "post": {
-        "description": "Dispatch an operation through the NeMo Relay proxy adapter.",
+        "description": "Dispatch once through the configured HTTP Relay bridge.",
         "operationId": "dispatch_relay_operation_v1_runtimes_relay_dispatch_post",
         "requestBody": {
           "content": {
@@ -20208,6 +21436,119 @@
         ]
       }
     },
+    "/v1/workspaces/{workspace_id}/works/{work_id}/agent-runs/{run_id}/automations/{kind}": {
+      "post": {
+        "operationId": "configure_automation_v1_workspaces__workspace_id__works__work_id__agent_runs__run_id__automations__kind__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "heartbeat",
+                "loop"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomationCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Configure Automation",
+        "tags": [
+          "agent-runs"
+        ]
+      }
+    },
     "/v1/workspaces/{workspace_id}/works/{work_id}/agent-runs/{run_id}/control": {
       "post": {
         "operationId": "control_run_v1_workspaces__workspace_id__works__work_id__agent_runs__run_id__control_post",
@@ -22029,6 +23370,292 @@
         "summary": "Get Work Run",
         "tags": [
           "domain"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/works/{work_id}/sessions": {
+      "get": {
+        "operationId": "list_sessions_v1_workspaces__workspace_id__works__work_id__sessions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Query"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sessions",
+        "tags": [
+          "sessions"
+        ]
+      },
+      "post": {
+        "operationId": "operate_session_v1_workspaces__workspace_id__works__work_id__sessions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionManageArguments"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Operate Session",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/works/{work_id}/sessions/{session_id}": {
+      "get": {
+        "operationId": "get_session_v1_workspaces__workspace_id__works__work_id__sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session",
+        "tags": [
+          "sessions"
         ]
       }
     },

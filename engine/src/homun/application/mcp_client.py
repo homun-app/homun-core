@@ -44,6 +44,20 @@ def set_elicitation_callback(callback: Optional[ElicitationCallback]) -> None:
     _elicitation_callback = callback
 
 
+def mcp_elicitation_enabled() -> bool:
+    import os
+    return os.environ.get("HOMUN_MCP_ELICITATION", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def install_product_elicitation(callback: Optional[ElicitationCallback]) -> bool:
+    """Install product-owned elicitation callback for MCP sessions when opt-in env is set."""
+    if not mcp_elicitation_enabled():
+        set_elicitation_callback(None)
+        return False
+    set_elicitation_callback(callback)
+    return True
+
+
 async def _refuse_sampling(context, params: types.CreateMessageRequestParams):
     return types.ErrorData(
         code=types.INVALID_REQUEST,

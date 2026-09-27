@@ -8,11 +8,12 @@ and durable receipt tracking.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from homun.application.channel_contracts import ChannelAdapter
+from homun.application.delivery_outcomes import delivery_status
 from homun.application.deliverable_extractor import (
     DeliverableAttachment,
     extract_deliverables_from_text,
@@ -65,65 +66,51 @@ def dispatch_deliverables_for_turn(
     new_deliverables: List[DeliverableAttachment] = []
     already_delivered: List[DeliverableAttachment] = []
 
-    # 2. Check at-most-once delivery state in ledger
+    receipts: List[DeliveryReceipt] = []
+    claims: List[DeliveryReceipt] = []
+    blocked = False
     for item in extracted:
-        if dlv_ledger.is_delivered(session_id, item.path):
+        receipt, acquired = dlv_ledger.claim_delivery(
+            session_id, platform, item.path, item.filename, item.category,
+            destination_id=destination_id, metadata=metadata, intent=adapter is None,
+        )
+        if acquired:
+            new_deliverables.append(item)
+            if adapter is not None:
+                claims.append(receipt)
+            else:
+                receipts.append(receipt)
+        elif receipt.status == "delivered":
             already_delivered.append(item)
         else:
-            new_deliverables.append(item)
+            blocked = True
+            receipts.append(receipt)
 
-    # 3. Prepare ChannelMedia objects for new deliverables
-    media_items: List[ChannelMedia] = [
-        ChannelMedia(
-            url=item.path,
-            mime_type=item.mime_type,
-            file_name=item.filename,
-            size_bytes=item.size_bytes,
-        )
-        for item in new_deliverables
-    ]
-
+    media_items = [ChannelMedia(url=item.path, mime_type=item.mime_type,
+        file_name=item.filename, size_bytes=item.size_bytes) for item in new_deliverables]
     delivery_response: Dict[str, Any] = {}
-    receipts: List[DeliveryReceipt] = []
-
-    # 4. If adapter provided, deliver to channel
-    if adapter is not None:
-        delivery_response = adapter.send(
-            destination_id,
-            cleaned_text,
-            thread_id=thread_id,
-            reply_to_id=reply_to_id,
-            media=media_items if media_items else None,
-        )
-
-        # 5. Record receipts for newly dispatched deliverables
-        delivery_status = "delivered" if delivery_response.get("delivered") else "failed"
-        for item in new_deliverables:
-            rcp = dlv_ledger.record_delivery(
-                session_id=session_id,
-                channel=platform,
-                path=item.path,
-                filename=item.filename,
-                category=item.category,
-                metadata={
-                    **(metadata or {}),
-                    "channel_response": delivery_response,
-                    "status": delivery_status,
-                },
-            )
-            receipts.append(rcp)
+    if adapter is None:
+        delivery_response = {"delivered": False, "code": "backend_unavailable",
+                             "delivery_state": "intent"}
+    elif blocked and not claims:
+        delivery_response = {"delivered": False, "code": "delivery_outcome_unknown",
+                             "delivery_state": "unknown"}
     else:
-        # No adapter: only record delivery intent
-        for item in new_deliverables:
-            rcp = dlv_ledger.record_delivery(
-                session_id=session_id,
-                channel=platform,
-                path=item.path,
-                filename=item.filename,
-                category=item.category,
-                metadata=metadata or {},
-            )
-            receipts.append(rcp)
+        try:
+            response = adapter.send(destination_id, cleaned_text, thread_id=thread_id,
+                reply_to_id=reply_to_id, media=media_items or None)
+            delivery_response = response if isinstance(response, dict) else {}
+            status = delivery_status(delivery_response, has_media=bool(media_items))
+            delivery_response = {**delivery_response, "delivery_state": status}
+            if status == "unknown":
+                delivery_response.update(delivered=False, code="delivery_outcome_unknown")
+        except Exception as exc:
+            status = "unknown"
+            delivery_response = {"delivered": False, "code": "delivery_outcome_unknown",
+                "delivery_state": status, "error": str(exc)}
+        for receipt in claims:
+            receipts.append(dlv_ledger.finish_delivery(receipt, status,
+                metadata={"channel_response": delivery_response, "status": status}))
 
     return DeliverableTurnResult(
         cleaned_text=cleaned_text,

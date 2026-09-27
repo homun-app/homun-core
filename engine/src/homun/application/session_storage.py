@@ -130,7 +130,7 @@ class SessionStorage:
         with self._lock:
             conn = self._get_connection()
             with conn:
-                conn.execute("""
+                cursor = conn.execute("""
                 INSERT INTO sessions (
                     id, workspace_id, title, cwd, status, pinned, parent_id, forked_at_turn,
                     created_at, updated_at, last_active_at, model_pin, provider_pin,
@@ -151,7 +151,8 @@ class SessionStorage:
                     prompt_tokens=excluded.prompt_tokens,
                     completion_tokens=excluded.completion_tokens,
                     cost_estimate=excluded.cost_estimate,
-                    metadata=excluded.metadata;
+                    metadata=excluded.metadata
+                WHERE sessions.workspace_id = excluded.workspace_id;
                 """, (
                     session.id, session.workspace_id, session.title, session.cwd,
                     session.status, 1 if session.pinned else 0, session.parent_id,
@@ -160,6 +161,8 @@ class SessionStorage:
                     session.message_count, session.prompt_tokens, session.completion_tokens,
                     session.cost_estimate, json.dumps(session.metadata or {}),
                 ))
+                if cursor.rowcount != 1:
+                    raise ValueError('Session belongs to another workspace')
 
     def get_session(self, session_id: str) -> Optional[SessionRecord]:
         with self._lock:
@@ -451,7 +454,7 @@ class SessionStorage:
                     now = time.time()
                     conn.execute("""
                     INSERT INTO sessions (id, workspace_id, title, cwd, status, created_at, updated_at, last_active_at)
-                    VALUES (?, 'default', 'Recovered Session', '', 'active', ?, ?, ?);
+                    VALUES (?, '__quarantine__', 'Recovered Session', '', 'archived', ?, ?, ?);
                     """, (sid, now, now, now))
                     repaired["orphans_adopted"] += 1
 

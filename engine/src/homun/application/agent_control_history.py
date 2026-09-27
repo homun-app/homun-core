@@ -23,8 +23,8 @@ def consume_steering(run):
 def close_pending(run):
     unfinished=[]
     while call := agent_native.pending(run):
-        outcome='unknown' if call.id == run.get('_active_call_id') else 'not_executed'
-        if call.name==agent_native.QUESTION.name and run['status']=='waiting_input':
+        outcome='unknown' if (call.id == run.get('_active_call_id') or call.id in run.get('_active_call_ids', [])) else 'not_executed'
+        if call.name in {agent_native.QUESTION.name, 'clarify'} and run['status']=='waiting_input':
             outcome='awaiting_response_cancelled'
         unfinished.append({'tool':call.name,'arguments':call.arguments,'outcome':outcome})
         agent_native.append_result(run,{'error_code':'agent_run_interrupted','outcome':outcome,

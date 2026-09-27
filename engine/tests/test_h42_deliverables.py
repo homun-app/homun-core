@@ -219,7 +219,7 @@ def test_deliverable_dispatcher():
                 "text": text,
                 "media": media or [],
             })
-            return {"delivered": True, "platform": self.platform, "media_count": len(media or [])}
+            return {"delivered": True, "media_delivered": True, "platform": self.platform, "media_count": len(media or [])}
 
     mock_adapter = MockAdapter()
     text = (

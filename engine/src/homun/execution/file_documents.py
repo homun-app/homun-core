@@ -20,7 +20,13 @@ def extract(name: str, data: bytes) -> dict:
         return _pdf(data)
     if suffix in _DOCX:
         return _docx(data)
-    if suffix in {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.xlsx', '.pptx', '.sqlite', '.db'}:
+    if suffix in {'.xlsx', '.pptx'}:
+        from homun.materials.extract import extract_text
+        result = extract_text(data, filename=name)
+        status = result.status if result.status in {'extracted', 'failed'} else 'unavailable'
+        return {'status': status, 'text': result.text,
+                'reason': f'{suffix} text extraction: {status}; formulas and visual layout are not evaluated'}
+    if suffix in {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.sqlite', '.db'}:
         return {'status': 'unavailable', 'text': '',
                 'reason': f'{suffix} text extraction is not available in this workspace read'}
     raise ValidationError('Not an extracted document')
@@ -49,7 +55,9 @@ def _xml(payload: bytes):
 def _docx(data: bytes) -> dict:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as package:
-            root = _xml(package.read('word/document.xml'))
+            from homun.materials.office_archive import validate_archive, read_xml
+            validate_archive(package)
+            root = read_xml(package, 'word/document.xml')
     except (zipfile.BadZipFile, KeyError, ElementTree.ParseError, OSError, ValueError) as exc:
         return {'status': 'failed', 'text': '', 'reason': f'DOCX text extraction failed: {type(exc).__name__}'}
     lines = []

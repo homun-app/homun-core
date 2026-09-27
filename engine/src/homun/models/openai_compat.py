@@ -55,7 +55,9 @@ class OpenAICompatibleProvider:
         base_url: str = "https://api.openai.com/v1",
         default_model: str = "gpt-4o-mini",
         timeout_seconds: float = 120.0,
+        provider_id: str = "openai_compatible",
     ) -> None:
+        self.provider_id = provider_id
         self._secrets = secrets
         self.base_url = base_url.rstrip("/")
         self.default_model = default_model
@@ -63,7 +65,7 @@ class OpenAICompatibleProvider:
         self.last_stream_result: CompletionResult | None = None
 
     def _api_key(self) -> str | None:
-        key = self._secrets.get(SECRET_KEY)
+        key = self._secrets.get(f"provider:{self.provider_id}:api_key") or self._secrets.get(SECRET_KEY)
         if key:
             return key
         # Local OpenAI-compatible gateways (e.g. Ollama) often need no real key.

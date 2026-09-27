@@ -41,6 +41,7 @@ class CodeExecutionRpcServer:
         self._lock = threading.Lock()
         self._shutdown_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._clients = {}
 
         self.is_unix_socket = (sys.platform != "win32")
         self.socket_path: Optional[str] = None
@@ -100,12 +101,16 @@ class CodeExecutionRpcServer:
             with client_sock:
                 fileobj = client_sock.makefile("rwb")
                 while not self._shutdown_event.is_set():
-                    line = fileobj.readline()
+                    line = fileobj.readline(1_048_577)
+                    if len(line) > 1_048_576:
+                        break
                     if not line:
                         break
 
                     try:
                         req = json.loads(line.decode("utf-8"))
+                        if not isinstance(req, dict):
+                            raise ValueError("RPC payload must be an object")
                     except Exception as exc:
                         resp = {"status": "error", "error": f"Invalid JSON payload: {exc}"}
                         fileobj.write(json.dumps(resp).encode("utf-8") + b"\n")
@@ -153,6 +158,8 @@ class CodeExecutionRpcServer:
                         self.tool_call_count += 1
                         current_count = self.tool_call_count
 
+                    if self._shutdown_event.is_set():
+                        break
                     # 5. Dispatch
                     t0 = time.monotonic()
                     try:
@@ -182,6 +189,9 @@ class CodeExecutionRpcServer:
                     fileobj.flush()
         except Exception as exc:
             logger.debug("RPC client connection error: %s", exc)
+        finally:
+            with self._lock:
+                self._clients.pop(client_sock, None)
 
     def stop(self) -> None:
         """Shut down server and remove socket."""
@@ -193,6 +203,17 @@ class CodeExecutionRpcServer:
                 pass
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
+        with self._lock:
+            clients = list(self._clients.items())
+        for client, thread in clients:
+            try:
+                client.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            client.close()
+        deadline = time.monotonic() + 1
+        for client, thread in clients:
+            thread.join(timeout=max(0, deadline - time.monotonic()))
         if self.socket_path and os.path.exists(self.socket_path):
             try:
                 os.remove(self.socket_path)

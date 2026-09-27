@@ -144,7 +144,7 @@ def test_catalog_packs_full_manifest_and_install(tmp_path: Path):
     manifest = mgr.get_catalog_manifest()
     assert len(manifest) == len(BUILTIN_PACKS)
     manifest_ids = {p.id for p in manifest}
-    assert manifest_ids == {"dev_essentials", "data_analysis", "sysadmin_suite"}
+    assert manifest_ids == {"productivity", "research", "dev_essentials", "data_analysis", "sysadmin_suite"}
     assert all(not p.is_installed for p in manifest)
 
     # 2. Install representative bundled pack

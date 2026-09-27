@@ -6,34 +6,13 @@ from homun.domain.errors import ValidationError
 from homun.domain.models import Actor
 from homun.execution.contracts import digest
 from homun.application.agent_terminal_link import validate_link
+from homun.application.agent_terminal_request import proposal_body
 
 
 def stage(ctx,actor,run,decision):
     call=agent_native.pending(run)
     proposal_id='terminal:'+digest([run['id'],run['_epoch'],call.id])
-    terminal=run['terminal']
-    body={'command_id':proposal_id,'command':decision.arguments['command'],'policy':terminal['policy'],
-        'timeout_seconds':decision.arguments.get('timeout_seconds',300),'expected_version':run['_run_version']}
-    ssh_key_path=None
-    if terminal['policy']=='local-private-v1':
-        if decision.arguments.get('pty'):
-            raise ValidationError('A local session has no terminal')
-    elif terminal['policy']=='ssh-v1':
-        if decision.arguments.get('pty'):
-            raise ValidationError('An SSH session has no terminal')
-        body.update(ssh_host=terminal['host'], ssh_user=terminal['user'], ssh_port=terminal['port'],
-                    ssh_host_key=terminal['host_key'])
-        ssh_key_path=terminal['key_path']
-    else:
-        body['image']=terminal['image']
-        if decision.arguments.get('pty') and not decision.arguments.get('background'):
-            raise ValidationError('A PTY session must stay in the background')
-        if decision.arguments.get('background'):
-            body['background']=True
-            if terminal.get('version',1)>=4:body['stdin']=True
-            if decision.arguments.get('pty'):body['pty']=True
-    if terminal['policy'] in {'local-private-v1', 'ssh-v1'} and decision.arguments.get('background'):
-        body['background']=True
+    body, ssh_key_path = proposal_body(run, decision.arguments, proposal_id)
     terminal_jobs.propose(ctx,actor,run['work_id'],body,agent_binding={
         'run_id':run['id'],'epoch':run['_epoch'],'call_id':call.id,'lease_token':run['_lease_token']},
         ssh_key_path=ssh_key_path)

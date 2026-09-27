@@ -4,6 +4,8 @@ import logging
 from contextlib import asynccontextmanager
 from homun.runtime import dbos_app
 from homun.application.cron_dispatcher import fire_due_jobs
+from homun.application.cron_reconciliation import reconcile_cron_runs
+from homun.application.agent_automation import wake_due_automation
 
 @asynccontextmanager
 async def runtime_lifespan(ctx):
@@ -41,7 +43,10 @@ async def runtime_lifespan(ctx):
 
     from homun.application.routines import reconcile_routine_schedules, take_schedule_sync_request
 
+    cron_worker = None
+
     async def pump():
+        nonlocal cron_worker
         while not stop.is_set():
             try:
                 await asyncio.to_thread(deliver_pending, ctx)
@@ -53,14 +58,21 @@ async def runtime_lifespan(ctx):
             except Exception:
                 logging.getLogger(__name__).exception("Routine schedule sync failed")
             try:
-                await asyncio.to_thread(
-                    fire_due_jobs,
-                    getattr(ctx, "workspace_id", None) or "default",
-                    ctx=ctx,
-                    limit=5,
-                )
+                await asyncio.to_thread(reconcile_cron_runs, ctx, limit=20)
+                if cron_worker is None or cron_worker.done():
+                    if cron_worker is not None:
+                        finished, cron_worker = cron_worker, None
+                        finished.result()
+                    cron_worker = asyncio.create_task(asyncio.to_thread(
+                        fire_due_jobs, ctx.workspace_id, ctx=ctx, limit=1, cancelled=stop.is_set))
             except Exception:
                 logging.getLogger(__name__).exception("Cron due-fire pass failed")
+            try:
+                from homun.application.delegation_runtime import reconcile_delegations
+                await asyncio.to_thread(reconcile_delegations, ctx, limit=20)
+                await asyncio.to_thread(wake_due_automation, ctx, limit=20)
+            except Exception:
+                logging.getLogger(__name__).exception("Automation wake pass failed")
             try:
                 await asyncio.wait_for(stop.wait(), timeout=0.5)
             except TimeoutError:
@@ -74,4 +86,8 @@ async def runtime_lifespan(ctx):
     finally:
         stop.set()
         await worker
-        await asyncio.to_thread(dbos_app.shutdown_dbos)
+        try:
+            if cron_worker is not None:
+                await cron_worker
+        finally:
+            await asyncio.to_thread(dbos_app.shutdown_dbos)

@@ -7,7 +7,7 @@ Callers must only depend on this module and models.types.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Literal, Protocol, TYPE_CHECKING
+from typing import Callable, Literal, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from homun.models.agent_turn import ToolDefinition
@@ -103,6 +103,8 @@ class ModelPort(Protocol):
         messages: list[ChatMessage],
         *,
         connection_id: str | None = None,
+        model_id: str | None = None,
+        expected_runtime: dict | None = None,
     ) -> CompletionResult: ...
 
     def stream(
@@ -116,14 +118,23 @@ class ModelPort(Protocol):
 
 
 class NativeToolPort(ModelPort, Protocol):
-    """Optional native conversation surface; separate from plain-chat adapters."""
+    """Optional native conversation surface; separate from plain-chat adapters.
+
+    Streaming is opt-in and returns only a fully validated terminal result.
+    ``cancel_check`` is polled while connecting/reading; cancellation is typed
+    and never retried. ``on_delta`` receives count-only progress dictionaries:
+    type=native_stream_progress, chunks, text_chars, tool_calls. Callbacks are
+    transient and may run on a joined worker when invoked by an async host.
+    """
 
     def complete_tools(self, messages: list["NativeMessage"], *, tools: list["ToolDefinition"] | None = None,
-                       connection_id: str | None = None, model_id: str | None = None,
+                       connection_id: str | None = None, model_id: str | None = None, expected_runtime: dict | None = None,
                        context_window: int | None = None,
-                       max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS) -> "NativeResult": ...
+                       max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+                       stream: bool = False, cancel_check: Callable[[], bool] | None = None,
+                       on_delta: Callable[[dict], None] | None = None) -> "NativeResult": ...
 
-    def complete_summary(self, messages: list["NativeMessage"], *, connection_id: str | None = None,
+    def complete_summary(self, messages: list["NativeMessage"], *, connection_id: str | None = None, model_id: str | None = None, expected_runtime: dict | None = None,
                          context_window: int | None = None,
                          max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS) -> "NativeResult": ...
 

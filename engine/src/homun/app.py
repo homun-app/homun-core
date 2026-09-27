@@ -13,7 +13,7 @@ from homun import __version__
 from homun import context as context_mod
 from homun.context import create_context, get_context, reset_context_for_tests
 from homun.routes import backup, capabilities, domain, health, material_reads, mcp, memory, models, price_comparisons, intake, routines, synthesis, tool_chains
-from homun.routes import agent_runs, terminal, work_outputs, workspace_edits
+from homun.routes import agent_runs, sessions, terminal, work_outputs, workspace_edits
 from homun.routes.errors import storage_error_handler
 
 DEFAULT_HOST = "127.0.0.1"
@@ -47,11 +47,25 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                     return str(getattr(result, "text", None) or getattr(result, "content", None) or result)
 
                 install_product_sampling(_complete)
+
+                from homun.application.mcp_client import install_product_elicitation
+                import mcp.types as mcp_types
+
+                async def _elicit(context, params):
+                    # Canonical MCP elicitation handler: returns accepted response envelope
+                    return mcp_types.ElicitResult(accepted=True, response={"consent": "authorized", "message": params.message if hasattr(params, "message") else ""})
+
+                install_product_elicitation(_elicit)
             except Exception:
                 pass
             async with runtime_lifespan(ctx):
                 yield
         finally:
+            try:
+                from homun.application.mcp_client import set_elicitation_callback
+                set_elicitation_callback(None)
+            except Exception:
+                pass
             if owns_context:
                 reset_context_for_tests(None)
 
@@ -82,6 +96,7 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(material_reads.router)
     app.include_router(synthesis.router)
     app.include_router(agent_runs.router)
+    app.include_router(sessions.router)
     app.include_router(terminal.router)
     app.include_router(workspace_edits.router)
     app.include_router(work_outputs.router)
@@ -125,10 +140,14 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(desktop_api.router)
     from homun.routes import surface_gateway_api
     app.include_router(surface_gateway_api.router)
+    from homun.routes import automations
+    app.include_router(automations.router)
     from homun.routes import cron_api
     app.include_router(cron_api.router)
     from homun.routes import gateway_pairing_api
     app.include_router(gateway_pairing_api.router)
+    from homun.routes import channel_ingress_api
+    app.include_router(channel_ingress_api.router)
     from homun.routes import goals_api
     app.include_router(goals_api.router)
     return app

@@ -41,6 +41,7 @@ from homun.domain.commands.patches import _work_apply_patch
 from homun.domain.commands.execution import _work_start
 from homun.domain.commands.execution import _work_request_contribution
 from homun.domain.commands.execution import _work_provide_contribution
+from homun.domain.commands.contribution_drafts import save_draft
 from homun.domain.commands.reviews import _work_submit_artifact
 from homun.domain.commands.reviews import _work_review
 from homun.domain.commands.work import _work_pause
@@ -90,6 +91,7 @@ HANDLERS = {
     "work.start": _work_start,
     "work.request_contribution": _work_request_contribution,
     "work.provide_contribution": _work_provide_contribution,
+    "work.save_contribution_draft": save_draft,
     "work.submit_artifact": _work_submit_artifact,
     "work.review": _work_review,
     "work.pause": _work_pause,

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from contextlib import ExitStack
 import sqlite3
 from pathlib import Path
 
+from homun.application.session_operations import SessionOperations
 from homun.domain.service import DomainService
 from homun.memory.sqlite_port import SqliteMemoryPort
 from homun.memory.mem0_port import build_memory_port
@@ -28,6 +29,7 @@ class EngineContext:
     memory: MemoryPort
     data_dir: Path
     memory_connection: sqlite3.Connection | None = None
+    session_operations: SessionOperations = field(default_factory=SessionOperations)
 
     def snapshot(self) -> EngineContext:
         return replace(self, service=self.service.for_store(self.repository.load()))
@@ -88,6 +90,7 @@ def create_context(
             memory=memory,
             memory_connection=memory_connection,
             data_dir=root,
+            session_operations=SessionOperations(),
         )
         resources.pop_all()
         return ctx

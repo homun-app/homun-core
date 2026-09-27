@@ -299,7 +299,8 @@ def test_agent_runs_terminal_wait_id_view(api_setup):
     assert matching[0]["terminal_wait_id"] == "term_sess_xyz"
 
 
-def test_agent_runs_fallback_connection_and_failover(api_setup, monkeypatch):
+@pytest.mark.parametrize("known_usage,attempt_cap", [(False, 8), (True, 8), (True, 1)])
+def test_agent_runs_fallback_connection_and_failover(api_setup, monkeypatch, known_usage, attempt_cap):
     from types import SimpleNamespace
     from homun.models.port import Connection
     from homun.models.native_errors import NativeModelError, RATE_LIMITED
@@ -314,6 +315,9 @@ def test_agent_runs_fallback_connection_and_failover(api_setup, monkeypatch):
         kind="openai_compatible",
         display_name="Secondary Provider",
         model_id="secondary-model",
+        base_url="http://127.0.0.1:8000/v1",
+        credential_present=True,
+        context_window=8192, max_output_tokens=1024,
         active=True,
     )
     orig_get_connection = ctx.models.get_connection
@@ -349,21 +353,45 @@ def test_agent_runs_fallback_connection_and_failover(api_setup, monkeypatch):
     )
     assert approve_resp.status_code == 200
 
+    with ctx.repository.transaction() as store:
+        store.commands["run_with_failover"].result["limits"]["max_model_attempts"] = attempt_cap
+    from homun.models.types import UsageEntry
+    primary_usage = UsageEntry(id="primary", provider_id="primary", model_id="m", input_tokens=7, output_tokens=2) if known_usage else None
+    secondary_usage = UsageEntry(id="secondary", provider_id="secondary", model_id="m", input_tokens=11, output_tokens=3) if known_usage else None
+
     # 3. Simulate complete_tools: primary fails with 429 RATE_LIMITED, secondary succeeds
     attempts = []
     def mock_complete_tools(messages, **kwargs):
         conn_id = kwargs.get("connection_id")
         attempts.append(conn_id)
         if conn_id != "secondary_provider":
-            raise NativeModelError(RATE_LIMITED, "Rate limit exceeded (429)", status_code=429)
-        return SimpleNamespace(message=NativeMessage(role="assistant", content="Answer from secondary"), usage=None)
+            raise NativeModelError(RATE_LIMITED, "Rate limit exceeded (429)", status_code=429, usage=primary_usage)
+        return SimpleNamespace(message=NativeMessage(role="assistant", content="Answer from secondary"), usage=secondary_usage)
 
     monkeypatch.setattr(ctx.models, "complete_tools", mock_complete_tools)
 
     # 4. Advance execution turn
     outcome = advance(ctx, "run_with_failover")
+    if attempt_cap == 1:
+        assert outcome == "failed"
+        assert attempts == ["openai_compatible"]
+        budget = ctx.repository.load().work_budgets[work_id]
+        assert budget.spent.input_tokens == 7
+        assert budget.spent.attempts == 1
+        assert not budget.pending
+        return
     assert outcome == "completed"
     assert attempts == ["openai_compatible", "secondary_provider"]
+    budget = ctx.repository.load().work_budgets[work_id]
+    assert budget.unknown.attempts == (0 if known_usage else 2)
+    if known_usage:
+        assert budget.spent.input_tokens == 18
+        assert budget.spent.output_tokens == 5
+        assert budget.spent.attempts == 2
+    assert not budget.pending
+    assert ctx.repository.load().commands['run_with_failover'].result['model_attempts'] == 2
+    persisted = ctx.repository.load().commands["run_with_failover"].result
+    assert persisted["_context_policy"] == {"context_window":8192, "max_output_tokens":1024}
 
     # 5. Verify persisted run and RunView
     list_resp = client.get(base_url, headers=headers)

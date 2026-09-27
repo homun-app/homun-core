@@ -1,4 +1,4 @@
-"""NeMo Relay / Enterprise subscription proxy adapter (H39).
+"""Configured HTTP dispatch bridge (H39), not full NeMo Relay SDK parity.
 
 Provides corporate relay session isolation, operation mapping, header injection
 (x-dynamo-session-id), and explicit unavailable service state when unconfigured.
@@ -6,6 +6,9 @@ Provides corporate relay session isolation, operation mapping, header injection
 from __future__ import annotations
 
 import logging
+import os
+import httpx
+from urllib.parse import urlsplit
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 from uuid import uuid4
@@ -31,6 +34,8 @@ class RelayExecutionResult:
     output: Dict[str, Any]
     headers_injected: Dict[str, str]
     error: Optional[str] = None
+    error_code: Optional[str] = None
+    source: str = "engine"
 
 
 class RelayRuntime:
@@ -39,14 +44,16 @@ class RelayRuntime:
     def __init__(
         self,
         endpoint_url: Optional[str] = None,
-        enabled: bool = False,
+        enabled: Optional[bool] = None,
+        *, timeout_seconds: float = 30.0,
     ) -> None:
-        self.endpoint_url = endpoint_url
-        self.enabled = enabled
+        self.endpoint_url = endpoint_url or os.getenv("HOMUN_RELAY_ENDPOINT_URL")
+        self.enabled = enabled if enabled is not None else os.getenv("HOMUN_RELAY_ENABLED", "").lower() in {"1", "true"}
+        self.timeout_seconds = timeout_seconds
         self._active_sessions: Dict[str, RelayTurnContext] = {}
 
     def is_available(self) -> bool:
-        """Check if relay runtime is actively configured and reachable."""
+        """Check configuration only; this does not probe remote reachability."""
         return self.enabled and bool(self.endpoint_url)
 
     def create_session(
@@ -88,19 +95,32 @@ class RelayRuntime:
                 output={},
                 headers_injected=headers,
                 error="Relay service is not configured or disabled (explicit gap).",
+                error_code="backend_unavailable",
             )
 
         try:
             if passthrough_handler:
                 res = passthrough_handler(payload, headers)
             else:
-                res = {"status": "relayed", "data": payload}
+                endpoint = urlsplit(self.endpoint_url)
+                if endpoint.scheme not in {"http", "https"} or not endpoint.netloc or endpoint.username or endpoint.password or endpoint.fragment:
+                    raise ValueError("Invalid configured HTTP dispatch endpoint")
+                # This envelope is Homun's configured bridge contract, not an
+                # invented NeMo endpoint. Never retry a possibly accepted effect.
+                with httpx.Client(timeout=self.timeout_seconds, follow_redirects=False, trust_env=False) as client:
+                    response = client.post(self.endpoint_url, headers=headers,
+                                           json={"operation": operation, "payload": payload})
+                    response.raise_for_status()
+                    res = response.json()
+                if not isinstance(res, dict) or not res:
+                    raise ValueError("Dispatch response must be a nonempty JSON object")
 
             return RelayExecutionResult(
                 success=True,
                 operation=operation,
                 output=res,
                 headers_injected=headers,
+                source="simulation" if passthrough_handler is not None else "engine",
             )
         except Exception as exc:
             return RelayExecutionResult(
@@ -108,5 +128,9 @@ class RelayRuntime:
                 operation=operation,
                 output={},
                 headers_injected=headers,
-                error=str(exc),
+                error="HTTP dispatch failed; outcome may be unknown" if isinstance(exc, httpx.RequestError) else "Invalid or rejected dispatch response",
+                error_code=("runtime_timeout" if isinstance(exc, httpx.TimeoutException) else
+                            "runtime_http_error" if isinstance(exc, httpx.HTTPStatusError) else
+                            "runtime_transport_error" if isinstance(exc, httpx.RequestError) else "runtime_protocol_error"),
+                source="simulation" if passthrough_handler is not None else "engine",
             )

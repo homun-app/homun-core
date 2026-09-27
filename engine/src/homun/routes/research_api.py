@@ -20,6 +20,7 @@ from homun.application.batch_eval_runner import (
     BatchItem,
     BatchItemResult,
     BatchSummary,
+    create_canonical_batch_executor,
 )
 from homun.application.observability_exporter import (
     ObservabilityCollector,
@@ -32,7 +33,8 @@ router = APIRouter(prefix="/v1/research", tags=["research"])
 _data_dir = default_data_dir()
 _trajectory_store = TrajectoryStore(_data_dir / "trajectories")
 _trajectory_compressor = TrajectoryCompressor()
-_batch_runner = BatchEvalRunner(_data_dir / "eval_batches")
+_canonical_executor = create_canonical_batch_executor(data_dir=_data_dir, trajectory_store=_trajectory_store)
+_batch_runner = BatchEvalRunner(_data_dir / "eval_batches", task_executor=_canonical_executor)
 _observability_collector = ObservabilityCollector()
 
 

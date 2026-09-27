@@ -15,8 +15,8 @@ from homun.application.loop_manager import LoopManager
 
 
 def automation_session_id(run: Dict[str, Any]) -> str:
-    """Canonical session key for heartbeat/loop (run id unless explicitly overridden)."""
-    return str(run.get("_automation_session_id") or run.get("session_id") or run.get("id") or "")
+    """Canonical goal and automation key; work identity survives run epochs."""
+    return str(run.get("work_id") or run.get("_automation_session_id") or run.get("session_id") or run.get("id") or "")
 
 
 def inject_due_automation(

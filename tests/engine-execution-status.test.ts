@@ -18,3 +18,10 @@ test('external approval waits keep polling and refresh the work', async () => {
   assert.equal(executionPolls('waiting_external'), true);
   assert.equal(executionRefreshes('waiting_external', 'running'), true);
 });
+
+test('automation waits remain observable through wake and human controls', async () => {
+  const { executionPolls, executionRefreshes } = await import('../apps/web/src/lib/engine-execution-status.ts');
+  assert.equal(executionPolls('waiting_automation'), true);
+  assert.equal(executionRefreshes('waiting_automation', 'running'), true);
+  assert.equal(executionRefreshes('queued', 'waiting_automation'), true);
+});

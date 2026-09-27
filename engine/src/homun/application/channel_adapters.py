@@ -114,6 +114,11 @@ class TelegramAdapter(ChannelAdapter):
             return super().send(
                 channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media
             )
+        if media:
+            from homun.application.channel_delivery_recovery import send_with_media_dispatch
+            return send_with_media_dispatch(
+                self, channel_id, text, media=media, thread_id=thread_id, reply_to_id=reply_to_id
+            )
         payload: Dict[str, Any] = {"chat_id": channel_id, "text": text}
         if thread_id:
             payload["message_thread_id"] = thread_id
@@ -693,9 +698,13 @@ class ChannelRegistry:
         self,
         pairing_manager: Optional[GatewayPairingManager] = None,
         lease_manager: Optional[TurnLeaseManager] = None,
+        inbound_queue: Optional[Any] = None,
+        delivery_supervisor: Optional[Any] = None,
     ):
         self.pairing_manager = pairing_manager or GatewayPairingManager()
         self.lease_manager = lease_manager or TurnLeaseManager()
+        self.inbound_queue = inbound_queue
+        self.delivery_supervisor = delivery_supervisor
         core: List[ChannelAdapter] = [
             TelegramAdapter(), DiscordAdapter(), SlackAdapter(), WhatsAppAdapter(),
             WebhookRelayAdapter(), NtfyAdapter(), MatrixAdapter(), EmailAdapter(),
@@ -713,7 +722,6 @@ class ChannelRegistry:
         self._adapters["teams-meetings"] = self._adapters["teams_meetings"]
         self._adapters["wecom-callback"] = self._adapters["wecom_callback"]
         self._adapters["whatsapp-cloud"] = self._adapters["whatsapp_cloud"]
-
 
     def register_adapter(self, adapter: ChannelAdapter) -> None:
         self._adapters[adapter.platform.lower()] = adapter
@@ -733,9 +741,14 @@ class ChannelRegistry:
             raise ValueError(f"No adapter registered for platform: {platform}")
 
         message = adapter.parse_inbound(raw_payload)
+        q_item = None
+        if self.inbound_queue:
+            q_item = self.inbound_queue.enqueue(platform, raw_payload, message, status="pending")
 
         # 1. Authorization check
         if not self.pairing_manager.is_user_authorized(message.platform, message.user_id):
+            if q_item:
+                self.inbound_queue.fail(q_item.item_id, "Unauthorized sender", retryable=False)
             return {
                 "status": "unauthorized",
                 "platform": message.platform,
@@ -751,18 +764,32 @@ class ChannelRegistry:
             response_text = handler(message)
 
             # 4. Deliver response
-            delivery_res = adapter.send(
+            from homun.application.channel_delivery_recovery import send_with_media_dispatch
+            delivery_res = send_with_media_dispatch(
+                adapter,
                 message.channel_id,
                 response_text,
                 thread_id=message.thread_id,
                 reply_to_id=message.id,
+                supervisor=self.delivery_supervisor,
             )
+            if q_item:
+                self.inbound_queue.complete(
+                    q_item.item_id,
+                    response_text,
+                    delivery_receipt_id=delivery_res.get("intent_id"),
+                )
             return {
                 "status": "processed",
                 "message_id": message.id,
                 "routing_key": routing_key,
                 "response": response_text,
                 "delivery": delivery_res,
+                "queue_item_id": q_item.item_id if q_item else None,
             }
+        except Exception as exc:
+            if q_item:
+                self.inbound_queue.fail(q_item.item_id, str(exc), retryable=True)
+            raise
         finally:
             self.lease_manager.release(token)

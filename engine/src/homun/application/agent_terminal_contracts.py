@@ -113,7 +113,7 @@ def _local_entries(config):
             "With background true, the result arrives once the process is running and includes job_id; "
             "then use terminal_poll, terminal_wait, or terminal_stop. "
             "Stdin and a terminal are not available. "
-            "Set timeout_seconds (1..3600, default 300). Deadline enforcement requires Homun to be running."),
+            "Set timeout_seconds (1..3600, default 300). Newly approved commands have deadlines enforced by their local supervisor even if Homun exits."),
         input_schema=BackgroundTerminalArguments.model_json_schema())
     catalog = [ToolEntry(definition, 'terminal', '1', BackgroundTerminalArguments, replay='never')]
     session = TerminalSessionArguments.model_json_schema()

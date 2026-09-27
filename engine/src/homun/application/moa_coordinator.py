@@ -27,6 +27,7 @@ from homun.application.moa_contracts import (
 )
 from homun.application.moa_filter import apply_privacy_filter
 from homun.application.moa_trace import save_moa_turn_trace
+from homun.domain.errors import DomainError
 from homun.models.native_turn import NativeMessage
 from homun.models.types import UsageEntry
 
@@ -119,6 +120,8 @@ class MoACoordinator:
                         duration_seconds=duration,
                     )
                     advisor_outputs.append(adv)
+                except DomainError:
+                    raise  # Authorization/admission failures must stop the fanout.
                 except Exception as exc:
                     logger.warning("MoA advisor %s failed: %s", ref.display_label, exc)
 

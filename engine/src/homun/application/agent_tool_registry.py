@@ -39,11 +39,23 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.browser_pages import execute as browser_execute
         for browser_entry in browser_entries(browser_execute, browser.get('version', 1)):
             registry.register(browser_entry)
-    if isinstance(browser, dict) and browser.get('policy') == 'owned-headless-v1' and browser.get('version') in {3, 4, 5}:
+    if isinstance(browser, dict) and browser.get('policy') == 'owned-headless-v1' and browser.get('version') in {3, 4, 5, 6}:
         from homun.application.browser_form_contracts import entries as browser_form_entries
         from homun.application.browser_form_pages import execute as browser_form_execute
         for browser_entry in browser_form_entries(browser_form_execute, browser.get('version')):
             registry.register(browser_entry)
+    desktop = run.get('desktop')
+    if isinstance(desktop, dict) and desktop.get('policy') == 'native-desktop-v1' and desktop.get('version') == 1:
+        from homun.application.desktop_tools import entries as desktop_entries
+        from homun.application.desktop_tools import execute as desktop_execute
+        for d_entry in desktop_entries(desktop_execute, desktop.get('version', 1)):
+            registry.register(d_entry)
+    cps = run.get('checkpoints')
+    if isinstance(cps, dict) and cps.get('policy') == 'workspace-checkpoints-v1' and cps.get('version') == 1:
+        from homun.application.checkpoint_contracts import entries as checkpoint_entries
+        from homun.application.checkpoint_tools import execute as checkpoint_execute
+        for cp_entry in checkpoint_entries(checkpoint_execute, cps.get('version', 1)):
+            registry.register(cp_entry)
     mem = run.get('memory')
     if isinstance(mem, dict) and mem.get('policy') == 'scoped-workspace-v1' and mem.get('version') == 1:
         from homun.application.memory_contracts import entries as memory_entries
@@ -126,6 +138,10 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             excluded = ('tool_search', 'tool_describe', 'tool_call')
         registry.register(ToolEntry(definition, 'discovery', version, DiscoveryArguments,
             lambda ctx, actor, current, args: {'tools': registry.search(args['query'], args['limit'], exclude=excluded)}))
+    from homun.application.surface_toolset_policy import is_tool_allowed_for_surface
+    for item in registry.manifest():
+        if not is_tool_allowed_for_surface(item['name'], run, metadata=item):
+            registry.unregister(item['name'])
     if 'tools' in run:
         registry.validate_manifest(run['tools'])
     return registry

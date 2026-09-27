@@ -2,7 +2,7 @@
 
 Provides approval boundaries for cross-session writes across memory, skills, workspace,
 and external side-effects. Denied actions produce zero side effects with an auditable
-refusal; approved actions execute strictly once.
+refusal; dispatch is fenced before effects and ambiguous outcomes are never retried.
 """
 from __future__ import annotations
 
@@ -40,6 +40,8 @@ class PendingActionRecord:
     resolved_at: Optional[float] = None
     rejection_reason: Optional[str] = None
     executed: bool = False
+    execution_state: str = "not_started"
+    error_code: Optional[str] = None
 
 
 class WriteApprovalGate:
@@ -83,7 +85,7 @@ class WriteApprovalGate:
         for action_id, payload in rows:
             try:
                 data = json.loads(payload)
-                self._records[action_id] = PendingActionRecord(
+                record = PendingActionRecord(
                     id=str(data.get("id") or action_id),
                     subsystem=str(data.get("subsystem") or "general"),
                     action=str(data.get("action") or ""),
@@ -94,8 +96,14 @@ class WriteApprovalGate:
                     created_at=float(data.get("created_at") or time.time()),
                     resolved_at=data.get("resolved_at"),
                     rejection_reason=data.get("rejection_reason"),
-                    executed=bool(data.get("executed")),
+                    executed=bool(data.get('executed')) if 'execution_state' in data else False,
+                    execution_state=str(data.get('execution_state') or ('unknown' if data.get('executed') else 'not_started')),
+                    error_code=data.get('error_code'),
                 )
+                if action_id in self._records:
+                    self._records[action_id].__dict__.update(record.__dict__)
+                else:
+                    self._records[action_id] = record
             except Exception as exc:
                 logger.warning("Failed to load approval %s: %s", action_id, exc)
 
@@ -149,6 +157,7 @@ class WriteApprovalGate:
     def list_pending(self, subsystem: Optional[str] = None) -> List[PendingActionRecord]:
         """List currently pending actions."""
         with self._lock:
+            self._load_from_db()
             records = list(self._records.values())
         if subsystem:
             records = [r for r in records if r.subsystem == subsystem]
@@ -157,6 +166,7 @@ class WriteApprovalGate:
     def get_record(self, action_id: str) -> Optional[PendingActionRecord]:
         """Get record by ID."""
         with self._lock:
+            self._load_from_db()
             return self._records.get(action_id)
 
     def approve_and_execute(
@@ -169,32 +179,40 @@ class WriteApprovalGate:
 
         Returns (success, result, error_message).
         """
-        with self._lock:
+        with self._lock, self._conn:
+            self._conn.execute('BEGIN IMMEDIATE')
+            self._load_from_db()
             record = self._records.get(action_id)
             if not record:
-                return False, None, f"Action '{action_id}' not found."
-
-            if record.status == STATUS_APPROVED or record.executed:
-                return False, None, f"Action '{action_id}' has already been executed."
-
+                return False, None, 'Action not found.'
+            if record.executed:
+                return False, None, 'Action has already been executed.'
+            if record.execution_state in {'dispatching', 'unknown'}:
+                return False, None, 'execution_outcome_unknown: reconciliation required before retry'
             if record.status == STATUS_REJECTED:
-                return False, None, f"Action '{action_id}' was rejected ({record.rejection_reason})."
-
+                return False, None, 'Action was rejected.'
             record.status = STATUS_APPROVED
             record.resolved_at = time.time()
-            record.executed = True
+            if executor is None:
+                self._persist(record)
+                return True, {'action_id': action_id, 'status': 'approved_pending_execution'}, None
+            record.execution_state = 'dispatching'
             self._persist(record)
 
-        # Execute payload handler outside lock
-        if executor:
-            try:
-                res = executor(record.payload)
-                return True, res, None
-            except Exception as exc:
-                logger.error("Execution of approved action %s failed: %s", action_id, exc)
-                return False, None, str(exc)
-
-        return True, {"action_id": action_id, "status": "approved_and_executed"}, None
+        # The durable dispatch intent fences other processes before any effect.
+        try:
+            result = executor(record.payload)
+        except Exception:
+            with self._lock, self._conn:
+                record.execution_state = 'unknown'
+                record.error_code = 'execution_outcome_unknown'
+                self._persist(record)
+            return False, None, 'execution_outcome_unknown: executor did not confirm completion'
+        with self._lock, self._conn:
+            record.execution_state = 'executed'
+            record.executed = True
+            self._persist(record)
+        return True, result, None
 
     def reject_action(
         self,
@@ -206,12 +224,14 @@ class WriteApprovalGate:
 
         Returns (success, error_message).
         """
-        with self._lock:
+        with self._lock, self._conn:
+            self._conn.execute('BEGIN IMMEDIATE')
+            self._load_from_db()
             record = self._records.get(action_id)
             if not record:
                 return False, f"Action '{action_id}' not found."
 
-            if record.executed:
+            if record.executed or record.execution_state in {'dispatching', 'unknown'}:
                 return False, f"Action '{action_id}' was already executed; cannot reject."
 
             record.status = STATUS_REJECTED

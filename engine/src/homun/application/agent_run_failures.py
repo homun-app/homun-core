@@ -6,12 +6,7 @@ from homun.domain.models import DomainEvent, utc_now
 from homun.domain.states import WorkStatus
 
 
-def interrupted(recovery) -> dict:
-    """A fenced recovery starts the next generation with a fresh budget."""
-    verdict = {key: value for key, value in recovery.items()
-               if key not in {'next_attempt_at', 'retry_after_seconds'}}
-    verdict.update(status='interrupted', attempts=0)
-    return verdict
+from homun.application.agent_recovery_state import interrupted
 
 
 def fail(ctx, run_id, code, *, token=None, blocked=False, epoch=None, expected_steering=None,
@@ -28,7 +23,9 @@ def fail(ctx, run_id, code, *, token=None, blocked=False, epoch=None, expected_s
             run = lookup(store, run_id)
             if epoch is not None and run['_epoch'] != epoch:
                 return 'superseded'
-            if run['status'] not in {'queued', 'running', 'waiting_input', 'waiting_external'}:
+            goal_wait = (run['status'] == 'waiting_automation'
+                         and run.get('automation_wait', {}).get('reason') == 'goal_gate_pending')
+            if run['status'] not in {'queued', 'running', 'waiting_input', 'waiting_external'} and not goal_wait:
                 return run['status']
             if token is not None and run.get('_lease_token') != token:
                 return run['status']
@@ -45,7 +42,7 @@ def fail(ctx, run_id, code, *, token=None, blocked=False, epoch=None, expected_s
                 run.pop('_lease_token', None)
                 run.pop('_lease_until', None)
                 work = store.works[run['work_id']]
-                if work.status == WorkStatus.RUNNING and work.version == run.get('_run_version'):
+                if not run.get('_delegation_parent') and work.status == WorkStatus.RUNNING and work.version == run.get('_run_version'):
                     work.status = WorkStatus.FAILED
                     work.version += 1
                     work.updated_at = utc_now()

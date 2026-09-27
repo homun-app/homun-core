@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from homun.domain.errors import NotFoundError, ValidationError
 from homun.models.fake import FakeProvider
+from homun.models.runtime_binding import bound_provider
 from homun.models.port import Connection, ConnectionKind
 from homun.models.types import ChatMessage, CompletionResult, UsageEntry, VerifyResult
 
@@ -75,9 +76,13 @@ class FakeModelAdapter:
         messages: list[ChatMessage],
         *,
         connection_id: str | None = None,
+        model_id: str | None = None,
+        expected_runtime: dict | None = None,
     ) -> CompletionResult:
-        del connection_id
-        result = self._provider.complete(messages)
+        if connection_id is not None:
+            self.get_connection(connection_id)
+        provider = bound_provider(self._provider, self._connection.id, expected_runtime)
+        result = provider.complete(messages, model_id=model_id)
         self.usage.append(result.usage)
         return result
 

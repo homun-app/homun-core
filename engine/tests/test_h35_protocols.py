@@ -303,10 +303,11 @@ async def test_acp_adapter_lifecycle_and_edit_approval():
     def on_event(event_type: str, data: Any):
         events.append((event_type, data))
 
-    prompt_res = await adapter.prompt(session.session_id, "Analyze file", event_callback=on_event)
-    assert prompt_res["status"] == "completed"
-    assert len(events) >= 2
-    assert any(e[0] == "message_chunk" for e in events)
+    from homun.domain.errors import BackendUnavailableError
+    with pytest.raises(BackendUnavailableError):
+        await adapter.prompt(session.session_id, "Analyze file", event_callback=on_event)
+    assert events == []
+    assert session.messages == []
 
     # 4. Propose edit and resolve approval
     proposals_captured = []

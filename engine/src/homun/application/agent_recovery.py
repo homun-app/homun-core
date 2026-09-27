@@ -83,15 +83,7 @@ def accept(run, phase):
         recovery.pop('retry_after_seconds', None)
 
 
-def interrupt(run):
-    """Owner controls fence unresolved waits; the new generation retries fresh."""
-    # Keep the format marker: a later crash must not trigger legacy migration.
-    run['_model_phase_attempts'] = {}
-    run.pop('_force_context_compaction', None)
-    run.pop('_overflow_recoveries', None)
-    recovery = run.get('recovery')
-    if recovery and recovery.get('status') == 'waiting':
-        run['recovery'] = interrupted(recovery)
+from homun.application.agent_recovery_state import interrupt
 
 
 def schedule(ctx, actor, run, error: NativeModelError, *, phase, expected_steering):

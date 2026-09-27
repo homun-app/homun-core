@@ -175,7 +175,8 @@ def test_managed_tool_gateway():
         managed_mode=True,
     )
     gateway = ManagedToolGateway(config=config)
-    assert gateway.is_available() is True
+    assert gateway.is_configured() is True
+    assert gateway.is_available() is False
 
     captured_headers = {}
 
@@ -201,7 +202,10 @@ def test_managed_tool_gateway():
 
 
 # 5. REST API Routes
-def test_alternate_runtimes_api_routes():
+def test_alternate_runtimes_api_routes(monkeypatch):
+    monkeypatch.setenv("HOMUN_CODEX_COMMAND", "/missing/codex")
+    monkeypatch.delenv("HOMUN_RELAY_ENDPOINT_URL", raising=False)
+    monkeypatch.delenv("HOMUN_RELAY_ENABLED", raising=False)
     app = create_app()
     client = TestClient(app)
 
@@ -224,8 +228,12 @@ def test_alternate_runtimes_api_routes():
             ],
         },
     )
+    assert resp.status_code == 422
+    resp = client.post('/v1/runtimes/codex/turn', json={'messages':[{'role':'user','content':'Hi'}]})
     assert resp.status_code == 200
-    assert resp.json()["text"] == "Hello from adapter"
+    assert resp.json()['source'] == 'engine'
+    assert resp.json()['error_code'] == 'backend_unavailable'
+    assert resp.json()['status'] != 'completed'
 
     # 3. POST /v1/runtimes/copilot-acp/turn
     resp = client.post(
@@ -235,16 +243,12 @@ def test_alternate_runtimes_api_routes():
             "simulated_response": "Output with <tool_call>{\"name\": \"sh\", \"arguments\": {}}</tool_call>",
         },
     )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["is_available"] is True
-    assert len(data["tool_calls"]) == 1
-    assert data["tool_calls"][0]["name"] == "sh"
+    assert resp.status_code == 422
 
     # 4. POST /v1/runtimes/relay/dispatch
     resp = client.post(
         "/v1/runtimes/relay/dispatch",
-        json={"operation": "ping", "payload": {"foo": "bar"}, "enabled": False},
+        json={"operation": "ping", "payload": {"foo": "bar"}},
     )
     assert resp.status_code == 200
     assert resp.json()["success"] is False

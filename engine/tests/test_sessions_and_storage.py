@@ -36,7 +36,7 @@ from homun.application.session_manager import (
     set_default_storage,
 )
 from homun.application.session_storage import SessionStorage
-from homun.application.session_tools import execute as session_execute
+from homun.application.session_tools import execute_standalone as session_execute
 from homun.domain.errors import ValidationError
 
 
@@ -290,8 +290,10 @@ def test_sqlite_wal_integrity_and_repair(temp_storage):
     assert repair_res["healthy"] is True
 
     # Stranded session is now adopted into sessions
-    recovered = mgr.get_session("stranded-session-999")
+    assert mgr.get_session("stranded-session-999") is None
+    recovered = temp_storage.get_session("stranded-session-999")
     assert recovered is not None
+    assert recovered.workspace_id == "__quarantine__"
     assert recovered.title == "Recovered Session"
 
 

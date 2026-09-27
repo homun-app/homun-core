@@ -20,6 +20,7 @@ from homun.domain.models import (
     Team,
     Work,
     WorkBudget,
+    BudgetUsageReceipt,
 )
 
 
@@ -35,6 +36,7 @@ class WorkspaceStore:
         self.messages: dict[str, Message] = {}
         self.works: dict[str, Work] = {}
         self.work_budgets: dict[str, WorkBudget] = {}
+        self.budget_usage_receipts: dict[str, BudgetUsageReceipt] = {}
         self.outbox: dict[str, RuntimeIntent] = {}
         self.outbox: dict[str, RuntimeIntent] = {}
         self.runs: dict[str, Run] = {}

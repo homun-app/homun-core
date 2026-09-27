@@ -32,6 +32,11 @@ CLIENT_BOOTSTRAP_TEMPLATE = """# --- Homun Programmatic Tool Calling Bridge ---
 import json
 import socket
 import sys
+try:
+    import resource
+    resource.setrlimit(resource.RLIMIT_FSIZE, (10 * 1024 * 1024, 10 * 1024 * 1024))
+except ImportError:
+    pass
 
 _RPC_TYPE = {rpc_type!r}
 _RPC_PATH = {rpc_path!r}
@@ -88,8 +93,11 @@ def run_code_with_rpc(
     cwd: Optional[Path] = None,
     timeout: int = DEFAULT_TIMEOUT,
     max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
+    cancelled: Optional[Callable[[], bool]] = None,
 ) -> CodeExecutionResult:
     """Execute Python code in a child process with local tool RPC bridge."""
+    if not 0 < timeout <= 600 or not 1 <= max_tool_calls <= 1000:
+        raise ValidationError('Code execution limits are outside the supported range')
     rpc_token = secrets.token_hex(16)
     server = CodeExecutionRpcServer(
         rpc_token=rpc_token,
@@ -116,27 +124,11 @@ def run_code_with_rpc(
             script_file = tf.name
 
         work_dir = str(cwd) if cwd else os.getcwd()
-        proc = subprocess.Popen(
-            [sys.executable, script_file],
-            cwd=work_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        try:
-            stdout_raw, stderr_raw = proc.communicate(timeout=timeout)
-            exit_code = proc.returncode
-            err_msg = None
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout_raw, stderr_raw = proc.communicate()
-            exit_code = -1
-            err_msg = f"Execution timed out after {timeout} seconds"
-
+        from homun.execution.owned_python import run_script
+        exit_code, stdout_clean, stderr_clean, truncated, err_msg = run_script(
+            script_file, cwd=work_dir, timeout=timeout, stdout_limit=MAX_STDOUT_BYTES,
+            stderr_limit=MAX_STDERR_BYTES, cancelled=cancelled)
         duration = round(time.monotonic() - t0, 3)
-        stdout_clean, truncated = truncate_output(stdout_raw, MAX_STDOUT_BYTES)
-        stderr_clean, _ = truncate_output(stderr_raw, MAX_STDERR_BYTES)
 
         return CodeExecutionResult(
             exit_code=exit_code,
@@ -176,12 +168,22 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
     run_copy = dict(run)
     run_copy.setdefault("assignee_id", "default")
     reg = registry_module.registry_for(run_copy)
-    allowed_tools = {t["name"] for t in reg.manifest() if t.get("name") != "execute_code"}
+    allowed_tools = {t['name'] for t in reg.manifest()
+                     if t['name'] != 'execute_code' and t.get('replay') == 'read_only' and t.get('kind') == 'tool'}
+
+    def cancelled():
+        if ctx is None or not run.get('id'):
+            return False
+        current = ctx.repository.load().commands.get(run['id'])
+        return (current is None or current.result.get('status') != 'running'
+                or current.result.get('_lease_token') != run.get('_lease_token'))
 
     def dispatch(tool_name: str, tool_args: Dict[str, Any]) -> Any:
+        if cancelled():
+            raise ValidationError('Code execution was cancelled or superseded')
         return reg.dispatch(tool_name, tool_args, ctx=ctx, actor=actor, run=run)
 
-    cwd_path = Path(run.get("cwd") or os.getcwd())
+    cwd_path = Path(run.get("_cwd") or run.get("cwd") or os.getcwd())
     result = run_code_with_rpc(
         code=code,
         allowed_tools=allowed_tools,
@@ -189,5 +191,6 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         cwd=cwd_path,
         timeout=timeout,
         max_tool_calls=max_tool_calls,
+        cancelled=cancelled,
     )
     return result.to_dict()

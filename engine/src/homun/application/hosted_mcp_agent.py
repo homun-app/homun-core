@@ -22,10 +22,11 @@ class HostedMcpAgentServer:
         self._tools = {
             "homun_task": {
                 "name": "homun_task",
-                "description": "Execute an autonomous goal or task using Homun Agent with full tool access and verification.",
+                "description": "Propose a supervised Homun task. Returns pending approval; execution requires human authorization.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
+                        "command_id": {"type": "string", "description": "Stable idempotency key for retries."},
                         "objective": {"type": "string", "description": "The goal or task to achieve."},
                         "files": {"type": "array", "items": {"type": "string"}, "description": "Optional list of files for context."},
                         "allow_tools": {"type": "array", "items": {"type": "string"}, "description": "Optional subset of tools to allow."},
@@ -123,6 +124,8 @@ class HostedMcpAgentServer:
                     "files": arguments.get("files") or [],
                     "allow_tools": arguments.get("allow_tools"),
                 }
+                if arguments.get("command_id") is not None:
+                    task_kwargs["command_id"] = arguments["command_id"]
                 if ctx is not None:
                     task_kwargs["ctx"] = ctx
                 result = runner.run_task(objective, **task_kwargs)

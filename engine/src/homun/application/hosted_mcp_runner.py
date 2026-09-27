@@ -6,10 +6,12 @@ Without an EngineContext the runner refuses the call with a typed error.
 from __future__ import annotations
 
 import logging
+import hashlib
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from homun.domain.errors import ValidationError
+from homun.domain.errors import ValidationError, BackendUnavailableError
 from homun.domain.models import Actor
 
 logger = logging.getLogger(__name__)
@@ -23,7 +25,7 @@ class HostedMcpEngineRunner:
 
     def _require_ctx(self, ctx: Any):
         if ctx is None:
-            raise ValidationError(
+            raise BackendUnavailableError(
                 "Hosted MCP runner requires an EngineContext. "
                 "Pass ctx when calling tools, or configure the server with a bound context."
             )
@@ -61,67 +63,64 @@ class HostedMcpEngineRunner:
         return (result.message.content if result.message else "") or ""
 
     def run_task(
-        self,
-        objective: str,
-        files: Optional[List[str]] = None,
-        allow_tools: Optional[List[str]] = None,
-        *,
-        ctx=None,
-        actor: Optional[Actor] = None,
+        self, objective: str, files: Optional[List[str]] = None,
+        allow_tools: Optional[List[str]] = None, *, ctx=None,
+        actor: Optional[Actor] = None, command_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Create supervised work and propose a native agent run (pending approval)."""
+        """Persist a supervised proposal, with resumable idempotent admission."""
         engine = self._require_ctx(ctx)
         act = self._actor(engine, actor)
         from homun.application.agent_runs import propose
+        from homun.application.price_comparisons import cached, save
+        from homun.application.surface_toolset_policy import pin_policy
+        from homun.policy.work import require_work_access
+        from homun.policy import require_workspace_actor
 
-        cmd = uuid4().hex[:10]
-        project = engine.service.apply(
-            act,
-            f"mcp-p-{cmd}",
-            "project.create",
-            {"name": "Hosted MCP"},
-        )
-        project_id = project["project_id"] if isinstance(project, dict) else project
-        conv = engine.service.apply(
-            act,
-            f"mcp-c-{cmd}",
-            "conversation.create",
-            {"title": "Hosted MCP task", "project_id": project_id},
-        )
-        conversation_id = conv["conversation_id"] if isinstance(conv, dict) else conv
-        work = engine.service.apply(
-            act,
-            f"mcp-w-{cmd}",
-            "work.create",
-            {
-                "conversation_id": conversation_id,
-                "title": (objective[:80] or "MCP task"),
-                "objective": objective,
-            },
-        )
-        work_id = work["work_id"] if isinstance(work, dict) else work
-        engine.persist()
-
-        store = engine.repository.load()
-        work_obj = store.works[work_id]
-        body = {
-            "command_id": f"mcp-run-{cmd}",
-            "expected_version": work_obj.version,
-            "material_ids": [],
-        }
-        proposal = propose(engine, act, work_id, body)
-        engine.persist()
-        return {
-            "status": "pending_approval",
-            "work_id": work_id,
-            "run_id": proposal.get("id"),
-            "digest": proposal.get("digest"),
-            "expected_version": proposal.get("expected_version"),
-            "objective": objective,
-            "files": list(files or []),
-            "allow_tools": list(allow_tools or []),
-            "note": "Homun staged a real agent run. Approve it before execution.",
-        }
+        require_workspace_actor(act, engine.workspace_id)
+        if not isinstance(objective, str) or not objective.strip():
+            raise ValidationError("objective is required")
+        if files:
+            raise ValidationError("File import is unsupported here; attach canonical materials before proposing work")
+        policy = pin_policy({"surface": "headless", "allowed_tools": allow_tools})
+        if command_id is not None and (not isinstance(command_id, str) or not command_id.strip()):
+            raise ValidationError("command_id must be a nonempty string")
+        caller_id = command_id or uuid4().hex
+        key = "hosted-task:" + hashlib.sha256(caller_id.encode()).hexdigest()
+        payload = {"objective": objective, "files": [], "policy": policy}
+        kind = "hosted_task.admit"
+        # Save the admission before proposal construction. A crash between stages
+        # resumes the same canonical work and exact proposal request on retry.
+        with engine.repository.locked():
+            with engine.repository.transaction() as store:
+                record, fingerprint = cached(store, act, key, kind, payload)
+                if record:
+                    admission = deepcopy(record.result)
+                    require_work_access(store, act, admission["work_id"], "write")
+                else:
+                    service = engine.service.for_store(store)
+                    project = service.apply(act, key+":project", "project.create", {"name": "Hosted MCP"})
+                    conv = service.apply(act, key+":conversation", "conversation.create", {"title": "Hosted MCP task", "project_id": project["project_id"]})
+                    work = service.apply(act, key+":work", "work.create", {"conversation_id": conv["conversation_id"], "title": objective[:80], "objective": objective})
+                    work_id = work["work_id"]
+                    admission = {"work_id": work_id, "proposal_body": {
+                        "command_id": key+":run", "expected_version": store.works[work_id].version,
+                        "material_ids": [], **policy}}
+                    save(store, act, key, kind, fingerprint, admission)
+            if "result" in admission:
+                return deepcopy(admission["result"])
+            proposal = propose(engine, act, admission["work_id"], admission["proposal_body"])
+            result = {
+                "status": proposal["status"], "work_id": admission["work_id"],
+                "run_id": proposal["id"], "digest": proposal.get("digest"),
+                "expected_version": proposal.get("expected_version"),
+                "objective": objective, "files": [], "allow_tools": allow_tools,
+                "command_id": caller_id,
+                "note": "Homun staged a real agent run. Approve it before execution.",
+            }
+            with engine.repository.transaction() as store:
+                admission["result"] = result
+                save(store, act, key, kind, fingerprint, admission)
+            return deepcopy(result)
 
     def get_status(self, work_id: str, *, ctx=None, actor: Optional[Actor] = None) -> Dict[str, Any]:
         engine = self._require_ctx(ctx)

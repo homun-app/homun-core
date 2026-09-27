@@ -4,9 +4,20 @@ import { DEFAULT_WORKSPACE_ID, defaultLocalActor, domainFetch, listEngineWorks }
 import { homunErrorFromHttp } from './homun-errors.ts';
 import type { Work } from '../components/builder/conversation-types.ts';
 
-export type AgentRun = {
+export type AgentRunPolicy = {
+  surface?: 'cli' | 'tui' | 'web' | 'desktop' | 'bot_screen' | 'headless';
+  toolset?: 'full' | 'readonly' | 'minimal';
+  allowed_tools?: string[] | null;
+  denied_tools?: string[];
+  micro_compaction?: boolean;
+  native_stream?: boolean;
+  parallel_read_tools?: boolean;
+};
+export type AgentRun = AgentRunPolicy & {
   id: string; work_id: string; digest: string; expected_version: number;
-  status: 'pending_approval' | 'queued' | 'running' | 'waiting_input' | 'waiting_external' | 'completed' | 'failed' | 'blocked' | 'paused' | 'cancelled';
+  status: 'pending_approval' | 'queued' | 'running' | 'waiting_input' | 'waiting_external' | 'waiting_automation' | 'completed' | 'failed' | 'blocked' | 'paused' | 'cancelled';
+  stream_progress?: { chunks: number; text_chars: number; tool_calls: number };
+  automation_wait?: { reason: string };
   external_request_id?: string;
   terminal_request_id?: string;
   terminal_wait_id?: string;
@@ -36,6 +47,7 @@ export type AgentRun = {
   materials: { id: string; title: string; version: number; sha256: string }[];
   limits: { max_turns: number };
   observations: { tool: string; message?: string; result: unknown }[];
+  clarify_request?: {id: string | null; qid: string; question: string; choices: string[] | null; multi_select: boolean}[];
   request_id?: string; artifact_id?: string; error_code?: string;
 };
 
@@ -52,12 +64,12 @@ async function request(workId: string, suffix = '', body?: unknown) {
 export async function listAgentRuns(workId: string): Promise<AgentRun[]> {
   return (await request(workId)).items;
 }
-export async function prepareAgentRun(work: Work, materialIds: string[], commandId: string, teamId?: string, personId?: string, serverIds?: string[], terminalImage?: string, terminalBackend?: 'local' | 'ssh', ssh?: {host: string; user: string; port: number; hostKey: string; keyPath: string}, webPages?: boolean, browser?: boolean, memory?: boolean, skills?: boolean, delegation?: boolean, clarify?: boolean, goals?: boolean, cron?: boolean, sessionManagement?: boolean, gateway?: boolean, codeExecution?: boolean, plugins?: boolean, moa?: boolean | {preset?: string; fanout?: string; privacy_filter?: string}, fallbackConnectionId?: string): Promise<AgentRun> {
+export async function prepareAgentRun(work: Work, materialIds: string[], commandId: string, teamId?: string, personId?: string, serverIds?: string[], terminalImage?: string, terminalBackend?: 'local' | 'ssh', ssh?: {host: string; user: string; port: number; hostKey: string; keyPath: string}, webPages?: boolean, browser?: boolean, memory?: boolean, skills?: boolean, delegation?: boolean, clarify?: boolean, goals?: boolean, cron?: boolean, sessionManagement?: boolean, gateway?: boolean, codeExecution?: boolean, plugins?: boolean, moa?: boolean | {preset?: string; fanout?: string; privacy_filter?: string}, fallbackConnectionId?: string, policy?: AgentRunPolicy): Promise<AgentRun> {
   const existing = (await listAgentRuns(work.id)).find(p => p.id === commandId);
   if (existing) return existing;
   const current = (await listEngineWorks()).find(w => w['id'] === work.id);
   if (!current) throw homunErrorFromHttp(404, {detail:'Lavoro non accessibile'}, 'Lavoro non accessibile');
-  return request(work.id, '', { command_id: commandId, expected_version: current['version'], material_ids: materialIds, ...(terminalBackend === 'local' ? {terminal_backend: 'local'} : terminalBackend === 'ssh' && ssh ? {terminal_backend: 'ssh', ssh_host: ssh.host, ssh_user: ssh.user, ssh_port: ssh.port, ssh_host_key: ssh.hostKey, ssh_key_path: ssh.keyPath} : terminalImage ? {terminal_image: terminalImage} : {}), ...(serverIds?.length ? {server_ids: serverIds} : {}), ...(teamId ? {team_id: teamId} : {}), ...(personId ? {person_id: personId} : {}), ...(webPages ? {web_pages: true} : {}), ...(browser ? {browser: true} : {}), ...(memory ? {memory: true} : {}), ...(skills ? {skills: true} : {}), ...(delegation ? {delegation: true} : {}), ...(clarify ? {clarify: true} : {}), ...(goals ? {goals: true} : {}), ...(cron ? {cron: true} : {}), ...(sessionManagement ? {session_management: true} : {}), ...(gateway ? {gateway: true} : {}), ...(codeExecution ? {code_execution: true} : {}), ...(plugins ? {plugins: true} : {}), ...(moa ? {moa: typeof moa === 'object' ? moa : true} : {}), ...(fallbackConnectionId ? {fallback_connection_id: fallbackConnectionId} : {}) });
+  return request(work.id, '', { ...policy, command_id: commandId, expected_version: current['version'], material_ids: materialIds, ...(terminalBackend === 'local' ? {terminal_backend: 'local'} : terminalBackend === 'ssh' && ssh ? {terminal_backend: 'ssh', ssh_host: ssh.host, ssh_user: ssh.user, ssh_port: ssh.port, ssh_host_key: ssh.hostKey, ssh_key_path: ssh.keyPath} : terminalImage ? {terminal_image: terminalImage} : {}), ...(serverIds?.length ? {server_ids: serverIds} : {}), ...(teamId ? {team_id: teamId} : {}), ...(personId ? {person_id: personId} : {}), ...(webPages ? {web_pages: true} : {}), ...(browser ? {browser: true} : {}), ...(memory ? {memory: true} : {}), ...(skills ? {skills: true} : {}), ...(delegation ? {delegation: true} : {}), ...(clarify ? {clarify: true} : {}), ...(goals ? {goals: true} : {}), ...(cron ? {cron: true} : {}), ...(sessionManagement ? {session_management: true} : {}), ...(gateway ? {gateway: true} : {}), ...(codeExecution ? {code_execution: true} : {}), ...(plugins ? {plugins: true} : {}), ...(moa ? {moa: typeof moa === 'object' ? moa : true} : {}), ...(fallbackConnectionId ? {fallback_connection_id: fallbackConnectionId} : {}) });
 }
 export function approveAgentRun(workId: string, run: AgentRun, commandId: string): Promise<AgentRun> {
   return request(workId, `/${encodeURIComponent(run.id)}/approve`, {

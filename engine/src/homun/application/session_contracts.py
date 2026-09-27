@@ -145,16 +145,25 @@ class SessionUsage:
 # --- Pydantic Arguments for Agent Tool Registry ---
 
 class SessionManageArguments(BaseModel):
+    workspace_mode: str = 'history_only'
+    execution_cwd: str | None = Field(default=None, max_length=1024)
     action: str = Field(
         description="Action to perform: create | get | list | update | resume | pin | unpin | archive | unarchive | prune | export | import | rewind | fork | handoff | repair | usage"
     )
-    session_id: Optional[str] = Field(default=None, description="Session identifier")
+    limit: int = Field(default=50, ge=1, le=200, description="Usage receipt page size")
+    cursor: Optional[str] = Field(default=None, description="Usage receipt cursor")
+    command_id: Optional[str] = Field(default=None, max_length=140, description="Idempotency key required for mutations")
+    expected_revision: Optional[str] = Field(default=None, description="Transcript revision to branch or continue")
+    expected_version: Optional[int] = Field(default=None, ge=1, description="Work version for paused run resume")
+    instruction: Optional[str] = Field(default=None, max_length=16000, description="New request for an approved continuation")
+    proposal: Optional[Dict[str, Any]] = Field(default=None, description="Fresh run proposal options; ordinary validation and approval apply")
+    session_id: Optional[str] = Field(default=None, description="Canonical run or snapshot identifier within this work")
     title: Optional[str] = Field(default=None, description="Title for create, update, or fork")
     cwd: Optional[str] = Field(default=None, description="Working directory path")
     pinned: Optional[bool] = Field(default=None, description="Pin status")
     archived: Optional[bool] = Field(default=None, description="Archive status")
     parent_id: Optional[str] = Field(default=None, description="Parent session identifier for forking")
-    turn_index: Optional[int] = Field(default=None, description="Turn index target for rewind or fork")
+    turn_index: Optional[int] = Field(default=None, description="Exclusive message count for a closed tool-call prefix when rewinding or forking")
     format: Optional[str] = Field(default="jsonl", description="Export format: jsonl | markdown")
     redact_secrets: Optional[bool] = Field(default=True, description="When true, sanitizes API keys and bearer tokens on export")
     data: Optional[str] = Field(default=None, description="Serialized transcript text for import")
@@ -173,12 +182,12 @@ def entries(executor: Callable, version: int) -> list:
         ToolEntry(
             ToolDefinition(
                 name="session_manage",
-                description="Manage durable agent sessions: CRUD, cwd resume, title, pin, archive, prune, export with redaction, import without identity drift, rewind, fork lineage, handoff, integrity repair, and token accounting.",
+                description="Inspect canonical native histories, export, import context, fork closed message prefixes, rewind inactive histories into new snapshots, and edit title/pin/archive. Resume prepares a fresh work proposal requiring ordinary human approval (paused runs use human controls). Runtime roots/models must be selected in fresh proposal options. Usage returns own immutable receipts and explicit incomplete coverage. Prune and repair are not yet available.",
                 input_schema=SessionManageArguments.model_json_schema(),
             ),
             "session",
             str(version),
             SessionManageArguments,
-            executor,
+            lambda ctx, actor, run, args: executor(ctx, actor, run, 'session_manage', args),
         ),
     ]

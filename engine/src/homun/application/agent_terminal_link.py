@@ -6,6 +6,9 @@ from homun.domain.errors import ConflictError
 def validate_link(ctx,store,actor,proposal,*,staging=False):
     link=proposal.get('_agent_binding')
     if not link:return None
+    if link.get('kind') == 'goal_gate':
+        from homun.application.goal_terminal_link import validate_link as validate_goal_link
+        return validate_goal_link(ctx, store, actor, proposal, staging=staging)
     from homun.application.agent_runs import lookup,authority
     from homun.application.agent_tool_bridge import resolve_call
     run=lookup(store,link['run_id'],proposal['work_id'])
@@ -24,7 +27,8 @@ def validate_link(ctx,store,actor,proposal,*,staging=False):
             or bool(call.arguments.get('background'))!=bool(proposal.get('background'))
             or bool(call.arguments.get('pty'))!=bool(proposal.get('pty'))
             or call.arguments.get('timeout_seconds',300)!=proposal.get('timeout_seconds',300)
-            or run.get('terminal',{}).get('image')!=proposal.get('image')):
+            or run.get('terminal',{}).get('image')!=proposal.get('image')
+            or run.get('execution_context', {}).get('cwd', '.') != proposal.get('cwd', '.')):
         raise ConflictError('Terminal proposal differs from the canonical call')
     return run
 

@@ -15,12 +15,11 @@ OUTPUT_TYPE='work.output'
 
 
 def root_for(ctx,run):
-    terminal=run['terminal']
-    if terminal.get('policy')=='local-private-v1':
-        spec=LocalJobSpec(workspace_id=ctx.workspace_id,run_id=run['id'],call_id='files',command='true')
-        return LocalJobs(ctx.data_dir.resolve()/'execution').workspace(spec)
-    spec=JobSpec(workspace_id=ctx.workspace_id,run_id=run['id'],call_id='files',image=terminal['image'],command='true')
-    return DockerJobs(ctx.data_dir.resolve()/'execution').workspace(spec)
+    from homun.execution.workspace import owned_root
+    from homun.execution.contracts import ExecutionUnavailable
+    if run.get('terminal', {}).get('policy') not in {'local-private-v1', 'docker-offline-v1'}:
+        raise ExecutionUnavailable('This backend has no owned workspace adapter')
+    return owned_root(ctx.data_dir.resolve()/'execution', ctx.workspace_id, run['id'])
 
 
 def _authorized(ctx,store,actor,run):
@@ -67,6 +66,12 @@ def execute(ctx,actor,run,tool,args):
                           file_coverage={'path':args['path'],'sha256':result['sha256'],'complete':complete,
                                          'representation':'utf-8','total_lines':0 if complete and text=='' else None})
     _authorized(ctx,ctx.repository.load(),actor,run)
+    try:
+        from homun.application.subdirectory_hints import track_and_attach_hints
+        wd = root_for(ctx, run)
+        result, _ = track_and_attach_hints(run, tool, args, result, working_dir=wd)
+    except Exception:
+        pass
     return result
 
 

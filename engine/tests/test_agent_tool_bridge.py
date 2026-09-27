@@ -232,3 +232,18 @@ def test_visible_definitions_filters_by_surface_and_toolset():
     assert "write_file" not in denied_names
     assert "desktop_click" not in denied_names
     assert "read_file" in denied_names
+
+
+def test_denied_deferred_tool_is_not_advertised_or_described(setup, monkeypatch):
+    from homun.application.agent_tool_bridge import describe
+    from homun.domain.errors import ValidationError
+    ctx, actor, work, proposal, calls = start(setup, monkeypatch)
+    run = dict(ctx.repository.load().commands[proposal['id']].result)
+    target = run['external_tools'][0]['name']
+    run['denied_tools'] = [target]
+    run.pop('tools')
+    registry = registry_for(run)
+    search = next(d for d in registry.definitions() if d.name == 'tool_search')
+    assert target not in search.description
+    with pytest.raises(ValidationError):
+        describe(run, registry, [target])

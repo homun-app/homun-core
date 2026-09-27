@@ -209,3 +209,196 @@ def resolve_tts_dispatcher(provider: Optional[str] = None) -> Optional[Callable[
         # Do not silently fall back to inventing Edge success.
         return None
     return None
+
+
+def openai_image_dispatcher(
+    *,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> Callable[[str, Dict[str, Any]], Dict[str, Any]]:
+    """Return an image dispatcher backed by OpenAI /v1/images/generations."""
+    key = (api_key or os.environ.get("OPENAI_API_KEY") or "").strip()
+    base = (base_url or os.environ.get("HOMUN_IMAGE_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    if not key and "127.0.0.1" not in base and "localhost" not in base:
+        raise RuntimeError("OpenAI API key is missing for image generation (code=backend_unavailable)")
+
+    def _dispatch(model: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        prompt = str(payload.get("prompt") or "").strip()
+        aspect_ratio = payload.get("aspect_ratio", "1:1")
+        size_map = {"1:1": "1024x1024", "16:9": "1792x1024", "9:16": "1024x1792"}
+        size = size_map.get(aspect_ratio, "1024x1024")
+        body = {
+            "model": model or "dall-e-3",
+            "prompt": prompt,
+            "n": 1,
+            "size": size,
+            "response_format": "url",
+        }
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        req = urllib.request.Request(
+            f"{base}/images/generations",
+            data=json.dumps(body).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                items = data.get("data") or []
+                url = items[0].get("url") if items else ""
+                return {
+                    "image_url": url,
+                    "seed": payload.get("seed"),
+                    "metadata": {"provider": "openai", "model": model, "size": size},
+                }
+        except Exception as exc:
+            raise RuntimeError(f"OpenAI image generation error: {exc}") from exc
+
+    return _dispatch
+
+
+def resolve_image_dispatcher(
+    *,
+    provider: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> Optional[Callable[[str, Dict[str, Any]], Dict[str, Any]]]:
+    """Auto-resolve image generation dispatcher when configured."""
+    prov = (provider or os.environ.get("HOMUN_IMAGE_PROVIDER") or "").strip().lower()
+    base = base_url or os.environ.get("HOMUN_IMAGE_BASE_URL")
+    key = api_key or os.environ.get("OPENAI_API_KEY")
+    if base or key or prov in ("openai", "dalle", "dall-e", "local"):
+        try:
+            return openai_image_dispatcher(api_key=key, base_url=base)
+        except Exception:
+            return None
+    return None
+
+
+def fal_video_dispatcher(
+    *,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> Callable[[str, Dict[str, Any]], Dict[str, Any]]:
+    """Return a video generation dispatcher backed by Fal or local video HTTP gateway."""
+    key = (api_key or os.environ.get("FAL_KEY") or os.environ.get("FAL_API_KEY") or "").strip()
+    base = (base_url or os.environ.get("HOMUN_VIDEO_BASE_URL") or "https://queue.fal.run").rstrip("/")
+    if not key and "127.0.0.1" not in base and "localhost" not in base:
+        raise RuntimeError("Video provider API key is missing (code=backend_unavailable)")
+
+    def _dispatch(provider: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        prompt = str(payload.get("prompt") or "").strip()
+        body = {
+            "prompt": prompt,
+            "duration": payload.get("duration", 5),
+            "aspect_ratio": payload.get("aspect_ratio", "16:9"),
+        }
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if key:
+            headers["Authorization"] = f"Key {key}"
+        endpoint = f"{base}/video/generate" if "127.0.0.1" in base or "localhost" in base else f"{base}/fal-ai/fast-svd/text-to-video"
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(body).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=180.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                video_url = data.get("video_url") or (data.get("video", {}) or {}).get("url") or ""
+                return {
+                    "video_url": video_url,
+                    "status": "completed",
+                    "metadata": {"provider": provider, "endpoint": endpoint},
+                }
+        except Exception as exc:
+            raise RuntimeError(f"Video generation error: {exc}") from exc
+
+    return _dispatch
+
+
+def resolve_video_dispatcher(
+    *,
+    provider: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> Optional[Callable[[str, Dict[str, Any]], Dict[str, Any]]]:
+    """Auto-resolve video generation dispatcher when configured."""
+    prov = (provider or os.environ.get("HOMUN_VIDEO_PROVIDER") or "").strip().lower()
+    base = base_url or os.environ.get("HOMUN_VIDEO_BASE_URL")
+    key = api_key or os.environ.get("FAL_KEY") or os.environ.get("FAL_API_KEY")
+    if base or key or prov in ("fal", "local", "svd"):
+        try:
+            return fal_video_dispatcher(api_key=key, base_url=base)
+        except Exception:
+            return None
+    return None
+
+
+def whisper_stt_dispatcher(
+    *,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> Callable[[str, Dict[str, Any]], Dict[str, Any]]:
+    """Return an STT transcription dispatcher backed by OpenAI Whisper or local STT gateway."""
+    key = (api_key or os.environ.get("OPENAI_API_KEY") or "").strip()
+    base = (base_url or os.environ.get("HOMUN_STT_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    if not key and "127.0.0.1" not in base and "localhost" not in base:
+        raise RuntimeError("STT provider API key is missing (code=backend_unavailable)")
+
+    def _dispatch(provider: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        audio_path = params.get("path") or ""
+        p = Path(audio_path)
+        content = p.read_bytes() if p.exists() else b""
+        body = {
+            "model": "whisper-1",
+            "language": params.get("language"),
+            "audio_base64": base64.b64encode(content).decode("ascii") if content else "",
+            "filename": p.name if p.exists() else "audio.wav",
+        }
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        endpoint = f"{base}/stt/transcribe" if "127.0.0.1" in base or "localhost" in base else f"{base}/audio/transcriptions"
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(body).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                text = data.get("text") or ""
+                duration = float(data.get("duration", 0.0) or 0.0)
+                return {
+                    "text": text,
+                    "duration": duration,
+                    "language": data.get("language") or params.get("language"),
+                    "metadata": {"provider": provider, "endpoint": endpoint},
+                }
+        except Exception as exc:
+            raise RuntimeError(f"STT transcription error: {exc}") from exc
+
+    return _dispatch
+
+
+def resolve_stt_dispatcher(
+    *,
+    provider: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> Optional[Callable[[str, Dict[str, Any]], Dict[str, Any]]]:
+    """Auto-resolve STT transcription dispatcher when configured."""
+    prov = (provider or os.environ.get("HOMUN_STT_PROVIDER") or "").strip().lower()
+    base = base_url or os.environ.get("HOMUN_STT_BASE_URL")
+    key = api_key or os.environ.get("OPENAI_API_KEY")
+    if base or key or prov in ("whisper", "openai", "local"):
+        try:
+            return whisper_stt_dispatcher(api_key=key, base_url=base)
+        except Exception:
+            return None
+    return None

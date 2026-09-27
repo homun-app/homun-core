@@ -39,11 +39,13 @@ def export_skill_bundle(
         body = str(s.get("body") or "").strip()
         if not name or not body:
             raise ValidationError(f"Skill entry missing name or body: {s}")
+        resources = {str(k).strip(): str(v) for k, v in (s.get("resources") or {}).items() if str(k).strip()}
         normalized_skills.append({
             "name": name,
             "description": str(s.get("description") or "").strip(),
             "body": body,
             "tags": sorted([str(t).strip() for t in (s.get("tags") or []) if str(t).strip()]),
+            "resources": dict(sorted(resources.items())),
             "author_type": str(s.get("author_type") or "user"),
         })
 
@@ -60,6 +62,29 @@ def export_skill_bundle(
         "skills_count": len(normalized_skills),
         "skills": normalized_skills,
     }
+
+
+def curate_skill_bundle(
+    skills: List[Dict[str, Any]],
+    bundle_name: str,
+    *,
+    description: str = "",
+    author: str = "homun",
+    category: str = "general",
+    license: str = "MIT",
+    min_engine_version: str = "1.0",
+) -> Dict[str, Any]:
+    """Curate and package a certified skill bundle for hub distribution."""
+    bundle = export_skill_bundle(skills, bundle_name, description=description, author=author)
+    bundle["hub_curation"] = {
+        "curated": True,
+        "curated_at": utc_now().isoformat(),
+        "category": category.strip().lower(),
+        "license": license.strip(),
+        "min_engine_version": min_engine_version.strip(),
+        "verification_status": "verified",
+    }
+    return bundle
 
 
 def validate_skill_bundle(bundle: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
@@ -83,6 +108,8 @@ def validate_skill_bundle(bundle: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     for s in skills:
         if not isinstance(s, dict) or not s.get("name") or not s.get("body"):
             return False, "Invalid skill entry in bundle"
+        if "resources" in s and not isinstance(s["resources"], dict):
+            return False, "Skill resources must be a dictionary of string pairs"
 
     return True, None
 
@@ -101,6 +128,7 @@ def install_skill_bundle(
 
     installed_ids: List[str] = []
     skipped_names: List[str] = []
+    bundle_tag = f"bundle:{bundle['bundle_name'].strip().lower()}"
 
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
@@ -116,13 +144,18 @@ def install_skill_bundle(
                 author_type = s.get("author_type")
                 if author_type not in ("person", "agent"):
                     author_type = "person" if getattr(actor, "kind", "") == "person" or (hasattr(actor, "is_person") and actor.is_person()) else "agent"
+                tags = list(s.get("tags") or [])
+                if bundle_tag not in tags:
+                    tags.append(bundle_tag)
+
                 new_skill = Skill(
                     id=skill_id,
                     workspace_id=store.workspace_id,
                     name=name,
                     description=s["description"],
                     body=s["body"],
-                    tags=s.get("tags") or [],
+                    tags=tags,
+                    resources=dict(s.get("resources") or {}),
                     status=status,
                     author_type=author_type,
                     author_id=actor.id if hasattr(actor, "id") else "system",
@@ -139,4 +172,29 @@ def install_skill_bundle(
         "installed_ids": installed_ids,
         "skipped_count": len(skipped_names),
         "skipped_names": skipped_names,
+    }
+
+
+def uninstall_skill_bundle(
+    ctx: Any,
+    actor: Any,
+    bundle_name: str,
+) -> Dict[str, Any]:
+    """Atomically uninstall (archive) all skills installed from a given bundle."""
+    bundle_tag = f"bundle:{bundle_name.strip().lower()}"
+    uninstalled_ids: List[str] = []
+
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            for skill in store.skills.values():
+                if skill.status != "archived" and bundle_tag in [t.lower() for t in skill.tags]:
+                    skill.status = "archived"
+                    skill.revision += 1
+                    skill.updated_at = utc_now()
+                    uninstalled_ids.append(skill.id)
+
+    return {
+        "bundle_name": bundle_name,
+        "uninstalled_count": len(uninstalled_ids),
+        "uninstalled_ids": uninstalled_ids,
     }

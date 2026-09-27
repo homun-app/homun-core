@@ -13,9 +13,10 @@ from homun.models.types import UsageEntry
 from homun.models.port import ContextLimits
 
 
-def complete_tools(provider, messages, *, tools, model_id=None, context_window=None, max_output_tokens=8192):
+def complete_tools(provider, messages, *, tools, model_id=None, context_window=None, max_output_tokens=8192, stream=False, cancel_check=None, on_delta=None):
     return _complete(provider, messages, tools=tools, model_id=model_id,
-                     context_window=context_window, max_output_tokens=max_output_tokens)
+                     context_window=context_window, max_output_tokens=max_output_tokens,
+                     stream=stream, cancel_check=cancel_check, on_delta=on_delta)
 
 
 def complete_summary(provider, messages, *, model_id=None, context_window=None, max_output_tokens=8192):
@@ -42,19 +43,23 @@ def usage_from_response(response, *, provider_id, model_id, ollama) -> UsageEntr
         return value if type(value) is int and value >= 0 else None
 
     input_tokens, output_tokens = counter(raw_input), counter(raw_output)
-    return UsageEntry(id=new_id('usage'), provider_id=provider_id, model_id=model_id,
+    reported_model = body.get('model')
+    if not isinstance(reported_model, str) or not reported_model.strip():
+        reported_model = model_id
+    return UsageEntry(id=new_id('usage'), provider_id=provider_id, model_id=reported_model,
                       input_tokens=input_tokens, output_tokens=output_tokens,
                       status='ok' if input_tokens is not None and output_tokens is not None else 'unknown')
 
 
-def _complete(provider, messages, *, tools, model_id, context_window, max_output_tokens):
+def _complete(provider, messages, *, tools, model_id, context_window, max_output_tokens,
+              stream=False, cancel_check=None, on_delta=None):
     limits = ContextLimits(context_window=context_window, max_output_tokens=max_output_tokens)
     key = provider._api_key()
     if not key:
         raise RuntimeError('OpenAI-compatible provider has no credentials')
     model = model_id or provider.default_model
     ollama = provider._ollama_native_root() is not None
-    payload = {'model': model, 'messages': project_messages(messages, ollama=ollama), 'stream': False}
+    payload = {'model': model, 'messages': project_messages(messages, ollama=ollama), 'stream': stream}
     if tools is not None:
         payload['tools'] = [{'type': 'function', 'function': {'name': t.name,
                             'description': t.description, 'parameters': t.input_schema}} for t in tools]
@@ -63,15 +68,26 @@ def _complete(provider, messages, *, tools, model_id, context_window, max_output
             payload.update(think=False, options={'temperature': 0, 'num_predict': limits.max_output_tokens})
             if limits.context_window is not None:
                 payload['options']['num_ctx'] = limits.context_window
-            response = provider._post_ollama_chat(payload)
+            response = None if stream else provider._post_ollama_chat(payload)
         else:
             payload.update(temperature=0, max_tokens=limits.max_output_tokens)
-            response = provider._post('/chat/completions', payload, api_key=key)
+            response = None if stream else provider._post('/chat/completions', payload, api_key=key)
     except Exception as exc:
         raise classify_transport(exc) from exc
+    if stream:
+        from homun.models.native_stream_transport import stream_response
+        if not ollama:
+            payload['stream_options'] = {'include_usage': True}
+        response = stream_response(provider, payload, api_key=key, ollama=ollama,
+            cancel_check=cancel_check, on_delta=on_delta,
+            usage_factory=lambda body: usage_from_response(body, provider_id=provider.provider_id,
+                                                           model_id=model, ollama=ollama))
     usage = usage_from_response(response, provider_id=provider.provider_id, model_id=model, ollama=ollama)
     try:
         message = parse_response(response, ollama=ollama)
     except ValueError as exc:
-        raise classify_response(exc, usage=usage) from exc
+        error = classify_response(exc, usage=usage)
+        if stream:
+            error.retryable = False
+        raise error from exc
     return NativeResult(message=message, usage=usage)

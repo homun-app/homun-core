@@ -16,17 +16,10 @@ from homun.domain.errors import ConflictError, PermissionDeniedError
 
 from .contracts import ExecutionUnavailable, ExecutionUncertain, LocalJobSpec
 from .layout import confine_directory
+from .workspace import owned_root, working_directory
 
 
-def _lstart(pid: int) -> str | None:
-    try:
-        reply = subprocess.run(["/bin/ps", "-p", str(pid), "-o", "lstart="], capture_output=True, text=True)
-    except OSError:
-        return None
-    if reply.returncode:
-        return None
-    text = reply.stdout.strip()
-    return text or None
+from .local_job_supervisor import process_lstart as _lstart
 
 
 def _environment(workspace: Path) -> dict[str, str]:
@@ -41,7 +34,7 @@ class LocalJobs:
 
     def workspace(self, job: LocalJobSpec) -> Path:
         job = LocalJobSpec.model_validate(job.model_dump())
-        return confine_directory(self.root / "workspaces" / job.owner)
+        return owned_root(self.root, job.workspace_id, job.run_id)
 
     def start(self, job: LocalJobSpec, *, stdin: bool = False, pty: bool = False) -> dict:
         if stdin or pty:
@@ -53,26 +46,31 @@ class LocalJobs:
             if not self._path("local-state", job).is_file():
                 raise ExecutionUncertain("Recorded command has no process; automatic redispatch is forbidden")
             return self.inspect(job)
+        cwd = working_directory(workspace, job.cwd)
         log = self._path("local-logs", job)
         confine_directory(log.parent)
-        log_fd = os.open(log, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+        state_path = self._path("local-state", job)
+        confine_directory(state_path.parent)
+        from .local_job_supervisor import command
+        payload = {"command":job.command, "contract":job.contract,
+                   "workspace":str(cwd), "environment":_environment(workspace),
+                   "state_path":str(state_path), "log_path":str(log), "deadline_at":job.deadline_at}
         try:
-            process = subprocess.Popen(["/bin/sh", "-c", job.command], cwd=workspace, env=_environment(workspace),
-                                       stdin=subprocess.DEVNULL, stdout=log_fd, stderr=subprocess.STDOUT,
-                                       start_new_session=True)
+            supervisor = subprocess.Popen(command(payload), cwd=workspace,
+                env=_environment(workspace), stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError:
-            raise ExecutionUncertain("Local process did not start; command will not be repeated") from None
-        finally:
-            os.close(log_fd)
-        try:
-            self._write_json(self._path("local-state", job), {"contract": job.contract, "pid": process.pid, "lstart": _lstart(process.pid)})
-        except OSError:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            raise ExecutionUncertain("Local process state could not be recorded; command will not be repeated") from None
-        return self.inspect(job)
+            raise ExecutionUncertain("Local supervisor did not start; command will not be repeated") from None
+        # Only wait for ownership admission; the supervisor owns the child and
+        # its durable exit receipt independently from this engine process.
+        until = time.monotonic() + 5
+        while time.monotonic() < until:
+            if state_path.is_file():
+                return self.inspect(job)
+            if supervisor.poll() is not None:
+                break
+            time.sleep(0.01)
+        raise ExecutionUncertain("Local ownership admission is unknown; automatic redispatch is forbidden")
 
     def inspect(self, job: LocalJobSpec) -> dict:
         job = LocalJobSpec.model_validate(job.model_dump())
@@ -80,12 +78,24 @@ class LocalJobs:
         if state is None:
             raise ExecutionUncertain("Local process is missing; command will not be repeated")
         if "exit_code" in state:
-            return self._exited(state["exit_code"])
+            return self._exited(state["exit_code"], timed_out=state.get("timed_out"))
         pid = state["pid"]
+        if state.get("supervised"):
+            # Another process owns waitpid. A vanished PID without its receipt
+            # remains unknown (e.g. supervisor crash), never assumed successful.
+            owner = state.get('supervisor_pid')
+            owner_alive = owner is None or (state.get('supervisor_lstart') and
+                self._alive(owner) and _lstart(owner) == state['supervisor_lstart'])
+            if owner_alive and state.get("lstart") and self._alive(pid) and _lstart(pid) == state["lstart"]:
+                return {"status":"running", "running":True, "exit_code":None, "oom_killed":None}
+            latest = self._read_state(job)
+            if latest is not None and "exit_code" in latest:
+                return self._exited(latest["exit_code"], timed_out=latest.get("timed_out"))
+            return {"status":"outcome_unknown", "running":None, "exit_code":None, "oom_killed":None}
         try:
             waited, status = os.waitpid(pid, os.WNOHANG)
         except ChildProcessError:
-            if self._alive(pid) and _lstart(pid) == state.get("lstart"):
+            if state.get("lstart") and self._alive(pid) and _lstart(pid) == state["lstart"]:
                 return {"status": "running", "running": True, "exit_code": None, "oom_killed": None}
             return {"status": "outcome_unknown", "running": None, "exit_code": None, "oom_killed": None}
         if waited == 0:
@@ -118,25 +128,53 @@ class LocalJobs:
         state = self._read_state(job)
         if state is None:
             raise ExecutionUncertain("Local process is missing; command will not be repeated")
-        pid = state["pid"]
-        if "exit_code" in state or (state.get("lstart") and _lstart(pid) != state.get("lstart")):
-            return self.inspect(job)
-        try:
-            if os.getpgid(pid) != pid:
-                raise ExecutionUncertain("Process is not the owned session leader")
-            os.killpg(pid, signal.SIGTERM)
-        except ProcessLookupError:
+        if state.get('control_version') == 1:
+            if 'exit_code' in state:
+                return self.inspect(job)
+            # The supervisor is the sole waiter and signaller. An engine-side
+            # signal could race waitpid and hit a reused PID/process group.
+            self._write_json(self._path('local-state', job).with_suffix('.stop'),
+                             {'contract':job.contract})
+            for _ in range(45):
+                current = self.inspect(job)
+                if current['running'] is False:
+                    return current
+                time.sleep(.1)
+            raise ExecutionUncertain('Local supervisor did not confirm cancellation')
+        if not self._signal_owned(job, signal.SIGTERM):
             return self.inspect(job)
         for _ in range(20):
             current = self.inspect(job)
-            if current["running"] is not True:
+            if current["running"] is False:
                 return current
             time.sleep(0.1)
+        # A supervisor may have reaped the child during the grace interval.
+        # Reload the receipt and revalidate identity before any escalation.
+        if not self._signal_owned(job, signal.SIGKILL):
+            return self.inspect(job)
+        for _ in range(20):
+            current = self.inspect(job)
+            if current["running"] is False:
+                return current
+            time.sleep(0.1)
+        return current
+
+    def _signal_owned(self, job: LocalJobSpec, sig: int) -> bool:
+        state = self._read_state(job)
+        if state is None or "exit_code" in state:
+            return False
+        if not state.get("lstart"):
+            raise ExecutionUncertain("Local process identity is unavailable; refusing to signal")
+        pid = state["pid"]
+        if _lstart(pid) != state["lstart"]:
+            return False
         try:
-            os.killpg(pid, signal.SIGKILL)
+            if os.getpgid(pid) != pid:
+                raise ExecutionUncertain("Process is not the owned session leader")
+            os.killpg(pid, sig)
         except ProcessLookupError:
-            pass
-        return self.inspect(job)
+            return False
+        return True
 
     def remove(self, job: LocalJobSpec) -> None:
         self.stop(job)
@@ -147,10 +185,10 @@ class LocalJobs:
     def write_stdin(self, job: LocalJobSpec, payload: bytes) -> None:
         raise ExecutionUnavailable("Local execution has no stdin or terminal")
 
-    def _exited(self, code: int) -> dict:
-        if code < 0:
-            return {"status": "dead", "running": False, "exit_code": None, "oom_killed": False}
-        return {"status": "exited", "running": False, "exit_code": code, "oom_killed": False}
+    def _exited(self, code: int | None, *, timed_out: bool | None = None) -> dict:
+        if code is None or code < 0:
+            return {"status": "dead", "running": False, "exit_code": None, "oom_killed": False, **({"timed_out": timed_out} if timed_out is not None else {})}
+        return {"status": "exited", "running": False, "exit_code": code, "oom_killed": False, **({"timed_out": timed_out} if timed_out is not None else {})}
 
     def _intent(self, job: LocalJobSpec) -> bool:
         directory = confine_directory(self.root / "intents")
@@ -203,12 +241,8 @@ class LocalJobs:
         if path.is_symlink():
             raise PermissionDeniedError("Execution state must not be a symlink")
         confine_directory(path.parent)
-        temporary = path.with_suffix(".tmp")
-        with temporary.open("w") as stream:
-            json.dump(payload, stream)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        from .local_job_supervisor import write_receipt
+        write_receipt(path, payload)
 
     @staticmethod
     def _alive(pid: int) -> bool:

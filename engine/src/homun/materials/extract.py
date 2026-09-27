@@ -7,6 +7,7 @@ import io
 import mimetypes
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+from homun.materials.office_archive import validate_archive, read_xml, workbook_sheets
 
 
 EXTRACTED = "extracted"
@@ -110,11 +111,10 @@ def _extract_docx(data: bytes, *, mime: str) -> ExtractResult:
 
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            validate_archive(zf)
             if "word/document.xml" not in zf.namelist():
                 return ExtractResult(status=UNSUPPORTED, text="", mime_type=mime)
-            xml_content = zf.read("word/document.xml")
-
-        root = ET.fromstring(xml_content)
+            root = read_xml(zf, "word/document.xml")
         # XML namespace for WordprocessingML
         ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
         paragraphs = []
@@ -137,35 +137,40 @@ def _extract_xlsx(data: bytes, *, mime: str) -> ExtractResult:
 
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            validate_archive(zf)
             names = set(zf.namelist())
             # 1. Read shared strings if present
             shared_strings = []
             if "xl/sharedStrings.xml" in names:
-                root_ss = ET.fromstring(zf.read("xl/sharedStrings.xml"))
+                root_ss = read_xml(zf, "xl/sharedStrings.xml")
                 ns_ss = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
                 for si in root_ss.findall(".//main:si", ns_ss):
-                    t = si.find(".//main:t", ns_ss)
-                    shared_strings.append(t.text if t is not None and t.text else "")
+                    shared_strings.append(''.join(t.text or '' for t in si.findall('.//main:t', ns_ss)))
 
-            # 2. Read sheet1
-            sheet_name = next((n for n in names if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")), None)
-            if not sheet_name:
-                return ExtractResult(status=UNSUPPORTED, text="", mime_type=mime)
-
-            root_sheet = ET.fromstring(zf.read(sheet_name))
-            ns_sheet = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+            sheet_names = workbook_sheets(zf)
+            if not sheet_names:
+                return ExtractResult(status=UNSUPPORTED, text='', mime_type=mime)
+            ns_sheet = {'main': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
             rows = []
-            for row in root_sheet.findall(".//main:row", ns_sheet):
-                cells = []
-                for c in row.findall("main:c", ns_sheet):
-                    v = c.find("main:v", ns_sheet)
-                    val = v.text if v is not None and v.text else ""
-                    if c.get("t") == "s" and val.isdigit():
-                        idx = int(val)
-                        val = shared_strings[idx] if idx < len(shared_strings) else val
-                    cells.append(val.strip())
-                if any(cells):
-                    rows.append(", ".join(cells))
+            for sheet_name, sheet_title in sheet_names:
+                root_sheet = read_xml(zf, sheet_name)
+                rows.append(f'[{sheet_title}]')
+                for row in root_sheet.findall('.//main:row', ns_sheet):
+                    cells = []
+                    for c in row.findall('main:c', ns_sheet):
+                        v = c.find('main:v', ns_sheet)
+                        val = v.text if v is not None and v.text else ''
+                        if c.get('t') == 's' and val.isdigit():
+                            idx = int(val)
+                            val = shared_strings[idx] if idx < len(shared_strings) else val
+                        elif c.get('t') == 'inlineStr':
+                            val = ''.join(t.text or '' for t in c.findall('.//main:t', ns_sheet))
+                        coordinate = c.get('r')
+                        if coordinate:
+                            val = f'{coordinate}={val}'
+                        cells.append(val.strip())
+                    if any(cells):
+                        rows.append(', '.join(cells))
 
         text = "\n".join(rows).strip()
         if not text:
@@ -181,6 +186,7 @@ def _extract_pptx(data: bytes, *, mime: str) -> ExtractResult:
 
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            validate_archive(zf)
             slide_names = sorted(
                 [n for n in zf.namelist() if n.startswith("ppt/slides/slide") and n.endswith(".xml")],
                 key=lambda x: int("".join(filter(str.isdigit, x)) or 0),
@@ -191,7 +197,7 @@ def _extract_pptx(data: bytes, *, mime: str) -> ExtractResult:
             ns = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
             slides_text = []
             for i, sname in enumerate(slide_names, start=1):
-                root = ET.fromstring(zf.read(sname))
+                root = read_xml(zf, sname)
                 texts = [t.text for t in root.iterfind(".//a:t", ns) if t.text]
                 if texts:
                     slides_text.append(f"[Slide {i}]\n" + "\n".join(texts))

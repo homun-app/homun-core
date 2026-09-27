@@ -12,7 +12,7 @@ from homun.application.session_manager import SessionManager
 from homun.domain.errors import ValidationError
 
 
-def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
+def execute_standalone(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
     if run.get("session_management", {}).get("policy") != "durable-sessions-v1":
         raise ValidationError("Session management tools are not enabled for this run")
 
@@ -187,3 +187,23 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"usage": usage.to_dict()}
 
     raise ValidationError(f"Unsupported session action: {action!r}")
+
+
+def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Registered runtime path. Standalone SessionManager remains explicitly separate."""
+    if run.get("session_management", {}).get("policy") != "durable-sessions-v1":
+        raise ValidationError("Session management tools are not enabled for this run")
+    from homun.application.session_runtime import execute as canonical
+    args = {key: value for key, value in args.items() if value is not None}
+    args['action'] = str(args.get('action') or '').strip().lower()
+    from homun.models.native_turn import NativeMessage, pending_call
+    pending = pending_call([NativeMessage.model_validate(message) for message in run.get('_messages', [])])
+    call_id = run.get('_active_call_id') or (pending.id if pending else None)
+    if not args.get('command_id') and call_id:
+        import hashlib
+        identity = str(run['id']) + ':' + str(call_id)
+        args['command_id'] = 'session-tool:' + hashlib.sha256(identity.encode()).hexdigest()
+    result = canonical(ctx, actor, run['work_id'], args, allow_run_control=False)
+    from homun.application.session_dependencies import retain
+    retain(ctx, actor, run, args, result)
+    return result

@@ -14,6 +14,7 @@ from homun.domain.errors import ConflictError, PermissionDeniedError
 from .cli import DockerCLI
 from .contracts import ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain, JobSpec, digest
 from .layout import confine_directory
+from .workspace import owned_root, working_directory
 
 
 class DockerJobs:
@@ -30,7 +31,7 @@ class DockerJobs:
         return digest(str(self.root / "workspaces" / job.owner))
 
     def workspace(self, job: JobSpec) -> Path:
-        return self._directory(self.root / "workspaces" / job.owner)
+        return owned_root(self.root, job.workspace_id, job.run_id)
 
     def _intent(self, job: JobSpec) -> bool:
         directory = self._directory(self.root / "intents")
@@ -106,12 +107,13 @@ class DockerJobs:
             return existing
         if not fresh:
             raise ExecutionUncertain("Recorded command has no container; automatic redispatch is forbidden")
+        working_directory(workspace, job.cwd)
         if any(c in str(workspace) for c in (",", "\n", "\r")):
             raise PermissionDeniedError("Workspace path cannot be represented as a Docker mount")
         if pty:stdin = True
         args = ["run", "--detach", *(["--interactive"] if stdin else []), *(["--tty"] if pty else []), "--name", job.name, "--pull=never", "--network=none", "--init",
                 "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=512m",
-                "--cpus=1", "--workdir=/workspace", "--mount", f"type=bind,src={workspace},dst=/workspace",
+                "--cpus=1", "--workdir=" + ("/workspace" if job.cwd == "." else "/workspace/" + job.cwd), "--mount", f"type=bind,src={workspace},dst=/workspace",
                 "--label", f"io.homun.owner={job.owner}", "--label", f"io.homun.contract={job.contract}",
                 "--label", f"io.homun.workspace={self._workspace_identity(job)}",
                 "--entrypoint", "/bin/sh", job.image, "-lc", job.command]

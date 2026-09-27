@@ -39,8 +39,12 @@ output/playwright/
 .env.*
 !.env.example
 *.pem
-*.key
+.venv
 .venv/
+engine/.venv
+engine/.venv/
+**/.venv
+**/.venv/
 __pycache__/
 .pytest_cache/
 *.pyc

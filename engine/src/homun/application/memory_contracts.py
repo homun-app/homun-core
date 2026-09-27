@@ -28,6 +28,15 @@ class SessionSearchArguments(BaseModel):
     to_date: str | None = Field(default=None, max_length=10)
 
 
+class MemoryReviewArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    query: str | None = Field(default=None, max_length=500)
+    project_id: str | None = Field(default=None, max_length=100)
+    min_similarity: float = Field(default=0.75, ge=0.1, le=1.0)
+    action: str = Field(default="preview", max_length=20)
+    limit: int = Field(default=20, ge=1, le=100)
+
+
 def entries(handler, version=1):
     recall_def = ToolDefinition(
         name="memory_recall",
@@ -52,6 +61,14 @@ def entries(handler, version=1):
         ),
         input_schema=SessionSearchArguments.model_json_schema(),
     )
+    review_def = ToolDefinition(
+        name="memory_review",
+        description=(
+            "Review stored persistent memories to detect duplicates, redundancies, and obsolete notes. "
+            "Action 'preview' returns duplicate clusters; action 'prune' removes redundant notes."
+        ),
+        input_schema=MemoryReviewArguments.model_json_schema(),
+    )
 
     def run_recall(ctx, actor, run, args):
         return handler(ctx, actor, run, "memory_recall", args)
@@ -62,8 +79,12 @@ def entries(handler, version=1):
     def run_search(ctx, actor, run, args):
         return handler(ctx, actor, run, "session_search", args)
 
+    def run_review(ctx, actor, run, args):
+        return handler(ctx, actor, run, "memory_review", args)
+
     return [
         ToolEntry(recall_def, "memory", str(version), MemoryRecallArguments, run_recall, replay="read_only"),
         ToolEntry(remember_def, "memory", str(version), MemoryRememberArguments, run_remember, replay="read_only"),
         ToolEntry(session_search_def, "memory", str(version), SessionSearchArguments, run_search, replay="read_only"),
+        ToolEntry(review_def, "memory", str(version), MemoryReviewArguments, run_review, replay="never"),
     ]

@@ -3,6 +3,7 @@ from typing import Literal
 from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
 from homun.application.agent_runs import approve, list_runs, propose
+from homun.application.surface_toolset_policy import RunToolPolicy
 from homun.application.agent_control import control
 from homun.application.agent_side_questions import answer_side_question
 from homun.domain.errors import DomainError
@@ -12,38 +13,7 @@ from homun.routes.price_comparisons import request_context
 router = APIRouter(prefix='/v1/workspaces/{workspace_id}', tags=['agent-runs'])
 
 
-class RunRequest(BaseModel):
-    command_id: str = Field(min_length=1, max_length=160)
-    expected_version: int = Field(ge=1)
-    terminal_image: str | None = Field(default=None,pattern=r'^sha256:[0-9a-f]{64}$')
-    terminal_backend: Literal['docker', 'local', 'ssh', 'modal', 'managed_modal', 'singularity', 'daytona', 'vercel'] | None = None
-    ssh_host: str | None = Field(default=None, max_length=253)
-    ssh_user: str | None = Field(default=None, max_length=32)
-    ssh_port: int | None = Field(default=None, ge=1, le=65535)
-    ssh_host_key: str | None = Field(default=None, max_length=2000)
-    ssh_key_path: str | None = Field(default=None, max_length=4096)
-    web_pages: bool = False
-    browser: bool = False
-    memory: bool = False
-    skills: bool = False
-    delegation: bool = False
-    clarify: bool = False
-    goals: bool = False
-    cron: bool = False
-    session_management: bool = False
-    gateway: bool = False
-    code_execution: bool = False
-    plugins: bool = False
-    moa: bool | dict | None = None
-    server_ids: list[str] = Field(default_factory=list, max_length=4)
-    material_ids: list[str] = Field(default_factory=list, max_length=12)
-    team_id: str | None = Field(default=None, max_length=160)
-    person_id: str | None = Field(default=None, min_length=1, max_length=160)
-    cwd: str | None = Field(default=None, max_length=4096)
-    workspace_root: str | None = Field(default=None, max_length=4096)
-    connection_id: str | None = Field(default=None, max_length=160)
-    fallback_connection_id: str | None = Field(default=None, max_length=160)
-
+from homun.application.agent_run_request import RunRequest
 
 class RunApproval(BaseModel):
     command_id: str = Field(min_length=1, max_length=160)
@@ -51,7 +21,8 @@ class RunApproval(BaseModel):
     digest: str
 
 
-class RunView(BaseModel):
+class RunView(RunToolPolicy):
+    micro_compaction: bool = False  # Older proposals did not enable it.
     id: str
     work_id: str
     status: str
@@ -76,6 +47,10 @@ class RunView(BaseModel):
     goals: dict | None = None
     cron: dict | None = None
     session_management: dict | None = None
+    session_context: dict | None = None
+    execution_context: dict | None = None
+    runtime_selection: dict | None = None
+    workspace_transfer: dict | None = None
     gateway: dict | None = None
     code_execution: dict | None = None
     plugins: dict | None = None
@@ -92,6 +67,10 @@ class RunView(BaseModel):
     turns: int
     model_attempts: int
     history_redacted: bool = False
+    stream_progress: dict | None = None
+    automation_wait: dict | None = None
+    clarify_request: list[dict] | None = None
+    clarify_deadline_at: str | None = None
     request_id: str | None = None
     artifact_id: str | None = None
     error_code: str | None = None

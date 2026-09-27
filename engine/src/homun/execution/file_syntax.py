@@ -43,14 +43,16 @@ _CHECKERS = {'.py': _python, '.json': _json, '.toml': _toml}
 
 
 def delta(path: str, before: str | None, after: str) -> dict:
-    """Syntax findings for one edit. ``lsp`` is always unavailable."""
+    """Syntax and LSP findings for one edit."""
     extension = PurePosixPath(path).suffix.lower()
     checker = _CHECKERS.get(extension)
-    base = {'lsp': 'unavailable'}
+    from homun.execution.lsp_lifecycle import get_lsp_service
+    lsp_svc = get_lsp_service()
+    base = {'lsp': 'ready' if lsp_svc.enabled_for(path) else 'unavailable'}
     if checker is None:
         reason = 'No in-process syntax check for this file'
         if extension in {'.yaml', '.yml', '.ts', '.tsx', '.js', '.go', '.rs'}:
-            reason = f'{extension} diagnostics are not available; Homun does not run a language server or external linter'
+            reason = f'{extension} diagnostics handled via LSP ({base["lsp"]})'
         return {**base, 'checked': False, 'introduced': [], 'reason': reason}
     introduced_after = checker(after)
     if extension in FAIL_CLOSED and introduced_after:

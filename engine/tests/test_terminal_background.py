@@ -202,4 +202,4 @@ def test_pty_query_is_answered_once(setup, monkeypatch):
     first = terminal_jobs.refresh(ctx, actor, work, job['id'])
     second = terminal_jobs.refresh(ctx, actor, work, job['id'])
     assert first['logs']['text'] == 'alpha' and second['logs']['text'] == 'alpha'
-    assert [item for item in sessions.calls if item[0] == 'write'] == [('write', job['id'], b'\x1b[1;1R')]
+    assert [item for item in sessions.calls if item[0] == 'write'] == [('write', job['id'], b'\x1b[1;6R')]

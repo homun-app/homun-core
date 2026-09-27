@@ -200,8 +200,8 @@ def test_agent_run_advances_with_clarify_tool(setup):
         usage=None,
     )
 
-    assert advance(ctx, proposal["id"]) == "running"
-    cmd = ctx.repository.load().commands[proposal["id"]]
-    obs = cmd.result["observations"][-1]
-    assert obs["tool"] == "clarify"
-    assert obs["result"]["responses"][0]["user_response"] == "Report sintetico"
+    # Stored fixture answers cannot impersonate a human contribution.
+    assert advance(ctx, proposal['id']) == 'waiting_input'
+    run = ctx.repository.load().commands[proposal['id']].result
+    assert run['clarify_request'][0]['question'] == 'Che tipo di report desideri?'
+    assert not run['observations']
