@@ -43,7 +43,7 @@ type Props = {
   onToggleNotifications?: (() => void) | undefined;
 };
 
-const SPACE_LINKS: SpaceView[] = ["Compiti", "Materiali", "Documenti", "Automazioni", "Plugin"];
+const SPACE_LINKS: SpaceView[] = ["Compiti", "Materiali", "Documenti", "Automazioni", "Plugin", "Canali"];
 
 function spaceLinkCount(
   view: SpaceView,
@@ -67,6 +67,8 @@ function spaceLinkCount(
       return visibleWorks.length;
     case "Plugin":
       return (spaceData.installedPlugins || []).length;
+    case "Canali":
+      return null;
     case "Nuovo collaboratore":
       return 0;
     default: {

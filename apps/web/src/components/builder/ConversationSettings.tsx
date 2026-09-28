@@ -33,6 +33,8 @@ import { ConversationMemorySettingsSection } from "./ConversationMemorySettingsS
 import { ConversationAgentsSettingsSection } from "./ConversationAgentsSettingsSection";
 import { ConversationGatewayChannelsSection } from "./ConversationGatewayChannelsSection";
 import { ConversationEngineMaintenanceSection } from "./ConversationEngineMaintenanceSection";
+import { CapabilitiesView } from "./capabilities/CapabilitiesView";
+import { MessagingView } from "./messaging/MessagingView";
 import { type ConversationPreferences } from "./conversation-preferences";
 import { setLanguage } from "@/lib/i18n";
 import "./conversation-settings.css";
@@ -304,20 +306,13 @@ export function ConversationSettings({
               </div>
             </>
           )}
-          {section === "notifications" && (
-            <ConversationGatewayChannelsSection
-              resultNotifications={draft.resultNotifications}
-              onToggleResultNotifications={(val) => change("resultNotifications", val)}
-            />
-          )}
+          {section === "notifications" && <MessagingView />}
           {section === "models" && <ConversationUnifiedModelsSection />}
           {section === "budget" && (
             <ConversationBudgetSettingsSection draft={draft} onChange={change} />
           )}
           {section === "people" && <ConversationPeopleSettingsSection />}
-          {(section === "plugins" || section === "skills") && (
-            <ConversationUnifiedPluginsSection />
-          )}
+          {(section === "plugins" || section === "skills") && <CapabilitiesView />}
           {section === "automations" && <ConversationAutomationsSettingsSection />}
           {section === "agents" && <ConversationAgentsSettingsSection actorId="person_fabio" />}
           {section === "projects" && (

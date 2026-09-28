@@ -34,6 +34,8 @@ import { EngineWorkspaceTeams } from "./EngineWorkspaceTeams";
 import { HomunClientError } from "@/lib/homun-errors";
 import { EngineMaterials } from "./EngineMaterials";
 import { ConversationCapabilitiesSettingsSection } from "./ConversationCapabilitiesSettingsSection";
+import { CapabilitiesView } from "./capabilities/CapabilitiesView";
+import { MessagingView } from "./messaging/MessagingView";
 import { EngineDocuments } from "./EngineDocuments";
 import { EngineRoutines } from "./EngineRoutines";
 import type { EngineRoutine } from "@/lib/engine-routines-client";
@@ -239,13 +241,11 @@ export function ConversationWorkspaceSpaceHost({
   if (engineMode && space === "Plugin")
     return (
       <section className="cw-workspace cw-documents cw-engine-library" aria-label="Plugin">
-        <div className="cw-panel-top">
-          <h2>Plugin e capacità</h2>
-          <span className="cw-hint">Fonte: motore</span>
-        </div>
+        <CapabilitiesView />
         <ConversationCapabilitiesSettingsSection />
       </section>
     );
+  if (engineMode && space === "Canali") return <MessagingView />;
   if (space === "Materiali") {
     return (
       <ConversationMaterials
@@ -329,14 +329,11 @@ export function ConversationWorkspaceSpaceHost({
   }
 
   if (space === "Plugin") {
-    return (
-      <ConversationPlugins
-        onReveal={onRevealPanel}
-        data={spaceData}
-        onChange={setSpaceData}
-        onMember={(n) => onOpenSpace("Squadra", "", `person:${n}`)}
-      />
-    );
+    return <CapabilitiesView />;
+  }
+
+  if (space === "Canali") {
+    return <MessagingView />;
   }
 
   return (

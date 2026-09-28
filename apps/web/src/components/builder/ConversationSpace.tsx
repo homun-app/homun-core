@@ -47,7 +47,7 @@ export type SpaceView =
   | "Plugin"
   | "Materiali"
   | "Documenti"
-  | "Compiti"
+  | "Compiti" | "Canali"
   | "Nuovo collaboratore";
 export type SpaceWork = {
   routineId?: string;
