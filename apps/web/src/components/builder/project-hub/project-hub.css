@@ -714,13 +714,25 @@
 }
 
 .ph-icon-tab:hover {
-  background: rgba(0, 0, 0, 0.05);
-  color: #1c2d22;
+  background: transparent;
+  color: var(--color-foreground, #131a17);
 }
 
 .ph-icon-tab.is-active {
-  background: rgba(0, 0, 0, 0.06);
-  color: #1c2d22;
+  background: transparent;
+  color: var(--color-foreground, #131a17);
+}
+
+.ph-icon-tab.is-active::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-primary, #206553);
 }
 
 .ph-icon-tab-badge {
