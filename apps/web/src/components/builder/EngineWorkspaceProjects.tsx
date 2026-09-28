@@ -14,6 +14,8 @@ export function EngineWorkspaceProjects({
   onWork,
   onCreateWork,
   engineMode = false,
+  sidebarOpen,
+  onOpenSidebar,
 }: {
   projects: SpaceProject[];
   works: Work[];
@@ -21,7 +23,9 @@ export function EngineWorkspaceProjects({
   onProject: (id: string) => void;
   onWork: (id: string) => void;
   onCreateWork?: (projectId: string) => void;
-  engineMode?: boolean;
+  engineMode?: boolean | undefined;
+  sidebarOpen?: boolean | undefined;
+  onOpenSidebar?: (() => void) | undefined;
 }) {
   return (
     <ProjectHubView
@@ -32,6 +36,8 @@ export function EngineWorkspaceProjects({
       onOpenWork={onWork}
       onCreateWork={onCreateWork}
       engineMode={engineMode}
+      sidebarOpen={sidebarOpen}
+      onOpenSidebar={onOpenSidebar}
     />
   );
 }

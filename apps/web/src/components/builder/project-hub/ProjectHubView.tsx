@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FolderGit2, MessageSquare, Bot, FileText, BookMarked, UsersRound, Plus, ArrowUp } from "lucide-react";
+import { MessageSquare, Bot, FileText, BookMarked, UsersRound, Plus, ArrowUp, PanelRightClose } from "lucide-react";
 import "./project-hub.css";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { SettingsCustomSelect, type SelectOption } from "../SettingsCustomSelect";
@@ -32,6 +32,8 @@ type Props = {
   onOpenWork: (id: string) => void;
   onCreateWork?: ((projectId: string) => void) | undefined;
   engineMode?: boolean | undefined;
+  sidebarOpen?: boolean | undefined;
+  onOpenSidebar?: (() => void) | undefined;
 };
 
 export function ProjectHubView({
@@ -42,6 +44,8 @@ export function ProjectHubView({
   onOpenWork,
   onCreateWork,
   engineMode = false,
+  sidebarOpen = true,
+  onOpenSidebar,
 }: Props) {
   const engineStatus = useEngineStatus();
   const isEngine = engineMode && engineStatus.connection === "connected";
@@ -322,10 +326,21 @@ export function ProjectHubView({
         </div>
       )}
 
-      {/* Compact topbar: project name left, icon tabs right */}
-      <div className="ph-topbar">
-        <div className="ph-topbar-left">
-          <FolderGit2 size={14} className="ph-topbar-folder-icon" />
+      {/* Single Unified Topbar */}
+      <header className="cw-topbar">
+        <div className="ph-topbar-breadcrumb-group">
+          {!sidebarOpen && onOpenSidebar && (
+            <button
+              className="cw-icon"
+              aria-label="Apri barra laterale"
+              title="Apri barra laterale"
+              onClick={onOpenSidebar}
+            >
+              <PanelRightClose size={19} />
+            </button>
+          )}
+          <span className="ph-breadcrumb-root">Progetti</span>
+          <span className="ph-breadcrumb-sep">/</span>
           {projectOptions.length > 1 ? (
             <div className="ph-title-heading-wrapper">
               <SettingsCustomSelect
@@ -350,7 +365,7 @@ export function ProjectHubView({
           </span>
         </div>
 
-        <div className="ph-topbar-right">
+        <div className="ph-topbar-contextual">
           <div className="ph-icon-tabs" role="tablist" aria-label="Sezioni del progetto">
             <button role="tab" aria-selected={activeTab === "overview"}
               title={`Lavori${projectWorks.length > 0 ? ` (${projectWorks.length})` : ""}`}
@@ -390,7 +405,7 @@ export function ProjectHubView({
             <Plus size={15} />
           </button>
         </div>
-      </div>
+      </header>
 
       {/* Tab body */}
       <div className="ph-body">

@@ -9,7 +9,7 @@
   flex-direction: column;
   height: 100%;
   width: 100%;
-  background: #fbfbf8;
+  background: #ffffff;
   color: #263832;
   overflow: hidden;
   font-family: var(--font-sans);
@@ -642,41 +642,50 @@
    COMPACT TOPBAR (replaces ph-header + ph-tabs)
    ============================================================ */
 
-.ph-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  height: 44px;
-  border-bottom: 1px solid #e8ece6;
-  background: #ffffff;
-  flex-shrink: 0;
-  gap: 12px;
-}
+/* ============================================================
+   UNIFIED TOPBAR (inside cw-topbar)
+   ============================================================ */
 
-.ph-topbar-left {
+.ph-topbar-breadcrumb-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   flex: 1;
 }
 
-.ph-topbar-folder-icon {
-  color: #8a9d92;
-  flex-shrink: 0;
+.ph-breadcrumb-root {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-muted-foreground, #656e6b);
+}
+
+.ph-breadcrumb-sep {
+  font-size: 12px;
+  color: var(--color-muted-foreground, #a8b8af);
+  user-select: none;
+  margin: 0 1px;
 }
 
 .ph-topbar-name {
   font-size: 13px;
   font-weight: 600;
-  color: #1c2d22;
+  color: var(--color-foreground, #131a17);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.ph-topbar-right {
+.ph-title-heading-wrapper button {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  padding: 3px 6px !important;
+  border-radius: 6px !important;
+  color: var(--color-foreground, #131a17) !important;
+  gap: 4px !important;
+}
+
+.ph-topbar-contextual {
   display: flex;
   align-items: center;
   gap: 2px;

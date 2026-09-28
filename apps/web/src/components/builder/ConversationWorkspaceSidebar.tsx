@@ -2,7 +2,7 @@
  * Left navigation for the simulated conversation workspace.
  */
 
-import { ArrowLeft, ArrowUpRight, ChevronDown, PanelRightOpen, Plus, Search, Settings2 } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Bell, ChevronDown, PanelRightOpen, Plus, Search, Settings2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { ConversationAvatar } from "./ConversationAvatar";
 import { ConversationProjectNav } from "./ConversationProjectNav";
@@ -39,6 +39,8 @@ type Props = {
   onToggleSquadList: () => void;
   preferences: ConversationPreferences;
   onOpenSettings: () => void;
+  notificationCount?: number | undefined;
+  onToggleNotifications?: (() => void) | undefined;
 };
 
 const SPACE_LINKS: SpaceView[] = ["Compiti", "Materiali", "Documenti", "Automazioni", "Plugin"];
@@ -99,6 +101,8 @@ export function ConversationWorkspaceSidebar({
   onToggleSquadList,
   preferences,
   onOpenSettings,
+  notificationCount = 0,
+  onToggleNotifications,
 }: Props) {
   const uniqueAgents = scenarios.filter(
     (s, i) =>
@@ -264,14 +268,26 @@ export function ConversationWorkspaceSidebar({
         </div>
       </div>
       <div className="cw-sidebar-foot">
-        <button aria-label="Impostazioni dello spazio" onClick={onOpenSettings}>
+        <button className="cw-sidebar-profile" aria-label="Impostazioni dello spazio" onClick={onOpenSettings}>
           <span className="cw-user">{preferences.displayName.slice(0, 1)}</span>
-          <span>
-            {preferences.displayName}
+          <span className="cw-sidebar-profile-info">
+            <span className="cw-sidebar-profile-name">{preferences.displayName}</span>
             <small>{preferences.spaceName}</small>
           </span>
-          <Settings2 size={17} />
+          <Settings2 size={16} className="cw-sidebar-settings-icon" />
         </button>
+        {onToggleNotifications && (
+          <button
+            type="button"
+            className="cw-sidebar-notif-btn"
+            aria-label={`Notifiche${notificationCount ? ` · ${notificationCount} aggiornamenti` : ""}`}
+            onClick={onToggleNotifications}
+            title="Notifiche"
+          >
+            <Bell size={16} />
+            {!!notificationCount && <span className="cw-notif-badge">{notificationCount}</span>}
+          </button>
+        )}
       </div>
     </aside>
   );

@@ -81,6 +81,8 @@ type Props = {
     | ((routine: EngineRoutine, changes: { name: string; cron: string }) => Promise<void>)
     | undefined;
   onSkipNextRoutine?: ((routine: EngineRoutine) => Promise<void>) | undefined;
+  sidebarOpen?: boolean | undefined;
+  onOpenSidebar?: (() => void) | undefined;
 };
 
 export function ConversationWorkspaceSpaceHost({
@@ -120,6 +122,8 @@ export function ConversationWorkspaceSpaceHost({
   onUpdateMaterial,
   onRemoveMaterial,
   onLinkMaterial,
+  sidebarOpen,
+  onOpenSidebar,
 }: Props) {
   if (engineMode && space === "Squadra")
     return (
@@ -145,6 +149,8 @@ export function ConversationWorkspaceSpaceHost({
           onCreateFreeWork("Nuovo lavoro", "Descrivi l'obiettivo di questa attività...", [], projId)
         }
         engineMode={engineMode}
+        sidebarOpen={sidebarOpen}
+        onOpenSidebar={onOpenSidebar}
       />
     );
 

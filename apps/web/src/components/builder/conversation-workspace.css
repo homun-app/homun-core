@@ -207,29 +207,89 @@
   font-size: 11px;
   padding: 10px 8px;
 }
-.cw-sidebar-foot > button {
+.cw-sidebar-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--color-sidebar-border, #e3e7e5);
+}
+.cw-sidebar-profile {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 6px 8px;
   background: none;
   border: 0;
   border-radius: var(--radius-md, 6px);
   color: var(--color-sidebar-foreground, #28302d);
   text-align: left;
+  cursor: pointer;
   transition: background-color 0.12s ease;
 }
-.cw-sidebar-foot > button:hover {
+.cw-sidebar-profile:hover {
   background: var(--color-sidebar-accent, #e9eeec);
+}
+.cw-sidebar-profile-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.cw-sidebar-profile-name {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cw-sidebar-settings-icon {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--color-muted-foreground, #656e6b);
+}
+.cw-sidebar-notif-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid var(--color-border, #e3e7e5);
+  color: var(--color-muted-foreground, #656e6b);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: all 0.12s ease;
+}
+.cw-sidebar-notif-btn:hover {
+  background: var(--color-sidebar-accent, #e9eeec);
+  color: var(--color-foreground, #131a17);
+}
+.cw-notif-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  background: var(--color-primary, #206553);
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  line-height: 1;
 }
 .cw-sidebar-foot small {
   display: block;
   color: var(--color-muted-foreground, #656e6b);
   font-size: 11px;
-}
-.cw-sidebar-foot svg:last-child {
-  margin-left: auto;
 }
 .cw-user {
   border-radius: 50%;
@@ -924,14 +984,18 @@
 }
 .cw-notifications {
   position: absolute;
-  right: 26px;
-  top: 64px;
-  z-index: 20;
-  background: white;
-  box-shadow: 0 16px 65px #183a3326;
-  border-radius: 16px;
-  width: 340px;
-  padding: 20px;
+  left: 16px;
+  bottom: 60px;
+  top: auto;
+  right: auto;
+  z-index: 60;
+  background: #ffffff;
+  border: 1px solid var(--color-border, #e3e7e5);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  padding: 16px;
 }
 .cw-notifications header {
   display: flex;

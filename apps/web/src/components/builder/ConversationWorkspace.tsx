@@ -19,6 +19,7 @@ import { ConversationWorkspacePreview } from "./ConversationWorkspacePreview";
 import { ConversationWorkspaceSidebar } from "./ConversationWorkspaceSidebar";
 import { ConversationWorkspaceSpaceHost } from "./ConversationWorkspaceSpaceHost";
 import { ConversationWorkspaceTopbar } from "./ConversationWorkspaceTopbar";
+import { ConversationNotifications } from "./ConversationNotifications";
 import {
   ConversationWorkspaceWorkPanel,
   registerPlanAgent,
@@ -1162,33 +1163,23 @@ export function ConversationWorkspace() {
         onToggleSquadList={() => setSquadListOpen(!squadListOpen)}
         preferences={preferences}
         onOpenSettings={() => setSettings(true)}
+        notificationCount={notificationCount}
+        onToggleNotifications={() => setNotifications(!notifications)}
       />
       <main className={`cw-main ${panel ? "" : "cw-details-hidden"}`}>
-        <ConversationWorkspaceTopbar
-          engineMode={engine.backend === "engine"}
-          sidebarOpen={sidebarOpen}
-          onOpenSidebar={() => setSidebarOpen(true)}
-          space={space}
-          work={work}
-          preferences={preferences}
-          onOpenSettings={() => setSettings(true)}
-          viewer={viewer}
-          onViewerChange={(next) => {
-            setViewer(next);
-            setNotifications(false);
-          }}
-          spaceData={displaySpaceData}
-          notificationCount={notificationCount}
-          notificationsOpen={notifications}
-          onToggleNotifications={() => setNotifications(!notifications)}
-          onCloseNotifications={() => setNotifications(false)}
-          pending={pending}
-          completedNotices={completedNotices}
-          scenarios={scenarios}
-          onOpenWork={open}
-          showPanelToggle={!!(work || space)}
-          panelOpen={panel}
-          onTogglePanel={() => setPanel(!panel)}
+        {space !== "Progetti" && (
+          <ConversationWorkspaceTopbar
+            engineMode={engine.backend === "engine"}
+            sidebarOpen={sidebarOpen} onOpenSidebar={() => setSidebarOpen(true)}
+            space={space} work={work} preferences={preferences}
+            viewer={viewer} onViewerChange={(next) => { setViewer(next); setNotifications(false); }}
+            spaceData={displaySpaceData}
+          />
+        )}
+        <ConversationNotifications
+          isOpen={notifications} onClose={() => setNotifications(false)}
+          pending={pending} completedNotices={completedNotices}
+          scenarios={scenarios} spaceData={displaySpaceData} onOpenWork={open}
         />
         {/* Diagnostics live in Settings; blocking errors use HomunErrorNotice. */}
         {space ? (
@@ -1199,6 +1190,8 @@ export function ConversationWorkspace() {
             spaceInitial={spaceInitial}
             spaceSelected={spaceSelected}
             spaceVersion={spaceVersion}
+            sidebarOpen={sidebarOpen}
+            onOpenSidebar={() => setSidebarOpen(true)}
             spaceData={displaySpaceData}
             setSpaceData={setSpaceData}
             scenarios={scenarios}
