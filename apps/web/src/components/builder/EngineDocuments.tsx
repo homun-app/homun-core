@@ -59,13 +59,20 @@ export function EngineDocuments({ projects }: { projects: ProjectOption[] }) {
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </ConversationSelectField>
       </div>
-      {docs === null && !error && <p role="status">{t("common.loading")}</p>}
       {docs !== null && filtered.length === 0 && (
-        <p className="cw-documents__empty">
-          {docs.length === 0
-            ? t("documents.no_documents")
-            : t("documents.no_documents")}
-        </p>
+        <div className="homun-empty-state">
+          <div className="homun-empty-state__icon">
+            <FileText size={20} />
+          </div>
+          <h3 className="homun-empty-state__title">
+            {docs.length === 0 ? "Nessun documento prodotto" : "Nessun documento trovato"}
+          </h3>
+          <p className="homun-empty-state__description">
+            {docs.length === 0
+              ? "I documenti e i report finali generati dagli agenti durante le conversazioni appariranno qui."
+              : "Nessun documento corrisponde ai termini di ricerca impostati."}
+          </p>
+        </div>
       )}
       <div className="cw-documents__list">
         {filtered.map((doc) => (

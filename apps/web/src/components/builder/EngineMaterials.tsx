@@ -229,8 +229,21 @@ export function EngineMaterials({ projects }: { projects: Project[] }) {
         </div>
       ))}
       <HomunErrorNotice error={error} />
-      {materials === null && !error && <p role="status">Carico i materiali…</p>}
-      {materials !== null && !visible.length && <p>Nessun materiale con questi filtri.</p>}
+      {materials !== null && !visible.length && (
+        <div className="homun-empty-state">
+          <div className="homun-empty-state__icon">
+            <Upload size={20} />
+          </div>
+          <h3 className="homun-empty-state__title">
+            {materials.length === 0 ? "Nessun materiale caricato" : "Nessun materiale trovato"}
+          </h3>
+          <p className="homun-empty-state__description">
+            {materials.length === 0
+              ? "Carica file o documenti da mettere a disposizione della squadra durante i compiti."
+              : "Verifica i termini di ricerca o seleziona un altro progetto."}
+          </p>
+        </div>
+      )}
       <div className="cw-documents__list">
         {visible.map((material) => (
           <article className="cw-document" key={material.id}>

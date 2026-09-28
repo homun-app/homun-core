@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CheckCircle2 } from "lucide-react";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 export type TaskSummary = {
   id: string;
@@ -143,11 +144,20 @@ export function ConversationTasks({
             </p>
           )}
           {!visible.length && (
-            <p className="cw-hint">
-              Nessun compito. Inizia una conversazione dalla Home o da un progetto.
-            </p>
+            <div className="homun-empty-state">
+              <div className="homun-empty-state__icon">
+                <CheckCircle2 size={20} />
+              </div>
+              <h3 className="homun-empty-state__title">
+                {items.length === 0 ? "Nessun compito attivo" : "Nessun compito trovato"}
+              </h3>
+              <p className="homun-empty-state__description">
+                {items.length === 0
+                  ? "I compiti nascono automaticamente quando affidi un lavoro a un agente o collaboratore."
+                  : "Nessun lavoro corrisponde ai criteri di filtro o di ricerca impostati."}
+              </p>
+            </div>
           )}
-          {!visible.length && <p className="cw-hint">Nessun lavoro corrisponde a questi filtri.</p>}
           {view === "Elenco" ? (
             visible.map(card)
           ) : view === "Kanban" ? (

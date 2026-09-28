@@ -46,7 +46,7 @@ export function EngineRoutines({
 
   return (
     <section className="cw-workspace cw-routines" aria-label={t("routines.title")}>
-      <div className="ph-inline-tabs" role="tablist" style={{ margin: "-24px -32px 20px", padding: "0 32px" }}>
+      <div className="ph-inline-tabs" role="tablist">
         <button
           role="tab"
           aria-selected={tab === "routines"}
@@ -54,9 +54,9 @@ export function EngineRoutines({
           onClick={() => setTab("routines")}
         >
           <Clock size={14} />
-          <span>{t("routines.title")}</span>
+          <span>Routine ricorrenti</span>
           <span className="ph-inline-tab-count">
-            ({routines.filter((r) => r.status === "active").length})
+            {routines.filter((r) => r.status === "active").length}
           </span>
         </button>
         <button
@@ -66,7 +66,7 @@ export function EngineRoutines({
           onClick={() => setTab("goals")}
         >
           <Target size={14} />
-          <span>{t("goals.title")}</span>
+          <span>Obiettivi multi-turno</span>
         </button>
       </div>
 
@@ -75,9 +75,15 @@ export function EngineRoutines({
       ) : (
         <>
           {routines.length === 0 && (
-            <p className="cw-routines__empty">
-              {t("routines.empty")}
-            </p>
+            <div className="homun-empty-state">
+              <div className="homun-empty-state__icon">
+                <Clock size={20} />
+              </div>
+              <h3 className="homun-empty-state__title">Nessuna routine programmata</h3>
+              <p className="homun-empty-state__description">
+                Le routine eseguono automaticamente i tuoi lavori su base ricorrente. Puoi trasformare qualsiasi lavoro riuscito in una routine dal suo riepilogo con l’opzione «Rendi ripetibile».
+              </p>
+            </div>
           )}
           <div className="cw-routines__list">
         {routines.map((routine) => (

@@ -1005,6 +1005,109 @@ aside.cw-workspace,
   color: var(--color-muted-foreground) !important;
 }
 
+/* ================================================================
+   INLINE TABS & NAVIGATION (GLOBAL STANDARD)
+   ================================================================ */
+
+.ph-inline-tabs {
+  display: flex !important;
+  align-items: center !important;
+  gap: 20px !important;
+  border-bottom: 1px solid var(--color-border) !important;
+  margin-bottom: 24px !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+.ph-inline-tab {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 8px 4px 10px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--color-muted-foreground) !important;
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  margin-bottom: -1px !important;
+  cursor: pointer !important;
+  transition: all 0.12s ease !important;
+  white-space: nowrap !important;
+  line-height: 1 !important;
+}
+
+.ph-inline-tab:hover {
+  color: var(--foreground) !important;
+  background: transparent !important;
+}
+
+.ph-inline-tab.is-active,
+.ph-inline-tab[aria-selected="true"] {
+  color: var(--foreground) !important;
+  border-bottom-color: var(--foreground) !important;
+  font-weight: 600 !important;
+  background: transparent !important;
+}
+
+.ph-inline-tab-count {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  color: var(--color-muted-foreground) !important;
+  background: rgba(0, 0, 0, 0.04) !important;
+  padding: 1px 6px !important;
+  border-radius: 999px !important;
+}
+
+.ph-inline-tab.is-active .ph-inline-tab-count {
+  color: var(--foreground) !important;
+  background: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* ================================================================
+   HOMUN EMPTY STATE (GLOBAL STANDARD)
+   ================================================================ */
+
+.homun-empty-state {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  padding: 56px 24px !important;
+  margin: 20px 0 !important;
+  background: transparent !important;
+  border: 1px dashed var(--color-border) !important;
+  border-radius: 8px !important;
+}
+
+.homun-empty-state__icon {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 8px !important;
+  background: rgba(0, 0, 0, 0.03) !important;
+  color: var(--color-muted-foreground) !important;
+  margin-bottom: 14px !important;
+}
+
+.homun-empty-state__title {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+  margin: 0 0 6px 0 !important;
+}
+
+.homun-empty-state__description {
+  font-size: 13px !important;
+  color: var(--color-muted-foreground) !important;
+  max-width: 480px !important;
+  line-height: 1.5 !important;
+  margin: 0 0 16px 0 !important;
+}
+
 /* Sidebar resets: New conversation button & active links */
 .cw-new {
   background: var(--foreground) !important;
@@ -1030,6 +1133,16 @@ aside.cw-workspace,
 
 .cs-space-links button:hover {
   background: rgba(0, 0, 0, 0.03) !important;
+  color: var(--foreground) !important;
+}
+
+/* Sidebar clean typography for project works */
+.cv-project-work {
+  color: var(--color-muted-foreground) !important;
+  font-size: 12px !important;
+}
+
+.cv-project-work:hover {
   color: var(--foreground) !important;
 }
 
