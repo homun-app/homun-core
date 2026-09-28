@@ -63,19 +63,19 @@ export function ProjectCreateModal({ isOpen, onClose, onCreateProject }: Props) 
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div
               style={{
-                width: 32,
-                height: 32,
-                borderRadius: 8,
-                background: "#edf2e7",
-                color: "#157a6e",
+                width: 30,
+                height: 30,
+                borderRadius: 6,
+                background: "rgba(0, 0, 0, 0.04)",
+                color: "var(--foreground)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
               }}
             >
-              <FolderGit2 size={18} />
+              <FolderGit2 size={16} />
             </div>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#1c2d22" }}>
+            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "var(--foreground)" }}>
               Crea Nuovo Progetto
             </h3>
           </div>

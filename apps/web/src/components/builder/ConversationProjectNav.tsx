@@ -7,6 +7,7 @@ export function ConversationProjectNav({
   onProject,
   onWork,
   onAll,
+  onCreate,
   onMove,
   actions,
 }: {
@@ -15,6 +16,7 @@ export function ConversationProjectNav({
   onProject: (id: string) => void;
   onWork: (id: string) => void;
   onAll: () => void;
+  onCreate?: () => void;
   onMove: (id: string, projectId: string) => void;
   actions: (id: string) => React.ReactNode;
 }) {
@@ -83,7 +85,7 @@ export function ConversationProjectNav({
     <section className="cv-project-nav" aria-label="Organizzazione progetti">
       <div className="cv-project-toolbar">
         <button onClick={onAll}>Progetti</button>
-        <button aria-label="Gestisci progetti" onClick={onAll}>
+        <button aria-label="Nuovo progetto" title="Nuovo progetto" onClick={onCreate || onAll}>
           <Plus size={15} />
         </button>
       </div>

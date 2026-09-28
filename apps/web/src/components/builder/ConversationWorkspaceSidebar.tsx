@@ -149,6 +149,7 @@ export function ConversationWorkspaceSidebar({
           onProject={(id) => onOpenSpace("Progetti", "", id)}
           onWork={onOpenWork}
           onAll={() => onOpenSpace("Progetti")}
+          onCreate={() => onOpenSpace("Progetti", "", "new")}
           onMove={onMoveConversation}
           actions={(id) => {
             const w = works.find((item) => item.id === id);

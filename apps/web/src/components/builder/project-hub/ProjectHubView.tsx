@@ -68,7 +68,12 @@ export function ProjectHubView({
   const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
-    if (selectedId) {
+    if (selectedId === "new") {
+      setCreatingProject(true);
+      if (!currentProjectId && (engineProjectsList[0]?.id || simProjects[0]?.id)) {
+        setCurrentProjectId(engineProjectsList[0]?.id || simProjects[0]?.id || "");
+      }
+    } else if (selectedId) {
       setCurrentProjectId(selectedId);
     } else if (!currentProjectId && (engineProjectsList[0]?.id || simProjects[0]?.id)) {
       setCurrentProjectId(engineProjectsList[0]?.id || simProjects[0]?.id || "");
