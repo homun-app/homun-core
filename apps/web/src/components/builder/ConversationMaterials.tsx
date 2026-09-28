@@ -254,19 +254,13 @@ export function ConversationMaterials({
           </div>
         )}
         <div className="cw-history">
-          <div className="cm-page-heading">
-            <h1 className="cs-title">Materiali</h1>
-            <span>{items.length} elementi</span>
-          </div>
-          {contextWork ? (
+          {contextWork && (
             <div className="cm-context">
               <button className="cs-link" onClick={() => onBack(contextWork.id)}>
                 ← {contextWork.title}
               </button>
               <span>I nuovi materiali saranno collegati qui.</span>
             </div>
-          ) : (
-            <p className="cs-intro">La raccolta dei tuoi lavori.</p>
           )}
           <input
             className="cs-member-search"

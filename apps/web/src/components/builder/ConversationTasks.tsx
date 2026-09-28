@@ -67,15 +67,17 @@ export function ConversationTasks({
           onDragStart={(e) => e.dataTransfer.setData("text/plain", i.id)}
           onClick={() => onOpen(i.id)}
         >
-          <strong>{i.title}</strong>
-          <small>
-            {i.agent}
-            {i.unavailable ? " · agente eliminato" : ""} · {i.project || "Senza progetto"}
-          </small>
-          <small>
-            {i.status}
-            {i.due ? ` · ${i.due}` : ""}
-          </small>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className="ph-work-row__dot" />
+            <div>
+              <strong>{i.title}</strong>
+              <small>
+                {i.agent}
+                {i.unavailable ? " · eliminato" : ""} · {i.project || "Senza progetto"}
+                {i.due ? ` · ${i.due}` : ""}
+              </small>
+            </div>
+          </div>
         </button>
         <button
           className="ct-manage"
@@ -95,10 +97,7 @@ export function ConversationTasks({
     <div className="cw-stage with-panel cs-stage">
       <section className="cw-conversation">
         <div className="cw-history">
-          <span className="cw-overline">COMPITI</span>
-          <h1 className="cs-title">Il lavoro, a colpo d’occhio.</h1>
-          <p className="cs-intro">Le stesse conversazioni, viste per stato o scadenza.</p>
-          <div className="cs-actions">
+          <div className="cs-actions" style={{ marginBottom: 12 }}>
             {["Elenco", "Kanban", "Calendario"].map((v) => (
               <button
                 key={v}

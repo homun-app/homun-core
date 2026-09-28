@@ -959,3 +959,167 @@
 .cv-settings-body {
   background: #ffffff !important;
 }
+
+/* ================================================================
+   CLARIFY, PATCH PROPOSALS & DELIVERABLE REVIEW CARDS
+   Matches the Linear/Cursor card template: zero heavy color fills.
+   ================================================================ */
+
+.cw-clarify-card {
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+}
+
+.cw-clarify-header {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+
+.cw-clarify-legend {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--foreground) !important;
+}
+
+.cw-clarify-choice {
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  color: var(--foreground) !important;
+  transition: all 0.1s ease !important;
+}
+
+.cw-clarify-choice:hover {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border-color: var(--color-border) !important;
+}
+
+.cw-clarify-choice.is-selected {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-color: var(--foreground) !important;
+  color: var(--foreground) !important;
+  font-weight: 500 !important;
+}
+
+.cs-badge-recommended {
+  background: rgba(0, 0, 0, 0.06) !important;
+  color: var(--foreground) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  border-radius: 4px !important;
+}
+
+.cw-clarify-textarea {
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  background: #ffffff !important;
+  color: var(--foreground) !important;
+}
+
+.cw-clarify-textarea:focus {
+  border-color: var(--foreground) !important;
+  outline: none !important;
+}
+
+/* Patch proposals & chat deliverables */
+.cc-chat-proposal,
+.cc-step-editor,
+.cw-patch-preview {
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 8px !important;
+  padding: 16px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+}
+
+.cc-chat-proposal strong,
+.cw-patch-preview strong {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+
+/* Artifact review card */
+.cw-artifact-review-card,
+.cw-artifact-review-inline {
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04) !important;
+}
+
+.cw-artifact-header h3,
+.cw-artifact-header h4 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+
+.cw-artifact-toolbar button {
+  background: transparent !important;
+  border: 1px solid var(--color-border) !important;
+  color: var(--color-muted-foreground) !important;
+  border-radius: 6px !important;
+  font-size: 11px !important;
+}
+
+.cw-artifact-toolbar button:hover {
+  background: rgba(0, 0, 0, 0.03) !important;
+  color: var(--foreground) !important;
+}
+
+.cw-artifact-toolbar button.is-active {
+  background: var(--foreground) !important;
+  color: #ffffff !important;
+  border-color: var(--foreground) !important;
+}
+
+.cw-artifact-content {
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  background: #ffffff !important;
+}
+
+/* ================================================================
+   RIGHT-HAND WORK PANEL (INSPECTOR TEMPLATE)
+   Clean flat layout matching Linear issue details.
+   ================================================================ */
+
+.cw-workspace.cw-engine-summary,
+.cw-details-panel {
+  background: #ffffff !important;
+  border-left: 1px solid var(--color-border) !important;
+}
+
+.cw-engine-summary h2 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+
+.cw-engine-summary h3 {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  color: var(--color-muted-foreground) !important;
+}
+
+.cw-engine-summary__facts dt {
+  color: var(--color-muted-foreground) !important;
+  font-size: 12px !important;
+}
+
+.cw-engine-summary__facts dd {
+  color: var(--foreground) !important;
+  font-size: 12px !important;
+}
+
+.cw-engine-summary__next {
+  border-top: none !important;
+  padding-top: 12px !important;
+}
+
