@@ -131,7 +131,13 @@ export function ConversationWorkspaceSpaceHost({
     return (
       <div className="cw-squad-layout">
         <EngineOrganizationOnboarding onChanged={onRefreshEngine} />
-        <EngineWorkspaceAgents agents={engineAgents ?? []} onChanged={onRefreshEngine} />
+        <EngineWorkspaceAgents
+          agents={engineAgents ?? []}
+          profiles={spaceData.profiles}
+          removedPeople={spaceData.removedPeople}
+          onChanged={onRefreshEngine}
+          onCreateMember={() => onOpenSpace("Nuovo collaboratore")}
+        />
         <EngineWorkspaceTeams
           teams={engineTeams ?? []}
           agents={engineAgents ?? []}

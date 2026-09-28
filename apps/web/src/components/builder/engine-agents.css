@@ -1,13 +1,18 @@
 /* Modern Engine Agents & Squad Layout Styling */
 .cw-squad-layout {
-  padding: 24px 32px 64px;
-  max-width: 900px;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: 24px 32px 80px;
+  max-width: 1040px;
   width: 100%;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 28px;
   box-sizing: border-box;
+  scrollbar-width: thin;
 }
 
 .cw-agents-panel {
@@ -40,11 +45,269 @@
   color: #a1a1aa;
 }
 
+/* Toolbar: Search & Filter Tabs */
+.cw-squad-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cw-squad-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 240px;
+  max-width: 380px;
+}
+
+.cw-squad-search-icon {
+  position: absolute;
+  left: 10px;
+  color: #a1a1aa;
+  pointer-events: none;
+}
+
+.cw-squad-search-input {
+  width: 100%;
+  padding: 6px 30px 6px 30px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #ffffff;
+  color: #18181b;
+  outline: none;
+  transition: all 0.12s ease;
+  box-sizing: border-box;
+}
+
+.cw-squad-search-input:focus {
+  border-color: #18181b;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.04);
+}
+
+.cw-squad-search-clear {
+  position: absolute;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: #a1a1aa;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cw-squad-search-clear:hover {
+  color: #18181b;
+}
+
+.cw-squad-filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.03);
+  padding: 3px;
+  border-radius: 7px;
+}
+
+.cw-squad-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: #71717a;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  user-select: none;
+}
+
+.cw-squad-filter-pill:hover {
+  color: #18181b;
+}
+
+.cw-squad-filter-pill.active {
+  background: #ffffff;
+  color: #18181b;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.cw-squad-pill-count {
+  font-size: 10px;
+  font-weight: 500;
+  color: #a1a1aa;
+}
+
+.cw-squad-filter-pill.active .cw-squad-pill-count {
+  color: #71717a;
+}
+
+/* Compact Grid of Cards */
+.cw-squad-compact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.cw-agent-compact-card {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 124px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.cw-agent-compact-card:hover {
+  border-color: rgba(0, 0, 0, 0.18);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.04);
+  transform: translateY(-1px);
+}
+
+.cw-compact-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cw-compact-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cw-compact-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.cw-compact-name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #18181b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cw-compact-type-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.cw-compact-type-badge.is-bot {
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.cw-compact-type-badge.is-human {
+  background: #f4f4f5;
+  color: #71717a;
+}
+
+.cw-compact-role {
+  margin: 0;
+  font-size: 12px;
+  color: #71717a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cw-compact-summary {
+  margin: 0;
+  font-size: 12px;
+  color: #52525b;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex: 1;
+}
+
+.cw-compact-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.cw-compact-status-chip {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.cw-compact-status-chip.supervised {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.cw-compact-status-chip.autonomous {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.cw-compact-status-chip.pending {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.cw-compact-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f4f4f5;
+  color: #71717a;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cw-compact-tag-more {
+  font-size: 10px;
+  font-weight: 500;
+  color: #a1a1aa;
+}
+
+/* Empty state */
 .cw-squad-empty-card {
   background: #fafafa;
   border: 1px dashed rgba(0, 0, 0, 0.12);
   border-radius: 10px;
-  padding: 24px;
+  padding: 28px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -53,8 +316,8 @@
 }
 
 .cw-squad-empty-icon {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 8px;
   background: #ffffff;
   border: 1px solid rgba(0, 0, 0, 0.08);
@@ -65,14 +328,13 @@
 }
 
 .cw-squad-empty-text h4 {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: #18181b;
   margin: 0 0 4px;
 }
 
-.cw-squad-empty-text p,
-.cw-agents-empty {
+.cw-squad-empty-text p {
   font-size: 12px;
   color: #71717a;
   max-width: 440px;
@@ -84,7 +346,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: 6px;
   border: 1px solid rgba(0, 0, 0, 0.1);
   background: #ffffff;
@@ -117,201 +379,4 @@
 
 .cw-squad-btn-primary:hover {
   background: #123d32;
-}
-
-.cw-agents-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.cw-agent-card {
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px;
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
-  transition: border-color 0.12s ease;
-}
-
-.cw-agent-card:hover {
-  border-color: rgba(0, 0, 0, 0.14);
-}
-
-.cw-agent-card__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.cw-agent-card__identity {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  min-width: 0;
-}
-
-.cw-agent-card__name-col {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.cw-agent-card__title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.cw-agent-card__title-row h3 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #18181b;
-  letter-spacing: -0.01em;
-}
-
-.cw-agent-card__role {
-  margin: 0;
-  font-size: 12px;
-  color: #71717a;
-}
-
-.cw-agent-card__tone {
-  margin: 0;
-  font-size: 11px;
-  color: #a1a1aa;
-  font-style: italic;
-}
-
-.cw-agent-autonomy-badge {
-  font-size: 11px;
-  font-weight: 500;
-  padding: 1px 7px;
-  border-radius: 99px;
-  white-space: nowrap;
-}
-
-.cw-agent-autonomy-badge.supervised {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.cw-agent-autonomy-badge.autonomous {
-  background: #dcfce7;
-  color: #15803d;
-}
-
-.cw-agent-card__edit-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 5px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  background: transparent;
-  color: #71717a;
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.1s ease;
-  flex-shrink: 0;
-}
-
-.cw-agent-card__edit-btn:hover {
-  background: rgba(0, 0, 0, 0.04);
-  color: #18181b;
-}
-
-.cw-agent-card__section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.cw-agent-card__label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #a1a1aa;
-}
-
-.cw-agent-card__text {
-  margin: 0;
-  font-size: 13px;
-  color: #27272a;
-  line-height: 1.45;
-}
-
-.cw-agent-card__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.cw-agent-cap-chip {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 5px;
-  background: #f4f4f5;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  color: #3f3f46;
-  font-weight: 500;
-}
-
-.cw-agent-spec-chip {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 5px;
-  background: #f4f4f5;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  color: #71717a;
-}
-
-.cw-agent-card__disclosures {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 4px;
-}
-
-.cw-agent-disclosure {
-  display: flex;
-  flex-direction: column;
-}
-
-.cw-agent-disclosure__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background: transparent;
-  border: none;
-  padding: 3px 0;
-  color: #71717a;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  align-self: flex-start;
-  transition: color 0.1s ease;
-}
-
-.cw-agent-disclosure__toggle:hover {
-  color: #18181b;
-}
-
-.cw-agent-disclosure__content {
-  margin-top: 6px;
-  padding: 8px 12px;
-  background: #fbfbfb;
-  border-left: 2px solid #e4e4e7;
-  font-size: 12px;
-  color: #3f3f46;
-  line-height: 1.5;
-  white-space: pre-wrap;
 }

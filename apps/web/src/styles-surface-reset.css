@@ -1189,6 +1189,23 @@ aside.cw-workspace,
   padding: 2px 8px !important;
 }
 
+.cw-squad-layout {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow-y: auto !important;
+}
+
+.cw-agent-compact-card {
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+}
+
+.cw-agent-compact-card:hover {
+  border-color: rgba(0, 0, 0, 0.18) !important;
+}
+
 .cw-team-card {
   border: 1px solid rgba(0, 0, 0, 0.08) !important;
   border-radius: 10px !important;

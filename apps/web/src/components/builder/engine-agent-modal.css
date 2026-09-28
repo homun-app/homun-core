@@ -1,0 +1,247 @@
+/* Engine Agent & Member Detail Modal */
+.cw-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: cwFadeIn 0.15s ease-out;
+}
+
+@keyframes cwFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.cw-modal-sheet {
+  background: #ffffff;
+  width: 100%;
+  max-width: 640px;
+  max-height: 88vh;
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.16), 0 0 1px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: cwSlideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes cwSlideUp {
+  from { transform: translateY(12px) scale(0.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.cw-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+}
+
+.cw-modal-identity {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.cw-modal-name-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cw-modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cw-modal-title-row h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #18181b;
+  letter-spacing: -0.01em;
+}
+
+.cw-modal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 99px;
+}
+
+.cw-modal-badge.badge-agent {
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid rgba(22, 101, 52, 0.15);
+}
+
+.cw-modal-badge.badge-human {
+  background: #f4f4f5;
+  color: #3f3f46;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.cw-modal-role {
+  margin: 0;
+  font-size: 13px;
+  color: #71717a;
+}
+
+.cw-modal-tone {
+  margin: 0;
+  font-size: 12px;
+  color: #a1a1aa;
+  font-style: italic;
+}
+
+.cw-modal-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cw-modal-btn-subtle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #ffffff;
+  color: #18181b;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.cw-modal-btn-subtle:hover {
+  background: #f4f4f5;
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.cw-modal-close-btn {
+  background: transparent;
+  border: none;
+  color: #71717a;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s ease;
+}
+
+.cw-modal-close-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #18181b;
+}
+
+.cw-modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  scrollbar-width: thin;
+}
+
+.cw-modal-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cw-modal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cw-modal-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #a1a1aa;
+}
+
+.cw-modal-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #27272a;
+}
+
+.cw-modal-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cw-modal-quote-box {
+  padding: 10px 14px;
+  background: #fafafa;
+  border-left: 3px solid #e4e4e7;
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+  color: #3f3f46;
+  line-height: 1.5;
+}
+
+.cw-modal-instructions-box {
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #334155;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  font-family: inherit;
+}
+
+.cw-modal-edit-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cw-modal-edit-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.cw-modal-edit-top h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #18181b;
+}
+
+.cw-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 24px;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+  background: #fbfbfb;
+}
