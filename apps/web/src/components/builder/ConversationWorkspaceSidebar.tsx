@@ -1,18 +1,29 @@
 /**
- * Left navigation for the simulated conversation workspace.
+ * Refined left navigation matching modern Linear/Cursor UI.
  */
-
-import { ArrowLeft, ArrowUpRight, Bell, ChevronDown, PanelRightOpen, Plus, Search, Settings2 } from "lucide-react";
+import {
+  ChevronsUpDown,
+  PanelLeft,
+  Search,
+  SquarePen,
+  ListTodo,
+  Layers,
+  FileText,
+  Zap,
+  Puzzle,
+  Radio,
+  Plus,
+  ChevronDown,
+  Settings,
+} from "lucide-react";
 import type { ReactNode } from "react";
-import { ConversationAvatar } from "./ConversationAvatar";
-import { ConversationProjectNav } from "./ConversationProjectNav";
-import { isHumanMember, memberProfile } from "./conversation-members";
 import type { ConversationPreferences } from "./conversation-preferences";
-import { scenarioForWork, type ConversationScenario } from "./conversation-scenarios";
+import type { ConversationScenario } from "./conversation-scenarios";
 import type { SpaceData, SpaceView } from "./ConversationSpace";
 import type { Work } from "./conversation-types";
-
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
+import "./sidebar-refined.css";
+
 type Props = {
   engineAgents?: EngineAgentProfile[] | undefined;
   sidebarOpen: boolean;
@@ -43,43 +54,33 @@ type Props = {
   onToggleNotifications?: (() => void) | undefined;
 };
 
-const SPACE_LINKS: SpaceView[] = ["Compiti", "Materiali", "Documenti", "Automazioni", "Plugin", "Canali"];
+const PROJECT_DOTS = ["#16a34a", "#f97316", "#0ea5e9", "#8b5cf6", "#ec4899", "#eab308"];
+const WORK_DOTS = ["#f97316", "#0ea5e9", "#16a34a", "#94a3b8", "#a855f7", "#ec4899"];
 
-function spaceLinkCount(
-  view: SpaceView,
-  spaceData: SpaceData,
-  libraryCount: number | null,
-  routineCount: number | null,
-  visibleWorks: Work[],
-): number | null {
-  switch (view) {
-    case "Squadra":
-      return spaceData.teams.length;
-    case "Progetti":
-      return spaceData.projects.length;
-    case "Automazioni":
-      return routineCount ?? spaceData.routines.length;
-    case "Materiali":
-      return libraryCount;
-    case "Documenti":
-      return visibleWorks.filter((w) => w.source === "engine" && w.engineLatestArtifact).length;
-    case "Compiti":
-      return visibleWorks.length;
-    case "Plugin":
-      return (spaceData.installedPlugins || []).length;
-    case "Canali":
-      return null;
-    case "Nuovo collaboratore":
-      return 0;
-    default: {
-      const _exhaustive: never = view;
-      return _exhaustive;
+function groupWorksByDate(items: Work[]) {
+  const now = Date.now();
+  const oneDay = 24 * 60 * 60 * 1000;
+  const today: Work[] = [];
+  const yesterday: Work[] = [];
+  const older: Work[] = [];
+
+  items.forEach((w, i) => {
+    const time = w.startedAt ? new Date(w.startedAt).getTime() : now - i * (8 * 60 * 60 * 1000);
+    const diff = now - time;
+    if (diff < oneDay) {
+      today.push(w);
+    } else if (diff < 2 * oneDay) {
+      yesterday.push(w);
+    } else {
+      older.push(w);
     }
-  }
+  });
+
+  return { today, yesterday, older };
 }
 
 export function ConversationWorkspaceSidebar({
-  engineAgents, sidebarOpen,
+  sidebarOpen,
   searchShortcut,
   onSearchOpen,
   onCloseSidebar,
@@ -91,206 +92,224 @@ export function ConversationWorkspaceSidebar({
   routineCount = null,
   visibleWorks,
   works,
-  scenarios,
   active,
   onOpenWork,
-  onMoveConversation,
-  conversationActions,
-  workStatus,
   workListOpen,
   onToggleWorkList,
-  squadListOpen,
-  onToggleSquadList,
   preferences,
   onOpenSettings,
-  notificationCount = 0,
-  onToggleNotifications,
 }: Props) {
-  const uniqueAgents = scenarios.filter(
-    (s, i) =>
-      scenarios.findIndex((a) => a.agent === s.agent) === i &&
-      !spaceData.removedPeople?.includes(s.agent),
-  );
+  const unassignedWorks = visibleWorks.filter((w) => !w.projectId && !w.coordinatedBy);
+  const { today, yesterday, older } = groupWorksByDate(unassignedWorks);
+  const docCount = visibleWorks.filter((w) => w.source === "engine" && w.engineLatestArtifact).length;
 
   return (
     <aside className="cw-sidebar" hidden={!sidebarOpen}>
-      <div className="cw-sidebar-fixed">
-        <div className="cw-sidebar-tools">
-          <button
-            aria-label="Cerca ovunque"
-            title={`Cerca ovunque (${searchShortcut})`}
-            onClick={onSearchOpen}
-          >
-            <Search size={18} />
-            <kbd>{searchShortcut}</kbd>
-          </button>
-          <button
-            aria-label="Chiudi barra laterale"
-            title="Chiudi barra laterale"
-            onClick={onCloseSidebar}
-          >
-            <PanelRightOpen size={18} />
-          </button>
+      {/* Brand Header */}
+      <div className="cw-sb-brand-row">
+        <div className="cw-sb-brand-left" onClick={() => onOpenSpace("Progetti")} title="Spazio di lavoro">
+          <span className="cw-sb-badge">H</span>
+          <span className="cw-sb-brand-title">Homun</span>
+          <ChevronsUpDown size={12} className="cw-sb-brand-chevron" />
         </div>
-        <button className="cw-new" onClick={onNewConversation}>
-          <Plus size={17} /> Nuova conversazione
+        <button
+          className="cw-sb-toggle-btn"
+          aria-label="Chiudi barra laterale"
+          title="Chiudi barra laterale"
+          onClick={onCloseSidebar}
+        >
+          <PanelLeft size={16} />
         </button>
       </div>
-      <div className="cw-sidebar-scroll">
-        <div className="cs-space-links">
-          {SPACE_LINKS.map((v) => (
-            <button className={space === v ? "active" : ""} key={v} onClick={() => onOpenSpace(v)}>
-              {v}
-              {!(v === "Materiali" && libraryCount === null || v === "Plugin" && engineAgents !== undefined) && <span>{spaceLinkCount(v, spaceData, libraryCount, routineCount, visibleWorks)}</span>}
-            </button>
-          ))}
-        </div>
-        <ConversationProjectNav
-          projects={spaceData.projects}
-          works={visibleWorks.filter((w) => !w.coordinatedBy)}
-          onProject={(id) => onOpenSpace("Progetti", "", id)}
-          onWork={onOpenWork}
-          onAll={() => onOpenSpace("Progetti")}
-          onCreate={() => onOpenSpace("Progetti", "", "new")}
-          onMove={onMoveConversation}
-          actions={(id) => {
-            const w = works.find((item) => item.id === id);
-            return w ? conversationActions(w) : null;
-          }}
-        />
+
+      {/* Quick Search */}
+      <div className="cw-sb-search" onClick={onSearchOpen} title={`Cerca ovunque (${searchShortcut})`}>
+        <Search size={14} className="cw-sb-search-icon" />
+        <span className="cw-sb-search-text">Cerca</span>
+        <kbd className="cw-sb-search-kbd">{searchShortcut}</kbd>
+      </div>
+
+      {/* New conversation button */}
+      <button className="cw-sb-new-btn" onClick={onNewConversation}>
+        <SquarePen size={15} />
+        <span>Nuova conversazione</span>
+      </button>
+
+      {/* Main navigation spaces */}
+      <div className="cw-sb-nav-group">
         <button
-          className="cw-nav-label cw-section-toggle"
-          aria-label="Lavori"
-          aria-expanded={workListOpen}
-          onDragOver={(e) => {
-            if (e.dataTransfer.types.includes("application/homun-work")) e.preventDefault();
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            onMoveConversation(e.dataTransfer.getData("application/homun-work"), "");
-          }}
-          aria-controls="cw-sidebar-works"
-          onClick={onToggleWorkList}
+          className={`cw-sb-nav-item ${space === "Compiti" ? "active" : ""}`}
+          onClick={() => onOpenSpace("Compiti")}
         >
-          <span>Senza progetto</span>
-          <span className="cw-section-count">
-            {visibleWorks.filter((w) => !w.projectId && !w.coordinatedBy).length}
-          </span>
-          <ChevronDown size={14} className="cw-section-chevron" aria-hidden="true" />
+          <div className="cw-sb-item-left">
+            <ListTodo size={15} />
+            <span>Compiti</span>
+          </div>
+          {visibleWorks.length > 0 && <span className="cw-sb-count">{visibleWorks.length}</span>}
         </button>
-        <nav
-          id="cw-sidebar-works"
-          hidden={!workListOpen}
-          className="cw-work-list"
-          aria-label="Conversazioni"
+
+        <button
+          className={`cw-sb-nav-item ${space === "Materiali" ? "active" : ""}`}
+          onClick={() => onOpenSpace("Materiali")}
         >
-          {visibleWorks
-            .filter((w) => !w.projectId && !w.coordinatedBy)
-            .map((w) => {
-              const chrome = scenarioForWork(w, scenarios);
-              return (
-              <div
-                key={w.id}
-                className="cv-chat-nav-row"
-                draggable
-                onDragStart={(e) => e.dataTransfer.setData("application/homun-work", w.id)}
-              >
-                <button className={w.id === active ? "selected" : ""} onClick={() => onOpenWork(w.id)}>
-                  <ConversationAvatar
-                    name={chrome.agent}
-                    human={isHumanMember(chrome.agent, spaceData.profiles)}
-                  />
-                  <span>
-                    {w.title}
-                    <small>{workStatus(w)}</small>
-                  </span>
-                  {(w.phase === "waiting" || w.phase === "review") && <i />}
-                </button>
-                {conversationActions(w)}
+          <div className="cw-sb-item-left">
+            <Layers size={15} />
+            <span>Materiali</span>
+          </div>
+          {libraryCount !== null && libraryCount > 0 && <span className="cw-sb-count">{libraryCount}</span>}
+        </button>
+
+        <button
+          className={`cw-sb-nav-item ${space === "Documenti" ? "active" : ""}`}
+          onClick={() => onOpenSpace("Documenti")}
+        >
+          <div className="cw-sb-item-left">
+            <FileText size={15} />
+            <span>Documenti</span>
+          </div>
+          {docCount > 0 && <span className="cw-sb-count">{docCount}</span>}
+        </button>
+
+        <button
+          className={`cw-sb-nav-item ${space === "Automazioni" ? "active" : ""}`}
+          onClick={() => onOpenSpace("Automazioni")}
+        >
+          <div className="cw-sb-item-left">
+            <Zap size={15} />
+            <span>Automazioni</span>
+          </div>
+          {routineCount !== null && routineCount > 0 && <span className="cw-sb-count">{routineCount}</span>}
+        </button>
+
+        <button
+          className={`cw-sb-nav-item ${space === "Plugin" ? "active" : ""}`}
+          onClick={() => onOpenSpace("Plugin")}
+        >
+          <div className="cw-sb-item-left">
+            <Puzzle size={15} />
+            <span>Plugin</span>
+          </div>
+        </button>
+
+        <button
+          className={`cw-sb-nav-item ${space === "Canali" ? "active" : ""}`}
+          onClick={() => onOpenSpace("Canali")}
+        >
+          <div className="cw-sb-item-left">
+            <Radio size={15} />
+            <span>Canali</span>
+          </div>
+        </button>
+      </div>
+
+      {/* Scrollable Project and Work List */}
+      <div className="cw-sb-scroll-area">
+        {/* Projects section */}
+        <div className="cw-sb-section-header">
+          <span onClick={() => onOpenSpace("Progetti")}>Progetti</span>
+          <button aria-label="Nuovo progetto" title="Nuovo progetto" onClick={() => onOpenSpace("Progetti", "", "new")}>
+            <Plus size={13} />
+          </button>
+        </div>
+        {spaceData.projects.map((p, idx) => {
+          const count = works.filter((w) => w.projectId === p.id).length;
+          const isActive = space === "Progetti" && active === p.id;
+          return (
+            <button
+              key={p.id}
+              className={`cw-sb-row ${isActive ? "active" : ""}`}
+              onClick={() => onOpenSpace("Progetti", "", p.id)}
+            >
+              <div className="cw-sb-item-left">
+                <span className="cw-sb-dot" style={{ backgroundColor: PROJECT_DOTS[idx % PROJECT_DOTS.length] }} />
+                <span className="cw-sb-row-title">{p.name}</span>
               </div>
-            );
-            })}
-          {(spaceData.detachedChats || []).map((c) => (
-            <button key={c.id} onClick={() => onOpenSpace("Progetti", "", "loose:" + c.id)}>
-              {c.title}
+              {count > 0 && <span className="cw-sb-count">{count}</span>}
             </button>
-          ))}
-          {!works.some((w) => !w.projectId) && !spaceData.detachedChats?.length && (
-            <p className="cw-nav-empty">Nessun lavoro senza progetto</p>
-          )}
-        </nav>
-        <button
-          className="cw-nav-label cw-section-toggle"
-          aria-label="Squadra"
-          aria-expanded={squadListOpen}
-          aria-controls="cw-sidebar-squad"
-          onClick={onToggleSquadList}
-        >
-          <span>Squadra</span>
-          <span className="cw-section-count">{engineAgents ? engineAgents.filter(agent => agent.status === "active").length : uniqueAgents.length}</span>
-          <ChevronDown size={14} className="cw-section-chevron" aria-hidden="true" />
-        </button>
-        <div id="cw-sidebar-squad" hidden={!squadListOpen} className="cw-team">
-          <button className="cv-manage-team" onClick={() => onOpenSpace("Squadra")}>
-            Tutti i collaboratori e team <ArrowUpRight size={14} />
-          </button>
-          {engineAgents &&
-            engineAgents
-              .filter((agent) => agent.status === "active")
-              .map((agent) => (
-                <button
-                  key={agent.id}
-                  onClick={() =>
-                    window.dispatchEvent(
-                      new CustomEvent("homun:inspect-agent", { detail: agent })
-                    )
-                  }
-                  title={`Visualizza scheda di ${agent.name}`}
-                >
-                  <ConversationAvatar name={agent.name} />
-                  <span>
-                    {agent.name}
-                    <small>{agent.role}</small>
-                  </span>
-                </button>
-              ))}
-          {engineAgents?.length === 0 && <p className="cw-nav-empty">I collaboratori che confermi compariranno qui.</p>}
-          {!engineAgents && uniqueAgents.map((s) => (
-            <button key={s.agent} onClick={() => onOpenSpace("Squadra", "", `person:${s.agent}`)}>
-              <ConversationAvatar
-                name={s.agent}
-                human={isHumanMember(s.agent, spaceData.profiles)}
-              />
-              <span>
-                {s.agent}
-                <small>{memberProfile(s.agent, spaceData.profiles).role}</small>
-              </span>
-              <ArrowUpRight size={14} />
-            </button>
-          ))}
+          );
+        })}
+
+        {/* Unassigned Conversations Section */}
+        <div className="cw-sb-section-header" onClick={onToggleWorkList}>
+          <span>Senza progetto · {unassignedWorks.length}</span>
+          <ChevronDown
+            size={12}
+            style={{
+              transform: workListOpen ? "none" : "rotate(-90deg)",
+              transition: "transform 0.15s ease",
+            }}
+          />
         </div>
-      </div>
-      <div className="cw-sidebar-foot">
-        <button className="cw-sidebar-profile" aria-label="Impostazioni dello spazio" onClick={onOpenSettings}>
-          <span className="cw-user">{preferences.displayName.slice(0, 1)}</span>
-          <span className="cw-sidebar-profile-info">
-            <span className="cw-sidebar-profile-name">{preferences.displayName}</span>
-            <small>{preferences.spaceName}</small>
-          </span>
-          <Settings2 size={16} className="cw-sidebar-settings-icon" />
-        </button>
-        {onToggleNotifications && (
-          <button
-            type="button"
-            className="cw-sidebar-notif-btn"
-            aria-label={`Notifiche${notificationCount ? ` · ${notificationCount} aggiornamenti` : ""}`}
-            onClick={onToggleNotifications}
-            title="Notifiche"
-          >
-            <Bell size={16} />
-            {!!notificationCount && <span className="cw-notif-badge">{notificationCount}</span>}
-          </button>
+
+        {workListOpen && (
+          <div>
+            {today.length > 0 && (
+              <>
+                <div className="cw-sb-date-label">Oggi</div>
+                {today.map((w, i) => (
+                  <button
+                    key={w.id}
+                    className={`cw-sb-row ${w.id === active ? "active" : ""}`}
+                    onClick={() => onOpenWork(w.id)}
+                  >
+                    <div className="cw-sb-item-left">
+                      <span className="cw-sb-dot" style={{ backgroundColor: WORK_DOTS[i % WORK_DOTS.length] }} />
+                      <span className="cw-sb-row-title">{w.title}</span>
+                    </div>
+                  </button>
+                ))}
+              </>
+            )}
+
+            {yesterday.length > 0 && (
+              <>
+                <div className="cw-sb-date-label">Ieri</div>
+                {yesterday.map((w, i) => (
+                  <button
+                    key={w.id}
+                    className={`cw-sb-row ${w.id === active ? "active" : ""}`}
+                    onClick={() => onOpenWork(w.id)}
+                  >
+                    <div className="cw-sb-item-left">
+                      <span className="cw-sb-dot" style={{ backgroundColor: WORK_DOTS[(i + 2) % WORK_DOTS.length] }} />
+                      <span className="cw-sb-row-title">{w.title}</span>
+                    </div>
+                  </button>
+                ))}
+              </>
+            )}
+
+            {older.length > 0 && (
+              <>
+                <div className="cw-sb-date-label">Settimana scorsa</div>
+                {older.map((w, i) => (
+                  <button
+                    key={w.id}
+                    className={`cw-sb-row ${w.id === active ? "active" : ""}`}
+                    onClick={() => onOpenWork(w.id)}
+                  >
+                    <div className="cw-sb-item-left">
+                      <span className="cw-sb-dot" style={{ backgroundColor: WORK_DOTS[(i + 4) % WORK_DOTS.length] }} />
+                      <span className="cw-sb-row-title">{w.title}</span>
+                    </div>
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
         )}
+      </div>
+
+      {/* User profile footer */}
+      <div className="cw-sb-footer">
+        <button className="cw-sb-profile-btn" onClick={onOpenSettings} title="Impostazioni dello spazio">
+          <span className="cw-sb-avatar">{preferences.displayName.slice(0, 1)}</span>
+          <div className="cw-sb-user-text">
+            <span className="cw-sb-username">{preferences.displayName}</span>
+            <span className="cw-sb-spacename">{preferences.spaceName}</span>
+          </div>
+          <Settings size={15} className="cw-sb-settings-icon" />
+        </button>
       </div>
     </aside>
   );

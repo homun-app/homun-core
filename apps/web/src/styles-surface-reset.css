@@ -910,27 +910,26 @@ aside.cw-workspace,
   padding: 0 10px !important;
 }
 
-/* Document & Material rows: flat, zero shadow, hover effect */
+/* Document & Material rows: flat, zero shadow, whitespace separation */
 .cw-documents__list {
   display: flex !important;
   flex-direction: column !important;
-  gap: 0 !important;
-  border-top: 1px solid var(--color-border) !important;
+  gap: 2px !important;
+  border-top: none !important;
 }
 
 .cw-document {
   background: transparent !important;
   border: none !important;
-  border-bottom: 1px solid var(--color-border) !important;
-  border-radius: 0 !important;
-  padding: 12px 4px !important;
+  border-radius: 6px !important;
+  padding: 8px 10px !important;
   box-shadow: none !important;
   cursor: pointer !important;
   transition: background 0.1s ease !important;
 }
 
 .cw-document:hover {
-  background: rgba(0, 0, 0, 0.015) !important;
+  background: rgba(0, 0, 0, 0.02) !important;
 }
 
 .cw-document header {
@@ -967,16 +966,15 @@ aside.cw-workspace,
 .cw-routines__list {
   display: flex !important;
   flex-direction: column !important;
-  gap: 0 !important;
-  border-top: 1px solid var(--color-border) !important;
+  gap: 4px !important;
+  border-top: none !important;
 }
 
 .cw-routine {
   background: transparent !important;
   border: none !important;
-  border-bottom: 1px solid var(--color-border) !important;
-  border-radius: 0 !important;
-  padding: 14px 4px !important;
+  border-radius: 6px !important;
+  padding: 10px 12px !important;
   box-shadow: none !important;
   display: flex !important;
   flex-direction: column !important;
@@ -985,7 +983,7 @@ aside.cw-workspace,
 }
 
 .cw-routine:hover {
-  background: rgba(0, 0, 0, 0.015) !important;
+  background: rgba(0, 0, 0, 0.02) !important;
 }
 
 .cw-routine header {
@@ -1006,15 +1004,15 @@ aside.cw-workspace,
 }
 
 /* ================================================================
-   INLINE TABS & NAVIGATION (GLOBAL STANDARD)
+   INLINE TABS & NAVIGATION (ZERO LINES — PILL/WHITESPACE STYLE)
    ================================================================ */
 
 .ph-inline-tabs {
   display: flex !important;
   align-items: center !important;
-  gap: 20px !important;
-  border-bottom: 1px solid var(--color-border) !important;
-  margin-bottom: 24px !important;
+  gap: 4px !important;
+  border-bottom: none !important;
+  margin-bottom: 20px !important;
   padding: 0 !important;
   background: transparent !important;
 }
@@ -1023,14 +1021,13 @@ aside.cw-workspace,
   display: inline-flex !important;
   align-items: center !important;
   gap: 6px !important;
-  padding: 8px 4px 10px !important;
+  padding: 6px 12px !important;
   font-size: 13px !important;
   font-weight: 500 !important;
   color: var(--color-muted-foreground) !important;
   background: transparent !important;
   border: none !important;
-  border-bottom: 2px solid transparent !important;
-  margin-bottom: -1px !important;
+  border-radius: 6px !important;
   cursor: pointer !important;
   transition: all 0.12s ease !important;
   white-space: nowrap !important;
@@ -1039,15 +1036,14 @@ aside.cw-workspace,
 
 .ph-inline-tab:hover {
   color: var(--foreground) !important;
-  background: transparent !important;
+  background: rgba(0, 0, 0, 0.03) !important;
 }
 
 .ph-inline-tab.is-active,
 .ph-inline-tab[aria-selected="true"] {
   color: var(--foreground) !important;
-  border-bottom-color: var(--foreground) !important;
+  background: rgba(0, 0, 0, 0.06) !important;
   font-weight: 600 !important;
-  background: transparent !important;
 }
 
 .ph-inline-tab-count {
