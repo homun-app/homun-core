@@ -563,3 +563,399 @@
 .ph-card-subtitle {
   display: none;
 }
+
+/* ================================================================
+   SPACE VIEWS & GENERIC HEADINGS RESET (Compiti, Squadra, etc.)
+   ================================================================ */
+
+.cs-stage {
+  background: #ffffff;
+}
+
+.cs-stage .cw-conversation {
+  background: #ffffff;
+}
+
+.cs-stage .cs-title,
+.cm-page-heading .cs-title {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  margin: 6px 0 2px !important;
+  color: var(--foreground) !important;
+  letter-spacing: -0.01em;
+}
+
+.cs-stage .cs-intro {
+  font-size: 13px !important;
+  color: var(--color-muted-foreground) !important;
+  margin-bottom: 16px !important;
+}
+
+.cw-overline {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+  color: var(--color-muted-foreground) !important;
+}
+
+/* Actions in space headers: ghost buttons */
+.cs-actions .cw-primary,
+.cs-actions .cw-secondary,
+.cs-create-actions .cw-primary,
+.cs-create-actions .cw-secondary {
+  background: transparent !important;
+  border: 1px solid var(--color-border) !important;
+  color: var(--foreground) !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  padding: 5px 10px !important;
+  box-shadow: none !important;
+}
+
+.cs-actions .cw-primary:hover,
+.cs-actions .cw-secondary:hover,
+.cs-create-actions .cw-primary:hover,
+.cs-create-actions .cw-secondary:hover {
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* ================================================================
+   COMPITI (TASKS) RESET — Linear/Cursor style
+   ================================================================ */
+
+.ct-focus-filters {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.ct-focus-filters button {
+  background: transparent !important;
+  border: 1px solid var(--color-border) !important;
+  color: var(--color-muted-foreground) !important;
+  border-radius: 6px !important;
+  padding: 4px 10px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.ct-focus-filters button[aria-pressed="true"] {
+  background: rgba(0, 0, 0, 0.05) !important;
+  color: var(--foreground) !important;
+  border-color: var(--foreground) !important;
+  font-weight: 600 !important;
+}
+
+.ct-focus-filters button:hover {
+  background: rgba(0, 0, 0, 0.03) !important;
+  color: var(--foreground) !important;
+}
+
+.ct-focus-filters button span {
+  font-size: 10px;
+  color: var(--color-muted-foreground);
+}
+
+.ct-card-row {
+  margin-bottom: 2px;
+  border-radius: 6px;
+  transition: background 0.1s ease;
+}
+
+.ct-card-row:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.ct-card {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 10px 12px !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+}
+
+.ct-card strong {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--foreground) !important;
+}
+
+.ct-card small {
+  font-size: 11px !important;
+  color: var(--color-muted-foreground) !important;
+  margin-top: 2px !important;
+}
+
+.ct-manage {
+  background: transparent !important;
+  border: none !important;
+  color: var(--color-muted-foreground) !important;
+  opacity: 0.6;
+  cursor: pointer;
+  padding: 4px 8px !important;
+  border-radius: 4px;
+}
+
+.ct-manage:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Kanban board */
+.ct-board {
+  gap: 16px !important;
+  padding: 12px 0 !important;
+}
+
+.ct-board > section {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+}
+
+.ct-board h3 {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  color: var(--color-muted-foreground) !important;
+  margin-bottom: 8px !important;
+}
+
+.ct-board .ct-card {
+  border: 1px solid var(--color-border) !important;
+  background: #ffffff !important;
+  margin-bottom: 6px !important;
+}
+
+.ct-board .ct-card:hover {
+  border-color: var(--foreground) !important;
+}
+
+/* Calendar */
+.ct-calendar {
+  gap: 2px !important;
+}
+
+.ct-calendar > div {
+  background: transparent !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  min-height: 80px !important;
+}
+
+/* ================================================================
+   MATERIALI (MATERIALS) RESET
+   ================================================================ */
+
+.cm-materials .cm-material-row {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 2px 10px !important;
+  margin-bottom: 2px !important;
+  transition: background 0.1s ease;
+}
+
+.cm-materials .cm-material-row:hover {
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.cm-materials .cm-material-row:has(.active) {
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+
+.cw .cm-filter-chip {
+  background: transparent !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  color: var(--color-muted-foreground) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  padding: 4px 10px !important;
+  box-shadow: none !important;
+}
+
+.cw .cm-filter-chip:hover {
+  background: rgba(0, 0, 0, 0.03) !important;
+  color: var(--foreground) !important;
+  border-color: var(--foreground) !important;
+}
+
+.cw .cm-filter-chip[data-active="true"] {
+  background: rgba(0, 0, 0, 0.05) !important;
+  border-color: var(--foreground) !important;
+  color: var(--foreground) !important;
+}
+
+.cm-filter-chip small {
+  background: transparent !important;
+  color: var(--color-muted-foreground) !important;
+  font-size: 10px !important;
+  padding: 0 !important;
+}
+
+.cm-filter-popover.cw {
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08) !important;
+  border-radius: 8px !important;
+}
+
+/* ================================================================
+   DOCUMENTI & AUTOMAZIONI (ROUTINES) RESET
+   ================================================================ */
+
+.cw-document {
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 8px 12px !important;
+  transition: background 0.1s ease;
+}
+
+.cw-document:hover {
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.cw-routine {
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 8px 12px !important;
+  transition: background 0.1s ease;
+}
+
+.cw-routine:hover {
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.cw-routine-creator,
+.cw-team-editor,
+.cw-agent-editor,
+.cv-mcp-add {
+  border-top: none !important;
+  padding-top: 12px !important;
+}
+
+/* ================================================================
+   ENGINE AGENTS & TEAMS RESET
+   ================================================================ */
+
+.cw-agent-card {
+  border: none !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  padding: 12px 14px !important;
+  transition: background 0.12s ease;
+}
+
+.cw-agent-card:hover {
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.cw-agent-cap-chip,
+.cw-agent-spec-chip {
+  background: transparent !important;
+  border: 1px solid var(--color-border) !important;
+  color: var(--foreground) !important;
+  border-radius: 4px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  padding: 2px 6px !important;
+}
+
+.cw-team-card {
+  border: none !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  padding: 12px 14px !important;
+  transition: background 0.12s ease;
+}
+
+.cw-team-card:hover {
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.cw-agents-empty {
+  background: transparent !important;
+  border: 1px dashed var(--color-border) !important;
+  border-radius: 8px !important;
+}
+
+/* ================================================================
+   CHAT STAGE & MESSAGES RESET
+   ================================================================ */
+
+.cw-stage {
+  background: #ffffff !important;
+}
+
+.cw-conversation {
+  background: #ffffff !important;
+}
+
+.cw-message.you {
+  background: #f4f4f5 !important;
+  border: none !important;
+  color: var(--foreground) !important;
+  border-radius: 12px 12px 2px 12px !important;
+  padding: 12px 16px !important;
+}
+
+.cw-engine-banner {
+  background: transparent !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 8px !important;
+  color: var(--foreground) !important;
+}
+
+/* Floating composer box styling */
+.cw .st-sdk-composer {
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04) !important;
+  border-radius: 12px !important;
+}
+
+.cw .st-sdk-composer:focus-within {
+  border-color: var(--foreground) !important;
+}
+
+/* ================================================================
+   GLOBAL DIVIDER LINE ELIMINATION (Modals, Panels, Bars)
+   ================================================================ */
+
+.engine-status-bar,
+.engine-domain-panel,
+.cw-engine-banner,
+.organization-role,
+.cw-sidebar-foot,
+.cv-settings-sidebar__top,
+.cv-settings-sidebar,
+.cv-settings-dialog {
+  border-top: none !important;
+  border-bottom: none !important;
+}
+
+.cv-settings-sidebar {
+  border-right: 1px solid var(--color-border) !important;
+  background: #fafafa !important;
+}
+
+.cv-settings-dialog {
+  border: 1px solid var(--color-border) !important;
+  background: #ffffff !important;
+}
+
+.cv-settings-body {
+  background: #ffffff !important;
+}
