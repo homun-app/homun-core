@@ -6,6 +6,7 @@ import { cadenceToCron } from "@/lib/cadence-language";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { ConversationSelectField } from "./ConversationSelect";
 import { EngineGoalDashboard } from "./EngineGoalDashboard";
+import { Clock, Target } from "lucide-react";
 import { t } from "@/lib/i18n";
 import "./engine-routines.css";
 
@@ -45,20 +46,27 @@ export function EngineRoutines({
 
   return (
     <section className="cw-workspace cw-routines" aria-label={t("routines.title")}>
-      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+      <div className="ph-inline-tabs" role="tablist" style={{ margin: "-24px -32px 20px", padding: "0 32px" }}>
         <button
-          type="button"
-          className={tab === "routines" ? "cw-primary" : "cw-secondary"}
+          role="tab"
+          aria-selected={tab === "routines"}
+          className={`ph-inline-tab ${tab === "routines" ? "is-active" : ""}`}
           onClick={() => setTab("routines")}
         >
-          {t("routines.title")} ({routines.filter((r) => r.status === "active").length})
+          <Clock size={14} />
+          <span>{t("routines.title")}</span>
+          <span className="ph-inline-tab-count">
+            ({routines.filter((r) => r.status === "active").length})
+          </span>
         </button>
         <button
-          type="button"
-          className={tab === "goals" ? "cw-primary" : "cw-secondary"}
+          role="tab"
+          aria-selected={tab === "goals"}
+          className={`ph-inline-tab ${tab === "goals" ? "is-active" : ""}`}
           onClick={() => setTab("goals")}
         >
-          {t("goals.title")}
+          <Target size={14} />
+          <span>{t("goals.title")}</span>
         </button>
       </div>
 

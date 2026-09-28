@@ -813,29 +813,224 @@
 }
 
 /* ================================================================
-   DOCUMENTI & AUTOMAZIONI (ROUTINES) RESET
+   WORKSPACE STAGE & MAIN CONTENT PANELS
+   Removes the sage/beige #f0f2eb rounded box across all spaces.
+   Content flows directly on the white canvas (#ffffff).
    ================================================================ */
 
-.cw-document {
+section.cw-workspace,
+.cw .cw-main > .cw-workspace,
+.cw-stage,
+.cs-stage {
+  background: transparent !important;
+  border-radius: 0 !important;
   border: none !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 24px 32px 48px !important;
+  max-width: 1200px;
+  width: 100%;
+}
+
+/* Inspector / Right-hand aside panels: clean divider, flat white background */
+aside.cw-workspace,
+.cw-workspace.cs-panel {
+  background: #ffffff !important;
+  border-radius: 0 !important;
+  border: none !important;
+  border-left: 1px solid var(--color-border) !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 24px 20px !important;
+}
+
+/* Header in workspace sections */
+.cw-panel-top {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  margin-bottom: 16px !important;
+}
+
+.cw-panel-top h2 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+  margin: 0 !important;
+}
+
+.cw-workspace h2 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+
+/* Filters bar: standard modern input layout */
+.cw-documents__filters {
+  display: flex !important;
+  gap: 8px !important;
+  align-items: center !important;
+  margin-bottom: 16px !important;
+}
+
+.cw-documents__filters label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
   border-radius: 6px !important;
-  padding: 8px 12px !important;
-  transition: background 0.1s ease;
+  padding: 6px 10px !important;
+  flex: 1 !important;
+  transition: border-color 0.12s ease !important;
+}
+
+.cw-documents__filters label:focus-within {
+  border-color: var(--foreground) !important;
+}
+
+.cw-documents__filters input {
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+  font-size: 13px !important;
+  color: var(--foreground) !important;
+  padding: 0 !important;
+  width: 100% !important;
+}
+
+.cw-documents__filters select {
+  height: 32px !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--color-border) !important;
+  background: #ffffff !important;
+  font-size: 13px !important;
+  color: var(--foreground) !important;
+  padding: 0 10px !important;
+}
+
+/* Document & Material rows: flat, zero shadow, hover effect */
+.cw-documents__list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+  border-top: 1px solid var(--color-border) !important;
+}
+
+.cw-document {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid var(--color-border) !important;
+  border-radius: 0 !important;
+  padding: 12px 4px !important;
+  box-shadow: none !important;
+  cursor: pointer !important;
+  transition: background 0.1s ease !important;
 }
 
 .cw-document:hover {
+  background: rgba(0, 0, 0, 0.015) !important;
+}
+
+.cw-document header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: 100% !important;
+}
+
+.cw-document header .cs-link {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--foreground) !important;
+  text-decoration: none !important;
+}
+
+.cw-document header small {
+  margin-left: auto !important;
+  font-size: 11px !important;
+  color: var(--color-muted-foreground) !important;
+}
+
+.cw-document__content {
   background: rgba(0, 0, 0, 0.02) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  padding: 12px !important;
+  font-size: 12px !important;
+  font-family: var(--font-mono, monospace) !important;
+  margin: 10px 0 !important;
+}
+
+/* Routines (Automazioni) */
+.cw-routines__list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+  border-top: 1px solid var(--color-border) !important;
 }
 
 .cw-routine {
+  background: transparent !important;
   border: none !important;
-  border-radius: 6px !important;
-  padding: 8px 12px !important;
-  transition: background 0.1s ease;
+  border-bottom: 1px solid var(--color-border) !important;
+  border-radius: 0 !important;
+  padding: 14px 4px !important;
+  box-shadow: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  transition: background 0.1s ease !important;
 }
 
 .cw-routine:hover {
-  background: rgba(0, 0, 0, 0.02) !important;
+  background: rgba(0, 0, 0, 0.015) !important;
+}
+
+.cw-routine header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+
+.cw-routine header strong {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+
+.cw-routine header small {
+  font-size: 11px !important;
+  color: var(--color-muted-foreground) !important;
+}
+
+/* Sidebar resets: New conversation button & active links */
+.cw-new {
+  background: var(--foreground) !important;
+  color: #ffffff !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  padding: 6px 12px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  transition: all 0.12s ease !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08) !important;
+}
+
+.cw-new:hover:not(:disabled) {
+  opacity: 0.9 !important;
+}
+
+.cs-space-links button.active {
+  background: rgba(0, 0, 0, 0.05) !important;
+  color: var(--foreground) !important;
+  font-weight: 600 !important;
+}
+
+.cs-space-links button:hover {
+  background: rgba(0, 0, 0, 0.03) !important;
+  color: var(--foreground) !important;
 }
 
 .cw-routine-creator,

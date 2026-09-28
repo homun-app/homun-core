@@ -703,10 +703,10 @@
   border: 0;
 }
 .cw-workspace {
-  background: #f0f2eb;
-  margin: 8px 20px 20px 0;
-  border-radius: 20px;
-  padding: 26px 24px;
+  background: transparent;
+  margin: 0;
+  border-radius: 0;
+  padding: 24px 32px 48px;
   overflow-y: auto;
   scrollbar-width: thin;
 }
@@ -940,11 +940,11 @@
   margin: 10px 0 17px;
 }
 .cw-document {
-  background: white;
-  border-radius: 14px;
-  padding: 24px 19px;
+  background: transparent;
+  border-radius: 0;
+  padding: 12px 0;
   cursor: pointer;
-  box-shadow: 0 8px 20px #2b432908;
+  box-shadow: none;
 }
 .cw-document > svg {
   color: #95a380;

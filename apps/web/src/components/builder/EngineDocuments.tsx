@@ -84,7 +84,7 @@ export function EngineDocuments({ projects }: { projects: ProjectOption[] }) {
                 <pre className="cw-document__content">{doc.content}</pre>
                 <button
                   type="button"
-                  className="cw-secondary"
+                  className="ph-btn-promote"
                   onClick={() => {
                     const url = URL.createObjectURL(new Blob([doc.content], { type: "text/markdown;charset=utf-8" }));
                     const anchor = document.createElement("a");

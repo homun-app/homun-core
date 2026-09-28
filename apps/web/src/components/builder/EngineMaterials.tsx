@@ -11,6 +11,7 @@ import { subscribeMaterialChanges, type MaterialFailure } from "@/lib/project-ma
 import { isHomunClientError } from "@/lib/homun-errors";
 import { materialOptionLabel } from "@/lib/engine-material-selection";
 import { ConversationSelectField } from "./ConversationSelect";
+import { Search, FileText, Upload, FolderPlus, RefreshCw } from "lucide-react";
 import "./engine-documents.css";
 import "./engine-library.css";
 
@@ -131,16 +132,16 @@ export function EngineMaterials({ projects }: { projects: Project[] }) {
 
   return (
     <section className="cw-workspace cw-documents cw-engine-library" aria-label="Materiali">
-      <div className="cw-panel-top">
-        <h2>Materiali</h2>
-        <span className="cw-hint">Fonte: motore</span>
+      <div className="section-label">
+        MATERIALI DEI PROGETTI ({materials?.length ?? 0})
       </div>
-      <p className="cw-hint">
+      <p className="ph-card-subtitle" style={{ marginBottom: "16px" }}>
         I file dei tuoi progetti, disponibili anche nelle conversazioni e negli strumenti del
         lavoro.
       </p>
       <div className="cw-documents__filters">
         <label>
+          <Search size={14} />
           <input
             aria-label="Cerca materiali"
             placeholder="Cerca nome o percorso…"
@@ -165,25 +166,25 @@ export function EngineMaterials({ projects }: { projects: Project[] }) {
           ))}
         </ConversationSelectField>
       </div>
-      <div className="cs-actions">
+      <div className="cs-actions" style={{ marginBottom: "16px" }}>
         <button
           type="button"
-          className="cw-secondary"
+          className="ph-btn-promote"
           disabled={!targetProject || busy}
           onClick={() => files.current?.click()}
         >
-          Aggiungi file
+          <Upload size={13} /> Aggiungi file
         </button>
         <button
           type="button"
-          className="cw-secondary"
+          className="ph-btn-promote"
           disabled={!targetProject || busy}
           onClick={() => folder.current?.click()}
         >
-          Aggiungi cartella
+          <FolderPlus size={13} /> Aggiungi cartella
         </button>
         <button type="button" className="cs-link" disabled={busy} onClick={() => void reload()}>
-          Aggiorna
+          <RefreshCw size={13} /> Aggiorna
         </button>
       </div>
       <input
@@ -234,6 +235,7 @@ export function EngineMaterials({ projects }: { projects: Project[] }) {
         {visible.map((material) => (
           <article className="cw-document" key={material.id}>
             <header>
+              <FileText size={16} />
               <button
                 className="cs-link"
                 type="button"

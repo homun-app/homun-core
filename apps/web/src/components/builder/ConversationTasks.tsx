@@ -97,14 +97,16 @@ export function ConversationTasks({
     <div className="cw-stage with-panel cs-stage">
       <section className="cw-conversation">
         <div className="cw-history">
-          <div className="cs-actions" style={{ marginBottom: 12 }}>
+          <div className="ph-inline-tabs" role="tablist" style={{ margin: "-8px 0 16px" }}>
             {["Elenco", "Kanban", "Calendario"].map((v) => (
               <button
                 key={v}
-                className={view === v ? "cw-primary" : "cw-secondary"}
+                role="tab"
+                aria-selected={view === v}
+                className={`ph-inline-tab ${view === v ? "is-active" : ""}`}
                 onClick={() => setView(v)}
               >
-                {v}
+                <span>{v}</span>
               </button>
             ))}
           </div>
