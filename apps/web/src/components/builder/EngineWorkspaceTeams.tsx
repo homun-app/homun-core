@@ -37,16 +37,9 @@ export function EngineWorkspaceTeams({
 
   return (
     <section className="cw-workspace cw-teams-panel" aria-label="Team">
-      <div className="cw-panel-top">
-        <h2>Team</h2>
-        <span className="cw-hint">
-          {teams.length} {teams.length === 1 ? "team" : "team"}
-        </span>
+      <div className="section-label">
+        TEAM ({teams.length})
       </div>
-      <p className="cw-hint">
-        Un team raggruppa collaboratori per i lavori di squadra: il coordinatore è il riferimento
-        dei passaggi che richiedono una firma unica.
-      </p>
       {editing === "new" ? (
         <EngineTeamEditor
           team={null}

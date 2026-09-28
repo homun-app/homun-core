@@ -45,35 +45,27 @@ export function EngineRoutines({
 
   return (
     <section className="cw-workspace cw-routines" aria-label={t("routines.title")}>
-      <div className="cw-panel-top">
-        <h2>{tab === "routines" ? t("routines.title") : t("goals.title")}</h2>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button
-            type="button"
-            className={tab === "routines" ? "cw-primary" : "cw-secondary"}
-            style={{ padding: "4px 10px", fontSize: "0.8rem" }}
-            onClick={() => setTab("routines")}
-          >
-            {t("routines.title")} ({routines.filter((r) => r.status === "active").length})
-          </button>
-          <button
-            type="button"
-            className={tab === "goals" ? "cw-primary" : "cw-secondary"}
-            style={{ padding: "4px 10px", fontSize: "0.8rem" }}
-            onClick={() => setTab("goals")}
-          >
-            {t("goals.title")}
-          </button>
-        </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        <button
+          type="button"
+          className={tab === "routines" ? "cw-primary" : "cw-secondary"}
+          onClick={() => setTab("routines")}
+        >
+          {t("routines.title")} ({routines.filter((r) => r.status === "active").length})
+        </button>
+        <button
+          type="button"
+          className={tab === "goals" ? "cw-primary" : "cw-secondary"}
+          onClick={() => setTab("goals")}
+        >
+          {t("goals.title")}
+        </button>
       </div>
 
       {tab === "goals" ? (
         <EngineGoalDashboard />
       ) : (
         <>
-          <p className="cw-hint">
-            {t("routines.subtitle")}
-          </p>
           {routines.length === 0 && (
             <p className="cw-routines__empty">
               {t("routines.empty")}

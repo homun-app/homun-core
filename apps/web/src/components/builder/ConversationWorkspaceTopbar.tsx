@@ -43,32 +43,42 @@ export function ConversationWorkspaceTopbar({
 
   return (
     <header className="cw-topbar">
-      {!sidebarOpen && (
-        <button
-          className="cw-icon"
-          aria-label="Apri barra laterale"
-          title="Apri barra laterale"
-          onClick={onOpenSidebar}
-        >
-          <PanelRightClose size={19} />
-        </button>
-      )}
-      <span>
+      <div className="ph-topbar-breadcrumb-group">
+        {!sidebarOpen && (
+          <button
+            className="cw-icon"
+            aria-label="Apri barra laterale"
+            title="Apri barra laterale"
+            onClick={onOpenSidebar}
+          >
+            <PanelRightClose size={19} />
+          </button>
+        )}
         {space ? (
-          space
+          <span className="ph-breadcrumb-root">{space}</span>
         ) : work ? (
           <>
-            <span className="cw-breadcrumb">Conversazioni / </span>
-            {work.title}
+            <span className="ph-breadcrumb-root">Conversazioni</span>
+            <span className="ph-breadcrumb-sep">/</span>
+            <span className="ph-topbar-name">{work.title}</span>
           </>
         ) : (
-          preferences.spaceName
+          <span className="ph-breadcrumb-root">{preferences.spaceName}</span>
         )}
-      </span>
-      <div>
+        <span
+          className={
+            engineMode
+              ? "ph-source-badge ph-source-badge--engine"
+              : "ph-source-badge ph-source-badge--simulation"
+          }
+        >
+          {engineMode ? "motore" : "sim"}
+        </span>
+      </div>
+
+      <div className="ph-topbar-contextual">
         {!engineMode && (
-          <label className="cw-viewer">
-            Fonte: simulazione · Vista demo{" "}
+          <label className="cw-viewer" style={{ margin: 0, fontSize: "11px" }}>
             <ConversationSelectField
               aria-label="Vista utente demo"
               value={viewer}

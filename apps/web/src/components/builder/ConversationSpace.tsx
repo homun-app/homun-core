@@ -322,21 +322,6 @@ export function ConversationSpace({
               </div>
             </div>
             <div className="cw-history">
-              <span className="cw-overline">{view.toUpperCase()}</span>
-              <h1 className="cs-title">
-                {view === "Squadra"
-                  ? "Le persone giuste, insieme."
-                  : view === "Progetti"
-                    ? "Un obiettivo condiviso."
-                    : "Un lavoro che continua."}
-              </h1>
-              <p className="cs-intro">
-                {view === "Squadra"
-                  ? "Persone e agenti nella stessa squadra, con un coordinatore riconoscibile."
-                  : view === "Progetti"
-                    ? "Collega una squadra e ritrova qui le sue conversazioni di lavoro."
-                    : "Parti da un lavoro esistente. Le nuove esecuzioni avranno una propria conversazione."}
-              </p>
               {view === "Squadra" && (
                 <div className="cs-actions cs-create-actions" aria-label="Crea nella squadra">
                   <button

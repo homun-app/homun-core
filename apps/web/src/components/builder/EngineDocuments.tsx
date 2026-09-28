@@ -37,15 +37,9 @@ export function EngineDocuments({ projects }: { projects: ProjectOption[] }) {
 
   return (
     <section className="cw-workspace cw-documents" aria-label={t("documents.title")}>
-      <div className="cw-panel-top">
-        <h2>{t("documents.title")}</h2>
-        <span className="cw-hint">
-          {docs?.length ?? "…"} {docs?.length === 1 ? t("documents.verified_single") : t("documents.verified_multiple")}
-        </span>
+      <div className="section-label">
+        {t("documents.title").toUpperCase()} ({docs?.length ?? 0})
       </div>
-      <p className="cw-hint">
-        {t("documents.subtitle")}
-      </p>
       <div className="cw-documents__filters">
         <label>
           <Search size={14} />

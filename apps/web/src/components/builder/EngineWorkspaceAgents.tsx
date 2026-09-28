@@ -25,16 +25,9 @@ export function EngineWorkspaceAgents({ agents, onChanged }: {
   const active = agents.filter((agent) => agent.status === "active");
   return (
     <section className="cw-workspace cw-agents-panel" aria-label="Collaboratori">
-      <div className="cw-panel-top">
-        <h2>La tua squadra</h2>
-        <span className="cw-hint">
-          {active.length} {active.length === 1 ? "collaboratore" : "collaboratori"}
-        </span>
+      <div className="section-label">
+        SQUADRA & AGENTI ({active.length})
       </div>
-      <p className="cw-hint">
-        I collaboratori proposti in chat entrano nella squadra dopo la tua conferma. Il profilo non
-        concede automaticamente strumenti o permessi.
-      </p>
       {active.length === 0 && (
         <p className="cw-agents-empty">
           Non hai ancora creato collaboratori. Racconta a Homun il lavoro che vuoi affidare: ti
