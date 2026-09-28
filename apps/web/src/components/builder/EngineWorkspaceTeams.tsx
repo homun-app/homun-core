@@ -6,17 +6,8 @@ import { createEngineTeam, updateEngineTeam } from "@/lib/engine-projects-client
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { ConversationAvatar } from "./ConversationAvatar";
 import { ConversationSelectField } from "./ConversationSelect";
+import { Users, Plus, Pencil } from "lucide-react";
 import "./engine-teams.css";
-
-type Draft = { name: string; memberIds: string[]; coordinatorId: string };
-
-function draftOf(team: EngineTeam | null): Draft {
-  return {
-    name: team?.name ?? "",
-    memberIds: team?.member_ids ?? [],
-    coordinatorId: team?.coordinator_id ?? "",
-  };
-}
 
 export function EngineWorkspaceTeams({
   teams,
@@ -36,59 +27,105 @@ export function EngineWorkspaceTeams({
   }
 
   return (
-    <section className="cw-workspace cw-teams-panel" aria-label="Team">
-      <div className="section-label">
-        TEAM ({teams.length})
+    <section className="cw-teams-panel" aria-label="Team">
+      <div className="cw-squad-section-head">
+        <div className="cw-squad-section-title">
+          <span>Team</span>
+          <span className="cw-squad-section-count">{teams.length}</span>
+        </div>
+        {editing !== "new" && active.length >= 2 && (
+          <button
+            type="button"
+            className="cw-squad-btn-subtle"
+            onClick={() => setEditing("new")}
+          >
+            <Plus size={13} />
+            <span>Nuovo team</span>
+          </button>
+        )}
       </div>
+
       {editing === "new" ? (
         <EngineTeamEditor
           team={null}
           agents={active}
           onCancel={() => setEditing(null)}
-          onSaved={async () => { setEditing(null); await refresh(); }}
+          onSaved={async () => {
+            setEditing(null);
+            await refresh();
+          }}
         />
-      ) : (
-        <button type="button" className="cw-secondary" disabled={active.length < 2}
-          onClick={() => setEditing("new")}>
-          Crea un team
-        </button>
-      )}
-      {active.length < 2 && editing !== "new" && (
-        <p className="cw-hint">Servono almeno due collaboratori per un team.</p>
-      )}
+      ) : teams.length === 0 ? (
+        <div className="cw-squad-empty-card">
+          <div className="cw-squad-empty-icon">
+            <Users size={18} />
+          </div>
+          <div className="cw-squad-empty-text">
+            <h4>Nessun team configurato</h4>
+            <p>
+              {active.length < 2
+                ? "Servono almeno due collaboratori per creare un team coordinato."
+                : "I team permettono di raggruppare collaboratori attorno a un coordinatore per raggiungere obiettivi complessi."}
+            </p>
+          </div>
+          {active.length >= 2 && (
+            <button
+              type="button"
+              className="cw-squad-btn-primary"
+              onClick={() => setEditing("new")}
+            >
+              <Plus size={13} />
+              <span>Crea un team</span>
+            </button>
+          )}
+        </div>
+      ) : null}
+
       <div className="cw-teams-grid">
         {teams.map((team) => (
           <article key={team.id} className="cw-team-card">
-            <header>
-              <h3>{team.name}</h3>
-              {team.coordinator_id && (
-                <span className="cw-team-coordinator">
-                  Coordinatore: {agentName(team.coordinator_id)}
-                </span>
+            <header className="cw-team-card__head">
+              <div>
+                <h3>{team.name}</h3>
+                {team.coordinator_id && (
+                  <span className="cw-team-coordinator">
+                    Coordinatore: <strong>{agentName(team.coordinator_id)}</strong>
+                  </span>
+                )}
+              </div>
+              {editing !== team.id && onChanged && (
+                <button
+                  type="button"
+                  className="cw-agent-card__edit-btn"
+                  onClick={() => setEditing(team.id)}
+                >
+                  <Pencil size={13} />
+                  <span>Modifica</span>
+                </button>
               )}
             </header>
             <div className="cw-team-members">
               {team.member_ids.map((id) => (
-                <span key={id} className="cw-team-member">
+                <span key={id} className="cw-team-member-chip">
                   <ConversationAvatar name={agentName(id)} />
-                  {agentName(id)}
+                  <span>{agentName(id)}</span>
                 </span>
               ))}
             </div>
-            {editing === team.id ? (
+            {editing === team.id && (
               <EngineTeamEditor
                 team={team}
                 agents={active}
                 onCancel={() => setEditing(null)}
-                onSaved={async () => { setEditing(null); await refresh(); }}
-                onArchived={async () => { setEditing(null); await refresh(); }}
+                onSaved={async () => {
+                  setEditing(null);
+                  await refresh();
+                }}
+                onArchived={async () => {
+                  setEditing(null);
+                  await refresh();
+                }}
               />
-            ) : (
-              onChanged && (
-                <button type="button" className="cs-link" onClick={() => setEditing(team.id)}>
-                  Modifica team
-                </button>
-              )
             )}
           </article>
         ))}
@@ -172,27 +209,47 @@ function EngineTeamEditor({
   }
 
   return (
-    <form className="cw-team-editor" aria-label={team ? `Modifica ${team.name}` : "Nuovo team"}
-      onSubmit={(event) => { event.preventDefault(); void save(); }}>
+    <form
+      className="cw-team-editor"
+      aria-label={team ? `Modifica ${team.name}` : "Nuovo team"}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+    >
+      <HomunErrorNotice error={error} />
       <label>
         Nome del team
-        <input value={name} maxLength={80} disabled={saving}
-          onChange={(event) => setName(event.target.value)} />
+        <input
+          value={name}
+          maxLength={80}
+          disabled={saving}
+          placeholder="es. Analisi Commerciale"
+          onChange={(event) => setName(event.target.value)}
+        />
       </label>
       <fieldset className="cw-team-editor__members">
-        <legend>Membri</legend>
+        <legend>Membri del team</legend>
         {agents.map((agent) => (
           <label key={agent.id}>
-            <input type="checkbox" checked={memberIds.includes(agent.id)} disabled={saving}
-              onChange={() => toggleMember(agent.id)} />
+            <input
+              type="checkbox"
+              checked={memberIds.includes(agent.id)}
+              disabled={saving}
+              onChange={() => toggleMember(agent.id)}
+            />
             {agent.name}
           </label>
         ))}
       </fieldset>
       <label>
         Coordinatore
-        <ConversationSelectField aria-label="Coordinatore del team" value={coordinatorId} disabled={saving}
-          onChange={(event) => setCoordinatorId(event.target.value)}>
+        <ConversationSelectField
+          aria-label="Coordinatore del team"
+          value={coordinatorId}
+          disabled={saving}
+          onChange={(event) => setCoordinatorId(event.target.value)}
+        >
           <option value="">Nessuno (collaborativi)</option>
           {memberIds.map((id) => (
             <option key={id} value={id}>
@@ -201,32 +258,50 @@ function EngineTeamEditor({
           ))}
         </ConversationSelectField>
       </label>
-      <div className="cs-actions">
-        <button className="cw-primary" disabled={saving || !name.trim() || memberIds.length < 1}>
+      <div className="cw-team-editor__actions">
+        <button
+          type="submit"
+          className="cw-squad-btn-primary"
+          disabled={saving || !name.trim() || memberIds.length < 1}
+        >
           {saving ? "Sto salvando…" : team ? "Salva team" : "Crea team"}
         </button>
-        <button type="button" className="cw-secondary" disabled={saving} onClick={onCancel}>
+        <button type="button" className="cw-squad-btn-subtle" disabled={saving} onClick={onCancel}>
           Annulla
         </button>
+        {team &&
+          onArchived &&
+          (confirmingArchive ? (
+            <div className="cw-team-editor__actions">
+              <button
+                type="button"
+                className="cw-squad-btn-subtle"
+                disabled={saving}
+                onClick={() => void archive()}
+              >
+                {saving ? "Sto archiviando…" : "Sì, archivia"}
+              </button>
+              <button
+                type="button"
+                className="cs-link"
+                disabled={saving}
+                onClick={() => setConfirmingArchive(false)}
+              >
+                Annulla
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="cs-link"
+              disabled={saving}
+              onClick={() => setConfirmingArchive(true)}
+            >
+              Archivia team
+            </button>
+          ))}
       </div>
-      {team && onArchived && (
-        confirmingArchive ? (
-          <div className="cs-actions">
-            <button type="button" className="cw-secondary" disabled={saving} onClick={() => void archive()}>
-              {saving ? "Sto archiviando…" : "Sì, archivia"}
-            </button>
-            <button type="button" className="cs-link" disabled={saving} onClick={() => setConfirmingArchive(false)}>
-              Annulla
-            </button>
-          </div>
-        ) : (
-          <button type="button" className="cs-link" disabled={saving} onClick={() => setConfirmingArchive(true)}>
-            Archivia team
-          </button>
-        )
-      )}
       {saving && <p role="status">Salvataggio in corso…</p>}
-      <HomunErrorNotice error={error} />
     </form>
   );
 }

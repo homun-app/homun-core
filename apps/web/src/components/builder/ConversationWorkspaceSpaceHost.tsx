@@ -129,7 +129,7 @@ export function ConversationWorkspaceSpaceHost({
 }: Props) {
   if (engineMode && space === "Squadra")
     return (
-      <>
+      <div className="cw-squad-layout">
         <EngineOrganizationOnboarding onChanged={onRefreshEngine} />
         <EngineWorkspaceAgents agents={engineAgents ?? []} onChanged={onRefreshEngine} />
         <EngineWorkspaceTeams
@@ -137,7 +137,7 @@ export function ConversationWorkspaceSpaceHost({
           agents={engineAgents ?? []}
           onChanged={onRefreshEngine}
         />
-      </>
+      </div>
     );
   if (space === "Progetti")
     return (

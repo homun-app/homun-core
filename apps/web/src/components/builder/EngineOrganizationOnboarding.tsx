@@ -1,22 +1,66 @@
 import { useEffect, useState } from 'react';
+import { Sparkles, X } from 'lucide-react';
 import { HomunErrorNotice } from '@/components/HomunErrorNotice';
 import { organizationRequest, type OrganizationContext, type OrganizationState, type OrganizationProposal } from '@/lib/engine-organization-client';
 import { HomunClientError } from '@/lib/homun-errors';
 import './engine-organization.css';
 
 const labels: Record<Exclude<keyof OrganizationContext, "team_size">, string> = {
-  company: 'Di cosa si occupa la tua azienda?', people: 'Persone e responsabilità',
-  tools: 'Strumenti che usate oggi', goals: 'Difficoltà e obiettivi da migliorare',
+  company: 'Di cosa si occupa la tua azienda?',
+  people: 'Persone e responsabilità',
+  tools: 'Strumenti che usate oggi',
+  goals: 'Difficoltà e obiettivi da migliorare',
 };
 
 export function EngineOrganizationOnboarding({ onChanged }: { onChanged?: (() => Promise<void>) | undefined }) {
   const [open, setOpen] = useState(false);
-  return <section className="organization-onboarding">
-    <button type="button" className="cw-secondary" onClick={() => setOpen(!open)} aria-expanded={open}>
-      {open ? 'Chiudi contesto e squadra' : 'Costruisci la tua squadra'}
-    </button>
-    {open && <OrganizationEditor onChanged={onChanged} />}
-  </section>;
+  return (
+    <section className={`organization-onboarding ${open ? "is-open" : ""}`}>
+      {!open ? (
+        <div className="org-onboarding-banner" onClick={() => setOpen(true)}>
+          <div className="org-onboarding-banner__left">
+            <div className="org-onboarding-icon">
+              <Sparkles size={16} />
+            </div>
+            <div>
+              <div className="org-onboarding-title">Costruisci la tua squadra con AI</div>
+              <div className="org-onboarding-desc">
+                Descrivi l'azienda e le esigenze: Homun proporrà i collaboratori più adatti alle tue attività.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="org-onboarding-cta-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(true);
+            }}
+          >
+            <span>Configura squadra</span>
+          </button>
+        </div>
+      ) : (
+        <div className="org-onboarding-expanded">
+          <div className="org-onboarding-head">
+            <div className="org-onboarding-head__title">
+              <Sparkles size={16} className="org-sparkle-icon" />
+              <span>Costruisci la tua squadra</span>
+            </div>
+            <button
+              type="button"
+              className="org-onboarding-close-btn"
+              onClick={() => setOpen(false)}
+              title="Chiudi pannello"
+            >
+              <X size={15} />
+            </button>
+          </div>
+          <OrganizationEditor onChanged={onChanged} />
+        </div>
+      )}
+    </section>
+  );
 }
 
 function OrganizationEditor({ onChanged }: { onChanged?: (() => Promise<void>) | undefined }) {

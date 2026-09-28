@@ -1155,44 +1155,57 @@ aside.cw-workspace,
    ================================================================ */
 
 .cw-agent-card {
-  border: none !important;
-  border-radius: 8px !important;
-  background: transparent !important;
-  padding: 12px 14px !important;
-  transition: background 0.12s ease;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  padding: 16px 20px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease !important;
 }
 
 .cw-agent-card:hover {
-  background: rgba(0, 0, 0, 0.02) !important;
+  background: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.14) !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.03) !important;
 }
 
-.cw-agent-cap-chip,
-.cw-agent-spec-chip {
-  background: transparent !important;
-  border: 1px solid var(--color-border) !important;
-  color: var(--foreground) !important;
-  border-radius: 4px !important;
+.cw-agent-cap-chip {
+  background: #f4f4f5 !important;
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  color: #3f3f46 !important;
+  border-radius: 5px !important;
   font-size: 11px !important;
   font-weight: 500 !important;
-  padding: 2px 6px !important;
+  padding: 2px 8px !important;
+}
+
+.cw-agent-spec-chip {
+  background: #f4f4f5 !important;
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  color: #71717a !important;
+  border-radius: 5px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  padding: 2px 8px !important;
 }
 
 .cw-team-card {
-  border: none !important;
-  border-radius: 8px !important;
-  background: transparent !important;
-  padding: 12px 14px !important;
-  transition: background 0.12s ease;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  padding: 16px 20px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+  transition: border-color 0.12s ease !important;
 }
 
 .cw-team-card:hover {
-  background: rgba(0, 0, 0, 0.02) !important;
+  background: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.14) !important;
 }
 
 .cw-agents-empty {
   background: transparent !important;
-  border: 1px dashed var(--color-border) !important;
-  border-radius: 8px !important;
+  border: none !important;
 }
 
 /* ================================================================
