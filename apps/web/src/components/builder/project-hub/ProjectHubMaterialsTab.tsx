@@ -56,14 +56,8 @@ export function ProjectHubMaterialsTab({
     <div className="ph-tab-content">
       <div className="ph-card">
         <div className="ph-card-header">
-          <div>
-            <h3 className="ph-card-title">
-              <FileText size={16} className="text-[#157a6e]" />
-              Documenti & Materiali di {projectName}
-            </h3>
-            <p className="ph-card-subtitle">
-              File sorgente, note e contratti ingeriti specifici per il grounding e la consultazione degli agenti.
-            </p>
+          <div className="section-label">
+            Documenti & Materiali ({materials.length})
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <input
@@ -73,19 +67,19 @@ export function ProjectHubMaterialsTab({
               onChange={handleFileChange}
             />
             <button
-              className="ph-btn-secondary"
+              className="ph-btn-ghost"
               onClick={() => fileInputRef.current?.click()}
               disabled={busy}
             >
-              <Upload size={14} />
+              <Upload size={13} />
               Carica File
             </button>
             <button
-              className="ph-btn-primary"
+              className="ph-btn-ghost"
               onClick={() => setAddingNote(!addingNote)}
               disabled={busy}
             >
-              <Plus size={14} />
+              <Plus size={13} />
               Nuova Nota
             </button>
           </div>

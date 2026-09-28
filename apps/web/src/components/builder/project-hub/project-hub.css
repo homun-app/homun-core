@@ -265,10 +265,14 @@
 
 .ph-card-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   margin-bottom: 18px;
   gap: 16px;
+}
+
+.ph-card-header .section-label {
+  margin-bottom: 0;
 }
 
 .ph-card-title {
@@ -379,18 +383,16 @@
 .ph-agent-card {
   background: transparent;
   border: none;
-  border-bottom: 1px solid #e8ece6;
-  border-radius: 0;
-  padding: 16px 0;
+  border-radius: 8px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  transition: background 0.1s ease;
+  gap: 14px;
+  transition: background 0.12s ease;
 }
 
 .ph-agent-card:hover {
-  background: rgba(0,0,0,0.015);
-  border-color: #e8ece6;
+  background: rgba(0, 0, 0, 0.02);
   box-shadow: none;
 }
 
@@ -515,24 +517,22 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 12px 0;
+  padding: 10px 14px;
   background: transparent;
   border: none;
-  border-bottom: 1px solid #e8ece6;
-  border-radius: 0;
-  margin-bottom: 0;
+  border-radius: 6px;
+  margin-bottom: 2px;
   gap: 16px;
-  transition: background 0.1s ease;
+  transition: background 0.12s ease;
 }
 
 .ph-memory-item:hover {
-  border-color: #e8ece6;
-  background: rgba(0,0,0,0.015);
+  background: rgba(0, 0, 0, 0.02);
 }
 
 .ph-memory-item--global {
   background: transparent;
-  border-color: #e8ece6;
+  border: none;
 }
 
 .ph-memory-text {
@@ -585,25 +585,25 @@
 
 .ph-table th {
   text-align: left;
-  padding: 8px 0;
+  padding: 8px 10px;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #8a9d92;
   background: transparent;
-  border-bottom: 1px solid #e8ece6;
+  border-bottom: none;
 }
 
 .ph-table td {
-  padding: 10px 0;
-  border-bottom: 1px solid #e8ece6;
+  padding: 10px 10px;
+  border-bottom: none;
   color: #263832;
   vertical-align: middle;
 }
 
 .ph-table tr:hover td {
-  background: #f9fbf8;
+  background: rgba(0, 0, 0, 0.02);
 }
 
 .ph-table tr:last-child td {
@@ -612,10 +612,10 @@
 
 /* --- RBAC & Work Capsules --- */
 .ph-capsule-box {
-  background: linear-gradient(135deg, #eaf2e8 0%, #edf4ec 100%);
-  border: 1px solid #c5dbca;
-  border-radius: 12px;
-  padding: 18px 20px;
+  background: rgba(0, 0, 0, 0.015);
+  border: 1px solid var(--color-border, #e3e7e5);
+  border-radius: 8px;
+  padding: 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;

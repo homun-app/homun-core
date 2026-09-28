@@ -60,17 +60,11 @@ export function ProjectHubMemoryTab({
       {/* Top Banner and Actions */}
       <div className="ph-card">
         <div className="ph-card-header">
-          <div>
-            <h3 className="ph-card-title">
-              <BookMarked size={16} className="text-[#157a6e]" />
-              Memoria & Vincoli di Progetto
-            </h3>
-            <p className="ph-card-subtitle">
-              Regole contestuali e preferenze approvate che gli agenti applicano automaticamente ai lavori di {projectName}.
-            </p>
+          <div className="section-label">
+            Memoria & Vincoli ({projectMemories.length})
           </div>
-          <button className="ph-btn-primary" onClick={() => setAdding(!adding)}>
-            <Plus size={14} />
+          <button className="ph-btn-ghost" onClick={() => setAdding(!adding)}>
+            <Plus size={13} />
             Nuovo Vincolo
           </button>
         </div>

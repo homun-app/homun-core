@@ -32,32 +32,29 @@
   letter-spacing: 0.05em;
 }
 
-/* Tab bar: underline only, no background on active/hover */
+/* Tab bar: clean transparent tabs, no full-bleed border-bottom */
 .ph-tabs {
-  border-bottom: 1px solid var(--color-border);
-  gap: 0;
+  border-bottom: none !important;
+  gap: 4px;
   padding-bottom: 0;
 }
 
 .ph-tab {
-  padding: 8px 12px;
+  padding: 6px 10px;
   font-size: 13px;
   font-weight: 500;
   color: var(--color-muted-foreground);
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  margin-bottom: -1px;
+  border-bottom: none !important;
+  border-radius: 6px;
 }
 
 .ph-tab:hover {
-  background: transparent;
+  background: rgba(0, 0, 0, 0.02);
   color: var(--foreground);
-  border-radius: 0;
 }
 
 .ph-tab--active {
   color: var(--foreground);
-  border-bottom-color: var(--foreground);
   font-weight: 600;
 }
 
@@ -95,17 +92,16 @@
   color: var(--color-muted-foreground);
 }
 
-/* Agent cards: flat, no border */
+/* Agent cards: clean floating cards, zero horizontal divider lines */
 .ph-agent-card {
   background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
-  padding: 16px 0;
+  border: none !important;
+  border-radius: 8px;
+  padding: 14px 16px;
+  transition: background 0.12s ease;
 }
 
 .ph-agent-card:hover {
-  border-color: var(--color-border);
   box-shadow: none;
   background: rgba(0, 0, 0, 0.02);
 }
@@ -116,24 +112,23 @@
   color: var(--foreground);
 }
 
-/* Memory items: flat list */
+/* Memory items: flat list with zero horizontal lines */
 .ph-memory-item {
   background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
-  padding: 12px 0;
-  margin-bottom: 0;
+  border: none !important;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 2px;
+  transition: background 0.12s ease;
 }
 
 .ph-memory-item:hover {
-  border-color: var(--color-border);
   background: rgba(0, 0, 0, 0.02);
 }
 
 .ph-memory-item--global {
   background: transparent;
-  border-color: var(--color-border);
+  border: none !important;
 }
 
 /* Empty state: no border box */
@@ -177,8 +172,8 @@
 
 .ph-table th {
   background: transparent;
-  border-bottom: 1px solid var(--color-border);
-  padding: 8px 0;
+  border-bottom: none !important;
+  padding: 8px 12px;
   font-size: 11px;
   font-weight: 600;
   color: var(--color-muted-foreground);
@@ -187,13 +182,9 @@
 }
 
 .ph-table td {
-  padding: 10px 0;
-  border-bottom: 1px solid var(--color-border);
+  padding: 10px 12px;
+  border-bottom: none !important;
   color: var(--foreground);
-}
-
-.ph-table tr:last-child td {
-  border-bottom: none;
 }
 
 .ph-table tr:hover td {
@@ -237,10 +228,9 @@
 
 .cv-people-card {
   background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
-  padding: 14px 0;
+  border: none !important;
+  border-radius: 8px;
+  padding: 12px 16px;
 }
 
 .cv-people-card:hover {
@@ -309,17 +299,15 @@
 
 .cv-settings-card {
   background: transparent;
-  border: none;
-  box-shadow: none;
+  border: none !important;
+  box-shadow: none !important;
   padding: 0;
-  border-bottom: 1px solid var(--color-border);
   border-radius: 0;
   padding-bottom: 24px;
   margin-bottom: 24px;
 }
 
 .cv-settings-card:last-child {
-  border-bottom: none;
   margin-bottom: 0;
 }
 
@@ -347,8 +335,7 @@
 [class*='engine-card'],
 [class*='maintenance-card'] {
   background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--color-border);
+  border: none !important;
   border-radius: 0;
   padding-bottom: 24px;
   margin-bottom: 24px;
@@ -473,22 +460,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--color-border);
+  padding: 7px 10px;
+  border-bottom: none !important;
   cursor: pointer;
   transition: background 0.1s ease;
-  border-radius: 0;
-}
-
-.ph-work-row:last-child {
-  border-bottom: none;
+  border-radius: 6px;
 }
 
 .ph-work-row:hover {
   background: rgba(0, 0, 0, 0.02);
-  padding-left: 4px;
-  padding-right: 4px;
-  border-radius: 4px;
 }
 
 .ph-work-row__left {

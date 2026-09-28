@@ -108,17 +108,11 @@ export function ProjectHubRbacTab({
     <div className="ph-tab-content">
       <div className="ph-card">
         <div className="ph-card-header">
-          <div>
-            <h3 className="ph-card-title">
-              <UsersRound size={16} className="text-[#157a6e]" />
-              Squadra Umana & Permessi (RBAC)
-            </h3>
-            <p className="ph-card-subtitle">
-              Persone che collaborano su {projectName} con relativi livelli di accesso e autorizzazioni.
-            </p>
+          <div className="section-label">
+            Squadra Umana & Permessi ({members.length})
           </div>
-          <button className="ph-btn-primary" onClick={() => setModalOpen(true)}>
-            <Plus size={14} />
+          <button className="ph-btn-ghost" onClick={() => setModalOpen(true)}>
+            <Plus size={13} />
             Aggiungi Membro
           </button>
         </div>

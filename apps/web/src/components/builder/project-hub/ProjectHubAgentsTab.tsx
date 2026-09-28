@@ -95,18 +95,12 @@ export function ProjectHubAgentsTab({
     <div className="ph-tab-content">
       <div className="ph-card">
         <div className="ph-card-header">
-          <div>
-            <h3 className="ph-card-title">
-              <Bot size={16} className="text-[#157a6e]" />
-              Agenti Assegnati a {projectName}
-            </h3>
-            <p className="ph-card-subtitle">
-              Scegli quali agenti operano su questo perimetro, imposta override di modelli per privacy o costi e attiva i tool necessari.
-            </p>
+          <div className="section-label">
+            Squadra & Agenti ({configs.length})
           </div>
           {unassignedAgents.length > 0 && (
-            <button className="ph-btn-primary" onClick={() => setAssigning(!assigning)}>
-              <Plus size={15} />
+            <button className="ph-btn-ghost" onClick={() => setAssigning(!assigning)}>
+              <Plus size={13} />
               Assegna Agente
             </button>
           )}
