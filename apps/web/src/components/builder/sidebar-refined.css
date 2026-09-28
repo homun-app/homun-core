@@ -188,6 +188,14 @@
   cursor: pointer;
 }
 
+.cw-sb-section-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  flex: 1;
+}
+
 .cw-sb-section-header button {
   background: transparent;
   border: none;
@@ -255,6 +263,23 @@
   color: #a1a1aa;
 }
 
+.cw-sb-role-sub {
+  font-size: 11px;
+  color: #a1a1aa;
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 90px;
+}
+
+.cw-sb-empty-sub {
+  font-size: 11px;
+  color: #a1a1aa;
+  padding: 4px 8px;
+  font-style: italic;
+}
+
 .cw-sb-scroll-area {
   flex: 1;
   min-height: 0;
@@ -264,15 +289,19 @@
 
 .cw-sb-footer {
   border-top: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 10px 4px 2px;
+  padding: 8px 4px 2px;
   margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .cw-sb-profile-btn {
   display: flex;
   align-items: center;
   gap: 9px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 4px 6px;
   border-radius: 6px;
   border: none;
@@ -326,7 +355,47 @@
   white-space: nowrap;
 }
 
-.cw-sb-settings-icon {
-  color: #71717a;
+.cw-sb-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   flex-shrink: 0;
+}
+
+.cw-sb-footer-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #71717a;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.cw-sb-footer-btn:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: #18181b;
+}
+
+.cw-sb-notif-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #16a34a;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
