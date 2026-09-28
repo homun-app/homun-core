@@ -464,20 +464,22 @@ export function ProjectHubView({
 
       {/* Always-visible prompt — agentic entry point for this project */}
       <div className="ph-prompt">
-        <input
-          type="text"
-          className="ph-prompt-input"
-          placeholder="Chiedi o assegna un compito in questo progetto..."
-          value={promptValue}
-          onChange={(e) => setPromptValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handlePromptSubmit(); }
-          }}
-        />
-        <button className="ph-prompt-send" onClick={handlePromptSubmit}
-          title="Avvia" disabled={!promptValue.trim()}>
-          <ArrowUp size={14} />
-        </button>
+        <div className="ph-prompt-box">
+          <input
+            type="text"
+            className="ph-prompt-input"
+            placeholder="Chiedi o assegna un compito in questo progetto..."
+            value={promptValue}
+            onChange={(e) => setPromptValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handlePromptSubmit(); }
+            }}
+          />
+          <button className="ph-prompt-send" onClick={handlePromptSubmit}
+            title="Avvia" disabled={!promptValue.trim()}>
+            <ArrowUp size={14} />
+          </button>
+        </div>
       </div>
 
       <ProjectCreateModal

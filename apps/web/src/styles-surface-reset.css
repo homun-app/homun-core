@@ -213,16 +213,13 @@
   border-color: var(--foreground);
 }
 
-/* Context bar */
-.ph-context-bar {
-  background: #ffffff;
-  border-bottom: 1px solid var(--color-border);
-}
-
-/* Header */
+/* Header & Topbar: seamless white, no separation line */
+.cw-topbar,
+.ph-context-bar,
 .ph-header {
-  background: #ffffff;
-  border-bottom: 1px solid var(--color-border);
+  background: #ffffff !important;
+  border-bottom: none !important;
+  border: none !important;
 }
 
 /* Override badge */

@@ -754,13 +754,26 @@
    ============================================================ */
 
 .ph-prompt {
+  padding: 12px 32px 20px;
+  background: #ffffff;
+  border-top: none;
+  flex-shrink: 0;
+}
+
+.ph-prompt-box {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 20px;
-  border-top: 1px solid #e8ece6;
+  padding: 7px 12px;
   background: #ffffff;
-  flex-shrink: 0;
+  border: 1px solid var(--color-border, #e3e7e5);
+  border-radius: 8px;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.ph-prompt-box:focus-within {
+  border-color: var(--color-foreground, #131a17);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
 .ph-prompt-input {
@@ -769,14 +782,14 @@
   outline: none;
   font-family: var(--font-sans);
   font-size: 13px;
-  color: #1c2d22;
+  color: var(--color-foreground, #131a17);
   background: transparent;
   padding: 0;
   min-width: 0;
 }
 
 .ph-prompt-input::placeholder {
-  color: #a8b8af;
+  color: var(--color-muted-foreground, #a8b8af);
 }
 
 .ph-prompt-send {
@@ -785,10 +798,10 @@
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: 5px;
-  border: 1px solid #e8ece6;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #e3e7e5);
   background: transparent;
-  color: #8a9d92;
+  color: var(--color-muted-foreground, #8a9d92);
   cursor: pointer;
   transition: all 0.1s ease;
   flex-shrink: 0;
