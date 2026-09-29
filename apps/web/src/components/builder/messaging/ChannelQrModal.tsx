@@ -229,6 +229,11 @@ export function ChannelQrModal({
             }
             return;
           }
+          // The sidecar may still be handshaking: show the QR as soon as it lands.
+          if (res.qr_payload && !qrDataUrl) {
+            const qr = await generateQr(res.qr_payload);
+            if (isMounted) setQrDataUrl(qr);
+          }
           timer = window.setTimeout(() => void poll(), 2000);
           return;
         }
@@ -283,7 +288,7 @@ export function ChannelQrModal({
       isMounted = false;
       if (timer) window.clearTimeout(timer);
     };
-  }, [isOpen, channelId, activeTab, onboardingPhase, pairingId, currentFields, onSaveTokenAndFields]);
+  }, [isOpen, channelId, activeTab, onboardingPhase, pairingId, currentFields, onSaveTokenAndFields, qrDataUrl]);
 
   // Handle manual token submission (Official Homun Bot flow)
   async function handleApplyCustomToken(e: React.FormEvent) {

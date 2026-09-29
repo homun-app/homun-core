@@ -35,6 +35,10 @@ def serve(args):
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.bind((args.host, args.port))
+        from homun.application.engine_listening import set_listening_port
+
+        # Channel sidecars spawned by the engine call back on this port.
+        set_listening_port(sock.getsockname()[1])
         # Reserved socket, not a readiness claim. Parent polls authenticated health.
         print('HOMUN_SOCKET '+json.dumps({'port': sock.getsockname()[1]}), flush=True)
         uvicorn.Server(uvicorn.Config(app, log_level='warning', access_log=False)).run(sockets=[sock])

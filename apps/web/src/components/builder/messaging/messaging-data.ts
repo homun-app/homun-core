@@ -187,6 +187,14 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
         required: false,
         helpText: "Opzionale: default http://127.0.0.1:8902 (o HOMUN_WHATSAPP_BRIDGE_URL nel motore).",
       },
+      {
+        id: "bridge_binary",
+        label: "Percorso binario wa-rs-bridge",
+        placeholder: "/percorso/wa-rs-bridge",
+        type: "text",
+        required: false,
+        helpText: "Opzionale: se il canale è attivo e nessun bridge risponde, il motore lo avvia da questo percorso (default: HOMUN_WHATSAPP_BRIDGE_BIN, bin del venv, PATH).",
+      },
     ],
   },
   {

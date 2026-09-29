@@ -1,6 +1,7 @@
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import asyncio
 import json
 import os
 import threading
@@ -521,8 +522,18 @@ def _whatsapp_bridge_adapter():
 
 @router.post("/whatsapp/onboarding/start", response_model=Dict[str, Any])
 async def start_whatsapp_onboarding() -> Dict[str, Any]:
+    from homun.application.whatsapp_bridge_process import ensure_whatsapp_bridge
+
+    # Pairing precedes configuration: make sure the sidecar is up even when
+    # the channel is not enabled yet, giving it a moment to bind and emit QR.
+    ensure_whatsapp_bridge(force=True, allow_unconfigured=True)
     adapter = _whatsapp_bridge_adapter()
-    status = adapter.bridge_status()
+    status = None
+    for _ in range(8):
+        status = adapter.bridge_status()
+        if status is not None:
+            break
+        await asyncio.sleep(0.75)
     if status is None:
         raise HTTPException(
             status_code=502,
