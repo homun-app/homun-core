@@ -115,7 +115,10 @@ def run_interpret(
     if provider_id == "fake":
         return registry._fake.interpret(text, roster=roster)
 
-    get_prov = getattr(registry, "_get_provider", registry._providers.get)
+    get_prov = getattr(registry, "_get_provider", None)
+    if get_prov is None:
+        providers = getattr(registry, "_providers", None)
+        get_prov = providers.get if providers is not None else (lambda _pid: None)
     provider = get_prov(provider_id)
     if provider is None and provider_id == "openai_compatible":
         provider = registry._openai
