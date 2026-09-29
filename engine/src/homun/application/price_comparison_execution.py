@@ -78,7 +78,7 @@ def _report_message(summary):
             f"{counts['decreased']} diminuzioni, {counts['unchanged']} prezzi invariati, "
             f"{counts['new']} nuovi prodotti, {counts['removed']} rimossi e "
             f"{counts['excluded']} esclusi. "
-            "Report pronto per la revisione umana. Fonte: motore.")
+            "Report pronto per la revisione umana.")
 
 
 def _record_failure(store, proposal, code, *, blocked=False):

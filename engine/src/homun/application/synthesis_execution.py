@@ -256,8 +256,7 @@ def _attempt(proposal, connection_id, model_id, *, status, error_code=None):
 
 def _report_message(proposal, meta):
     return (f"Sintesi pronta: «{proposal['step_title']}». Bozza scritta dal modello "
-            f"{meta.get('model_id') or 'del collaboratore'} e lasciata in revisione nella conversazione. "
-            f"Fonte: motore.")
+            f"{meta.get('model_id') or 'del collaboratore'} e lasciata in revisione nella conversazione.")
 
 
 def _record_failure(store, proposal, code, *, blocked=False):
