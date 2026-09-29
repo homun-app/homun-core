@@ -160,3 +160,67 @@ export async function cancelTelegramOnboarding(pairingId: string): Promise<{ ok:
   });
   return res.json().catch(() => ({ ok: true }));
 }
+
+// ── WhatsApp bridge (wa-rs-bridge sidecar) ────────────────────────────
+
+export type WhatsAppOnboardingStartResponse = {
+  pairing_id: string;
+  paired: boolean;
+  qr_payload?: string | null;
+  pair_code?: string | null;
+  expires_at?: string;
+};
+
+export type WhatsAppOnboardingStatusResponse = {
+  status: "waiting" | "ready" | "expired";
+  jid?: string;
+  qr_payload?: string | null;
+  pair_code?: string | null;
+};
+
+export async function startWhatsAppOnboarding(): Promise<WhatsAppOnboardingStartResponse> {
+  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/whatsapp/onboarding/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.detail?.message || err?.detail || `Impossibile avviare il pairing WhatsApp (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+export async function getWhatsAppOnboardingStatus(pairingId: string): Promise<WhatsAppOnboardingStatusResponse> {
+  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/whatsapp/onboarding/${encodeURIComponent(pairingId)}`);
+  if (!res.ok) {
+    if (res.status === 410 || res.status === 404) {
+      return { status: "expired" };
+    }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.detail?.message || err?.detail || `Errore verifica pairing WhatsApp (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+export async function applyWhatsAppOnboarding(
+  pairingId: string,
+): Promise<{ ok: boolean; platform: string; jid?: string; enabled: boolean; fields?: Record<string, string> }> {
+  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/whatsapp/onboarding/${encodeURIComponent(pairingId)}/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.detail?.message || err?.detail || `Errore applicazione WhatsApp (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+export async function cancelWhatsAppOnboarding(pairingId: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/whatsapp/onboarding/${encodeURIComponent(pairingId)}`, {
+    method: "DELETE",
+  });
+  return res.json().catch(() => ({ ok: true }));
+}

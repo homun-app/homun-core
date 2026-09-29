@@ -77,6 +77,7 @@ export function ChannelBrandIcon({
       );
 
     case "whatsapp":
+    case "whatsapp_cloud":
     case "whatsappcloud":
       return (
         <svg

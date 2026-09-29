@@ -163,7 +163,36 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
   {
     id: "whatsapp",
     name: "WhatsApp",
-    subtitle: "Ricevi ed esegui richieste direttamente da WhatsApp aziendale o personale.",
+    subtitle: "Ricevi ed esegui richieste direttamente dal tuo WhatsApp personale, senza account Meta.",
+    iconColor: "#25d366",
+    quickSetupAvailable: true,
+    quickSetupLabel: "Scansiona un codice QR da WhatsApp → Dispositivi collegati. Il tuo numero sarà l'unico autorizzato.",
+    credentialsGuide:
+      "Il canale usa il sidecar locale wa-rs-bridge (github.com/homunbot/wa-rs), che possiede la sessione WhatsApp Web: nessun account Meta né URL pubblica. Avvia il sidecar e usa la configurazione rapida con il QR.",
+    guideUrl: "https://github.com/homunbot/wa-rs",
+    fields: [
+      {
+        id: "allowed_user_ids",
+        label: "ID Mittenti Autorizzati (JID o numero)",
+        placeholder: "es. 393331234567, 393339876543@s.whatsapp.net",
+        type: "text",
+        required: false,
+        helpText: "Il QR imposta automaticamente il tuo numero. Aggiungi qui altri JID (o numeri nudi) separati da virgola per autorizzarli.",
+      },
+      {
+        id: "bridge_url",
+        label: "URL del bridge wa-rs-bridge",
+        placeholder: "http://127.0.0.1:8902",
+        type: "text",
+        required: false,
+        helpText: "Opzionale: default http://127.0.0.1:8902 (o HOMUN_WHATSAPP_BRIDGE_URL nel motore).",
+      },
+    ],
+  },
+  {
+    id: "whatsapp_cloud",
+    name: "WhatsApp Business (Cloud API)",
+    subtitle: "Canale ufficiale Meta Cloud API con numero aziendale e webhook.",
     iconColor: "#25d366",
     credentialsGuide:
       "Crea un'applicazione su Meta for Developers (developers.facebook.com), aggiungi il prodotto WhatsApp, e copia il Phone Number ID e il Token di accesso permanente.",

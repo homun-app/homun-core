@@ -19,6 +19,10 @@ import {
   getTelegramOnboardingStatus,
   applyTelegramOnboarding,
   cancelTelegramOnboarding,
+  startWhatsAppOnboarding,
+  getWhatsAppOnboardingStatus,
+  applyWhatsAppOnboarding,
+  cancelWhatsAppOnboarding,
 } from "../../../lib/engine-channels-client";
 
 export interface ChannelQrModalProps {
@@ -87,6 +91,33 @@ export function ChannelQrModal({
     }
   }, []);
 
+  // Start WhatsApp bridge pairing session (QR comes from the local sidecar)
+  const initWhatsAppOnboarding = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setQrDataUrl(null);
+    setOnboardingPhase("waiting");
+    try {
+      const res = await startWhatsAppOnboarding();
+      setPairingId(res.pairing_id);
+      if (res.paired) {
+        setOnboardingPhase("ready");
+      }
+      const link = res.qr_payload || null;
+      setDeepLink(null);
+      if (link) {
+        const qr = await generateQr(link);
+        setQrDataUrl(qr);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+      setOnboardingPhase("idle");
+      setQrDataUrl(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Sync activeTab when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -98,7 +129,11 @@ export function ChannelQrModal({
   useEffect(() => {
     if (!isOpen) {
       if (pairingIdRef.current) {
-        void cancelTelegramOnboarding(pairingIdRef.current);
+        if (channelId === "whatsapp") {
+          void cancelWhatsAppOnboarding(pairingIdRef.current);
+        } else {
+          void cancelTelegramOnboarding(pairingIdRef.current);
+        }
       }
       setQrDataUrl(null);
       setError(null);
@@ -111,7 +146,9 @@ export function ChannelQrModal({
       return;
     }
 
-    if (channelId === "telegram") {
+    if (channelId === "whatsapp") {
+      void initWhatsAppOnboarding();
+    } else if (channelId === "telegram") {
       const existingToken = (currentFields["bot_token"] || "").trim();
       if (existingToken) {
         // User already has a token: verify and display existing bot
@@ -153,11 +190,12 @@ export function ChannelQrModal({
         }
       })();
     }
-  }, [isOpen, channelId, activeTab, currentFields, initTelegramOnboarding]);
+  }, [isOpen, channelId, activeTab, currentFields, initTelegramOnboarding, initWhatsAppOnboarding]);
 
-  // Poll for Telegram onboarding readiness in quick_qr mode
+  // Poll for onboarding readiness (Telegram gateway QR / WhatsApp bridge)
   useEffect(() => {
-    if (!isOpen || channelId !== "telegram" || activeTab !== "quick_qr" || onboardingPhase !== "waiting" || !pairingId) {
+    const supportsPolling = channelId === "telegram" || channelId === "whatsapp";
+    if (!isOpen || !supportsPolling || activeTab !== "quick_qr" || onboardingPhase !== "waiting" || !pairingId) {
       return;
     }
 
@@ -167,6 +205,34 @@ export function ChannelQrModal({
     async function poll() {
       if (!pairingId || !isMounted) return;
       try {
+        if (channelId === "whatsapp") {
+          const res = await getWhatsAppOnboardingStatus(pairingId);
+          if (!isMounted) return;
+          if (res.status === "ready") {
+            setOnboardingPhase("ready");
+            setOwnerUserId(res.jid ?? null);
+            try {
+              const applied = await applyWhatsAppOnboarding(pairingId);
+              if (applied.ok && isMounted) {
+                setOnboardingPhase("applied");
+                await onSaveTokenAndFields(applied.fields || { ...currentFields });
+              }
+            } catch (applyErr: unknown) {
+              if (isMounted) setError(applyErr instanceof Error ? applyErr.message : String(applyErr));
+            }
+            return;
+          }
+          if (res.status === "expired") {
+            if (isMounted) {
+              setError("Sessione WhatsApp scaduta. Clicca Rigenera per riprovare.");
+              setOnboardingPhase("idle");
+            }
+            return;
+          }
+          timer = window.setTimeout(() => void poll(), 2000);
+          return;
+        }
+
         const res = await getTelegramOnboardingStatus(pairingId);
         if (!isMounted) return;
 
@@ -278,7 +344,11 @@ export function ChannelQrModal({
           <div className="msg-modal-title-wrap">
             <ChannelBrandIcon channelId={channelId} size={22} />
             <h4 className="msg-modal-title">
-              {channelId === "telegram" ? "Configura Bot Telegram" : `Accoppiamento ${channelName}`}
+              {channelId === "telegram"
+                ? "Configura Bot Telegram"
+                : channelId === "whatsapp"
+                  ? "Collega WhatsApp"
+                  : `Accoppiamento ${channelName}`}
             </h4>
           </div>
           <button
@@ -464,8 +534,55 @@ export function ChannelQrModal({
           </div>
         )}
 
-        {/* Non-Telegram channels */}
-        {channelId !== "telegram" && (
+        {/* WhatsApp bridge pairing */}
+        {channelId === "whatsapp" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center", width: "100%" }}>
+            <div className="msg-modal-qr-box">
+              {loading ? (
+                <div className="msg-modal-qr-loading">
+                  <Loader2 size={32} className="animate-spin text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">Connessione al bridge WhatsApp…</span>
+                </div>
+              ) : qrDataUrl ? (
+                <img src={qrDataUrl} alt="QR WhatsApp" className="msg-modal-qr-img" />
+              ) : (
+                <div className="msg-modal-qr-loading">
+                  <AlertCircle size={28} className="text-destructive" />
+                  <span className="text-xs text-destructive">QR non disponibile</span>
+                </div>
+              )}
+            </div>
+
+            {onboardingPhase === "waiting" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center", width: "100%" }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#059669", background: "rgba(5,150,105,0.08)", padding: "4px 10px", borderRadius: 12, fontWeight: 500 }}>
+                  <Loader2 size={12} className="animate-spin" />
+                  <span>In attesa della scansione da WhatsApp…</span>
+                </div>
+                <p className="msg-modal-desc" style={{ fontSize: 11.5 }}>
+                  Sul telefono: <strong>WhatsApp → Impostazioni → Dispositivi collegati → Collega un dispositivo</strong> e inquadra questo codice. La sessione resta collegata; il numero autorizzato di default è il tuo.
+                </p>
+              </div>
+            )}
+
+            {(onboardingPhase === "ready" || onboardingPhase === "applied") && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center", width: "100%" }}>
+                <div className="msg-modal-bot-badge" style={{ width: "100%" }}>
+                  <Check size={16} className="text-emerald-600" />
+                  <span>WhatsApp collegato</span>
+                </div>
+                {ownerUserId && (
+                  <span style={{ fontSize: 12, color: "var(--color-muted-foreground)" }}>
+                    Numero autorizzato: <strong>{ownerUserId}</strong>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Other non-Telegram channels */}
+        {channelId !== "telegram" && channelId !== "whatsapp" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center", width: "100%" }}>
             <div className="msg-modal-qr-box">
               {loading ? (
@@ -520,6 +637,18 @@ export function ChannelQrModal({
               className="msg-test-btn"
               onClick={initTelegramOnboarding}
               title="Crea nuovo QR"
+            >
+              <RefreshCw size={13} />
+              <span>Rigenera</span>
+            </button>
+          )}
+
+          {channelId === "whatsapp" && onboardingPhase !== "applied" && (
+            <button
+              type="button"
+              className="msg-test-btn"
+              onClick={initWhatsAppOnboarding}
+              title="Nuovo QR WhatsApp"
             >
               <RefreshCw size={13} />
               <span>Rigenera</span>
