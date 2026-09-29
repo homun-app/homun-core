@@ -74,8 +74,9 @@ def test_parse_inbound_attributes_self_echo_to_the_owner(api):
             "owner": {"jid": "393792345686:10@s.whatsapp.net", "lid": "205652345507984@lid"},
         },
     })
-    # The conversation identity is the human owner, not the system companion.
-    assert msg.user_id == "393792345686:10@s.whatsapp.net"
+    # The conversation identity is the human owner, not the system
+    # companion — in bare, device-suffix-free form.
+    assert msg.user_id == "393792345686@s.whatsapp.net"
     assert msg.channel_id == "10832041742478@lid"
 
 
@@ -196,3 +197,21 @@ def test_pair_error_surfaces_in_status(api, monkeypatch):
     status = api.get(f"/v1/gateway/channels/whatsapp/onboarding/{pairing_id}")
     assert status.status_code == 200
     assert "device props rejected" in (status.json().get("pair_error") or "")
+
+
+def test_parse_inbound_normalizes_device_suffix(api):
+    adapter = WhatsAppBridgeAdapter()
+    msg = adapter.parse_inbound({
+        "source": "wa-rs-bridge",
+        "message": {
+            "id": "msgid-3",
+            "chat": "10832041742478@lid",
+            "sender": "10832041742478:39@lid",
+            "is_group": False,
+            "text": "ciao",
+            "timestamp": "2026-09-29T12:02:00+00:00",
+        },
+    })
+    # The companion shows up with or without a device suffix; the authorized
+    # identity is the bare form.
+    assert msg.user_id == "10832041742478@lid"

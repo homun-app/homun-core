@@ -21,6 +21,19 @@ from homun.application.gateway_contracts import ChannelMedia, ChannelMessage
 DEFAULT_BRIDGE_URL = "http://127.0.0.1:8902"
 
 
+def _strip_device_suffix(jid: str) -> str:
+    """Drop the :NN device suffix: one identity, many devices.
+
+    The same WhatsApp account (and the self-chat companion) addresses traffic
+    with or without a device suffix; authorization and conversation identity
+    must see the bare form.
+    """
+    head, sep, domain = jid.partition("@")
+    if sep and ":" in head:
+        head = head.split(":", 1)[0]
+    return f"{head}{sep}{domain}" if sep else head.split(":", 1)[0]
+
+
 class WhatsAppBridgeAdapter(ChannelAdapter):
     """WhatsApp personal account through the wa-rs-bridge sidecar."""
 
@@ -57,6 +70,7 @@ class WhatsAppBridgeAdapter(ChannelAdapter):
             owner = msg.get("owner") or {}
             sender = str(owner.get("jid") or owner.get("lid") or sender)
             push_name = push_name or "note personali"
+        sender = _strip_device_suffix(sender)
         is_group = bool(msg.get("is_group"))
         timestamp = _parse_timestamp(msg.get("timestamp"))
         return ChannelMessage(
