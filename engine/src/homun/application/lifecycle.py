@@ -78,14 +78,28 @@ async def runtime_lifespan(ctx):
             except TimeoutError:
                 pass
 
+    async def channel_poller_loop():
+        from homun.routes.channel_ingress_api import poll_enabled_channels
+        while not stop.is_set():
+            try:
+                await asyncio.to_thread(poll_enabled_channels, timeout=2)
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=1.0)
+            except TimeoutError:
+                pass
+
     from homun.application.followup_recovery import followup_recovery_lifespan
     worker = asyncio.create_task(pump())
+    poller_worker = asyncio.create_task(channel_poller_loop())
     try:
         async with followup_recovery_lifespan(ctx):
             yield
     finally:
         stop.set()
         await worker
+        await poller_worker
         try:
             if cron_worker is not None:
                 await cron_worker

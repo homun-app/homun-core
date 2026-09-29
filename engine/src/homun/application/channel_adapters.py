@@ -746,15 +746,15 @@ class ChannelRegistry:
             q_item = self.inbound_queue.enqueue(platform, raw_payload, message, status="pending")
 
         # 1. Authorization check
-        if not self.pairing_manager.is_user_authorized(message.platform, message.user_id):
+        is_auth = self.pairing_manager.is_user_authorized(message.platform, message.user_id)
+        if not is_auth and adapter:
+            allowed_conf = getattr(adapter, "config", {}).get("allowed_users")
+            if isinstance(allowed_conf, list) and (len(allowed_conf) == 0 or message.user_id in allowed_conf or getattr(message, "username", "") in allowed_conf):
+                is_auth = True
+        if not is_auth:
             if q_item:
                 self.inbound_queue.fail(q_item.item_id, "Unauthorized sender", retryable=False)
-            return {
-                "status": "unauthorized",
-                "platform": message.platform,
-                "user_id": message.user_id,
-                "message": "Unauthorized sender. To pair, send a pairing request code.",
-            }
+            return {"status": "unauthorized", "platform": message.platform, "user_id": message.user_id, "message": "Unauthorized sender. To pair, send a pairing request code."}
 
         # 2. Turn lease serialization: resolve session/routing key
         routing_key = f"{message.platform}:{message.channel_id}:{message.thread_id or 'main'}"
