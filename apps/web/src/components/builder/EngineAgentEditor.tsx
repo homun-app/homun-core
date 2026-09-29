@@ -2,9 +2,9 @@
 import { useEffect, useState } from "react";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import { updateEngineAgent } from "@/lib/engine-agents-client";
-import { listModelConnections, type ModelConnectionInfo } from "@/lib/engine-models-client";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { ConversationSelectField } from "./ConversationSelect";
+import { AgentModelSelector } from "./AgentModelSelector";
 import "./engine-agent-editor.css";
 
 const CAPABILITY_CHOICES = [
@@ -35,18 +35,8 @@ export function EngineAgentEditor({
   const [autonomy, setAutonomy] = useState(agent.autonomy_mode ?? "supervised");
   const [capabilities, setCapabilities] = useState<string[]>(agent.capabilities ?? []);
   const [connectionId, setConnectionId] = useState(agent.preferred_connection_id ?? "");
-  const [connections, setConnections] = useState<ModelConnectionInfo[] | null>(null);
-  const [connectionsError, setConnectionsError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
-
-  useEffect(() => {
-    let active = true;
-    listModelConnections()
-      .then((response) => { if (active) setConnections(response.items); })
-      .catch((cause) => { if (active) setConnectionsError(cause); });
-    return () => { active = false; };
-  }, []);
 
   function toggleCapability(id: string) {
     setCapabilities((current) =>
@@ -121,20 +111,14 @@ export function EngineAgentEditor({
             {AUTONOMY_CHOICES.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
           </ConversationSelectField>
         </label>
-        <label>
-          Modello per questo collaboratore
-          <ConversationSelectField aria-label="Modello del collaboratore" value={connectionId} disabled={saving || connections === null}
-            onChange={(e) => setConnectionId(e.target.value)}>
-            <option value="">Quello dello spazio (predefinito)</option>
-            {(connections ?? [])
-              .filter((connection) => connection.configured)
-              .map((connection) => (
-                <option key={connection.id} value={connection.id}>
-                  {connection.display_name} · {connection.model_id}
-                </option>
-              ))}
-          </ConversationSelectField>
-        </label>
+        <div className="cw-agent-editor__field">
+          <span>Modello per questo collaboratore</span>
+          <AgentModelSelector
+            value={connectionId}
+            onChange={setConnectionId}
+            disabled={saving}
+          />
+        </div>
       </div>
       <fieldset className="cw-agent-editor__capabilities">
         <legend>Capacità che sa usare</legend>
@@ -155,7 +139,7 @@ export function EngineAgentEditor({
         </button>
       </div>
       {saving && <p role="status">Salvataggio in corso…</p>}
-      <HomunErrorNotice error={error ?? connectionsError} />
+      <HomunErrorNotice error={error} />
     </form>
   );
 }

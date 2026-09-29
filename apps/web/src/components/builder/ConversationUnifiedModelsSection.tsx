@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import {
-  Brain,
   Settings2,
   Check,
   Plus,
   Search,
-  Laptop,
+  Star,
+  Layers,
+  ArrowRight,
 } from "lucide-react";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { useEngineStatus } from "@/hooks/useEngineStatus";
@@ -16,11 +17,12 @@ import {
   setActiveModelProvider,
   type ModelProviderInfo,
 } from "@/lib/engine-models-client";
-import { SettingsToggleSwitch } from "./SettingsToggleSwitch";
 import {
   ConversationModelEditModal,
   type EditingProviderState,
 } from "./ConversationModelEditModal";
+import { ProviderBrandIcon } from "./ProviderBrandIcon";
+import { KNOWN_MODEL_PRESETS } from "@/lib/known-model-presets";
 import "./conversation-unified-models.css";
 
 type ProviderCardData = {
@@ -33,90 +35,15 @@ type ProviderCardData = {
   baseUrl?: string;
   configured: boolean;
   isActive: boolean;
-  iconBg: string;
-  iconColor: string;
 };
 
-const KNOWN_PRESETS: Array<{
-  id: string;
-  name: string;
-  kind: "cloud" | "local";
-  defaultModel: string;
-  availableModels: string[];
-  defaultBaseUrl: string;
-  iconBg: string;
-  iconColor: string;
-  description: string;
-}> = [
-  {
-    id: "openai_compatible",
-    name: "OpenAI",
-    kind: "cloud",
-    defaultModel: "gpt-4o",
-    availableModels: ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1", "gpt-4-turbo"],
-    defaultBaseUrl: "https://api.openai.com/v1",
-    iconBg: "#10a37f",
-    iconColor: "#ffffff",
-    description: "Modelli di punta GPT-4o, o3-mini e compatibili OpenAI API.",
-  },
-  {
-    id: "anthropic",
-    name: "Anthropic Claude",
-    kind: "cloud",
-    defaultModel: "claude-3-7-sonnet-20250219",
-    availableModels: ["claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
-    defaultBaseUrl: "https://api.anthropic.com/v1",
-    iconBg: "#d97706",
-    iconColor: "#ffffff",
-    description: "Modelli Claude 3.7 Sonnet, Claude 3.5 Haiku ad alto ragionamento.",
-  },
-  {
-    id: "gemini",
-    name: "Google Gemini",
-    kind: "cloud",
-    defaultModel: "gemini-2.0-flash",
-    availableModels: ["gemini-2.0-flash", "gemini-2.0-pro-exp-02-05", "gemini-1.5-pro", "gemini-1.5-flash"],
-    defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
-    iconBg: "#2563eb",
-    iconColor: "#ffffff",
-    description: "Modelli multimodali ad alta velocità e grande finestra di contesto.",
-  },
-  {
-    id: "ollama",
-    name: "Ollama (Locale)",
-    kind: "local",
-    defaultModel: "qwen2.5:7b",
-    availableModels: ["qwen2.5:7b", "deepseek-r1:8b", "llama3.2:3b", "mistral:7b", "phi4:14b"],
-    defaultBaseUrl: "http://localhost:11434",
-    iconBg: "#1b302b",
-    iconColor: "#8fe3d0",
-    description: "Esecuzione 100% locale sul tuo hardware senza costi o invio dati.",
-  },
-  {
-    id: "deepseek",
-    name: "DeepSeek",
-    kind: "cloud",
-    defaultModel: "deepseek-chat",
-    availableModels: ["deepseek-chat", "deepseek-reasoner"],
-    defaultBaseUrl: "https://api.deepseek.com/v1",
-    iconBg: "#4f46e5",
-    iconColor: "#ffffff",
-    description: "DeepSeek-V3 e R1 per ragionamento logico e codice ad alta efficienza.",
-  },
-  {
-    id: "openrouter",
-    name: "OpenRouter",
-    kind: "cloud",
-    defaultModel: "anthropic/claude-3.5-sonnet",
-    availableModels: ["anthropic/claude-3.5-sonnet", "meta-llama/llama-3.3-70b-instruct", "deepseek/deepseek-r1", "google/gemini-2.0-flash-001"],
-    defaultBaseUrl: "https://openrouter.ai/api/v1",
-    iconBg: "#7c3aed",
-    iconColor: "#ffffff",
-    description: "Router unificato per accedere a centinaia di modelli da un'unica chiave.",
-  },
-];
+const KNOWN_PRESETS = KNOWN_MODEL_PRESETS;
 
-export function ConversationUnifiedModelsSection() {
+export function ConversationUnifiedModelsSection({
+  onNavigateSection,
+}: {
+  onNavigateSection?: (sectionId: string) => void;
+} = {}) {
   const status = useEngineStatus();
   const engineReady = status.connection === "connected" && status.capabilities?.features.models;
   const [providers, setProviders] = useState<ModelProviderInfo[]>([]);
@@ -154,10 +81,9 @@ export function ConversationUnifiedModelsSection() {
   const displayList: ProviderCardData[] = KNOWN_PRESETS.map((preset) => {
     const fromEngine = providers.find((p) => p.id === preset.id);
     const isAct = activeProviderId === preset.id;
-    const isConfigured = !!(
-      (fromEngine && (fromEngine.credential_present || fromEngine.configured)) ||
-      (preset.kind === "local" && ollamaTags.length > 0)
-    );
+    const isConfigured = preset.kind === "local"
+      ? (ollamaTags.length > 0 || Boolean(fromEngine?.configured))
+      : Boolean(fromEngine?.credential_present);
 
     let displayModel = fromEngine?.default_model || preset.defaultModel;
     let avail = [...preset.availableModels];
@@ -178,8 +104,6 @@ export function ConversationUnifiedModelsSection() {
       baseUrl: fromEngine?.base_url || preset.defaultBaseUrl,
       configured: isConfigured,
       isActive: isAct,
-      iconBg: preset.iconBg,
-      iconColor: preset.iconColor,
     };
   });
 
@@ -198,25 +122,23 @@ export function ConversationUnifiedModelsSection() {
     return true;
   });
 
-  async function handleToggleProvider(provider: ProviderCardData, turnOn: boolean) {
+  async function handleSetDefault(provider: ProviderCardData) {
+    if (!provider.configured) {
+      openEdit(provider);
+      return;
+    }
     setBusy(true);
     setError(null);
     setInfo(null);
     try {
-      if (turnOn) {
-        if (provider.kind === "local") {
-          await applyOllamaPreset({
-            model: provider.defaultModel,
-          });
-        }
-        await setActiveModelProvider(provider.id);
-        setActiveProviderId(provider.id);
-        setInfo(`Provider ${provider.name} impostato come attivo per la squadra.`);
-      } else {
-        const nextId = provider.id === "openai_compatible" ? "ollama" : "openai_compatible";
-        await setActiveModelProvider(nextId);
-        setActiveProviderId(nextId);
+      if (provider.kind === "local") {
+        await applyOllamaPreset({
+          model: provider.defaultModel,
+        });
       }
+      await setActiveModelProvider(provider.id);
+      setActiveProviderId(provider.id);
+      setInfo(`Provider ${provider.name} impostato come predefinito per lo spazio.`);
       await load();
     } catch (cause) {
       setError(cause);
@@ -268,6 +190,34 @@ export function ConversationUnifiedModelsSection() {
           </button>
         </div>
       </header>
+
+      {/* Guidance Banner for Multi-Provider Pool */}
+      <div className="cv-unified-guidance-banner">
+        <div className="cv-unified-guidance-banner__icon">
+          <Layers size={17} />
+        </div>
+        <div className="cv-unified-guidance-banner__content">
+          <div className="cv-unified-guidance-banner__title">
+            Pool di Modelli Multi-Provider
+          </div>
+          <p className="cv-unified-guidance-banner__text">
+            Tutti i provider con credenziali configurate sono attivi contemporaneamente nel pool.
+            Puoi assegnare cervelli e modelli diversi a ciascun collaboratore AI (es. Claude 3.7 per il codice, GPT-4o per l'analisi, Ollama per i task locali senza costi) nella sezione{" "}
+            {onNavigateSection ? (
+              <button
+                type="button"
+                className="cv-unified-guidance-banner__link"
+                onClick={() => onNavigateSection("agents")}
+              >
+                Catalogo Agenti dello Spazio <ArrowRight size={12} />
+              </button>
+            ) : (
+              <strong>Catalogo Agenti dello Spazio</strong>
+            )}
+            . Il provider contrassegnato con <em>Predefinito Spazio</em> viene usato come fallback per le operazioni generiche.
+          </p>
+        </div>
+      </div>
 
       {/* Sub-tabs & Search bar */}
       <div className="cv-unified-toolbar">
@@ -325,24 +275,27 @@ export function ConversationUnifiedModelsSection() {
         {filtered.map((item) => (
           <div key={item.id} className="cv-unified-row">
             <div className="cv-unified-row__top-line">
-              <div
-                className="cv-unified-row__icon"
-                style={{ backgroundColor: item.iconBg, color: item.iconColor }}
-              >
-                {item.kind === "local" ? <Laptop size={18} /> : <Brain size={18} />}
+              <div className="cv-unified-row__icon" title={item.name}>
+                <ProviderBrandIcon providerId={item.id} size={22} />
               </div>
 
               <div className="cv-unified-row__main">
                 <div className="cv-unified-row__title-line">
                   <span className="cv-unified-row__title">{item.name}</span>
-                  {item.isActive && (
-                    <span className="cv-unified-badge is-active">In uso</span>
-                  )}
                   <span className="cv-unified-badge">
                     {item.kind === "local" ? "Locale" : "Cloud"}
                   </span>
-                  {item.configured && (
-                    <span className="cv-unified-badge is-ok">Configurato</span>
+                  {item.configured ? (
+                    <span className="cv-unified-badge is-pool" title="Configurato e disponibile per tutti gli agenti nel pool">
+                      <span className="cv-unified-dot is-green" /> Nel Pool
+                    </span>
+                  ) : (
+                    <span className="cv-unified-badge is-muted">Non configurato</span>
+                  )}
+                  {item.isActive && (
+                    <span className="cv-unified-badge is-default-space" title="Fallback predefinito per lo spazio">
+                      <Star size={11} fill="currentColor" /> Predefinito Spazio
+                    </span>
                   )}
                 </div>
                 <p className="cv-unified-row__desc">{item.description}</p>
@@ -352,38 +305,59 @@ export function ConversationUnifiedModelsSection() {
                 <button
                   type="button"
                   className="cv-unified-icon-btn"
-                  title={`Configura ${item.name}`}
+                  title={`Configura credenziali e parametri per ${item.name}`}
                   aria-label={`Configura ${item.name}`}
                   onClick={() => openEdit(item)}
                 >
                   <Settings2 size={16} />
                 </button>
 
-                <SettingsToggleSwitch
-                  checked={item.isActive}
-                  ariaLabel={`Attiva ${item.name}`}
-                  disabled={busy}
-                  onChange={(turnOn) => void handleToggleProvider(item, turnOn)}
-                />
+                {item.configured ? (
+                  item.isActive ? (
+                    <span
+                      className="cv-unified-default-badge is-active"
+                      title="Questo provider è il predefinito di fallback per lo spazio"
+                    >
+                      <Star size={12} fill="currentColor" /> Predefinito
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="cv-unified-set-default-btn"
+                      disabled={busy}
+                      title="Imposta come provider predefinito di riserva per lo spazio"
+                      onClick={() => void handleSetDefault(item)}
+                    >
+                      <Star size={12} /> Imposta predefinito
+                    </button>
+                  )
+                ) : (
+                  <button
+                    type="button"
+                    className="cv-unified-btn cv-unified-btn--sm is-primary"
+                    onClick={() => openEdit(item)}
+                  >
+                    Configura
+                  </button>
+                )}
               </div>
             </div>
 
             {/* Available Models Pills */}
             <div className="cv-unified-row__models-pills">
-              <span style={{ fontSize: "0.72rem", color: "#9db3ad" }}>Modelli disponibili:</span>
+              <span style={{ fontSize: "0.72rem", color: "#647a6d" }}>Modelli nel pool:</span>
               {item.availableModels.slice(0, 5).map((m) => (
                 <span
                   key={m}
-                  className={`cv-unified-model-pill ${m === item.defaultModel ? "is-default" : ""}`}
-                  title={m === item.defaultModel ? "Modello predefinito attivo" : "Disponibile per la squadra"}
+                  className={`cv-unified-model-pill ${m === item.defaultModel && item.isActive ? "is-default" : ""}`}
+                  title={m === item.defaultModel ? "Modello predefinito di questo provider" : "Disponibile per gli agenti"}
                 >
                   {m}
                 </span>
               ))}
               {item.availableModels.length > 5 && (
                 <span
-                  className="cv-unified-model-pill"
-                  style={{ opacity: 0.75, cursor: "pointer" }}
+                  className="cv-unified-model-pill is-more"
                   onClick={() => openEdit(item)}
                   title="Apri per visualizzare e selezionare tutti i modelli"
                 >

@@ -2,7 +2,9 @@ import { useState } from "react";
 import { X, Check, RefreshCw, AlertCircle, Sparkles, Sliders, ChevronDown, ChevronRight } from "lucide-react";
 import {
   applyOllamaPreset,
-  setOpenAICompatibleCredentials,
+  upsertModelConnection,
+  addPooledCredential,
+  setActiveModelProvider,
   verifyModelProvider,
 } from "@/lib/engine-models-client";
 import {
@@ -67,7 +69,11 @@ export function ConversationModelEditModal({
           });
         }
       } else {
-        const res = await verifyModelProvider(form.id);
+        const res = await verifyModelProvider(form.id, {
+          apiKey: form.apiKey.trim() || undefined,
+          baseUrl: form.baseUrl.trim() || undefined,
+          modelId: form.model.trim() || undefined,
+        });
         if (res.ok) {
           setVerifyMessage({
             ok: true,
@@ -100,12 +106,22 @@ export function ConversationModelEditModal({
           model: form.model.trim() || "qwen2.5:7b",
         });
       } else {
-        await setOpenAICompatibleCredentials({
-          apiKey: form.apiKey.trim() || "configured",
-          baseUrl: form.baseUrl.trim() || "https://api.openai.com/v1",
-          defaultModel: form.model.trim() || "gpt-4o",
+        await upsertModelConnection({
+          connection_id: form.id,
+          kind: "openai_compatible",
+          display_name: form.name,
+          model_id: form.model.trim() || "gpt-4o",
+          base_url: form.baseUrl.trim() || undefined,
+          api_key: form.apiKey.trim() || undefined,
         });
+        if (form.apiKey.trim()) {
+          await addPooledCredential({
+            provider: form.id,
+            secret_value: form.apiKey.trim(),
+          }).catch(() => null);
+        }
       }
+      await setActiveModelProvider(form.id).catch(() => null);
       setProviderGranularConfig(form.id, granular);
       onSaved(form.name);
       onClose();

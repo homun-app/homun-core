@@ -117,7 +117,7 @@ export function ConversationModelsConnectionSection({ onExecution }: {
         <>
           <p>
             Provider attivo: <code>{active}</code>
-            {verifiedHint ? ` · ${verifiedHint}` : ""}. Le richieste chat (Fonte motore) usano
+            {verifiedHint ? ` · ${verifiedHint}` : ""}. Le richieste chat usano
             questo collegamento — non la demo IndexedDB.
           </p>
           <div className="cv-settings-card">
