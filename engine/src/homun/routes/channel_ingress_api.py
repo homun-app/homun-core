@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from homun.application.channel_adapters import ChannelRegistry
+from homun.application.channel_conversation_bridge import channel_reply
 from homun.application.channel_delivery_recovery import ChannelPoller, get_channel_delivery_supervisor
 from homun.application.channel_inbound_queue import InboundChannelQueue, get_inbound_channel_queue
 
@@ -504,12 +505,10 @@ async def ingest_channel_inbound(
             detail={"code": "channel_platform_unsupported", "message": f"Platform '{platform}' is not supported."},
         )
 
-    # Echo or simple reply handler for webhook ingress
-    def default_ingress_handler(msg) -> str:
-        return f"Echo from Homun: {msg.text}"
-
+    # Ingress webhook: persists to queue, checks pairing, leases turn, and
+    # bridges the message into a supervised engine conversation.
     try:
-        result = registry.dispatch_inbound(platform, raw_payload, default_ingress_handler)
+        result = registry.dispatch_inbound(platform, raw_payload, channel_reply)
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"code": "inbound_error", "message": str(exc)})
@@ -558,12 +557,9 @@ def poll_channel_once(
 
     queue = get_inbound_channel_queue()
 
-    def default_ingress_handler(msg) -> str:
-        return f"Echo from Homun: {msg.text}"
-
     def _ingest_update(upd: Dict[str, Any]) -> None:
         try:
-            registry.dispatch_inbound(plat, upd, default_ingress_handler)
+            registry.dispatch_inbound(plat, upd, channel_reply)
         except Exception:
             try:
                 msg = adapter.parse_inbound(upd)

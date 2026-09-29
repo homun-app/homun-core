@@ -363,7 +363,10 @@ def test_channel_ingress_api_authorized_flow(clean_inbound_queue, clean_delivery
     data = resp.json()
     assert data["status"] == "processed"
     assert data["message_id"] == "10"
-    assert "Echo from Homun: Hello Homun agent" in data["response"]
+    # The authorized message is bridged into a supervised conversation: the
+    # response is the assistant reply, never an echo of the inbound text.
+    assert data["response"].strip()
+    assert not data["response"].startswith("Echo from Homun")
     assert data.get("queue_item_id") is not None
 
     # Check queue item completed
