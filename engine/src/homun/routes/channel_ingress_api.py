@@ -618,17 +618,39 @@ async def get_whatsapp_onboarding_status(pairing_id: str) -> Dict[str, Any]:
         return {"status": "waiting"}
     if status.get("paired"):
         jid = status.get("jid")
+        lid = status.get("lid")
         with _whatsapp_pairings_lock:
             record = _whatsapp_pairings.get(pairing_id)
             if record is not None:
                 record["jid"] = jid
-        return {"status": "ready", "jid": jid}
+                record["lid"] = lid
+        return {"status": "ready", "jid": jid, "lid": lid}
     qr_payload = (status.get("qr") or {}).get("payload")
     pair_code = (status.get("pair_code") or {}).get("code")
     payload: Dict[str, Any] = {"status": "waiting", "qr_payload": qr_payload, "pair_code": pair_code}
     if status.get("last_pair_error"):
         payload["pair_error"] = status["last_pair_error"]
     return payload
+
+
+def _whatsapp_allowed_ids(jid: Optional[str], lid: Optional[str]) -> List[str]:
+    """Both wire identities of the paired account, in the forms senders use.
+
+    A WhatsApp account addresses traffic with its phone Jid or its opaque LID,
+    with or without a device suffix; authorizing all observed forms of the
+    owner's identities is what makes the self-chat pass the gate.
+    """
+    allowed: List[str] = []
+    for full in (jid, lid):
+        if not full:
+            continue
+        allowed.append(full)
+        user = str(full).split("@")[0].split(":")[0]
+        for suffix in ("@s.whatsapp.net", "@lid"):
+            candidate = f"{user}{suffix}"
+            if candidate not in allowed:
+                allowed.append(candidate)
+    return allowed
 
 
 @router.post("/whatsapp/onboarding/{pairing_id}/apply", response_model=Dict[str, Any])
@@ -641,14 +663,15 @@ def apply_whatsapp_onboarding(pairing_id: str, body: Optional[TelegramOnboarding
                 detail={"code": "pairing_not_ready", "message": "La sessione WhatsApp non è ancora collegata."},
             )
         jid = record["jid"]
+        lid = record.get("lid")
         _whatsapp_pairings.pop(pairing_id, None)
 
     saved = _load_channels_config()
     current = saved.get("whatsapp") or {"enabled": False, "fields": {}}
     fields = dict(current.get("fields") or {})
-    # Default authorization: the paired account itself, so "message yourself"
-    # works out of the box; additional JIDs/numbers can be added in the UI.
-    allowed = body.allowed_user_ids if body and body.allowed_user_ids else ([jid] if jid else [])
+    # Default authorization: both identities of the paired account itself, so
+    # "message yourself" works out of the box; extra senders go in the UI field.
+    allowed = body.allowed_user_ids if body and body.allowed_user_ids else _whatsapp_allowed_ids(jid, lid)
     if allowed:
         fields["allowed_user_ids"] = ", ".join(str(u).strip() for u in allowed if str(u).strip())
     current["enabled"] = True

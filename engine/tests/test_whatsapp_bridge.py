@@ -103,12 +103,14 @@ def test_onboarding_flow_from_qr_to_ready_and_apply(api, monkeypatch):
     assert status.json()["status"] == "ready"
     assert status.json()["jid"] == "393331234567@s.whatsapp.net"
 
-    # 4. apply persists the channel with the paired account as sole authorized sender
+    # 4. apply persists the channel authorizing every wire form of the account
     apply_res = api.post(f"/v1/gateway/channels/whatsapp/onboarding/{pairing_id}/apply", json={})
     assert apply_res.status_code == 200
     assert apply_res.json()["ok"] is True
     fields = apply_res.json()["fields"]
-    assert fields["allowed_user_ids"] == "393331234567@s.whatsapp.net"
+    allowed = {part.strip() for part in fields["allowed_user_ids"].split(",")}
+    assert "393331234567@s.whatsapp.net" in allowed
+    assert "393331234567@lid" in allowed
 
     # 5. platform list reflects the connection
     platforms = api.get("/v1/gateway/channels/platforms").json()["platforms"]
