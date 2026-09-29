@@ -17,27 +17,16 @@ export function EngineOrganizationOnboarding({ onChanged }: { onChanged?: (() =>
   return (
     <section className={`organization-onboarding ${open ? "is-open" : ""}`}>
       {!open ? (
-        <div className="org-onboarding-banner" onClick={() => setOpen(true)}>
-          <div className="org-onboarding-banner__left">
-            <div className="org-onboarding-icon">
-              <Sparkles size={16} />
-            </div>
-            <div>
-              <div className="org-onboarding-title">Costruisci la tua squadra con AI</div>
-              <div className="org-onboarding-desc">
-                Descrivi l'azienda e le esigenze: Homun proporrà i collaboratori più adatti alle tue attività.
-              </div>
-            </div>
-          </div>
+        <div className="org-onboarding-minimal-row">
           <button
             type="button"
-            className="org-onboarding-cta-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(true);
-            }}
+            className="org-onboarding-minimal-btn"
+            onClick={() => setOpen(true)}
+            title="Apri configurazione guidata con AI"
           >
-            <span>Configura squadra</span>
+            <Sparkles size={13} className="org-sparkle-icon" />
+            <span>Costruisci la squadra con l'assistente AI</span>
+            <span className="org-onboarding-minimal-arrow">→</span>
           </button>
         </div>
       ) : (
@@ -97,7 +86,7 @@ function OrganizationEditor({ onChanged }: { onChanged?: (() => Promise<void>) |
   const proposal = state?.proposal;
   return <div className="organization-editor">
     <h2>Una squadra per il tuo lavoro</h2>
-    <p>Fonte: motore · Facoltativo. Descrivi il contesto, rivedi la proposta e scegli se creare i collaboratori.</p>
+    <p>Facoltativo. Descrivi il contesto, rivedi la proposta e scegli se creare i collaboratori.</p>
     <p>Le persone descritte restano contesto. Nei lavori puoi chiedere un contributo a una persona e creare un invito limitato alla sua richiesta.</p>
     <HomunErrorNotice error={error} />
     {!draft ? <p>Caricamento del contesto…</p> : <>

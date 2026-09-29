@@ -42,7 +42,9 @@ import { closeEngineWork, reviseEnginePlan, setEngineWorkBudget, setEngineWorkDu
 import { createEngineRoutine, routineEngineAction, updateEngineRoutine, type EngineRoutine } from "@/lib/engine-routines-client";
 import { createEngineSkill } from "@/lib/engine-mcp-client";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
-import { proposeWorkIntake } from "@/lib/engine-intake-client";
+import { confirmWorkIntake, proposeWorkIntake } from "@/lib/engine-intake-client";
+import { approveAgentRun, prepareAgentRun } from "@/lib/engine-agent-run-client";
+import type { AutonomyLevel } from "@/components/builder/conversation-preferences";
 import { applyIntakePreview } from "@/lib/engine-intake-display";
 import { routeEngineFirstMessage, type FirstMessageRoute } from "@/lib/engine-first-message-routing";
 export type EngineWorkspaceState = {
@@ -73,7 +75,7 @@ export type EngineWorkspaceState = {
   updateRoutine: (routineId: string, expectedVersion: number, changes: { name?: string; cron?: string }) => Promise<void>;
   revisePlan: (work: Work, action: { insertAfterStepId?: string | null; newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string }; removeStepId?: string }) => Promise<void>;
   createWork: (title: string, objective: string, draftOnly?: boolean) => Promise<Work | null>;
-  postMessage: (work: Work, text: string, attachments?: File[]) => Promise<void>;
+  postMessage: (work: Work, text: string, attachments?: File[], autonomyLevel?: AutonomyLevel, modelConnectionId?: string) => Promise<void>;
   confirmPatch: (work: Work, messageIndex: number) => Promise<void>;
   discardPatch: (work: Work, messageIndex: number) => void;
   applyObjectivePatch: (work: Work, nextObjective: string) => Promise<void>;
@@ -192,7 +194,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     } finally { endRequest(signal); }
   }
 
-  async function postMessage(work: Work, text: string, attachments?: File[]): Promise<void> {
+  async function postMessage(work: Work, text: string, attachments?: File[], autonomyLevel?: AutonomyLevel, modelConnectionId?: string): Promise<void> {
     if (backend !== "engine" || work.source !== "engine" || !work.engineConversationId) {
       throw new Error("postMessage requires an engine-backed work");
     }
@@ -239,6 +241,72 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
         return { route: "propose" as const };
       })) as FirstMessageRoute;
       if (routed.route === "propose") {
+        if (autonomyLevel === "autonomous") {
+          // Autonomous mode: propose and immediately confirm the intake, then auto-prepare & approve the agent run
+          setMessageOverlay((current) => ({
+            ...current,
+            [work.id]: (current[work.id] ?? work.messages).map((message) =>
+              message.who === "agent" && message.partial && message.wait
+                ? { ...message, wait: { phase: "preparing", startedAt } }
+                : message,
+            ),
+          }));
+          const intake = await proposeWorkIntake(
+            work.id,
+            effectiveText,
+            work.revision,
+            crypto.randomUUID(),
+            signal,
+            routed.language,
+          );
+          await confirmWorkIntake(
+            work.id,
+            intake,
+            crypto.randomUUID(),
+            Boolean(intake.new_agent),
+          );
+          bumpIntakeSeq();
+          await refresh();
+
+          const runCmdId = crypto.randomUUID();
+          const preparedRun = await prepareAgentRun(
+            work,
+            work.materialIds ?? [],
+            runCmdId,
+            modelConnectionId || undefined,
+            undefined,
+            [],
+            undefined,
+            "local",
+            undefined,
+            true, // webPages
+            true, // browser
+            true, // memory
+            true, // skills
+            true, // delegation
+            true, // clarify
+            true, // goals
+            true, // cron
+            true, // sessionManagement
+            true, // gateway
+            true, // codeExecution
+            true, // plugins
+            undefined,
+            undefined,
+            { toolset: "full", micro_compaction: true, native_stream: true },
+          );
+          await approveAgentRun(work.id, preparedRun, crypto.randomUUID());
+          await refresh();
+
+          setMessageOverlay((current) => ({
+            ...current,
+            [work.id]: (current[work.id] ?? work.messages).filter(
+              (m) => !(m.who === "agent" && m.partial),
+            ),
+          }));
+          return;
+        }
+
         // The wait stays visible through synthesis: an honest phase instead of
         // a mute gap between the message and the agreement card.
         setMessageOverlay((current) => ({
@@ -267,6 +335,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
       const posted = await postEngineConversationMessage({
         conversationId: work.engineConversationId,
         text,
+        connectionId: modelConnectionId || undefined,
         actor: defaultLocalActor(),
         signal,
         onToken: (chunk) => {

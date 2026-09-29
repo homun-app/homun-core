@@ -22,17 +22,22 @@ export function ConversationTasks({
   onOpen,
   onDue,
   onMove,
+  initialView = "Elenco",
 }: {
   onReveal: () => void;
   items: TaskSummary[];
   onOpen: (id: string) => void;
   onDue: (id: string, date: string) => void | Promise<void>;
   onMove: (id: string, phase: string) => string;
+  initialView?: string;
 }) {
   const [savingDue, setSavingDue] = useState(false);
   const [dueError, setDueError] = useState<unknown>(null);
   const [feedback, setFeedback] = useState("");
-  const [view, setView] = useState("Elenco");
+  const [view, setView] = useState(initialView);
+  if (initialView && ["Elenco", "Kanban", "Calendario"].includes(initialView) && view !== initialView) {
+    setView(initialView);
+  }
   const [focus, setFocus] = useState("Tutti");
   const [query, setQuery] = useState("");
   const [selected, setSelectedValue] = useState("");
@@ -98,19 +103,6 @@ export function ConversationTasks({
     <div className="cw-stage with-panel cs-stage">
       <section className="cw-conversation">
         <div className="cw-history">
-          <div className="ph-inline-tabs" role="tablist" style={{ margin: "-8px 0 16px" }}>
-            {["Elenco", "Kanban", "Calendario"].map((v) => (
-              <button
-                key={v}
-                role="tab"
-                aria-selected={view === v}
-                className={`ph-inline-tab ${view === v ? "is-active" : ""}`}
-                onClick={() => setView(v)}
-              >
-                <span>{v}</span>
-              </button>
-            ))}
-          </div>
           <div className="ct-focus-filters" aria-label="Stato del lavoro">
             {["Tutti", "Richiede te", "In corso", "Risultati"].map((label) => (
               <button key={label} aria-pressed={focus === label} onClick={() => setFocus(label)}>

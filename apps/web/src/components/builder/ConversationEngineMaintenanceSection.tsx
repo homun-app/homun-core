@@ -80,7 +80,7 @@ export function ConversationEngineMaintenanceSection() {
     <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
       <div>
         <h3 style={{ fontSize: "18px", fontWeight: 600, margin: "0 0 6px", color: "var(--color-foreground)" }}>
-          Manutenzione & Diagnostica Motore
+          Manutenzione & Diagnostica
         </h3>
         <p style={{ fontSize: "13px", color: "var(--color-muted-foreground)", margin: 0 }}>
           Parametri granulari del runtime Hermes/Homun: compattazione del contesto, gestione database SQLite e sicurezza tool.
@@ -121,7 +121,7 @@ export function ConversationEngineMaintenanceSection() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <Database size={16} className="text-[#206553]" />
-            <strong style={{ fontSize: "14px" }}>Archivio Locale & Motore SQLite</strong>
+            <strong style={{ fontSize: "14px" }}>Archivio Locale SQLite</strong>
           </div>
           <span
             style={{
@@ -218,7 +218,7 @@ export function ConversationEngineMaintenanceSection() {
               <option value={64000}>64.000 token (modelli ad alta capienza)</option>
             </select>
             <span style={{ fontSize: "11px", color: "var(--color-muted-foreground)", display: "block", marginTop: "4px" }}>
-              Quando la cronologia supera questa soglia, il motore sintetizza i messaggi precedenti.
+              Quando la cronologia supera questa soglia, i messaggi precedenti vengono sintetizzati.
             </span>
           </div>
 
@@ -293,7 +293,7 @@ export function ConversationEngineMaintenanceSection() {
 
           <div>
             <label style={{ fontSize: "12px", fontWeight: 500, display: "block", marginBottom: "4px" }}>
-              Livello di Log del Motore
+              Livello di Log
             </label>
             <select
               value={config.logLevel}

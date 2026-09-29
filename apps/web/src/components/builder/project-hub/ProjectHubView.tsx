@@ -365,9 +365,6 @@ export function ProjectHubView({
           ) : (
             <span className="ph-topbar-name">{projectName}</span>
           )}
-          <span className={isEngine ? "ph-source-badge ph-source-badge--engine" : "ph-source-badge ph-source-badge--simulation"}>
-            {isEngine ? "motore" : "sim"}
-          </span>
         </div>
 
         <div className="ph-topbar-contextual">

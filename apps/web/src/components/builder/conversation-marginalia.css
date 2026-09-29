@@ -1,7 +1,7 @@
-/* Marginalia Spine & Floating Dash Notes */
+/* Marginalia Spine & Floating Dash Notes - placed on LEFT margin as notes */
 .cw-marginalia-spine {
-  position: fixed;
-  right: 28px;
+  position: absolute;
+  left: 10px;
   top: 50%;
   transform: translateY(-50%);
   z-index: 40;
@@ -12,26 +12,26 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  align-items: flex-end;
+  align-items: flex-start;
   pointer-events: auto;
-  padding-right: 4px;
+  padding-left: 2px;
 }
 
 .cw-marginalia-item {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
-/* Generous, comfortable hit target: 32px wide by 20px tall */
+/* Comfortable hit target: 24px wide by 18px tall */
 .cw-marginalia-btn {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   background: transparent;
   border: none;
-  padding: 8px 4px;
+  padding: 6px 2px;
   cursor: pointer;
   outline: none;
   transition: transform 0.2s ease;
@@ -39,66 +39,66 @@
 
 .cw-marginalia-dash {
   display: block;
-  width: 14px;
+  width: 9px;
   height: 2px;
   border-radius: 2px;
-  background: #9db0a0;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  background: #a1a1aa;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: none;
 }
 
 .cw-marginalia-btn:hover .cw-marginalia-dash,
 .cw-marginalia-btn.is-active .cw-marginalia-dash {
-  width: 24px;
-  height: 3px;
-  background: #1f3326;
-  box-shadow: 0 0 8px rgba(31, 51, 38, 0.25);
+  width: 18px;
+  height: 2px;
+  background: #18181b;
 }
 
 .cw-marginalia-item.has-badge .cw-marginalia-dash {
-  background: #55755e;
+  background: #71717a;
 }
 
 .cw-marginalia-item.has-badge .cw-marginalia-btn:hover .cw-marginalia-dash,
 .cw-marginalia-item.has-badge .cw-marginalia-btn.is-active .cw-marginalia-dash {
-  background: #172d1e;
+  background: #18181b;
 }
 
-/* Floating Popover on Hover (Dark Floating Card as in reference image) */
+/* Floating Popover on Hover: opens to the RIGHT towards the center */
 .cw-marginalia-popover {
   position: absolute;
-  right: calc(100% + 8px);
+  left: calc(100% + 8px);
+  right: auto;
   top: 50%;
   transform: translateY(-50%);
-  width: 280px;
-  background: #1a221d;
-  color: #f1f4ed;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  padding: 13px 15px;
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
+  width: 270px;
+  background: #18181b;
+  color: #f4f4f5;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   z-index: 50;
-  animation: marginalia-fade-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: marginalia-fade-in 0.16s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   pointer-events: auto;
 }
 
-/* Generous bridge between button and popover so mouse never leaves */
+/* Bridge between button and popover so mouse never leaves */
 .cw-marginalia-popover::after {
   content: "";
   position: absolute;
-  right: -24px;
+  left: -20px;
   top: -20px;
   bottom: -20px;
-  width: 32px;
+  width: 24px;
 }
 
 @keyframes marginalia-fade-in {
   from {
     opacity: 0;
-    transform: translateY(-50%) translateX(6px);
+    transform: translateY(-50%) translateX(-6px);
   }
   to {
     opacity: 1;

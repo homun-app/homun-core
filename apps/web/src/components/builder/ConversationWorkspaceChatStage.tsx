@@ -7,7 +7,7 @@ import { EngineWorkIntake } from "./EngineWorkIntake";
 import { EnginePlanRelayTimeline } from "./EnginePlanRelayTimeline";
 import { ConversationMarginaliaSpine } from "./ConversationMarginaliaSpine";
 import { EngineAgentProfileModal } from "./EngineAgentProfileModal";
-import { Check, Sparkles, X } from "lucide-react";
+import { Check, Sparkles, X, Copy, Bookmark, BookmarkCheck } from "lucide-react";
 import { useEffect, useState, type ReactNode, type RefObject } from "react";
 import { ConversationAgentWait } from "./ConversationAgentWait";
 import { ConversationAvatar } from "./ConversationAvatar";
@@ -21,6 +21,7 @@ import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { StudioChatInput } from "./StudioChatInput";
 import { WorkPatchPreviewCard } from "./WorkPatchPreviewCard";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
+import type { AutonomyLevel } from "./conversation-preferences";
 
 type Props = {
   work: Work | undefined;
@@ -59,6 +60,11 @@ type Props = {
   onCancelInFlight?: () => void;
   agentNames?: Record<string, string> | undefined;
   onStartWork?: (() => Promise<void>) | undefined;
+  onOpenSpace?: (space: "Progetti" | "Squadra" | "Materiali", initial?: string, selected?: string) => void;
+  autonomyLevel?: AutonomyLevel | undefined;
+  onAutonomyLevelChange?: ((level: AutonomyLevel) => void) | undefined;
+  modelConnectionId?: string | undefined;
+  onModelConnectionIdChange?: ((connectionId: string) => void) | undefined;
 };
 
 export function ConversationWorkspaceChatStage({
@@ -98,6 +104,11 @@ export function ConversationWorkspaceChatStage({
   onCancelInFlight,
   agentNames,
   onStartWork,
+  onOpenSpace,
+  autonomyLevel,
+  onAutonomyLevelChange,
+  modelConnectionId,
+  onModelConnectionIdChange,
 }: Props) {
   const [inspectedAgent, setInspectedAgent] = useState<EngineAgentProfile | null>(null);
 
@@ -207,26 +218,7 @@ export function ConversationWorkspaceChatStage({
             disabilitate.
           </p>
         )}
-        {work && scenario && (
-          <div className="cw-conversation-head">
-            <ConversationAvatar
-              name={scenario.agent}
-              human={isHumanMember(scenario.agent, spaceData.profiles)}
-              large
-            />
-            <div>
-              <strong>{work.catalogPlan ? work.title : scenario.agent}</strong>
-              <span>
-                {work.catalogPlan ? "Conversazione del lavoro" : scenario.role} <i />{" "}
-                {work.autonomy === "autonomous"
-                  ? "Autonomo su questo lavoro"
-                  : "Sotto supervisione"}
-              </span>
-            </div>
-            <span className="cw-private">Conversazione di lavoro</span>
-            {conversationActions(work)}
-          </div>
-        )}
+
         <div className="cw-history" ref={historyRef}>
           {!work ? (
             <ConversationWorkspaceWelcome
@@ -236,6 +228,7 @@ export function ConversationWorkspaceChatStage({
               onCreateExample={onCreateExample}
               engineMode={engineMode}
               onRefreshEngine={onRefreshEngine}
+              onOpenSpace={onOpenSpace}
             />
           ) : (
             <>
@@ -243,7 +236,6 @@ export function ConversationWorkspaceChatStage({
               {work.messages.map((m, i) => (
                 <article
                   key={i}
-                  data-message={`${work.id}:${i}`}
                   className={`cw-message ${m.who}`}
                 >
                   <small>
@@ -252,33 +244,47 @@ export function ConversationWorkspaceChatStage({
                   {m.wait ? (
                     <ConversationAgentWait phase={m.wait.phase} startedAt={m.wait.startedAt} />
                   ) : (
-                    <p className={m.partial ? "cw-message-partial" : undefined}>{m.text}</p>
+                    <p className={m.partial ? "cw-message-partial" : undefined}>{cleanMessageText(m.text)}</p>
                   )}
-                  {engineMode &&
-                    m.who === "agent" &&
-                    !m.partial &&
-                    onSaveMemory &&
-                    (m.memorySaved ? (
-                      <p className="cw-hint cw-memory-saved">Salvato in memoria</p>
-                    ) : (
+                  {m.who === "agent" && !m.partial && (
+                    <div className="cw-msg-actions">
                       <button
                         type="button"
-                        className="cs-link cw-memory-promote"
-                        disabled={engineBusy}
-                        onClick={() => onSaveMemory(i)}
+                        className="cw-msg-action-btn"
+                        title="Copia messaggio"
+                        onClick={() => navigator.clipboard.writeText(cleanMessageText(m.text))}
                       >
-                        Salva in memoria
+                        <Copy size={13} />
                       </button>
-                    ))}
-                  {engineMode && m.who === "agent" && !m.partial && onSaveSkill && (
-                    <button
-                      type="button"
-                      className="cs-link cw-memory-promote"
-                      disabled={engineBusy}
-                      onClick={() => onSaveSkill(i)}
-                    >
-                      Salva come procedura
-                    </button>
+                      {engineMode && onSaveMemory && (
+                        m.memorySaved ? (
+                          <span className="cw-msg-action-saved" title="Salvato in memoria">
+                            <BookmarkCheck size={13} />
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="cw-msg-action-btn"
+                            disabled={engineBusy}
+                            title="Salva in memoria"
+                            onClick={() => onSaveMemory(i)}
+                          >
+                            <Bookmark size={13} />
+                          </button>
+                        )
+                      )}
+                      {engineMode && onSaveSkill && (
+                        <button
+                          type="button"
+                          className="cw-msg-action-btn"
+                          disabled={engineBusy}
+                          title="Salva come procedura"
+                          onClick={() => onSaveSkill(i)}
+                        >
+                          <Sparkles size={13} />
+                        </button>
+                      )}
+                    </div>
                   )}
                   {m.patchProposal && !m.patchResolved && onConfirmPatch && onDiscardPatch && (
                     <WorkPatchPreviewCard
@@ -411,6 +417,10 @@ export function ConversationWorkspaceChatStage({
             disabled={engineMode && historyLoading}
             onSend={onSend}
             references={mentionRefs}
+            autonomyLevel={autonomyLevel}
+            onAutonomyLevelChange={onAutonomyLevelChange}
+            modelConnectionId={modelConnectionId}
+            onModelConnectionIdChange={onModelConnectionIdChange}
           />
           {historyLoading && <p className="cw-hint" role="status">Caricamento conversazione…</p>}
           {engineMode && engineBusy && onCancelInFlight && (
@@ -430,14 +440,7 @@ export function ConversationWorkspaceChatStage({
               </button>
             </p>
           )}
-          <div className="cw-composer-caption">
-            <span>
-              <Sparkles size={12} /> Scrivi naturalmente. Usa @ per un collaboratore.
-            </span>
-            {!engineMode && (
-              <span title={storageStatus}>{`Simulazione · ${storageStatus}`}</span>
-            )}
-          </div>
+
         </div>
       </section>
       {!panelOpen && <ConversationMarginaliaSpine work={work} intake={engineIntake} />}
@@ -450,4 +453,12 @@ export function ConversationWorkspaceChatStage({
       )}
     </div>
   );
+}
+
+function cleanMessageText(text: string): string {
+  return text
+    .replace(/\.?\s*Fonte:\s*motore\.?/gi, "")
+    .replace(/\.?\s*Fonte\s+motore\.?/gi, "")
+    .replace(/\.?\s*Fonte:\s*simulazione\.?/gi, "")
+    .trim();
 }

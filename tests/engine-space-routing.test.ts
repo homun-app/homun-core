@@ -25,12 +25,7 @@ test("engine Materiali routes to the authoritative library, not the prototype ca
 
 test("engine Plugin exposes the same real capability and MCP panel as settings", () => {
   const view = component.ConversationWorkspaceSpaceHost({ ...base, space: "Plugin" });
-  const children = [view, ...(Array.isArray(view.props.children) ? view.props.children : [])];
-  assert.ok(
-    children.some(
-      (child) => child.type === components.get("ConversationCapabilitiesSettingsSection"),
-    ),
-  );
+  assert.equal(view.type, components.get("CapabilitiesView"));
 });
 
 test("task deadline invokes the engine command with the current work and clears as null", async () => {

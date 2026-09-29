@@ -18,6 +18,7 @@ type Props = {
   removedPeople?: string[] | undefined;
   onChanged?: (() => Promise<void>) | undefined;
   onCreateMember?: (() => void) | undefined;
+  initialFilter?: string | undefined;
 };
 
 export function EngineWorkspaceAgents({
@@ -26,9 +27,17 @@ export function EngineWorkspaceAgents({
   removedPeople = [],
   onChanged,
   onCreateMember,
+  initialFilter,
 }: Props) {
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "agents" | "humans">("all");
+  const [filter, setFilter] = useState<"all" | "agents" | "humans">(() => {
+    if (initialFilter === "agents" || initialFilter === "humans") return initialFilter;
+    return "all";
+  });
+
+  if (initialFilter && (initialFilter === "agents" || initialFilter === "humans" || initialFilter === "all") && filter !== initialFilter && !search) {
+    setFilter(initialFilter);
+  }
   const [selectedTarget, setSelectedTarget] = useState<DetailTarget | null>(null);
 
   // Active engine agents
@@ -78,33 +87,18 @@ export function EngineWorkspaceAgents({
 
   return (
     <section className="cw-agents-panel" aria-label="Collaboratori e Agenti">
-      {/* Section Header */}
+      {/* Section Header with inline search */}
       <div className="cw-squad-section-head">
         <div className="cw-squad-section-title">
           <span>Squadra & Collaboratori</span>
           <span className="cw-squad-section-count">{allItems.length}</span>
         </div>
-        {onCreateMember && (
-          <button
-            type="button"
-            className="cw-squad-btn-subtle"
-            onClick={onCreateMember}
-            title="Invita una nuova persona nella squadra"
-          >
-            <Plus size={13} />
-            <span>Nuovo collaboratore</span>
-          </button>
-        )}
-      </div>
-
-      {/* Search & Filter Toolbar */}
-      <div className="cw-squad-toolbar">
         <div className="cw-squad-search-wrap">
-          <Search size={14} className="cw-squad-search-icon" />
+          <Search size={13} className="cw-squad-search-icon" />
           <input
             type="text"
             className="cw-squad-search-input"
-            placeholder="Cerca per nome, ruolo, competenza..."
+            placeholder="Cerca collaboratore..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -115,45 +109,7 @@ export function EngineWorkspaceAgents({
               onClick={() => setSearch("")}
               title="Azzera ricerca"
             >
-              <X size={12} />
-            </button>
-          )}
-        </div>
-
-        {/* Filter Pills */}
-        <div className="cw-squad-filters" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={filter === "all"}
-            className={`cw-squad-filter-pill ${filter === "all" ? "active" : ""}`}
-            onClick={() => setFilter("all")}
-          >
-            <span>Tutti</span>
-            <span className="cw-squad-pill-count">{allItems.length}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={filter === "agents"}
-            className={`cw-squad-filter-pill ${filter === "agents" ? "active" : ""}`}
-            onClick={() => setFilter("agents")}
-          >
-            <Bot size={13} />
-            <span>Agenti AI</span>
-            <span className="cw-squad-pill-count">{agentItems.length}</span>
-          </button>
-          {humanItems.length > 0 && (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={filter === "humans"}
-              className={`cw-squad-filter-pill ${filter === "humans" ? "active" : ""}`}
-              onClick={() => setFilter("humans")}
-            >
-              <User size={13} />
-              <span>Persone</span>
-              <span className="cw-squad-pill-count">{humanItems.length}</span>
+              <X size={11} />
             </button>
           )}
         </div>
@@ -161,30 +117,12 @@ export function EngineWorkspaceAgents({
 
       {/* Grid of Compact Cards */}
       {searchFiltered.length === 0 ? (
-        <div className="cw-squad-empty-card">
-          <div className="cw-squad-empty-icon">
-            <Users size={18} />
-          </div>
-          <div className="cw-squad-empty-text">
-            <h4>Nessun collaboratore trovato</h4>
-            <p>
-              {search
-                ? `Nessun risultato per "${search}". Prova a modificare i filtri o la ricerca.`
-                : "Non hai ancora collaboratori in questa categoria."}
-            </p>
-          </div>
-          {search && (
-            <button
-              type="button"
-              className="cw-squad-btn-subtle"
-              onClick={() => {
-                setSearch("");
-                setFilter("all");
-              }}
-            >
-              Azzera filtri
-            </button>
-          )}
+        <div className="ph-overview-empty">
+          <span>
+            {search
+              ? `Nessun risultato per "${search}". Prova a modificare i filtri o la ricerca.`
+              : "Non hai ancora collaboratori in questa categoria."}
+          </span>
         </div>
       ) : (
         <div className="cw-squad-compact-grid">

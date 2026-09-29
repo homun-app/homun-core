@@ -77,7 +77,7 @@ const settingGroups: SettingsGroup[] = [
     items: [
       { id: "space", label: "Spazio e profilo", icon: UserRound },
       { id: "preferences", label: "Aspetto & Preferenze", icon: Settings2 },
-      { id: "engine", label: "Motore & Manutenzione", icon: Cpu },
+      { id: "engine", label: "Manutenzione & Sistema", icon: Cpu },
       { id: "archive", label: "Archivio", icon: Archive },
       ...(import.meta.env.DEV ? [{ id: "data", label: "Dati della demo", icon: Database } as const] : []),
       { id: "help", label: "Guida", icon: HelpCircle },
@@ -307,7 +307,9 @@ export function ConversationSettings({
             </>
           )}
           {section === "notifications" && <MessagingView />}
-          {section === "models" && <ConversationUnifiedModelsSection />}
+          {section === "models" && (
+            <ConversationUnifiedModelsSection onNavigateSection={(sec) => setSection(sec)} />
+          )}
           {section === "budget" && (
             <ConversationBudgetSettingsSection draft={draft} onChange={change} />
           )}

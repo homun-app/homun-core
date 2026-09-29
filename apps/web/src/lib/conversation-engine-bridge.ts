@@ -191,7 +191,6 @@ export function engineWorkToUiWork(
   record: EngineWorkRecord,
   messages?: ConversationMessage[],
 ): Work {
-  const statusLine = `Fonte motore · stato ${record.status} · v${record.version}`;
   const objectiveLine = record.objective
     ? `Obiettivo: ${record.objective}`
     : "Obiettivo non ancora specificato.";
@@ -202,7 +201,7 @@ export function engineWorkToUiWork(
           {
             who: "agent",
             sender: "Homun",
-            text: `${statusLine}\n${objectiveLine}\nQuesto lavoro è sul dominio SQLite del motore. Le azioni di simulazione restano disabilitate.`,
+            text: objectiveLine,
           },
         ];
   const work: Work = {
@@ -298,6 +297,7 @@ export async function createEngineConversationAndWork(input: {
 export async function postEngineConversationMessage(input: {
   conversationId: string;
   text: string;
+  connectionId?: string | undefined;
   actor?: EngineActor;
   roster?: Array<{ id: string; display_name: string; kind: "person" | "agent" | "other" }>;
   signal?: AbortSignal;
@@ -340,6 +340,7 @@ export async function postEngineConversationMessage(input: {
       conversation_id: input.conversationId,
       text: input.text,
       roster,
+      ...(input.connectionId ? { connection_id: input.connectionId } : {}),
     },
     actor,
     ...(input.signal ? { signal: input.signal } : {}),

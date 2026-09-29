@@ -1,5 +1,6 @@
 /** Chat message routing for engine-backed works: attachments, side questions (/btw), and intake. */
 import type { Work } from "@/components/builder/conversation-types.ts";
+import type { AutonomyLevel } from "@/components/builder/conversation-preferences.ts";
 import { isEngineBackedWork } from "./conversation-engine-bridge.ts";
 import { sendEngineFirstMessage } from "./engine-first-send.ts";
 import { askEngineSideQuestion } from "./engine-side-question.ts";
@@ -13,6 +14,8 @@ export type EngineSendContext = {
   open: (id: string) => void;
   setNotice: (notice: string) => void;
   bumpOwnSend: () => void;
+  autonomyLevel?: AutonomyLevel | undefined;
+  modelConnectionId?: string | undefined;
 };
 
 export function handleEngineSend({
@@ -23,6 +26,8 @@ export function handleEngineSend({
   open,
   setNotice,
   bumpOwnSend,
+  autonomyLevel,
+  modelConnectionId,
 }: EngineSendContext): boolean {
   if (engine.backend !== "engine") return false;
 
@@ -64,13 +69,13 @@ export function handleEngineSend({
   if (work && isEngineBackedWork(work)) {
     bumpOwnSend();
     void engine
-      .postMessage(work, text, attachments)
+      .postMessage(work, text, attachments, autonomyLevel, modelConnectionId)
       .then(() => setNotice(""))
       .catch(() => setNotice("Invio al motore non riuscito. Controlla il banner errori."));
     return true;
   }
 
   // First message of a new work: create draft and route
-  sendEngineFirstMessage(engine, text, open, setNotice, bumpOwnSend, attachments);
+  sendEngineFirstMessage(engine, text, open, setNotice, bumpOwnSend, attachments, autonomyLevel, modelConnectionId);
   return true;
 }

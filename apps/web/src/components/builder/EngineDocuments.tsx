@@ -3,8 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { EngineArtifact } from "@/lib/engine-domain-client";
 import { listEngineArtifacts } from "@/lib/engine-domain-client";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
-import { ConversationSelectField } from "./ConversationSelect";
-import { FileText, Download, Search } from "lucide-react";
+import { FileText, Download, Search, ArrowRight, X } from "lucide-react";
 import { t } from "@/lib/i18n";
 import "./engine-documents.css";
 
@@ -36,77 +35,118 @@ export function EngineDocuments({ projects }: { projects: ProjectOption[] }) {
   }, [docs, query, project]);
 
   return (
-    <section className="cw-workspace cw-documents" aria-label={t("documents.title")}>
-      <div className="section-label">
-        {t("documents.title").toUpperCase()} ({docs?.length ?? 0})
-      </div>
-      <div className="cw-documents__filters">
-        <label>
-          <Search size={14} />
-          <input
-            aria-label={t("documents.search_placeholder")}
-            placeholder={t("documents.search_placeholder")}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
-        <ConversationSelectField
-          aria-label={t("documents.filter_project")}
-          value={project}
-          onChange={(event) => setProject(event.target.value)}
-        >
-          <option value="">{t("documents.filter_project")}</option>
-          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </ConversationSelectField>
-      </div>
-      {docs !== null && filtered.length === 0 && (
-        <div className="homun-empty-state">
-          <div className="homun-empty-state__icon">
-            <FileText size={20} />
+    <section className="ph-body cw-documents-refined" aria-label={t("documents.title")}>
+      <div className="ph-work-group">
+        <div className="ph-doc-header-row">
+          <div className="ph-work-group__label" style={{ margin: 0 }}>
+            <FileText size={11} />
+            <span>DOCUMENTI PRODOTTI</span>
+            <span className="ph-work-group__count">{filtered.length}</span>
           </div>
-          <h3 className="homun-empty-state__title">
-            {docs.length === 0 ? "Nessun documento prodotto" : "Nessun documento trovato"}
-          </h3>
-          <p className="homun-empty-state__description">
-            {docs.length === 0
-              ? "I documenti e i report finali generati dagli agenti durante le conversazioni appariranno qui."
-              : "Nessun documento corrisponde ai termini di ricerca impostati."}
-          </p>
-        </div>
-      )}
-      <div className="cw-documents__list">
-        {filtered.map((doc) => (
-          <article key={doc.id} className="cw-document" data-open={openId === doc.id}>
-            <header>
-              <FileText size={18} />
-              <button type="button" className="cs-link" onClick={() => setOpenId(openId === doc.id ? null : doc.id)}>
-                {doc.title}
-              </button>
-              <small>
-                {doc.work_title} · {new Date(doc.created_at).toLocaleDateString("it-IT")}
-              </small>
-            </header>
-            {openId === doc.id && (
-              <>
-                <pre className="cw-document__content">{doc.content}</pre>
+
+          <div className="ph-doc-filters-minimal">
+            <div className="ph-doc-search-box">
+              <Search size={12} className="ph-doc-search-icon" />
+              <input
+                type="text"
+                className="ph-doc-search-input"
+                aria-label={t("documents.search_placeholder")}
+                placeholder="Cerca..."
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              {query && (
                 <button
                   type="button"
-                  className="ph-btn-promote"
-                  onClick={() => {
-                    const url = URL.createObjectURL(new Blob([doc.content], { type: "text/markdown;charset=utf-8" }));
-                    const anchor = document.createElement("a");
-                    anchor.href = url;
-                    anchor.download = `${doc.title.replace(/[^\w\d-]+/g, "-").toLowerCase()}.md`;
-                    anchor.click();
-                    setTimeout(() => URL.revokeObjectURL(url), 1000);
-                  }}
+                  className="ph-doc-search-clear"
+                  onClick={() => setQuery("")}
+                  title="Azzera ricerca"
                 >
-                  <Download size={14} /> Scarica
+                  <X size={11} />
                 </button>
-              </>
+              )}
+            </div>
+
+            {projects.length > 0 && (
+              <select
+                className="ph-doc-select"
+                aria-label={t("documents.filter_project")}
+                value={project}
+                onChange={(event) => setProject(event.target.value)}
+              >
+                <option value="">Tutti i progetti</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
             )}
-          </article>
-        ))}
+          </div>
+        </div>
+
+        {docs !== null && filtered.length === 0 && (
+          <div className="ph-overview-empty">
+            <span>
+              {docs.length === 0
+                ? "Nessun documento prodotto. I documenti e i report finali generati dagli agenti appariranno qui."
+                : "Nessun documento corrisponde ai termini di ricerca impostati."}
+            </span>
+          </div>
+        )}
+
+        <div className="ph-work-list">
+          {filtered.map((doc) => {
+            const isOpen = openId === doc.id;
+            return (
+              <div key={doc.id} className="ph-doc-item">
+                <div
+                  className="ph-work-row"
+                  onClick={() => setOpenId(isOpen ? null : doc.id)}
+                >
+                  <div className="ph-work-row__left">
+                    <span className="ph-work-row__dot" />
+                    <div>
+                      <div className="ph-work-row__title">{doc.title}</div>
+                      <div className="ph-work-row__meta">
+                        {doc.work_title} · {new Date(doc.created_at).toLocaleDateString("it-IT")}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button
+                      type="button"
+                      className="ph-doc-action-btn"
+                      title="Scarica Markdown"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const url = URL.createObjectURL(
+                          new Blob([doc.content], { type: "text/markdown;charset=utf-8" })
+                        );
+                        const anchor = document.createElement("a");
+                        anchor.href = url;
+                        anchor.download = `${doc.title.replace(/[^\w\d-]+/g, "-").toLowerCase()}.md`;
+                        anchor.click();
+                        setTimeout(() => URL.revokeObjectURL(url), 1000);
+                      }}
+                    >
+                      <Download size={13} />
+                    </button>
+                    <span className="ph-work-row__action">
+                      {isOpen ? "Chiudi" : "Apri"} <ArrowRight size={12} />
+                    </span>
+                  </div>
+                </div>
+
+                {isOpen && (
+                  <div className="ph-doc-expanded-preview">
+                    <pre className="ph-doc-content-pre">{doc.content}</pre>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
       <HomunErrorNotice error={error} />
     </section>

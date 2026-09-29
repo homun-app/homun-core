@@ -1,8 +1,9 @@
 import type { Work } from "@/components/builder/conversation-types";
+import type { AutonomyLevel } from "@/components/builder/conversation-preferences";
 
 type FirstSendEngine = {
   createWork: (title: string, objective: string, draftOnly?: boolean) => Promise<Work | null>;
-  postMessage: (work: Work, text: string, attachments?: File[]) => Promise<void>;
+  postMessage: (work: Work, text: string, attachments?: File[], autonomyLevel?: AutonomyLevel, modelConnectionId?: string) => Promise<void>;
 };
 
 /**
@@ -17,6 +18,8 @@ export function sendEngineFirstMessage(
   setNotice: (notice: string) => void,
   bumpOwnSend: () => void,
   attachments?: File[],
+  autonomyLevel?: AutonomyLevel,
+  modelConnectionId?: string,
 ): void {
   void engine.createWork("Nuova richiesta", text, true).then((created) => {
     if (!created) {
@@ -27,7 +30,7 @@ export function sendEngineFirstMessage(
     setNotice("");
     bumpOwnSend();
     void engine
-      .postMessage(created, text, attachments)
+      .postMessage(created, text, attachments, autonomyLevel, modelConnectionId)
       .catch(() => setNotice("Invio al motore non riuscito. Controlla il banner errori."));
   });
 }

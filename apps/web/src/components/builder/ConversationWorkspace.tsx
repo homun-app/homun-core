@@ -8,11 +8,7 @@ import { ConversationContribution } from "./ConversationContribution";
 import { ConversationHumanWork } from "./ConversationHumanWork";
 import { type ConversationMaterial } from "./ConversationMaterials";
 import { memberProfile, isHumanMember } from "./conversation-members";
-import {
-  type SpaceData,
-  type SpaceView,
-  spacePeople,
-} from "./ConversationSpace";
+import { type SpaceData, type SpaceView, spacePeople } from "./ConversationSpace";
 import { ConversationSearch } from "./ConversationSearch";
 import { ConversationWorkspaceChatStage } from "./ConversationWorkspaceChatStage";
 import { ConversationWorkspacePreview } from "./ConversationWorkspacePreview";
@@ -20,28 +16,16 @@ import { ConversationWorkspaceSidebar } from "./ConversationWorkspaceSidebar";
 import { ConversationWorkspaceSpaceHost } from "./ConversationWorkspaceSpaceHost";
 import { ConversationWorkspaceTopbar } from "./ConversationWorkspaceTopbar";
 import { ConversationNotifications } from "./ConversationNotifications";
-import {
-  ConversationWorkspaceWorkPanel,
-  registerPlanAgent,
-} from "./ConversationWorkspaceWorkPanel";
+import { ConversationWorkspaceBottomDock } from "./ConversationWorkspaceBottomDock";
+import { ConversationFloatingAgentWidget } from "./ConversationFloatingAgentWidget";
+import { ConversationWorkspaceWorkPanel, registerPlanAgent } from "./ConversationWorkspaceWorkPanel";
 import { initialScenarios, scenarioForWork } from "./conversation-scenarios";
-import {
-  applyBoardMove,
-  boardMoveSuccessMessage,
-  validateBoardMove,
-} from "./conversation-board-move";
+import { applyBoardMove, boardMoveSuccessMessage, validateBoardMove } from "./conversation-board-move";
 import { buildDemoBootstrap, resolveDemoMode } from "./conversation-demo-mode";
 import { downloadPrototypeExport, downloadWorkResult } from "./conversation-export";
 import { buildMaterialLibrary } from "./conversation-material-library";
-import {
-  buildConversationSearchEntries,
-  openWorkResultPreview,
-} from "./conversation-search-entries";
-import {
-  isCompletedNoticeForViewer,
-  isPendingForViewer,
-  workspaceWorkStatus,
-} from "./conversation-work-status";
+import { buildConversationSearchEntries, openWorkResultPreview } from "./conversation-search-entries";
+import { isCompletedNoticeForViewer, isPendingForViewer, workspaceWorkStatus } from "./conversation-work-status";
 import { useConversationPrototypeStorage } from "./useConversationPrototypeStorage";
 import { type Phase, type Work } from "./conversation-types";
 import { useEffect, useReducer, useRef, useState } from "react";
@@ -84,7 +68,13 @@ export function ConversationWorkspace() {
   const [panel, setPanel] = useState(false);
   const searchShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K";
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 800);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = localStorage.getItem("homun:sidebar-width");
+    return saved ? Math.min(480, Math.max(180, parseInt(saved, 10))) : 250;
+  });
+  const handleSidebarWidthChange = (w: number) => { setSidebarWidth(w); localStorage.setItem("homun:sidebar-width", String(w)); };
   const [notifications, setNotifications] = useState(false);
+  const [floatingAgentOpen, setFloatingAgentOpen] = useState(false);
   const [seenResults, setSeenResults] = useState<string[]>([]);
   const [preview, setPreview] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -96,38 +86,11 @@ export function ConversationWorkspace() {
   const displaySpaceData = projectWorkspaceData(engine.backend, spaceData, engine.projects);
   const [searchOpen, setSearchOpen] = useState(false);
   const { resetting } = useConversationPrototypeStorage({
-    storageKey,
-    loaded,
-    setLoaded,
-    storageEnabled,
-    setStorageEnabled,
-    setStorageStatus,
-    scenarios,
-    setScenarios,
-    works,
-    setWorks,
-    materials,
-    setMaterials,
-    spaceData,
-    setSpaceData,
-    preferences,
-    setPreferences,
-    seenResults,
-    setSeenResults,
-    active,
-    setActive,
-    space,
-    setSpace,
-    sidebarOpen,
-    setSidebarOpen,
-    panel,
-    setPanel,
-    viewer,
-    setViewer,
-    spaceSelected,
-    setSpaceSelected,
-    attachmentIds,
-    materialDates,
+    storageKey, loaded, setLoaded, storageEnabled, setStorageEnabled, setStorageStatus,
+    scenarios, setScenarios, works, setWorks, materials, setMaterials, spaceData, setSpaceData,
+    preferences, setPreferences, seenResults, setSeenResults, active, setActive,
+    space, setSpace, sidebarOpen, setSidebarOpen, panel, setPanel, viewer, setViewer,
+    spaceSelected, setSpaceSelected, attachmentIds, materialDates,
   });
 
   useEffect(() => {
@@ -651,17 +614,17 @@ export function ConversationWorkspace() {
       return;
     }
 
-    if (
-      handleEngineSend({
-        engine,
-        work: work ?? null,
-        text,
-        attachments,
-        open,
-        setNotice,
-        bumpOwnSend,
-      })
-    ) {
+    if (handleEngineSend({
+      engine,
+      work: work ?? null,
+      text,
+      attachments,
+      open,
+      setNotice,
+      bumpOwnSend,
+      autonomyLevel: preferences.autonomyLevel,
+      modelConnectionId: preferences.preferredModelConnectionId || undefined,
+    })) {
       return;
     }
 
@@ -1087,6 +1050,7 @@ export function ConversationWorkspace() {
   return (
     <div
       className={`cw ${sidebarOpen ? "" : "cw-sidebar-closed"} ${preferences.textSize === "large" ? "cw-large-text" : ""} ${preferences.motion ? "" : "cw-reduce-motion"}`}
+      style={{ "--cw-sidebar-w": sidebarOpen ? `${sidebarWidth}px` : "0px" } as React.CSSProperties}
     >
       {settings && (
         <ConversationSettings
@@ -1147,6 +1111,7 @@ export function ConversationWorkspace() {
         onNewConversation={() => open(null)}
         space={space}
         onOpenSpace={openSpace}
+        engineMode={engine.backend === "engine"}
         spaceData={displaySpaceData}
         libraryCount={engine.backend === "engine" ? null : library.length} routineCount={engine.backend === "engine" ? engine.routines.filter((r) => r.status === "active").length : null}
         visibleWorks={visibleWorks}
@@ -1165,6 +1130,8 @@ export function ConversationWorkspace() {
         onOpenSettings={() => setSettings(true)}
         notificationCount={notificationCount}
         onToggleNotifications={() => setNotifications(!notifications)}
+        sidebarWidth={sidebarWidth}
+        onSidebarWidthChange={handleSidebarWidthChange}
       />
       <main className={`cw-main ${panel ? "" : "cw-details-hidden"}`}>
         {space !== "Progetti" && (
@@ -1174,6 +1141,9 @@ export function ConversationWorkspace() {
             space={space} work={work} preferences={preferences}
             viewer={viewer} onViewerChange={(next) => { setViewer(next); setNotifications(false); }}
             spaceData={displaySpaceData}
+            works={engine.backend === "engine" ? engine.works : works}
+            onOpenWork={open} onNewConversation={() => open(null)}
+            spaceInitial={spaceInitial} onOpenSpace={openSpace} scenario={scenario} scenarios={scenarios} workActions={work ? conversationActions(work) : undefined}
           />
         )}
         <ConversationNotifications
@@ -1274,7 +1244,11 @@ export function ConversationWorkspace() {
             onApprovePlan={approvePlan}
             onApplyPlanEdit={(plan) => updatePlan(plan)}
             onCancelPlanEdit={() => setPlanEdit(null)}
-            onSend={send}
+            onSend={send} onOpenSpace={openSpace}
+            autonomyLevel={preferences.autonomyLevel}
+            onAutonomyLevelChange={(level) => setPreferences((p) => ({ ...p, autonomyLevel: level }))}
+            modelConnectionId={preferences.preferredModelConnectionId ?? ""}
+            onModelConnectionIdChange={(connId) => setPreferences((p) => ({ ...p, preferredModelConnectionId: connId }))}
             onClearNotice={() => setNotice("")}
             engineMode={engine.backend === "engine"} engineIntake={engine.intake} onRefreshEngine={engine.refresh}
             engineAgents={engine.backend === "engine" ? engine.agents : undefined} agentNames={engine.backend === "engine" ? Object.fromEntries(engine.agents.map((agent) => [agent.id, agent.name])) : undefined}
@@ -1346,27 +1320,29 @@ export function ConversationWorkspace() {
           />
         )}
       </main>
-      <input
-        ref={upload}
-        hidden
-        type="file"
-        multiple
-        onChange={(e) => {
-          setFiles([...files, ...Array.from(e.target.files || [])]);
-          e.target.value = "";
+      <ConversationWorkspaceBottomDock
+        space={space}
+        onToggleAgent={() => {
+          if (space) setFloatingAgentOpen((prev) => !prev);
+          else setActive(null);
         }}
+        isFloatingOpen={floatingAgentOpen}
+        works={engine.backend === "engine" ? engine.works : works}
+        activeWorkId={active}
+        onOpenWork={open}
       />
-      <input
-        ref={directory}
-        hidden
-        type="file"
-        multiple
-        {...{ webkitdirectory: "" }}
-        onChange={(e) => {
-          setFiles([...files, ...Array.from(e.target.files || [])]);
-          e.target.value = "";
-        }}
-      />
+      {space && (
+        <ConversationFloatingAgentWidget
+          isOpen={floatingAgentOpen}
+          onClose={() => setFloatingAgentOpen(false)}
+          onExpand={() => { setFloatingAgentOpen(false); setSpace(null); }}
+          onSend={(text) => { send(text, []); }}
+          work={work}
+          engineMode={engine.backend === "engine"}
+        />
+      )}
+      <input ref={upload} hidden type="file" multiple onChange={(e) => { setFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = ""; }} />
+      <input ref={directory} hidden type="file" multiple {...{ webkitdirectory: "" }} onChange={(e) => { setFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = ""; }} />
       {preview && work && scenario && (
         <ConversationWorkspacePreview
           work={work}

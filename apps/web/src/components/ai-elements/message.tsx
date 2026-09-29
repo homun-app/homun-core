@@ -323,14 +323,51 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 
+const customTableComponents = {
+  table: ({ children, className, ...props }: any) => (
+    <div className="w-full overflow-x-auto my-3">
+      <table className={cn("w-full border-collapse text-left", className)} {...props}>
+        {children}
+      </table>
+    </div>
+  ),
+  thead: ({ children, className, ...props }: any) => (
+    <thead className={cn("border-b border-black/[0.08] bg-transparent", className)} {...props}>
+      {children}
+    </thead>
+  ),
+  tbody: ({ children, className, ...props }: any) => (
+    <tbody className={cn("divide-y divide-black/[0.04] bg-transparent", className)} {...props}>
+      {children}
+    </tbody>
+  ),
+  tr: ({ children, className, ...props }: any) => (
+    <tr className={cn("border-b border-black/[0.04] bg-transparent hover:bg-black/[0.015] transition-colors", className)} {...props}>
+      {children}
+    </tr>
+  ),
+  th: ({ children, className, ...props }: any) => (
+    <th className={cn("py-2 px-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground bg-transparent border-none", className)} {...props}>
+      {children}
+    </th>
+  ),
+  td: ({ children, className, ...props }: any) => (
+    <td className={cn("py-2 px-3 text-sm text-foreground align-middle bg-transparent border-none", className)} {...props}>
+      {children}
+    </td>
+  ),
+};
+
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
+  ({ className, controls, components, ...props }: MessageResponseProps) => (
     <Streamdown
       className={cn(
         "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
         className
       )}
       plugins={streamdownPlugins}
+      controls={controls ?? { table: false }}
+      components={{ ...customTableComponents, ...components }}
       {...props}
     />
   ),

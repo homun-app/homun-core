@@ -12,14 +12,19 @@
 }
 
 .cw-team-card {
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px;
-  padding: 16px 20px;
+  background: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 8px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  gap: 8px;
+  transition: all 0.1s ease;
+}
+
+.cw-team-card:hover {
+  background: rgba(0, 0, 0, 0.015);
+  border-color: rgba(0, 0, 0, 0.15);
 }
 
 .cw-team-card__head {

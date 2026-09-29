@@ -1,5 +1,5 @@
-/** Cohesive deliverable review: formatted markdown preview, raw toggle, physical file outputs and review actions. */
 import { useState, useCallback } from "react";
+import { Eye, Code2, Copy, Check } from "lucide-react";
 import type { Work } from "./conversation-types";
 import { EngineResultReview } from "./EngineResultReview";
 import { EngineWorkOutputs } from "./EngineWorkOutputs";
@@ -21,10 +21,35 @@ export function EngineArtifactReview({
 
   const handleCopy = useCallback(() => {
     if (!artifact?.content) return;
-    void navigator.clipboard.writeText(artifact.content).then(() => {
+    const text = artifact.content;
+    const markCopied = () => {
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+      setTimeout(() => setCopied(false), 2500);
+    };
+
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(markCopied).catch(() => {
+        fallbackCopy(text);
+        markCopied();
+      });
+    } else {
+      fallbackCopy(text);
+      markCopied();
+    }
+
+    function fallbackCopy(val: string) {
+      try {
+        const el = document.createElement("textarea");
+        el.value = val;
+        el.setAttribute("readonly", "");
+        el.style.position = "absolute";
+        el.style.left = "-9999px";
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+      } catch {}
+    }
   }, [artifact?.content]);
 
   if (!artifact) return null;
@@ -44,24 +69,29 @@ export function EngineArtifactReview({
             type="button"
             className={viewMode === "formatted" ? "is-active" : ""}
             onClick={() => setViewMode("formatted")}
-            title="Visualizza anteprima formattata (Markdown)"
+            title="Anteprima"
+            aria-label="Anteprima"
           >
-            Anteprima
+            <Eye size={14} />
           </button>
           <button
             type="button"
             className={viewMode === "raw" ? "is-active" : ""}
             onClick={() => setViewMode("raw")}
-            title="Visualizza testo grezzo"
+            title="Grezzo"
+            aria-label="Grezzo"
           >
-            Grezzo
+            <Code2 size={14} />
           </button>
           <button
             type="button"
             onClick={handleCopy}
-            title="Copia il testo negli appunti"
+            className={`cw-artifact-copy-btn ${copied ? "is-copied" : ""}`}
+            title={copied ? "Copiato negli appunti!" : "Copia contenuto"}
+            aria-label={copied ? "Copiato" : "Copia"}
           >
-            {copied ? "Copiato!" : "Copia"}
+            {copied ? <Check size={14} className="cw-copied-icon" /> : <Copy size={14} />}
+            {copied && <span className="cw-copied-label">Copiato!</span>}
           </button>
         </div>
       </div>

@@ -18,17 +18,21 @@ import {
   Bell,
   Bot,
   ArrowUpRight,
+  Folder,
+  MessageSquare,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, useCallback, useEffect, type ReactNode } from "react";
 import { memberProfile } from "./conversation-members";
 import type { ConversationPreferences } from "./conversation-preferences";
 import type { ConversationScenario } from "./conversation-scenarios";
 import type { SpaceData, SpaceView } from "./ConversationSpace";
 import type { Work } from "./conversation-types";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
+import { ConversationHelpPopover } from "./ConversationHelpPopover";
 import "./sidebar-refined.css";
 
 type Props = {
+  engineMode?: boolean;
   engineAgents?: EngineAgentProfile[] | undefined;
   sidebarOpen: boolean;
   searchShortcut: string;
@@ -56,10 +60,9 @@ type Props = {
   onOpenSettings: () => void;
   notificationCount?: number | undefined;
   onToggleNotifications?: (() => void) | undefined;
+  sidebarWidth?: number;
+  onSidebarWidthChange?: (width: number) => void;
 };
-
-const PROJECT_DOTS = ["#16a34a", "#f97316", "#0ea5e9", "#8b5cf6", "#ec4899", "#eab308"];
-const WORK_DOTS = ["#f97316", "#0ea5e9", "#16a34a", "#94a3b8", "#a855f7", "#ec4899"];
 
 function groupWorksByDate(items: Work[]) {
   const now = Date.now();
@@ -84,6 +87,7 @@ function groupWorksByDate(items: Work[]) {
 }
 
 export function ConversationWorkspaceSidebar({
+  engineMode = false,
   engineAgents,
   sidebarOpen,
   searchShortcut,
@@ -108,8 +112,45 @@ export function ConversationWorkspaceSidebar({
   onOpenSettings,
   notificationCount = 0,
   onToggleNotifications,
+  sidebarWidth = 250,
+  onSidebarWidthChange,
 }: Props) {
   const [projectsOpen, setProjectsOpen] = useState(true);
+
+  const handleResizeMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (!onSidebarWidthChange) return;
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = sidebarWidth;
+
+      const onMouseMove = (ev: MouseEvent) => {
+        const delta = ev.clientX - startX;
+        const next = Math.min(480, Math.max(180, startWidth + delta));
+        onSidebarWidthChange(next);
+      };
+      const onMouseUp = () => {
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    },
+    [sidebarWidth, onSidebarWidthChange],
+  );
+
+  // Clean up any stray listeners if component unmounts during drag
+  useEffect(() => {
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, []);
 
   const unassignedWorks = visibleWorks.filter((w) => !w.projectId && !w.coordinatedBy);
   const { today, yesterday, older } = groupWorksByDate(unassignedWorks);
@@ -125,7 +166,11 @@ export function ConversationWorkspaceSidebar({
     : uniqueAgents.length;
 
   return (
-    <aside className="cw-sidebar" hidden={!sidebarOpen}>
+    <aside className="cw-sidebar" hidden={!sidebarOpen} style={{ width: sidebarWidth }}>
+      {/* Resize handle */}
+      {onSidebarWidthChange && (
+        <div className="cw-sb-resize-handle" onMouseDown={handleResizeMouseDown} title="Trascina per ridimensionare" />
+      )}
       {/* Brand Header */}
       <div className="cw-sb-brand-row">
         <div className="cw-sb-brand-left" onClick={() => onOpenSpace("Progetti")} title="Spazio di lavoro">
@@ -181,25 +226,16 @@ export function ConversationWorkspaceSidebar({
         </button>
 
         <button
-          className={`cw-sb-nav-item ${space === "Materiali" ? "active" : ""}`}
-          onClick={() => onOpenSpace("Materiali")}
-        >
-          <div className="cw-sb-item-left">
-            <Layers size={15} />
-            <span>Materiali</span>
-          </div>
-          {libraryCount !== null && libraryCount > 0 && <span className="cw-sb-count">{libraryCount}</span>}
-        </button>
-
-        <button
-          className={`cw-sb-nav-item ${space === "Documenti" ? "active" : ""}`}
+          className={`cw-sb-nav-item ${space === "Documenti" || space === "Materiali" ? "active" : ""}`}
           onClick={() => onOpenSpace("Documenti")}
         >
           <div className="cw-sb-item-left">
             <FileText size={15} />
             <span>Documenti</span>
           </div>
-          {docCount > 0 && <span className="cw-sb-count">{docCount}</span>}
+          {((docCount || 0) + (libraryCount || 0)) > 0 && (
+            <span className="cw-sb-count">{(docCount || 0) + (libraryCount || 0)}</span>
+          )}
         </button>
 
         <button
@@ -266,7 +302,7 @@ export function ConversationWorkspaceSidebar({
 
         {projectsOpen && (
           <div>
-            {spaceData.projects.map((p, idx) => {
+            {spaceData.projects.map((p) => {
               const count = works.filter((w) => w.projectId === p.id).length;
               const isActive = space === "Progetti" && active === p.id;
               return (
@@ -276,7 +312,7 @@ export function ConversationWorkspaceSidebar({
                   onClick={() => onOpenSpace("Progetti", "", p.id)}
                 >
                   <div className="cw-sb-item-left">
-                    <span className="cw-sb-dot" style={{ backgroundColor: PROJECT_DOTS[idx % PROJECT_DOTS.length] }} />
+                    <Folder size={13} style={{ color: isActive ? "#18181b" : "#71717a", flexShrink: 0 }} />
                     <span className="cw-sb-row-title">{p.name}</span>
                   </div>
                   {count > 0 && <span className="cw-sb-count">{count}</span>}
@@ -305,14 +341,14 @@ export function ConversationWorkspaceSidebar({
             {today.length > 0 && (
               <>
                 <div className="cw-sb-date-label">Oggi</div>
-                {today.map((w, i) => (
+                {today.map((w) => (
                   <button
                     key={w.id}
                     className={`cw-sb-row ${w.id === active ? "active" : ""}`}
                     onClick={() => onOpenWork(w.id)}
                   >
                     <div className="cw-sb-item-left">
-                      <span className="cw-sb-dot" style={{ backgroundColor: WORK_DOTS[i % WORK_DOTS.length] }} />
+                      <MessageSquare size={13} style={{ color: w.id === active ? "#18181b" : "#71717a", flexShrink: 0 }} />
                       <span className="cw-sb-row-title">{w.title}</span>
                     </div>
                   </button>
@@ -323,14 +359,14 @@ export function ConversationWorkspaceSidebar({
             {yesterday.length > 0 && (
               <>
                 <div className="cw-sb-date-label">Ieri</div>
-                {yesterday.map((w, i) => (
+                {yesterday.map((w) => (
                   <button
                     key={w.id}
                     className={`cw-sb-row ${w.id === active ? "active" : ""}`}
                     onClick={() => onOpenWork(w.id)}
                   >
                     <div className="cw-sb-item-left">
-                      <span className="cw-sb-dot" style={{ backgroundColor: WORK_DOTS[(i + 2) % WORK_DOTS.length] }} />
+                      <MessageSquare size={13} style={{ color: w.id === active ? "#18181b" : "#71717a", flexShrink: 0 }} />
                       <span className="cw-sb-row-title">{w.title}</span>
                     </div>
                   </button>
@@ -341,14 +377,14 @@ export function ConversationWorkspaceSidebar({
             {older.length > 0 && (
               <>
                 <div className="cw-sb-date-label">Settimana scorsa</div>
-                {older.map((w, i) => (
+                {older.map((w) => (
                   <button
                     key={w.id}
                     className={`cw-sb-row ${w.id === active ? "active" : ""}`}
                     onClick={() => onOpenWork(w.id)}
                   >
                     <div className="cw-sb-item-left">
-                      <span className="cw-sb-dot" style={{ backgroundColor: WORK_DOTS[(i + 4) % WORK_DOTS.length] }} />
+                      <MessageSquare size={13} style={{ color: w.id === active ? "#18181b" : "#71717a", flexShrink: 0 }} />
                       <span className="cw-sb-row-title">{w.title}</span>
                     </div>
                   </button>
@@ -452,6 +488,12 @@ export function ConversationWorkspaceSidebar({
           <button className="cw-sb-footer-btn" onClick={onOpenSettings} title="Impostazioni dello spazio">
             <Settings size={15} />
           </button>
+          <ConversationHelpPopover
+            engineMode={engineMode}
+            onOpenSettings={onOpenSettings}
+            onSearchOpen={onSearchOpen}
+            searchShortcut={searchShortcut}
+          />
         </div>
       </div>
     </aside>

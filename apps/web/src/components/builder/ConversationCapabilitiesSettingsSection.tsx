@@ -44,12 +44,12 @@ export function ConversationCapabilitiesSettingsSection() {
   return (
     <>
       <ConversationMcpSettingsSection />
-      <h3>Capacità del motore</h3>
+      <h3>Capacità disponibili</h3>
       <p>
-        Ciò che la tua squadra sa fare davvero, dal registro del motore: le capacità elencate qui
+        Ciò che la tua squadra sa fare davvero: le capacità elencate qui
         sono le uniche che i collaboratori possono eseguire. Nessuno può prometterti altro.
       </p>
-      {items === null && !error && <p role="status">Leggo il catalogo del motore…</p>}
+      {items === null && !error && <p role="status">Caricamento del catalogo…</p>}
       {items?.map((item) => (
         <div className="cv-settings-card" key={item.id}>
           <strong>{item.summary}</strong>

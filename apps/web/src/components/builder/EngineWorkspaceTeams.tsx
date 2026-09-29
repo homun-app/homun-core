@@ -56,28 +56,12 @@ export function EngineWorkspaceTeams({
           }}
         />
       ) : teams.length === 0 ? (
-        <div className="cw-squad-empty-card">
-          <div className="cw-squad-empty-icon">
-            <Users size={18} />
-          </div>
-          <div className="cw-squad-empty-text">
-            <h4>Nessun team configurato</h4>
-            <p>
-              {active.length < 2
-                ? "Servono almeno due collaboratori per creare un team coordinato."
-                : "I team permettono di raggruppare collaboratori attorno a un coordinatore per raggiungere obiettivi complessi."}
-            </p>
-          </div>
-          {active.length >= 2 && (
-            <button
-              type="button"
-              className="cw-squad-btn-primary"
-              onClick={() => setEditing("new")}
-            >
-              <Plus size={13} />
-              <span>Crea un team</span>
-            </button>
-          )}
+        <div className="ph-overview-empty">
+          <span>
+            {active.length < 2
+              ? "Servono almeno due collaboratori per creare un team."
+              : "Nessun team configurato. I team raggruppano collaboratori attorno a un coordinatore."}
+          </span>
         </div>
       ) : null}
 

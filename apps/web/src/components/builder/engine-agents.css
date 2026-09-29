@@ -50,8 +50,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
+  margin-bottom: 2px;
 }
 
 .cw-squad-search-wrap {
@@ -59,44 +60,42 @@
   display: flex;
   align-items: center;
   flex: 1;
-  min-width: 240px;
-  max-width: 380px;
+  max-width: 240px;
 }
 
 .cw-squad-search-icon {
   position: absolute;
-  left: 10px;
+  left: 8px;
   color: #a1a1aa;
   pointer-events: none;
 }
 
 .cw-squad-search-input {
   width: 100%;
-  padding: 6px 30px 6px 30px;
-  font-size: 13px;
+  height: 26px;
+  padding: 0 24px 0 26px;
+  font-size: 12px;
   border-radius: 6px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: transparent;
   color: #18181b;
   outline: none;
-  transition: all 0.12s ease;
+  transition: border-color 0.12s ease;
   box-sizing: border-box;
 }
 
 .cw-squad-search-input:focus {
   border-color: #18181b;
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.04);
 }
 
 .cw-squad-search-clear {
   position: absolute;
-  right: 8px;
+  right: 6px;
   background: transparent;
   border: none;
   color: #a1a1aa;
   cursor: pointer;
-  padding: 3px;
-  border-radius: 4px;
+  padding: 2px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -110,21 +109,19 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  background: rgba(0, 0, 0, 0.03);
-  padding: 3px;
-  border-radius: 7px;
 }
 
 .cw-squad-filter-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
+  gap: 4px;
+  padding: 2px 8px;
+  height: 24px;
   border-radius: 5px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: #71717a;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.1s ease;
@@ -133,13 +130,13 @@
 
 .cw-squad-filter-pill:hover {
   color: #18181b;
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .cw-squad-filter-pill.active {
-  background: #ffffff;
+  background: rgba(0, 0, 0, 0.06);
   color: #18181b;
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .cw-squad-pill-count {
@@ -155,31 +152,28 @@
 /* Compact Grid of Cards */
 .cw-squad-compact-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
 }
 
 .cw-agent-compact-card {
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px;
-  padding: 14px 16px;
+  background: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 8px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 10px;
-  min-height: 124px;
+  gap: 6px;
   cursor: pointer;
-  transition: all 0.12s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  transition: all 0.1s ease;
   user-select: none;
   box-sizing: border-box;
 }
 
 .cw-agent-compact-card:hover {
-  border-color: rgba(0, 0, 0, 0.18);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.04);
-  transform: translateY(-1px);
+  background: rgba(0, 0, 0, 0.015);
+  border-color: rgba(0, 0, 0, 0.15);
 }
 
 .cw-compact-head {

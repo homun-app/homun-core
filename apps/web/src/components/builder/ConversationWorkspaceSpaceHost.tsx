@@ -33,10 +33,10 @@ import { EngineWorkspaceAgents } from "./EngineWorkspaceAgents";
 import { EngineWorkspaceTeams } from "./EngineWorkspaceTeams";
 import { HomunClientError } from "@/lib/homun-errors";
 import { EngineMaterials } from "./EngineMaterials";
-import { ConversationCapabilitiesSettingsSection } from "./ConversationCapabilitiesSettingsSection";
 import { CapabilitiesView } from "./capabilities/CapabilitiesView";
 import { MessagingView } from "./messaging/MessagingView";
 import { EngineDocuments } from "./EngineDocuments";
+import { UnifiedDocumentsAndMaterials } from "./UnifiedDocumentsAndMaterials";
 import { EngineRoutines } from "./EngineRoutines";
 import type { EngineRoutine } from "@/lib/engine-routines-client";
 type Props = {
@@ -137,6 +137,7 @@ export function ConversationWorkspaceSpaceHost({
           removedPeople={spaceData.removedPeople}
           onChanged={onRefreshEngine}
           onCreateMember={() => onOpenSpace("Nuovo collaboratore")}
+          initialFilter={spaceInitial}
         />
         <EngineWorkspaceTeams
           teams={engineTeams ?? []}
@@ -196,6 +197,7 @@ export function ConversationWorkspaceSpaceHost({
   if (space === "Compiti") {
     return (
       <ConversationTasks
+        initialView={spaceInitial || "Elenco"}
         onReveal={onRevealPanel}
         onMove={onMoveWork}
         items={visibleWorks.map((w) => ({
@@ -238,22 +240,14 @@ export function ConversationWorkspaceSpaceHost({
         onSkipNext={onSkipNextRoutine}
       />
     );
-  if (space === "Documenti") {
-    return (
+  if (engineMode && space === "Materiali") return <EngineMaterials projects={spaceData.projects} />;
+  if (space === "Documenti" || space === "Materiali") {
+    const documentsView = (
       <EngineDocuments projects={spaceData.projects.map((p) => ({ id: p.id, name: p.name }))} />
     );
-  }
-  if (engineMode && space === "Materiali") return <EngineMaterials projects={spaceData.projects} />;
-  if (engineMode && space === "Plugin")
-    return (
-      <section className="cw-workspace cw-documents cw-engine-library" aria-label="Plugin">
-        <CapabilitiesView />
-        <ConversationCapabilitiesSettingsSection />
-      </section>
-    );
-  if (engineMode && space === "Canali") return <MessagingView />;
-  if (space === "Materiali") {
-    return (
+    const materialsView = engineMode ? (
+      <EngineMaterials projects={spaceData.projects} />
+    ) : (
       <ConversationMaterials
         onReveal={onRevealPanel}
         key={spaceVersion}
@@ -330,6 +324,14 @@ export function ConversationWorkspaceSpaceHost({
         onRemove={onRemoveMaterial}
         onLink={onLinkMaterial}
         initialId={spaceSelected}
+      />
+    );
+
+    return (
+      <UnifiedDocumentsAndMaterials
+        activeTab={spaceInitial === "materials" || space === "Materiali" ? "materials" : "documents"}
+        documentsView={documentsView}
+        materialsView={materialsView}
       />
     );
   }

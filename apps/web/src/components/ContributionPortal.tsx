@@ -21,7 +21,7 @@ export function ContributionPortal() {
     catch(e) { setError(e); } finally { setBusy(false); }
   }
   return <main className="organization-editor" style={{ margin: '3rem auto' }}>
-    <h1>Il tuo contributo</h1><p>Fonte: motore · Accesso limitato a questa richiesta.</p>
+    <h1>Il tuo contributo</h1><p>Accesso limitato a questa richiesta.</p>
     <HomunErrorNotice error={error} />
     {view && <><p>Stai rispondendo come <strong>{view.recipient_name}</strong>.</p>
       <h2>{view.work_title}</h2><p>{view.need}</p>

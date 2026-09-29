@@ -182,7 +182,7 @@ export function ConversationMemoryReviewModal({
 
         <div className="mt-6 flex items-center justify-between border-t border-neutral-100 pt-4 dark:border-neutral-800">
           <span className="text-[11px] text-neutral-400">
-            Fonte: motore nativo (Jaccard token clustering)
+            Jaccard token clustering
           </span>
           <div className="flex items-center gap-2">
             <button

@@ -30,6 +30,11 @@ import {
   type ProbeResult,
   type Skill,
 } from "@/lib/engine-mcp-client";
+import {
+  listEnginePlugins,
+  enableEnginePlugin,
+  disableEnginePlugin,
+} from "@/lib/engine-plugins-client";
 import { SettingsToggleSwitch } from "./SettingsToggleSwitch";
 import { AddMcpServerModal, AddSkillModal, ViewSkillModal } from "./ConversationPluginModals";
 import { ConversationSkillPacksSection } from "./ConversationSkillPacksSection";
@@ -175,14 +180,23 @@ export function ConversationUnifiedPluginsSection() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [srvs, sks, cat] = await Promise.all([
+      const [srvs, sks, cat, engPlugs] = await Promise.all([
         listEngineServers().catch(() => [] as ExternalServer[]),
         listEngineSkills().catch(() => [] as Skill[]),
         listEngineCatalog().catch(() => [] as CatalogEntry[]),
+        listEnginePlugins().catch(() => null),
       ]);
       setServers(srvs);
       setSkills(sks);
       setCatalog(cat);
+      if (engPlugs?.plugins && engPlugs.plugins.length > 0) {
+        setBuiltins((prev) =>
+          prev.map((b) => {
+            const match = engPlugs.plugins.find((p) => p.name === b.id);
+            return match ? { ...b, enabled: match.enabled } : b;
+          })
+        );
+      }
     } catch (cause) {
       setError(cause);
     } finally {
@@ -295,10 +309,19 @@ export function ConversationUnifiedPluginsSection() {
     }
   }
 
-  function handleToggleBuiltin(id: string, next: boolean) {
+  async function handleToggleBuiltin(id: string, next: boolean) {
     setBuiltins((prev) =>
       prev.map((b) => (b.id === id ? { ...b, enabled: next } : b))
     );
+    try {
+      if (next) {
+        await enableEnginePlugin(id);
+      } else {
+        await disableEnginePlugin(id);
+      }
+    } catch {
+      // Non-engine or virtual builtin, local state suffices
+    }
   }
 
   async function handleSaveNewServer(e: React.FormEvent) {

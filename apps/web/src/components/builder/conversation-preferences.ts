@@ -1,3 +1,5 @@
+export type AutonomyLevel = "autonomous" | "guarded" | "supervised";
+
 export type ConversationPreferences = {
   spaceName: string;
   displayName: string;
@@ -8,6 +10,8 @@ export type ConversationPreferences = {
   resultNotifications: boolean;
   routing: "automatic" | "quality" | "fast";
   execution: "cloud" | "local";
+  autonomyLevel?: AutonomyLevel | undefined;
+  preferredModelConnectionId?: string | undefined;
   budget: number;
   perWorkBudget: number;
 };
@@ -21,6 +25,8 @@ export const defaultPreferences: ConversationPreferences = {
   resultNotifications: true,
   routing: "automatic",
   execution: "local",
+  autonomyLevel: "guarded",
+  preferredModelConnectionId: "",
   budget: 100,
   perWorkBudget: 10,
 };

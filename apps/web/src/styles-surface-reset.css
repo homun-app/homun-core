@@ -1197,27 +1197,35 @@ aside.cw-workspace,
 }
 
 .cw-agent-compact-card {
-  border: 1px solid rgba(0, 0, 0, 0.08) !important;
-  border-radius: 10px !important;
-  background: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  min-height: auto !important;
+  padding: 10px 12px !important;
 }
 
 .cw-agent-compact-card:hover {
-  border-color: rgba(0, 0, 0, 0.18) !important;
+  background: rgba(0, 0, 0, 0.015) !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
 }
 
 .cw-team-card {
-  border: 1px solid rgba(0, 0, 0, 0.08) !important;
-  border-radius: 10px !important;
-  background: #ffffff !important;
-  padding: 16px 20px !important;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
-  transition: border-color 0.12s ease !important;
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  padding: 10px 14px !important;
+  box-shadow: none !important;
+  transition: all 0.1s ease !important;
 }
 
 .cw-team-card:hover {
-  background: #ffffff !important;
-  border-color: rgba(0, 0, 0, 0.14) !important;
+  background: rgba(0, 0, 0, 0.015) !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+}
+
+.cw-squad-empty-card {
+  display: none !important;
 }
 
 .cw-agents-empty {
@@ -1376,13 +1384,15 @@ aside.cw-workspace,
   color: var(--foreground) !important;
 }
 
-/* Artifact review card */
+/* Artifact review: 100% flat, NO container box, NO borders, NO tint */
 .cw-artifact-review-card,
 .cw-artifact-review-inline {
-  background: #ffffff !important;
-  border: 1px solid var(--color-border) !important;
-  border-radius: 8px !important;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04) !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 16px 0 24px !important;
 }
 
 .cw-artifact-header h3,
@@ -1392,29 +1402,92 @@ aside.cw-workspace,
   color: var(--foreground) !important;
 }
 
-.cw-artifact-toolbar button {
+/* Artifact toolbar buttons: NEVER background, ONLY color change */
+.cw-artifact-toolbar button,
+.cw-artifact-toolbar button:hover,
+.cw-artifact-toolbar button:focus,
+.cw-artifact-toolbar button.is-active {
   background: transparent !important;
-  border: 1px solid var(--color-border) !important;
-  color: var(--color-muted-foreground) !important;
-  border-radius: 6px !important;
-  font-size: 11px !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 4px !important;
+}
+
+.cw-artifact-toolbar button {
+  color: #a1a1aa !important;
 }
 
 .cw-artifact-toolbar button:hover {
-  background: rgba(0, 0, 0, 0.03) !important;
-  color: var(--foreground) !important;
+  color: var(--foreground, #18181b) !important;
 }
 
 .cw-artifact-toolbar button.is-active {
-  background: var(--foreground) !important;
-  color: #ffffff !important;
-  border-color: var(--foreground) !important;
+  color: var(--foreground, #18181b) !important;
+  font-weight: 700 !important;
+}
+
+.cw-artifact-toolbar button.cw-artifact-copy-btn.is-copied {
+  color: #16a34a !important;
 }
 
 .cw-artifact-content {
-  border: 1px solid var(--color-border) !important;
-  border-radius: 6px !important;
-  background: #ffffff !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+/* Streamdown table resets: completely flat, NO box wrapper, NO borders around table, NO green/dark thead */
+[data-streamdown="table-wrapper"],
+[data-streamdown="table-wrapper"] > div,
+[data-streamdown="table"],
+.cw-artifact-markdown table {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 12px 0 !important;
+}
+
+[data-streamdown="table-header"],
+[data-streamdown="table-header-cell"],
+.cw-artifact-markdown thead,
+.cw-artifact-markdown thead tr,
+.cw-artifact-markdown th {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+  color: #71717a !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  padding: 8px 12px !important;
+}
+
+[data-streamdown="table-cell"],
+.cw-artifact-markdown td {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
+  color: #18181b !important;
+  padding: 8px 12px !important;
+}
+
+[data-streamdown="table-row"]:last-child td,
+.cw-artifact-markdown tr:last-child td {
+  border-bottom: none !important;
+}
+
+[data-streamdown="table-row"]:hover td,
+.cw-artifact-markdown tr:hover td {
+  background: rgba(0, 0, 0, 0.015) !important;
 }
 
 /* ================================================================
@@ -1456,4 +1529,71 @@ aside.cw-workspace,
   border-top: none !important;
   padding-top: 12px !important;
 }
+
+/* Sidebar and window background are identical (#f4f4f5), only .cw-main card is white */
+html,
+body,
+#root,
+.cw,
+.cw-sidebar,
+.cw .cw-sidebar {
+  background: #f4f4f5 !important;
+  border-right: none !important;
+}
+
+.cw-main {
+  background: #ffffff !important;
+  margin: 6px 6px 42px 6px !important;
+  height: calc(100dvh - 48px) !important;
+}
+.cw-sidebar-closed .cw-main {
+  margin: 6px 6px 42px 6px !important;
+}
+
+/* All icon and dock buttons: hover/active changes text/icon color ONLY, zero background tint */
+.linear-agent-dock-btn:hover,
+.linear-agent-dock-history:hover,
+.linear-floating-agent-btn:hover,
+.cw-sb-footer-btn:hover,
+.cw-sb-toggle-btn:hover,
+.cw-sb-section-header button:hover,
+.cw-icon:hover,
+.cv-chat-more:hover,
+.cw-msg-action-btn:hover,
+.cw-marginalia-btn:hover,
+.cw-topbar button:hover,
+.cw-conversation-head button:hover,
+.cw-artifact-toolbar button:hover,
+.cw-artifact-toolbar button.is-active,
+.ph-inline-tab:hover,
+.ph-inline-tab--action:hover,
+.ph-tab:hover,
+.st-sdk-composer button:hover,
+.cw-team-popover-close:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: var(--foreground, #18181b) !important;
+  box-shadow: none !important;
+}
+
+/* Chat step results: flat white, subtle hairline border */
+.cc-chat-results details {
+  background: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.cc-chat-results details summary {
+  color: #18181b !important;
+}
+
+/* Chat date separator */
+.cw-date {
+  color: #a1a1aa !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.08em !important;
+}
+
 

@@ -233,7 +233,7 @@
 
 /* Global background: pure white */
 body {
-  background: #ffffff;
+  background: #f4f4f5;
 }
 
 /* Content headings in main areas: smaller, lighter */
@@ -245,6 +245,16 @@ body {
   letter-spacing: -0.01em;
   color: var(--foreground);
   margin-bottom: 4px;
+}
+
+/* Welcome screen modern heading */
+.cw-welcome h1,
+.cw-welcome-linear h1 {
+  font-size: 21px !important;
+  font-weight: 600 !important;
+  margin: 0 0 6px !important;
+  line-height: 1.35 !important;
+  letter-spacing: -0.015em !important;
 }
 
 /* Section label style (uppercase muted 11px) */
