@@ -158,6 +158,26 @@ def update_channel_platform(platform_id: str, body: PlatformConfigRequest) -> Di
     return {"ok": True, "platform": plat, "enabled": current.get("enabled", False)}
 
 
+@router.delete("/platforms/{platform_id}", response_model=Dict[str, Any])
+def delete_channel_platform(platform_id: str) -> Dict[str, Any]:
+    """Remove a platform configuration: saved fields are deleted and the live
+    adapter is cleared so polling stops without an engine restart."""
+    plat = platform_id.strip().lower()
+    saved = _load_channels_config()
+    if plat not in saved:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "channel_platform_not_configured", "message": f"Platform '{plat}' has no saved configuration."},
+        )
+    del saved[plat]
+    _save_channels_config(saved)
+    registry = get_channel_registry()
+    adapter = registry.get_adapter(plat)
+    if adapter is not None and isinstance(getattr(adapter, "config", None), dict):
+        adapter.config.clear()
+    return {"ok": True, "platform": plat}
+
+
 KNOWN_PLATFORMS = {
     "telegram", "discord", "slack", "whatsapp", "signal", "matrix",
     "mattermost", "bluebubbles", "homeassistant", "email", "sms",

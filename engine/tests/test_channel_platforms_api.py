@@ -55,6 +55,40 @@ def test_channel_platforms_lifecycle(api_client):
     assert "non riconosciuta" in test_unknown.json()["message"]
 
 
+def test_channel_platform_delete_removes_configuration(api_client):
+    # 1. Configure telegram
+    put_res = api_client.put(
+        "/v1/gateway/channels/platforms/telegram",
+        json={"enabled": True, "fields": {"bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"}},
+    )
+    assert put_res.status_code == 200
+
+    # 2. DELETE removes it
+    del_res = api_client.delete("/v1/gateway/channels/platforms/telegram")
+    assert del_res.status_code == 200
+    assert del_res.json()["ok"] is True
+    assert del_res.json()["platform"] == "telegram"
+
+    # 3. Platform is back to unconfigured/disabled
+    res = api_client.get("/v1/gateway/channels/platforms")
+    tg = next(p for p in res.json()["platforms"] if p["id"] == "telegram")
+    assert tg["enabled"] is False
+    assert tg["configured"] is False
+    assert tg["fields"] == {}
+
+    # 4. Live adapter config was cleared
+    from homun.routes.channel_ingress_api import get_channel_registry
+    adapter = get_channel_registry().get_adapter("telegram")
+    assert adapter is not None
+    assert not (getattr(adapter, "config", None) or {}).get("TELEGRAM_BOT_TOKEN")
+    assert not (getattr(adapter, "config", None) or {}).get("bot_token")
+
+    # 5. Deleting again is a typed 404
+    del_again = api_client.delete("/v1/gateway/channels/platforms/telegram")
+    assert del_again.status_code == 404
+    assert del_again.json()["detail"]["code"] == "channel_platform_not_configured"
+
+
 def test_telegram_onboarding_lifecycle(api_client, monkeypatch):
     from homun.routes import channel_ingress_api
 

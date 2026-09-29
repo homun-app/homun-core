@@ -4773,6 +4773,43 @@
         "title": "PlanStepPayload",
         "type": "object"
       },
+      "PlatformConfigRequest": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "object"
+          }
+        },
+        "title": "PlatformConfigRequest",
+        "type": "object"
+      },
+      "PlatformTestRequest": {
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "object"
+          }
+        },
+        "title": "PlatformTestRequest",
+        "type": "object"
+      },
       "PluginActionResponse": {
         "properties": {
           "message": {
@@ -8088,6 +8125,44 @@
         "title": "TeamsParseRequest",
         "type": "object"
       },
+      "TelegramOnboardingApply": {
+        "properties": {
+          "allowed_user_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed User Ids"
+          }
+        },
+        "title": "TelegramOnboardingApply",
+        "type": "object"
+      },
+      "TelegramOnboardingStart": {
+        "properties": {
+          "bot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "Homun Agent",
+            "title": "Bot Name"
+          }
+        },
+        "title": "TelegramOnboardingStart",
+        "type": "object"
+      },
       "TerminalApprovalRequest": {
         "additionalProperties": false,
         "properties": {
@@ -11364,6 +11439,239 @@
         ]
       }
     },
+    "/v1/gateway/channels/platforms": {
+      "get": {
+        "operationId": "list_channel_platforms_v1_gateway_channels_platforms_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Channel Platforms V1 Gateway Channels Platforms Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Channel Platforms",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
+    "/v1/gateway/channels/platforms/{platform_id}": {
+      "delete": {
+        "description": "Remove a platform configuration: saved fields are deleted and the live\nadapter is cleared so polling stops without an engine restart.",
+        "operationId": "delete_channel_platform_v1_gateway_channels_platforms__platform_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "platform_id",
+            "required": true,
+            "schema": {
+              "title": "Platform Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Channel Platform V1 Gateway Channels Platforms  Platform Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Channel Platform",
+        "tags": [
+          "gateway_channels"
+        ]
+      },
+      "post": {
+        "operationId": "update_channel_platform_v1_gateway_channels_platforms__platform_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "platform_id",
+            "required": true,
+            "schema": {
+              "title": "Platform Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Channel Platform V1 Gateway Channels Platforms  Platform Id  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Channel Platform",
+        "tags": [
+          "gateway_channels"
+        ]
+      },
+      "put": {
+        "operationId": "update_channel_platform_v1_gateway_channels_platforms__platform_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "platform_id",
+            "required": true,
+            "schema": {
+              "title": "Platform Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Channel Platform V1 Gateway Channels Platforms  Platform Id  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Channel Platform",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
+    "/v1/gateway/channels/platforms/{platform_id}/test": {
+      "post": {
+        "operationId": "test_channel_platform_v1_gateway_channels_platforms__platform_id__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "platform_id",
+            "required": true,
+            "schema": {
+              "title": "Platform Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PlatformTestRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Test Channel Platform V1 Gateway Channels Platforms  Platform Id  Test Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Channel Platform",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
     "/v1/gateway/channels/queue": {
       "get": {
         "operationId": "list_inbound_queue_items_v1_gateway_channels_queue_get",
@@ -11482,6 +11790,203 @@
           }
         },
         "summary": "Recover Stale Inbound Queue",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
+    "/v1/gateway/channels/telegram/onboarding/start": {
+      "post": {
+        "operationId": "start_telegram_onboarding_v1_gateway_channels_telegram_onboarding_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TelegramOnboardingStart"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Start Telegram Onboarding V1 Gateway Channels Telegram Onboarding Start Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Telegram Onboarding",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
+    "/v1/gateway/channels/telegram/onboarding/{pairing_id}": {
+      "delete": {
+        "operationId": "cancel_telegram_onboarding_v1_gateway_channels_telegram_onboarding__pairing_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pairing_id",
+            "required": true,
+            "schema": {
+              "title": "Pairing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancel Telegram Onboarding V1 Gateway Channels Telegram Onboarding  Pairing Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Telegram Onboarding",
+        "tags": [
+          "gateway_channels"
+        ]
+      },
+      "get": {
+        "operationId": "get_telegram_onboarding_status_v1_gateway_channels_telegram_onboarding__pairing_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pairing_id",
+            "required": true,
+            "schema": {
+              "title": "Pairing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Telegram Onboarding Status V1 Gateway Channels Telegram Onboarding  Pairing Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Telegram Onboarding Status",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
+    "/v1/gateway/channels/telegram/onboarding/{pairing_id}/apply": {
+      "post": {
+        "operationId": "apply_telegram_onboarding_v1_gateway_channels_telegram_onboarding__pairing_id__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pairing_id",
+            "required": true,
+            "schema": {
+              "title": "Pairing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TelegramOnboardingApply"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Apply Telegram Onboarding V1 Gateway Channels Telegram Onboarding  Pairing Id  Apply Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Telegram Onboarding",
         "tags": [
           "gateway_channels"
         ]
