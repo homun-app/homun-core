@@ -91,15 +91,31 @@ class ModelRegistry:
         }
         try:
             from homun.application.provider_registry import create_builtin_profiles
-            for pid, prof in create_builtin_profiles().items():
+            builtin_profiles = create_builtin_profiles()
+            for pid, prof in builtin_profiles.items():
                 if pid in self._providers:
                     continue
-                default_mod = prof.default_aux_model or (prof.fallback_models[0] if prof.fallback_models else "default")
+                prof_cfg = self._config.get(pid) or {}
+                b_url = str(prof_cfg.get("base_url") or prof.base_url or "https://api.openai.com/v1")
+                default_mod = prof_cfg.get("default_model") or prof.default_aux_model or (prof.fallback_models[0] if prof.fallback_models else "default")
                 self._providers[pid] = OpenAICompatibleProvider(
                     secrets=self.secrets,
-                    base_url=str(prof.base_url or "https://api.openai.com/v1"),
+                    base_url=b_url,
                     default_model=str(default_mod),
                     provider_id=pid,
+                )
+            for cid, cfg in self._config.items():
+                if cid in self._providers or cid in ("active_provider_id", "version") or not isinstance(cfg, dict):
+                    continue
+                base_pid = cid.split(":")[0]
+                prof = builtin_profiles.get(base_pid)
+                b_url = str(cfg.get("base_url") or (prof.base_url if prof else "https://api.openai.com/v1"))
+                default_mod = str(cfg.get("default_model") or (prof.default_aux_model if prof else "default"))
+                self._providers[cid] = OpenAICompatibleProvider(
+                    secrets=self.secrets,
+                    base_url=b_url,
+                    default_model=default_mod,
+                    provider_id=base_pid,
                 )
         except Exception:
             pass
@@ -135,7 +151,7 @@ class ModelRegistry:
                 kind="openai_compatible",
                 display_name="OpenAI-compatible",
                 configured=True,
-                credential_present=self.secrets.has(SECRET_KEY),
+                credential_present=self.secrets.has(SECRET_KEY) or self.secrets.has("provider:openai_compatible:api_key"),
                 base_url=str(openai_cfg.get("base_url") or ""),
                 default_model=str(openai_cfg.get("default_model") or ""),
                 notes=[
@@ -147,11 +163,20 @@ class ModelRegistry:
         ]
         try:
             from homun.application.provider_registry import create_builtin_profiles
-            for pid, prof in create_builtin_profiles().items():
+            from homun.application.credential_pool import get_credential_pool
+            pool = get_credential_pool()
+            builtin_profiles = create_builtin_profiles()
+            for pid, prof in builtin_profiles.items():
                 if any(p.id == pid for p in res):
                     continue
-                has_cred = any(bool(os.environ.get(ev)) for ev in prof.env_vars)
-                default_mod = prof.default_aux_model or (prof.fallback_models[0] if prof.fallback_models else "")
+                prof_cfg = self._config.get(pid) or {}
+                has_cred = (
+                    self.secrets.has(f"provider:{pid}:api_key")
+                    or any(bool(os.environ.get(ev)) for ev in prof.env_vars)
+                    or bool(pool.list_credentials(provider=pid))
+                )
+                default_mod = prof_cfg.get("default_model") or prof.default_aux_model or (prof.fallback_models[0] if prof.fallback_models else "")
+                b_url = prof_cfg.get("base_url") or prof.base_url or ""
                 res.append(
                     ProviderInfo(
                         id=pid,
@@ -160,8 +185,34 @@ class ModelRegistry:
                         configured=True,
                         credential_present=has_cred,
                         default_model=str(default_mod),
-                        base_url=str(prof.base_url or ""),
+                        base_url=str(b_url),
                         notes=[prof.description],
+                    )
+                )
+            for cid, cfg in self._config.items():
+                if any(p.id == cid for p in res) or cid in ("active_provider_id", "version") or not isinstance(cfg, dict):
+                    continue
+                base_pid = cid.split(":")[0]
+                prof = builtin_profiles.get(base_pid)
+                d_mod = str(cfg.get("default_model") or "")
+                d_name = str(cfg.get("display_name") or (f"{prof.display_name} ({d_mod})" if prof and d_mod else cid))
+                b_url = str(cfg.get("base_url") or (prof.base_url if prof else ""))
+                has_cred = (
+                    self.secrets.has(f"provider:{cid}:api_key")
+                    or self.secrets.has(f"provider:{base_pid}:api_key")
+                    or (prof and any(bool(os.environ.get(ev)) for ev in prof.env_vars))
+                    or bool(pool.list_credentials(provider=base_pid))
+                )
+                res.append(
+                    ProviderInfo(
+                        id=cid,
+                        kind="openai_compatible",
+                        display_name=d_name,
+                        configured=True,
+                        credential_present=has_cred or base_pid == "ollama",
+                        default_model=d_mod,
+                        base_url=b_url,
+                        notes=[prof.description if prof else ""],
                     )
                 )
         except Exception:
@@ -195,6 +246,23 @@ class ModelRegistry:
         for conn in self.list_connections():
             if conn.id == connection_id:
                 return conn
+        if ":" in connection_id:
+            base_pid, model_name = connection_id.split(":", 1)
+            for conn in self.list_connections():
+                if conn.id == base_pid:
+                    return Connection(
+                        id=connection_id,
+                        kind=conn.kind,
+                        display_name=f"{conn.display_name} ({model_name})",
+                        model_id=model_name,
+                        base_url=conn.base_url,
+                        context_window=conn.context_window,
+                        max_output_tokens=conn.max_output_tokens,
+                        configured=conn.configured,
+                        credential_present=conn.credential_present,
+                        active=conn.active,
+                        notes=conn.notes,
+                    )
         raise NotFoundError(f"Unknown connection: {connection_id}")
 
     def upsert_connection(
@@ -219,29 +287,38 @@ class ModelRegistry:
                 raise ValidationError("Built-in fake connection id must be 'fake'")
             return self.get_connection("fake")
         if kind == "openai_compatible":
-            openai_cfg = dict(self._config.get("openai_compatible") or {})
+            cid = connection_id or "openai_compatible"
+            cfg = dict(self._config.get(cid) or (self._config.get("openai_compatible") if cid == "openai_compatible" else {}))
             if base_url is not None and base_url.strip():
-                openai_cfg["base_url"] = base_url.strip().rstrip("/")
+                cfg["base_url"] = base_url.strip().rstrip("/")
             if model_id.strip():
-                openai_cfg["default_model"] = model_id.strip()
+                cfg["default_model"] = model_id.strip()
             if context_window is not UNSET_PIN:
                 if context_window is None:
-                    openai_cfg.pop('context_window', None)
+                    cfg.pop('context_window', None)
                 else:
-                    openai_cfg['context_window'] = context_window
+                    cfg['context_window'] = context_window
             if max_output_tokens is not UNSET_PIN:
-                openai_cfg['max_output_tokens'] = max_output_tokens
+                cfg['max_output_tokens'] = max_output_tokens
             try:
-                ContextLimits(context_window=effective_context_window(openai_cfg.get('base_url'), openai_cfg.get('context_window')),
-                              max_output_tokens=openai_cfg.get('max_output_tokens', 8192))
+                ContextLimits(context_window=effective_context_window(cfg.get('base_url'), cfg.get('context_window')),
+                              max_output_tokens=cfg.get('max_output_tokens', 8192))
             except SchemaError as exc:
                 raise ValidationError('Invalid native context limits') from exc
             if api_key is not None and api_key.strip():
-                self.secrets.put(SECRET_KEY, api_key.strip())
-            self._config["openai_compatible"] = openai_cfg
+                clean_key = api_key.strip()
+                self.secrets.put(f"provider:{cid}:api_key", clean_key)
+                if cid == "openai_compatible":
+                    self.secrets.put(SECRET_KEY, clean_key)
+                try:
+                    from homun.application.credential_pool import get_credential_pool
+                    get_credential_pool().add_credential(cid, clean_key)
+                except Exception:
+                    pass
+            self._config[cid] = cfg
             self._save_config()
             self._rebuild_providers()
-            return self.get_connection("openai_compatible")
+            return self.get_connection(cid)
         if kind == "pydantic_ai":
             raise ValidationError(
                 "kind=pydantic_ai connections are not registered yet; use openai_compatible or fake"
@@ -266,11 +343,49 @@ class ModelRegistry:
     def clear_openai_credentials(self) -> None:
         self.secrets.delete(SECRET_KEY)
 
-    def verify(self, provider_id: str | None = None, *, connection_id: str | None = None) -> VerifyResult:
+    def _get_provider(self, pid: str | None) -> Any:
+        target_id = pid or self.active_provider_id
+        if target_id in self._providers:
+            return self._providers[target_id]
+        if target_id and ":" in target_id:
+            base_pid, model_id = target_id.split(":", 1)
+            base_prov = self._providers.get(base_pid)
+            if base_prov is not None and isinstance(base_prov, OpenAICompatibleProvider):
+                derived = OpenAICompatibleProvider(
+                    secrets=self.secrets,
+                    base_url=base_prov.base_url,
+                    default_model=model_id,
+                    provider_id=base_pid,
+                )
+                self._providers[target_id] = derived
+                return derived
+        return self._providers.get(target_id)
+
+    def verify(
+        self,
+        provider_id: str | None = None,
+        *,
+        connection_id: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model_id: str | None = None,
+    ) -> VerifyResult:
         pid = connection_id or provider_id or self.active_provider_id
-        provider = self._providers.get(pid)
+        provider = self._get_provider(pid)
         if provider is None:
             return VerifyResult(ok=False, provider_id=pid, message=f"Unknown provider: {pid}")
+        if pid == "fake":
+            return provider.verify_connection()
+        if api_key or base_url or model_id:
+            temp_b_url = base_url or getattr(provider, "base_url", "https://api.openai.com/v1")
+            temp_mod = model_id or getattr(provider, "default_model", "gpt-4o-mini")
+            temp_provider = OpenAICompatibleProvider(
+                secrets=self.secrets,
+                base_url=temp_b_url,
+                default_model=temp_mod,
+                provider_id=pid,
+            )
+            return temp_provider.verify_connection(api_key_override=api_key)
         return provider.verify_connection()
 
     def complete(
@@ -283,7 +398,7 @@ class ModelRegistry:
         expected_runtime: dict | None = None,
     ) -> CompletionResult:
         pid = connection_id or provider_id or self.active_provider_id
-        provider = self._providers.get(pid)
+        provider = self._get_provider(pid)
         if provider is None:
             raise KeyError(f"Unknown provider: {pid}")
         provider = bound_provider(provider, pid, expected_runtime)
@@ -297,7 +412,7 @@ class ModelRegistry:
         from homun.models.native_errors import NativeModelError
         from homun.models.native_transport import complete_tools
         pid = connection_id or self.active_provider_id
-        provider = self._providers.get(pid)
+        provider = self._get_provider(pid)
         if not isinstance(provider, OpenAICompatibleProvider):
             raise ValidationError('Native tools require an OpenAI-compatible connection')
         provider = bound_provider(provider, pid, expected_runtime)
@@ -315,7 +430,8 @@ class ModelRegistry:
     def complete_summary(self, messages, *, connection_id=None, model_id=None, expected_runtime=None, context_window=None, max_output_tokens=8192):
         from homun.models.native_errors import NativeModelError
         from homun.models.native_transport import complete_summary
-        provider = self._providers.get(connection_id or self.active_provider_id)
+        pid = connection_id or self.active_provider_id
+        provider = self._get_provider(pid)
         if not isinstance(provider, OpenAICompatibleProvider):
             raise ValidationError('Native summaries require an OpenAI-compatible connection')
         provider = bound_provider(provider, connection_id or self.active_provider_id, expected_runtime)
@@ -339,7 +455,7 @@ class ModelRegistry:
         cancel_check: Any | None = None,
     ) -> Iterator[str]:
         pid = connection_id or provider_id or self.active_provider_id
-        provider = self._providers.get(pid)
+        provider = self._get_provider(pid)
         if provider is None:
             raise KeyError(f"Unknown provider: {pid}")
         stream_fn = getattr(provider, "stream", None)
@@ -396,7 +512,8 @@ class ModelRegistry:
         conversation_context: ConversationContext | None = None,
     ) -> MessageInterpretation:
         pid = provider_id or self.active_provider_id
-        if pid not in self._providers:
+        prov = self._get_provider(pid)
+        if prov is None:
             raise KeyError(f"Unknown provider: {pid}")
         raw = run_interpret_with_retry(
             self,

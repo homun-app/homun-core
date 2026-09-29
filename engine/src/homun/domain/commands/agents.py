@@ -20,6 +20,8 @@ def _validate_connection_id(ctx: CommandContext, connection_id: str | None) -> s
     if ctx._known_connection_ids is not None:
         known = set(ctx._known_connection_ids())
         if cid not in known:
+            if ":" in cid and cid.split(":", 1)[0] in known:
+                return cid
             raise ValidationError(f"Unknown model connection: {cid}")
     return cid
 

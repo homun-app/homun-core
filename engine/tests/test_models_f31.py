@@ -159,3 +159,52 @@ def test_local_ollama_uses_native_chat_root() -> None:
         default_model="gpt-4o-mini",
     )
     assert remote._ollama_native_root() is None
+
+
+def test_provider_connection_upsert_and_pool_sync(tmp_path: Path) -> None:
+    db_path = tmp_path / "ws_sync.sqlite3"
+    ctx = create_context(workspace_id="ws_sync", db_path=db_path, data_dir=tmp_path, for_tests=True)
+    reset_context_for_tests(ctx)
+    with TestClient(create_app()) as client:
+        res = client.post(
+            "/v1/models/connections",
+            json={
+                "connection_id": "deepseek",
+                "kind": "openai_compatible",
+                "display_name": "DeepSeek",
+                "model_id": "deepseek-chat",
+                "api_key": "sk-deepseek-test-key-12345",
+                "base_url": "https://api.deepseek.com/v1",
+            },
+        )
+        assert res.status_code == 200, res.text
+        data = res.json()
+        assert data["id"] == "deepseek"
+        assert data["credential_present"] is True
+        assert data["model_id"] == "deepseek-chat"
+
+        # Verify provider list sees credential present
+        prov_res = client.get("/v1/models/providers")
+        assert prov_res.status_code == 200
+        providers = prov_res.json()["items"]
+        deepseek_prov = next((p for p in providers if p["id"] == "deepseek"), None)
+        assert deepseek_prov is not None
+        assert deepseek_prov["credential_present"] is True
+        assert deepseek_prov["default_model"] == "deepseek-chat"
+
+        # Verify credential was added to credential pool
+        cred_res = client.get("/v1/credentials/pool?provider=deepseek")
+        assert cred_res.status_code == 200
+        creds = cred_res.json()
+        assert len(creds) >= 1
+        assert creds[0]["provider"] == "deepseek"
+        assert creds[0]["is_available"] is True
+
+        # Verify endpoint accepts transient body
+        verify_res = client.post(
+            "/v1/models/providers/fake/verify",
+            json={"api_key": "override-key"},
+        )
+        assert verify_res.status_code == 200
+        assert verify_res.json()["ok"] is True
+    reset_context_for_tests(None)

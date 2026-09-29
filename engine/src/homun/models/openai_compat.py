@@ -68,6 +68,24 @@ class OpenAICompatibleProvider:
         key = self._secrets.get(f"provider:{self.provider_id}:api_key") or self._secrets.get(SECRET_KEY)
         if key:
             return key
+        try:
+            from homun.application.credential_pool import get_credential_pool
+            pool = get_credential_pool()
+            cred = pool.acquire_credential(self.provider_id)
+            if cred and cred.secret_value:
+                return cred.secret_value
+        except Exception:
+            pass
+        try:
+            from homun.application.provider_registry import get_provider_registry
+            prof = get_provider_registry().get_profile(self.provider_id)
+            if prof and prof.env_vars:
+                for ev in prof.env_vars:
+                    val = os.environ.get(ev)
+                    if val and val.strip():
+                        return val.strip()
+        except Exception:
+            pass
         # Local OpenAI-compatible gateways (e.g. Ollama) often need no real key.
         host = self.base_url.lower()
         if "127.0.0.1" in host or "localhost" in host:
@@ -90,8 +108,8 @@ class OpenAICompatibleProvider:
             return root
         return None
 
-    def verify_connection(self) -> VerifyResult:
-        api_key = self._api_key()
+    def verify_connection(self, *, api_key_override: str | None = None) -> VerifyResult:
+        api_key = api_key_override or self._api_key()
         if not api_key:
             return VerifyResult(
                 ok=False,
@@ -403,15 +421,19 @@ class OpenAICompatibleProvider:
 
     def _post_url(self, url: str, body: dict[str, Any], *, api_key: str) -> dict[str, Any]:
         data = json.dumps(body).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+        }
+        if "anthropic.com" in url:
+            headers["x-api-key"] = api_key
+            headers["anthropic-version"] = "2023-06-01"
         request = Request(
             url,
             data=data,
             method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-                "Accept": "application/json",
-            },
+            headers=headers,
         )
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:

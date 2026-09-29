@@ -28,6 +28,12 @@ class CredentialsRequest(BaseModel):
     default_model: str | None = None
 
 
+class VerifyProviderRequest(BaseModel):
+    api_key: str | None = None
+    base_url: str | None = None
+    model_id: str | None = None
+
+
 class ConnectionRequest(BaseModel):
     connection_id: str | None = None
     kind: ConnectionKind
@@ -190,9 +196,12 @@ def clear_openai_credentials() -> dict[str, Any]:
 
 
 @router.post("/providers/{provider_id}/verify")
-def verify_provider(provider_id: str) -> dict[str, Any]:
+def verify_provider(provider_id: str, body: VerifyProviderRequest | None = None) -> dict[str, Any]:
     ctx = get_context()
-    result = ctx.models.verify(provider_id)
+    api_key = body.api_key if body else None
+    base_url = body.base_url if body else None
+    model_id = body.model_id if body else None
+    result = ctx.models.verify(provider_id, api_key=api_key, base_url=base_url, model_id=model_id)
     status = 200 if result.ok else 503
     if not result.ok and "Unknown provider" in result.message:
         raise HTTPException(
