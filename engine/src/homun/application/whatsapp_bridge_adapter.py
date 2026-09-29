@@ -50,6 +50,13 @@ class WhatsAppBridgeAdapter(ChannelAdapter):
         msg = payload.get("message") or {}
         chat = str(msg.get("chat") or "")
         sender = str(msg.get("sender") or chat)
+        push_name = str(msg["push_name"]) if msg.get("push_name") else None
+        if msg.get("self_echo"):
+            # The self-chat companion echoed the owner's own note back: the
+            # conversation identity must be the human, not the system JID.
+            owner = msg.get("owner") or {}
+            sender = str(owner.get("jid") or owner.get("lid") or sender)
+            push_name = push_name or "note personali"
         is_group = bool(msg.get("is_group"))
         timestamp = _parse_timestamp(msg.get("timestamp"))
         return ChannelMessage(
@@ -57,7 +64,7 @@ class WhatsAppBridgeAdapter(ChannelAdapter):
             platform=self.platform,
             channel_id=chat,
             user_id=sender,
-            username=str(msg["push_name"]) if msg.get("push_name") else None,
+            username=push_name,
             text=str(msg.get("text") or ""),
             is_direct=not is_group,
             timestamp=timestamp,

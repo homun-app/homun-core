@@ -58,6 +58,27 @@ def test_parse_inbound_maps_bridge_callback(api):
     assert msg.is_direct is True
 
 
+def test_parse_inbound_attributes_self_echo_to_the_owner(api):
+    adapter = WhatsAppBridgeAdapter()
+    msg = adapter.parse_inbound({
+        "source": "wa-rs-bridge",
+        "message": {
+            "id": "msgid-2",
+            "chat": "10832041742478@lid",
+            "sender": "10832041742478@lid",
+            "push_name": "",
+            "is_group": False,
+            "text": "test",
+            "timestamp": "2026-09-29T12:01:00+00:00",
+            "self_echo": True,
+            "owner": {"jid": "393792345686:10@s.whatsapp.net", "lid": "205652345507984@lid"},
+        },
+    })
+    # The conversation identity is the human owner, not the system companion.
+    assert msg.user_id == "393792345686:10@s.whatsapp.net"
+    assert msg.channel_id == "10832041742478@lid"
+
+
 def test_send_failure_is_typed_when_bridge_unreachable():
     adapter = WhatsAppBridgeAdapter({"bridge_url": "http://127.0.0.1:59999"})
     result = adapter.send("393331234567", "ciao")
