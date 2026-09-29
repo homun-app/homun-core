@@ -58,6 +58,7 @@ export function ChannelQrModal({
 
   const pairingIdRef = useRef<string | null>(null);
   pairingIdRef.current = pairingId;
+  const lastWaQrRef = useRef<string | null>(null);
 
   // Helper to generate QR code data URL
   async function generateQr(link: string): Promise<string> {
@@ -97,6 +98,7 @@ export function ChannelQrModal({
     setError(null);
     setQrDataUrl(null);
     setOnboardingPhase("waiting");
+    lastWaQrRef.current = null;
     try {
       const res = await startWhatsAppOnboarding();
       setPairingId(res.pairing_id);
@@ -143,6 +145,7 @@ export function ChannelQrModal({
       setBotUsername(null);
       setOwnerUserId(null);
       setTokenInput("");
+      lastWaQrRef.current = null;
       return;
     }
 
@@ -229,10 +232,17 @@ export function ChannelQrModal({
             }
             return;
           }
-          // The sidecar may still be handshaking: show the QR as soon as it lands.
-          if (res.qr_payload && !qrDataUrl) {
+          // The sidecar may still be handshaking, or the engine may have
+          // recycled it for a fresh QR: track the payload we last rendered.
+          if (res.qr_payload && res.qr_payload !== lastWaQrRef.current) {
             const qr = await generateQr(res.qr_payload);
-            if (isMounted) setQrDataUrl(qr);
+            if (isMounted) {
+              lastWaQrRef.current = res.qr_payload;
+              setQrDataUrl(qr);
+            }
+          }
+          if (res.pair_error && isMounted) {
+            setError(`WhatsApp ha rifiutato il collegamento: ${res.pair_error}`);
           }
           timer = window.setTimeout(() => void poll(), 2000);
           return;

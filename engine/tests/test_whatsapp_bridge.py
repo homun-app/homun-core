@@ -134,3 +134,42 @@ def test_apply_before_ready_is_typed_400(api, monkeypatch):
     res = api.post(f"/v1/gateway/channels/whatsapp/onboarding/{pairing_id}/apply", json={})
     assert res.status_code == 400
     assert res.json()["detail"]["code"] == "pairing_not_ready"
+
+
+def test_stale_qr_recycles_the_bridge(api, monkeypatch):
+    from homun.application import whatsapp_bridge_process as supervisor
+
+    def stale_status(timeout=5.0):
+        return {
+            "ok": True, "paired": False, "jid": None, "logged_out": False,
+            "qr": {"payload": "2@old-expired-qr", "expires_at": "2020-01-01T00:00:00+00:00"},
+        }
+
+    monkeypatch.setattr(WhatsAppBridgeAdapter, "bridge_status", stale_status)
+    restarted = {"count": 0}
+
+    def fake_restart():
+        restarted["count"] += 1
+        return "spawned"
+
+    monkeypatch.setattr(supervisor, "restart_whatsapp_bridge", fake_restart)
+
+    start = api.post("/v1/gateway/channels/whatsapp/onboarding/start")
+    assert start.status_code == 200
+    # Start already recycles the stale sidecar, so the payload is fresh again
+    # via the monkeypatched status: the restart must have been requested.
+    assert restarted["count"] >= 1
+
+
+def test_pair_error_surfaces_in_status(api, monkeypatch):
+    def rejected(timeout=5.0):
+        payload = _status_payload(paired=False)
+        payload["last_pair_error"] = "device props rejected by server (platform 15)"
+        return payload
+
+    monkeypatch.setattr(WhatsAppBridgeAdapter, "bridge_status", rejected)
+    start = api.post("/v1/gateway/channels/whatsapp/onboarding/start")
+    pairing_id = start.json()["pairing_id"]
+    status = api.get(f"/v1/gateway/channels/whatsapp/onboarding/{pairing_id}")
+    assert status.status_code == 200
+    assert "device props rejected" in (status.json().get("pair_error") or "")

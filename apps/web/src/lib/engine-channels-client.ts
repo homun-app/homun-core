@@ -176,6 +176,7 @@ export type WhatsAppOnboardingStatusResponse = {
   jid?: string;
   qr_payload?: string | null;
   pair_code?: string | null;
+  pair_error?: string | null;
 };
 
 export async function startWhatsAppOnboarding(): Promise<WhatsAppOnboardingStartResponse> {

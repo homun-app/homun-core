@@ -520,20 +520,49 @@ def _whatsapp_bridge_adapter():
     return adapter if adapter is not None and hasattr(adapter, "bridge_status") else WhatsAppBridgeAdapter()
 
 
+async def _fresh_whatsapp_bridge_status(adapter):
+    """Bridge status with a non-expired QR, recycling our own sidecar.
+
+    The sidecar emits one QR per connection: when the payload is stale (or
+    absent while unpaired), the only way to hand back a scannable code is a
+    fresh connection. External bridges are reported as-is.
+    """
+    status = adapter.bridge_status()
+    if status is None or status.get("paired") or status.get("logged_out"):
+        return status
+    qr = status.get("qr") or {}
+    expires = _parse_iso_timestamp(qr.get("expires_at"))
+    if expires and expires > datetime.now(timezone.utc).timestamp() + 5:
+        return status
+    from homun.application.whatsapp_bridge_process import restart_whatsapp_bridge
+
+    await asyncio.to_thread(restart_whatsapp_bridge)
+    for _ in range(8):
+        refreshed = await asyncio.to_thread(adapter.bridge_status)
+        if refreshed is not None and (refreshed.get("paired") or (refreshed.get("qr") or {}).get("payload")):
+            return refreshed
+        await asyncio.sleep(0.75)
+    return await asyncio.to_thread(adapter.bridge_status)
+
+
+def _parse_iso_timestamp(value) -> Optional[float]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
 @router.post("/whatsapp/onboarding/start", response_model=Dict[str, Any])
 async def start_whatsapp_onboarding() -> Dict[str, Any]:
     from homun.application.whatsapp_bridge_process import ensure_whatsapp_bridge
 
     # Pairing precedes configuration: make sure the sidecar is up even when
-    # the channel is not enabled yet, giving it a moment to bind and emit QR.
+    # the channel is not enabled yet, with a fresh, non-expired QR.
     ensure_whatsapp_bridge(force=True, allow_unconfigured=True)
     adapter = _whatsapp_bridge_adapter()
-    status = None
-    for _ in range(8):
-        status = adapter.bridge_status()
-        if status is not None:
-            break
-        await asyncio.sleep(0.75)
+    status = await _fresh_whatsapp_bridge_status(adapter)
     if status is None:
         raise HTTPException(
             status_code=502,
@@ -584,7 +613,7 @@ async def get_whatsapp_onboarding_status(pairing_id: str) -> Dict[str, Any]:
                 detail={"code": "pairing_expired", "message": "Sessione di pairing WhatsApp scaduta."},
             )
 
-    status = _whatsapp_bridge_adapter().bridge_status()
+    status = await _fresh_whatsapp_bridge_status(_whatsapp_bridge_adapter())
     if status is None:
         return {"status": "waiting"}
     if status.get("paired"):
@@ -596,7 +625,10 @@ async def get_whatsapp_onboarding_status(pairing_id: str) -> Dict[str, Any]:
         return {"status": "ready", "jid": jid}
     qr_payload = (status.get("qr") or {}).get("payload")
     pair_code = (status.get("pair_code") or {}).get("code")
-    return {"status": "waiting", "qr_payload": qr_payload, "pair_code": pair_code}
+    payload: Dict[str, Any] = {"status": "waiting", "qr_payload": qr_payload, "pair_code": pair_code}
+    if status.get("last_pair_error"):
+        payload["pair_error"] = status["last_pair_error"]
+    return payload
 
 
 @router.post("/whatsapp/onboarding/{pairing_id}/apply", response_model=Dict[str, Any])

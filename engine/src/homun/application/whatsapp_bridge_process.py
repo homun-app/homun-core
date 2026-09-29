@@ -180,3 +180,17 @@ def stop_whatsapp_bridge() -> None:
         proc.kill()
         proc.wait(timeout=5)
     logger.info("stopped wa-rs-bridge (pid %s)", proc.pid)
+
+
+def restart_whatsapp_bridge() -> str:
+    """Recycle our own sidecar: pairing emits one QR per connection, so a new
+    connection is the way to hand the app a fresh, non-expired QR.
+
+    External bridges cannot be recycled; the caller keeps their stale status.
+    """
+    global _last_check
+    if _spawned is None:
+        return "external"
+    stop_whatsapp_bridge()
+    _last_check = 0.0
+    return ensure_whatsapp_bridge(force=True, allow_unconfigured=True) or "unknown"
