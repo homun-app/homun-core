@@ -208,3 +208,25 @@ def test_provider_connection_upsert_and_pool_sync(tmp_path: Path) -> None:
         assert verify_res.status_code == 200
         assert verify_res.json()["ok"] is True
     reset_context_for_tests(None)
+
+
+def test_ollama_preset_alias_resolves_saved_active_provider(tmp_path):
+    """Configs saved by the UI may say active "ollama"; the preset IS the
+    openai_compatible connection, and the registry must resolve the alias."""
+    import json
+
+    (tmp_path / "models.json").write_text(json.dumps({
+        "active_provider_id": "ollama",
+        "openai_compatible": {"base_url": "http://127.0.0.1:11434/v1", "default_model": "qwen3.5:4b"},
+    }), encoding="utf-8")
+    (tmp_path / "secrets.json").write_text(json.dumps({"provider:openai_compatible:api_key": "ollama"}), encoding="utf-8")
+    from homun.models.registry import build_default_registry
+    registry = build_default_registry(tmp_path)
+    provider = registry._get_provider(None)
+    assert provider is not None
+    assert provider.provider_id == "openai_compatible"
+    assert provider.base_url == "http://127.0.0.1:11434/v1"
+    # The user's model choice survives the alias, instead of the builtin
+    # profile default (llama3.2:latest) the saved active id would pick.
+    assert provider.default_model == "qwen3.5:4b"
+    assert registry._get_provider("ollama") is provider

@@ -345,6 +345,15 @@ class ModelRegistry:
 
     def _get_provider(self, pid: str | None) -> Any:
         target_id = pid or self.active_provider_id
+        # Preset alias: "ollama" may name the builtin profile or the user's
+        # openai_compatible connection pointed at local Ollama. Prefer the
+        # configured connection (its base_url and default_model are the
+        # user's choice); the builtin profile only serves when no such
+        # connection exists.
+        if target_id == "ollama" and "openai_compatible" in self._providers:
+            oc = self._providers["openai_compatible"]
+            if isinstance(oc, OpenAICompatibleProvider) and "11434" in (getattr(oc, "base_url", "") or ""):
+                return oc
         if target_id in self._providers:
             return self._providers[target_id]
         if target_id and ":" in target_id:
