@@ -1,4 +1,4 @@
-const { app, BrowserWindow, protocol, session, dialog, safeStorage } = require('electron');
+const { app, BrowserWindow, protocol, session, dialog, safeStorage, shell } = require('electron');
 const path = require('node:path');
 const { startEngine } = require('./engine-process.cjs');
 const { createProtocolHandler } = require('./protocol.cjs');
@@ -40,7 +40,12 @@ else app.whenReady().then(async () => {
   const window = new BrowserWindow({ width: 1380, height: 920, title: 'Homun',
     webPreferences: { session: isolated, preload: path.join(__dirname, 'preload.cjs'), sandbox: true,
       contextIsolation: true, nodeIntegration: false, webSecurity: true, webviewTag: false } });
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url) || url.startsWith('tg:') || url.startsWith('mailto:')) {
+      void shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
   window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('homun://app/')) event.preventDefault(); });
   window.webContents.on('will-attach-webview', event => event.preventDefault());
   engine.child.once('exit', () => { if (!stopping) window.setTitle('Homun — motore arrestato'); });
