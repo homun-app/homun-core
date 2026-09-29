@@ -1,12 +1,13 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   Search,
   Check,
   ExternalLink,
   QrCode,
-  ShieldCheck,
-  Send,
   AlertCircle,
+  Loader2,
+  Send,
+  Sparkles,
 } from "lucide-react";
 import { SettingsToggleSwitch } from "../SettingsToggleSwitch";
 import {
@@ -14,6 +15,13 @@ import {
   type ChannelDefinition,
   type ChannelStatus,
 } from "./messaging-data";
+import { ChannelBrandIcon } from "./ChannelBrandIcon";
+import { ChannelQrModal } from "./ChannelQrModal";
+import {
+  listEngineChannelPlatforms,
+  updateEngineChannelPlatform,
+  testEngineChannelPlatform,
+} from "../../../lib/engine-channels-client";
 import "./messaging-view.css";
 
 type SavedChannelConfig = {
@@ -39,8 +47,47 @@ export function MessagingView() {
     return savedConfigs[selectedChannelId]?.fields ?? {};
   });
   const [isSaved, setIsSaved] = useState(false);
-  const [testStatus, setTestStatus] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [testState, setTestState] = useState<{
+    status: "idle" | "testing" | "success" | "error";
+    message?: string;
+  }>({ status: "idle" });
   const [showQrModal, setShowQrModal] = useState(false);
+  const [qrModalTab, setQrModalTab] = useState<"homun_custom" | "quick_qr">("homun_custom");
+
+  // Sync with real engine gateway platforms
+  const loadEnginePlatforms = useCallback(async () => {
+    try {
+      const platforms = await listEngineChannelPlatforms();
+      if (platforms && platforms.length > 0) {
+        const merged: Record<string, SavedChannelConfig> = {};
+        for (const p of platforms) {
+          merged[p.id] = {
+            enabled: p.enabled,
+            fields: p.fields || {},
+          };
+        }
+        setSavedConfigs((prev) => {
+          const next = { ...prev, ...merged };
+          try {
+            localStorage.setItem("homun_messaging_channels_config", JSON.stringify(next));
+          } catch {
+            // ignore
+          }
+          return next;
+        });
+        if (merged[selectedChannelId]?.fields) {
+          setFormFields(merged[selectedChannelId].fields);
+        }
+      }
+    } catch {
+      // Backend engine offline or unreachable, retain cached state
+    }
+  }, [selectedChannelId]);
+
+  useEffect(() => {
+    loadEnginePlatforms();
+  }, [loadEnginePlatforms]);
 
   const selectedChannel = useMemo<ChannelDefinition>(() => {
     return (
@@ -53,21 +100,25 @@ export function MessagingView() {
     setSelectedChannelId(id);
     setFormFields(savedConfigs[id]?.fields ?? {});
     setIsSaved(false);
-    setTestStatus(null);
+    setTestState({ status: "idle" });
   }
 
   function handleFieldChange(fieldId: string, value: string) {
     setFormFields((prev) => ({ ...prev, [fieldId]: value }));
     setIsSaved(false);
+    if (testState.status !== "idle") {
+      setTestState({ status: "idle" });
+    }
   }
 
-  function handleToggleChannel(enabled: boolean) {
+  async function handleToggleChannel(enabled: boolean) {
+    const currentFields = formFields;
     setSavedConfigs((prev) => {
       const updated = {
         ...prev,
         [selectedChannelId]: {
           enabled,
-          fields: formFields,
+          fields: currentFields,
         },
       };
       try {
@@ -77,44 +128,85 @@ export function MessagingView() {
       }
       return updated;
     });
+
+    try {
+      await updateEngineChannelPlatform(selectedChannelId, {
+        enabled,
+        fields: currentFields,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setTestState({ status: "error", message: `Salvataggio stato fallito: ${msg}` });
+    }
   }
 
-  function handleSaveChanges(e: React.FormEvent) {
+  async function handleSaveChanges(e: React.FormEvent) {
     e.preventDefault();
-    setSavedConfigs((prev) => {
-      const isCurrentlyEnabled = prev[selectedChannelId]?.enabled ?? false;
-      const hasRequiredFilled = selectedChannel.fields
-        .filter((f) => f.required)
-        .every((f) => (formFields[f.id] || "").trim().length > 0);
+    setIsSaving(true);
+    const isCurrentlyEnabled = savedConfigs[selectedChannelId]?.enabled ?? false;
+    const hasRequiredFilled = selectedChannel.fields
+      .filter((f) => f.required)
+      .every((f) => (formFields[f.id] || "").trim().length > 0);
+    const newEnabled = isCurrentlyEnabled || hasRequiredFilled;
 
-      const updated = {
-        ...prev,
-        [selectedChannelId]: {
-          enabled: isCurrentlyEnabled || hasRequiredFilled,
-          fields: formFields,
-        },
-      };
-      try {
-        localStorage.setItem("homun_messaging_channels_config", JSON.stringify(updated));
-      } catch {
-        // ignore
-      }
-      return updated;
-    });
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 2500);
+    try {
+      await updateEngineChannelPlatform(selectedChannelId, {
+        enabled: newEnabled,
+        fields: formFields,
+      });
+      setSavedConfigs((prev) => {
+        const updated = {
+          ...prev,
+          [selectedChannelId]: {
+            enabled: newEnabled,
+            fields: formFields,
+          },
+        };
+        try {
+          localStorage.setItem("homun_messaging_channels_config", JSON.stringify(updated));
+        } catch {
+          // ignore
+        }
+        return updated;
+      });
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 2500);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setTestState({ status: "error", message: `Salvataggio fallito: ${msg}` });
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function handleTestConnection() {
-    setTestStatus("testing");
-    setTimeout(() => {
-      const hasToken = Object.values(formFields).some((v) => v.trim().length > 0);
-      if (hasToken) {
-        setTestStatus("success");
+  async function handleTestConnection() {
+    setTestState({ status: "testing" });
+    try {
+      const res = await testEngineChannelPlatform(selectedChannelId, formFields);
+      if (res.ok) {
+        setTestState({ status: "success", message: res.message });
       } else {
-        setTestStatus("missing_token");
+        setTestState({ status: "error", message: res.message });
       }
-    }, 600);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setTestState({ status: "error", message: `Impossibile contattare il motore: ${msg}` });
+    }
+  }
+
+  async function handleSaveTokenFromQr(newFields: Record<string, string>) {
+    setFormFields(newFields);
+    await updateEngineChannelPlatform(selectedChannelId, {
+      enabled: true,
+      fields: newFields,
+    });
+    setSavedConfigs((prev) => ({
+      ...prev,
+      [selectedChannelId]: {
+        enabled: true,
+        fields: newFields,
+      },
+    }));
   }
 
   const filteredChannels = useMemo(() => {
@@ -169,11 +261,8 @@ export function MessagingView() {
                 onClick={() => handleSelectChannel(ch.id)}
               >
                 <div className="msg-channel-row-left">
-                  <div
-                    className="msg-channel-icon-badge"
-                    style={{ backgroundColor: ch.iconColor }}
-                  >
-                    {ch.name[0]}
+                  <div className="msg-channel-icon-wrap">
+                    <ChannelBrandIcon channelId={ch.id} size={18} />
                   </div>
                   <span className="msg-channel-name">{ch.name}</span>
                 </div>
@@ -205,11 +294,8 @@ export function MessagingView() {
         <header className="msg-header">
           <div className="msg-header-top">
             <div className="msg-header-title-row">
-              <div
-                className="msg-header-icon"
-                style={{ backgroundColor: selectedChannel.iconColor }}
-              >
-                {selectedChannel.name[0]}
+              <div className="msg-header-icon">
+                <ChannelBrandIcon channelId={selectedChannel.id} size={32} />
               </div>
               <div>
                 <h3 className="msg-header-title">{selectedChannel.name}</h3>
@@ -240,24 +326,40 @@ export function MessagingView() {
         {/* Quick Setup Block */}
         {selectedChannel.quickSetupAvailable && (
           <section className="msg-section">
-            <span className="msg-section-label">Configurazione Rapida</span>
+            <span className="msg-section-label">Configurazione Rapida Bot</span>
             <div className="msg-quick-setup-card">
               <div className="msg-quick-setup-top">
-                <span>Configurazione con QR Code</span>
+                <Sparkles size={16} className="text-amber-500" />
+                <span>Configurazione Istantanea Bot</span>
                 <span className="msg-rec-pill">Consigliato</span>
               </div>
               <p className="msg-quick-setup-desc">
-                {selectedChannel.quickSetupLabel ??
-                  "Scansiona un codice QR e associa la sessione automaticamente."}
+                Inquadra il codice QR con l'app di Telegram sul tuo telefono: il tuo bot dedicato verrà creato e collegato a Homun in automatico, senza configurazione manuale.
               </p>
-              <button
-                type="button"
-                className="msg-qr-btn"
-                onClick={() => setShowQrModal(true)}
-              >
-                <QrCode size={15} />
-                <span>Crea con codice QR</span>
-              </button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="msg-qr-btn"
+                  onClick={() => {
+                    setQrModalTab("quick_qr");
+                    setShowQrModal(true);
+                  }}
+                >
+                  <QrCode size={14} />
+                  <span>Connetti con Codice QR</span>
+                </button>
+                <button
+                  type="button"
+                  className="msg-test-btn"
+                  onClick={() => {
+                    setQrModalTab("homun_custom");
+                    setShowQrModal(true);
+                  }}
+                >
+                  <Send size={14} />
+                  <span>Configura manualmente (BotFather)</span>
+                </button>
+              </div>
             </div>
           </section>
         )}
@@ -306,19 +408,22 @@ export function MessagingView() {
             </div>
           ))}
 
-          {testStatus === "testing" && (
-            <div style={{ fontSize: 13, color: "var(--color-muted-foreground)" }}>
-              Verifica della connessione in corso…
+          {testState.status === "testing" && (
+            <div className="msg-test-banner is-testing">
+              <Loader2 size={14} className="animate-spin" />
+              <span>Verifica connessione e validazione token in corso…</span>
             </div>
           )}
-          {testStatus === "success" && (
-            <div style={{ fontSize: 13, color: "#059669", display: "flex", alignItems: "center", gap: 6 }}>
-              <Check size={14} /> Credenziali e endpoint validati con successo.
+          {testState.status === "success" && (
+            <div className="msg-test-banner is-success">
+              <Check size={14} />
+              <span>{testState.message || "Credenziali e endpoint validati con successo dal motore."}</span>
             </div>
           )}
-          {testStatus === "missing_token" && (
-            <div style={{ fontSize: 13, color: "#ef4444", display: "flex", alignItems: "center", gap: 6 }}>
-              <AlertCircle size={14} /> Inserisci il token prima di testare la connessione.
+          {testState.status === "error" && (
+            <div className="msg-test-banner is-error">
+              <AlertCircle size={14} />
+              <span>{testState.message || "Errore di connessione o token non valido."}</span>
             </div>
           )}
 
@@ -326,19 +431,33 @@ export function MessagingView() {
             <button
               type="button"
               className="msg-test-btn"
+              disabled={testState.status === "testing"}
               onClick={handleTestConnection}
             >
-              Verifica connessione
+              {testState.status === "testing" ? (
+                <>
+                  <Loader2 size={13} className="animate-spin" />
+                  <span>Verifica in corso…</span>
+                </>
+              ) : (
+                <span>Verifica connessione</span>
+              )}
             </button>
 
             <button
               type="submit"
+              disabled={isSaving}
               className={`msg-save-btn ${isSaved ? "is-saved" : ""}`}
             >
               {isSaved ? (
                 <>
                   <Check size={14} />
                   <span>Salvato</span>
+                </>
+              ) : isSaving ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Salvataggio…</span>
                 </>
               ) : (
                 <span>Salva modifiche</span>
@@ -348,64 +467,16 @@ export function MessagingView() {
         </form>
       </main>
 
-      {/* QR Code Modal dialog */}
-      {showQrModal && (
-        <dialog
-          open
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowQrModal(false);
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: "#ffffff",
-              borderRadius: "12px",
-              padding: "24px",
-              maxWidth: "380px",
-              width: "100%",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "16px",
-              boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
-            }}
-          >
-            <h4 style={{ margin: 0, fontSize: "16px", fontWeight: 600 }}>
-              Accoppiamento {selectedChannel.name}
-            </h4>
-            <div
-              style={{
-                width: "180px",
-                height: "180px",
-                backgroundColor: "#f8fafc",
-                border: "1px dashed var(--color-border)",
-                borderRadius: "8px",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                color: "var(--color-muted-foreground)",
-              }}
-            >
-              <QrCode size={48} />
-              <span style={{ fontSize: "11px", fontWeight: 500 }}>Codice QR d'esempio</span>
-            </div>
-            <p style={{ margin: 0, fontSize: "12.5px", color: "var(--color-muted-foreground)", textAlign: "center" }}>
-              Inquadra questo codice dall'app {selectedChannel.name} per registrare l'identità della sessione.
-            </p>
-            <button
-              type="button"
-              className="msg-save-btn"
-              style={{ width: "100%", justifyContent: "center" }}
-              onClick={() => setShowQrModal(false)}
-            >
-              Chiudi
-            </button>
-          </div>
-        </dialog>
-      )}
+      {/* Real QR Code Modal */}
+      <ChannelQrModal
+        isOpen={showQrModal}
+        onClose={() => setShowQrModal(false)}
+        channelId={selectedChannel.id}
+        channelName={selectedChannel.name}
+        currentFields={formFields}
+        initialTab={qrModalTab}
+        onSaveTokenAndFields={handleSaveTokenFromQr}
+      />
     </div>
   );
 }
