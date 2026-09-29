@@ -32,6 +32,13 @@ from homun.application.channel_adapters_protocols import (
     SimplexAdapter,
     SmsAdapter,
 )
+# WhatsApp cloud + bridge adapters live in whatsapp_bridge_adapter; the
+# WhatsAppAdapter name stays importable from here for existing callers.
+from homun.application.whatsapp_bridge_adapter import (
+    WhatsAppAdapter,
+    WhatsAppBridgeAdapter,
+    WhatsAppCloudApiAdapter,
+)  # noqa: F401 -- WhatsAppAdapter re-exported for backward compatibility
 from homun.application.channel_adapters_catalog import (
     DingTalkAdapter,
     FeishuChannelAdapter,
@@ -358,112 +365,6 @@ class SlackAdapter(ChannelAdapter):
             )
 
 
-class WhatsAppAdapter(ChannelAdapter):
-    """WhatsApp Cloud API adapter."""
-
-    platform = "whatsapp"
-
-    def parse_inbound(self, payload: Dict[str, Any]) -> ChannelMessage:
-        entry = (payload.get("entry") or [{}])[0]
-        changes = (entry.get("changes") or [{}])[0]
-        val = changes.get("value") or {}
-        msg = (val.get("messages") or [{}])[0]
-
-        from_number = str(msg.get("from") or "")
-        text_obj = msg.get("text") or {}
-        text = str(text_obj.get("body") or "")
-
-        return ChannelMessage(
-            id=str(msg.get("id") or uuid.uuid4().hex[:8]),
-            platform=self.platform,
-            channel_id=from_number,
-            user_id=from_number,
-            text=text,
-            is_direct=True,
-            timestamp=float(msg.get("timestamp") or time.time()),
-        )
-
-    def send(
-        self,
-        channel_id: str,
-        text: str,
-        *,
-        thread_id: Optional[str] = None,
-        reply_to_id: Optional[str] = None,
-        media: Optional[List[ChannelMedia]] = None,
-    ) -> Dict[str, Any]:
-        token = _token_from(
-            self.config,
-            "WHATSAPP_TOKEN",
-            "HOMUN_WHATSAPP_TOKEN",
-            "WHATSAPP_ACCESS_TOKEN",
-        )
-        phone_number_id = str(
-            self.config.get("phone_number_id")
-            or os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
-            or os.environ.get("HOMUN_WHATSAPP_PHONE_NUMBER_ID")
-            or ""
-        ).strip()
-        if not token or not phone_number_id:
-            return super().send(
-                channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media
-            )
-        version = str(self.config.get("api_version") or "v21.0")
-        url = f"https://graph.facebook.com/{version}/{phone_number_id}/messages"
-        payload: Dict[str, Any] = {
-            "messaging_product": "whatsapp",
-            "to": channel_id,
-            "type": "text",
-            "text": {"body": text},
-        }
-        if reply_to_id:
-            payload["context"] = {"message_id": reply_to_id}
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        try:
-            with httpx.Client(timeout=float(self.config.get("timeout") or 15.0)) as client:
-                resp = client.post(url, json=payload, headers=headers)
-            data = resp.json() if resp.content else {}
-            if resp.status_code >= 400:
-                return _http_delivery_result(
-                    platform=self.platform,
-                    channel_id=channel_id,
-                    text=text,
-                    thread_id=thread_id,
-                    reply_to_id=reply_to_id,
-                    media=media,
-                    delivered=False,
-                    error=f"WhatsApp API HTTP {resp.status_code}",
-                    status_code=resp.status_code,
-                )
-            msg_id = None
-            if isinstance(data, dict):
-                messages = data.get("messages") or []
-                if messages and isinstance(messages[0], dict):
-                    msg_id = messages[0].get("id")
-            return _http_delivery_result(
-                platform=self.platform,
-                channel_id=channel_id,
-                text=text,
-                thread_id=thread_id,
-                reply_to_id=reply_to_id,
-                media=media,
-                delivered=True,
-                status_code=resp.status_code,
-                extra={"provider_message_id": msg_id},
-            )
-        except Exception as exc:
-            return _http_delivery_result(
-                platform=self.platform,
-                channel_id=channel_id,
-                text=text,
-                thread_id=thread_id,
-                reply_to_id=reply_to_id,
-                media=media,
-                delivered=False,
-                error=str(exc),
-            )
-
-
 class WebhookRelayAdapter(ChannelAdapter):
     """Generic outbound webhook relay."""
 
@@ -706,7 +607,8 @@ class ChannelRegistry:
         self.inbound_queue = inbound_queue
         self.delivery_supervisor = delivery_supervisor
         core: List[ChannelAdapter] = [
-            TelegramAdapter(), DiscordAdapter(), SlackAdapter(), WhatsAppAdapter(),
+            TelegramAdapter(), DiscordAdapter(), SlackAdapter(),
+            WhatsAppBridgeAdapter(), WhatsAppCloudApiAdapter(),
             WebhookRelayAdapter(), NtfyAdapter(), MatrixAdapter(), EmailAdapter(),
             SignalAdapter(), IrcAdapter(), FeishuChannelAdapter(), MattermostAdapter(),
             GoogleChatAdapter(), DingTalkAdapter(), WeComAdapter(), LineAdapter(),

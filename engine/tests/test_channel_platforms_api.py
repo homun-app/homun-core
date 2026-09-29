@@ -5,16 +5,23 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from homun.routes.channel_ingress_api import router
+from homun.context import create_context, reset_context_for_tests
+from homun.routes.channel_ingress_api import reset_channel_registry, router
 
 
 @pytest.fixture
-def api_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOMUN_DATA_DIR", str(tmp_path))
+def api_client(tmp_path):
+    # The routes resolve data_dir through get_context(); without an explicit
+    # isolated context they would touch the real engine data directory.
+    ctx = create_context(db_path=tmp_path / "ws.db", data_dir=tmp_path, for_tests=True)
+    reset_context_for_tests(ctx)
+    reset_channel_registry()
     app = FastAPI()
     app.include_router(router)
     with TestClient(app) as client:
         yield client
+    reset_channel_registry()
+    reset_context_for_tests(None)
 
 
 def test_channel_platforms_lifecycle(api_client):

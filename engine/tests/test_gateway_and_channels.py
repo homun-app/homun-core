@@ -21,6 +21,7 @@ from homun.application.channel_adapters import (
     TelegramAdapter,
     WebhookRelayAdapter,
     WhatsAppAdapter,
+    WhatsAppCloudApiAdapter,
 )
 from homun.application.gateway_contracts import (
     ChannelMedia,
@@ -328,7 +329,7 @@ def test_slack_adapter():
 
 
 def test_whatsapp_adapter():
-    adapter = WhatsAppAdapter()
+    adapter = WhatsAppCloudApiAdapter()
     payload = {
         "entry": [
             {
@@ -350,7 +351,7 @@ def test_whatsapp_adapter():
         ]
     }
     msg = adapter.parse_inbound(payload)
-    assert msg.platform == "whatsapp"
+    assert msg.platform == "whatsapp_cloud"
     assert msg.channel_id == "+393331234567"
     assert msg.user_id == "+393331234567"
     assert msg.text == "Ciao Homun"
@@ -563,7 +564,7 @@ def test_telegram_send_posts_when_token_configured(monkeypatch):
             calls.append({"url": url, "json": json, "headers": headers})
             return _Resp()
 
-    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", _Client)
+    monkeypatch.setattr("homun.application.whatsapp_bridge_adapter.httpx.Client", _Client)
     adapter = TelegramAdapter(config={"bot_token": "tg-test-token"})
     out = adapter.send("888123", "hello tg", reply_to_id="10")
     assert out["delivered"] is True
@@ -595,7 +596,7 @@ def test_discord_send_posts_when_token_configured(monkeypatch):
             calls.append({"url": url, "json": json, "headers": headers})
             return _Resp()
 
-    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", _Client)
+    monkeypatch.setattr("homun.application.whatsapp_bridge_adapter.httpx.Client", _Client)
     adapter = DiscordAdapter(config={"bot_token": "dsc-test-token"})
     out = adapter.send("chan_444", "hello dsc", reply_to_id="msg_1")
     assert out["delivered"] is True
@@ -628,7 +629,7 @@ def test_slack_send_posts_when_token_configured(monkeypatch):
             calls.append({"url": url, "json": json, "headers": headers})
             return _Resp()
 
-    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", _Client)
+    monkeypatch.setattr("homun.application.whatsapp_bridge_adapter.httpx.Client", _Client)
     adapter = SlackAdapter(config={"bot_token": "xoxb-test"})
     out = adapter.send("C123", "hello slack", thread_id="1.0")
     assert out["delivered"] is True
@@ -659,7 +660,7 @@ def test_ntfy_send_posts_when_configured(monkeypatch):
             calls.append({"url": url, "content": content, "headers": headers})
             return _Resp()
 
-    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", _Client)
+    monkeypatch.setattr("homun.application.whatsapp_bridge_adapter.httpx.Client", _Client)
     from homun.application.channel_adapters import NtfyAdapter
 
     out = NtfyAdapter(config={"server": "https://ntfy.example"}).send("homun-test", "ping")
@@ -699,8 +700,8 @@ def test_whatsapp_send_posts_when_token_configured(monkeypatch):
             calls.append({"url": url, "json": json, "headers": headers})
             return _Resp()
 
-    monkeypatch.setattr("homun.application.channel_adapters.httpx.Client", _Client)
-    adapter = WhatsAppAdapter(
+    monkeypatch.setattr("homun.application.whatsapp_bridge_adapter.httpx.Client", _Client)
+    adapter = WhatsAppCloudApiAdapter(
         config={"bot_token": "wa-token", "phone_number_id": "pnid_1"}
     )
     out = adapter.send("15551234567", "hello wa")

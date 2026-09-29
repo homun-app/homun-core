@@ -1,9 +1,11 @@
 from pathlib import Path
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import os
 import threading
 import time
+import uuid
 import httpx
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -180,7 +182,7 @@ def delete_channel_platform(platform_id: str) -> Dict[str, Any]:
 
 
 KNOWN_PLATFORMS = {
-    "telegram", "discord", "slack", "whatsapp", "signal", "matrix",
+    "telegram", "discord", "slack", "whatsapp", "whatsapp_cloud", "signal", "matrix",
     "mattermost", "bluebubbles", "homeassistant", "email", "sms",
     "googlechat", "dingtalk", "feishu", "wecom", "qqbot", "yuanbao", "irc"
 }
@@ -279,6 +281,20 @@ def test_channel_platform(platform_id: str, body: Optional[PlatformTestRequest] 
             return {"ok": False, "message": f"Impossibile raggiungere Matrix: {exc}"}
 
     elif plat == "whatsapp":
+        # Personal-account path: the local wa-rs-bridge sidecar owns the session.
+        adapter = get_channel_registry().get_adapter("whatsapp")
+        if adapter is None or not hasattr(adapter, "bridge_status"):
+            return {"ok": False, "message": "Adattatore WhatsApp bridge non registrato nel motore."}
+        status = adapter.bridge_status()
+        if status is None:
+            return {"ok": False, "message": f"wa-rs-bridge non raggiungibile su {adapter.bridge_url()}. Avvia il sidecar e riprova."}
+        if status.get("logged_out"):
+            return {"ok": False, "message": "La sessione WhatsApp è stata scollegata da questo telefono. Riavvia il pairing."}
+        if status.get("paired"):
+            return {"ok": True, "message": f"Sessione WhatsApp attiva ({status.get('jid')})."}
+        return {"ok": False, "message": "Bridge raggiungibile ma nessuna sessione collegata: completa il pairing dal QR."}
+
+    elif plat == "whatsapp_cloud":
         token = fields.get("api_token") or os.environ.get("WHATSAPP_API_TOKEN")
         phone_id = fields.get("phone_number_id") or os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
         if not token or not phone_id:
@@ -483,6 +499,127 @@ def apply_telegram_onboarding(pairing_id: str, body: Optional[TelegramOnboarding
 def cancel_telegram_onboarding(pairing_id: str) -> Dict[str, Any]:
     with _telegram_onboarding_lock:
         _telegram_onboarding_pairings.pop(pairing_id, None)
+    return {"ok": True}
+
+
+# ── WhatsApp Bridge QR Pairing ────────────────────────────────────────
+# The wa-rs-bridge sidecar pairs autonomously at boot; these endpoints
+# surface its live QR/status to the app and persist the channel config.
+
+_whatsapp_pairings: Dict[str, Dict[str, Any]] = {}
+_whatsapp_pairings_lock = threading.RLock()
+
+_WHATSAPP_PAIRING_WINDOW_SECONDS = 1800.0
+
+
+def _whatsapp_bridge_adapter():
+    from homun.application.whatsapp_bridge_adapter import WhatsAppBridgeAdapter
+
+    adapter = get_channel_registry().get_adapter("whatsapp")
+    return adapter if adapter is not None and hasattr(adapter, "bridge_status") else WhatsAppBridgeAdapter()
+
+
+@router.post("/whatsapp/onboarding/start", response_model=Dict[str, Any])
+async def start_whatsapp_onboarding() -> Dict[str, Any]:
+    adapter = _whatsapp_bridge_adapter()
+    status = adapter.bridge_status()
+    if status is None:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "bridge_unreachable",
+                    "message": f"wa-rs-bridge non raggiungibile su {adapter.bridge_url()}. Avvia il sidecar (wa-rs-bridge)."},
+        )
+    pairing_id = uuid.uuid4().hex[:16]
+    record: Dict[str, Any] = {"created_ts": time.time(), "jid": None}
+    qr_payload = None
+    pair_code = None
+    if status.get("paired"):
+        record["jid"] = status.get("jid")
+    else:
+        qr_payload = (status.get("qr") or {}).get("payload")
+        pair_code = (status.get("pair_code") or {}).get("code")
+    with _whatsapp_pairings_lock:
+        expired = [k for k, v in _whatsapp_pairings.items()
+                   if time.time() - v["created_ts"] > _WHATSAPP_PAIRING_WINDOW_SECONDS]
+        for k in expired:
+            _whatsapp_pairings.pop(k, None)
+        _whatsapp_pairings[pairing_id] = record
+    return {
+        "pairing_id": pairing_id,
+        "paired": bool(status.get("paired")),
+        "qr_payload": qr_payload,
+        "pair_code": pair_code,
+        "expires_at": datetime.fromtimestamp(
+            record["created_ts"] + _WHATSAPP_PAIRING_WINDOW_SECONDS, tz=timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.get("/whatsapp/onboarding/{pairing_id}", response_model=Dict[str, Any])
+async def get_whatsapp_onboarding_status(pairing_id: str) -> Dict[str, Any]:
+    with _whatsapp_pairings_lock:
+        record = _whatsapp_pairings.get(pairing_id)
+        if not record:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "pairing_not_found", "message": "Sessione di pairing WhatsApp non trovata."},
+            )
+        if record.get("jid"):
+            return {"status": "ready", "jid": record["jid"]}
+        if time.time() - record["created_ts"] > _WHATSAPP_PAIRING_WINDOW_SECONDS:
+            _whatsapp_pairings.pop(pairing_id, None)
+            raise HTTPException(
+                status_code=410,
+                detail={"code": "pairing_expired", "message": "Sessione di pairing WhatsApp scaduta."},
+            )
+
+    status = _whatsapp_bridge_adapter().bridge_status()
+    if status is None:
+        return {"status": "waiting"}
+    if status.get("paired"):
+        jid = status.get("jid")
+        with _whatsapp_pairings_lock:
+            record = _whatsapp_pairings.get(pairing_id)
+            if record is not None:
+                record["jid"] = jid
+        return {"status": "ready", "jid": jid}
+    qr_payload = (status.get("qr") or {}).get("payload")
+    pair_code = (status.get("pair_code") or {}).get("code")
+    return {"status": "waiting", "qr_payload": qr_payload, "pair_code": pair_code}
+
+
+@router.post("/whatsapp/onboarding/{pairing_id}/apply", response_model=Dict[str, Any])
+def apply_whatsapp_onboarding(pairing_id: str, body: Optional[TelegramOnboardingApply] = None) -> Dict[str, Any]:
+    with _whatsapp_pairings_lock:
+        record = _whatsapp_pairings.get(pairing_id)
+        if not record or not record.get("jid"):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "pairing_not_ready", "message": "La sessione WhatsApp non è ancora collegata."},
+            )
+        jid = record["jid"]
+        _whatsapp_pairings.pop(pairing_id, None)
+
+    saved = _load_channels_config()
+    current = saved.get("whatsapp") or {"enabled": False, "fields": {}}
+    fields = dict(current.get("fields") or {})
+    # Default authorization: the paired account itself, so "message yourself"
+    # works out of the box; additional JIDs/numbers can be added in the UI.
+    allowed = body.allowed_user_ids if body and body.allowed_user_ids else ([jid] if jid else [])
+    if allowed:
+        fields["allowed_user_ids"] = ", ".join(str(u).strip() for u in allowed if str(u).strip())
+    current["enabled"] = True
+    current["fields"] = fields
+    saved["whatsapp"] = current
+    _save_channels_config(saved)
+    _apply_channel_to_adapter("whatsapp", current)
+    return {"ok": True, "platform": "whatsapp", "jid": jid, "enabled": True, "fields": fields}
+
+
+@router.delete("/whatsapp/onboarding/{pairing_id}", response_model=Dict[str, Any])
+def cancel_whatsapp_onboarding(pairing_id: str) -> Dict[str, Any]:
+    with _whatsapp_pairings_lock:
+        _whatsapp_pairings.pop(pairing_id, None)
     return {"ok": True}
 
 

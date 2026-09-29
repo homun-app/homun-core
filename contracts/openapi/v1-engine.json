@@ -11992,6 +11992,176 @@
         ]
       }
     },
+    "/v1/gateway/channels/whatsapp/onboarding/start": {
+      "post": {
+        "operationId": "start_whatsapp_onboarding_v1_gateway_channels_whatsapp_onboarding_start_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Start Whatsapp Onboarding V1 Gateway Channels Whatsapp Onboarding Start Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Start Whatsapp Onboarding",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
+    "/v1/gateway/channels/whatsapp/onboarding/{pairing_id}": {
+      "delete": {
+        "operationId": "cancel_whatsapp_onboarding_v1_gateway_channels_whatsapp_onboarding__pairing_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pairing_id",
+            "required": true,
+            "schema": {
+              "title": "Pairing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancel Whatsapp Onboarding V1 Gateway Channels Whatsapp Onboarding  Pairing Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Whatsapp Onboarding",
+        "tags": [
+          "gateway_channels"
+        ]
+      },
+      "get": {
+        "operationId": "get_whatsapp_onboarding_status_v1_gateway_channels_whatsapp_onboarding__pairing_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pairing_id",
+            "required": true,
+            "schema": {
+              "title": "Pairing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Whatsapp Onboarding Status V1 Gateway Channels Whatsapp Onboarding  Pairing Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Whatsapp Onboarding Status",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
+    "/v1/gateway/channels/whatsapp/onboarding/{pairing_id}/apply": {
+      "post": {
+        "operationId": "apply_whatsapp_onboarding_v1_gateway_channels_whatsapp_onboarding__pairing_id__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pairing_id",
+            "required": true,
+            "schema": {
+              "title": "Pairing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TelegramOnboardingApply"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Apply Whatsapp Onboarding V1 Gateway Channels Whatsapp Onboarding  Pairing Id  Apply Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Whatsapp Onboarding",
+        "tags": [
+          "gateway_channels"
+        ]
+      }
+    },
     "/v1/gateway/channels/{platform}/inbound": {
       "post": {
         "description": "Ingress webhook for messaging platforms: persists to queue, checks pairing, leases turn, and delivers response.",
