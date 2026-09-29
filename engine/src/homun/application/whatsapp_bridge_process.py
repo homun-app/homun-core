@@ -9,6 +9,10 @@ custom settings and the engine simply uses it.
 
 Binary resolution order: HOMUN_WHATSAPP_BRIDGE_BIN env, the channel's
 ``bridge_binary`` field, the interpreter's bin directory (venv or bundle), PATH.
+
+macOS note: an unsigned arm64 binary spawned from a GUI-owned process is
+killed silently at exec; installs and packaging must give wa-rs-bridge at
+least an ad-hoc signature (``codesign -s - wa-rs-bridge``).
 """
 from __future__ import annotations
 
@@ -100,8 +104,12 @@ def ensure_whatsapp_bridge(force: bool = False, allow_unconfigured: bool = False
     _last_check = now
 
     cfg = _load_whatsapp_config()
-    if not cfg.get("enabled") and not allow_unconfigured:
-        return "disabled"
+    if not cfg.get("enabled"):
+        if not allow_unconfigured:
+            # Disabling the channel must not leave our own sidecar running.
+            if _spawned is not None and _spawned.poll() is None:
+                stop_whatsapp_bridge()
+            return "disabled"
 
     fields = cfg.get("fields") or {}
     port = _bridge_port(fields)
