@@ -659,3 +659,13 @@
   flex-shrink: 0;
   margin-top: 1px;
 }
+
+.msg-disconnect-btn {
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.35);
+}
+
+.msg-disconnect-btn:hover {
+  background: rgba(185, 28, 28, 0.06);
+  border-color: rgba(185, 28, 28, 0.5);
+}

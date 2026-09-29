@@ -20,6 +20,7 @@ import { ChannelQrModal } from "./ChannelQrModal";
 import {
   listEngineChannelPlatforms,
   updateEngineChannelPlatform,
+  deleteEngineChannelPlatform,
   testEngineChannelPlatform,
 } from "../../../lib/engine-channels-client";
 import "./messaging-view.css";
@@ -137,6 +138,27 @@ export function MessagingView() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setTestState({ status: "error", message: `Salvataggio stato fallito: ${msg}` });
+    }
+  }
+
+  async function handleDisconnectChannel() {
+    try {
+      await deleteEngineChannelPlatform(selectedChannelId);
+      setSavedConfigs((prev) => {
+        const next = { ...prev };
+        delete next[selectedChannelId];
+        try {
+          localStorage.setItem("homun_messaging_channels_config", JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+      setFormFields({});
+      setTestState({ status: "idle" });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setTestState({ status: "error", message: `Rimozione canale fallita: ${msg}` });
     }
   }
 
@@ -301,6 +323,18 @@ export function MessagingView() {
                 <h3 className="msg-header-title">{selectedChannel.name}</h3>
               </div>
             </div>
+
+            {(savedConfigs[selectedChannel.id]?.enabled ||
+              Object.values(savedConfigs[selectedChannel.id]?.fields ?? {}).some((v) => v.trim())) && (
+              <button
+                type="button"
+                className="msg-test-btn msg-disconnect-btn"
+                onClick={handleDisconnectChannel}
+                title="Rimuove la configurazione salvata del canale dal motore"
+              >
+                Scollega
+              </button>
+            )}
 
             <SettingsToggleSwitch
               checked={savedConfigs[selectedChannel.id]?.enabled ?? false}

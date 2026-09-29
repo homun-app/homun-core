@@ -66,6 +66,19 @@ export async function updateEngineChannelPlatform(
   return res.json();
 }
 
+export async function deleteEngineChannelPlatform(
+  platformId: string,
+): Promise<{ ok: boolean; platform: string }> {
+  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/platforms/${encodeURIComponent(platformId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.detail?.message || err?.detail || `Errore rimozione canale (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
 export async function testEngineChannelPlatform(
   platformId: string,
   fields?: Record<string, string>,
