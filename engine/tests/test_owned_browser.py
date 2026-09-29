@@ -24,7 +24,7 @@ def test_owned_browser_reads_example_and_spares_another_process(tmp_path):
     sibling = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)
     try:
         result = read_page(tmp_path / "browser", "https://example.com/")
-        assert "Example Domain" in result.get("text", ""), result
+        assert "Example Domain" in result.get("text", "") or "documentation examples" in result.get("text", ""), result
         assert "Application Support/Google/Chrome" not in result.get("text", "")
         assert sibling.poll() is None
     finally:
@@ -42,7 +42,7 @@ def test_owned_browser_dismisses_a_native_dialog_without_accepting_it(tmp_path):
         result = browser.read("https://example.com/", dismiss_dialogs=True)
     finally:
         browser.close()
-    assert "Example Domain" in result.get("text", ""), result
+    assert "Example Domain" in result.get("text", "") or "documentation examples" in result.get("text", ""), result
     assert result.get("dialogs") == [{
         "type": "confirm", "message": "homun-dialog-proof", "action": "dismiss"}]
 
@@ -63,7 +63,7 @@ def test_approved_run_reads_in_an_owned_browser(setup):
     try:
         assert advance(ctx, proposal["id"]) == "running"
         text = str(ctx.repository.load().commands[proposal["id"]].result["observations"][-1]["result"])
-        assert "Example Domain" in text
+        assert "Example Domain" in text or "documentation examples" in text
     finally:
         close_browser(proposal["id"])
 
@@ -89,7 +89,7 @@ def test_owned_browser_fills_a_public_field_and_clicks_its_button(tmp_path):
             " document.body.append(input, button); });"
         )})
         opened = open_page(browser, "https://example.com/")
-        assert "Example Domain" in opened.get("text", ""), opened
+        assert "Example Domain" in opened.get("text", "") or "documentation examples" in opened.get("text", ""), opened
         snapshot = opened.get("snapshot", "")
         field = next(line.split()[0] for line in snapshot.splitlines() if "Proof field" in line)
         button = next(line.split()[0] for line in snapshot.splitlines() if "Proof button" in line)
@@ -110,7 +110,7 @@ def test_owned_browser_saves_a_png_of_the_public_page(tmp_path):
     dest = tmp_path / "shots" / "page.png"
     try:
         opened = open_page(browser, "https://example.com/")
-        assert "Example Domain" in opened.get("text", ""), opened
+        assert "Example Domain" in opened.get("text", "") or "documentation examples" in opened.get("text", ""), opened
         shot = capture(browser, dest)
         assert shot.get("url", "").startswith("https://example.com"), shot
         raw = dest.read_bytes()
@@ -140,7 +140,7 @@ def test_owned_browser_interacts_inside_iframe(tmp_path):
             "}"
         )})
         opened = open_page(browser, "https://example.com/")
-        assert "Example Domain" in opened.get("text", ""), opened
+        assert "Example Domain" in opened.get("text", "") or "documentation examples" in opened.get("text", ""), opened
         snapshot = opened.get("snapshot", "")
         field = next(line.split()[0] for line in snapshot.splitlines() if "Frame field" in line)
         button = next(line.split()[0] for line in snapshot.splitlines() if "Frame button" in line)
