@@ -100,6 +100,19 @@ def _agent_create(ctx: CommandContext, actor: Actor, command_id: str, payload: d
     name = str(payload.get("name", "")).strip()
     if not name:
         raise ValidationError("Agent name is required")
+    clash = next(
+        (
+            agent
+            for agent in ctx.store.agents.values()
+            if agent.name.casefold() == name.casefold() and agent.status != "retired"
+        ),
+        None,
+    )
+    if clash is not None and not payload.get("allow_duplicate_name"):
+        raise ValidationError(
+            f"An agent named '{name}' already exists ({clash.id}); "
+            "reuse it with agent.update or pass allow_duplicate_name to create anyway"
+        )
     connection_id = _validate_connection_id(ctx, payload.get("preferred_connection_id"))
     fallback_connection_id = _validate_connection_id(ctx, payload.get("fallback_connection_id"))
     avatar_raw = payload.get("avatar")

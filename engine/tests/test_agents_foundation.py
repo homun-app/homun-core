@@ -63,6 +63,39 @@ def test_agent_create_rejects_unknown_connection(
         )
 
 
+def test_agent_create_rejects_duplicate_name(
+    service_with_connections: tuple[DomainService, Actor],
+) -> None:
+    service, actor = service_with_connections
+    created = service.apply(actor, "cmd_dup_1", "agent.create", {"name": "Menta"})
+    with pytest.raises(ValidationError, match="already exists"):
+        service.apply(actor, "cmd_dup_2", "agent.create", {"name": "Menta"})
+    with pytest.raises(ValidationError, match="already exists"):
+        service.apply(actor, "cmd_dup_3", "agent.create", {"name": "  menta "})
+    forced = service.apply(
+        actor,
+        "cmd_dup_4",
+        "agent.create",
+        {"name": "Menta", "allow_duplicate_name": True},
+    )
+    assert forced["agent_id"] != created["agent_id"]
+
+
+def test_agent_create_allows_name_reuse_after_retirement(
+    service_with_connections: tuple[DomainService, Actor],
+) -> None:
+    service, actor = service_with_connections
+    created = service.apply(actor, "cmd_ret_1", "agent.create", {"name": "Menta"})
+    service.apply(
+        actor,
+        "cmd_ret_2",
+        "agent.update",
+        {"agent_id": created["agent_id"], "expected_version": 1, "status": "retired"},
+    )
+    reborn = service.apply(actor, "cmd_ret_3", "agent.create", {"name": "Menta"})
+    assert reborn["agent_id"] != created["agent_id"]
+
+
 def test_agent_update_bumps_revision(
     service_with_connections: tuple[DomainService, Actor],
 ) -> None:
