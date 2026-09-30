@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
-import { listEngineSkills, type Skill } from "@/lib/engine-mcp-client";
-import { listEngineChannelPlatforms, type ChannelPlatformInfo } from "@/lib/engine-channels-client";
-import { listEnginePlugins, type EnginePluginSummaryItem } from "@/lib/engine-plugins-client";
+import { SettingsToggleSwitch } from "../SettingsToggleSwitch";
+import { listEngineSkills, skillEngineAction, type Skill } from "@/lib/engine-mcp-client";
+import {
+  listEngineChannelPlatforms,
+  updateEngineChannelPlatform,
+  type ChannelPlatformInfo,
+} from "@/lib/engine-channels-client";
+import {
+  listEnginePlugins,
+  enableEnginePlugin,
+  disableEnginePlugin,
+  type EnginePluginSummaryItem,
+} from "@/lib/engine-plugins-client";
 import "./capabilities-view.css";
 
 /**
@@ -38,27 +48,44 @@ export function CapabilitiesView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
 
+  const [busy, setBusy] = useState<string | null>(null);
+
   useEffect(() => {
-    let live = true;
-    setLoading(true);
-    Promise.all([
-      listEngineSkills(true).catch(() => []),
-      listEngineChannelPlatforms().catch(() => []),
-      listEnginePlugins().then((s) => s.plugins).catch(() => []),
-    ])
-      .then(([s, c, p]) => {
-        if (!live) return;
-        setSkills(s);
-        setChannels(c);
-        setPlugins(p);
-        setError(null);
-      })
-      .catch(setError)
-      .finally(() => live && setLoading(false));
-    return () => {
-      live = false;
-    };
+    void refresh();
   }, []);
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      const [s, c, p] = await Promise.all([
+        listEngineSkills(true).catch(() => []),
+        listEngineChannelPlatforms().catch(() => []),
+        listEnginePlugins().then((summary) => summary.plugins).catch(() => []),
+      ]);
+      setSkills(s);
+      setChannels(c);
+      setPlugins(p);
+      setError(null);
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function act(key: string, operation: () => Promise<unknown>) {
+    if (busy) return;
+    setBusy(key);
+    setError(null);
+    try {
+      await operation();
+      await refresh();
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   const q = searchQuery.trim().toLowerCase();
   const match = (...fields: Array<string | undefined | null>) =>
@@ -147,13 +174,48 @@ export function CapabilitiesView() {
                   </div>
                   <p className="cap-card-desc">{s.description}</p>
                 </div>
-                {s.resources.length > 0 && (
-                  <div className="cap-card-footer">
-                    <div className="cap-card-tags">
+                <div className="cap-card-footer">
+                  <div className="cap-card-tags">
+                    {s.resources.length > 0 && (
                       <span className="cap-tag-pill">{s.resources.length} risorse</span>
-                    </div>
+                    )}
                   </div>
-                )}
+                  {s.status === "staged" ? (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        type="button"
+                        className="cap-filter-item"
+                        disabled={busy !== null}
+                        onClick={() =>
+                          void act(`skill:${s.id}:approve`, () =>
+                            skillEngineAction({ skillId: s.id, action: "approve", expectedVersion: s.revision }))}
+                      >
+                        Approva
+                      </button>
+                      <button
+                        type="button"
+                        className="cap-filter-item"
+                        disabled={busy !== null}
+                        onClick={() =>
+                          void act(`skill:${s.id}:reject`, () =>
+                            skillEngineAction({ skillId: s.id, action: "reject", expectedVersion: s.revision }))}
+                      >
+                        Rifiuta
+                      </button>
+                    </div>
+                  ) : s.status === "approved" && s.author_type === "agent" ? (
+                    <button
+                      type="button"
+                      className="cap-filter-item"
+                      disabled={busy !== null}
+                      onClick={() =>
+                        void act(`skill:${s.id}:archive`, () =>
+                          skillEngineAction({ skillId: s.id, action: "archive", expectedVersion: s.revision }))}
+                    >
+                      Archivia
+                    </button>
+                  ) : null}
+                </div>
               </article>
             ))}
             {filteredSkills.length === 0 && <div className="cap-empty">Nessuna skill corrisponde.</div>}
@@ -171,6 +233,11 @@ export function CapabilitiesView() {
                 </div>
               </article>
             ))}
+            <div className="cap-empty" style={{ border: "none" }}>
+              In Homun i tool non si accendono globalmente: si scelgono per singolo run
+              (flag di capability) o per agente nella directory. I comandi restano sempre
+              sotto approvazione a digest.
+            </div>
           </div>
         ) : activeTab === "connectors" ? (
           <div className="cap-grid">
@@ -179,16 +246,27 @@ export function CapabilitiesView() {
                 <div>
                   <div className="cap-card-top">
                     <h4 className="cap-card-title">{c.name}</h4>
-                    <span
-                      className="cap-card-version"
-                      title={c.state}
-                    >
-                      {c.state === "connected" ? "connesso" : c.enabled ? c.state === "needs_setup" ? "da configurare" : c.state : "disattivato"}
+                    <SettingsToggleSwitch
+                      checked={c.enabled}
+                      disabled={busy !== null}
+                      onChange={(val) =>
+                        void act(`channel:${c.id}`, () =>
+                          updateEngineChannelPlatform(c.id, { enabled: val }))}
+                      ariaLabel={`Abilita canale ${c.name}`}
+                    />
+                  </div>
+                  <div className="cap-card-author-row">
+                    <span className="cap-card-author">{c.id}</span>
+                    <span className="cap-card-version">
+                      {c.state === "connected" ? "connesso" : c.enabled ? "da configurare" : "disattivato"}
                     </span>
                   </div>
                   <p className="cap-card-desc">
-                    Canale {c.id}
-                    {c.state === "connected" ? " — attivo e configurato." : c.enabled ? " — abilitato." : " — non abilitato."}
+                    {c.state === "connected"
+                      ? "Attivo e configurato."
+                      : c.enabled
+                        ? "Abilitato: serve la configurazione in Impostazioni → Canali & Messaggistica."
+                        : "Disattivato: il toggle lo abilita, le credenziali si configurano in Canali & Messaggistica."}
                   </p>
                 </div>
               </article>
@@ -208,7 +286,14 @@ export function CapabilitiesView() {
                   <div>
                     <div className="cap-card-top">
                       <h4 className="cap-card-title">{p.name}</h4>
-                      <span className="cap-card-version">{p.enabled ? "abilitato" : "disabilitato"}</span>
+                      <SettingsToggleSwitch
+                        checked={p.enabled}
+                        disabled={busy !== null}
+                        onChange={(val) =>
+                          void act(`plugin:${p.name}`, () =>
+                            val ? enableEnginePlugin(p.name) : disableEnginePlugin(p.name))}
+                        ariaLabel={`Abilita plugin ${p.name}`}
+                      />
                     </div>
                     <div className="cap-card-author-row">
                       <span className="cap-card-author">{p.kind}</span>

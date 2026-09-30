@@ -86,7 +86,7 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
         CORSMiddleware,
         allow_origins=allowed_origins if allowed_origins is not None else ["http://127.0.0.1:4183", "http://localhost:4183"],
         allow_credentials=False,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
     if session_token:
