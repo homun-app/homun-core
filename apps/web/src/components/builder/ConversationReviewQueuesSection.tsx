@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, ShieldCheck } from "lucide-react";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { useEngineReviewQueues } from "@/hooks/useEngineReviewQueues";
@@ -6,6 +6,7 @@ import { approveAgentRun, type AgentRun } from "@/lib/engine-agent-run-client";
 import { terminalAction } from "@/lib/engine-terminal-client";
 import { approveFileEdit } from "@/lib/engine-file-edit-client";
 import { skillEngineAction } from "@/lib/engine-mcp-client";
+import { enrollEngineRelay, listEngineRelay } from "@/lib/engine-approval-relay-client";
 import "./conversation-unified-models.css";
 
 /**
@@ -53,6 +54,8 @@ export function ConversationReviewQueuesSection({ actorId }: { actorId?: string 
 
       <HomunErrorNotice error={queues.error} />
       <HomunErrorNotice error={actionError} />
+
+      <MobileApprovals actorId={actorId} />
 
       <QueueStats
         loading={queues.loading}
@@ -228,6 +231,56 @@ export function ConversationReviewQueuesSection({ actorId }: { actorId?: string 
 }
 
 /** Lettura a strumenti: quattro colonne divise da hairline, il numero parla. */
+function MobileApprovals({ actorId }: { actorId?: string | undefined }) {
+  const [binding, setBinding] = useState<{ platform: string } | null>(null);
+  const [enroll, setEnroll] = useState<{ code: string; hint: string } | null>(null);
+  const [error, setError] = useState<unknown>(null);
+
+  useEffect(() => {
+    if (!actorId) return;
+    let live = true;
+    void listEngineRelay()
+      .then((status) => {
+        if (live) setBinding(status.bindings.find((b) => b.person_id === actorId) ?? null);
+      })
+      .catch(() => setBinding(null));
+    return () => {
+      live = false;
+    };
+  }, [actorId]);
+
+  if (!actorId) return null;
+  if (binding) {
+    return (
+      <p className="text-[11px] text-[#9db3ad]">
+        Autorizzazioni da mobile: canale {binding.platform} collegato — le richieste arrivano lì con un codice, rispondi «A» o «R».
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      <HomunErrorNotice error={error} />
+      {enroll ? (
+        <p className="text-[11px] text-[#647a6d]">
+          {enroll.hint} <span className="font-mono text-[#1c2d22]">{enroll.code}</span>
+        </p>
+      ) : (
+        <button
+          type="button"
+          className="text-[11px] text-[#647a6d] underline decoration-[#dce4d5] underline-offset-4 transition-colors hover:text-[#1c2d22]"
+          onClick={() =>
+            void enrollEngineRelay()
+              .then((result) => setEnroll({ code: result.code, hint: result.hint }))
+              .catch(setError)
+          }
+        >
+          Autorizzazioni da mobile: collega il tuo canale
+        </button>
+      )}
+    </div>
+  );
+}
+
 function QueueStats({
   loading, runs, terminal, edits, skills,
 }: {
