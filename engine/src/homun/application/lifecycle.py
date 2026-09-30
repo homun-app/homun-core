@@ -89,6 +89,11 @@ async def runtime_lifespan(ctx):
             except Exception:
                 logging.getLogger(__name__).exception("Skill curation pass failed")
             try:
+                from homun.application.approval_relay import notify_pending
+                await asyncio.to_thread(notify_pending, ctx)
+            except Exception:
+                logging.getLogger(__name__).exception("Approval relay notify pass failed")
+            try:
                 from homun.application.delegation_runtime import reconcile_delegations
                 await asyncio.to_thread(reconcile_delegations, ctx, limit=20)
                 await asyncio.to_thread(wake_due_automation, ctx, limit=20)

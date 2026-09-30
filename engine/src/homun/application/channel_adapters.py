@@ -636,8 +636,14 @@ class ChannelRegistry:
         platform: str,
         raw_payload: Dict[str, Any],
         handler: Callable[[ChannelMessage], str],
+        pre_handler: Optional[Callable[[ChannelMessage], Optional[str]]] = None,
     ) -> Dict[str, Any]:
-        """Dispatch inbound payload: authorization check, turn lease acquire, execution, and release."""
+        """Dispatch inbound payload: authorization check, turn lease acquire, execution, and release.
+
+        ``pre_handler`` runs first and may claim the message (approval relay
+        replies never become conversation turns); returning None hands the
+        message to the normal ``handler``.
+        """
         adapter = self.get_adapter(platform)
         if not adapter:
             raise ValueError(f"No adapter registered for platform: {platform}")
@@ -662,8 +668,13 @@ class ChannelRegistry:
         routing_key = f"{message.platform}:{message.channel_id}:{message.thread_id or 'main'}"
         token = self.lease_manager.acquire(routing_key, owner_key=message.user_id, timeout=5.0)
         try:
-            # 3. Handle message
-            response_text = handler(message)
+            # 3. Handle message (the pre-handler may claim it: relay replies are
+            # decisions, not conversation)
+            response_text = None
+            if pre_handler is not None:
+                response_text = pre_handler(message)
+            if response_text is None:
+                response_text = handler(message)
 
             # 4. Deliver response
             from homun.application.channel_delivery_recovery import send_with_media_dispatch

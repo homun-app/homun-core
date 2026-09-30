@@ -709,9 +709,12 @@ async def ingest_channel_inbound(
         )
 
     # Ingress webhook: persists to queue, checks pairing, leases turn, and
-    # bridges the message into a supervised engine conversation.
+    # bridges the message into a supervised engine conversation. Approval-relay
+    # replies (COLLEGA/A/R + code) are claimed before the conversation turn.
     try:
-        result = registry.dispatch_inbound(platform, raw_payload, channel_reply)
+        from homun.application.approval_relay import pre_handler as _relay_pre
+        result = registry.dispatch_inbound(platform, raw_payload, channel_reply,
+                                           pre_handler=_relay_pre())
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"code": "inbound_error", "message": str(exc)})
@@ -762,7 +765,8 @@ def poll_channel_once(
 
     def _ingest_update(upd: Dict[str, Any]) -> None:
         try:
-            registry.dispatch_inbound(plat, upd, channel_reply)
+            from homun.application.approval_relay import pre_handler as _relay_pre
+            registry.dispatch_inbound(plat, upd, channel_reply, pre_handler=_relay_pre())
         except Exception:
             try:
                 msg = adapter.parse_inbound(upd)
@@ -793,3 +797,4 @@ def poll_enabled_channels(timeout: int = 1) -> None:
             poll_channel_once(plat, timeout=timeout)
         except Exception:
             pass
+
