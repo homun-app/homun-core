@@ -73,6 +73,8 @@ class WhatsAppBridgeAdapter(ChannelAdapter):
         sender = _strip_device_suffix(sender)
         is_group = bool(msg.get("is_group"))
         timestamp = _parse_timestamp(msg.get("timestamp"))
+        context = msg.get("context") or msg.get("quoted") or {}
+        reply_to_id = str(context.get("message_id") or context.get("id") or "") or None
         return ChannelMessage(
             id=str(msg.get("id") or ""),
             platform=self.platform,
@@ -82,6 +84,7 @@ class WhatsAppBridgeAdapter(ChannelAdapter):
             text=str(msg.get("text") or ""),
             is_direct=not is_group,
             timestamp=timestamp,
+            reply_to_id=reply_to_id,
         )
 
     def send(

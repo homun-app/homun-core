@@ -25,6 +25,8 @@ STATE_FILENAME = "approval_relay.json"
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no I/1/O/0: typed on a phone
 CODE_TTL_MINUTES = 15
 ENROLL_PREFIX = "COLLEGA"
+APPROVE_WORDS = {"A", "APPROVA", "OK", "SI", "SÌ", "YES", "VAI", "1", "APPROVO"}
+REJECT_WORDS = {"R", "RIFIUTA", "NO", "STOP", "ANNULLA", "0", "RIFIUTO"}
 MAX_SEND_ATTEMPTS = 3
 
 _lock = threading.Lock()
@@ -217,8 +219,8 @@ def notify_pending(ctx) -> int:
                 raise DomainError("channel_unsupported")
             text = (f"🔐 Homun — autorizzazione richiesta\n"
                     f"{label}\n"
-                    f"Rispondi: A {code} per approvare · R {code} per rifiutare\n"
-                    f"(il codice scade tra {CODE_TTL_MINUTES} minuti)")
+                    f"Rispondi a questo messaggio con A per approvare o R per rifiutare"
+                    f" (in caso di più richieste: A {code})")
             result = send_with_media_dispatch(
                 adapter, str(state["bindings"][entry["person_id"]]["target"]), text,
                 intent_id=f"relay:{entry['gate_id']}")
@@ -227,6 +229,10 @@ def notify_pending(ctx) -> int:
                 if result.get("delivered"):
                     state["gates"].setdefault(entry["gate_id"], {})["notified"] = True
                     notified += 1
+                    message_id = result.get("provider_message_id")
+                    if message_id:
+                        # Una risposta QUOTE-ata a questo messaggio identifica il gate.
+                        state.setdefault("msg_gates", {})[str(message_id)] = code
                 _save()
         except Exception:
             logger.warning("approval relay notify failed for %s", entry.get("gate_id"), exc_info=True)
@@ -330,11 +336,15 @@ def handle_inbound(ctx, message) -> Optional[str]:
     text = (message.text or "").strip().upper()
     if not text:
         return None
-    parts = text.split()
-    with _lock:
-        state = _load(ctx)
-        # pairing: COLLEGA <CODE>
-        if len(parts) == 2 and parts[0] == ENROLL_PREFIX:
+    import unicodedata
+    parts = ["".join(c for c in unicodedata.normalize("NFKD", p)
+                     if not unicodedata.combining(c)).upper()
+             for p in text.split()]
+    word = parts[0] if parts else ""
+    # pairing: COLLEGA <CODE> — il canale dimostra di appartenere alla persona
+    if len(parts) == 2 and word == ENROLL_PREFIX:
+        with _lock:
+            state = _load(ctx)
             entry = state["enroll"].get(parts[1])
             if entry is None or _expired(entry.get("expires_at", "")):
                 return "❌ Codice di collegamento scaduto o sconosciuto."
@@ -343,27 +353,43 @@ def handle_inbound(ctx, message) -> Optional[str]:
                 "target": message.channel_id, "bound_at": _now().isoformat()}
             state["enroll"].pop(parts[1], None)
             _save()
-            return (f"🔗 Canale collegato: le autorizzazioni di {entry['person_id']} "
-                    f"arriveranno qui.")
-        # decision: A <CODE> / R <CODE>
-        if len(parts) == 2 and parts[0] in {"A", "R"}:
-            entry = state["codes"].get(parts[1])
-            if entry is None:
-                return "❌ Codice sconosciuto."
-            if _expired(entry.get("expires_at", "")):
-                state["codes"].pop(parts[1], None)
-                _save()
-                return "⌛ Codice scaduto: richiedi l'autorizzazione da desktop."
-            bound_person = _binding_for(state, message.platform, message.user_id)
-            if bound_person != entry["person_id"]:
-                return "❌ Questo canale non è collegato alla persona del gate."
-            state["codes"].pop(parts[1], None)
-            _save()
-    if len(parts) == 2 and parts[0] in {"A", "R"} and entry is not None:
-        if parts[0] == "A":
-            return _approve_gate(ctx, entry, message.platform)
-        return _reject_gate(ctx, entry, message.platform)
-    return None
+        return (f"🔗 Canale collegato: le autorizzazioni di {entry['person_id']} "
+                f"arriveranno qui.")
+    is_approve = word in APPROVE_WORDS
+    is_reject = word in REJECT_WORDS
+    if not is_approve and not is_reject:
+        return None
+    explicit_code = parts[1] if len(parts) > 1 and len(parts[1]) == 6 else None
+    with _lock:
+        state = _load(ctx)
+        bound_person = _binding_for(state, message.platform, message.user_id)
+        if bound_person is None:
+            return None  # canale non collegato: flusso conversazione normale
+        # vivi e di questa persona
+        live = {code: entry for code, entry in state["codes"].items()
+                if not _expired(entry.get("expires_at", ""))
+                and entry["person_id"] == bound_person}
+        code = None
+        if explicit_code and explicit_code in live:
+            code = explicit_code
+        elif message.reply_to_id:
+            code = state.get("msg_gates", {}).get(str(message.reply_to_id))
+            if code is not None and code not in live:
+                code = None
+        if code is None and len(live) == 1:
+            code = next(iter(live))
+        if code is None:
+            if len(live) > 1:
+                listing = "\n".join(f"- A {c}" for c in sorted(live))
+                return ("❓ Ci sono più richieste in attesa: rispondi al messaggio "
+                        f"giusto, oppure usa il codice:\n{listing}")
+            return "❌ Nessuna richiesta in attesa per te."
+        entry = live[code]
+        state["codes"].pop(code, None)
+        _save()
+    if is_approve:
+        return _approve_gate(ctx, entry, message.platform)
+    return _reject_gate(ctx, entry, message.platform)
 
 
 def pending_codes(ctx) -> int:
