@@ -15,6 +15,7 @@ from homun.context import create_context, get_context, reset_context_for_tests
 from homun.routes import backup, capabilities, domain, health, material_reads, mcp, memory, models, price_comparisons, intake, routines, synthesis, tool_chains
 from homun.routes import agent_runs, sessions, terminal, work_outputs, workspace_edits
 from homun.routes import approval_relay
+from homun.routes import computer_use_api
 from homun.routes.errors import storage_error_handler
 
 DEFAULT_HOST = "127.0.0.1"
@@ -112,6 +113,7 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(models.router)
     app.include_router(memory.router)
     app.include_router(approval_relay.router)
+    app.include_router(computer_use_api.router)
     from homun.application import approval_relay as _relay_app
     from homun.routes.channel_ingress_api import get_channel_registry
     _relay_app.set_registry_provider(get_channel_registry)
