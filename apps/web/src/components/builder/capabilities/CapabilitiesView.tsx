@@ -287,6 +287,7 @@ export function CapabilitiesView() {
             </div>
           </div>
         ) : activeTab === "connectors" ? (
+          <>
           <div className="cap-grid">
             {filteredChannels.map((c) => (
               <article key={c.id} className="cap-card">
@@ -390,7 +391,8 @@ export function CapabilitiesView() {
               </article>
             ))}
             {filteredChannels.length === 0 && <div className="cap-empty">Nessun connettore canale corrisponde.</div>}
-            <div className="cap-card-footer" style={{ marginTop: 16, borderTop: "1px solid #dce4d5", paddingTop: 12, justifyContent: "space-between" }}>
+          </div>
+          <div className="cap-card-footer" style={{ marginTop: 16, borderTop: "1px solid #dce4d5", paddingTop: 12, justifyContent: "space-between" }}>
               <span style={{ fontSize: 12, color: "#647a6d" }}>
                 Connettori ospitati — {connectedCount} collegati su {connectors.length}
               </span>
@@ -478,8 +480,8 @@ export function CapabilitiesView() {
               </article>
             ))}
             {filteredConnectors.length === 0 && <div className="cap-empty">Nessun connettore del catalogo corrisponde.</div>}
-            </div>
           </div>
+          </>
         ) : (
           <div className="cap-grid">
             {plugins.length === 0 ? (
