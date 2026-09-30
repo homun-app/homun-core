@@ -1,4 +1,4 @@
-/** Build a local, unsigned macOS bundle from an explicit file allowlist. */
+/** Build a local, unsigned native bundle from an explicit file allowlist. */
 import { cp, mkdtemp, mkdir, readFile, writeFile, stat, rm, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -9,6 +9,14 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { verifyEngineArtifact, verifyWebAssets } from './artifact-inventory.mjs';
 import { packager } from '@electron/packager';
+
+// Native verified profiles: build on the target OS itself. The receipt's
+// architecture is platform.machine() on the build host.
+const NATIVE_PROFILES = {
+  darwin: { packagerPlatform: 'darwin', packagerArch: 'arm64', receiptArch: 'arm64', tag: 'macos-arm64' },
+  win32: { packagerPlatform: 'win32', packagerArch: 'x64', receiptArch: 'AMD64', tag: 'windows-x64' },
+  linux: { packagerPlatform: 'linux', packagerArch: 'x64', receiptArch: 'x86_64', tag: 'linux-x64' },
+};
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const digest = data => createHash('sha256').update(data).digest('hex');
@@ -34,7 +42,8 @@ async function engineSourceHash(sourceRoot) {
 export async function verifyEngineInputs(sourceRoot, engineDir) {
   const raw = await readFile(path.join(engineDir, 'build-receipt.json'));
   const receipt = JSON.parse(raw);
-  if (receipt.python_version !== '3.13.12' || receipt.architecture !== 'arm64') throw new Error('Unverified engine interpreter or architecture');
+  const expectedArch = NATIVE_PROFILES[process.platform]?.receiptArch;
+  if (receipt.python_version !== '3.13.12' || receipt.architecture !== expectedArch) throw new Error(`Unverified engine interpreter or architecture (want ${expectedArch}, receipt ${receipt.architecture})`);
   for (const name of ['requirements.lock', 'requirements-packaging.lock']) {
     if (receipt.locks?.[name] !== digest(await readFile(path.join(sourceRoot, 'engine', name)))) throw new Error('Stale engine lock: '+name);
   }
@@ -47,7 +56,8 @@ export async function verifyEngineInputs(sourceRoot, engineDir) {
 }
 
 export async function stageApp({ sourceRoot, stage, engineDir, webDir }) {
-  for (const required of [path.join(engineDir, 'homun-engine'), path.join(webDir, 'index.html')]) {
+  const engineExecutable = path.join(engineDir, process.platform === 'win32' ? 'homun-engine.exe' : 'homun-engine');
+  for (const required of [engineExecutable, path.join(webDir, 'index.html')]) {
     if (!(await stat(required)).isFile()) throw new Error('Missing build input: '+required);
   }
   const engineReceiptHash = await verifyEngineInputs(sourceRoot, engineDir);
@@ -86,8 +96,27 @@ export async function stageApp({ sourceRoot, stage, engineDir, webDir }) {
   return { appDir, web, engine, receiptPath, electronVersion };
 }
 
+function bundleResourcesPath(bundle) {
+  // macOS wraps in Homun.app/Contents; Windows/Linux keep a plain folder.
+  return process.platform === 'darwin'
+    ? path.join(bundle, 'Homun.app/Contents/Resources')
+    : path.join(bundle, 'resources');
+}
+
+async function archiveBundle(bundleTop, archive) {
+  if (process.platform === 'darwin') {
+    await promisify(execFile)('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', bundleTop, archive]);
+  } else if (process.platform === 'win32') {
+    await promisify(execFile)('powershell.exe', ['-NoProfile', '-Command',
+      `Compress-Archive -Path "${bundleTop}" -DestinationPath "${archive}" -Force`]);
+  } else {
+    await promisify(execFile)('tar', ['-czf', archive, '-C', path.dirname(bundleTop), path.basename(bundleTop)]);
+  }
+}
+
 export async function packageApp() {
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('This verified build profile requires macOS arm64');
+  const profile = NATIVE_PROFILES[process.platform];
+  if (!profile || (process.platform === 'darwin' && process.arch !== 'arm64')) throw new Error('This verified build profile requires a native macOS arm64, Windows x64 or Linux x64 host');
   const stage = await mkdtemp(path.join(os.tmpdir(), 'homun-package-'));
   try {
     const inputs = await stageApp({ sourceRoot: root, stage, engineDir: path.join(root, 'dist/engine'), webDir: path.join(root, 'apps/web/dist') });
@@ -95,7 +124,7 @@ export async function packageApp() {
     const bundles = await packager({
       dir: inputs.appDir, name: 'Homun', appBundleId: 'dev.homun.desktop',
       appVersion: JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version || '0.2.0', electronVersion: inputs.electronVersion,
-      platform: 'darwin', arch: 'arm64', out: output, asar: true,
+      platform: profile.packagerPlatform, arch: profile.packagerArch, out: output, asar: true,
       prune: false, overwrite: false,
       extraResource: [inputs.web, inputs.receiptPath],
       osxSign: false, osxNotarize: false,
@@ -103,14 +132,17 @@ export async function packageApp() {
     // Packager's extraResource copier rewrites symlinks to absolute staging paths.
     // Copy the engine ourselves, preserve its links, then verify the actual app.
     for (const bundle of bundles) {
-      const resources = path.join(bundle, 'Homun.app/Contents/Resources');
+      const resources = bundleResourcesPath(bundle);
       const finalEngine = path.join(resources, 'engine');
       await cp(inputs.engine, finalEngine, { recursive: true, verbatimSymlinks: true });
       if (await verifyEngineInputs(root, finalEngine) !== await verifyEngineInputs(root, inputs.engine)) throw new Error('Final application engine differs from staged engine');
       await verifyWebAssets(path.join(resources, 'web'));
     }
-    const archive = path.join(output, `Homun-${JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version || '0.2.0'}-macos-arm64.zip`);
-    await promisify(execFile)('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', path.join(bundles[0], 'Homun.app'), archive]);
+    const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version || '0.2.0';
+    const archive = path.join(output, `Homun-${version}-${profile.tag}` + (process.platform === 'linux' ? '.tar.gz' : '.zip'));
+    const bundleTop = process.platform === 'darwin'
+      ? path.join(bundles[0], 'Homun.app') : bundles[0];
+    await archiveBundle(bundleTop, archive);
     const hash = createHash('sha256');
     for await (const chunk of createReadStream(archive)) hash.update(chunk);
     await writeFile(archive+'.sha256', hash.digest('hex')+'  '+path.basename(archive)+'\n');
