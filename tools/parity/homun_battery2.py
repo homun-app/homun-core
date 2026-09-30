@@ -28,6 +28,14 @@ def work_version(work):
     return next(x for x in items if x["id"] == work)["version"]
 
 
+def ensure_agent(cid, name, fields=None):
+    """Riusa l'agente attivo con quel nome; crea solo se manca (niente duplicati)."""
+    for a in req("GET", "/v1/workspaces/ws_local/agents")["items"]:
+        if a["name"].casefold() == name.casefold() and a["status"] != "retired":
+            return a["id"]
+    return cmd(cid, "agent.create", {"name": name, **(fields or {})})["agent_id"]
+
+
 def wait_run(work, run_id, timeout=360):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -60,7 +68,7 @@ results["t1_seconds"] = round(time.monotonic() - t0, 1)
 print(f"reply: {msg['assistant_text'][:60]!r} in {results['t1_seconds']}s")
 
 print("=== T2 agente crea file (auto-approve agente autonomo) ===")
-agent = cmd("b2-agent", "agent.create", {"name": f"Beta-{TAG}", "autonomy_mode": "autonomous"})["agent_id"]
+agent = ensure_agent("b2-agent", "Beta", {"autonomy_mode": "autonomous"})
 work = cmd("b2-work", "work.create", {"conversation_id": conv, "title": "T2 file",
     "objective": "Create a file named parity_test.txt in your workspace with the exact content "
                  "hello parity, then report the path. One write, then finish. No questions."})["work_id"]

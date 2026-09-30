@@ -24,6 +24,14 @@ def cmd(cid, kind, payload):
                {"command_id": cid, "type": kind, "payload": payload})["result"]
 
 
+def ensure_agent(cid, name, fields=None):
+    """Riusa l'agente attivo con quel nome; crea solo se manca (niente duplicati)."""
+    for a in req("GET", "/v1/workspaces/ws_local/agents")["items"]:
+        if a["name"].casefold() == name.casefold() and a["status"] != "retired":
+            return a["id"]
+    return cmd(cid, "agent.create", {"name": name, **(fields or {})})["agent_id"]
+
+
 def wait_run(work, run_id, timeout=300):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -72,7 +80,7 @@ def propose_and_approve(work, cid, extra=None):
 
 
 print("=== 1. Setup: progetti A/B + agente autonomo ===")
-agent = cmd("lt-agent-" + RUN_TAG, "agent.create", {"name": "Menta", "autonomy_mode": "autonomous"})["agent_id"]
+agent = ensure_agent("lt-agent-" + RUN_TAG, "Menta", {"autonomy_mode": "autonomous"})
 pa = cmd("lt-pa-" + RUN_TAG, "project.create", {"name": "Parity Alpha"})["project_id"]
 pb = cmd("lt-pb-" + RUN_TAG, "project.create", {"name": "Parity Beta"})["project_id"]
 ca = cmd("lt-ca-" + RUN_TAG, "conversation.create", {"title": "A", "project_id": pa})["conversation_id"]
