@@ -66,6 +66,10 @@ export function CapabilitiesView() {
 
   useEffect(() => {
     void refresh();
+    // di ritorno dall'autorizzazione OAuth (altra finestra/scheda) lo stato si aggiorna da solo
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   async function refresh() {
@@ -129,10 +133,19 @@ export function CapabilitiesView() {
     () => channels.filter((c) => match(c.name, c.id)),
     [channels, q],
   );
+  const [connectorFilter, setConnectorFilter] = useState<"all" | "connected" | "pending">("all");
+  const sortedConnectors = useMemo(() => {
+    const rank = (k: HostedConnector) => k.connected ? 0 : k.declared ? 1 : 2;
+    return [...connectors].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  }, [connectors]);
   const filteredConnectors = useMemo(
-    () => connectors.filter((k) => match(k.name, k.description, k.keywords.join(" "))),
-    [connectors, q],
+    () => sortedConnectors.filter((k) => match(k.name, k.description, k.keywords.join(" "))
+      && (connectorFilter === "all"
+        || (connectorFilter === "connected" && k.connected)
+        || (connectorFilter === "pending" && !k.connected))),
+    [sortedConnectors, q, connectorFilter],
   );
+  const connectedCount = connectors.filter((k) => k.connected).length;
   const filteredPlugins = useMemo(
     () => plugins.filter((p) => match(p.name, p.kind, p.tools.join(" "))),
     [plugins, q],
@@ -377,9 +390,22 @@ export function CapabilitiesView() {
               </article>
             ))}
             {filteredChannels.length === 0 && <div className="cap-empty">Nessun connettore canale corrisponde.</div>}
-            <div className="cap-empty" style={{ border: "none", marginTop: 16 }}>
-              Connettori ospitati ({connectors.length} nel catalogo) — OAuth nel browser,
-              tool sempre sotto gate di approvazione:
+            <div className="cap-card-footer" style={{ marginTop: 16, borderTop: "1px solid #dce4d5", paddingTop: 12, justifyContent: "space-between" }}>
+              <span style={{ fontSize: 12, color: "#647a6d" }}>
+                Connettori ospitati — {connectedCount} collegati su {connectors.length}
+              </span>
+              <div style={{ display: "flex", gap: 6 }}>
+            {([["all", "Tutti"], ["connected", `Collegati ${connectedCount}`], ["pending", "Da collegare"]] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`cap-filter-item ${connectorFilter === id ? "is-selected" : ""}`}
+                    onClick={() => setConnectorFilter(id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="cap-grid">
             {filteredConnectors.map((k) => (
@@ -387,8 +413,14 @@ export function CapabilitiesView() {
                 <div>
                   <div className="cap-card-top">
                     <h4 className="cap-card-title">{k.name}</h4>
-                    <span className="cap-card-version">
-                      {k.connected ? "collegato" : k.declared ? "da autorizzare" : ""}
+                    <span
+                      className="cap-card-version"
+                      style={k.connected
+                        ? { color: "#1f7a4d", fontWeight: 600, background: "rgba(31,122,77,0.08)",
+                            padding: "2px 8px", borderRadius: 999 }
+                        : undefined}
+                    >
+                      {k.connected ? "✓ collegato" : k.declared ? "da autorizzare" : ""}
                     </span>
                   </div>
                   <p className="cap-card-desc">{k.description}</p>
@@ -419,13 +451,20 @@ export function CapabilitiesView() {
                       type="button"
                       className="cap-filter-item is-selected"
                       disabled={busy !== null}
-                      onClick={() =>
+                      onClick={() => {
+                        // finestra aperta al click (gesto utente): niente popup blocker
+                        const popup = window.open("", "_blank");
                         void act(`connector:${k.name}`, async () => {
                           const serverId = k.server_id
                             ?? (await installEngineConnector(k.name)).server_id;
                           const flow = await startConnectorOAuth(serverId);
-                          setOauthLink({ name: k.name, url: flow.authorize_url });
-                        })}
+                          if (popup && !popup.closed) {
+                            popup.location.href = flow.authorize_url;
+                          } else {
+                            setOauthLink({ name: k.name, url: flow.authorize_url });
+                          }
+                        });
+                      }}
                     >
                       Connetti
                     </button>
