@@ -210,3 +210,23 @@ registrato-ma-fallito non avvelena più le riesecuzioni con lo stesso id. Sync f
 - File creati dagli agenti: /tmp/parity_hermes/{parity_test.txt,term_test.txt,cron_ok.txt};
   engine data-dir …/execution/workspaces/<hash>/{parity_test.txt,term_test.txt}
 - Routine di test fermata (routine_e1dJpEiDQzNHSg stopped) e cron Hermes rimosso dopo il test.
+
+## Batteria estesa pomeriggio: le aree "mai testate" (30/09 sera)
+
+Obiettivo: uscire dal buio sulle aree elencate come "non testate in questa passata".
+Metodo: superficie via probe black-box sul motore live + esercizio profondo dove contava.
+
+| Area | Superficie | Esercizio | Esito |
+|---|---|---|---|
+| Steering/interrupt (H02) | route_message → steer atomico | **LIVE**: run nativo Vega in volo, messaggio "step2 → 'done 2 rivisto'" | **PASS** — `agent_control: steer`, ack, run completato, step2.txt contiene "done 2 rivisto" |
+| Capability surface | 1 run pending con tutti i flag | probe | **42 tool registrati**: browser×7, web×3 (search/extract/x), delegation×3, goals×8+subgoals, clarify×2, cron, session_manage, execute_code, gateway_manage, memory×4, skills×5 |
+| Memoria conversazionale (T3 gap) | — | **LIVE** (chiuso in sessione, commit 3f1191d8) | **PASS** — conversazione pura ricorda "teal"; isolamento cross-persona verificato (PIN di Marta non arriva a Fabio) |
+| Compressione contesto (H05) | `micro_compaction` in RunToolPolicy | unit (test_agent_overflow.py) | superficie+unit OK, non esercitata live |
+| Checkpoint/rollback (H12) | sessions API + session_manage tool | unit (test_checkpoints_and_worktrees, test_c1_checkpoints_lsp, test_canonical_sessions, 13 file session_*) | molto coperto a unit, non esercitato live |
+| MCP | /mcp/servers CRUD + test + tools per work + propose/approve | unit (test_agent_mcp) | OK |
+| Plugins | API enable/disable/data/reload-config | unit | OK |
+| Media/voice (H41) | /media/tts/synthesize, /media/voice/wake-check, wake-word | parziale | superficie presente |
+| Batch/evals (H45) | /research/batch/run + BatchEvalRunner | **NESSUN test** | **gap reale**: implementazione ed endpoint senza unit test |
+
+Conclusione: quasi tutto esisteva già ed è coperto dai test; il buco era l'esercizio live.
+Veri gap rimasti: batch/evals senza test; web/browser/delegation/media da esercizio live end-to-end.
