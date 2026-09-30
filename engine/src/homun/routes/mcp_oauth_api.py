@@ -104,10 +104,17 @@ def install_connector(workspace_id: str, name: str,
     if entry is None:
         raise _http_error(DomainError(f"Connettore sconosciuto: {name}"))
     try:
-        result = ctx.service.apply(actor, f"connector-install:{name}", "external.create", {
-            "name": entry["name"], "transport": "http", "url": entry["url"],
-            "args": [], "tools_include": [], "tools_exclude": [],
-        })
+        import secrets as _secrets
+        with ctx.repository.locked():
+            with ctx.repository.transaction() as store:
+                service = ctx.service.for_store(store)
+                result = service.apply(
+                    actor, f"connector-install:{name}:{_secrets.token_hex(4)}",
+                    "external.create", {
+                        "name": entry["name"], "transport": "http", "url": entry["url"],
+                        "args": [], "tools_include": [], "tools_exclude": [],
+                    })
+            ctx.service.store = store
         return {"server_id": result["server_id"], "name": name}
     except DomainError as exc:
         raise _http_error(exc) from exc

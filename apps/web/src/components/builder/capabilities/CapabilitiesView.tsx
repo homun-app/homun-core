@@ -62,6 +62,7 @@ export function CapabilitiesView() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [draftFields, setDraftFields] = useState<Record<string, string>>({});
   const [newFieldKey, setNewFieldKey] = useState("");
+  const [oauthLink, setOauthLink] = useState<{ name: string; url: string } | null>(null);
 
   useEffect(() => {
     void refresh();
@@ -403,6 +404,16 @@ export function CapabilitiesView() {
                       title="Già autorizzato: i tool arrivano tramite i gate di approvazione">
                       Collegato
                     </button>
+                  ) : oauthLink?.name === k.name ? (
+                    <a
+                      href={oauthLink.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="cap-filter-item is-selected"
+                      style={{ textDecoration: "none" }}
+                    >
+                      Apri l'autorizzazione →
+                    </a>
                   ) : (
                     <button
                       type="button"
@@ -413,11 +424,16 @@ export function CapabilitiesView() {
                           const serverId = k.server_id
                             ?? (await installEngineConnector(k.name)).server_id;
                           const flow = await startConnectorOAuth(serverId);
-                          window.open(flow.authorize_url, "_blank", "noopener");
+                          setOauthLink({ name: k.name, url: flow.authorize_url });
                         })}
                     >
                       Connetti
                     </button>
+                  )}
+                  {oauthLink?.name === k.name && (
+                    <span style={{ fontSize: 10, opacity: 0.7 }}>
+                      Si apre la pagina del fornitore; dopo l'autorizzazione torna qui.
+                    </span>
                   )}
                 </div>
               </article>
