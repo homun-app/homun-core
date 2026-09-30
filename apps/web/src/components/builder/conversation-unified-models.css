@@ -655,3 +655,47 @@
   color: #f4f1ee;
 }
 
+
+/* Review queues — Braun-minimal: white surfaces, hairlines, mono readouts. */
+
+.rq-card {
+  background: #ffffff;
+  border: 1px solid #dce4d5;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.rq-code {
+  margin: 8px 0 0 0;
+  overflow-x: auto;
+  background: #f6f8f3;
+  border: 1px solid #dce4d5;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.65;
+  color: #263832;
+}
+
+.rq-code--scroll {
+  max-height: 16rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.rq-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #dce4d5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rq-hint {
+  font-size: 11px;
+  color: #9db3ad;
+}
