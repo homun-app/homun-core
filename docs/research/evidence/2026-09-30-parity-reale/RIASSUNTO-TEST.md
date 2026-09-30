@@ -230,3 +230,20 @@ Metodo: superficie via probe black-box sul motore live + esercizio profondo dove
 
 Conclusione: quasi tutto esisteva già ed è coperto dai test; il buco era l'esercizio live.
 Veri gap rimasti: batch/evals senza test; web/browser/delegation/media da esercizio live end-to-end.
+
+## Chiusura gap in autonomia (30/09 notte)
+
+Azzerati i gap azzerabili emersi dalla batteria estesa:
+
+| Gap | Chiusura | Verifica |
+|---|---|---|
+| Batch/evals senza test | `tests/test_batch_eval.py` (5): aggregazione, eccezioni, resume da checkpoint, rifiuto senza executor, endpoint HTTP (200/503) | unit |
+| Governance entità | comandi `work.archive` / `conversation.archive` (reversibili, `restore:true`) con permessi write + version; già esistevano team/project/material/skill archive | unit (5) + **live dogfood**: 7 archiviazioni di probe via command bus |
+| approval_channel non esposto | il campo `_approval_channel` veniva scartato da pydantic (il chip "auto-approvazione prevista" non aveva mai dati); ora `public()` lo espone come `approval_channel` ufficiale + campo RunView + tipo/pannello web | unit (1) |
+| Badge autonomia UI | la UI offriva `strict/semi/autonomous` ma il motore accetta solo `supervised/autonomous` → salvataggi rotti e agente supervisionato etichettato "Semi-autonomo"; allineati livelli, template e badge | live UI: 2 Autonomo / 2 Supervisione umana / 0 residui |
+| Scope memoria non visibile | tipo + `memoryScopeLabel` + badge nelle viste elenco/recall; nota person ora etichettata "Personale · person_fabio" | live UI |
+| Catalogo skill non navigabile | pannello "Catalogo Skill" (57 skill, ricerca, filtri con conteggi, corpo espandibile, uso, risorse) + sync dal repository + `usage_count`/`last_used_at` esposti dall'API | live UI: ricerca "price" → 2 risultati |
+| Web tools mai esercitati (H14) | **LIVE**: run con `web_pages:true`, agente chiama `web_extract` su example.com → 200 + contenuto | live |
+| Delegation mai esercitata (H21) | **LIVE**: senza team approvato → blocco tipizzato `delegation_agent_not_approved` (security ok); con team Vega+Bruno → child run assegnato a Bruno, `_delegation_result.result = "BANANA"` esatto | live end-to-end |
+
+Nota: la nota "teal" era duplicata (globale del mattino pre-scope + person di oggi); eliminata la globale, tenuta la person.
