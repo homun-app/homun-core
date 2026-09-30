@@ -46,7 +46,8 @@ def execute(manager, job_id, *, now=None, custom_runner=None, claimed=None, canc
             result = custom_runner(dict(job_id=job.id, occurrence_id=claimed.occurrence_id,
                 prompt=prompt, script=job.script, workdir=job.workdir, skills=job.skills,
                 owner_actor=job.owner_actor, source_work_id=job.source_work_id,
-                no_agent=job.no_agent, model_pin=job.model_pin, provider_pin=job.provider_pin))
+                no_agent=job.no_agent, model_pin=job.model_pin, provider_pin=job.provider_pin,
+                auto_approve=job.auto_approve))
             if not isinstance(result, CronExecutionResult):
                 code, output, error = result
                 result = CronExecutionResult('success' if code == 0 else 'failed', output, error, code)

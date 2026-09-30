@@ -73,6 +73,23 @@ class CronAgentRunner:
             work_id = work['work_id']
             body['expected_version'] = ctx.repository.load().works[work_id].version
             proposal = propose(ctx, actor, work_id, body)
+            if payload.get('auto_approve'):
+                from homun.application import agent_runs
+                try:
+                    agent_runs.approve(ctx, actor, work_id, proposal['id'], {
+                        'command_id': run_id + ':auto',
+                        'expected_version': proposal['expected_version'],
+                        'digest': proposal['digest'],
+                    })
+                    with ctx.repository.locked():
+                        with ctx.repository.transaction() as store:
+                            store.commands[proposal['id']].result['_approval_channel'] = 'policy:cron-auto-approve'
+                        ctx.service.store = store
+                    return CronExecutionResult('running',
+                        output=f'Auto-approved agent run {proposal["id"]} (job policy)',
+                        agent_run_id=proposal['id'], work_id=work_id)
+                except DomainError:
+                    pass  # the staged proposal keeps the human gate
             return CronExecutionResult('awaiting_approval',
                 output=f'Staged agent run {proposal["id"]} (pending approval)',
                 agent_run_id=proposal['id'], work_id=work_id)

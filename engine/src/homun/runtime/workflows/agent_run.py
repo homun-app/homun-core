@@ -1,5 +1,6 @@
 """DBOS delivers adaptive turns with stable identity and journal order."""
 from dbos import DBOS, SetWorkflowID
+import logging
 from homun.application.agent_run_execution import advance, fail
 from homun.application.agent_runs import PROPOSAL_TYPE, resume_waiting
 from homun.domain.errors import DomainError
@@ -59,6 +60,14 @@ def deliver_agent_runs(ctx):
         if record.type != PROPOSAL_TYPE:
             continue
         run = record.result
+        if run['status'] in {'pending_approval', 'waiting_external'}:
+            from homun.application.approval_auto import sweep as auto_approve
+            try:
+                if auto_approve(ctx, record.command_id):
+                    run = ctx.repository.load().commands[record.command_id].result
+            except Exception:
+                # A policy approval must never block delivery; the human gate stays.
+                logging.getLogger(__name__).warning('Policy auto-approve failed for %s', record.command_id, exc_info=True)
         if run['status'] == 'waiting_automation' and run.get('automation_wait', {}).get('reason') == 'goal_gate_pending':
             from homun.application.goal_terminal import resume as resume_goal_gate
             try:
@@ -82,6 +91,8 @@ def deliver_agent_runs(ctx):
                 else:
                     resume_external(ctx, run['id'])
             except DomainError as exc:
+                logging.getLogger(__name__).warning('Run %s blocked during resume (%s): %s',
+                                                    run['id'], exc.code, exc.message, exc_info=True)
                 fail(ctx, run['id'], exc.code, blocked=True)
             run = ctx.repository.load().commands[run['id']].result
         if run['status'] == 'waiting_input':
@@ -92,6 +103,13 @@ def deliver_agent_runs(ctx):
             except DomainError as exc:
                 fail(ctx, run['id'], exc.code, blocked=True, epoch=run['_epoch'])
             run = ctx.repository.load().commands[run['id']].result
+        if run['status'] == 'completed' and (run.get('skills') or {}).get('policy') == 'workspace-catalog-v1':
+            from homun.application.skill_reflection import maybe_reflect
+            try:
+                maybe_reflect(ctx, record.command_id)
+            except Exception:
+                # Reflection is learning, not delivery; failures never break the sweep.
+                logging.getLogger(__name__).warning('Skill reflection failed for %s', record.command_id, exc_info=True)
         if run['status'] not in {'queued', 'running'}:
             continue
         try:
