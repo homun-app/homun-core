@@ -284,6 +284,8 @@ class Skill(BaseModel):
     author_type: str = "person"  # person | agent
     author_id: str = ""
     revision: int = 1
+    usage_count: int = 0
+    last_used_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
