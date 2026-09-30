@@ -74,6 +74,7 @@ class RunView(RunToolPolicy):
     request_id: str | None = None
     artifact_id: str | None = None
     error_code: str | None = None
+    approval_channel: str | None = None
 
 
 class RunList(BaseModel):

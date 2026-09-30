@@ -228,6 +228,7 @@ def list_skills(workspace_id: str,
         "tags": skill.tags, "status": skill.status,
         "author_type": skill.author_type, "author_id": skill.author_id,
         "revision": skill.revision, "resources": sorted((skill.resources or {}).keys()),
+        "usage_count": skill.usage_count, "last_used_at": skill.last_used_at,
         "body": skill.body if include_body else None,
     } for skill in sorted(store.skills.values(), key=lambda s: s.created_at)
         if include_archived or skill.status != "archived"

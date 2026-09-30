@@ -28,6 +28,9 @@ LIMITS = AGENT_RUN.limits
 
 def public(run):
     item = deepcopy({k: v for k, v in run.items() if not k.startswith('_')})
+    if '_approval_channel' in run:
+        # The stamp stays internal (underscore); clients read the official field.
+        item['approval_channel'] = run['_approval_channel']
     terminal = item.get('terminal')
     if isinstance(terminal, dict):
         terminal.pop('key_path', None)

@@ -149,3 +149,20 @@ def test_delivery_sweep_hook_auto_approves_autonomous_run(ctx):
     run = ctx.repository.load().commands[proposal['id']].result
     assert run['status'] == 'queued'
     assert run['_approval_channel'] == 'policy:autonomy_mode=autonomous'
+
+
+def test_public_view_exposes_approval_channel_officially(ctx):
+    """The API never leaked the underscore stamp; clients read approval_channel."""
+    from homun.application.agent_runs import list_runs, public
+    from homun.application.approval_auto import sweep
+    actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
+    agent, work = _setup(ctx, actor, autonomy='autonomous')
+    proposal = _propose(ctx, actor, work)
+    sweep(ctx, proposal['id'])
+    run = ctx.repository.load().commands[proposal['id']].result
+    assert run['_approval_channel'].startswith('policy:')
+    view = public(run)
+    assert view['approval_channel'].startswith('policy:')
+    assert '_approval_channel' not in view
+    listed = list_runs(ctx, actor, work)['items']
+    assert next(r for r in listed if r['id'] == proposal['id'])['approval_channel'].startswith('policy:')
