@@ -175,6 +175,33 @@ def port(src: Path, dst: Path, commit: str) -> dict:
                              "description": (desc_m.group(1).strip().strip('"').strip("'")
                                              if desc_m else name)[:120],
                              "tags": normalized, "body": adapted_body})
+    # Native Homun skills: authored in this repository under
+    # tools/parity/native-skills/, shipped with the catalog verbatim.
+    native_root = Path(__file__).resolve().parent / "native-skills"
+    for skill_md in sorted(native_root.glob("*/*/SKILL.md")):
+        category, name_dir = skill_md.parent.parent.name, skill_md.parent.name
+        out_dir = dst / category / name_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(skill_md, out_dir / "SKILL.md")
+        files = ["SKILL.md"]
+        for support in sorted(skill_md.parent.rglob("*")):
+            if support.is_file() and support.name != "SKILL.md":
+                rel = support.relative_to(skill_md.parent)
+                target = out_dir / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(support, target)
+                files.append(str(rel))
+        raw = skill_md.read_text(encoding="utf-8")
+        m = re.match(r"^---\n(.*?)\n---\n(.*)$", raw, re.S)
+        head, body = m.groups()
+        name = re.search(r"^name:\s*(.+)$", head, re.M).group(1).strip()
+        manifest["skills"].append({"name": name, "category": category,
+                                   "path": f"{category}/{name_dir}", "files": files,
+                                   "native": True})
+        desc = re.search(r"^description:\s*(.+)$", head, re.M).group(1).strip()[:120]
+        embedded.append({"name": name, "description": desc,
+                         "tags": [category.lower(), "skill", "authoring"][:8],
+                         "body": body.strip()})
     (dst / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return {"manifest": manifest, "embedded": embedded}
