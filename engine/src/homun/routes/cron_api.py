@@ -69,7 +69,7 @@ class CronJobCreateRequest(BaseModel):
 def create_cron_job(body: CronJobCreateRequest,
                     x_homun_actor_id: str | None = Header(default=None),
                     x_homun_actor_name: str | None = Header(default=None)) -> Dict[str, Any]:
-    """Human cron job creation (parity with `hermes cron create`)."""
+    """Human cron job creation ( cron manuale)."""
     ctx, actor = request_context("ws_local" if not hasattr(body, "workspace_id") else body.workspace_id,
                                  x_homun_actor_id, x_homun_actor_name)
     if actor.kind != "person":

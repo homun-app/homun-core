@@ -1,5 +1,5 @@
 /**
- * Client storage and helpers for granular Hermes-parity engine settings.
+ * Client storage and helpers for granular engine settings.
  * Manages fine-grained provider parameters (temperature, thinking, top_p, timeouts)
  * and engine maintenance/diagnostics configurations.
  */

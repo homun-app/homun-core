@@ -83,7 +83,7 @@ export function ConversationEngineMaintenanceSection() {
           Manutenzione & Diagnostica
         </h3>
         <p style={{ fontSize: "13px", color: "var(--color-muted-foreground)", margin: 0 }}>
-          Parametri granulari del runtime Hermes/Homun: compattazione del contesto, gestione database SQLite e sicurezza tool.
+          Parametri granulari del runtime: compattazione del contesto, gestione database SQLite e sicurezza tool.
         </p>
       </div>
 

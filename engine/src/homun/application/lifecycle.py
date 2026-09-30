@@ -89,6 +89,11 @@ async def runtime_lifespan(ctx):
             except Exception:
                 logging.getLogger(__name__).exception("Skill curation pass failed")
             try:
+                from homun.application.chat_agent import deliver_chat_answers
+                await asyncio.to_thread(deliver_chat_answers, ctx)
+            except Exception:
+                logging.getLogger(__name__).exception("Chat answer delivery pass failed")
+            try:
                 from homun.application.approval_relay import notify_pending
                 await asyncio.to_thread(notify_pending, ctx)
             except Exception:

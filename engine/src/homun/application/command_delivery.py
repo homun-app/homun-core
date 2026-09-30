@@ -111,6 +111,37 @@ def admit(ctx: EngineContext, actor: Actor, body: CommandRequest) -> Delivery:
 
 
 def complete(ctx: EngineContext, delivery: Delivery) -> dict:
+    # Conversazioni legate a un agente: il messaggio avvia (o steera) il run
+    # dell'agente e la risposta torna in chat — la chat singola è con l'agente.
+    if delivery.token is not None and delivery.body.type == "conversation.post_message":
+        from homun.application import chat_agent
+        store_now = ctx.repository.load()
+        if chat_agent.handles(ctx, store_now, delivery.body):
+            from homun.domain.errors import DomainError as _DE
+            try:
+                outcome = chat_agent.start_chat_turn(
+                    ctx, delivery.actor,
+                    str(delivery.body.payload.get("conversation_id") or ""),
+                    str(delivery.body.payload.get("text") or ""))
+            except _DE as exc:
+                fail(ctx, delivery, exc.code)
+                raise
+            with ctx.repository.locked():
+                with ctx.repository.transaction() as store:
+                    record = store.commands.get(delivery.body.command_id)
+                    if record is not None and record.followup_token == delivery.token:
+                        record.result = {**record.result, "assistant_text": None,
+                                         "agent_run_id": outcome["agent_run_id"],
+                                         "steered": outcome["steered"]}
+                        record.followup_status = "completed"
+                        record.followup_token = None
+                        record.followup_expires_at = None
+                ctx.service.store = store
+            _publish(ctx, store)
+            return {"message_id": record.result.get("message_id"),
+                    "agent_run_id": outcome["agent_run_id"],
+                    "steered": outcome["steered"],
+                    "chat_agent": True}
     if delivery.token is None:
         from homun.runtime.dispatcher import deliver_pending
         result = deliver_pending(ctx, command_id=delivery.body.command_id,

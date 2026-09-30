@@ -155,7 +155,7 @@ class PluginInstallRequest(BaseModel):
 
 @router.post("/install", response_model=Dict[str, Any])
 def install_plugin(body: PluginInstallRequest) -> Dict[str, Any]:
-    """Install a plugin from git at an EXACT commit SHA (the Hermes trust model:
+    """Install a plugin from git at an EXACT commit SHA (the trust model:
     no branches, no tags, no self-updating code — the pin is the review).
 
     Clones without checkout, verifies the SHA exists, validates the manifest,
