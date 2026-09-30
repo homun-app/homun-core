@@ -302,3 +302,36 @@ export function approveEngineToolDelivery(preview: ExternalDeliveryPreview, comm
     command_id: commandId, expected_version: preview.expected_version, digest: preview.digest,
   });
 }
+
+export type HostedConnector = {
+  name: string;
+  description: string;
+  url: string;
+  keywords: string[];
+  server_id: string | null;
+  connected: boolean;
+  declared: boolean;
+};
+
+export async function listEngineConnectors(): Promise<HostedConnector[]> {
+  const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/connectors`,
+    { method: "GET", headers: jsonHeaders });
+  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Catalogo connettori non disponibile");
+  return ((await response.json()) as { items: HostedConnector[] }).items ?? [];
+}
+
+export async function installEngineConnector(name: string): Promise<{ server_id: string }> {
+  const response = await mcpFetch(
+    `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/connectors/${encodeURIComponent(name)}/install`,
+    { method: "POST", headers: jsonHeaders });
+  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Installazione connettore non riuscita");
+  return (await response.json()) as { server_id: string };
+}
+
+export async function startConnectorOAuth(serverId: string): Promise<{ authorize_url: string }> {
+  const response = await mcpFetch(
+    `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/connectors/${encodeURIComponent(serverId)}/oauth/start`,
+    { method: "POST", headers: jsonHeaders });
+  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Avvio OAuth non riuscito");
+  return (await response.json()) as { authorize_url: string };
+}

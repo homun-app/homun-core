@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { SettingsToggleSwitch } from "../SettingsToggleSwitch";
-import { listEngineSkills, skillEngineAction, type Skill } from "@/lib/engine-mcp-client";
+import {
+  installEngineConnector,
+  listEngineConnectors,
+  listEngineSkills,
+  skillEngineAction,
+  startConnectorOAuth,
+  type HostedConnector,
+  type Skill,
+} from "@/lib/engine-mcp-client";
 import {
   listEngineChannelPlatforms,
   updateEngineChannelPlatform,
@@ -46,6 +54,7 @@ export function CapabilitiesView() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [channels, setChannels] = useState<ChannelPlatformInfo[]>([]);
   const [plugins, setPlugins] = useState<EnginePluginSummaryItem[]>([]);
+  const [connectors, setConnectors] = useState<HostedConnector[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
 
@@ -61,14 +70,16 @@ export function CapabilitiesView() {
   async function refresh() {
     setLoading(true);
     try {
-      const [s, c, p] = await Promise.all([
+      const [s, c, p, k] = await Promise.all([
         listEngineSkills(true).catch(() => []),
         listEngineChannelPlatforms().catch(() => []),
         listEnginePlugins().then((summary) => summary.plugins).catch(() => []),
+        listEngineConnectors().catch(() => []),
       ]);
       setSkills(s);
       setChannels(c);
       setPlugins(p);
+      setConnectors(k);
       setError(null);
     } catch (cause) {
       setError(cause);
@@ -117,6 +128,10 @@ export function CapabilitiesView() {
     () => channels.filter((c) => match(c.name, c.id)),
     [channels, q],
   );
+  const filteredConnectors = useMemo(
+    () => connectors.filter((k) => match(k.name, k.description, k.keywords.join(" "))),
+    [connectors, q],
+  );
   const filteredPlugins = useMemo(
     () => plugins.filter((p) => match(p.name, p.kind, p.tools.join(" "))),
     [plugins, q],
@@ -129,7 +144,7 @@ export function CapabilitiesView() {
   const counts = {
     skills: skills.filter((s) => s.status !== "archived").length,
     tools: RUN_TOOL_SURFACE.length,
-    connectors: channels.length,
+    connectors: channels.length + connectors.length,
     plugins: plugins.length,
   };
 
@@ -360,7 +375,55 @@ export function CapabilitiesView() {
                 )}
               </article>
             ))}
-            {filteredChannels.length === 0 && <div className="cap-empty">Nessun connettore corrisponde.</div>}
+            {filteredChannels.length === 0 && <div className="cap-empty">Nessun connettore canale corrisponde.</div>}
+            <div className="cap-empty" style={{ border: "none", marginTop: 16 }}>
+              Connettori ospitati ({connectors.length} nel catalogo) — OAuth nel browser,
+              tool sempre sotto gate di approvazione:
+            </div>
+            <div className="cap-grid">
+            {filteredConnectors.map((k) => (
+              <article key={k.name} className="cap-card">
+                <div>
+                  <div className="cap-card-top">
+                    <h4 className="cap-card-title">{k.name}</h4>
+                    <span className="cap-card-version">
+                      {k.connected ? "collegato" : k.declared ? "da autorizzare" : ""}
+                    </span>
+                  </div>
+                  <p className="cap-card-desc">{k.description}</p>
+                </div>
+                <div className="cap-card-footer">
+                  <div className="cap-card-tags">
+                    {k.keywords.slice(0, 3).map((word) => (
+                      <span key={word} className="cap-tag-pill">{word}</span>
+                    ))}
+                  </div>
+                  {k.connected ? (
+                    <button type="button" className="cap-filter-item" disabled
+                      title="Già autorizzato: i tool arrivano tramite i gate di approvazione">
+                      Collegato
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="cap-filter-item is-selected"
+                      disabled={busy !== null}
+                      onClick={() =>
+                        void act(`connector:${k.name}`, async () => {
+                          const serverId = k.server_id
+                            ?? (await installEngineConnector(k.name)).server_id;
+                          const flow = await startConnectorOAuth(serverId);
+                          window.open(flow.authorize_url, "_blank", "noopener");
+                        })}
+                    >
+                      Connetti
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
+            {filteredConnectors.length === 0 && <div className="cap-empty">Nessun connettore del catalogo corrisponde.</div>}
+            </div>
           </div>
         ) : (
           <div className="cap-grid">

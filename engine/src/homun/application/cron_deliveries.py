@@ -117,4 +117,10 @@ def _deliver_to_channel(platform: str, chat_id: str, output: str) -> Dict[str, A
     except Exception as exc:
         logger.warning("Cron channel delivery to %s failed: %s", platform, exc)
         return {"status": "pending", "error_code": "delivery_transport_failed"}
+    if not receipt.get("delivered"):
+        # Mai riportare successo senza consegna reale: resta pendente, ritentabile.
+        code = receipt.get("code") or "delivery_transport_failed"
+        logger.warning("Cron channel delivery to %s not delivered (%s): %s",
+                       platform, code, receipt.get("error"))
+        return {"status": "pending", "error_code": "delivery_transport_failed"}
     return {"status": "sent", "receipt": receipt}

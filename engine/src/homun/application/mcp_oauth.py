@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
@@ -42,8 +43,51 @@ class OAuthToken:
 class MCPOAuthBroker:
     """Manages real OAuth2 access tokens for external MCP servers."""
 
-    def __init__(self, cache: Optional[Dict[str, OAuthToken]] = None) -> None:
+    def __init__(self, cache: Optional[Dict[str, OAuthToken]] = None,
+                 disk_dir: Optional["Path"] = None) -> None:
         self._cache: Dict[str, OAuthToken] = cache if cache is not None else {}
+        self._disk_dir = disk_dir
+        self._disk_lock = __import__("threading").Lock()
+
+    def _disk_path(self, server_id: str) -> "Path":
+        return self._disk_dir / f"{server_id}.json"
+
+    def _token_to_disk(self, server_id: str, token: OAuthToken) -> None:
+        if self._disk_dir is None:
+            return
+        import json as _json
+        self._disk_dir.mkdir(parents=True, exist_ok=True)
+        payload = {"access_token": token.access_token, "token_type": token.token_type,
+                   "expires_at": token.expires_at, "refresh_token": token.refresh_token,
+                   "scope": token.scope}
+        self._disk_path(server_id).write_text(_json.dumps(payload), encoding="utf-8")
+        try:
+            os.chmod(self._disk_path(server_id), 0o600)
+        except OSError:
+            pass
+
+    def _token_from_disk(self, server_id: str) -> Optional[OAuthToken]:
+        if self._disk_dir is None:
+            return None
+        path = self._disk_path(server_id)
+        if not path.is_file():
+            return None
+        import json as _json
+        try:
+            data = _json.loads(path.read_text(encoding="utf-8"))
+            return OAuthToken(access_token=str(data["access_token"]),
+                              token_type=str(data.get("token_type") or "Bearer"),
+                              expires_at=data.get("expires_at"),
+                              refresh_token=data.get("refresh_token"),
+                              scope=data.get("scope"))
+        except Exception:
+            logger.warning("MCP OAuth token on disk unreadable for %s", server_id, exc_info=True)
+            return None
+
+    def forget_disk_token(self, server_id: str) -> None:
+        if self._disk_dir is not None:
+            with self._disk_lock:
+                self._disk_path(server_id).unlink(missing_ok=True)
 
     def cache_key(self, server: ExternalServer) -> str:
         client_id = str(getattr(server, "oauth_client_id", "") or "").strip()
@@ -55,11 +99,18 @@ class MCPOAuthBroker:
         token = self._cache.get(key)
         if token and not token.is_expired():
             return token
+        with self._disk_lock:
+            disk = self._token_from_disk(server.id)
+        if disk:
+            self._cache[key] = disk
+            if not disk.is_expired():
+                return disk
         return None
 
     def store_token(self, server: ExternalServer, token: OAuthToken) -> None:
         key = self.cache_key(server)
         self._cache[key] = token
+        self._token_to_disk(server.id, token)
 
     def clear_token(self, server: ExternalServer) -> None:
         key = self.cache_key(server)
@@ -319,3 +370,207 @@ _DEFAULT_BROKER = MCPOAuthBroker()
 def get_mcp_oauth_broker() -> MCPOAuthBroker:
     return _DEFAULT_BROKER
 
+
+
+# ── Hosted remote-MCP connectors: discovery, DCR, interactive browser flow ──
+# Mirrors the Hermes optional-mcps model: the vendor hosts the MCP, Homun
+# only discovers its authorization server (RFC 8414), registers a public
+# client via Dynamic Client Registration when allowed, and walks the person
+# through an authorization-code + PKCE round trip in their browser.
+
+PENDING_DIR_NAME = "mcp_oauth_pending"
+TOKENS_DIR_NAME = "mcp_oauth_tokens"
+METADATA_TIMEOUT = 15.0
+
+
+def discover_oauth_metadata(server_url: str) -> Dict[str, str]:
+    """RFC 8414 discovery for the authorization server behind an MCP URL."""
+    from urllib.parse import urlsplit
+
+    split = urlsplit(server_url)
+    candidates = []
+    for well_known in (
+        f"{split.scheme}://{split.netloc}/.well-known/oauth-authorization-server{split.path}",
+        f"{split.scheme}://{split.netloc}/.well-known/oauth-authorization-server",
+    ):
+        if well_known not in candidates:
+            candidates.append(well_known.rstrip("/"))
+    last_error = ""
+    for candidate in candidates:
+        try:
+            with httpx.Client(timeout=METADATA_TIMEOUT, follow_redirects=True) as client:
+                resp = client.get(candidate)
+            if resp.status_code >= 400:
+                last_error = f"{candidate} -> HTTP {resp.status_code}"
+                continue
+            data = resp.json()
+            metadata = {
+                "authorization_endpoint": str(data.get("authorization_endpoint") or ""),
+                "token_endpoint": str(data.get("token_endpoint") or ""),
+                "registration_endpoint": str(data.get("registration_endpoint") or ""),
+            }
+            if metadata["authorization_endpoint"] and metadata["token_endpoint"]:
+                return metadata
+            last_error = f"{candidate}: metadati incompleti"
+        except Exception as exc:
+            last_error = f"{candidate}: {exc}"
+    raise RuntimeError(
+        f"OAuth discovery fallita per {server_url} ({last_error}) (code=backend_unavailable)")
+
+
+def dynamic_client_register(registration_endpoint: str, *, client_name: str,
+                            redirect_uri: str) -> Dict[str, str]:
+    """RFC 7591 Dynamic Client Registration for a public PKCE client."""
+    payload = {
+        "client_name": client_name,
+        "redirect_uris": [redirect_uri],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+        "code_challenge_method": "S256",
+    }
+    try:
+        with httpx.Client(timeout=METADATA_TIMEOUT, follow_redirects=True) as client:
+            resp = client.post(registration_endpoint, json=payload)
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"DCR rifiutata da {registration_endpoint} (HTTP {resp.status_code}): "
+                f"{resp.text[:200]} (code=backend_unavailable)")
+        data = resp.json()
+        client_id = str(data.get("client_id") or "")
+        if not client_id:
+            raise RuntimeError("DCR senza client_id (code=backend_unavailable)")
+        return {"client_id": client_id,
+                "client_secret": str(data.get("client_secret") or "")}
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"DCR fallita: {exc} (code=backend_unavailable)") from exc
+
+
+def _pending_dir(ctx) -> Path:
+    path = ctx.data_dir / PENDING_DIR_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _tokens_dir(ctx) -> Path:
+    path = ctx.data_dir / TOKENS_DIR_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def start_hosted_flow(ctx, actor, server_id: str, redirect_uri: str) -> Dict[str, Any]:
+    """Begin the browser flow for a hosted connector: discover, register, authorize URL."""
+    import json as _json
+    import secrets
+
+    store = ctx.repository.load()
+    server = store.external_servers.get(server_id)
+    if server is None:
+        raise RuntimeError(f"Server esterno non trovato: {server_id}")
+    if getattr(actor, "kind", "person") != "person":
+        raise RuntimeError("Solo una persona può collegare un connettore")
+
+    metadata = discover_oauth_metadata(server.url)
+    client_id = str(getattr(server, "oauth_client_id", "") or "").strip()
+    client_secret = ""
+    if not client_id:
+        if not metadata.get("registration_endpoint"):
+            raise RuntimeError(
+                "Il server non espone la registrazione dinamica e il client_id non è "
+                "configurato: serve un'app OAuth manuale (code=backend_unavailable)")
+        registered = dynamic_client_register(
+            metadata["registration_endpoint"], client_name=f"Homun ({server.name})",
+            redirect_uri=redirect_uri)
+        client_id = registered["client_id"]
+        client_secret = registered["client_secret"]
+
+    # aggiorna il record con gli endpoint scoperti/registrati (external.update)
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as write_store:
+            ctx.service.for_store(write_store).apply(actor, f"oauth-start:{server_id}:{secrets.token_hex(4)}",
+                "external.update", {
+                    "server_id": server_id, "expected_version": server.revision,
+                    "oauth_client_id": client_id,
+                    "oauth_authorization_url": metadata["authorization_endpoint"],
+                    "oauth_token_url": metadata["token_endpoint"],
+                })
+        ctx.service.store = write_store
+
+    code_verifier, code_challenge = MCPOAuthBroker.generate_pkce()
+    state = secrets.token_urlsafe(24)
+    pending = {
+        "server_id": server_id, "state": state,
+        "code_verifier": code_verifier, "redirect_uri": redirect_uri,
+        "client_id": client_id, "client_secret": client_secret,
+        "token_endpoint": metadata["token_endpoint"],
+        "started_at": time.time(),
+    }
+    (_pending_dir(ctx) / f"{state}.json").write_text(_json.dumps(pending), encoding="utf-8")
+
+    from urllib.parse import urlencode
+    params = {
+        "response_type": "code", "client_id": client_id,
+        "redirect_uri": redirect_uri, "state": state,
+        "code_challenge": code_challenge, "code_challenge_method": "S256",
+    }
+    sep = "&" if "?" in metadata["authorization_endpoint"] else "?"
+    return {"authorize_url": f"{metadata['authorization_endpoint']}{sep}{urlencode(params)}",
+            "server_id": server_id, "state": state}
+
+
+def complete_hosted_flow(ctx, state: str, code: str) -> Dict[str, Any]:
+    """Browser callback: exchange the code (PKCE) and persist the tokens."""
+    import json as _json
+
+    pending_path = _pending_dir(ctx) / f"{state}.json"
+    if not pending_path.is_file():
+        raise RuntimeError("Flusso OAuth sconosciuto o scaduto (state non riconosciuto)")
+    pending = _json.loads(pending_path.read_text(encoding="utf-8"))
+    store = ctx.repository.load()
+    server = store.external_servers.get(pending["server_id"])
+    if server is None:
+        raise RuntimeError("Il connettore non esiste più")
+
+    data = {
+        "grant_type": "authorization_code", "code": code,
+        "code_verifier": pending["code_verifier"],
+        "redirect_uri": pending["redirect_uri"], "client_id": pending["client_id"],
+    }
+    if pending.get("client_secret"):
+        data["client_secret"] = pending["client_secret"]
+    with httpx.Client(timeout=METADATA_TIMEOUT) as client:
+        resp = client.post(pending["token_endpoint"], data=data)
+    if resp.status_code >= 400:
+        raise RuntimeError(
+            f"Scambio del codice fallito (HTTP {resp.status_code}): {resp.text[:200]} "
+            "(code=backend_unavailable)")
+    payload = resp.json()
+    access = payload.get("access_token")
+    if not access:
+        raise RuntimeError("Risposta token senza access_token (code=backend_unavailable)")
+    expires_in = payload.get("expires_in")
+    token = OAuthToken(
+        access_token=str(access), token_type=str(payload.get("token_type") or "Bearer"),
+        expires_at=(time.time() + float(expires_in)) if expires_in is not None else None,
+        refresh_token=payload.get("refresh_token"), scope=payload.get("scope"))
+    broker = get_mcp_oauth_broker()
+    broker._disk_dir = _tokens_dir(ctx)
+    broker.store_token(server, token)
+    pending_path.unlink(missing_ok=True)
+    return {"server_id": server.id, "connected": True,
+            "expires_at": token.expires_at, "scope": token.scope}
+
+
+def hosted_connection_status(ctx, server_id: str) -> Dict[str, Any]:
+    store = ctx.repository.load()
+    server = store.external_servers.get(server_id)
+    if server is None:
+        return {"server_id": server_id, "connected": False, "declared": False}
+    broker = get_mcp_oauth_broker()
+    broker._disk_dir = _tokens_dir(ctx)
+    token = broker.get_cached_token(server)
+    return {"server_id": server_id, "declared": True, "connected": token is not None,
+            "expires_at": token.expires_at if token else None,
+            "interactive": bool(server.oauth_authorization_url or server.oauth_client_id)}
