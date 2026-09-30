@@ -1,0 +1,228 @@
+{
+    "items": [
+        {
+            "surface": "desktop",
+            "toolset": "full",
+            "denied_tools": [],
+            "micro_compaction": true,
+            "native_stream": false,
+            "parallel_read_tools": false,
+            "id": "t2-run",
+            "work_id": "work_8_XITK5L_Jf3fw",
+            "status": "waiting_external",
+            "expected_version": 2,
+            "digest": "53a163cdab9c82d61634119749461c55b09f395f5d171f8ae9e000702426162a",
+            "materials": [],
+            "limits": {
+                "max_turns": 8,
+                "max_model_attempts": 12,
+                "max_materials": 12,
+                "max_observation_characters": 64000
+            },
+            "external_tools": [],
+            "file_edit_request_id": "file-edit:a9713081f29950e1285f3006fc3630286b83d0003a97c7da3dcaef576c952e66",
+            "terminal": {
+                "image": "sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6",
+                "policy": "docker-offline-v1",
+                "version": 5
+            },
+            "execution_context": {
+                "version": 1,
+                "backend": "docker-offline-v1",
+                "cwd": "."
+            },
+            "runtime_selection": {
+                "version": 1,
+                "connection_id": "openai_compatible",
+                "provider_id": "openai_compatible",
+                "kind": "openai_compatible",
+                "model_id": "qwen3.5:4b",
+                "endpoint": "http://127.0.0.1:11434/v1"
+            },
+            "tools": [
+                {
+                    "name": "deliver_workspace_file",
+                    "toolset": "workspace_files",
+                    "version": "2",
+                    "schema_hash": "137af6e3d2605bb36f1d8d0f952e218c95189168c7619e732751448e204d3afe",
+                    "definition_hash": "5ba4ed445fe1650f315325a1512a0b4434fb17200f2edcd01dc7c0b5e2282c9e",
+                    "kind": "tool",
+                    "replay": "never"
+                },
+                {
+                    "name": "list_materials",
+                    "toolset": "materials",
+                    "version": "1",
+                    "schema_hash": "35249d96716a4408074b5d8132396599360d10fcc58b6512ae0759043b907f17",
+                    "definition_hash": "0c0da2b04915e88295d22bd544a1e2e66aa821a782d79e573c5f281f89e88985",
+                    "kind": "tool",
+                    "replay": "read_only"
+                },
+                {
+                    "name": "list_workspace_files",
+                    "toolset": "workspace_files",
+                    "version": "2",
+                    "schema_hash": "21168a31b964df483ddcc631f809a2911de9b06a469fbdd4b981763a9d80ac2e",
+                    "definition_hash": "56da3a4ca6319ff33fc83e6ac7a0dddce958e1a081823b4b35fedec03dd83a1e",
+                    "kind": "tool",
+                    "replay": "read_only"
+                },
+                {
+                    "name": "patch_workspace_file",
+                    "toolset": "workspace_files",
+                    "version": "2",
+                    "schema_hash": "462ae937824f1d35e381d8272caa4ccc8b493a3fc76b7ab8940dacefb08b8df1",
+                    "definition_hash": "d66c6a3cbbd7e9f60aa29783a3a33ab240993c116d76923f8b99669d6e375e60",
+                    "kind": "tool",
+                    "replay": "never"
+                },
+                {
+                    "name": "read_material",
+                    "toolset": "materials",
+                    "version": "1",
+                    "schema_hash": "7f22407e3ed1c2e5d1d677d5ba5630bdde4f4dd73f47acc2827d6261e20dd2a9",
+                    "definition_hash": "8f331efe360cc4fbc71ac3dec8e6caa3813f59d0b71ac3874f223784cf95d297",
+                    "kind": "tool",
+                    "replay": "read_only"
+                },
+                {
+                    "name": "read_tool_result",
+                    "toolset": "results",
+                    "version": "1",
+                    "schema_hash": "ae52f6973361263af9915e0a6d21f8a7d22c1063b75cdb80f070b9019d824f9b",
+                    "definition_hash": "c6de93dbad629772d7ac0fdf830c87ee175b508e60f5dc03fdeb6ea917e4fdb6",
+                    "kind": "tool",
+                    "replay": "read_only"
+                },
+                {
+                    "name": "read_workspace_file",
+                    "toolset": "workspace_files",
+                    "version": "2",
+                    "schema_hash": "6a67e06df1c22e73956f617c66e177985e20922892f54ef8bc966a086d40f171",
+                    "definition_hash": "1fcf1bcb559a2d8e0d03ba7d08b20e10dfe84707eebc37ee6f700179ca58716b",
+                    "kind": "tool",
+                    "replay": "read_only"
+                },
+                {
+                    "name": "read_workspace_lines",
+                    "toolset": "workspace_files",
+                    "version": "2",
+                    "schema_hash": "758840315aa82866df40c6be89ca8e6dfd845a64deb2df4bec8287fa391b1f22",
+                    "definition_hash": "d84556a09b32edd7ac3ef111260525c747bfce6b5f6afeb48ef64966f5d5a338",
+                    "kind": "tool",
+                    "replay": "read_only"
+                },
+                {
+                    "name": "request_user_input",
+                    "toolset": "human",
+                    "version": "1",
+                    "schema_hash": "dce4003173dbfda88697710f95746141db883536076068b0c1927e02dc3b0b98",
+                    "definition_hash": "60df98bfc2574afe40f17e32c0c3856009e30f366ae24670c9229a2a6c1fd65c",
+                    "kind": "ask",
+                    "replay": "never"
+                },
+                {
+                    "name": "search_materials",
+                    "toolset": "materials",
+                    "version": "1",
+                    "schema_hash": "ab92ccc96e1fbbaacfdbabd615151d87392697fb4793cc43f0e2d086dd94b1f4",
+                    "definition_hash": "fba3b9911fc9add36a46f1b2544a7561a7a0183caacc22a0c800ea5777ddb3a7",
+                    "kind": "tool",
+                    "replay": "read_only"
+                },
+                {
+                    "name": "search_workspace_files",
+                    "toolset": "workspace_files",
+                    "version": "2",
+                    "schema_hash": "84277d2dbdcb20c0675a5ba7534cd21f181437f4422d86997813f2d322f6bacc",
+                    "definition_hash": "a5eb7bc7bad00c2e16bc7716da37676728c54a0073dd9c5fa72e50ea0bbde1a4",
+                    "kind": "tool",
+                    "replay": "read_only"
+                },
+                {
+                    "name": "terminal_execute",
+                    "toolset": "terminal",
+                    "version": "5",
+                    "schema_hash": "f2a80aaf2e0f880de669f5ad3290251921119ce5c9a795f92a3e2b36ba55935f",
+                    "definition_hash": "b8055bf4c7a610eebf3fd52f67f2f72116256d9232fc8678fdaab9878024b3dc",
+                    "kind": "tool",
+                    "replay": "never"
+                },
+                {
+                    "name": "terminal_poll",
+                    "toolset": "terminal",
+                    "version": "3",
+                    "schema_hash": "a3b4fc6723b45c84745f5ab190eeb71b3eb7061d5e638ebf528654712daec31a",
+                    "definition_hash": "5af75b75e2533f0509a9edd83540e9044543cd8bae2adb193a15b5bed277877b",
+                    "kind": "tool",
+                    "replay": "read_only"
+                },
+                {
+                    "name": "terminal_stop",
+                    "toolset": "terminal",
+                    "version": "3",
+                    "schema_hash": "a3b4fc6723b45c84745f5ab190eeb71b3eb7061d5e638ebf528654712daec31a",
+                    "definition_hash": "ef9a88f183fe97094857e457b3502852ed660bd4954a3c68591e9ef131185819",
+                    "kind": "tool",
+                    "replay": "never"
+                },
+                {
+                    "name": "terminal_wait",
+                    "toolset": "terminal",
+                    "version": "3",
+                    "schema_hash": "a3b4fc6723b45c84745f5ab190eeb71b3eb7061d5e638ebf528654712daec31a",
+                    "definition_hash": "b36481c5a809e44734e22bf6500aaea5cf2fab5a23102b4ee0500935c7f27072",
+                    "kind": "tool",
+                    "replay": "never"
+                },
+                {
+                    "name": "terminal_write",
+                    "toolset": "terminal",
+                    "version": "4",
+                    "schema_hash": "e42db24bd79f13c061a9dad520de89bc90a7ac2c1572e19ed53d4d8ace935a19",
+                    "definition_hash": "3f921814ecbe22d36a233b9207f02343ba625f08856cd68d0b415e7dad4c72b5",
+                    "kind": "tool",
+                    "replay": "never"
+                },
+                {
+                    "name": "tool_search",
+                    "toolset": "discovery",
+                    "version": "1",
+                    "schema_hash": "c95e6f711d9d4714edb8f699e85a5accb38c77fe751d10abc87f8997431c3033",
+                    "definition_hash": "ae5eda1c97b51f33c79ccec6a3251489e73c7c4cb8e37797bb8ceea030d14c85",
+                    "kind": "tool",
+                    "replay": "read_only"
+                },
+                {
+                    "name": "write_workspace_file",
+                    "toolset": "workspace_files",
+                    "version": "2",
+                    "schema_hash": "6197cdec8fa708731af6d47aa7f58ec91a9a4dcc9021e92f637b9d1061c2f7dc",
+                    "definition_hash": "cb5ea11261c0d96eb2e5b628727fe98a0775ee23c2367f7c1e662771b95133f4",
+                    "kind": "tool",
+                    "replay": "never"
+                }
+            ],
+            "tool_version": "adaptive-materials-native-v2",
+            "assignee_id": "person_fabio",
+            "executor_name": "Homun",
+            "connection_id": "openai_compatible",
+            "observations": [
+                {
+                    "tool": "list_workspace_files",
+                    "arguments": {},
+                    "message": "Use list_workspace_files",
+                    "result": {
+                        "path": "",
+                        "items": [],
+                        "truncated": false,
+                        "scan_limited": false
+                    }
+                }
+            ],
+            "turns": 1,
+            "model_attempts": 2,
+            "history_redacted": false
+        }
+    ]
+}
