@@ -247,3 +247,23 @@ Azzerati i gap azzerabili emersi dalla batteria estesa:
 | Delegation mai esercitata (H21) | **LIVE**: senza team approvato → blocco tipizzato `delegation_agent_not_approved` (security ok); con team Vega+Bruno → child run assegnato a Bruno, `_delegation_result.result = "BANANA"` esatto | live end-to-end |
 
 Nota: la nota "teal" era duplicata (globale del mattino pre-scope + person di oggi); eliminata la globale, tenuta la person.
+
+## Approval relay (30/07... no: 30/09 notte-buia)
+
+Richieste di autorizzazione da mobile: la persona collega la propria identità di canale
+(WhatsApp/Telegram/webhook) con un codice COLLEGA inviato DAL canale; da lì ogni gate
+di sua proprietà (run, comando terminale, modifica file) genera una notifica con codice
+monouso a 15 minuti, e la risposta "A <codice>" / "R <codice>" decide.
+
+- Sicurezza: solo l'identità collegata decide; codici monouso; scadenza rifiutata;
+  gate su lavori archiviati mai notificati; approvazioni SOLO tramite i percorsi
+  canonici (digest + autorità owner/reviewer + journal) con timbro `relay:<platform>`.
+- Verifica live (adapter webhook come "telefono"): enroll → notifica → "A WMVE5W" →
+  run queued con `approval_channel: relay:webhook` nell'API. Rifiuto run = cancellazione
+  pulita della proposta (mai partita).
+- UI: riga "Autorizzazioni da mobile" nel pannello Code di revisione (canale collegato
+  o codice COLLEGA da inviare).
+- Suite: 1898 passed / 0 failed. Checker architettura: verde (nessun ciclo
+  application→routes; canale ingress sotto le 800 righe).
+- Da fare: collegamento reale del bridge WhatsApp (sidecar :8902, binario già previsto),
+  adapter Telegram già presente nel registry.
