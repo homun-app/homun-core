@@ -267,3 +267,30 @@ monouso a 15 minuti, e la risposta "A <codice>" / "R <codice>" decide.
   application→routes; canale ingress sotto le 800 righe).
 - Da fare: collegamento reale del bridge WhatsApp (sidecar :8902, binario già previsto),
   adapter Telegram già presente nel registry.
+
+## Computer-use a tre livelli (30/07... no: 30/07 era luglio. 30/09 notte-2)
+
+Design concordato: hard-block (mai), superfici sensibili denaro (sempre umano,
+non allowlistabile), allowlist per-app (recinto dell'autonomia).
+
+- Policy pura (`computer_use_policy.py`): hard-block ereditati da Hermes
+  (combo distruttive, pattern typing) + euristica sensibili IT/EN (banche,
+  PayPal, pagamenti, bonifici, IBAN, CVV…) che fallisce-safe verso il gate.
+- Job (`computer_use_jobs.py`): gate digest-pinned sul pattern terminal
+  (id = digest del contenuto, replay idempotente, approve ricontrolla il
+  digest), approve/reject con autorità owner/reviewer, canale timbrato.
+- Allowlist = AgentProfile.computer_use_apps: app allowlistata corre senza
+  gate SOLO per agenti autonomi; supervisionati gate sempre.
+- Backend (`computer_use_backend.py`): MCP-over-stdio verso cua-driver,
+  risoluzione binario (env/venv/PATH), BackendUnavailableError tipizzato con
+  hint di installazione — mai successi finti.
+- Tool `computer_use` registrato con capability `computer_use:true` nei run
+  (policy cua-driver-supervised-v1); gate computer-use notificati anche sul
+  relay WhatsApp (quarto tipo di gate).
+- Skill portata nel repo homun-skills (vocabolario + sezione governance
+  Homun) → catalogo a 55 voci, 58 approvate nel workspace live.
+- Fix incidentale: sync catalogo senza percorso ora è rifiutato (400
+  tipizzato) — prima archiviava tutto il catalogo usando la cwd.
+- Verifica live: agente autonomo con allowlist → run con capability → tool
+  registrato. Esecuzione reale in attesa del binario cua-driver sul desktop.
+- Suite: 1918 passed / 0 failed (+20: policy, gate, approve, digest, relay).
