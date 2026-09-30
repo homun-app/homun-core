@@ -38,13 +38,17 @@ def execute(ctx, actor, run, tool, args):
         limit = max(1, min(args.get("limit", 5), 20))
         if not hasattr(ctx, "memory") or ctx.memory is None:
             return {"memories": [], "count": 0}
-        notes = ctx.memory.recall(query, project_id=project_id, limit=limit)
-        if work_id:
-            work_notes = [
-                n for n in ctx.memory.list(work_id=work_id, include_deleted=False)
-                if query.lower() in n.text.lower() and n.id not in {m.id for m in notes}
-            ]
-            notes = (notes + work_notes)[:limit]
+        # Visibility composition for an agent run: the work's project notes,
+        # work-bound notes, and the assignee's craft memory. Workspace-global
+        # notes are deliberately excluded — no cross-project leakage.
+        notes = ctx.memory.recall(
+            query,
+            project_id=project_id,
+            work_id=work_id,
+            agent_id=run.get("assignee_id"),
+            include_global=False,
+            limit=limit,
+        )
         return {
             "memories": [
                 {
@@ -81,11 +85,15 @@ def execute(ctx, actor, run, tool, args):
                     "message": "An identical memory note is already recorded.",
                 }
 
+        # Agent-written notes are project knowledge: they land in the work's
+        # project, or stay bound to the work when it has no project. They can
+        # never land in the workspace-global compartment.
         new_note = ctx.memory.add_approved(
             text=text,
             actor_id=actor.id,
             work_id=work_id,
             project_id=project_id,
+            scope="project",
         )
         return {
             "status": "stored",
