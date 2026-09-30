@@ -339,6 +339,10 @@ def propose(ctx, actor, work_id, body):
                 if not agent_native.enabled(run):
                     raise ValidationError('Delegation tools require native model support')
                 run['delegation'] = {'policy': 'isolated-subagent-v1', 'version': 1}
+            if body.get('computer_use'):
+                if not agent_native.enabled(run):
+                    raise ValidationError('Computer use requires native model support')
+                run['computer_use'] = {'policy': 'cua-driver-supervised-v1', 'version': 1}
             if body.get('clarify'):
                 if not agent_native.enabled(run):
                     raise ValidationError('Clarify tools require native model support')

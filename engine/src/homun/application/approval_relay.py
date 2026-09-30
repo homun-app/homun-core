@@ -126,6 +126,10 @@ def _gate_label(kind: str, gate: Dict[str, Any], work_title: str) -> str:
         return f"Comando terminale su «{work_title}»: {command}"
     if kind == "edit":
         return f"Modifica file su «{work_title}»: {gate.get('path', '?')}"
+    if kind == "computer_use":
+        action = gate.get("action", {})
+        return (f"Azione desktop su «{work_title}»: {action.get('action', '?')}"
+                f"{' su ' + action['app'] if action.get('app') else ''}")
     return f"«{work_title}»"
 
 
@@ -143,6 +147,8 @@ def _pending_gates(store) -> list[tuple[str, str, Dict[str, Any], str]]:
             gates.append(("terminal", record.command_id, result, str(result.get("work_id", ""))))
         elif record.type == "workspace.file_edit":
             gates.append(("edit", record.command_id, result, str(result.get("work_id", ""))))
+        elif record.type == "computer_use.action":
+            gates.append(("computer_use", record.command_id, result, str(result.get("work_id", ""))))
     return gates
 
 
@@ -278,6 +284,11 @@ def _approve_gate(ctx, entry: Dict[str, Any], channel: str) -> str:
         elif entry["kind"] == "edit":
             workspace_file_edits.approve(ctx, actor, work.id, entry["gate_id"],
                                          {"digest": gate["digest"]})
+        elif entry["kind"] == "computer_use":
+            from homun.application import computer_use_jobs
+            computer_use_jobs.approve(ctx, actor, work.id, entry["gate_id"],
+                                      {"digest": gate["digest"],
+                                       "channel": f"relay:{channel}"})
         else:
             return "❌ Tipo di gate sconosciuto."
         _stamp()
@@ -323,6 +334,11 @@ def _reject_gate(ctx, entry: Dict[str, Any], channel: str = "relay") -> str:
                         rec.result["rejected_by"] = actor.id
                 ctx.service.store = inner
             return "🛑 Modifica file rifiutata."
+        if entry["kind"] == "computer_use":
+            from homun.application import computer_use_jobs
+            computer_use_jobs.reject(ctx, actor, work.id, entry["gate_id"],
+                                     {"digest": gate["digest"]})
+            return "🛑 Azione desktop rifiutata."
         return "❌ Tipo di gate sconosciuto."
     except DomainError as exc:
         return f"❌ Rifiuto non riuscito: {exc.message}"

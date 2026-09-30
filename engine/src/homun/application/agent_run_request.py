@@ -22,6 +22,7 @@ class RunRequest(RunToolPolicy):
     memory: bool | None = None
     skills: bool | None = None
     delegation: bool = False
+    computer_use: bool = False
     clarify: bool = False
     goals: bool = False
     cron: bool = False

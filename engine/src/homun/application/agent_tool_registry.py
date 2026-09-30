@@ -62,6 +62,12 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         from homun.application.memory_tools import execute as memory_execute
         for mem_entry in memory_entries(memory_execute, mem.get('version', 1)):
             registry.register(mem_entry)
+    cu = run.get('computer_use')
+    if isinstance(cu, dict) and cu.get('policy') == 'cua-driver-supervised-v1' and cu.get('version') == 1:
+        from homun.application.computer_use_contracts import entries as cu_entries
+        from homun.application.computer_use_contracts import execute as cu_execute
+        for cu_entry in cu_entries(cu_execute, cu.get('version', 1)):
+            registry.register(cu_entry)
     skills = run.get('skills')
     if isinstance(skills, dict) and skills.get('policy') == 'workspace-catalog-v1' and skills.get('version') == 1:
         from homun.application.skill_contracts import entries as skill_entries

@@ -94,6 +94,24 @@ def _identity_from_payload(payload: dict[str, Any], agent: AgentProfile, *, crea
         agent.autonomy_mode = _parse_autonomy(payload.get("autonomy_mode"))
     if create or "capabilities" in payload:
         agent.capabilities = _parse_capabilities(payload.get("capabilities"))
+    if create or "computer_use_apps" in payload:
+        agent.computer_use_apps = _parse_computer_use_apps(payload.get("computer_use_apps"))
+
+
+def _parse_computer_use_apps(raw: Any) -> list[str]:
+    """App allowlist for computer use: names, deduplicated, bounded."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValidationError("computer_use_apps must be a list")
+    items: list[str] = []
+    for item in raw:
+        text = str(item).strip()
+        if text and len(text) <= 64 and text.casefold() not in {i.casefold() for i in items}:
+            items.append(text)
+        if len(items) >= 12:
+            break
+    return items
 
 
 def _agent_create(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:

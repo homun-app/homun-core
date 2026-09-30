@@ -283,8 +283,13 @@ def sync_skill_catalog_route(workspace_id: str, body: dict,
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
     if actor.kind != "person":
         raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Persons only"})
-    return sync_skill_catalog(ctx, str((body or {}).get("path") or ""),
-                              rebase=bool((body or {}).get("rebase")))
+    path = str((body or {}).get("path") or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail={
+            "code": "catalog_path_required",
+            "message": "Il percorso del repository delle skill è obbligatorio "
+                       "(un sync senza percorso archivierebbe l'intero catalogo)."})
+    return sync_skill_catalog(ctx, path, rebase=bool((body or {}).get("rebase")))
 
 
 @router.post("/skills/seed")

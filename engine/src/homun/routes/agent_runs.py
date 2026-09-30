@@ -114,6 +114,48 @@ def approve_run(workspace_id: str, work_id: str, run_id: str, body: RunApproval,
         raise _http_error(exc) from exc
 
 
+class ComputerUseApproval(BaseModel):
+    digest: str
+
+
+@router.get('/works/{work_id}/computer-use')
+def list_computer_use(workspace_id: str, work_id: str,
+                      x_homun_actor_id: str | None = Header(default=None),
+                      x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        from homun.application.computer_use_jobs import list_for_work
+        return list_for_work(ctx, actor, work_id)
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post('/works/{work_id}/computer-use/{proposal_id}/approve')
+def approve_computer_use(workspace_id: str, work_id: str, proposal_id: str,
+                         body: ComputerUseApproval,
+                         x_homun_actor_id: str | None = Header(default=None),
+                         x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        from homun.application.computer_use_jobs import approve
+        return approve(ctx, actor, work_id, proposal_id, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post('/works/{work_id}/computer-use/{proposal_id}/reject')
+def reject_computer_use(workspace_id: str, work_id: str, proposal_id: str,
+                        body: ComputerUseApproval,
+                        x_homun_actor_id: str | None = Header(default=None),
+                        x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        from homun.application.computer_use_jobs import reject
+        return reject(ctx, actor, work_id, proposal_id, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
 class RunControl(BaseModel):
     command_id: str = Field(min_length=1, max_length=160)
     expected_version: int = Field(ge=1)
