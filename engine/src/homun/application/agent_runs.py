@@ -186,6 +186,11 @@ def propose(ctx, actor, work_id, body):
                 project = store.projects.get(work.project_id)
                 if project and getattr(project, 'agent_model_overrides', None):
                     connection_id = project.agent_model_overrides.get(assignee_id)
+            if work.project_id and not body.get('allowed_tools'):
+                project = store.projects.get(work.project_id)
+                allow = (getattr(project, 'agent_tool_overrides', None) or {}).get(assignee_id)
+                if isinstance(allow, list) and allow:
+                    body['allowed_tools'] = list(allow)
             if not connection_id and agent:
                 connection_id = agent.preferred_connection_id
             if not connection_id:
@@ -311,12 +316,20 @@ def propose(ctx, actor, work_id, body):
                 if not agent_native.enabled(run):
                     raise ValidationError('Desktop computer use requires native model support')
                 run['desktop'] = {'policy': 'native-desktop-v1', 'version': 1}
+            # Knowledge capabilities default ON when the connection supports
+            # native tools (Hermes-parity out of the box); explicit flags win.
+            _native = agent_native.enabled(run)
+            for _capability in ('memory', 'skills'):
+                if body.get(_capability) is None:
+                    body.pop(_capability, None)
+                if _capability not in body:
+                    body[_capability] = _native
             if body.get('memory'):
-                if not agent_native.enabled(run):
+                if not _native:
                     raise ValidationError('Memory tools require native model support')
                 run['memory'] = {'policy': 'scoped-workspace-v1', 'version': 1}
             if body.get('skills'):
-                if not agent_native.enabled(run):
+                if not _native:
                     raise ValidationError('Skills tools require native model support')
                 run['skills'] = {'policy': 'workspace-catalog-v1', 'version': 1}
             if body.get('delegation'):

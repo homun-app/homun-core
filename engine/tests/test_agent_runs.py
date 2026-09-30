@@ -25,7 +25,7 @@ def setup(tmp_path):
 
 def start(ctx,actor,work,material):
     from homun.application.agent_runs import propose, approve
-    p=propose(ctx,actor,work,{'command_id':'run','expected_version':1,'material_ids':[material]})
+    p=propose(ctx,actor,work,{'command_id':'run','expected_version':1,'material_ids':[material],'memory':False,'skills':False})
     approve(ctx,actor,work,p['id'],{'command_id':'approve','digest':p['digest'],'expected_version':p['expected_version']})
     return p
 
@@ -134,7 +134,7 @@ def test_wrong_approval_and_concurrent_turn_are_rejected(setup):
     from homun.application.agent_runs import propose,approve
     from homun.application.agent_run_execution import advance
     ctx,actor,work,material=setup
-    p=propose(ctx,actor,work,{'command_id':'run','expected_version':1,'material_ids':[material]})
+    p=propose(ctx,actor,work,{'command_id':'run','expected_version':1,'material_ids':[material],'memory':False,'skills':False})
     with pytest.raises(ConflictError):
         approve(ctx,actor,work,p['id'],{'command_id':'bad','digest':'wrong','expected_version':p['expected_version']})
     approve(ctx,actor,work,p['id'],{'command_id':'ok','digest':p['digest'],'expected_version':p['expected_version']})
