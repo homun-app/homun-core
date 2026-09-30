@@ -23,11 +23,14 @@ import {
   Settings2,
   Brain,
   Shield,
+  ShieldAlert,
+  Zap,
   Layers,
   Cpu,
 } from "lucide-react";
 import {
   ROLE_TEMPLATES,
+  autonomyLabel,
   parseAgentCognitiveConfig,
   serializeAgentCognitiveConfig,
   type RoleTemplate,
@@ -351,13 +354,20 @@ export function ConversationAgentsSettingsSection({ actorId = "person_fabio" }: 
                     temp: {cognitive.temperature ?? 0.5}
                   </div>
 
-                  {/* Autonomia */}
-                  <div className="px-2 py-0.5 rounded bg-[#111c18] border border-[rgba(255,255,255,0.08)] text-[#9db3ad]">
-                    {agent.autonomy_mode === "strict"
-                      ? "Supervisione stretta"
-                      : agent.autonomy_mode === "autonomous"
-                      ? "Autonomo"
-                      : "Semi-autonomo"}
+                  {/* Autonomia — valori del motore: supervised | autonomous */}
+                  <div
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded border ${
+                      agent.autonomy_mode === "autonomous"
+                        ? "bg-[rgba(21,122,110,0.18)] border-[rgba(143,227,208,0.2)] text-[#8fe3d0]"
+                        : "bg-[#111c18] border-[rgba(255,255,255,0.08)] text-[#9db3ad]"
+                    }`}
+                  >
+                    {agent.autonomy_mode === "autonomous" ? (
+                      <Zap size={11} />
+                    ) : (
+                      <ShieldAlert size={11} />
+                    )}
+                    <span>{autonomyLabel(agent.autonomy_mode)}</span>
                   </div>
                 </div>
               </div>

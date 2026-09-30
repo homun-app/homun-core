@@ -311,9 +311,8 @@ function DiffPreview({ diff }: { diff: string }) {
   );
 }
 
-function isPolicyApproved(run: { status: string }): boolean {
-  const channel = (run as unknown as { _approval_channel?: string })._approval_channel;
-  return typeof channel === "string" && channel.startsWith("policy:");
+function isPolicyApproved(run: { approval_channel?: string }): boolean {
+  return typeof run.approval_channel === "string" && run.approval_channel.startsWith("policy:");
 }
 
 const RUN_CAPABILITY_LABELS: [field: string, label: string][] = [
