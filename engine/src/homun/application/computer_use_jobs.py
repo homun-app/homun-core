@@ -84,20 +84,71 @@ def propose(ctx, actor, work_id: str, run_id: str, action: Dict[str, Any]) -> Di
     return deepcopy(gate)
 
 
+def _resolve_pid(app: str | None) -> int | None:
+    """Resolve an app name to its pid through the driver's own list_apps."""
+    if not app:
+        return None
+    listing = computer_use_backend.call_tool("list_apps", {})
+    import re
+    text = str(listing)
+    target = app.strip().casefold()
+    # Il driver elenca in testo piano: "- Finder (pid 728) [com.apple.finder]".
+    for match in re.finditer(r"-\s*([^\n(]+?)\s*\(pid\s+(\d+)\)", text):
+        if target in match.group(1).strip().casefold():
+            return int(match.group(2))
+    return None
+
+
 def _execute(gate: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate one Homun action onto the driver's real MCP verbs (pid-based)."""
     action = gate["action"]
     name = str(action.get("action"))
-    mapping = {
-        "capture": ("get_window_state", {"app": action.get("app")}),
-        "screenshot": ("screenshot", {}),
-        "click": ("click", {"element_token": action.get("element"),
-                            "x": action.get("x"), "y": action.get("y")}),
-        "type": ("type", {"text": action.get("text")}),
-        "key": ("press_key", {"keys": action.get("keys")}),
-        "scroll": ("scroll", {"direction": action.get("direction") or "down"}),
-    }
-    tool, arguments = mapping.get(name, ("get_window_state", {"app": action.get("app")}))
-    return computer_use_backend.call_tool(tool, arguments)
+    app = action.get("app")
+    pid = _resolve_pid(app)
+    if name in {"capture", "click", "double_click", "right_click", "type", "key",
+                "scroll"} and app and pid is None:
+        return {"isError": True, "error": f"app non in esecuzione: {app}"}
+    if name == "capture":
+        windows = computer_use_backend.call_tool("list_windows", {"pid": pid})
+        window_id = None
+        import json as _json
+        for part in (windows.get("structuredContent", {}) or {}).get("windows", []) \
+                if isinstance(windows, dict) else []:
+            window_id = part.get("window_id")
+            if part.get("is_on_screen", True):
+                break
+        if window_id is None:
+            import re as _re
+            match = _re.search(r'"window_id"\s*:\s*(\d+)', str(windows))
+            window_id = int(match.group(1)) if match else None
+        return computer_use_backend.call_tool(
+            "get_window_state", {"pid": pid, "window_id": window_id})
+    if name == "screenshot":
+        return computer_use_backend.call_tool("get_desktop_state", {})
+    if name == "launch":
+        return computer_use_backend.call_tool("launch_app", {"bundle_id": app})
+    if name == "click":
+        args = {"pid": pid}
+        if action.get("element"):
+            args["element_token"] = action["element"]
+        elif action.get("x") is not None:
+            args["x"], args["y"] = action.get("x"), action.get("y")
+        return computer_use_backend.call_tool("click", args)
+    if name == "double_click":
+        return computer_use_backend.call_tool("double_click",
+                                              {"pid": pid, "x": action.get("x"), "y": action.get("y")})
+    if name == "right_click":
+        return computer_use_backend.call_tool("right_click",
+                                              {"pid": pid, "x": action.get("x"), "y": action.get("y")})
+    if name == "type":
+        return computer_use_backend.call_tool("type_text", {"pid": pid, "text": action.get("text")})
+    if name == "key":
+        keys = [part.strip() for part in str(action.get("keys") or "").replace("-", "+").split("+") if part]
+        return computer_use_backend.call_tool("hotkey", {"pid": pid, "keys": keys})
+    if name == "scroll":
+        return computer_use_backend.call_tool("scroll",
+                                              {"pid": pid, "direction": action.get("direction") or "down"})
+    return {"isError": True, "error": f"unsupported action: {name}"}
 
 
 def approve(ctx, actor, work_id: str, proposal_id: str, body: Dict[str, Any]) -> Dict[str, Any]:

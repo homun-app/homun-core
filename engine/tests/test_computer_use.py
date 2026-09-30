@@ -84,9 +84,18 @@ def setup(tmp_path, monkeypatch):
                                                  workspace_id=ctx.workspace_id,
                                                  result=run_result)
     executed = []
-    monkeypatch.setattr("homun.application.computer_use_backend.call_tool",
-                        lambda tool, args, **kw: executed.append((tool, args))
-                        or {"ok": True, "tool": tool})
+
+    def fake_call(tool, args, **kw):
+        executed.append((tool, args))
+        if tool == "list_apps":
+            return {"content": [{"type": "text", "text":
+                "\n- Safari (pid 101) [com.test]\n- PayPal (pid 102) [com.test]\n"}]}
+        if tool == "list_windows":
+            return {"structuredContent": {"windows": [
+                {"window_id": 7, "is_on_screen": True, "app_name": "Safari"}]}}
+        return {"ok": True, "tool": tool}
+
+    monkeypatch.setattr("homun.application.computer_use_backend.call_tool", fake_call)
     yield ctx, actor, work, executed
     ctx.close()
 
@@ -116,7 +125,7 @@ def test_sensitive_action_gates_and_approval_executes(setup):
                                          {"digest": gate["digest"]})
     assert approved["status"] == "executed"
     assert approved["_approval_channel"] == "human:desktop"
-    assert executed and executed[0][0] == "click"
+    assert any(tool == "click" and args.get("element_token") == "9" for tool, args in executed)
 
 
 def test_allowlisted_autonomous_executes_inline(setup):
@@ -125,7 +134,9 @@ def test_allowlisted_autonomous_executes_inline(setup):
     gate = computer_use_jobs.propose(ctx, actor, work, "cu-run",
                                      {"action": "capture", "app": "Safari"})
     assert gate["status"] == "executed_inline"
-    assert executed and executed[0][0] == "get_window_state"
+    # prima risolve il pid via list_apps, poi cattura la finestra
+    assert ("list_apps", {}) in executed
+    assert ("get_window_state", {"pid": 101, "window_id": 7}) in executed
 
 
 def test_supervised_agent_gates_even_on_allowlisted_app(setup):
