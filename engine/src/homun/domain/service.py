@@ -21,6 +21,7 @@ from homun.domain.commands.teams import _team_create
 from homun.domain.commands.teams import _team_update
 from homun.domain.commands.teams import _team_archive
 from homun.domain.commands.conversations import _conversation_create
+from homun.domain.commands.conversations import _conversation_archive
 from homun.domain.commands.conversations import _conversation_post_message
 from homun.domain.commands.projects import _project_create
 from homun.domain.commands.projects import _project_create_from_conversation
@@ -32,6 +33,7 @@ from homun.domain.commands.materials import _material_create
 from homun.domain.commands.materials import _material_update
 from homun.domain.commands.materials import _material_archive
 from homun.domain.commands.work import _work_create
+from homun.domain.commands.work import _work_archive
 from homun.domain.commands.work import _work_link_conversation
 from homun.domain.commands.plans import _plan_propose
 from homun.domain.commands.plans import _plan_accept
@@ -71,6 +73,7 @@ HANDLERS = {
     "team.update": _team_update,
     "team.archive": _team_archive,
     "conversation.create": _conversation_create,
+    "conversation.archive": _conversation_archive,
     "conversation.post_message": _conversation_post_message,
     "project.create": _project_create,
     "project.create_from_conversation": _project_create_from_conversation,
@@ -82,6 +85,7 @@ HANDLERS = {
     "material.update": _material_update,
     "material.archive": _material_archive,
     "work.create": _work_create,
+    "work.archive": _work_archive,
     "work.link_conversation": _work_link_conversation,
     "plan.propose": _plan_propose,
     "plan.accept": _plan_accept,

@@ -86,6 +86,28 @@ def _work_pause(ctx: CommandContext, actor: Actor, command_id: str, payload: dic
     return {"work_id": work.id, "status": work.status, "version": work.version}
 
 
+def _work_archive(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Archive a work out of active views (reversible with restore=true)."""
+    from homun.policy.work import require_work_access
+    work = ctx.get_work(str(payload.get("work_id", "")))
+    require_work_access(ctx.store, actor, work.id, "write")
+    ctx._require_expected_version(work.version, payload.get("expected_version"))
+    restore = bool(payload.get("restore", False))
+    work.archived = not restore
+    work.version += 1
+    work.updated_at = utc_now()
+    ctx._emit(
+        actor=actor,
+        command_id=command_id,
+        aggregate_id=work.id,
+        aggregate_type="work",
+        aggregate_version=work.version,
+        event_type="work.restored" if restore else "work.archived",
+        payload={"archived": work.archived},
+    )
+    return {"work_id": work.id, "version": work.version, "archived": work.archived}
+
+
 def _work_cancel(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     work = ctx.get_work(str(payload.get("work_id", "")))
     ctx._require_expected_version(work.version, payload.get("expected_version"))
