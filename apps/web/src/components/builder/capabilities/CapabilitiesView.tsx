@@ -14,6 +14,7 @@ import {
   disableEnginePlugin,
   type EnginePluginSummaryItem,
 } from "@/lib/engine-plugins-client";
+import { CHANNELS_CATALOG } from "../messaging/messaging-data";
 import "./capabilities-view.css";
 
 /**
@@ -49,6 +50,9 @@ export function CapabilitiesView() {
   const [error, setError] = useState<unknown>(null);
 
   const [busy, setBusy] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [draftFields, setDraftFields] = useState<Record<string, string>>({});
+  const [newFieldKey, setNewFieldKey] = useState("");
 
   useEffect(() => {
     void refresh();
@@ -71,6 +75,20 @@ export function CapabilitiesView() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function openConfig(c: ChannelPlatformInfo) {
+    if (expanded === c.id) {
+      setExpanded(null);
+      return;
+    }
+    const defaults: Record<string, string> = {};
+    for (const field of CHANNELS_CATALOG.find((d) => d.id === c.id)?.fields ?? []) {
+      defaults[field.id] = "";
+    }
+    setDraftFields({ ...defaults, ...c.fields });
+    setNewFieldKey("");
+    setExpanded(c.id);
   }
 
   async function act(key: string, operation: () => Promise<unknown>) {
@@ -265,10 +283,81 @@ export function CapabilitiesView() {
                     {c.state === "connected"
                       ? "Attivo e configurato."
                       : c.enabled
-                        ? "Abilitato: serve la configurazione in Impostazioni → Canali & Messaggistica."
-                        : "Disattivato: il toggle lo abilita, le credenziali si configurano in Canali & Messaggistica."}
+                        ? "Abilitato, in attesa di credenziali."
+                        : "Disattivato."}
                   </p>
                 </div>
+                <div className="cap-card-footer">
+                  <button
+                    type="button"
+                    className="cap-filter-item"
+                    onClick={() => openConfig(c)}
+                  >
+                    {expanded === c.id ? "Chiudi" : "Configura"}
+                  </button>
+                </div>
+                {expanded === c.id && (
+                  <form
+                    style={{ display: "grid", gap: 6, marginTop: 8 }}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void act(`channel-config:${c.id}`, () =>
+                        updateEngineChannelPlatform(c.id, { enabled: true, fields: draftFields }));
+                    }}
+                  >
+                    {Object.keys(draftFields).map((key) => {
+                      const defined = CHANNELS_CATALOG.find((d) => d.id === c.id)
+                        ?.fields.find((f) => f.id === key);
+                      return (
+                        <label key={key} style={{ display: "grid", gap: 2, fontSize: 11 }}>
+                          <span>{defined?.label ?? key}{defined?.required ? " *" : ""}</span>
+                          <input
+                            type={key.toLowerCase().includes("token") ? "password" : "text"}
+                            value={draftFields[key] ?? ""}
+                            placeholder={defined?.placeholder ?? key}
+                            onChange={(e) =>
+                              setDraftFields((prev) => ({ ...prev, [key]: e.target.value }))}
+                            className="cap-search-input"
+                            style={{ width: "100%" }}
+                          />
+                        </label>
+                      );
+                    })}
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input
+                        type="text"
+                        value={newFieldKey}
+                        placeholder="nuova chiave (es. bot_token)"
+                        onChange={(e) => setNewFieldKey(e.target.value)}
+                        className="cap-search-input"
+                        style={{ flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        className="cap-filter-item"
+                        onClick={() => {
+                          const key = newFieldKey.trim();
+                          if (key && !(key in draftFields)) {
+                            setDraftFields((prev) => ({ ...prev, [key]: "" }));
+                          }
+                          setNewFieldKey("");
+                        }}
+                      >
+                        Aggiungi campo
+                      </button>
+                    </div>
+                    <button
+                      type="submit"
+                      className="cap-filter-item is-selected"
+                      disabled={busy !== null}
+                    >
+                      Salva configurazione
+                    </button>
+                    <span style={{ fontSize: 10, opacity: 0.7 }}>
+                      Il salvataggio abilita il canale; i segreti restano nel motore.
+                    </span>
+                  </form>
+                )}
               </article>
             ))}
             {filteredChannels.length === 0 && <div className="cap-empty">Nessun connettore corrisponde.</div>}
