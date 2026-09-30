@@ -11,7 +11,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from homun.application.cron_contracts import CronIncident, CronJob, CronOccurrence
 from homun.storage.paths import default_data_dir
@@ -223,6 +223,36 @@ class CronStore:
             except Exception as exc:
                 logger.warning("Failed to decode delivery in %s: %s", workspace_id, exc)
         return out
+
+    def pending_deliveries(self, workspace_id: str) -> List[Tuple[int, Dict[str, Any]]]:
+        """Rowid + payload for deliveries still awaiting a dispatch attempt."""
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT rowid AS delivery_id, payload FROM cron_deliveries
+                WHERE workspace_id = ?
+                ORDER BY delivery_id ASC
+                """,
+                (workspace_id,),
+            ).fetchall()
+        out: List[Tuple[int, Dict[str, Any]]] = []
+        for row in rows:
+            try:
+                data = json.loads(row["payload"])
+                if isinstance(data, dict) and data.get("status") == "pending":
+                    out.append((int(row["delivery_id"]), data))
+            except Exception:
+                continue
+        return out
+
+    def update_delivery(self, workspace_id: str, delivery_id: int, payload: Dict[str, Any]) -> None:
+        blob = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        with self._lock:
+            self._conn.execute(
+                "UPDATE cron_deliveries SET payload=? WHERE workspace_id=? AND rowid=?",
+                (blob, workspace_id, int(delivery_id)),
+            )
+            self._conn.commit()
 
     def clear_workspace(self, workspace_id: str) -> None:
         with self._lock:
