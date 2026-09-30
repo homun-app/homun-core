@@ -38,6 +38,22 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             ctx = get_context()
             recover_materials(ctx)
             try:
+                from homun.application.plugin_loader import iter_plugin_dirs
+                from homun.application.plugin_manager import get_plugin_manager
+                from homun.application.plugin_storage import (
+                    load_plugins_config, plugins_root)
+                from pathlib import Path as _P
+                bundled = _P(__file__).resolve().parent / "plugins_bundled"
+                config = load_plugins_config()
+                roots = [root for root in (plugins_root(), bundled) if root.is_dir()]
+                for root in roots:
+                    for plugin_dir in iter_plugin_dirs(root):
+                        get_plugin_manager().load_from_directory(
+                            plugin_dir, config=config)
+            except Exception:
+                import logging as _logging
+                _logging.getLogger(__name__).exception("Plugin startup discovery failed")
+            try:
                 from homun.application.mcp_sampling import install_product_sampling
                 from homun.models.port import ChatMessage
 

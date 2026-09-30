@@ -79,3 +79,32 @@ def plugin_db(name: str, filename: str = "data.db", base_dir: Optional[Path] = N
         pass
     
     return conn
+
+
+def plugins_root(base_dir=None) -> Path:
+    """Install tree for user plugins: <home>/plugins/."""
+    return get_homun_home() / "plugins"
+
+
+def plugins_config_path(base_dir=None) -> Path:
+    """Persisted enable/disable state across engine restarts."""
+    return get_homun_home() / "plugins.json"
+
+
+def load_plugins_config(base_dir=None) -> dict:
+    import json as _json
+    path = plugins_config_path(base_dir)
+    try:
+        data = _json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return {}
+
+
+def save_plugins_config(config: dict, base_dir=None) -> None:
+    import json as _json
+    path = plugins_config_path(base_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(config, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
