@@ -443,6 +443,8 @@ def advance(ctx, run_id, *, epoch=None):
             return ctx.repository.load().commands[run_id].result['status']
         return outcome
     except DomainError as exc:
+        import logging
+        logging.getLogger(__name__).warning('advance(%s) DomainError %s', run_id, exc.code, exc_info=exc)
         return fail(ctx, run_id, exc.code, token=token,
                     blocked=exc.code in {'permission_denied', 'version_conflict', 'not_found'}, epoch=epoch,
                     expected_steering=expected_steering)
