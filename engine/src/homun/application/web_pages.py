@@ -10,8 +10,21 @@ def execute(ctx, actor, run, tool, args):
     if tool == 'web_extract':
         if version >= 3:
             from homun.execution.web_cache import cached_fetch_page
-            return cached_fetch_page(args['url'])
-        return fetch_page(args['url'])
+            fetched = cached_fetch_page(args['url'])
+        else:
+            fetched = fetch_page(args['url'])
+        # I modelli locali hanno finestre piccole: la pagina entra nel
+        # contesto già contenuta, mai intera a far fallire il run.
+        if isinstance(fetched, dict) and isinstance(fetched.get('text'), str):
+            from homun.application.web_pages import _bounded_page_text
+            fetched = {**fetched, 'text': _bounded_page_text(fetched['text'])}
+        return fetched
+
+
+def _bounded_page_text(text: str, limit: int = 8000) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + '\n[… pagina troncata: usa zoom su una sezione se serve il resto]'[:limit + 80]
     if tool == 'web_search':
         if version == 1:
             return {

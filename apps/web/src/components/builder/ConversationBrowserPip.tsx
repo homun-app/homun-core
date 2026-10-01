@@ -8,6 +8,7 @@ type PipState = {
   active: boolean;
   url?: string;
   screenshot?: string;
+  web?: { tool: string; url: string; titles: string[] };
 };
 
 /**
@@ -58,7 +59,7 @@ export function ConversationBrowserPip({
       <div className="flex items-center gap-1.5 border-b border-[#dce4d5] bg-[#f6f8f3] px-2.5 py-1.5">
         <Globe size={12} className="shrink-0 text-[#235940]" aria-hidden />
         <span className="truncate text-[11px] text-[#263832]" title={state.url}>
-          {state.url ?? "in navigazione…"}
+          {state.web?.url ?? state.url ?? "in navigazione…"}
         </span>
         <span className="ml-auto flex items-center gap-1">
           {state.url && (
@@ -82,7 +83,23 @@ export function ConversationBrowserPip({
           </button>
         </span>
       </div>
-      {state.screenshot ? (
+      {state.web && !state.screenshot ? (
+        <div className="space-y-1.5 px-2.5 py-2">
+          <p className="text-[11px] text-[#647a6d]">
+            {state.web.tool === "web_search" ? "sta cercando" : "sta leggendo"}:
+          </p>
+          <p className="truncate font-mono text-[11px] text-[#1c2d22]" title={state.web.url}>
+            {state.web.url}
+          </p>
+          {state.web.titles.length > 0 && (
+            <ul className="space-y-0.5">
+              {state.web.titles.map((title) => (
+                <li key={title} className="truncate text-[11px] text-[#263832]">· {title}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : state.screenshot ? (
         <img
           src={state.screenshot}
           alt="Pagina corrente vista dall'agente"

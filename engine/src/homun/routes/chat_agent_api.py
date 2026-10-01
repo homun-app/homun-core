@@ -92,7 +92,27 @@ def browser_pip(workspace_id: str, conversation_id: str,
     from homun.execution.browser_sessions import require_browser
     browser = require_browser(str(run.get("id")))
     if browser is None:
-        return {"active": False, "run_id": run.get("id")}
+        # Ricerca headless: il PiP mostra query/URL in lettura dalle osservazioni
+        web = None
+        for observation in reversed(run.get("observations") or []):
+            tool = str((observation or {}).get("tool") or "")
+            if tool not in {"web_search", "web_extract", "x_search", "browser_read"}:
+                continue
+            arguments = (observation or {}).get("arguments") or {}
+            result = (observation or {}).get("result") or {}
+            url = (arguments.get("url") or arguments.get("query")
+                   or (result.get("url") if isinstance(result, dict) else None))
+            if url:
+                titles = []
+                if isinstance(result, dict):
+                    for hit in (result.get("results") or [])[:3]:
+                        if isinstance(hit, dict) and hit.get("title"):
+                            titles.append(str(hit["title"])[:80])
+                web = {"tool": tool, "url": str(url)[:300], "titles": titles}
+                break
+        if web is None:
+            return {"active": False, "run_id": run.get("id")}
+        return {"active": True, "run_id": run.get("id"), "web": web}
     from homun.execution.browser_shots import capture
     with tempfile.TemporaryDirectory() as tmp:
         shot = capture(browser, Path(tmp) / "pip.png")
