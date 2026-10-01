@@ -99,15 +99,19 @@ def test_failed_run_gets_no_silent_answer(setup):
 
 
 def test_default_agent_makes_every_chat_an_agent_chat(setup):
-    """Senza binding esplicito, la chat usa il primo agente attivo del workspace."""
+    """Senza binding esplicito, la chat usa la persona dedicata ('Homun') se c'è."""
     ctx, actor, conv = setup
     store = ctx.repository.load()
+    # niente persona dedicata: cade sul primo agente attivo
     assert chat_agent.default_chat_agent(store) == "agent_chat"
+    persona = chat_agent.ensure_chat_persona(ctx, actor)
+    assert persona is not None
+    assert chat_agent.default_chat_agent(ctx.repository.load()) == persona
     assert chat_agent.handles(ctx, store, _post_body(conv)) is True
     outcome = chat_agent.start_chat_turn(ctx, actor, conv, "ciao")
     run = ctx.repository.load().commands[outcome["agent_run_id"]].result
-    # al primo messaggio il binding resta impresso
-    assert chat_agent.binding_for(ctx, conv)["agent_id"] == "agent_chat"
+    # al primo messaggio il binding resta impresso (sulla persona dedicata)
+    assert chat_agent.binding_for(ctx, conv)["agent_id"] == persona
     # run non nativo in unit test: la chat degrada senza ricerca, il resto invariato
     assert run["status"] in {"queued", "running"}
 

@@ -120,10 +120,13 @@ def complete(ctx: EngineContext, delivery: Delivery) -> dict:
         if chat_agent.handles(ctx, store_now, delivery.body):
             from homun.domain.errors import DomainError as _DE
             try:
+                chat_agent.ensure_chat_persona(ctx, delivery.actor)
                 outcome = chat_agent.start_chat_turn(
                     ctx, delivery.actor,
                     str(delivery.body.payload.get("conversation_id") or ""),
-                    str(delivery.body.payload.get("text") or ""))
+                    str(delivery.body.payload.get("text") or ""),
+                    connection_id=(str(delivery.body.payload.get("connection_id") or "").strip()
+                                   or None))
             except _DE as exc:
                 fail(ctx, delivery, exc.code)
                 raise

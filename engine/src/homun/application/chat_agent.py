@@ -86,12 +86,38 @@ def _active_chat_run(store, conversation_id: str):
     return None
 
 
+CHAT_PERSONA_NAME = "Homun"
+
+
 def default_chat_agent(store) -> Optional[str]:
-    """La chat è con l'agente per default: primo agente attivo del workspace."""
-    for agent in sorted(store.agents.values(), key=lambda a: a.created_at):
-        if agent.status == "active":
-            return agent.id
-    return None
+    """La persona della chat: un agente dedicato, non il primo del registro."""
+    homun = [a for a in store.agents.values()
+             if a.name == CHAT_PERSONA_NAME and a.status == "active"]
+    if homun:
+        return sorted(homun, key=lambda a: a.created_at)[0].id
+    others = [a for a in sorted(store.agents.values(), key=lambda a: a.created_at)
+              if a.status == "active"]
+    return others[0].id if others else None
+
+
+def ensure_chat_persona(ctx, actor: Actor) -> Optional[str]:
+    """Crea una volta la persona della chat ('Homun'), se non esiste."""
+    store = ctx.repository.load()
+    existing = default_chat_agent(store)
+    if existing and next(a for a in store.agents.values() if a.id == existing).name == CHAT_PERSONA_NAME:
+        return existing
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as write_store:
+            svc = ctx.service.for_store(write_store)
+            result = svc.apply(actor, f"chat-persona:{secrets.token_hex(3)}", "agent.create", {
+                "name": CHAT_PERSONA_NAME, "role": "Assistente della chat",
+                "instructions": "Sei l'assistente operativo di Homun: rispondi in modo diretto e "
+                "utile nella lingua della persona, usa gli strumenti quando servono (ricerca web, "
+                "memoria, skill) e riporta i risultati in modo sintetico.",
+                "autonomy_mode": "supervised",
+            })
+        ctx.service.store = write_store
+    return str(result["agent_id"])
 
 
 def handles(ctx, store, body) -> bool:
@@ -134,8 +160,13 @@ def _new_chat_work(ctx, actor: Actor, conversation_id: str, agent_id: str,
     return str(work_id)
 
 
-def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str) -> Dict[str, Any]:
-    """Avvia il run della risposta; il testo torna in chat quando completa."""
+def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
+                    connection_id: str | None = None) -> Dict[str, Any]:
+    """Avvia il run della risposta; il testo torna in chat quando completa.
+
+    ``connection_id`` è il modello scelto dalla persona nel composer: il run
+    della chat usa quello, non quello dell'agente d'ufficio.
+    """
     from homun.application.agent_runs import propose
     entry = binding_for(ctx, conversation_id)
     store = ctx.repository.load()
@@ -161,6 +192,8 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str) -> Dict[
         "expected_version": version, "material_ids": [],
         "web_pages": True,
     }
+    if connection_id:
+        body["connection_id"] = connection_id
     try:
         run = propose(ctx, actor, work_id, body)
     except ValidationError:
