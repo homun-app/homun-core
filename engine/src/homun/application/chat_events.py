@@ -16,6 +16,7 @@ import time
 from typing import Any, Dict, Iterator, Optional
 
 from homun.domain.errors import DomainError
+from homun.models.finish_gates import strip_think_blocks
 from homun.policy.work import require_conversation_access
 
 POLL_SECONDS = 0.25
@@ -37,11 +38,28 @@ def _chat_runs_for(store, conversation_id: str):
 
 
 def _assistant_text(run: Dict[str, Any]) -> str:
+    """Il testo visibile dell'ultimo messaggio assistente: il ragionamento
+    (blocchi think, anche orfani) non si streamma in chat — come la risposta
+    consegnata, che passa dagli stessi gate."""
     messages = run.get("_messages") or []
     for message in reversed(messages):
         if isinstance(message, dict) and message.get("role") == "assistant":
-            return str(message.get("content") or "")
+            return strip_think_blocks(str(message.get("content") or ""))
     return ""
+
+
+def _yield_text_delta(run_id: str, streamed_text: Dict[str, str], text: str):
+    """Delta d'accrescimento del testo visibile, con reset quando cambia
+    il messaggio assistente di coda (turni con tool): il nuovo testo non
+    estende il precedente, quindi si rimanda per intero con ``reset``."""
+    previous = streamed_text.get(run_id, "")
+    if text.startswith(previous) and len(text) > len(previous):
+        streamed_text[run_id] = text
+        return [_sse("text_delta", {"run_id": run_id, "delta": text[len(previous):]})]
+    if not text.startswith(previous) and text != previous:
+        streamed_text[run_id] = text
+        return [_sse("text_delta", {"run_id": run_id, "delta": text, "reset": True})]
+    return []
 
 
 def conversation_events(ctx, actor, conversation_id: str,
@@ -55,7 +73,7 @@ def conversation_events(ctx, actor, conversation_id: str,
     conversation = require_conversation_access(store, actor, conversation_id, "read")
 
     seen_observations: Dict[str, set] = {}
-    streamed_len: Dict[str, int] = {}
+    streamed_text: Dict[str, str] = {}
     finished_runs: set = set()
     seen_messages: set = set()
     for message in store.messages.values():
@@ -75,8 +93,8 @@ def conversation_events(ctx, actor, conversation_id: str,
         for run in _chat_runs_for(store, conversation_id):
             run_id = str(run.get("id"))
             seen = seen_observations.setdefault(run_id, set())
-            if run_id not in streamed_len:
-                streamed_len[run_id] = 0
+            if run_id not in streamed_text:
+                streamed_text[run_id] = ""
                 yield _sse("run_started", {"run_id": run_id,
                                            "status": run.get("status")})
                 last_event_at = now
@@ -96,25 +114,20 @@ def conversation_events(ctx, actor, conversation_id: str,
             # delta di testo dell'ultimo messaggio assistente
             if run.get("status") in {"running", "queued", "waiting_input",
                                      "waiting_external", "waiting_automation"}:
-                text = _assistant_text(run)
-                length = streamed_len.get(run_id, 0)
-                if len(text) > length:
-                    delta = text[length:]
-                    streamed_len[run_id] = len(text)
-                    last_event_at = now
-                    events_this_cycle += 1
-                    yield _sse("text_delta", {"run_id": run_id, "delta": delta})
+                deltas = _yield_text_delta(run_id, streamed_text, _assistant_text(run))
             elif run.get("status") in {"completed", "failed"} and run_id not in finished_runs:
                 finished_runs.add(run_id)
-                text = _assistant_text(run)
-                length = streamed_len.get(run_id, 0)
-                if len(text) > length:
-                    yield _sse("text_delta", {"run_id": run_id, "delta": text[length:]})
-                    streamed_len[run_id] = len(text)
-                last_event_at = now
+                deltas = _yield_text_delta(run_id, streamed_text, _assistant_text(run))
                 yield _sse("run_finished", {"run_id": run_id, "status": run.get("status")})
-                # marca senza toccare il record: la fine è implicita nel set
-                streamed_len[run_id] = streamed_len.get(run_id, 0)
+                last_event_at = now
+                events_this_cycle += 1
+            else:
+                deltas = []
+            for delta in deltas:
+                yield delta
+            if deltas:
+                last_event_at = now
+                events_this_cycle += len(deltas)
 
         for message in sorted(store.messages.values(), key=lambda m: m.created_at):
             if message.conversation_id != conversation_id or message.id in seen_messages:

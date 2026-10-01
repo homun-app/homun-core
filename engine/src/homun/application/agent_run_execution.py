@@ -1,5 +1,6 @@
 """One persisted adaptive turn; DBOS drives repetition and recovery."""
 import json
+import logging
 from copy import deepcopy
 from datetime import datetime, timedelta
 from uuid import uuid4
@@ -16,6 +17,7 @@ from homun.application.agent_streaming import complete as complete_native
 from homun.domain.errors import DomainError, ValidationError
 from homun.domain.models import Actor, BudgetCounters, utc_now
 from homun.models.agent_turn import AgentDecision, decide
+from homun.models.finish_gates import strip_think_blocks
 from homun.models.native_errors import (
     NETWORK,
     RATE_LIMITED,
@@ -26,6 +28,8 @@ from homun.models.native_errors import (
 
 
 from homun.application.agent_run_fencing import LEASE_SECONDS
+
+logger = logging.getLogger(__name__)
 
 
 class _ModelFailure(Exception):
@@ -352,7 +356,8 @@ def advance(ctx, run_id, *, epoch=None):
         automation_evaluation = None
         if decision.kind == 'finish' and agent_native.enabled(run) \
                 and not run.get('_delegation_parent') and not run.get('_reasoning_nudge') \
-                and _looks_like_pure_reasoning(decision.message or '', run):
+                and _looks_like_pure_reasoning(
+                    strip_think_blocks(decision.message or ''), run):
             run['_reasoning_nudge'] = True
             from homun.models.native_turn import NativeMessage as _NM
             run['_messages'].append(_NM(role='user', content=(
@@ -360,8 +365,7 @@ def advance(ctx, run_id, *, epoch=None):
                 'Reply now with the actual answer for the user, in their language. '
                 'Do not describe what you will do.')).model_dump())
             run.pop('_decision', None)
-            logging.getLogger(__name__).warning(
-                'finish rifiutato (solo ragionamento): rilancio')
+            logger.warning('finish rifiutato (solo ragionamento): rilancio')
             with ctx.repository.locked():
                 with ctx.repository.transaction() as store:
                     target = store.commands.get(run_id)

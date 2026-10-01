@@ -88,3 +88,61 @@ def test_unauthorized_conversation_refused(setup):
     stranger = A(id="stranger", workspace_id="ws_altra", display_name="X")
     with pytest.raises(Exception):
         list(chat_events.conversation_events(ctx, stranger, conv, max_idle_cycles=1))
+
+
+def test_text_delta_strips_orphan_think_reasoning(setup):
+    """Il ragionamento (</think> orfano) non si streamma: solo la risposta."""
+    import json
+    ctx, actor, conv = setup
+    chat_agent.bind(ctx, actor, conv, "agent_chat")
+    run_id = chat_agent.start_chat_turn(ctx, actor, conv, "chi sei")["agent_run_id"]
+    with ctx.repository.transaction() as store:
+        store.commands[run_id].result["_messages"] = [
+            {"role": "user", "content": "chi sei"},
+            {"role": "assistant",
+             "content": 'The user asks "chi sei". No tools needed.</think>'
+                        'Sono Homun, un assistente operativo.'},
+        ]
+    payloads = []
+    for chunk in chat_events.conversation_events(ctx, actor, conv, max_idle_cycles=2):
+        for line in chunk.strip().split("\n"):
+            if line.startswith("data: ") and "delta" in line:
+                payloads.append(json.loads(line[len("data: "):]))
+    assert payloads, "nessun text_delta emesso"
+    streamed = "".join(p["delta"] for p in payloads)
+    assert streamed == "Sono Homun, un assistente operativo."
+    assert "</think>" not in streamed
+
+
+def test_text_delta_resets_when_tail_assistant_message_changes(setup):
+    """Cambio del messaggio di coda (turni con tool): reset con testo intero,
+    nella STESSA connessione (ogni connessione riparte dal stato vuoto)."""
+    import json
+    import threading
+    import time as _t
+    ctx, actor, conv = setup
+    chat_agent.bind(ctx, actor, conv, "agent_chat")
+    run_id = chat_agent.start_chat_turn(ctx, actor, conv, "cerca")["agent_run_id"]
+    with ctx.repository.transaction() as store:
+        store.commands[run_id].result["_messages"] = [
+            {"role": "user", "content": "cerca"},
+            {"role": "assistant", "content": "Sto cercando i listini"},
+        ]
+
+    def replace_tail_later():
+        _t.sleep(0.3)
+        with ctx.repository.transaction() as store:
+            store.commands[run_id].result["_messages"].append(
+                {"role": "assistant", "content": "Ecco il risultato finale."})
+
+    threading.Thread(target=replace_tail_later).start()
+    deltas = []
+    for chunk in chat_events.conversation_events(ctx, actor, conv, max_idle_cycles=2):
+        for line in chunk.strip().split("\n"):
+            if line.startswith("data: ") and "delta" in line:
+                deltas.append(json.loads(line[len("data: "):]))
+    reset = [d for d in deltas if d.get("reset") is True]
+    assert reset and reset[0]["delta"] == "Ecco il risultato finale."
+    # il delta di crescita normale resta quello del primo messaggio
+    assert "Sto cercando i listini" in "".join(
+        d["delta"] for d in deltas if not d.get("reset"))
