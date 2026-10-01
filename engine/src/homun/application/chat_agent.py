@@ -247,7 +247,7 @@ def deliver_chat_answers(ctx) -> int:
         if record.type != PROPOSAL_TYPE or not isinstance(record.result, dict):
             continue
         run = record.result
-        if run.get("_chat_delivered"):
+        if run.get("_chat_delivered") or not run.get("_chat_conversation_id"):
             continue
         if run.get("status") == "failed":
             code = str(run.get("error_code") or "failed")
@@ -255,6 +255,8 @@ def deliver_chat_answers(ctx) -> int:
             logger.warning("chat-run FAILED conv=%s run=%s errore=%s",
                            failed_conv, run.get("id"), code)
             conversation_id = failed_conv
+            if not conversation_id or conversation_id not in store.conversations:
+                continue
             try:
                 with ctx.repository.locked():
                     with ctx.repository.transaction() as write_store:
