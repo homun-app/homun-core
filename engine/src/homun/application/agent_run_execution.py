@@ -453,7 +453,36 @@ def advance(ctx, run_id, *, epoch=None):
                     expected_steering=expected_steering)
     except NativeModelError as exc:
         return fail(ctx, run_id, exc.code, token=token, epoch=epoch, expected_steering=expected_steering)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        # Una risposta malformata (argomenti invalidi, id riusati, JSON rotto)
+        # è correggibile dal modello, non un fallimento del run: chiudi le
+        # chiamate pendili con esito onesto e fai riprovare (i tentativi
+        # restanovincolati da max_model_attempts).
+        try:
+            run = ctx.repository.load().commands.get(run_id)
+            current = run.result if run is not None else None
+            if isinstance(current, dict) and agent_native.enabled(current) and current.get('_lease_token') == token \
+                    and agent_native.pending(current):
+                from homun.application.agent_control_history import close_pending
+                close_pending(current)
+                from homun.models.native_turn import NativeMessage
+                current['_messages'].append(NativeMessage(role='user', content=(
+                    f'[SYSTEM] Your last tool call was invalid ({str(exc)[:200]}). '
+                    'Re-issue the call with corrected arguments, or answer the user.')).model_dump())
+                with ctx.repository.locked():
+                    with ctx.repository.transaction() as store:
+                        target = store.commands.get(run_id)
+                        if target is not None and target.result.get('_lease_token') == token:
+                            target.result.update(current)
+                            target.result.pop('_decision', None)
+                            target.result.pop('_lease_token', None)
+                            target.result.pop('_lease_until', None)
+                    ctx.service.store = store
+                logging.getLogger(__name__).warning(
+                    'advance(%s) risposta malformata (%s): il modello riprova', run_id, exc)
+                return ctx.repository.load().commands[run_id].result['status']
+        except Exception:
+            logging.getLogger(__name__).warning('recupero malformito fallito per %s', run_id, exc_info=True)
         return fail(ctx, run_id, 'agent_run_invalid_decision', token=token, epoch=epoch, expected_steering=expected_steering)
     except RuntimeError:
         return fail(ctx, run_id, 'agent_run_model_error', token=token, epoch=epoch, expected_steering=expected_steering)
