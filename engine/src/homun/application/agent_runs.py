@@ -22,6 +22,8 @@ from homun.policy.work import require_work_access
 
 PROPOSAL_TYPE = 'agent_run.propose'
 ACTIVE = {'pending_approval', 'queued', 'running', 'waiting_input', 'waiting_external', 'waiting_automation', 'paused'}
+import logging
+
 from homun.domain.capabilities import AGENT_RUN
 LIMITS = AGENT_RUN.limits
 
@@ -112,6 +114,40 @@ def authority(ctx, store, actor, run, *, approve=False, running=False):
         raise ConflictError('Work changed after approval')
     return work, agent
 
+
+
+def _inject_volatile(ctx, run) -> None:
+    """Parte volatile del prompt Hermes: memoria della persona e indice skill.
+
+    Solo se il run porta le capability (già gate sui tool); la memoria è
+    snapshot gelato al propose come Hermes (cache del prefisso intatta).
+    """
+    try:
+        persona_notes: list[str] = []
+        if run.get('memory'):
+            actor = Actor.model_validate(run['_actor'])
+            from homun.memory.visibility import matches_context
+            for note in (ctx.memory.list(scope='person', subject_id=actor.id,
+                                          include_deleted=False) if ctx.memory else []):
+                if note.status == 'approved':
+                    persona_notes.append(note.text[:400])
+        skills: list[dict] = []
+        if run.get('skills'):
+            store = ctx.repository.load()
+            for skill in sorted(store.skills.values(), key=lambda k: k.created_at):
+                if skill.status == 'approved':
+                    skills.append({'name': skill.name, 'description': skill.description})
+        if not persona_notes and not skills:
+            return
+        from homun.models.prompt_injection import volatile_parts
+        block = volatile_parts(persona_notes, [], skills[:80])
+        if not block:
+            return
+        system = run['_messages'][0]
+        system['content'] = system['content'] + chr(10)*2 + block
+    except Exception:
+        logging.getLogger(__name__).warning(
+            'iniezione memoria/skill nel prompt saltata per %s', run.get('id'), exc_info=True)
 
 def propose(ctx, actor, work_id, body):
     from homun.application.agent_mcp import discover, validate_bindings
@@ -251,6 +287,7 @@ def propose(ctx, actor, work_id, body):
                     expand_refs=True,
                     base_guidance=hermes_guidance(run.get('connection_id')),
                 )]
+                _inject_volatile(ctx, run)
             from homun.application.agent_tool_registry import registry_for
             if bindings and not agent_native.enabled(run):
                 raise ValidationError('External agent tools require native model support')
