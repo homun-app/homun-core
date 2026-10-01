@@ -10,7 +10,7 @@ from homun.domain.errors import ConflictError, ValidationError
 from homun.models.agent_turn import ToolDefinition
 from homun.tools.registry import ToolEntry
 
-INLINE_CHARACTERS = 12000
+INLINE_CHARACTERS = 20000
 PREVIEW_CHARACTERS = 1600
 
 
