@@ -3,11 +3,31 @@ import json
 import os
 import socket
 import sys
+import logging
+
 import uvicorn
 from homun.app import create_app
 
 
+def _configure_logging(dev: bool) -> None:
+    """Traccia applicativa leggibile: un solo formato, livelli sensati.
+
+    HOMUN_LOG_LEVEL=INFO di default; DEBUG per il giro diagnostico completo.
+    """
+    import os
+    level = os.environ.get("HOMUN_LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
+    for noisy in ("httpx", "httpcore", "dbos", "uvicorn.access", "mcp"):
+        logging.getLogger(noisy).setLevel(max(logging.WARNING, getattr(logging, level)))
+
+
 def serve(args):
+    _configure_logging(getattr(args, 'dev_insecure', False))
     token = os.environ.get('HOMUN_SESSION_TOKEN')
     if args.host not in {'127.0.0.1', '::1'}:
         print('The local engine only binds to loopback', file=sys.stderr)

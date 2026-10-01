@@ -201,6 +201,9 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
         body.pop("web_pages")
         body["command_id"] = f"chat-run:{secrets.token_hex(6)}"
         run = propose(ctx, actor, work_id, body)
+    logger.info("chat-turn conv=%s agent=%s run=%s connection=%s modello_scelto=%s",
+                conversation_id, entry.get("agent_id"), run.get("id"),
+                run.get("connection_id"), connection_id or "(default agente)")
     # Chi scrive in chat ha già deciso: il run parte subito, timbrato.
     from homun.application.agent_runs import approve
     owner = Actor(id=actor.id, workspace_id=ctx.workspace_id,
@@ -244,7 +247,38 @@ def deliver_chat_answers(ctx) -> int:
         if record.type != PROPOSAL_TYPE or not isinstance(record.result, dict):
             continue
         run = record.result
-        if run.get("status") not in {"completed", "waiting_input"} or run.get("_chat_delivered"):
+        if run.get("_chat_delivered"):
+            continue
+        if run.get("status") == "failed":
+            code = str(run.get("error_code") or "failed")
+            failed_conv = run.get("_chat_conversation_id")
+            logger.warning("chat-run FAILED conv=%s run=%s errore=%s",
+                           failed_conv, run.get("id"), code)
+            conversation_id = failed_conv
+            try:
+                with ctx.repository.locked():
+                    with ctx.repository.transaction() as write_store:
+                        ctx.service.for_store(write_store).append_engine_message(
+                            actor=Actor(id="person_local", workspace_id=ctx.workspace_id,
+                                        display_name="Homun"),
+                            command_id=f"chat-error:{run['id'][:16]}:{secrets.token_hex(3)}",
+                            conversation_id=str(conversation_id),
+                            author_id="homun_engine",
+                            text=f"⚠️ La risposta non è andata a buon fine ({code}). "
+                                 "Controlla il modello selezionato nei dettagli del tentativo.",
+                            event_type="message.interpreted",
+                            event_payload={"agent_run_id": run["id"], "chat": True,
+                                           "error_code": code})
+                        target = write_store.commands.get(run["id"])
+                        if target is not None:
+                            target.result["_chat_delivered"] = True
+                ctx.service.store = write_store
+            except Exception:
+                logger.warning("consegna errore chat fallita", exc_info=True)
+            else:
+                delivered += 1
+            continue
+        if run.get("status") not in {"completed", "waiting_input"}:
             continue
         conversation_id = run.get("_chat_conversation_id")
         if not conversation_id or binding_for(ctx, str(conversation_id)) is None:
@@ -267,6 +301,8 @@ def deliver_chat_answers(ctx) -> int:
                         target.result["_chat_delivered"] = True
                 ctx.service.store = write_store
             delivered += 1
+            logger.info("chat-answer consegnata conv=%s run=%s chars=%d",
+                        conversation_id, run.get("id"), len(answer))
         except Exception:
             logger.warning("consegna risposta chat fallita per %s", run.get("id"), exc_info=True)
     return delivered

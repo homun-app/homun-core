@@ -89,13 +89,20 @@ def test_deliver_chat_answers_appends_engine_message(setup):
     assert chat_agent.deliver_chat_answers(ctx) == 0
 
 
-def test_failed_run_gets_no_silent_answer(setup):
+def test_failed_run_delivers_honest_error_note(setup):
+    """Un run fallito non lascia la chat muta: arriva una nota con il codice."""
     ctx, actor, conv = setup
     chat_agent.bind(ctx, actor, conv, "agent_chat")
     outcome = chat_agent.start_chat_turn(ctx, actor, conv, "x")
     with ctx.repository.transaction() as store:
         store.commands[outcome["agent_run_id"]].result["status"] = "failed"
-    assert chat_agent.deliver_chat_answers(ctx) == 0
+        store.commands[outcome["agent_run_id"]].result["error_code"] = "agent_model_invalid_request"
+    assert chat_agent.deliver_chat_answers(ctx) == 1
+    store = ctx.repository.load()
+    notes = [m for m in store.messages.values()
+             if m.conversation_id == conv and m.author_id == "homun_engine"
+             and "non è andata a buon fine" in m.text]
+    assert notes and "agent_model_invalid_request" in notes[0].text
 
 
 def test_default_agent_makes_every_chat_an_agent_chat(setup):
