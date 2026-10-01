@@ -242,12 +242,14 @@ def propose(ctx, actor, work_id, body):
                     ctx.data_dir, actor.workspace_id, body)
                 run['_cwd'] = str(cwd_path)
                 run['_workspace_root'] = str(workspace_root)
+                from homun.models.native_prompt import hermes_guidance
                 run['_messages'] = [m.model_dump() for m in initial_messages(
                     run['_objective'],
                     run['_instructions'],
                     cwd=cwd_path,
                     workspace_root=workspace_root,
                     expand_refs=True,
+                    base_guidance=hermes_guidance(run.get('connection_id')),
                 )]
             from homun.application.agent_tool_registry import registry_for
             if bindings and not agent_native.enabled(run):

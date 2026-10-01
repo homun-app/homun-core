@@ -32,6 +32,16 @@ def batch(material):
         ToolCall(id='two',name='read_material',arguments={'material_id':material})])
 
 
+def steer_text(message) -> str:
+    """Il testo della persona dentro il marcatore, o il testo nudo."""
+    content = message.content if hasattr(message, 'content') else str(message)
+    if not content.startswith('[OUT-OF-BAND'):
+        return content
+    body = content[content.find(']') + 1:]
+    close = body.rfind('[/OUT-OF-BAND')
+    return (body[:close] if close >= 0 else body).strip()
+
+
 def test_steer_waits_for_pending_results_before_next_request(setup):
     ctx,actor,work,material=setup;p=native_start(ctx,actor,work,material)
     seen=scripted(ctx,batch(material),NativeMessage(role='assistant',content='Nota corretta per Marta'))
@@ -41,7 +51,7 @@ def test_steer_waits_for_pending_results_before_next_request(setup):
     assert len(seen)==1
     assert advance(ctx,p['id'])=='completed'
     assert [m.role for m in seen[1]][-3:]==['tool','tool','user']
-    assert seen[1][-1].content=='Destinatario Marta'
+    assert steer_text(seen[1][-1])=='Destinatario Marta'
 
 
 def test_steer_during_final_generation_prevents_premature_publication(setup):
@@ -54,7 +64,7 @@ def test_steer_during_final_generation_prevents_premature_publication(setup):
     assert not ctx.repository.load().artifacts
     seen=scripted(ctx,NativeMessage(role='assistant',content='Lunedi'))
     assert advance(ctx,p['id'])=='completed'
-    assert seen[0][-1].content=='Nuova scadenza: lunedi'
+    assert steer_text(seen[0][-1])=='Nuova scadenza: lunedi'
 
 
 def test_redirect_fences_inflight_model_and_old_workflow(setup):
@@ -107,7 +117,7 @@ def test_control_is_idempotent_and_rejects_changed_command(setup):
     with pytest.raises(ConflictError):control(ctx,actor,work,p['id'],{**body,'text':'Ada'})
     scripted(ctx,NativeMessage(role='assistant',content='Marta'));assert advance(ctx,p['id'])=='completed'
     run=ctx.repository.load().commands[p['id']].result
-    assert len([m for m in run['_messages'] if m['content']=='Marta' and m['role']=='user'])==1
+    assert len([m for m in run['_messages'] if steer_text(type('M',(),{'content':m['content']})())=='Marta' and m['role']=='user'])==1
 
 
 def test_cancel_allowed_after_source_change_but_resume_is_not(setup):
@@ -135,7 +145,7 @@ def test_normal_chat_steers_without_independent_interpretation(setup):
     assert admit(ctx,actor,body).result==delivery.result
     seen=scripted(ctx,NativeMessage(role='assistant',content='Nota Marta'))
     assert advance(ctx,p['id'])=='completed'
-    assert seen[0][-1].content=='Usa Marta come destinatario'
+    assert steer_text(seen[0][-1])=='Usa Marta come destinatario'
 
 
 def test_redirect_during_tool_records_unknown_and_drops_late_result(setup, monkeypatch):
