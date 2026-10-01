@@ -250,7 +250,7 @@ export function ConversationWorkspaceChatStage({
                   <small>
                     {m.sender || (m.who === "you" ? work.requester || "Tu" : scenario!.agent)}
                   </small>
-                  {m.wait ? (
+                  {m.wait && !engineMode ? (
                     <ConversationAgentWait phase={m.wait.phase} startedAt={m.wait.startedAt} />
                   ) : m.who === "agent" ? (
                     <ChatMarkdown content={cleanMessageText(m.text)} streaming={m.partial} />

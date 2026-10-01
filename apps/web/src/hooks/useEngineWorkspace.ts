@@ -217,18 +217,13 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     }
     const prior = messageOverlay[work.id] ?? work.messages;
     const startedAt = Date.now();
+    // Chat istantanea: solo la bolla della persona. L'attività dell'agente
+    // la mostra il blocco live via SSE — nessuno stato di caricamento.
     setMessageOverlay((current) => ({
       ...current,
       [work.id]: [
         ...(current[work.id] ?? work.messages),
         { who: "you", sender: "Fabio", text: effectiveText },
-        {
-          who: "agent",
-          sender: "Homun",
-          text: "",
-          partial: true,
-          wait: { phase: "reading", startedAt },
-        },
       ],
     }));
     try {
