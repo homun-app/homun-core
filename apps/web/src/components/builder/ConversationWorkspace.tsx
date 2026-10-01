@@ -11,6 +11,11 @@ import { memberProfile, isHumanMember } from "./conversation-members";
 import { type SpaceData, type SpaceView, spacePeople } from "./ConversationSpace";
 import { ConversationSearch } from "./ConversationSearch";
 import { ConversationWorkspaceChatStage } from "./ConversationWorkspaceChatStage";
+import { loadEngineTranscript } from "@/lib/engine-transcript-client";
+import { postEngineConversationMessage } from "@/lib/conversation-engine-bridge";
+import { defaultLocalActor } from "@/lib/engine-domain-client";
+import { useState as _st, useEffect as _ef, useCallback as _cb } from "react";
+import { AgentChat } from "./chat/AgentChat";
 import { ConversationWorkspacePreview } from "./ConversationWorkspacePreview";
 import { ConversationWorkspaceSidebar } from "./ConversationWorkspaceSidebar";
 import { ConversationWorkspaceSpaceHost } from "./ConversationWorkspaceSpaceHost";
@@ -48,6 +53,69 @@ export type { Work } from "./conversation-types";
 const demoMode = resolveDemoMode();
 const { storageKey } = demoMode;
 const demoBootstrap = buildDemoBootstrap(demoMode);
+
+function EngineAgentChat({ workId, conversationId }: { workId: string; conversationId?: string }) {
+  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; id: string }[]>([]);
+  const [isRunning, setIsRunning] = useState(false);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    let live = true;
+    const load = async () => {
+      try {
+        const msgs = await loadEngineTranscript(conversationId);
+        if (!live) return;
+        setMessages(msgs.map((m) => ({
+          role: m.who === "you" ? "user" as const : "assistant" as const,
+          content: m.text,
+          id: m.engineMessageId ?? Math.random().toString(36).slice(2),
+        })));
+      } catch { /* la trascrizione arriverà al prossimo giro */ }
+    };
+    void load();
+    const timer = setInterval(load, 3000);
+    return () => { live = false; clearInterval(timer); };
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    const es = new EventSource(
+      `/v1/workspaces/ws_local/chat-agent/${encodeURIComponent(conversationId)}/events?actor=person_fabio`,
+    );
+    es.addEventListener("message", () => { void refresh(); });
+    es.addEventListener("run_started", () => setIsRunning(true));
+    es.addEventListener("run_finished", () => { setIsRunning(false); void refresh(); });
+    return () => es.close();
+    async function refresh() {
+      try {
+        const msgs = await loadEngineTranscript(conversationId ?? "");
+        setMessages(msgs.map((m: { who: string; text: string; engineMessageId?: string }) => ({
+          role: m.who === "you" ? "user" as const : "assistant" as const,
+          content: m.text,
+          id: m.engineMessageId ?? Math.random().toString(36).slice(2),
+        })));
+      } catch { /* ignore */ }
+    }
+  }, [conversationId]);
+
+  const onSend = _cb(async (text: string) => {
+    if (!conversationId) return;
+    setMessages(prev => [...prev, { role: "user", content: text, id: Date.now().toString() }]);
+    setIsRunning(true);
+    try {
+      await postEngineConversationMessage({ conversationId, text, actor: defaultLocalActor() });
+    } catch {
+      setIsRunning(false);
+    }
+  }, [conversationId]);
+
+  return (
+    <div className="h-full min-h-0 flex-1">
+      <AgentChat messages={messages} isRunning={isRunning} onSend={onSend} />
+    </div>
+  );
+}
+
 export function ConversationWorkspace() {
   const [active, setActive] = useState<string | null>(null);
   const engine = useEngineWorkspace(active);
@@ -1222,6 +1290,8 @@ export function ConversationWorkspace() {
             }
             unavailable={!!spaceData.removedPeople?.includes(scenario.agent)}
           />
+        ) : engine.backend === "engine" && work?.engineConversationId ? (
+          <EngineAgentChat workId={work.id} conversationId={work.engineConversationId ?? undefined} />
         ) : (
           <ConversationWorkspaceChatStage
             work={work}
