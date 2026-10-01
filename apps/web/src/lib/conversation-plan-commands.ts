@@ -42,3 +42,26 @@ export function parsePlanInsert(text: string): PlanInsert | null {
 export function stripTrailingMention(value: string): string {
   return value.replace(/\s+(?:con\s+)?@[^@]+$/, "").trim();
 }
+
+/** Riordina i passaggi di un piano a partire dal comando "sposta … dopo/prima …".
+    Restituisce i passaggi nell'ordine proposto, oppure null se il comando non
+    trova due passaggi futuri validi. */
+export function reorderPlanSteps<T extends { id: string; title: string }>(
+  steps: T[],
+  completed: number,
+  reorder: PlanReorder,
+): T[] | null {
+  const from = steps.findIndex((s) =>
+    s.title.toLowerCase().includes(reorder.itemTitle.toLowerCase()),
+  );
+  const target = steps.findIndex((s) =>
+    s.title.toLowerCase().includes(reorder.anchorTitle.toLowerCase()),
+  );
+  if (from < completed || target < completed || from === target) return null;
+  const next = steps.filter((_, i) => i !== from);
+  const to =
+    next.findIndex((s) => s.id === steps[target]!.id) +
+    (reorder.relation === "dopo" ? 1 : 0);
+  next.splice(to, 0, steps[from]!);
+  return next;
+}

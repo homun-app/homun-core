@@ -11,7 +11,7 @@ import { memberProfile, isHumanMember } from "./conversation-members";
 import { type SpaceData, type SpaceView, spacePeople } from "./ConversationSpace";
 import { ConversationSearch } from "./ConversationSearch";
 import { ConversationWorkspaceChatStage } from "./ConversationWorkspaceChatStage";
-import { EngineAgentChat } from "./chat/EngineAgentChat";
+import { EngineChatStage } from "./chat/EngineChatStage";
 import { ConversationWorkspacePreview } from "./ConversationWorkspacePreview";
 import { ConversationWorkspaceSidebar } from "./ConversationWorkspaceSidebar";
 import { ConversationWorkspaceSpaceHost } from "./ConversationWorkspaceSpaceHost";
@@ -40,6 +40,7 @@ import { parseConversationNavigation } from "@/lib/conversation-navigation";
 import {
   parsePlanInsert,
   parsePlanReorder,
+  reorderPlanSteps,
   stripTrailingMention,
 } from "@/lib/conversation-plan-commands";
 import { projectWorkspaceData } from "@/lib/engine-project-projection";
@@ -627,35 +628,23 @@ export function ConversationWorkspace() {
     }
 
     if (work?.catalogPlan && work.phase !== "approved" && /^sposta\s/i.test(text)) {
-      const reorder = parsePlanReorder(text);
       const plan = work.catalogPlan;
-      if (reorder) {
-        const from = plan.steps.findIndex((s) =>
-          s.title.toLowerCase().includes(reorder.itemTitle.toLowerCase()),
-        );
-        const target = plan.steps.findIndex((s) =>
-          s.title.toLowerCase().includes(reorder.anchorTitle.toLowerCase()),
-        );
-        if (from >= plan.completed && target >= plan.completed && from !== target) {
-          const steps = plan.steps.filter((_, i) => i !== from);
-          const to =
-            steps.findIndex((s) => s.id === plan.steps[target]!.id) +
-            (reorder.relation === "dopo" ? 1 : 0);
-          steps.splice(to, 0, plan.steps[from]!);
-          setPlanEdit({ workId: work.id, plan: { ...plan, steps } });
-          patch({
-            messages: [
-              ...work.messages,
-              { who: "you", text },
-              {
-                who: "agent",
-                text: "Ti propongo questo ordine. I passaggi già conclusi rimangono invariati.",
-              },
-            ],
-          });
-          setPanel(true);
-          return;
-        }
+      const reorder = parsePlanReorder(text);
+      const steps = reorder ? reorderPlanSteps(plan.steps, plan.completed, reorder) : null;
+      if (steps) {
+        setPlanEdit({ workId: work.id, plan: { ...plan, steps } });
+        patch({
+          messages: [
+            ...work.messages,
+            { who: "you", text },
+            {
+              who: "agent",
+              text: "Ti propongo questo ordine. I passaggi già conclusi rimangono invariati.",
+            },
+          ],
+        });
+        setPanel(true);
+        return;
       }
       setNotice(
         "Per riordinare indica i titoli di due passaggi futuri: Sposta Tradurre il catalogo dopo Preparare la bozza.",
@@ -1035,10 +1024,6 @@ export function ConversationWorkspace() {
     openResultPreview: (w) =>
       openWorkResultPreview(w, scenarios, spaceData.profiles, open, setPreview),
   });
-  function download() {
-    if (!scenario || !work) return;
-    downloadWorkResult({ scenario, work });
-  }
   if (!loaded)
     return (
       <div className="cw-loading" role="status">
@@ -1221,7 +1206,21 @@ export function ConversationWorkspace() {
             unavailable={!!spaceData.removedPeople?.includes(scenario.agent)}
           />
         ) : engine.backend === "engine" ? (
-          <EngineAgentChat conversationId={work?.engineConversationId ?? undefined} />
+          <EngineChatStage
+            engine={engine}
+            work={work}
+            activeWorkId={active}
+            preferences={preferences}
+            setPreferences={setPreferences}
+            notice={notice}
+            setNotice={setNotice}
+            assignee={assignee}
+            scenarios={scenarios}
+            spaceData={displaySpaceData}
+            onOpenSpace={openSpace}
+            onCreateExample={create}
+            onSend={send}
+          />
         ) : (
           <ConversationWorkspaceChatStage
             work={work}
@@ -1349,7 +1348,7 @@ export function ConversationWorkspace() {
           scenario={scenario}
           modalRef={modal}
           onClose={() => setPreview(false)}
-          onDownload={download}
+          onDownload={() => { if (scenario && work) downloadWorkResult({ scenario, work }); }}
         />
       )}
     </div>

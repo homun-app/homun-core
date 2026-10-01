@@ -1,16 +1,16 @@
-/** Chat dell'agente su assistant-ui primitives — chat-first, headless. */
-import { useCallback } from "react";
-import remarkGfm from "remark-gfm";
+/** Thread della chat su assistant-ui primitives — solo i messaggi.
 
+    Il composer è `StudioChatInput` (selettore modello, autonomia, menzioni):
+    la stessa esperienza della chat precedente. Qui si renderizza lo storico
+    con markdown, bolle e indicatore di digitazione. */
 import {
   AssistantRuntimeProvider,
-  ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
-import type { AppendMessage } from "@assistant-ui/core";
+import remarkGfm from "remark-gfm";
 
 import type { ChatStreamMessage } from "./useChatStream";
 
@@ -19,26 +19,16 @@ const REMARK_PLUGINS = [remarkGfm];
 export function AgentChat({
   messages,
   isRunning,
-  onSend,
 }: {
   messages: ChatStreamMessage[];
   isRunning: boolean;
-  onSend: (text: string) => void;
 }) {
-  const onNew = useCallback(
-    async (message: AppendMessage) => {
-      const text = (Array.isArray(message.content) ? message.content : [message.content])
-        .map((part) => (part.type === "text" ? part.text : ""))
-        .join("");
-      if (text) onSend(text);
-    },
-    [onSend],
-  );
-
   const runtime = useExternalStoreRuntime<ChatStreamMessage>({
     isRunning,
     messages,
-    onNew,
+    onNew: async () => {
+      /* l'invio vive nel composer esterno (pipeline engine completa) */
+    },
     convertMessage: (msg) => ({
       id: msg.id,
       role: msg.role,
@@ -50,12 +40,11 @@ export function AgentChat({
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ThreadPrimitive.Root className="flex h-full min-h-0 flex-col">
-        <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto px-4 py-6">
+        <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto">
           <ThreadPrimitive.Messages
             components={{ UserMessage, AssistantMessage }}
           />
         </ThreadPrimitive.Viewport>
-        <Composer />
       </ThreadPrimitive.Root>
     </AssistantRuntimeProvider>
   );
@@ -101,22 +90,4 @@ function MarkdownText() {
   // remark-gfm: tabelle, liste di controllo, testo barrato — come Hermes.
   // Il testo arriva dal contesto della parte (come MarkdownTextPrimitive nudo).
   return <MarkdownTextPrimitive remarkPlugins={REMARK_PLUGINS} />;
-}
-
-function Composer() {
-  return (
-    <ComposerPrimitive.Root className="border-t border-[#dce4d5] bg-white px-4 py-3">
-      <ComposerPrimitive.Input
-        autoFocus
-        placeholder="Chiedi qualsiasi cosa…"
-        className="w-full resize-none bg-transparent text-sm text-[#1c2d22] outline-none placeholder:text-[#9db3ad]"
-        rows={1}
-      />
-      <div className="mt-2 flex justify-end">
-        <ComposerPrimitive.Send className="inline-flex items-center gap-1.5 rounded-lg bg-[#182b26] px-4 py-1.5 text-xs font-medium text-[#8fe3d0] transition-colors hover:bg-[#253a33]">
-          Invia
-        </ComposerPrimitive.Send>
-      </div>
-    </ComposerPrimitive.Root>
-  );
 }

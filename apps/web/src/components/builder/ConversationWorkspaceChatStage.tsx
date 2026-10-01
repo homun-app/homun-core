@@ -17,6 +17,7 @@ import { ConversationAgentWait } from "./ConversationAgentWait";
 import { ConversationAvatar } from "./ConversationAvatar";
 import type { CatalogPlan } from "./ConversationCatalogPlan";
 import { isHumanMember, memberProfile } from "./conversation-members";
+import { buildMentionRefs } from "./conversation-mentions";
 import type { ConversationScenario } from "./conversation-scenarios";
 import type { SpaceData } from "./ConversationSpace";
 import { ConversationWorkspaceWelcome } from "./ConversationWorkspaceWelcome";
@@ -177,32 +178,7 @@ export function ConversationWorkspaceChatStage({
     window.addEventListener("homun:inspect-agent", handler);
     return () => window.removeEventListener("homun:inspect-agent", handler);
   }, [engineAgents, agentNames]);
-  const mentionRefs = [
-    ...scenarios
-      .filter(
-        (s, i) =>
-          memberProfile(s.agent, spaceData.profiles).invitation !== "pending" &&
-          scenarios.findIndex((a) => a.agent === s.agent) === i &&
-          !spaceData.removedPeople?.includes(s.agent),
-      )
-      .map((s) => ({
-        id: s.agent,
-        name: s.agent,
-        kind: "member" as const,
-        description: s.role,
-      })),
-    // Engine roster members are mentionable too: the squad the person built
-    // with the motor must answer @ even when no demo scenario carries them.
-    ...(engineAgents ?? [])
-      .filter((agent) => agent.status === "active")
-      .filter((agent) => !scenarios.some((s) => s.agent === agent.name))
-      .map((agent) => ({
-        id: agent.id,
-        name: agent.name,
-        kind: "member" as const,
-        description: agent.role,
-      })),
-  ];
+  const mentionRefs = buildMentionRefs(scenarios, spaceData, engineAgents);
 
   const agentStream = useConversationEventStream(
     engineMode ? work?.engineConversationId : undefined,
