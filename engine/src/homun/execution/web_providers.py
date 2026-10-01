@@ -349,7 +349,7 @@ def execute_provider_search(provider_name: str, query: str, limit: int = 5) -> d
     if not api_key and name != "keenable":
         return {
             "error_code": "web_provider_credentials_missing",
-            "message": f"No API key configured for provider '{name}'. Set {env_var}.",
+            "message": f"STOP trying providers: no API key for provider '{name}'. Set {env_var}.",
         }
     if name == "brave":
         return _call_brave(query, api_key, limit)
