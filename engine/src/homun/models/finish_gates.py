@@ -37,6 +37,9 @@ _PROMOTED_REASONING_PLAN_TAIL_RE = re.compile(
 )
 
 THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+# il modello locale spesso apre senza <think> e chiude con </think> orfano:
+# tutto ciò che precede la chiusura è ragionamento, non risposta
+ORPHAN_THINK_RE = re.compile(r"^.*?</think>", re.DOTALL)
 _OPENING_THINK_RE = re.compile(r"^\s*<think>(.*?)</think>", re.DOTALL)
 
 
@@ -67,8 +70,10 @@ def promoted_reasoning_announces_action(text: str) -> bool:
 
 
 def strip_think_blocks(text: str) -> str:
-    """Il testo visibile senza i blocchi di ragionamento."""
-    return THINK_BLOCK_RE.sub("", text or "").strip()
+    """Il testo visibile senza i blocchi di ragionamento (coppie e orfani)."""
+    result = THINK_BLOCK_RE.sub("", text or "")
+    result = ORPHAN_THINK_RE.sub("", result)
+    return result.strip()
 
 
 @dataclass
