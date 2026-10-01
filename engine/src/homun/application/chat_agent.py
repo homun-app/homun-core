@@ -261,21 +261,24 @@ def _presentable(text: str, run: Dict[str, Any], user_message: str | None) -> st
     # preambolo meta ("I have good material now. …", "Let me summarize …"):
     # la prima frase che parla del processo, non dell'utente, salta se seguita
     # da sostanza; una risposta intera non viene toccata (lunghezza < soglia no).
-    if len(clean) > 200:
-        first_break = clean.find("\n")
-        if first_break == -1:
-            first_break = next((i for i, ch in enumerate(clean) if ch in ".!?"), -1)
-        head = clean[:first_break + 1] if first_break >= 0 else clean
-        rest = clean[first_break + 1:] if first_break >= 0 else ""
-        meta_first = _re2.search(
-            r"\b(this is|the user|the request|the person|i have|i now|let me|"
-            r"i'll now|i will now|now let me|no tools|i can see|based on|"
-            r"i'll provide|i will provide|i need to|looking at|after reviewing|"
-            r"my final|final answer|here('s| is)|"
-            r"l'utente|la richiesta|ho trovato|ora ho|adesso|riassumo|devo)\b",
-            head, _re2.IGNORECASE)
-        if rest.strip() and meta_first:
-            clean = rest.strip()
+    # frasi meta iniziali a catena: finché parlano del compito (o citano la
+    # domanda) e c'è sostanza dopo, salgono via; la prima frase che risponde
+    # resta. Risposta corta o pulita: intoccata.
+    meta_re = _re2.compile(
+        r"\b(this is|the user|the request|the person|i have|i now|let me|"
+        r"i'll now|i will now|now let me|no tools|no tool needed|i can see|based on|"
+        r"i'll provide|i will provide|i need to|looking at|after reviewing|"
+        r"my final|final answer|here('s| is)|i should|i must|it's a simple|simple identity|"
+        r"l'utente|la richiesta|ho trovato|ora ho|adesso|riassumo|devo)\b",
+        _re2.IGNORECASE)
+    while len(clean) > 120:
+        stop = _re2.search(r"[.!?:\n]", clean[1:])
+        end = stop.start() + 1 if stop else len(clean)
+        sentence, remainder = clean[:end + 1], clean[end + 1:]
+        quoted = bool(user_message) and user_message[:30].lower() in sentence.lower()
+        if not remainder.strip() or not (meta_re.search(sentence) or quoted):
+            break
+        clean = remainder.lstrip()
     return clean or text
 
 
