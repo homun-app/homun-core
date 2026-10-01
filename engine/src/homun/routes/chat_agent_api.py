@@ -67,3 +67,43 @@ def conversation_events_stream(workspace_id: str, conversation_id: str,
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/{conversation_id}/browser-pip")
+def browser_pip(workspace_id: str, conversation_id: str,
+                actor: str | None = Query(default=None),
+                x_homun_actor_id: str | None = Header(default=None),
+                x_homun_actor_name: str | None = Header(default=None)):
+    """Stato live del browser dell'agente per il PiP: url + screenshot.
+
+    Risponde per il run chat attivo della conversazione; se il run non sta
+    usando il browser, active=false (il PiP si nasconde da solo).
+    """
+    import base64
+    import tempfile
+    from pathlib import Path
+
+    ctx, _resolved = request_context(workspace_id, x_homun_actor_id or actor,
+                                     x_homun_actor_name)
+    from homun.application.chat_agent import _active_chat_run
+    run = _active_chat_run(ctx.repository.load(), conversation_id)
+    if run is None:
+        return {"active": False}
+    from homun.execution.browser_sessions import require_browser
+    browser = require_browser(str(run.get("id")))
+    if browser is None:
+        return {"active": False, "run_id": run.get("id")}
+    from homun.execution.browser_shots import capture
+    with tempfile.TemporaryDirectory() as tmp:
+        shot = capture(browser, Path(tmp) / "pip.png")
+    if not isinstance(shot, dict) or "url" not in shot:
+        return {"active": False, "run_id": run.get("id")}
+    png = Path(shot["path"]).read_bytes()
+    return {
+        "active": True,
+        "run_id": run.get("id"),
+        "url": shot.get("url"),
+        "width": shot.get("width"),
+        "height": shot.get("height"),
+        "screenshot": "data:image/png;base64," + base64.b64encode(png).decode(),
+    }

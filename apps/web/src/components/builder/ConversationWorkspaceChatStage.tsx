@@ -5,6 +5,7 @@
 
 import { Markdown as ChatMarkdown } from "./ChatMarkdown";
 import { ConversationAgentLive } from "./ConversationAgentLive";
+import { ConversationBrowserPip } from "./ConversationBrowserPip";
 import { useConversationEventStream } from "@/hooks/useConversationEventStream";
 import { EngineWorkIntake } from "./EngineWorkIntake";
 import { EnginePlanRelayTimeline } from "./EnginePlanRelayTimeline";
@@ -307,6 +308,10 @@ export function ConversationWorkspaceChatStage({
                 </article>
               ))}
               {engineMode && <ConversationAgentLive stream={agentStream} />}
+              <ConversationBrowserPip
+                conversationId={engineMode ? work?.engineConversationId ?? undefined : undefined}
+                runActive={agentStream.runActive}
+              />
               {work.catalogPlan &&
                 work.catalogPlan.steps.filter((step) => step.result).length > 0 && (
                   <div className="cc-chat-results">
