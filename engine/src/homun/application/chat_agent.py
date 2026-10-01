@@ -230,8 +230,11 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
     if connection_id:
         body["connection_id"] = connection_id
     # la chat è conversazione, non consegna singola: turni da chiacchierata
-    # (2 ricerche + estrazioni + risposta), non il limite da lavoro assistito
-    body["limits"] = {**dict(LIMITS), "max_turns": 24, "max_model_attempts": 30}
+    # (2 ricerche + estrazioni + risposta), non il limite da lavoro assistito.
+    # Parity Hermes: il run muore sul limite di turni, mai sul volume delle
+    # osservazioni — la finestra del modello la gestisce il context manager.
+    body["limits"] = {**dict(LIMITS), "max_turns": 24, "max_model_attempts": 30,
+                      "max_observation_characters": 1_000_000}
     try:
         run = propose(ctx, actor, work_id, body)
     except ValidationError:

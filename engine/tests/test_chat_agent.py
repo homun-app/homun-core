@@ -52,6 +52,18 @@ def test_start_chat_turn_creates_approved_run(setup):
     assert "indice" in work.objective
 
 
+def test_chat_run_budget_survives_long_research(setup):
+    """Parity Hermes: il run chat muore sul limite di turni, mai sul volume
+    delle osservazioni (una ricerca multi-pagina sfora i 64k di default)."""
+    from homun.domain.capabilities import AGENT_RUN
+    ctx, actor, conv = setup
+    chat_agent.bind(ctx, actor, conv, "agent_chat")
+    outcome = chat_agent.start_chat_turn(ctx, actor, conv, "cerca e confronta")
+    run = ctx.repository.load().commands[outcome["agent_run_id"]].result
+    assert run["limits"]["max_observation_characters"] > 10 * AGENT_RUN.limits["max_observation_characters"]
+    assert run["limits"]["max_turns"] == 24
+
+
 def test_active_chat_run_is_detected_for_steering(setup):
     """Un secondo messaggio mentre il run è attivo trova il run da stestrare."""
     ctx, actor, conv = setup
