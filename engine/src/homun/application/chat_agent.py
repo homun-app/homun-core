@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from homun.domain.errors import DomainError, NotFoundError, ValidationError
+from homun.domain.capabilities import AGENT_RUN
 from homun.domain.models import Actor, utc_now
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,8 @@ def _active_chat_run(store, conversation_id: str):
             return run
     return None
 
+
+LIMITS = AGENT_RUN.limits
 
 CHAT_PERSONA_NAME = "Homun"
 
@@ -194,6 +197,9 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
     }
     if connection_id:
         body["connection_id"] = connection_id
+    # la chat è conversazione, non consegna singola: turni da chiacchierata
+    # (2 ricerche + estrazioni + risposta), non il limite da lavoro assistito
+    body["limits"] = {**dict(LIMITS), "max_turns": 24, "max_model_attempts": 30}
     try:
         run = propose(ctx, actor, work_id, body)
     except ValidationError:

@@ -201,7 +201,7 @@ def propose(ctx, actor, work_id, body):
             if connection_id is None:
                 raise ValidationError('Choose an active model connection')
             run = {'id': body['command_id'], 'work_id': work_id, 'status': 'pending_approval',
-                   'expected_version': pinned, 'materials': materials, 'team': team, 'person': person, 'limits': dict(LIMITS),
+                   'expected_version': pinned, 'materials': materials, 'team': team, 'person': person, 'limits': body.get('limits') if isinstance(body.get('limits'), dict) and all(isinstance(v, int) and v > 0 for v in body['limits'].values()) else dict(LIMITS),
                    'tool_version': 'adaptive-materials-v1', 'assignee_id': assignee_id,
                    '_step_id': current_step(store, work).id,
                    'executor_name': agent.name if agent else 'Homun', 'connection_id': connection_id,

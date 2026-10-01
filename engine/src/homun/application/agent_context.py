@@ -75,6 +75,7 @@ def prepare(ctx,run,tools):
             current['model_attempts']+=1
         ctx.service.store=store
     from types import SimpleNamespace
+    settled = False
     try:
         result=complete_summary(ctx, run, request,connection_id=run['connection_id'],
             context_window=policy['context_window'],max_output_tokens=output_tokens)
@@ -91,6 +92,7 @@ def prepare(ctx,run,tools):
         logging.getLogger(__name__).warning(
             'riassunto di contesto non disponibile (%s): degrado deterministico per %s',
             exc.code, run.get('id'))
+        settled = exc.usage is not None
         result=SimpleNamespace(message=SimpleNamespace(content=(
             '[riassunto di contesto non disponibile: cronologia ridotta deterministicamente. '
             'I turni di mezzo sono stati omessi per rispettare la finestra del modello.]'),
@@ -101,10 +103,12 @@ def prepare(ctx,run,tools):
         logging.getLogger(__name__).warning(
             'riassunto di contesto fallito (%s): degrado deterministico per %s',
             exc, run.get('id'))
+        settled = getattr(exc, 'usage', None) is not None
         result=SimpleNamespace(message=SimpleNamespace(content=(
             '[riassunto di contesto non disponibile: cronologia ridotta deterministicamente.]'),
             tool_calls=None), usage=None)
-    charge(ctx,actor,run,reservation,getattr(result,'usage',None))
+    if not settled:
+        charge(ctx,actor,run,reservation,getattr(result,'usage',None))
     _defer_if_stale(ctx,run)
     candidate=build_checkpoint(messages,plan,summary_text(result),tools)
     candidate['coverage']['sampled']=bool(clipped) or (run.get('_context_checkpoint') or {}).get('coverage',{}).get('sampled',False)
