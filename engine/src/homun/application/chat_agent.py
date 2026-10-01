@@ -164,51 +164,36 @@ def _new_chat_work(ctx, actor: Actor, conversation_id: str, agent_id: str,
 
 
 
-def _bind_history(ctx, store, work_id: str, conversation_id: str, actor) -> None:
-    """La chat è una conversazione: i turni precedenti entrano nel contesto.
 
-    Prendiamo gli ultimi messaggi della conversazione e li appendiamo come
-    messaggi user/assistant nel run, così il modello vede la storia come
-    Hermes (sessione persistente). Limitato per il budget di contesto.
-    """
+def _bind_history(ctx, store, run_id: str, conversation_id: str) -> None:
+    """La chat è una conversazione: i turni precedenti entrano nel contesto."""
     try:
+        from homun.models.native_turn import NativeMessage
         messages = sorted(
             (m for m in store.messages.values()
              if m.conversation_id == conversation_id
              and m.author_id in {"person_fabio", "person_local", "homun_engine"}),
             key=lambda m: m.created_at)
-        # gli ultimi 20 messaggi (≈10 scambi), tranne l'ultimo (è il messaggio corrente)
         recent = messages[:-1][-20:]
         if not recent:
             return
-        record = store.commands.get(
-            next((cid for cid, c in store.commands.items()
-                  if c.type == 'work.create' and c.result.get('work_id') == work_id), ''))
-        if record is None:
-            return
-        run_id = next((cid for cid, c in store.commands.items()
-                        if c.type == 'agent_run.propose' and c.result.get('work_id') == work_id), '')
-        if not run_id:
-            return
-        from homun.models.native_turn import NativeMessage
         with ctx.repository.locked():
             with ctx.repository.transaction() as write_store:
-                run = write_store.commands[run_id]
-                history_block = []
+                run = write_store.commands.get(run_id)
+                if run is None or '_messages' not in run.result:
+                    return
+                msgs = run.result['_messages']
+                history = []
                 for m in recent:
                     role = "assistant" if m.author_id == "homun_engine" else "user"
                     text = m.text.strip()[:2000]
                     if text:
-                        history_block.append(NativeMessage(role=role, content=text).model_dump())
-                if history_block:
-                    # inserisci la storia dopo il system prompt, prima dell'objective
-                    msgs = run.result['_messages']
-                    system = msgs[0]
-                    objective = msgs[-1]
-                    run.result['_messages'] = [system] + history_block + [objective]
+                        history.append(NativeMessage(role=role, content=text).model_dump())
+                if history:
+                    run.result['_messages'] = [msgs[0]] + history + [msgs[-1]]
             ctx.service.store = write_store
     except Exception:
-        logger.warning("bind storia conversazione saltato per %s", work_id, exc_info=True)
+        logger.warning("bind storia saltato per %s", run_id, exc_info=True)
 
 def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
                     connection_id: str | None = None) -> Dict[str, Any]:
@@ -236,8 +221,6 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
         return {"agent_run_id": active["id"], "steered": True}
 
     work_id = _new_chat_work(ctx, actor, conversation_id, entry["agent_id"], text)
-    # continuità: i turni precedenti della conversazione entrano nel contesto
-    _bind_history(ctx, store, work_id, conversation_id, actor)
     version = ctx.repository.load().works[work_id].version
     body = {
         "command_id": f"chat-run:{secrets.token_hex(6)}",
@@ -259,6 +242,8 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
     logger.info("chat-turn conv=%s agent=%s run=%s connection=%s modello_scelto=%s",
                 conversation_id, entry.get("agent_id"), run.get("id"),
                 run.get("connection_id"), connection_id or "(default agente)")
+    # continuità: i turni precedenti entrano nel contesto del run appena creato
+    _bind_history(ctx, ctx.repository.load(), run["id"], conversation_id)
     # Chi scrive in chat ha già deciso: il run parte subito, timbrato.
     from homun.application.agent_runs import approve
     owner = Actor(id=actor.id, workspace_id=ctx.workspace_id,
