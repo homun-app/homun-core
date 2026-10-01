@@ -410,10 +410,13 @@ def advance(ctx, run_id, *, epoch=None):
                         {'work_id': work.id, 'expected_version': work.version,
                          'title': f'Risultato · {work.title}', 'content': content})
                     current.update(status='completed', artifact_id=result['artifact_id'])
-                    service.append_engine_message(actor=actor, command_id=f'{run_id}:report',
-                        conversation_id=work.primary_conversation_id, author_id='homun_engine',
-                        text=f'{current["executor_name"]} ha preparato il risultato. Puoi verificarlo e chiedere modifiche.',
-                        event_payload={'work_id': work.id, 'agent_run_id': run_id, 'artifact_id': result['artifact_id']})
+                    # Nelle conversazioni chat il risultato arriva già come
+                    # risposta: la notifica di ciclo lavoro sarebbe rumore.
+                    if not current.get('_chat_conversation_id'):
+                        service.append_engine_message(actor=actor, command_id=f'{run_id}:report',
+                            conversation_id=work.primary_conversation_id, author_id='homun_engine',
+                            text=f'{current["executor_name"]} ha preparato il risultato. Puoi verificarlo e chiedere modifiche.',
+                            event_payload={'work_id': work.id, 'agent_run_id': run_id, 'artifact_id': result['artifact_id']})
                 current.pop('_active_call_id', None)
                 current.pop('_decision', None)
                 current.pop('_lease_token', None)

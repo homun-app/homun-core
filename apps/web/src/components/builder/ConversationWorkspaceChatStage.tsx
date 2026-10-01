@@ -307,7 +307,11 @@ export function ConversationWorkspaceChatStage({
                   )}
                 </article>
               ))}
-              {engineMode && <ConversationAgentLive stream={agentStream} />}
+              {engineMode && <ConversationAgentLive
+                stream={agentStream}
+                hiddenWhenAnswered={(work?.messages ?? []).some((m, i) =>
+                  i >= work.messages.length - 3 && m.who === "agent" && !m.partial)}
+              />}
               <ConversationBrowserPip
                 conversationId={engineMode ? work?.engineConversationId ?? undefined : undefined}
                 runActive={agentStream.runActive}
@@ -438,7 +442,9 @@ export function ConversationWorkspaceChatStage({
             modelConnectionId={modelConnectionId}
             onModelConnectionIdChange={onModelConnectionIdChange}
           />
-          {historyLoading && <p className="cw-hint" role="status">Caricamento conversazione…</p>}
+          {historyLoading && (work?.messages ?? []).length === 0 && (
+            <p className="cw-hint" role="status">Caricamento conversazione…</p>
+          )}
           {engineMode && engineBusy && onCancelInFlight && (
             <p className="cw-hint cw-engine-busy" role="status">
               Homun sta aspettando la risposta del modello: la conversazione mostra i passaggi

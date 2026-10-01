@@ -4,11 +4,13 @@ import { Bot, ChevronDown, Loader2, Wrench } from "lucide-react";
 import { Markdown as ChatMarkdown } from "./ChatMarkdown";
 import type { ConversationStreamState } from "@/hooks/useConversationEventStream";
 
-export function ConversationAgentLive({ stream }: { stream: ConversationStreamState }) {
+export function ConversationAgentLive({
+  stream, hiddenWhenAnswered = false,
+}: { stream: ConversationStreamState; hiddenWhenAnswered?: boolean }) {
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const active = stream.runActive || stream.answerText.length > 0;
+  const active = !hiddenWhenAnswered && (stream.runActive || stream.answerText.length > 0);
   useEffect(() => {
     if (!stream.runActive) return;
     const started = Date.now();
