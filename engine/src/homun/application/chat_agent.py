@@ -186,11 +186,15 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str) -> Dict[
 
 
 def _final_answer(run: Dict[str, Any]) -> str:
+    import re as _re
     messages = run.get("_messages") or []
     for message in reversed(messages):
         if isinstance(message, dict) and message.get("role") == "assistant" \
                 and str(message.get("content") or "").strip():
-            return str(message["content"]).strip()
+            text = str(message["content"]).strip()
+            # il blocco di ragionamento non è la risposta: via dal testo consegnato
+            text = _re.sub(r"<think>.*?</think>", "", text, flags=_re.DOTALL).strip()
+            return text or str(message["content"]).strip()
     for observation in reversed(run.get("observations") or []):
         text = str((observation or {}).get("message") or "").strip()
         if text:

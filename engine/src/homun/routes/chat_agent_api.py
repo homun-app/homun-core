@@ -1,5 +1,5 @@
 """Conversazioni legate a un agente: la chat singola con l'agente."""
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, Query
 from pydantic import BaseModel, Field
 
 from homun.domain.errors import DomainError
@@ -49,11 +49,18 @@ def status(workspace_id: str, conversation_id: str,
 
 @router.get("/{conversation_id}/events")
 def conversation_events_stream(workspace_id: str, conversation_id: str,
+                               actor: str | None = Query(default=None),
                                x_homun_actor_id: str | None = Header(default=None),
                                x_homun_actor_name: str | None = Header(default=None)):
-    """SSE: la conversazione in parti (run, tool, delta di testo, messaggi)."""
+    """SSE: la conversazione in parti (run, tool, delta di testo, messaggi).
+
+    EventSource non puo' inviare header: il fallback query actor vale
+    quanto l'header (stessa risoluzione, stesso spazio dei nomi).
+    """
     from fastapi.responses import StreamingResponse
-    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    ctx, resolved = request_context(workspace_id, x_homun_actor_id or actor,
+                                    x_homun_actor_name)
+    actor = resolved
     from homun.application.chat_events import conversation_events_threaded
     return StreamingResponse(
         conversation_events_threaded(ctx, actor, conversation_id),

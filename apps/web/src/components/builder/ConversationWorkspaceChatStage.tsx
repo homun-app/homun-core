@@ -3,6 +3,8 @@
  * Owns presentation; shell owns state and passes storageStatus / callbacks.
  */
 
+import { ConversationAgentLive } from "./ConversationAgentLive";
+import { useConversationEventStream } from "@/hooks/useConversationEventStream";
 import { EngineWorkIntake } from "./EngineWorkIntake";
 import { EnginePlanRelayTimeline } from "./EnginePlanRelayTimeline";
 import { ConversationMarginaliaSpine } from "./ConversationMarginaliaSpine";
@@ -200,6 +202,11 @@ export function ConversationWorkspaceChatStage({
       })),
   ];
 
+  const agentStream = useConversationEventStream(
+    engineMode ? work?.engineConversationId : undefined,
+    { onNewMessage: onRefreshEngine },
+  );
+
   useEffect(() => {
     if (historyRef.current && (work?.messages.length || engineIntake?.proposal)) {
       historyRef.current.scrollTo({
@@ -296,6 +303,7 @@ export function ConversationWorkspaceChatStage({
                   )}
                 </article>
               ))}
+              {engineMode && <ConversationAgentLive stream={agentStream} />}
               {work.catalogPlan &&
                 work.catalogPlan.steps.filter((step) => step.result).length > 0 && (
                   <div className="cc-chat-results">
