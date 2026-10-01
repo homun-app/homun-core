@@ -1,13 +1,22 @@
 /** Blocco live sotto i messaggi: thinking ripiegato, tool in uso, testo in streaming. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Bot, ChevronDown, Loader2, Wrench } from "lucide-react";
+import { Markdown as ChatMarkdown } from "./ChatMarkdown";
 import type { ConversationStreamState } from "@/hooks/useConversationEventStream";
 
 export function ConversationAgentLive({ stream }: { stream: ConversationStreamState }) {
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const active = stream.runActive || stream.answerText.length > 0;
+  useEffect(() => {
+    if (!stream.runActive) return;
+    const started = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [stream.runActive]);
   if (!active) return null;
+  const lastTool = stream.tools[stream.tools.length - 1];
 
   const visible = stream.visibleText.trim();
   return (
@@ -18,7 +27,11 @@ export function ConversationAgentLive({ stream }: { stream: ConversationStreamSt
         ) : (
           <Bot size={12} aria-hidden />
         )}
-        {stream.runActive ? "sta lavorando…" : "risposta"}
+        {stream.runActive
+          ? lastTool
+            ? `${lastTool.tool} · ${elapsed}s`
+            : `sta lavorando · ${elapsed}s`
+          : "risposta"}
       </small>
 
       {stream.thinking && (
@@ -74,15 +87,7 @@ export function ConversationAgentLive({ stream }: { stream: ConversationStreamSt
       )}
 
       {visible && (
-        <p className={`whitespace-pre-wrap leading-relaxed ${stream.runActive ? "cw-message-partial" : ""}`}>
-          {visible}
-          {stream.runActive && (
-            <span className="cw-stream-caret" aria-hidden style={{
-              display: "inline-block", width: 7, height: 14, marginLeft: 2,
-              background: "#235940", animation: "cw-blink 1s steps(2) infinite",
-            }} />
-          )}
-        </p>
+        <ChatMarkdown content={visible} streaming={stream.runActive} />
       )}
     </article>
   );

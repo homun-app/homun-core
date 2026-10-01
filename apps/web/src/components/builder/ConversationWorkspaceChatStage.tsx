@@ -3,6 +3,7 @@
  * Owns presentation; shell owns state and passes storageStatus / callbacks.
  */
 
+import { Markdown as ChatMarkdown } from "./ChatMarkdown";
 import { ConversationAgentLive } from "./ConversationAgentLive";
 import { useConversationEventStream } from "@/hooks/useConversationEventStream";
 import { EngineWorkIntake } from "./EngineWorkIntake";
@@ -250,6 +251,8 @@ export function ConversationWorkspaceChatStage({
                   </small>
                   {m.wait ? (
                     <ConversationAgentWait phase={m.wait.phase} startedAt={m.wait.startedAt} />
+                  ) : m.who === "agent" ? (
+                    <ChatMarkdown content={cleanMessageText(m.text)} streaming={m.partial} />
                   ) : (
                     <p className={m.partial ? "cw-message-partial" : undefined}>{cleanMessageText(m.text)}</p>
                   )}
