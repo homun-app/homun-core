@@ -309,6 +309,7 @@ export async function postEngineConversationMessage(input: {
   interpretation: MessageInterpretation | null;
   assistantText: string;
   patchProposal: WorkPatchProposal | null;
+  chatAgent?: boolean;
 }> {
   const actor = input.actor ?? defaultLocalActor();
   let roster = input.roster;
@@ -354,8 +355,12 @@ export async function postEngineConversationMessage(input: {
       : await postEngineCommandStream(commandInput);
   const interpretation = parseInterpretation(result.result["interpretation"]);
   const patchProposal = parseWorkPatchProposal(result.result["patch_proposal"]);
-  const assistantText =
-    typeof result.result["assistant_text"] === "string"
+  // Percorso chat-agente: nessun testo qui — la risposta arriva in conversazione
+  // quando il run completa (il blocco live mostra intanto il progredire).
+  const chatAgent = result.result["chat_agent"] === true;
+  const assistantText = chatAgent
+    ? ""
+    : typeof result.result["assistant_text"] === "string"
       ? result.result["assistant_text"]
       : interpretation
         ? formatInterpretationForUi(interpretation)
@@ -366,6 +371,7 @@ export async function postEngineConversationMessage(input: {
     interpretation,
     assistantText,
     patchProposal,
+    chatAgent,
   };
 }
 

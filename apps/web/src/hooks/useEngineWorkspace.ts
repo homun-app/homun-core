@@ -354,10 +354,19 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
           });
         },
       });
-      setMessageOverlay((current) => ({
-        ...current,
-        [work.id]: [...prior, { who: "you", sender: "Fabio", text }, assistantFromPosted(posted)],
-      }));
+      if (posted.chatAgent) {
+        // Chat con l'agente: la risposta arriva dal run (blocco live + evento
+        // messaggio). Qui restano solo le parole della persona.
+        setMessageOverlay((current) => ({
+          ...current,
+          [work.id]: [...prior, { who: "you", sender: "Fabio", text }],
+        }));
+      } else {
+        setMessageOverlay((current) => ({
+          ...current,
+          [work.id]: [...prior, { who: "you", sender: "Fabio", text }, assistantFromPosted(posted)],
+        }));
+      }
     } catch (cause) {
       if (isHomunClientError(cause) && cause.code === "request_cancelled") {
         setMessageOverlay((current) => ({
