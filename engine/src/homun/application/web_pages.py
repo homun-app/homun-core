@@ -16,15 +16,18 @@ def execute(ctx, actor, run, tool, args):
         # I modelli locali hanno finestre piccole: la pagina entra nel
         # contesto già contenuta, mai intera a far fallire il run.
         if isinstance(fetched, dict) and isinstance(fetched.get('text'), str):
-            from homun.application.web_pages import _bounded_page_text
-            fetched = {**fetched, 'text': _bounded_page_text(fetched['text'])}
+            from pathlib import Path as _P
+            from homun.execution.web_truncate import (
+                DEFAULT_EXTRACT_CHAR_LIMIT, store_full_text, truncate_with_footer)
+            text = fetched['text']
+            limit = DEFAULT_EXTRACT_CHAR_LIMIT
+            if len(text) > limit:
+                cache = _P(ctx.data_dir) / 'cache' / 'web'
+                stored = store_full_text(cache, str(args.get('url') or ''), text)
+                model_text, was_truncated = truncate_with_footer(
+                    text, str(args.get('url') or ''), limit, stored_path=stored)
+                fetched = {**fetched, 'text': model_text, 'truncated': was_truncated}
         return fetched
-
-
-def _bounded_page_text(text: str, limit: int = 8000) -> str:
-    if len(text) <= limit:
-        return text
-    return text[:limit] + '\n[… pagina troncata: usa zoom su una sezione se serve il resto]'[:limit + 80]
     if tool == 'web_search':
         if version == 1:
             return {
