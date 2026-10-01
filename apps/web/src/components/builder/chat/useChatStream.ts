@@ -14,6 +14,13 @@ export type ChatStreamMessage = {
   content: string;
 };
 
+/** Attività tool del run attivo, mostrata come avanzamento live. */
+export type ChatToolEvent = {
+  id: string;
+  tool: string;
+  message: string;
+};
+
 const ACTIVE_RUN_STATUSES = new Set([
   "running",
   "queued",
@@ -37,11 +44,14 @@ export function useChatStream(conversationId: string | undefined) {
   const [stream, setStream] = useState<{ runId: string; text: string } | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [toolEvents, setToolEvents] = useState<ChatToolEvent[]>([]);
 
   // bolle utente ottimistiche non ancora riechiate dal motore
   const pendingRef = useRef<{ id: string; text: string }[]>([]);
   // run attivi visti via SSE: i run già chiusi vengono riprodotti a connessione
   const activeRunsRef = useRef<Set<string>>(new Set());
+  // attività tool già viste: alla riconnessione il motore ripete le osservazioni
+  const seenToolsRef = useRef<Set<string>>(new Set());
   // numero di risposte assistente al momento dell'avvio del run corrente
   const assistantBaselineRef = useRef(0);
   // il prop definito viste finora: definito -> undefined = nuova conversazione
@@ -69,6 +79,7 @@ export function useChatStream(conversationId: string | undefined) {
       if (answers > assistantBaselineRef.current) {
         assistantBaselineRef.current = answers;
         setStream(null);
+        setToolEvents([]);
       }
     } catch {
       /* la prossima riga SSE ritenterà l'allineamento */
@@ -87,11 +98,13 @@ export function useChatStream(conversationId: string | undefined) {
     hadConversationRef.current = false;
     pendingRef.current = [];
     activeRunsRef.current.clear();
+    seenToolsRef.current.clear();
     assistantBaselineRef.current = 0;
     setPending([]);
     setStream(null);
     setServerMessages([]);
     setIsRunning(false);
+    setToolEvents([]);
   }, [conversationId]);
 
   // trascrizione iniziale al (ri)collegamento della conversazione
@@ -99,9 +112,11 @@ export function useChatStream(conversationId: string | undefined) {
     if (!conversationId) return;
     assistantBaselineRef.current = 0;
     pendingRef.current = [];
+    seenToolsRef.current.clear();
     setPending([]);
     setStream(null);
     setServerMessages([]);
+    setToolEvents([]);
     setHistoryLoading(true);
     void refresh(conversationId);
   }, [conversationId, refresh]);
@@ -124,7 +139,24 @@ export function useChatStream(conversationId: string | undefined) {
         activeRunsRef.current.add(data.run_id);
         setIsRunning(true);
         setStream({ runId: data.run_id, text: "" });
+        // nuovo turno: l'avanzamento tool riparte pulito
+        seenToolsRef.current.clear();
+        setToolEvents([]);
       }
+    });
+    es.addEventListener("tool_result", (event) => {
+      const data = JSON.parse((event as MessageEvent<string>).data) as {
+        run_id: string;
+        tool: string | null;
+        message: string | null;
+      };
+      if (!activeRunsRef.current.has(data.run_id)) return;
+      const tool = String(data.tool || "tool");
+      const message = String(data.message || "");
+      const id = `${data.run_id}:${tool}:${message}`;
+      if (seenToolsRef.current.has(id)) return;
+      seenToolsRef.current.add(id);
+      setToolEvents((current) => [...current, { id, tool, message }]);
     });
     es.addEventListener("text_delta", (event) => {
       const data = JSON.parse((event as MessageEvent<string>).data) as {
@@ -175,5 +207,5 @@ export function useChatStream(conversationId: string | undefined) {
     [serverMessages, pending, stream],
   );
 
-  return { messages, isRunning, historyLoading, noteUserSent };
+  return { messages, isRunning, historyLoading, toolEvents, noteUserSent };
 }
