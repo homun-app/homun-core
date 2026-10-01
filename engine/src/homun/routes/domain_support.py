@@ -20,7 +20,7 @@ def _actor_from_headers(
         id=actor_id,
         workspace_id=workspace_id,
         display_name=actor_name or actor_id,
-        kind="person",
+        kind="agent" if actor_id.startswith("agent_") else "person",
     )
 
 

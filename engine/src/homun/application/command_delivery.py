@@ -113,7 +113,8 @@ def admit(ctx: EngineContext, actor: Actor, body: CommandRequest) -> Delivery:
 def complete(ctx: EngineContext, delivery: Delivery) -> dict:
     # Conversazioni legate a un agente: il messaggio avvia (o steera) il run
     # dell'agente e la risposta torna in chat — la chat singola è con l'agente.
-    if delivery.token is not None and delivery.body.type == "conversation.post_message":
+    if (delivery.token is not None and delivery.body.type == "conversation.post_message"
+            and getattr(delivery.actor, "kind", "person") == "person"):
         from homun.application import chat_agent
         store_now = ctx.repository.load()
         if chat_agent.handles(ctx, store_now, delivery.body):
