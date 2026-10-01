@@ -229,6 +229,8 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
 
 def _final_answer(run: Dict[str, Any]) -> str:
     import re as _re
+    user_message = next((m.get("content") for m in reversed(run.get("_messages") or [])
+                         if isinstance(m, dict) and m.get("role") == "user"), None)
     messages = run.get("_messages") or []
     for message in reversed(messages):
         if isinstance(message, dict) and message.get("role") == "assistant" \
@@ -236,12 +238,41 @@ def _final_answer(run: Dict[str, Any]) -> str:
             text = str(message["content"]).strip()
             # il blocco di ragionamento non è la risposta: via dal testo consegnato
             text = _re.sub(r"<think>.*?</think>", "", text, flags=_re.DOTALL).strip()
-            return text or str(message["content"]).strip()
+            text = text or str(message["content"]).strip()
+            return _presentable(text, run, user_message)
     for observation in reversed(run.get("observations") or []):
         text = str((observation or {}).get("message") or "").strip()
         if text:
-            return text
+            return _presentable(text, run, user_message)
     return ""
+
+
+import re as _re2
+from homun.models.finish_gates import strip_think_blocks
+_PREAMBLE_MARKERS = _re2.compile(
+    r"^(?:[\w\s,'\"()\-–—:]{0,120}?(?:now|ok okay|alright)\b[^.!?\n]{0,80}[.!?]\s*)",
+    _re2.IGNORECASE)
+
+
+def _presentable(text: str, run: Dict[str, Any], user_message: str | None) -> str:
+    """La risposta come la vedrebbe dalla chat di Hermes: gate sul testo,
+    preambolo discorsivo di apertura rimosso, lingua dichiarata rispettata."""
+    clean = strip_think_blocks(text)
+    # preambolo meta ("I have good material now. …", "Let me summarize …"):
+    # la prima frase che parla del processo, non dell'utente, salta se seguita
+    # da sostanza; una risposta intera non viene toccata (lunghezza < soglia no).
+    if len(clean) > 200:
+        first_break = clean.find("\n")
+        if first_break == -1:
+            first_break = next((i for i, ch in enumerate(clean) if ch in ".!?"), -1)
+        head = clean[:first_break + 1] if first_break >= 0 else clean
+        rest = clean[first_break + 1:] if first_break >= 0 else ""
+        if rest.strip() and _re2.search(
+                r"\b(i have|i now|let me|i'll now|i will now|now let me|"
+                r"the user|ho trovato|ora ho|adesso|riassumo)\b",
+                head, _re2.IGNORECASE):
+            clean = rest.strip()
+    return clean or text
 
 
 def deliver_chat_answers(ctx) -> int:
