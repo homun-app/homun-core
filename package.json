@@ -32,6 +32,8 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.48",
     "@ai-sdk/react": "^4.0.102",
+    "@assistant-ui/react": "^0.15.22",
+    "@assistant-ui/react-markdown": "^0.14.17",
     "@fontsource/geist-mono": "^5.3.0",
     "@fontsource/geist-sans": "^5.3.0",
     "@hookform/resolvers": "^5.2.2",
@@ -81,6 +83,7 @@
     "geist": "^1.7.2",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.575.0",
+    "markdown-it": "^15.0.2",
     "motion": "^13.2.0",
     "nanoid": "^6.0.1",
     "qrcode": "^1.5.4",
