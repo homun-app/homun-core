@@ -96,3 +96,13 @@ export function buildDemoBootstrap(mode: DemoMode): DemoBootstrap {
     initialSpace: null,
   };
 }
+
+/** Bootstrap unico del workspace demo: modalità risolta + dati pronti. */
+export function demoWorkspaceBootstrap(): {
+  mode: DemoMode;
+  storageKey: string;
+  bootstrap: DemoBootstrap;
+} {
+  const mode = resolveDemoMode();
+  return { mode, storageKey: mode.storageKey, bootstrap: buildDemoBootstrap(mode) };
+}

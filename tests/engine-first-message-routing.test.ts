@@ -89,34 +89,36 @@ test("a confirmed agreement with a plan or result cannot re-enter intake", async
 });
 
 test("an open question on a fresh work stays in the conversation", async () => {
-  const mock = mockFetch([intakeList("failed"), classifyJson({ kind: "question", language: "en" })]);
+  const mock = mockFetch([intakeList("failed")]);
   try {
     assert.deepEqual(
       await routeEngineFirstMessage(work({}), "How much do we usually spend on supplies?"),
-      { route: "chat", language: "en" },
+      { route: "chat" },
     );
-    assert.equal(mock.seen.filter((url) => url.includes("/classify")).length, 1);
+    assert.equal(mock.seen.filter((url) => url.includes("/classify")).length, 0);
   } finally {
     mock.restore();
   }
 });
 
-test("a work request keeps the durable intake path and carries the detected language", async () => {
-  const mock = mockFetch([intakeList("failed"), classifyJson({ kind: "work_request", language: "en" })]);
+test("a work request on a fresh work stays in the conversation too (chat-first)", async () => {
+  const mock = mockFetch([intakeList("failed")]);
   try {
     assert.deepEqual(
       await routeEngineFirstMessage(work({}), "Compare the March and April price lists"),
-      { route: "propose", language: "en" },
+      { route: "chat" },
     );
+    assert.equal(mock.seen.filter((url) => url.includes("/classify")).length, 0);
   } finally {
     mock.restore();
   }
 });
 
-test("classification failures fall back to the proposal path, never silently to chat", async () => {
+test("fresh works never classify: an engine outage cannot block the chat reply", async () => {
   const mock = mockFetch([intakeList("failed"), unavailable()]);
   try {
-    assert.deepEqual(await routeEngineFirstMessage(work({}), "Qualsiasi cose"), { route: "propose" });
+    assert.deepEqual(await routeEngineFirstMessage(work({}), "Qualsiasi cose"), { route: "chat" });
+    assert.equal(mock.seen.filter((url) => url.includes("/classify")).length, 0);
   } finally {
     mock.restore();
   }
