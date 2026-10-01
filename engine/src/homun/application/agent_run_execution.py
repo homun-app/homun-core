@@ -221,6 +221,28 @@ def _decision(ctx, run):
     return decision
 
 
+
+def _looks_like_pure_reasoning(text: str, run: dict) -> bool:
+    """Il finale narra il compito invece di rispondere (modello locale senza tag think)."""
+    import re as _re
+    clean = text.strip()
+    if not clean or len(clean) > 700:
+        return False
+    if clean.startswith(('1.', '-', '**')):
+        return False
+    user = next((m.get('content') for m in reversed(run.get('_messages') or [])
+                 if isinstance(m, dict) and m.get('role') == 'user'), '') or ''
+    _META_WORDS = "this is|the user|the request|i should|i will|i must|no tools|no tool|simple|question|answer|i need|let me|i can|based on|devo|rispondo|domanda|semplice"
+    meta = _re.compile("(" + _META_WORDS + ")", _re.IGNORECASE)
+    sentences = [x for x in _re.split(r'[.!?\n]', clean) if x.strip()]
+    if not sentences:
+        return False
+    hits = sum(1 for x in sentences if meta.search(x))
+    first_line = clean.split(chr(10))[0]
+    echo = (user[:25].lower() in clean.lower()
+            or ('"' in first_line and '?' in first_line))
+    return hits * 2 >= len(sentences) and echo
+
 def _dispatch_allowed(ctx, actor, run):
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
@@ -328,6 +350,25 @@ def advance(ctx, run_id, *, epoch=None):
                 # Malformed arguments/readability are observations the model can correct.
                 observation = {'error_code': exc.code, 'message': exc.message}
         automation_evaluation = None
+        if decision.kind == 'finish' and agent_native.enabled(run) \
+                and not run.get('_delegation_parent') and not run.get('_reasoning_nudge') \
+                and _looks_like_pure_reasoning(decision.message or '', run):
+            run['_reasoning_nudge'] = True
+            from homun.models.native_turn import NativeMessage as _NM
+            run['_messages'].append(_NM(role='user', content=(
+                '[SYSTEM] Your last reply reasoned about the task instead of answering. '
+                'Reply now with the actual answer for the user, in their language. '
+                'Do not describe what you will do.')).model_dump())
+            run.pop('_decision', None)
+            logging.getLogger(__name__).warning(
+                'finish rifiutato (solo ragionamento): rilancio')
+            with ctx.repository.locked():
+                with ctx.repository.transaction() as store:
+                    target = store.commands.get(run_id)
+                    if target is not None and target.result.get('_lease_token') == token:
+                        target.result.update(run)
+                ctx.service.store = store
+            return 'running'
         if decision.kind == 'finish' and not run.get('_delegation_parent'):
             from homun.application.agent_automation import evaluate_finish
             from homun.application.delegation_runtime import has_pending
