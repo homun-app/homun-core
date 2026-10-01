@@ -86,12 +86,26 @@ def _active_chat_run(store, conversation_id: str):
     return None
 
 
+def default_chat_agent(store) -> Optional[str]:
+    """La chat è con l'agente per default: primo agente attivo del workspace."""
+    for agent in sorted(store.agents.values(), key=lambda a: a.created_at):
+        if agent.status == "active":
+            return agent.id
+    return None
+
+
 def handles(ctx, store, body) -> bool:
-    """Il messaggio va all'agente della conversazione invece che al solo testo."""
+    """Il messaggio va all'agente invece che al solo interprete testuale.
+
+    Conversazioni legate esplicitamente, oppure il default del workspace
+    (primo agente attivo): la chat funziona come una chat con un agente.
+    """
     if body.type != "conversation.post_message":
         return False
     conversation_id = str(body.payload.get("conversation_id") or "")
-    return binding_for(ctx, conversation_id) is not None
+    if binding_for(ctx, conversation_id) is not None:
+        return True
+    return default_chat_agent(store) is not None
 
 
 def _new_chat_work(ctx, actor: Actor, conversation_id: str, agent_id: str,
@@ -124,9 +138,12 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str) -> Dict[
     """Avvia il run della risposta; il testo torna in chat quando completa."""
     from homun.application.agent_runs import propose
     entry = binding_for(ctx, conversation_id)
-    if entry is None:
-        raise ValidationError("Conversazione non legata a un agente")
     store = ctx.repository.load()
+    if entry is None:
+        agent_id = default_chat_agent(store)
+        if agent_id is None:
+            raise ValidationError("Conversazione non legata a un agente")
+        entry = bind(ctx, actor, conversation_id, agent_id)
     active = _active_chat_run(store, conversation_id)
     if active is not None:
         # un run è già in volo su questa chat: il messaggio lo steera
@@ -139,10 +156,18 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str) -> Dict[
 
     work_id = _new_chat_work(ctx, actor, conversation_id, entry["agent_id"], text)
     version = ctx.repository.load().works[work_id].version
-    run = propose(ctx, actor, work_id, {
+    body = {
         "command_id": f"chat-run:{secrets.token_hex(6)}",
         "expected_version": version, "material_ids": [],
-    })
+        "web_pages": True,
+    }
+    try:
+        run = propose(ctx, actor, work_id, body)
+    except ValidationError:
+        # la ricerca web richiede run nativi: chat testuale senza, il resto invariato
+        body.pop("web_pages")
+        body["command_id"] = f"chat-run:{secrets.token_hex(6)}"
+        run = propose(ctx, actor, work_id, body)
     # Chi scrive in chat ha già deciso: il run parte subito, timbrato.
     from homun.application.agent_runs import approve
     owner = Actor(id=actor.id, workspace_id=ctx.workspace_id,

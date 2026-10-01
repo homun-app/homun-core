@@ -22,11 +22,13 @@ def setup(tmp_path):
 
 def test_bind_and_handles(setup):
     ctx, actor, conv = setup
-    assert chat_agent.handles(ctx, ctx.repository.load(),
-                              _post_body(conv)) is False
+    # col default del workspace (primo agente attivo) la chat è già dell'agente
+    assert chat_agent.handles(ctx, ctx.repository.load(), _post_body(conv)) is True
     chat_agent.bind(ctx, actor, conv, "agent_chat")
     assert chat_agent.handles(ctx, ctx.repository.load(), _post_body(conv)) is True
     assert chat_agent.unbind(ctx, conv) is True
+    with ctx.repository.transaction() as store:
+        store.agents["agent_chat"].status = "retired"
     assert chat_agent.handles(ctx, ctx.repository.load(), _post_body(conv)) is False
 
 
@@ -94,3 +96,26 @@ def test_failed_run_gets_no_silent_answer(setup):
     with ctx.repository.transaction() as store:
         store.commands[outcome["agent_run_id"]].result["status"] = "failed"
     assert chat_agent.deliver_chat_answers(ctx) == 0
+
+
+def test_default_agent_makes_every_chat_an_agent_chat(setup):
+    """Senza binding esplicito, la chat usa il primo agente attivo del workspace."""
+    ctx, actor, conv = setup
+    store = ctx.repository.load()
+    assert chat_agent.default_chat_agent(store) == "agent_chat"
+    assert chat_agent.handles(ctx, store, _post_body(conv)) is True
+    outcome = chat_agent.start_chat_turn(ctx, actor, conv, "ciao")
+    run = ctx.repository.load().commands[outcome["agent_run_id"]].result
+    # al primo messaggio il binding resta impresso
+    assert chat_agent.binding_for(ctx, conv)["agent_id"] == "agent_chat"
+    # run non nativo in unit test: la chat degrada senza ricerca, il resto invariato
+    assert run["status"] in {"queued", "running"}
+
+
+def test_no_agents_falls_back_to_interpretation(setup):
+    """Zero agenti attivi: la chat resta testuale (nessuna regressione)."""
+    ctx, actor, conv = setup
+    with ctx.repository.transaction() as store:
+        store.agents["agent_chat"].status = "retired"
+    assert chat_agent.default_chat_agent(ctx.repository.load()) is None
+    assert chat_agent.handles(ctx, ctx.repository.load(), _post_body(conv)) is False
