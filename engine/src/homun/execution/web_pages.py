@@ -245,7 +245,7 @@ def search_public(query: str) -> dict:
         return {"error_code": "web_query_refused", "message": "The search query is empty or not a single line"}
     try:
         from ddgs import DDGS
-        raw = list(DDGS().text(query.strip(), max_results=5))
+        raw = list(DDGS(timeout=10).text(query.strip(), max_results=5))
         results = [{"url": r.get("href") or r.get("url") or "",
                     "title": r.get("title") or "",
                     "snippet": r.get("body") or r.get("snippet") or ""} for r in raw if (r.get("href") or r.get("url"))]

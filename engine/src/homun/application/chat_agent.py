@@ -163,6 +163,53 @@ def _new_chat_work(ctx, actor: Actor, conversation_id: str, agent_id: str,
     return str(work_id)
 
 
+
+def _bind_history(ctx, store, work_id: str, conversation_id: str, actor) -> None:
+    """La chat è una conversazione: i turni precedenti entrano nel contesto.
+
+    Prendiamo gli ultimi messaggi della conversazione e li appendiamo come
+    messaggi user/assistant nel run, così il modello vede la storia come
+    Hermes (sessione persistente). Limitato per il budget di contesto.
+    """
+    try:
+        messages = sorted(
+            (m for m in store.messages.values()
+             if m.conversation_id == conversation_id
+             and m.author_id in {"person_fabio", "person_local", "homun_engine"}),
+            key=lambda m: m.created_at)
+        # gli ultimi 20 messaggi (≈10 scambi), tranne l'ultimo (è il messaggio corrente)
+        recent = messages[:-1][-20:]
+        if not recent:
+            return
+        record = store.commands.get(
+            next((cid for cid, c in store.commands.items()
+                  if c.type == 'work.create' and c.result.get('work_id') == work_id), ''))
+        if record is None:
+            return
+        run_id = next((cid for cid, c in store.commands.items()
+                        if c.type == 'agent_run.propose' and c.result.get('work_id') == work_id), '')
+        if not run_id:
+            return
+        from homun.models.native_turn import NativeMessage
+        with ctx.repository.locked():
+            with ctx.repository.transaction() as write_store:
+                run = write_store.commands[run_id]
+                history_block = []
+                for m in recent:
+                    role = "assistant" if m.author_id == "homun_engine" else "user"
+                    text = m.text.strip()[:2000]
+                    if text:
+                        history_block.append(NativeMessage(role=role, content=text).model_dump())
+                if history_block:
+                    # inserisci la storia dopo il system prompt, prima dell'objective
+                    msgs = run.result['_messages']
+                    system = msgs[0]
+                    objective = msgs[-1]
+                    run.result['_messages'] = [system] + history_block + [objective]
+            ctx.service.store = write_store
+    except Exception:
+        logger.warning("bind storia conversazione saltato per %s", work_id, exc_info=True)
+
 def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
                     connection_id: str | None = None) -> Dict[str, Any]:
     """Avvia il run della risposta; il testo torna in chat quando completa.
@@ -189,6 +236,8 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
         return {"agent_run_id": active["id"], "steered": True}
 
     work_id = _new_chat_work(ctx, actor, conversation_id, entry["agent_id"], text)
+    # continuità: i turni precedenti della conversazione entrano nel contesto
+    _bind_history(ctx, store, work_id, conversation_id, actor)
     version = ctx.repository.load().works[work_id].version
     body = {
         "command_id": f"chat-run:{secrets.token_hex(6)}",

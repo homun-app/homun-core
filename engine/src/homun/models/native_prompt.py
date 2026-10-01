@@ -24,7 +24,9 @@ def hermes_guidance(model_id: str | None = None) -> str:
     """Il corpus di guidance Hermes portato identico (models/prompt_blocks),
     innestato sulla base Homun di sicurezza e authority."""
     from homun.models.prompt_blocks import system_prompt_for
-    return GUIDANCE + "\n" + system_prompt_for(model_id)
+    from datetime import datetime as _dt
+    _date = "Conversation date: " + _dt.now().strftime("%A %d %B %Y")
+    return GUIDANCE + chr(10) + _date + chr(10) + system_prompt_for(model_id)
 
 
 def initial_messages(
