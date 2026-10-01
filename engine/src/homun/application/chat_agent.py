@@ -267,10 +267,14 @@ def _presentable(text: str, run: Dict[str, Any], user_message: str | None) -> st
             first_break = next((i for i, ch in enumerate(clean) if ch in ".!?"), -1)
         head = clean[:first_break + 1] if first_break >= 0 else clean
         rest = clean[first_break + 1:] if first_break >= 0 else ""
-        if rest.strip() and _re2.search(
-                r"\b(i have|i now|let me|i'll now|i will now|now let me|"
-                r"the user|ho trovato|ora ho|adesso|riassumo)\b",
-                head, _re2.IGNORECASE):
+        meta_first = _re2.search(
+            r"\b(this is|the user|the request|the person|i have|i now|let me|"
+            r"i'll now|i will now|now let me|no tools|i can see|based on|"
+            r"i'll provide|i will provide|i need to|looking at|after reviewing|"
+            r"my final|final answer|here('s| is)|"
+            r"l'utente|la richiesta|ho trovato|ora ho|adesso|riassumo|devo)\b",
+            head, _re2.IGNORECASE)
+        if rest.strip() and meta_first:
             clean = rest.strip()
     return clean or text
 
