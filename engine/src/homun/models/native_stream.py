@@ -80,7 +80,8 @@ class NativeStream:
             self.fail('Invalid native stream fragment')
         if self.on_delta:
             self.on_delta({'type':'native_stream_progress', 'chunks':self.chunks,
-                           'text_chars':len(self.content), 'tool_calls':len(self.calls)})
+                           'text_chars':len(self.content), 'tool_calls':len(self.calls),
+                           'text':self.content})
 
     def capture_usage(self, body):
         raw = body if self.ollama else body.get('usage')

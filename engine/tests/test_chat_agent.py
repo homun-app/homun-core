@@ -62,6 +62,8 @@ def test_chat_run_budget_survives_long_research(setup):
     run = ctx.repository.load().commands[outcome["agent_run_id"]].result
     assert run["limits"]["max_observation_characters"] > 10 * AGENT_RUN.limits["max_observation_characters"]
     assert run["limits"]["max_turns"] == 500
+    # streaming live: il pariale del modello finisce nel record del run
+    assert run.get("native_stream") is True
 
 
 def test_active_chat_run_is_detected_for_steering(setup):

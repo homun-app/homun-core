@@ -16,7 +16,7 @@ import time
 from typing import Any, Dict, Iterator, Optional
 
 from homun.domain.errors import DomainError
-from homun.models.finish_gates import strip_think_blocks
+from homun.models.finish_gates import THINK_BLOCK_RE, strip_think_blocks
 from homun.policy.work import require_conversation_access
 
 POLL_SECONDS = 0.25
@@ -48,16 +48,58 @@ def _assistant_text(run: Dict[str, Any]) -> str:
     return ""
 
 
-def _yield_text_delta(run_id: str, streamed_text: Dict[str, str], text: str):
+def _split_partial(text: str, run: Dict[str, Any]) -> tuple[str, str]:
+    """Il parziale in-flight diviso in (ragionamento, visibile).
+
+    Il tag di chiusura decide: prima di </think> è ragionamento, dopo è
+    risposta. Finché il tag non arriva si usa la storia del run: se questo
+    modello ha già chiuso pensieri con </think>, tutto il parziale è
+    ragionamento (ChatGPT-style: pensa, poi risponde); altrimenti è già
+    risposta che si streamma viva.
+    """
+    head, sep, tail = text.partition("</think>")
+    if sep:
+        reasoning = THINK_BLOCK_RE.sub("", head)
+        return reasoning, tail
+    uses_think = any(
+        isinstance(m, dict) and m.get("role") == "assistant"
+        and "</think>" in str(m.get("content") or "")
+        for m in run.get("_messages") or [])
+    if uses_think:
+        return THINK_BLOCK_RE.sub("", text), ""
+    stripped = text.lstrip()
+    if stripped.startswith("<think>"):
+        return stripped[len("<think>"):], ""
+    return "", text
+
+
+def _yield_stream_state(run_id: str, streamed: Dict[str, tuple], run: Dict[str, Any]):
+    """Stato live del parziale in-flight (stream_partial del record): reasoning
+    e testo completi, il client sostituisce — idempotente, niente delta."""
+    partial = (run.get("stream_partial") or {}).get("text")
+    if not isinstance(partial, str) or not partial:
+        return []
+    reasoning, visible = _split_partial(partial, run)
+    current = (reasoning, visible)
+    if streamed.get(f"state:{run_id}") == current:
+        return []
+    streamed[f"state:{run_id}"] = current
+    return [_sse("stream_state", {"run_id": run_id,
+                                  "reasoning": reasoning[-4000:],
+                                  "text": visible})]
+
+
+def _yield_text_delta(run_id: str, streamed: Dict[str, Any], text: str):
     """Delta d'accrescimento del testo visibile, con reset quando cambia
     il messaggio assistente di coda (turni con tool): il nuovo testo non
     estende il precedente, quindi si rimanda per intero con ``reset``."""
-    previous = streamed_text.get(run_id, "")
+    key = f"text:{run_id}"
+    previous = streamed.get(key, "")
     if text.startswith(previous) and len(text) > len(previous):
-        streamed_text[run_id] = text
+        streamed[key] = text
         return [_sse("text_delta", {"run_id": run_id, "delta": text[len(previous):]})]
     if not text.startswith(previous) and text != previous:
-        streamed_text[run_id] = text
+        streamed[key] = text
         return [_sse("text_delta", {"run_id": run_id, "delta": text, "reset": True})]
     return []
 
@@ -73,7 +115,7 @@ def conversation_events(ctx, actor, conversation_id: str,
     conversation = require_conversation_access(store, actor, conversation_id, "read")
 
     seen_observations: Dict[str, set] = {}
-    streamed_text: Dict[str, str] = {}
+    streamed: Dict[str, Any] = {}
     finished_runs: set = set()
     seen_messages: set = set()
     for message in store.messages.values():
@@ -93,8 +135,8 @@ def conversation_events(ctx, actor, conversation_id: str,
         for run in _chat_runs_for(store, conversation_id):
             run_id = str(run.get("id"))
             seen = seen_observations.setdefault(run_id, set())
-            if run_id not in streamed_text:
-                streamed_text[run_id] = ""
+            if f"text:{run_id}" not in streamed:
+                streamed[f"text:{run_id}"] = ""
                 yield _sse("run_started", {"run_id": run_id,
                                            "status": run.get("status")})
                 last_event_at = now
@@ -111,13 +153,19 @@ def conversation_events(ctx, actor, conversation_id: str,
                     "message": str(observation.get("message") or "")[:400],
                     "result": _bounded(observation.get("result")),
                 })
-            # delta di testo dell'ultimo messaggio assistente
+            # stato live del parziale in-flight: reasoning + testo che si scrivono
             if run.get("status") in {"running", "queued", "waiting_input",
                                      "waiting_external", "waiting_automation"}:
-                deltas = _yield_text_delta(run_id, streamed_text, _assistant_text(run))
+                live = _yield_stream_state(run_id, streamed, run)
+                for chunk in live:
+                    yield chunk
+                if live:
+                    last_event_at = now
+                    events_this_cycle += len(live)
+                deltas = _yield_text_delta(run_id, streamed, _assistant_text(run))
             elif run.get("status") in {"completed", "failed"} and run_id not in finished_runs:
                 finished_runs.add(run_id)
-                deltas = _yield_text_delta(run_id, streamed_text, _assistant_text(run))
+                deltas = _yield_text_delta(run_id, streamed, _assistant_text(run))
                 yield _sse("run_finished", {"run_id": run_id, "status": run.get("status")})
                 last_event_at = now
                 events_this_cycle += 1

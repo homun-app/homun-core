@@ -226,6 +226,9 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
         "command_id": f"chat-run:{secrets.token_hex(6)}",
         "expected_version": version, "material_ids": [],
         "web_pages": True,
+        # streaming live del parziale: la chat mostra ragionamento e testo
+        # mentre il modello lavora (parity Hermes)
+        "native_stream": True,
     }
     if connection_id:
         body["connection_id"] = connection_id

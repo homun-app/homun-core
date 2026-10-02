@@ -146,3 +146,48 @@ def test_text_delta_resets_when_tail_assistant_message_changes(setup):
     # il delta di crescita normale resta quello del primo messaggio
     assert "Sto cercando i listini" in "".join(
         d["delta"] for d in deltas if not d.get("reset"))
+
+
+def test_stream_state_splits_reasoning_from_visible(setup):
+    """Il parziale in-flight si streamma diviso: ragionamento prima di </think>,
+    risposta dopo — chiude la fase di pensiero come ChatGPT."""
+    import json
+    ctx, actor, conv = setup
+    chat_agent.bind(ctx, actor, conv, "agent_chat")
+    run_id = chat_agent.start_chat_turn(ctx, actor, conv, "chi sei")["agent_run_id"]
+
+    def set_partial(text, messages=None):
+        with ctx.repository.transaction() as store:
+            run = store.commands[run_id].result
+            run["stream_partial"] = {"text": text}
+            if messages is not None:
+                run["_messages"] = messages
+
+    def harvest():
+        states = []
+        for chunk in chat_events.conversation_events(ctx, actor, conv, max_idle_cycles=2):
+            for line in chunk.strip().split("\n"):
+                if line.startswith("data: ") and "reasoning" in line:
+                    d = json.loads(line[len("data: "):])
+                    states.append(d)
+        return states
+
+    # fase di pensiero: modello che usa think (storia con </think>)
+    set_partial("L'utente chiede chi sono. Rispondo breve.",
+                messages=[{"role": "assistant", "content": "pensiero </think>risposta"}])
+    states = harvest()
+    assert states, "nessuno stream_state emesso"
+    assert states[-1]["reasoning"].startswith("L'utente chiede")
+    assert states[-1]["text"] == ""
+
+    # arriva la chiusura del pensiero e la risposta inizia
+    set_partial("L'utente chiede chi sono. Rispondo breve.</think>Sono Homun,")
+    states = harvest()
+    assert states[-1]["reasoning"].startswith("L'utente")
+    assert states[-1]["text"] == "Sono Homun,"
+
+    # modello senza think: il parziale è già risposta che si vede viva
+    set_partial("Ecco la risposta diretta.", messages=[])
+    states = harvest()
+    assert states[-1]["reasoning"] == ""
+    assert states[-1]["text"] == "Ecco la risposta diretta."

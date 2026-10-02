@@ -122,8 +122,9 @@ class NativeToolPort(ModelPort, Protocol):
 
     Streaming is opt-in and returns only a fully validated terminal result.
     ``cancel_check`` is polled while connecting/reading; cancellation is typed
-    and never retried. ``on_delta`` receives count-only progress dictionaries:
-    type=native_stream_progress, chunks, text_chars, tool_calls. Callbacks are
+    and never retried. ``on_delta`` receives progress dictionaries:
+    type=native_stream_progress, chunks, text_chars, tool_calls and the
+    accumulated text so far (text) for live streaming surfaces. Callbacks are
     transient and may run on a joined worker when invoked by an async host.
     """
 

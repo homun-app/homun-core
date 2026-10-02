@@ -106,6 +106,10 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
+        # i Chromium moderni mandano Access-Control-Request-Private-Network
+        # sui preflight verso 127.0.0.1: senza questo flag rispondono 400 e
+        # il browser vede "Failed to fetch" su ogni POST con header custom
+        allow_private_network=True,
     )
     if session_token:
         from homun.routes.session_auth import SessionAuthMiddleware
