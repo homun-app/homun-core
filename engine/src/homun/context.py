@@ -32,7 +32,8 @@ class EngineContext:
     session_operations: SessionOperations = field(default_factory=SessionOperations)
 
     def snapshot(self) -> EngineContext:
-        return replace(self, service=self.service.for_store(self.repository.load()))
+        # vista read-only condivisa: le richieste GET non riparsano lo store
+        return replace(self, service=self.service.for_store(self.repository.snapshot()))
 
     def close(self) -> None:
         if self.memory_connection is not None:

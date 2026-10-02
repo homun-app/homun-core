@@ -77,7 +77,7 @@ def sweep(ctx, run_id: str) -> bool:
     in place; they never raise into the delivery loop.
     """
     from homun.application import agent_runs
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     record = store.commands.get(run_id)
     if record is None or record.type != agent_runs.PROPOSAL_TYPE:
         return False

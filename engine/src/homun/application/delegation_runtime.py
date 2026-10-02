@@ -102,13 +102,21 @@ def reconcile_delegations(ctx, *, limit=50):
     """Admit completed child receipts and release unused parent budget once."""
     from homun.application.agent_run_fencing import _fence
     admitted = []
-    for record in ctx.repository.snapshot().commands.values():
-        if len(admitted) >= limit:
-            break
-        if not record.result.get('_delegation_parent'):
-            continue
+    # pre-filtro read-only sulla snapshot: la transazione (parse completo)
+    # si apre solo quando c'è davvero un figlio da ammettere
+    candidates = [
+        record.result for record in ctx.repository.snapshot().commands.values()
+        if record.result.get('_delegation_parent')
+        and record.result.get('status') in TERMINAL
+        and not record.result.get('_delegation_admitted')
+    ][:limit]
+    for child_snapshot in candidates:
         with ctx.repository.locked():
             with ctx.repository.transaction() as store:
+                record = store.commands.get(child_snapshot.get('id'))
+                if record is None:
+                    continue
+                child = record.result
                 child = store.commands[record.command_id].result
                 binding, parent = parent_for(store, child)
                 if not parent:

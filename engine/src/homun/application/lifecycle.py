@@ -109,6 +109,7 @@ async def runtime_lifespan(ctx):
             except TimeoutError:
                 pass
 
+
     async def channel_poller_loop():
         from homun.application.whatsapp_bridge_process import ensure_whatsapp_bridge
         from homun.routes.channel_ingress_api import poll_enabled_channels

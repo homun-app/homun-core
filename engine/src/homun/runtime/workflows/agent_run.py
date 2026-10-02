@@ -56,7 +56,7 @@ def start(workflow_id, run_id, epoch=0):
 
 
 def deliver_agent_runs(ctx):
-    for record in ctx.repository.load().commands.values():
+    for record in ctx.repository.snapshot().commands.values():
         if record.type != PROPOSAL_TYPE:
             continue
         run = record.result
@@ -64,7 +64,7 @@ def deliver_agent_runs(ctx):
             from homun.application.approval_auto import sweep as auto_approve
             try:
                 if auto_approve(ctx, record.command_id):
-                    run = ctx.repository.load().commands[record.command_id].result
+                    run = ctx.repository.snapshot().commands[record.command_id].result
             except Exception:
                 # A policy approval must never block delivery; the human gate stays.
                 logging.getLogger(__name__).warning('Policy auto-approve failed for %s', record.command_id, exc_info=True)
@@ -75,7 +75,7 @@ def deliver_agent_runs(ctx):
             except DomainError as exc:
                 fail(ctx, run['id'], exc.code, blocked=True, epoch=run['_epoch'],
                      expected_steering=run.get('_steering', []))
-            run = ctx.repository.load().commands[run['id']].result
+            run = ctx.repository.snapshot().commands[run['id']].result
         if run['status'] == 'waiting_external':
             from homun.application.agent_external import resume_external
             try:
@@ -94,7 +94,7 @@ def deliver_agent_runs(ctx):
                 logging.getLogger(__name__).warning('Run %s blocked during resume (%s): %s',
                                                     run['id'], exc.code, exc.message, exc_info=True)
                 fail(ctx, run['id'], exc.code, blocked=True)
-            run = ctx.repository.load().commands[run['id']].result
+            run = ctx.repository.snapshot().commands[run['id']].result
         if run['status'] == 'waiting_input':
             try:
                 from homun.application.clarification_deadlines import expire_waiting
@@ -102,7 +102,7 @@ def deliver_agent_runs(ctx):
                 resume_waiting(ctx, run['id'])
             except DomainError as exc:
                 fail(ctx, run['id'], exc.code, blocked=True, epoch=run['_epoch'])
-            run = ctx.repository.load().commands[run['id']].result
+            run = ctx.repository.snapshot().commands[run['id']].result
         if run['status'] == 'completed' and (run.get('skills') or {}).get('policy') == 'workspace-catalog-v1':
             from homun.application.skill_reflection import maybe_reflect
             try:

@@ -80,7 +80,7 @@ def maybe_reflect(ctx, run_id: str) -> bool:
     """Reflect once per completed run; idempotent via the journaled marker."""
     from homun.application.agent_runs import PROPOSAL_TYPE
     from homun.application.price_comparisons import save
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     record = store.commands.get(run_id)
     if record is None or record.type != PROPOSAL_TYPE:
         return False

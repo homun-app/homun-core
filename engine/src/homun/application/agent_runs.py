@@ -502,6 +502,13 @@ def list_runs(ctx, actor, work_id):
 
 
 def resume_waiting(ctx, run_id):
+    # precontrollo read-only: senza risposta matura la transazione non si apre
+    peek = ctx.repository.snapshot().commands.get(run_id)
+    if peek is None or (peek.result or {}).get('status') != 'waiting_input':
+        return False
+    if not any(c.status == 'resolved' for c in ctx.repository.snapshot().contributions.values()
+               if c.id == (peek.result or {}).get('request_id')):
+        return False
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             run = lookup(store, run_id)

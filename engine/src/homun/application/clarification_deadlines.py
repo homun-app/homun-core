@@ -24,6 +24,14 @@ def bind(run, call):
 def expire_waiting(ctx, run_id, *, now=None):
     """Serialize with human answers; only an explicitly timed clarify expires."""
     now = utc_now() if now is None else now
+    # precontrollo read-only: senza scadenza matura la transazione non si apre
+    peek = ctx.repository.snapshot().commands.get(run_id)
+    if peek is None:
+        return False
+    _deadline = (peek.result or {}).get('clarify_deadline_at')
+    if (peek.result or {}).get('status') != 'waiting_input' or not _deadline \
+            or datetime.fromisoformat(_deadline) > now:
+        return False
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             run = lookup(store, run_id)
