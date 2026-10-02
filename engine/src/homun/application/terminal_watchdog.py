@@ -21,7 +21,7 @@ def _due(proposal,now):
 
 def reconcile(ctx,*,now=None,limit=4):
     now=now or utc_now()
-    candidates=[r.result for r in ctx.repository.load().commands.values()
+    candidates=[r.result for r in ctx.repository.snapshot().commands.values()
                 if r.type==terminal_jobs.TYPE and _due(r.result,now)]
     candidates.sort(key=lambda p:(p.get('_watchdog_checked_at',''),p['id']))
     for candidate in candidates[:limit]:

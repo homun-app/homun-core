@@ -61,6 +61,8 @@ class SqliteWorkspaceRepository:
         self.workspace_id = workspace_id
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
+        self._cache: WorkspaceStore | None = None
+        self._cache_generation = -1
         self._conn = _open_connection(path, encryption_key)
         try:
             initialize(self._conn, workspace_id)
@@ -81,6 +83,8 @@ class SqliteWorkspaceRepository:
                 self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             except Exception:
                 pass
+            self._cache = None
+            self._cache_generation = -1
             self._conn.close()
 
     def connection(self) -> sqlite3.Connection:
@@ -132,6 +136,26 @@ class SqliteWorkspaceRepository:
         store.commands = {key: CommandRecord.model_validate_json(payload) for key, payload in
                           self._conn.execute("SELECT command_id, payload FROM commands")}
         return store
+
+    def generation(self) -> int:
+        """Cursore di versione: una lettura sola, economica."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM meta WHERE key='generation'").fetchone()
+            return int(row[0]) if row else -1
+
+    def snapshot(self) -> WorkspaceStore:
+        """Vista read-only condivisa, stile Hermes (sessione residente):
+        il parsing avviene solo quando la generation cambia; le scritture
+        (load+transaction) restano isolate e invalidano qui il cursore.
+        I chiamanti NON devono mutare lo store restituito."""
+        with self._lock:
+            if self._cache is not None and self.generation() == self._cache_generation:
+                return self._cache
+            store = self._load()
+            self._cache = store
+            self._cache_generation = store._generation
+            return store
 
     def save(self, store: WorkspaceStore) -> None:
         with self._atomic(write=True):

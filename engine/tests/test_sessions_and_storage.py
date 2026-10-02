@@ -342,3 +342,27 @@ def test_session_manage_tool_execution(temp_storage):
     # Policy disabled error
     with pytest.raises(ValidationError, match="Session management tools are not enabled"):
         session_execute(ctx, actor, {}, "session_manage", {"action": "list"})
+
+
+def test_snapshot_is_cached_until_generation_changes(tmp_path):
+    """Parity Hermes (sessione residente): la vista read-only non riparsa
+    finché la generation non cambia; load() resta isolato per le scritture."""
+    from homun.context import create_context
+    from homun.domain.models import Actor, CommandRecord
+    ctx = create_context(db_path=tmp_path / "snap.db", data_dir=tmp_path, for_tests=True)
+    repo = ctx.repository
+    a = repo.snapshot()
+    b = repo.snapshot()
+    assert a is b  # stessa istanza: cursore generation invariato
+    c = repo.load()
+    assert c is not a  # load() resta una copia isolata
+    # una scrittura avanza la generation e invalida la snapshot
+    actor = Actor(id="person_a", workspace_id=ctx.workspace_id, display_name="A")
+    with repo.transaction() as store:
+        store.commands["cmd-snap"] = CommandRecord(
+            command_id="cmd-snap", type="conversation.create", actor_id=actor.id,
+            workspace_id=ctx.workspace_id, result={"ok": True})
+    d = repo.snapshot()
+    assert d is not a
+    assert "cmd-snap" in d.commands
+    ctx.close()

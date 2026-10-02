@@ -50,7 +50,7 @@ def binding_for(ctx, conversation_id: str) -> Optional[Dict[str, Any]]:
 
 
 def bind(ctx, actor: Actor, conversation_id: str, agent_id: str) -> Dict[str, Any]:
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     if conversation_id not in store.conversations:
         raise NotFoundError(f"Conversation not found: {conversation_id}")
     agent = store.agents.get(agent_id)
@@ -105,7 +105,7 @@ def default_chat_agent(store) -> Optional[str]:
 
 def ensure_chat_persona(ctx, actor: Actor) -> Optional[str]:
     """Crea una volta la persona della chat ('Homun'), se non esiste."""
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     existing = default_chat_agent(store)
     if existing and next(a for a in store.agents.values() if a.id == existing).name == CHAT_PERSONA_NAME:
         return existing
@@ -204,7 +204,7 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
     """
     from homun.application.agent_runs import propose
     entry = binding_for(ctx, conversation_id)
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     if entry is None:
         agent_id = default_chat_agent(store)
         if agent_id is None:
@@ -221,7 +221,7 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
         return {"agent_run_id": active["id"], "steered": True}
 
     work_id = _new_chat_work(ctx, actor, conversation_id, entry["agent_id"], text)
-    version = ctx.repository.load().works[work_id].version
+    version = ctx.repository.snapshot().works[work_id].version
     body = {
         "command_id": f"chat-run:{secrets.token_hex(6)}",
         "expected_version": version, "material_ids": [],
@@ -249,7 +249,7 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
                 conversation_id, entry.get("agent_id"), run.get("id"),
                 run.get("connection_id"), connection_id or "(default agente)")
     # continuità: i turni precedenti entrano nel contesto del run appena creato
-    _bind_history(ctx, ctx.repository.load(), run["id"], conversation_id)
+    _bind_history(ctx, ctx.repository.snapshot(), run["id"], conversation_id)
     # Chi scrive in chat ha già deciso: il run parte subito, timbrato.
     from homun.application.agent_runs import approve
     owner = Actor(id=actor.id, workspace_id=ctx.workspace_id,
@@ -326,7 +326,7 @@ def deliver_chat_answers(ctx) -> int:
     """Pump: le risposte dei run chat completati tornano in conversazione."""
     from homun.application.agent_runs import PROPOSAL_TYPE
     delivered = 0
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     for record in store.commands.values():
         if record.type != PROPOSAL_TYPE or not isinstance(record.result, dict):
             continue

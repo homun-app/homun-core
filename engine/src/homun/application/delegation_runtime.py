@@ -49,7 +49,7 @@ def _view(child):
 
 def inspect_child(ctx, actor, run, delegation_id):
     with ctx.repository.locked():
-        store = ctx.repository.load()
+        store = ctx.repository.snapshot()
         parent = admitted_parent(ctx, store, actor, run)
         handle = parent.get('_delegations', {}).get(delegation_id)
         if not handle:
@@ -83,7 +83,7 @@ def merge_snapshot(current, snapshot):
 def has_pending(ctx, run):
     if run.get('_delegation_parent'):
         return False
-    snapshot = ctx.repository.load()
+    snapshot = ctx.repository.snapshot()
     return any(r.result.get('_delegation_parent', {}).get('run_id') == run['id']
                and (r.result['status'] not in TERMINAL or not r.result.get('_delegation_admitted'))
                for r in snapshot.commands.values())
@@ -92,7 +92,7 @@ def has_pending(ctx, run):
 
 def live_count(ctx, run, snapshot=None):
     """Read authoritative child commands, including parked/retrying children."""
-    snapshot = ctx.repository.load() if snapshot is None else snapshot
+    snapshot = ctx.repository.snapshot() if snapshot is None else snapshot
     return sum(record.result.get('_delegation_parent', {}).get('run_id') == run['id']
                and record.result['status'] not in TERMINAL
                for record in snapshot.commands.values())
@@ -102,7 +102,7 @@ def reconcile_delegations(ctx, *, limit=50):
     """Admit completed child receipts and release unused parent budget once."""
     from homun.application.agent_run_fencing import _fence
     admitted = []
-    for record in ctx.repository.load().commands.values():
+    for record in ctx.repository.snapshot().commands.values():
         if len(admitted) >= limit:
             break
         if not record.result.get('_delegation_parent'):

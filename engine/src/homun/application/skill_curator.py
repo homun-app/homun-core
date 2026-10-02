@@ -57,7 +57,7 @@ def curate(ctx, *, now: float) -> Dict[str, Any]:
     from homun.domain.models import Actor, utc_now
     actor = Actor(id="person_local", workspace_id=ctx.workspace_id, display_name="Skill curator")
     archived_staged, archived_unused, skipped = [], [], []
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     candidates = sorted(
         (s for s in store.skills.values() if s.author_type == "agent" and s.status in ("staged", "approved")),
         key=lambda s: s.name,

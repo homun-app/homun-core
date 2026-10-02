@@ -185,7 +185,7 @@ def notify_pending(ctx) -> int:
     """Pump pass: notify every pending gate owned by a bound person. Idempotent."""
     from homun.application.channel_delivery_recovery import send_with_media_dispatch
 
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     notified = 0
     with _lock:
         state = _load(ctx)
@@ -252,7 +252,7 @@ def _approve_gate(ctx, entry: Dict[str, Any], channel: str) -> str:
     from homun.application.approval_auto import owner_actor
     from homun.domain.models import Actor
 
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     work = store.works.get(entry["work_id"])
     if work is None:
         return "❌ Lavoro non trovato."
@@ -301,7 +301,7 @@ def _reject_gate(ctx, entry: Dict[str, Any], channel: str = "relay") -> str:
     from homun.application import terminal_jobs
     from homun.domain.models import Actor
 
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     work = store.works.get(entry["work_id"])
     record = store.commands.get(entry["gate_id"])
     gate = getattr(record, "result", None) if record else None

@@ -116,7 +116,7 @@ def complete(ctx: EngineContext, delivery: Delivery) -> dict:
     if (delivery.token is not None and delivery.body.type == "conversation.post_message"
             and getattr(delivery.actor, "kind", "person") == "person"):
         from homun.application import chat_agent
-        store_now = ctx.repository.load()
+        store_now = ctx.repository.snapshot()
         if chat_agent.handles(ctx, store_now, delivery.body):
             from homun.domain.errors import DomainError as _DE
             try:
@@ -155,7 +155,7 @@ def complete(ctx: EngineContext, delivery: Delivery) -> dict:
         # Admission snapshots are not authority after time spent in a queue.
         # Read fresh grants without holding the repository lock across a model call.
         with ctx.repository.locked():
-            current = ctx.repository.load()
+            current = ctx.repository.snapshot()
             require_followup_authority(current, delivery.actor, delivery.body)
             model_context = replace(ctx, service=ctx.service.for_store(current))
         prepared, display = prepare_interpretation(

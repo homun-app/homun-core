@@ -129,7 +129,8 @@ def conversation_events(ctx, actor, conversation_id: str,
 
     idle_cycles = 0
     while True:
-        store = ctx.repository.load()
+        # scansione read-only: snapshot condiviso, reparsa solo a generation nuova
+        store = ctx.repository.snapshot()
         now = time.monotonic()
         events_this_cycle = 0
         for run in _chat_runs_for(store, conversation_id):

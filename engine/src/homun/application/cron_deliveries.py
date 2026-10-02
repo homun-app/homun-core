@@ -69,7 +69,7 @@ def _deliver_to_conversation(ctx, payload: Dict[str, Any], output: str) -> Dict[
     from homun.domain.commands.conversations import append_engine_message
     from homun.domain.models import Actor
     from homun.application.cron_manager import CronManager
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     manager = CronManager(workspace_id=ctx.workspace_id)
     job = manager.get_job(str(payload.get("job_id") or ""))
     source_work = getattr(job, "source_work_id", None) if job is not None else None

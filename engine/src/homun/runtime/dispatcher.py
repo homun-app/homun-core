@@ -21,7 +21,7 @@ def deliver_pending(ctx, command_id: str | None = None, wait_seconds: float = 0)
     """
     from homun.application.terminal_watchdog import reconcile as reconcile_terminal_deadlines
     reconcile_terminal_deadlines(ctx)
-    snapshot = ctx.repository.load()
+    snapshot = ctx.repository.snapshot()
     intents = sorted((i for i in snapshot.outbox.values() if not i.delivered and not i.cancelled),
                      key=lambda i: i.sequence)
     for candidate in intents:
@@ -57,7 +57,7 @@ def deliver_pending(ctx, command_id: str | None = None, wait_seconds: float = 0)
         deliver_chains(ctx)
         deliver_agent_runs(ctx)
         reconcile_runs(ctx, command_id=command_id, wait_seconds=wait_seconds)
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     if command_id is None:
         return None
     record = store.commands.get(command_id)
@@ -70,7 +70,7 @@ def deliver_pending(ctx, command_id: str | None = None, wait_seconds: float = 0)
 
 
 def reconcile_runs(ctx, *, command_id=None, wait_seconds=0):
-    snapshot = ctx.repository.load()
+    snapshot = ctx.repository.snapshot()
     for run in snapshot.runs.values():
         if run.status in {'completed', 'failed', 'cancelled'}:
             continue

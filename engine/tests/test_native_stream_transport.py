@@ -75,7 +75,7 @@ def test_openai_fragmented_tools_usage_and_registry(tmp_path, monkeypatch):
     assert (result.usage.input_tokens,result.usage.output_tokens) == (12,7)
     assert requests[0]['stream'] is True and requests[0]['stream_options']['include_usage'] is True
     assert events and events[-1]['tool_calls'] == 1
-    assert set(events[-1]) == {'type','chunks','text_chars','tool_calls'}
+    assert set(events[-1]) == {'type','chunks','text_chars','tool_calls','text'}
     assert registry.usage[-1].id == result.usage.id
 
 
