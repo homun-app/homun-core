@@ -38,7 +38,12 @@ export function AgentChat({
     convertMessage: (msg) => ({
       id: msg.id,
       role: msg.role,
-      content: [{ type: "text" as const, text: msg.content }],
+      content: [
+        ...(msg.reasoning
+          ? [{ type: "reasoning" as const, text: msg.reasoning }]
+          : []),
+        { type: "text" as const, text: msg.content },
+      ],
     }),
     adapters: {},
   });
@@ -135,11 +140,28 @@ function AssistantMessage() {
         </MessagePrimitive.If>
         <MessagePrimitive.If hasContent>
           <MessagePrimitive.Content
-            components={{ Text: MarkdownText as never }}
+            components={{ Text: MarkdownText as never, Reasoning: ReasoningBlock as never }}
           />
         </MessagePrimitive.If>
       </div>
     </MessagePrimitive.Root>
+  );
+}
+
+function ReasoningBlock({ text, state }: { text?: string; state?: { status?: string } }) {
+  const running = state?.status === "running";
+  return (
+    <details className="group mb-1 rounded-lg border border-[#e4ebe4] bg-[#fafcfa] px-3 py-1.5">
+      <summary className="cursor-pointer list-none text-[10px] font-medium tracking-wide text-[#8ba39a] uppercase select-none">
+        <span className="inline-flex items-center gap-1.5">
+          {running && <i className="h-1 w-1 animate-pulse rounded-full bg-[#8ba39a]" />}
+          {running ? "Sta ragionando" : "Ragionamento"}
+        </span>
+      </summary>
+      <p className="mt-1.5 max-h-56 overflow-y-auto text-xs whitespace-pre-wrap text-[#6d7f74] italic">
+        {text}
+      </p>
+    </details>
   );
 }
 

@@ -7,6 +7,7 @@ import { X } from "lucide-react";
 
 import { useConversationEventStream } from "@/hooks/useConversationEventStream";
 import type { AutonomyLevel } from "../conversation-preferences";
+import { ConversationBrowserPip } from "../ConversationBrowserPip";
 import type { ConversationScenario } from "../conversation-scenarios";
 import type { SpaceData } from "../ConversationSpace";
 import { ConversationWorkspaceWelcome } from "../ConversationWorkspaceWelcome";
@@ -63,7 +64,7 @@ export function EngineAgentChat({
   const { messages, isRunning, historyLoading: streamLoading, toolEvents, noteUserSent } =
     useChatStream(conversationId);
   // i dati del motore (lavori, pannelli) si rinfrescano quando la chat scrive
-  useConversationEventStream(conversationId ?? null, {
+  const agentStream = useConversationEventStream(conversationId ?? null, {
     ...(onRefreshEngine ? { onNewMessage: () => void onRefreshEngine() } : {}),
   });
 
@@ -80,12 +81,18 @@ export function EngineAgentChat({
       <section className="cw-conversation">
         <div className="cw-history">
           {showThread ? (
-            <AgentChat
-              messages={messages}
-              isRunning={isRunning || engineBusy}
-              toolEvents={toolEvents}
-              onCancel={onCancelInFlight}
-            />
+            <>
+              <ConversationBrowserPip
+                conversationId={conversationId}
+                runActive={agentStream.runActive}
+              />
+              <AgentChat
+                messages={messages}
+                isRunning={isRunning || engineBusy}
+                toolEvents={toolEvents}
+                onCancel={onCancelInFlight}
+              />
+            </>
           ) : (
             <ConversationWorkspaceWelcome
               assignee={assignee}

@@ -12,6 +12,7 @@ export type ChatStreamMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  reasoning?: string;
 };
 
 /** Attività tool del run attivo, mostrata come avanzamento live. */
@@ -41,7 +42,7 @@ const ACTIVE_RUN_STATUSES = new Set([
 export function useChatStream(conversationId: string | undefined) {
   const [serverMessages, setServerMessages] = useState<ChatStreamMessage[]>([]);
   const [pending, setPending] = useState<{ id: string; text: string }[]>([]);
-  const [stream, setStream] = useState<{ runId: string; text: string } | null>(null);
+  const [stream, setStream] = useState<{ runId: string; text: string; reasoning?: string } | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [toolEvents, setToolEvents] = useState<ChatToolEvent[]>([]);
@@ -158,6 +159,19 @@ export function useChatStream(conversationId: string | undefined) {
       seenToolsRef.current.add(id);
       setToolEvents((current) => [...current, { id, tool, message }]);
     });
+    es.addEventListener("stream_state", (event) => {
+      const data = JSON.parse((event as MessageEvent<string>).data) as {
+        run_id: string;
+        reasoning: string;
+        text: string;
+      };
+      if (!activeRunsRef.current.has(data.run_id)) return;
+      setStream((current) =>
+        current && current.runId === data.run_id
+          ? { ...current, text: data.text, reasoning: data.reasoning }
+          : { runId: data.run_id, text: data.text, reasoning: data.reasoning },
+      );
+    });
     es.addEventListener("text_delta", (event) => {
       const data = JSON.parse((event as MessageEvent<string>).data) as {
         run_id: string;
@@ -201,11 +215,23 @@ export function useChatStream(conversationId: string | undefined) {
       ...serverMessages,
       ...pending.map((p) => ({ id: p.id, role: "user" as const, content: p.text })),
       ...(stream
-        ? [{ id: `stream:${stream.runId}`, role: "assistant" as const, content: stream.text }]
+        ? [{
+            id: `stream:${stream.runId}`,
+            role: "assistant" as const,
+            content: stream.text,
+            ...(stream.reasoning ? { reasoning: stream.reasoning } : {}),
+          }]
         : []),
     ],
     [serverMessages, pending, stream],
   );
 
-  return { messages, isRunning, historyLoading, toolEvents, noteUserSent };
+  return {
+    messages,
+    isRunning,
+    historyLoading,
+    toolEvents,
+    reasoning: stream?.reasoning ?? "",
+    noteUserSent,
+  };
 }
