@@ -13,7 +13,6 @@ import { ConversationWorkspaceWelcome } from "../ConversationWorkspaceWelcome";
 import { StudioChatInput, type ChatReference } from "../StudioChatInput";
 
 import { AgentChat } from "./AgentChat";
-import { chatToolLabel } from "./chatToolLabels";
 import { useChatStream } from "./useChatStream";
 
 type Props = {
@@ -81,7 +80,12 @@ export function EngineAgentChat({
       <section className="cw-conversation">
         <div className="cw-history">
           {showThread ? (
-            <AgentChat messages={messages} isRunning={isRunning} />
+            <AgentChat
+              messages={messages}
+              isRunning={isRunning || engineBusy}
+              toolEvents={toolEvents}
+              onCancel={onCancelInFlight}
+            />
           ) : (
             <ConversationWorkspaceWelcome
               assignee={assignee}
@@ -116,49 +120,6 @@ export function EngineAgentChat({
             <p className="cw-hint" role="status">
               Caricamento conversazione…
             </p>
-          )}
-          {(engineBusy || isRunning) && (
-            <div
-              className="rounded-lg border border-[#dce4d5] bg-[#f6f8f3] px-3 py-2 text-xs text-[#263832]"
-              role="status"
-              aria-live="polite"
-            >
-              {toolEvents.length === 0 ? (
-                <p className="flex items-center gap-2 py-0.5">
-                  <i className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#5c8a75]" />
-                  Homun sta riflettendo sul tuo messaggio…
-                </p>
-              ) : (
-                <>
-                  {toolEvents.slice(-3).map((event) => (
-                    <p key={event.id} className="flex items-center gap-2 py-0.5 text-[#5a6b60]">
-                      <span aria-hidden>✓</span>
-                      <span className="font-medium text-[#263832]">{chatToolLabel(event.tool)}</span>
-                      {event.message ? (
-                        <span className="min-w-0 truncate">· {event.message.slice(0, 90)}</span>
-                      ) : null}
-                    </p>
-                  ))}
-                  {toolEvents.length > 3 && (
-                    <p className="py-0.5 text-[11px] text-[#9db3ad]">
-                      +{toolEvents.length - 3} strumenti precedenti
-                    </p>
-                  )}
-                  <p className="flex items-center gap-2 py-0.5">
-                    <i className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#5c8a75]" />
-                    Homun sta lavorando…
-                    {onCancelInFlight && (
-                      <>
-                        {" "}
-                        <button type="button" className="cs-link" onClick={onCancelInFlight}>
-                          Annulla
-                        </button>
-                      </>
-                    )}
-                  </p>
-                </>
-              )}
-            </div>
           )}
           {notice && (
             <p className="cw-notice" role="status">

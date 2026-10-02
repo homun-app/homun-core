@@ -1,8 +1,9 @@
-/** Thread della chat su assistant-ui primitives — solo i messaggi.
+/** Thread della chat su assistant-ui primitives — messaggi e avanzamento.
 
     Il composer è `StudioChatInput` (selettore modello, autonomia, menzioni):
     la stessa esperienza della chat precedente. Qui si renderizza lo storico
-    con markdown, bolle e indicatore di digitazione. */
+    con markdown, bolle, indicatore di digitazione e — come in Hermes —
+    l'avanzamento tool DENTRO la finestra di chat, non sotto il prompt. */
 import {
   AssistantRuntimeProvider,
   MessagePrimitive,
@@ -12,16 +13,21 @@ import {
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
 
-import type { ChatStreamMessage } from "./useChatStream";
+import { chatToolLabel } from "./chatToolLabels";
+import type { ChatStreamMessage, ChatToolEvent } from "./useChatStream";
 
 const REMARK_PLUGINS = [remarkGfm];
 
 export function AgentChat({
   messages,
   isRunning,
+  toolEvents,
+  onCancel,
 }: {
   messages: ChatStreamMessage[];
   isRunning: boolean;
+  toolEvents: ChatToolEvent[];
+  onCancel: (() => void) | undefined;
 }) {
   const runtime = useExternalStoreRuntime<ChatStreamMessage>({
     isRunning,
@@ -44,9 +50,60 @@ export function AgentChat({
           <ThreadPrimitive.Messages
             components={{ UserMessage, AssistantMessage }}
           />
+          {(isRunning || toolEvents.length > 0) && (
+            <ToolProgress events={toolEvents} isRunning={isRunning} onCancel={onCancel} />
+          )}
         </ThreadPrimitive.Viewport>
       </ThreadPrimitive.Root>
     </AssistantRuntimeProvider>
+  );
+}
+
+/** Avanzamento del run dentro il thread, come i tool chip di Hermes/ChatGPT. */
+function ToolProgress({
+  events,
+  isRunning,
+  onCancel,
+}: {
+  events: ChatToolEvent[];
+  isRunning: boolean;
+  onCancel: (() => void) | undefined;
+}) {
+  const visible = events.slice(-3);
+  return (
+    <div className="mb-6" role="status" aria-live="polite">
+      {events.length === 0 && (
+        <p className="flex items-center gap-2 py-1 text-xs text-[#9db3ad]">
+          <i className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#9db3ad]" />
+          Homun sta riflettendo sul tuo messaggio…
+        </p>
+      )}
+      {visible.map((event) => (
+        <p key={event.id} className="flex items-center gap-2 py-0.5 text-xs text-[#5a6b60]">
+          <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#e8f0ea] text-[9px] text-[#235940]">
+            ✓
+          </span>
+          <span className="font-medium text-[#263832]">{chatToolLabel(event.tool)}</span>
+          {event.message ? <span className="min-w-0 truncate">{event.message.slice(0, 90)}</span> : null}
+        </p>
+      ))}
+      {events.length > 3 && (
+        <p className="py-0.5 pl-6 text-[11px] text-[#9db3ad]">
+          +{events.length - 3} strumenti precedenti
+        </p>
+      )}
+      {isRunning && (
+        <p className="mt-1 flex items-center gap-2 text-xs text-[#263832]">
+          <i className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#5c8a75]" />
+          Homun sta lavorando…
+          {onCancel && (
+            <button type="button" className="cs-link ml-1" onClick={onCancel}>
+              Annulla
+            </button>
+          )}
+        </p>
+      )}
+    </div>
   );
 }
 
