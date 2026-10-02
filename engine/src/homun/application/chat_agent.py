@@ -230,10 +230,10 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
     if connection_id:
         body["connection_id"] = connection_id
     # la chat è conversazione, non consegna singola. Parity Hermes:
-    # max_iterations illimitato di default (sys.maxsize) — il modello decide
-    # quando ha finito, il run muore per runaway, mai per ricerca lunga.
-    # 200 turni = guardia contro il loop rotto, non contro il lavoro.
-    body["limits"] = {**dict(LIMITS), "max_turns": 200, "max_model_attempts": 240,
+    # max_iterations 500 di default per il parent, e al limite il run chiede
+    # un riassunto (handle_max_iterations) invece di fallire — la guardia
+    # anti-loop vera sono gli stall-guard dei finish gates.
+    body["limits"] = {**dict(LIMITS), "max_turns": 500, "max_model_attempts": 600,
                       "max_observation_characters": 1_000_000}
     try:
         run = propose(ctx, actor, work_id, body)

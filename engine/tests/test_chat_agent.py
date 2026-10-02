@@ -61,7 +61,7 @@ def test_chat_run_budget_survives_long_research(setup):
     outcome = chat_agent.start_chat_turn(ctx, actor, conv, "cerca e confronta")
     run = ctx.repository.load().commands[outcome["agent_run_id"]].result
     assert run["limits"]["max_observation_characters"] > 10 * AGENT_RUN.limits["max_observation_characters"]
-    assert run["limits"]["max_turns"] == 200
+    assert run["limits"]["max_turns"] == 500
 
 
 def test_active_chat_run_is_detected_for_steering(setup):
@@ -142,3 +142,34 @@ def test_no_agents_falls_back_to_interpretation(setup):
         store.agents["agent_chat"].status = "retired"
     assert chat_agent.default_chat_agent(ctx.repository.load()) is None
     assert chat_agent.handles(ctx, ctx.repository.load(), _post_body(conv)) is False
+
+
+def test_chat_run_at_turn_limit_requests_summary_not_failure(setup):
+    """Parity Hermes (handle_max_iterations): al limite di turni il run chat
+    appende la richiesta di riassunto e prosegue senza tool; solo se ci
+    ricasca (loop vero) muore con errore."""
+    from homun.application import agent_run_execution
+    ctx, actor, conv = setup
+    chat_agent.bind(ctx, actor, conv, "agent_chat")
+    outcome = chat_agent.start_chat_turn(ctx, actor, conv, "ricerca lunga")
+    run_id = outcome["agent_run_id"]
+    with ctx.repository.transaction() as store:
+        run = store.commands[run_id].result
+        run["turns"] = run["limits"]["max_turns"]
+
+    status, claimed = agent_run_execution._claim(ctx, run_id)
+    assert status == "running"
+    assert claimed["_summarize_due"] is True
+    messages = claimed["_messages"]
+    assert "maximum number of tool-calling iterations" in messages[-1]["content"]
+    # persistito
+    stored = ctx.repository.load().commands[run_id].result
+    assert stored["_summarize_due"] is True
+
+    # secondo giro al limite con il riassunto già richiesto: argine estremo
+    with ctx.repository.transaction() as store:
+        run = store.commands[run_id].result
+        run["turns"] = run["limits"]["max_turns"]
+        run["_lease_until"] = "2000-01-01T00:00:00+00:00"  # lease scaduta
+    with pytest.raises(Exception):
+        agent_run_execution._claim(ctx, run_id)

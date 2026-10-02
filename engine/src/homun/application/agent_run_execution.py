@@ -31,6 +31,14 @@ from homun.application.agent_run_fencing import LEASE_SECONDS
 
 logger = logging.getLogger(__name__)
 
+# Parity Hermes (context_compressor.MAX_ITERATIONS_SUMMARY_REQUEST): al limite
+# di iterazioni il run chiede un riassunto con una chiamata senza tool e
+# completa con quello — la persona riceve sempre una risposta, mai un errore.
+CHAT_SUMMARY_REQUEST = (
+    "You've reached the maximum number of tool-calling iterations allowed. Please provide a final response "
+    "summarizing what you've found and accomplished so far, without calling any more tools."
+)
+
 
 class _ModelFailure(Exception):
     """A native model call failed after its honest budget charge."""
@@ -61,7 +69,14 @@ def _claim(ctx, run_id, epoch=None):
             actor = Actor.model_validate(run['_actor'])
             authority(ctx, store, actor, run, running=True)
             if run['turns'] >= run['limits']['max_turns']:
-                raise ValidationError('Adaptive run reached its turn limit')
+                # Parity Hermes (handle_max_iterations): il run chat al limite
+                # chiede il riassunto e completa; solo se ci ricasca muore.
+                if run.get('_chat_conversation_id') and not run.get('_summarize_due'):
+                    run['_summarize_due'] = True
+                    run.setdefault('_messages', []).append(
+                        {"role": "user", "content": CHAT_SUMMARY_REQUEST})
+                else:
+                    raise ValidationError('Adaptive run reached its turn limit')
             if len(json.dumps(run['observations'])) > run['limits']['max_observation_characters']:
                 raise ValidationError('Adaptive run reached its observation limit')
             if agent_native.enabled(run):
@@ -98,7 +113,8 @@ def _decision(ctx, run):
         return agent_native.decision_model(run).model_validate(run['_decision'])
     actor = Actor.model_validate(run['_actor'])
     from homun.application.agent_tool_bridge import visible_definitions
-    tools = visible_definitions(run, registry_for(run))
+    # riassunto di fine budget: chiamata senza tool, il modello può solo rispondere
+    tools = [] if run.get('_summarize_due') else visible_definitions(run, registry_for(run))
     messages = prepare_context(ctx,run,tools) if agent_native.enabled(run) else None
     moa_enabled = agent_native.enabled(run) and run.get('moa', {}).get('policy') == 'mixture-of-agents-v1'
     reservation = None
