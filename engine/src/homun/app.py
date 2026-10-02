@@ -33,9 +33,25 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     owns_context = context_mod._CONTEXT is None
     root = default_data_dir() if owns_context else context_mod._CONTEXT.data_dir
     with engine_lease(root):
+        backup_task = None
         try:
             if owns_context:
-                reset_context_for_tests(create_context())
+                # un workspace corrotto non ferma il motore: quarantena,
+                # ricostruzione del salvabile e rapporto persistente
+                from homun.context import create_context_with_recovery
+                from homun.storage.recovery import db_state
+                reset_context_for_tests(create_context_with_recovery())
+                recovery = db_state(root)
+                if recovery["state"] != "ok":
+                    import logging as _logging
+                    _logging.getLogger(__name__).error(
+                        "Avvio in recovery mode=%s — diagnosi in chat", recovery["state"])
+                    try:
+                        from homun.application.recovery_narrator import seed_recovery_conversation
+                        seed_recovery_conversation(get_context(), recovery["report"])
+                    except Exception:
+                        _logging.getLogger(__name__).exception(
+                            "Diagnosi del recovery non scritta in chat")
             ctx = get_context()
             recover_materials(ctx)
             try:
@@ -79,8 +95,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             except Exception:
                 pass
             async with runtime_lifespan(ctx):
-                yield
+                # prevenzione dati: backup consistente giornaliero con retention
+                from homun.application.backup_schedule import start_backup_scheduler
+                backup_task = start_backup_scheduler(ctx)
+                try:
+                    yield
+                finally:
+                    backup_task.cancel()
         finally:
+            if backup_task is not None:
+                backup_task.cancel()
             try:
                 from homun.application.mcp_client import set_elicitation_callback
                 set_elicitation_callback(None)

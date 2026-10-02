@@ -18,15 +18,27 @@ class HealthResponse(TypedDict):
     status: Literal["ok"]
     version: str
     uptime_seconds: float
+    db: dict[str, Any]
 
 
 @router.get("/health")
 def health() -> HealthResponse:
+    from homun.storage.recovery import db_state
+    ctx = get_context()
     return {
         "status": "ok",
         "version": __version__,
         "uptime_seconds": get_uptime_seconds(),
+        "db": db_state(ctx.repository.path.parent),
     }
+
+
+@router.get("/diagnostics/db")
+def diagnostics_db() -> dict[str, Any]:
+    """Rapporto di recovery persistente: modalità, tabelle, problemi, quarantena."""
+    from homun.storage.recovery import db_state
+    ctx = get_context()
+    return db_state(ctx.repository.path.parent)
 
 
 @router.get("/capabilities")
