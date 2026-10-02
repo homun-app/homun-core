@@ -65,13 +65,22 @@ class SqliteWorkspaceRepository:
         try:
             initialize(self._conn, workspace_id)
             self._conn.execute("PRAGMA journal_mode=WAL")
+            # FULL: ogni commit fsynca il WAL. Il default NORMAL di WAL può
+            # lasciare pagine a metà su kill crudali: il costo è irrilevante
+            # per il traffico di un workspace locale.
+            self._conn.execute("PRAGMA synchronous=FULL")
             self._conn.execute("PRAGMA foreign_keys=ON")
+            self._conn.execute("PRAGMA busy_timeout=5000")
         except BaseException:
             self._conn.close()
             raise
 
     def close(self) -> None:
         with self._lock:
+            try:
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
             self._conn.close()
 
     def connection(self) -> sqlite3.Connection:

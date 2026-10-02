@@ -61,7 +61,7 @@ def test_chat_run_budget_survives_long_research(setup):
     outcome = chat_agent.start_chat_turn(ctx, actor, conv, "cerca e confronta")
     run = ctx.repository.load().commands[outcome["agent_run_id"]].result
     assert run["limits"]["max_observation_characters"] > 10 * AGENT_RUN.limits["max_observation_characters"]
-    assert run["limits"]["max_turns"] == 24
+    assert run["limits"]["max_turns"] == 200
 
 
 def test_active_chat_run_is_detected_for_steering(setup):
