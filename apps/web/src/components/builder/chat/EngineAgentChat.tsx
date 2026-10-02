@@ -61,7 +61,7 @@ export function EngineAgentChat({
   spaceData,
   onCreateExample,
 }: Props) {
-  const { messages, isRunning, historyLoading: streamLoading, toolEvents, noteUserSent } =
+  const { messages, isRunning, historyLoading: streamLoading, noteUserSent } =
     useChatStream(conversationId);
   // i dati del motore (lavori, pannelli) si rinfrescano quando la chat scrive
   const agentStream = useConversationEventStream(conversationId ?? null, {
@@ -86,12 +86,7 @@ export function EngineAgentChat({
                 conversationId={conversationId}
                 runActive={agentStream.runActive}
               />
-              <AgentChat
-                messages={messages}
-                isRunning={isRunning || engineBusy}
-                toolEvents={toolEvents}
-                onCancel={onCancelInFlight}
-              />
+              <AgentChat messages={messages} isRunning={isRunning || engineBusy} />
             </>
           ) : (
             <ConversationWorkspaceWelcome
@@ -106,6 +101,16 @@ export function EngineAgentChat({
           )}
         </div>
         <div className="cw-composer">
+          {(isRunning || engineBusy) && (
+            <p className="cw-hint" role="status">
+              Homun sta lavorando…
+              {onCancelInFlight && (
+                <button type="button" className="cs-link ml-1" onClick={onCancelInFlight}>
+                  Annulla
+                </button>
+              )}
+            </p>
+          )}
           {assignee && (
             <p className="cw-hint">
               Nuovo incarico per <strong>{assignee}</strong> · descrivi il risultato che vuoi

@@ -2,10 +2,39 @@
 @source "./";
 @source "../../../packages/ui/src";
 @import "tw-animate-css";
+@import "tw-shimmer";
 @import "@fontsource/geist-sans/latin.css";
 @import "@fontsource/geist-mono/latin.css";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
+
+/* animazioni dei pannelli collassabili degli elementi assistant-ui */
+@theme inline {
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(
+        --radix-collapsible-content-height,
+        var(--collapsible-panel-height, auto)
+      );
+    }
+  }
+  @keyframes collapsible-up {
+    from {
+      height: var(
+        --radix-collapsible-content-height,
+        var(--collapsible-panel-height, auto)
+      );
+    }
+    to {
+      height: 0;
+    }
+  }
+}
 
 /*
  * Homun design system — "Linear Alpine Clarity".

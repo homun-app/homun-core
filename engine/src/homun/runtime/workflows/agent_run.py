@@ -112,6 +112,28 @@ def deliver_agent_runs(ctx):
                 logging.getLogger(__name__).warning('Skill reflection failed for %s', record.command_id, exc_info=True)
         if run['status'] not in {'queued', 'running'}:
             continue
+        # Un run attivo il cui workflow DBOS è già terminale non ripartirà mai:
+        # l'enqueue con id stabile deduplica in silenzio. Si chiude il run con
+        # un esito tipizzato invece di lasciarlo zombie per sempre.
+        workflow_state = ''
+        try:
+            from homun.runtime.workflows.work_run import get_workflow_status
+            workflow_state = get_workflow_status(run['_workflow_id']).upper()
+        except Exception:
+            workflow_state = ''
+        if any(mark in workflow_state for mark in ('CANCEL', 'FAIL', 'ERROR')):
+            fail(ctx, run['id'], 'agent_run_workflow_lost', epoch=run['_epoch'],
+                 expected_steering=run.get('_steering', []))
+            logging.getLogger(__name__).warning(
+                'Run %s closed: workflow %s is %s', run['id'], run['_workflow_id'], workflow_state)
+            continue
+        if 'SUCCESS' in workflow_state or workflow_state in {'COMPLETED', 'FINISHED'}:
+            # Il workflow ha finito senza consegnare lo status (restart nell'ultimo step).
+            fail(ctx, run['id'], 'agent_run_workflow_finished_unrecorded', epoch=run['_epoch'],
+                 expected_steering=run.get('_steering', []))
+            logging.getLogger(__name__).warning(
+                'Run %s closed unrecorded: workflow %s succeeded', run['id'], run['_workflow_id'])
+            continue
         try:
             start(run['_workflow_id'], run['id'], run['_epoch'])
         except Exception:

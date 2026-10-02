@@ -13,6 +13,8 @@ export type ChatStreamMessage = {
   role: "user" | "assistant";
   content: string;
   reasoning?: string;
+  /** Attività tool del run che ha prodotto questo messaggio (solo live). */
+  tools?: ChatToolEvent[];
 };
 
 /** Attività tool del run attivo, mostrata come avanzamento live. */
@@ -49,6 +51,10 @@ export function useChatStream(conversationId: string | undefined) {
 
   // bolle utente ottimistiche non ancora riechiate dal motore
   const pendingRef = useRef<{ id: string; text: string }[]>([]);
+  // l'eco del motore prende l'id della bolla ottimistica che la rappresenta:
+  // il runtime external store aggiorna il nodo esistente invece di creare un
+  // branch fantasma (i messaggi rimossi restano nel repository dei branch)
+  const echoPendingIdsRef = useRef<Map<string, string[]>>(new Map());
   // run attivi visti via SSE: i run già chiusi vengono riprodotti a connessione
   const activeRunsRef = useRef<Set<string>>(new Set());
   // attività tool già viste: alla riconnessione il motore ripete le osservazioni
@@ -57,15 +63,34 @@ export function useChatStream(conversationId: string | undefined) {
   const assistantBaselineRef = useRef(0);
   // il prop definito viste finora: definito -> undefined = nuova conversazione
   const hadConversationRef = useRef(false);
+  // id della bolla streaming corrente: la risposta consegnata lo eredita
+  const streamEchoIdRef = useRef<string | null>(null);
+  // id stabili assegnati ai messaggi del motore (engineMessageId -> id del nodo)
+  const stableIdsRef = useRef<Map<string, string>>(new Map());
 
   const refresh = useCallback(async (id: string) => {
     try {
       const transcript = await loadEngineTranscript(id);
-      const next = transcript.map((m, index) => ({
-        id: m.engineMessageId ?? `srv:${index}`,
-        role: (m.who === "you" ? "user" : "assistant") as "user" | "assistant",
-        content: m.text,
-      }));
+      // il primo refresh consegna gli id stabili (pending/stream); i refresh
+      // successivi ricostruiscono la lista e li riprendono da questo mapping
+      const stableIds = stableIdsRef.current;
+      const rawEngineIds: (string | null)[] = [];
+      const next = transcript.map((m, index) => {
+        const role = (m.who === "you" ? "user" : "assistant") as "user" | "assistant";
+        const engineId = m.engineMessageId ?? null;
+        rawEngineIds.push(engineId);
+        let messageId = m.engineMessageId ?? `srv:${index}`;
+        if (engineId && stableIds.has(engineId)) {
+          messageId = stableIds.get(engineId) as string;
+        } else if (role === "user") {
+          const queue = echoPendingIdsRef.current.get(m.text.trim());
+          if (queue && queue.length > 0) {
+            messageId = queue.shift() as string;
+            if (engineId) stableIds.set(engineId, messageId);
+          }
+        }
+        return { id: messageId, role, content: m.text };
+      });
       // cala le bolle ottimistiche ormai presenti nella trascrizione
       const echoed = new Set(
         next.filter((m) => m.role === "user").map((m) => m.content.trim()),
@@ -74,20 +99,43 @@ export function useChatStream(conversationId: string | undefined) {
         (p) => !echoed.has(p.text.trim()),
       );
       setPending([...pendingRef.current]);
-      setServerMessages(next);
       // la risposta consegnata sostituisce la bolla in streaming
       const answers = next.filter((m) => m.role === "assistant").length;
       if (answers > assistantBaselineRef.current) {
+        // la prima risposta nuova prende l'id della bolla streaming: il nodo
+        // del runtime si aggiorna invece di lasciare un branch fantasma
+        const streamId = streamEchoIdRef.current;
+        if (streamId) {
+          let seen = answers - assistantBaselineRef.current;
+          for (let i = next.length - 1; i >= 0 && seen > 0; i--) {
+            const message = next[i] as ChatStreamMessage | undefined;
+            if (!message || message.role !== "assistant") continue;
+            seen -= 1;
+            if (seen === 0) {
+              next[i] = { ...message, id: streamId };
+              const engineId = rawEngineIds[i];
+              if (engineId) stableIds.set(engineId, streamId);
+            }
+          }
+          streamEchoIdRef.current = null;
+        }
         assistantBaselineRef.current = answers;
         setStream(null);
         setToolEvents([]);
       }
+      setServerMessages(next);
     } catch {
       /* la prossima riga SSE ritenterà l'allineamento */
     } finally {
       setHistoryLoading(false);
     }
   }, []);
+
+  // la bolla streaming vive finché il run non consegna: il suo id passa alla
+  // risposta della trascrizione perché il runtime aggiorni lo stesso nodo
+  useEffect(() => {
+    streamEchoIdRef.current = stream ? `stream:${stream.runId}` : null;
+  }, [stream]);
 
   // Nuova conversazione: il prop torna undefined dopo essere stato definito.
   useEffect(() => {
@@ -101,6 +149,8 @@ export function useChatStream(conversationId: string | undefined) {
     activeRunsRef.current.clear();
     seenToolsRef.current.clear();
     assistantBaselineRef.current = 0;
+    echoPendingIdsRef.current.clear();
+    stableIdsRef.current.clear();
     setPending([]);
     setStream(null);
     setServerMessages([]);
@@ -114,6 +164,8 @@ export function useChatStream(conversationId: string | undefined) {
     assistantBaselineRef.current = 0;
     pendingRef.current = [];
     seenToolsRef.current.clear();
+    echoPendingIdsRef.current.clear();
+    stableIdsRef.current.clear();
     setPending([]);
     setStream(null);
     setServerMessages([]);
@@ -207,6 +259,8 @@ export function useChatStream(conversationId: string | undefined) {
     const entry = { id: `pending:${Date.now()}`, text: text.trim() };
     if (!entry.text) return;
     pendingRef.current = [...pendingRef.current, entry];
+    const queue = echoPendingIdsRef.current.get(entry.text) ?? [];
+    echoPendingIdsRef.current.set(entry.text, [...queue, entry.id]);
     setPending([...pendingRef.current]);
   }, []);
 
@@ -214,16 +268,19 @@ export function useChatStream(conversationId: string | undefined) {
     () => [
       ...serverMessages,
       ...pending.map((p) => ({ id: p.id, role: "user" as const, content: p.text })),
-      ...(stream
+      // la bolla in streaming compare solo quando ha qualcosa da mostrare:
+      // prima del primo token l'attività è indicata dall'hint sotto il thread
+      ...(stream && (stream.text || stream.reasoning || toolEvents.length)
         ? [{
             id: `stream:${stream.runId}`,
             role: "assistant" as const,
             content: stream.text,
             ...(stream.reasoning ? { reasoning: stream.reasoning } : {}),
+            tools: toolEvents,
           }]
         : []),
     ],
-    [serverMessages, pending, stream],
+    [serverMessages, pending, stream, toolEvents],
   );
 
   return {

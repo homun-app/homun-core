@@ -15,6 +15,12 @@ import sys
 
 SOURCE_SUFFIXES = {".py", ".ts", ".tsx"}
 SKIP = {".git", ".venv", "node_modules", "__pycache__", "dist", "dist-prototype", ".output", ".tanstack"}
+# Elementi vendor presi verbatim (registry assistant-ui / shadcn): la soglia
+# anti-monolite vigila sul codice nostro, non sulle copie di terze parti.
+VENDOR_PREFIXES = (
+    "apps/web/src/components/assistant-ui/",
+    "apps/web/src/components/ui/",
+)
 DOMAIN_FORBIDDEN = (
     "homun.routes", "homun.context", "homun.storage", "homun.models",
     "homun.runtime", "homun.application", "homun.materials.blob", "homun.materials.extract",
@@ -113,7 +119,7 @@ def check(root: Path, baseline: dict):
                 errors.append(f"legacy growth: {name}: {lines} > {budgets[name]}")
             elif lines < budgets[name]:
                 errors.append(f"Shrink legacy budget: {name}: lower {budgets[name]} to {lines}, or remove if <=500")
-        elif lines > 800:
+        elif lines > 800 and not name.startswith(VENDOR_PREFIXES):
             errors.append(f"New oversized file: {name}: {lines} >800 lines")
     for name in budgets.keys() - present:
         errors.append(f"Remove stale legacy budget: {name}")
