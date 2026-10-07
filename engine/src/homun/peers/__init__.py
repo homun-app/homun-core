@@ -12,6 +12,7 @@ from homun.peers.device_identity import (
     load_device_identity,
     DeviceIdentity,
 )
+from homun.peers.replication import RemoteProjection, sync_remote_project
 from homun.peers.pairing_client import (
     pair_with_host,
     remote_request,
@@ -20,6 +21,7 @@ from homun.peers.pairing_client import (
 )
 
 __all__ = [
+    "RemoteProjection", "sync_remote_project",
     "generate_device_keypair", "key_fingerprint", "sign_nonce",
     "load_device_identity", "DeviceIdentity",
     "pair_with_host", "remote_request", "RemoteConnection", "PROTOCOL_VERSION",

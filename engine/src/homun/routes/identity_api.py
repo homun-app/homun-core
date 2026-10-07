@@ -140,3 +140,28 @@ def remote_pair_confirm(body: PairConfirmRequest):
         return confirm_pairing(ctx, body.model_dump())
     except DomainError as exc:
         raise _http_error(exc) from exc
+
+@router.get("/workspaces/{workspace_id}/remote/events")
+def remote_events(workspace_id: str, project_id: str, cursor: int = 0, limit: int = 200,
+                  x_homun_actor_id: str | None = Header(default=None),
+                  x_homun_actor_name: str | None = Header(default=None)):
+    """Feed replica per peer autorizzato: eventi del progetto dopo il cursor."""
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    from homun.identity.remote_feed import remote_events as _feed
+    try:
+        return _feed(ctx, actor, project_id=project_id, cursor=cursor, limit=limit)
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/workspaces/{workspace_id}/remote/snapshot")
+def remote_snapshot(workspace_id: str, project_id: str,
+                    x_homun_actor_id: str | None = Header(default=None),
+                    x_homun_actor_name: str | None = Header(default=None)):
+    """Bootstrap del peer: proiezione corrente del progetto + cursor."""
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    from homun.identity.remote_feed import remote_snapshot as _snapshot
+    try:
+        return _snapshot(ctx, actor, project_id=project_id)
+    except DomainError as exc:
+        raise _http_error(exc) from exc
