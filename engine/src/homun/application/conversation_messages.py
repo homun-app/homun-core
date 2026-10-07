@@ -9,6 +9,35 @@ _MESSAGE_EVENTS = {'message.created', 'message.interpreted'}
 _CARD_FIELDS = ('interpretation', 'patch_proposal', 'plan_draft')
 
 
+def _attach_run_context(store, item, payload):
+    """Ragionamento e strumenti del run che ha prodotto il messaggio.
+
+    I run chat consegnano l'answer come testo pulito; il pensiero (blocchi
+    think) e le observations vivono nel record del run. Con il link
+    `agent_run_id` scritto dall'evento di consegna, la transcript li espone
+    così lo storico mostra lo stesso ragionamento e le stesse chiamate tool
+    viste in live — collassati, come fanno Claude e Hermes.
+    """
+    run_id = payload.get('agent_run_id')
+    if not isinstance(run_id, str):
+        return
+    record = store.commands.get(run_id)
+    if record is None or not isinstance(record.result, dict):
+        return
+    from homun.application.chat_events import assistant_reasoning
+    reasoning = assistant_reasoning(record.result)
+    if reasoning:
+        item['reasoning'] = reasoning[-4000:]
+    tools = []
+    for observation in record.result.get('observations') or []:
+        if not isinstance(observation, dict):
+            continue
+        tools.append({'tool': str(observation.get('tool') or 'tool'),
+                      'message': str(observation.get('message') or '')[:400]})
+    if tools:
+        item['tools'] = tools
+
+
 def conversation_message_page(store, actor, conversation_id, after, limit):
     require_conversation_works_access(store, actor, conversation_id)
     seen = set()
@@ -44,6 +73,7 @@ def conversation_message_page(store, actor, conversation_id, after, limit):
             continue
         item = message.model_dump(mode='json', exclude={'workspace_id'})
         item['sequence'] = event.sequence
+        _attach_run_context(store, item, view['payload'])
         for field in _CARD_FIELDS:
             value = view['payload'].get(field)
             if isinstance(value, dict):

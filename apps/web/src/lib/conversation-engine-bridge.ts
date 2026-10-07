@@ -403,12 +403,16 @@ export function assistantFromPosted(posted: {
   assistantMessageId?: string;
   assistantText: string;
   patchProposal: WorkPatchProposal | null;
+  reasoning?: string;
+  tools?: Array<{ tool: string; message: string }>;
 }): ConversationMessage {
   return {
     who: "agent",
     sender: "Homun",
     ...(posted.assistantMessageId ? { engineMessageId: posted.assistantMessageId } : {}),
     text: posted.assistantText,
+    ...(posted.reasoning ? { reasoning: posted.reasoning } : {}),
+    ...(posted.tools && posted.tools.length > 0 ? { tools: posted.tools } : {}),
     ...(posted.patchProposal
       ? {
           patchProposal: {

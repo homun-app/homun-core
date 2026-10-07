@@ -89,7 +89,19 @@ export function useChatStream(conversationId: string | undefined) {
             if (engineId) stableIds.set(engineId, messageId);
           }
         }
-        return { id: messageId, role, content: m.text };
+        return {
+          id: messageId,
+          role,
+          content: m.text,
+          ...(m.reasoning ? { reasoning: m.reasoning } : {}),
+          ...(m.tools && m.tools.length > 0
+            ? { tools: m.tools.map((tool, toolIndex) => ({
+                id: `${messageId}:${toolIndex}`,
+                tool: tool.tool,
+                message: tool.message,
+              })) }
+            : {}),
+        };
       });
       // cala le bolle ottimistiche ormai presenti nella trascrizione
       const echoed = new Set(

@@ -37,6 +37,10 @@ export type ConversationMessage = {
   text: string;
   /** F3.5: in-flight / incomplete assistant turn (not yet final). */
   partial?: boolean;
+  /** Ragionamento (think) del run che ha prodotto il turno — visibile nello storico. */
+  reasoning?: string;
+  /** Chiamate tool del run che ha prodotto il turno — visibili nello storico. */
+  tools?: Array<{ tool: string; message: string }>;
   /** In-flight wait state: shown instead of text until the turn resolves. */
   wait?: AgentWait;
   /** F3.5a: user explicitly promoted this turn to approved memory. */

@@ -16,7 +16,7 @@ import time
 from typing import Any, Dict, Iterator, Optional
 
 from homun.domain.errors import DomainError
-from homun.models.finish_gates import THINK_BLOCK_RE, strip_think_blocks
+from homun.models.finish_gates import THINK_BLOCK_RE, THINK_CONTENT_RE, strip_think_blocks
 from homun.policy.work import require_conversation_access
 
 POLL_SECONDS = 0.25
@@ -45,6 +45,18 @@ def _assistant_text(run: Dict[str, Any]) -> str:
     for message in reversed(messages):
         if isinstance(message, dict) and message.get("role") == "assistant":
             return strip_think_blocks(str(message.get("content") or ""))
+    return ""
+
+
+def assistant_reasoning(run: Dict[str, Any]) -> str:
+    """Il ragionamento dell'ultimo messaggio assistente, come testo: i blocchi
+    think (chiusi o orfani) restano leggibili anche dopo la consegna, così la
+    transcript li può mostrare collassati come in live."""
+    messages = run.get("_messages") or []
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            blocks = THINK_CONTENT_RE.findall(str(message.get("content") or ""))
+            return "\n".join(block.strip() for block in blocks if block.strip())
     return ""
 
 

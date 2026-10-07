@@ -37,6 +37,9 @@ _PROMOTED_REASONING_PLAN_TAIL_RE = re.compile(
 )
 
 THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+# il contenuto dei blocchi think (chiusi o orfani), come testo: serve alla
+# transcript per mostrare il ragionamento anche dopo la consegna
+THINK_CONTENT_RE = re.compile(r"<think>(.*?)(?:</think>|$)", re.DOTALL)
 # il modello locale spesso apre senza <think> e chiude con </think> orfano:
 # tutto ciò che precede la chiusura è ragionamento, non risposta
 ORPHAN_THINK_RE = re.compile(r"^.*?</think>", re.DOTALL)

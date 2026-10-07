@@ -129,3 +129,50 @@ def test_invalid_message_provenance_is_omitted(transcript, invalid):
             store.events[0].workspace_id = 'other'
     page = client.get(BASE + '?limit=1', headers=HEADERS).json()
     assert page == {'items': [], 'cursor': 1, 'has_more': True}
+
+
+def test_transcript_exposes_run_reasoning_and_tools(tmp_path):
+    """Lo storico mostra ragionamento e chiamate tool del run che ha risposto:
+    il link è l'agent_run_id scritto dall'evento di consegna."""
+    from homun.domain.models import CommandRecord
+    ctx = create_context(db_path=tmp_path / 'runctx.db', data_dir=tmp_path, for_tests=True)
+    store = ctx.service.store
+    store.projects['p'] = Project(id='p', workspace_id='ws_local', name='Private')
+    store.grants['g'] = AccessGrant(id='g', workspace_id='ws_local', subject_id='reader', resource_id='p', capability='read', issuer_id='owner')
+    store.conversations['c'] = Conversation(id='c', workspace_id='ws_local', title='Chat', project_id='p')
+    store.messages['m1'] = Message(id='m1', workspace_id='ws_local', conversation_id='c',
+                                   author_id='homun_engine', text='La capitale è Parigi.')
+    store.events.append(DomainEvent(
+        event_id='e1', workspace_id='ws_local', aggregate_id='c', aggregate_type='conversation',
+        aggregate_version=1, sequence=1, type='message.interpreted', actor_id='reader',
+        payload={'message_id': 'm1', 'agent_run_id': 'run:1', 'chat': True}))
+    store.works['w1'] = Work(id='w1', workspace_id='ws_local', title='w1', objective='Objective',
+                             primary_conversation_id='c', requester_id='owner', owner_id='owner')
+    store.commands['run:1'] = CommandRecord(
+        command_id='run:1', type='agent_run.propose',
+        workspace_id='ws_local', actor_id='reader',
+        result={
+            'id': 'run:1', 'status': 'completed', 'work_id': 'w1',
+            '_messages': [
+                {'role': 'user', 'content': 'capitale della francia?'},
+                {'role': 'assistant', 'content': '<think>Parigi è la capitale dal 508.\n'
+                                                 'Controllo ancora.</think>La capitale è Parigi.'},
+            ],
+            'observations': [
+                {'tool': 'web_search', 'message': 'Trovate 3 fonti su Parigi'},
+                {'tool': 'terminal', 'message': 'Nessuna verifica necessaria'},
+            ],
+        })
+    ctx.repository.save(store)
+    reset_context_for_tests(ctx)
+    client = TestClient(create_app())
+    try:
+        body = client.get(BASE, headers=HEADERS).json()
+        item = next(m for m in body['items'] if m['id'] == 'm1')
+        assert item['reasoning'].startswith('Parigi è la capitale')
+        assert 'Controllo ancora' in item['reasoning']
+        assert [t['tool'] for t in item['tools']] == ['web_search', 'terminal']
+        assert item['tools'][0]['message'] == 'Trovate 3 fonti su Parigi'
+    finally:
+        client.close()
+        reset_context_for_tests(None)
