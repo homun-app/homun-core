@@ -9,6 +9,7 @@ separata per lo stato del codice.
 
 Documenti censiti: **225**. Punto di ingresso: [indice](README.md).
 
+- **SVILUPPO.md** — documento unico di sviluppo (fatto/da fare per fase, audit 2026-10-07). Sostituisce STATO.md per l'avanzamento.
 | Documento | Ruolo |
 | --- | --- |
 | [docs/archive/homun-assistenti-operativi-per-piccole-aziende-2026-09-15.md](archive/homun-assistenti-operativi-per-piccole-aziende-2026-09-15.md) | Documento storico (archivio) |

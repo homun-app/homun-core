@@ -1,4 +1,10 @@
-# Stato verificato di Homun 2
+# Stato verificato di Homun 2 — ARCHIVIO (congelato al 2026-09-30)
+
+> **Per l'avanzamento usare [SVILUPPO.md](SVILUPPO.md)** — documento unico
+> con l'audit del 2026-10-07: cosa è fatta e cosa resta, per fase F0-F11,
+> verificato contro il codice. Questo file resta come archivio del dettaglio
+> tecnico delle tranche fino al 30 settembre; non aggiornarlo: la cronologia
+> vive in git.
 
 ## Aggiornamento del 27 settembre 2026 — parity ancora parziale
 

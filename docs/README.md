@@ -1,8 +1,10 @@
 # Documentazione Homun 2
 
-Aggiornamento: 23 settembre 2026, consolidamento e tranche operativa.
+Aggiornamento: 7 ottobre 2026, documento unico di sviluppo.
 
 ## Da dove iniziare
+
+- **[Documento unico di sviluppo](SVILUPPO.md)** — cosa è fatta e cosa resta, per fase F0-F11, auditato sul codice (2026-10-07).
 
 - [Prova pratica Hermes / OpenHands SDK](research/2026-09-23-prova-hermes-openhands.md): prove locali ripetute, correzione e ripresa, evidenze e confini di integrazione.
 
@@ -15,7 +17,7 @@ Aggiornamento: 23 settembre 2026, consolidamento e tranche operativa.
 - [Visione e distanza dal codice](research/2026-09-23-visione-prodotto-gap.md): uso diretto, onboarding aziendale e squadra persone–bot; priorità proposte.
 
 - [Uso di Homun](USO-HOMUN.md): percorsi concreti, risultato atteso e limiti.
-- [Stato verificato](STATO.md): capacità attuali e problemi ancora aperti.
+- **[Documento unico di sviluppo](SVILUPPO.md)**: cosa è fatta e cosa resta, per fase F0-F11, auditato sul codice (2026-10-07). Punto d'ingresso.
 - [Confronto con Hermes](research/2026-09-23-hermes-homun-utilizzo.md): documentazione upstream aggiornata, testimonianze e implicazioni per Homun.
 - [Passaggio corrente](handoff/2026-09-23-consolidamento-e-ux.md): punto fermo tecnico e prossimo lavoro UX.
 - [Roadmap](../roadmap.md): avanzamento e priorità.

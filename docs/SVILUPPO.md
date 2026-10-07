@@ -1,0 +1,137 @@
+# Homun — documento unico di sviluppo
+
+> Fonte unica di verità su cosa è fatto, cosa resta e in che ordine.
+> Aggiornato il 7 ottobre 2026 con audit voce-per-voce del piano storico
+> (`development/2026-09-17-piano-sviluppo.md`) contro il codice reale.
+> Ogni voce "fatta" ha evidenza verificabile: modulo, rotta o test citati.
+
+**Numeri di riferimento**: suite engine **1972 test verdi** (226 file),
+web 256, typecheck/build/architettura verdi. Parity differenziale con
+Hermes rc.35-v0.21.5 del 2026-10-07 (`research/evidence/2026-10-07-parity-rc35/`).
+
+---
+
+## 1. Cosa è fatto (verificato per fase)
+
+### F0 — Decisioni e prove
+- ✅ F0.1 inventario riuso vecchio Homun → `research/2026-09-19-hermes-homun-comparison.md`, `2026-09-23-owned-core-verifica.md`
+- ✅ F0.2 runtime adottato: Pydantic AI + DBOS (ADR D-RUN-01)
+- ✅ F0.3 packaging: app Electron avvia il proprio motore (bundle/venv) con sessione; installer `apps/desktop/dist-installers/Homun-0.2.0-arm64.dmg`
+- ⬜ F0.4 prova rete LAN/due reti — mai eseguita (dipende da F5)
+- ◐ F0.5 cifratura a riposo: `storage/encryption.py` con SQLCipher, ma D-CRYPTO-01 resta aperta (non dichiarata pronta)
+
+### F1-F2 — Dominio, persistenza, API
+✅ Complete (comandi/eventi con actor e versioni, SQLite WAL ottimistica,
+API con cursor, backup consistente F2.5 — restore drill riuscito su backup
+reale il 2026-10-07).
+
+### F3 — Chat e piano reali
+✅ Completa (provider fake+reali, interpretazione, patch versionate,
+streaming interrompibile, Mem0 locale).
+
+### F4 — Esecuzione, input e risultati
+✅ **Completa** (le caselle stantie del piano sono state verificate):
+- F4.3 contributi tipizzati: `application/agent_clarification.py`, `clarify_contracts.py`, intake
+- F4.4 artifacts versionati: `routes/work_outputs.py`, `application/work_outputs.py`
+- F4.5 review su versione + autonomia (`autonomy_mode` supervised/autonomous con auto-approvazione policy)
+- F4.6 pausa/annulla/steer/ripresa: `application/agent_control.py`, visibili in chat e pannello lavori
+
+### F5 — Collaborazione tra applicazioni ⬜ **ZERO**
+`identity/` e `peers/` non esistono. È il prossimo grande blocco (visione
+confermata: utenti su macchine diverse, identità device/persona distinte,
+replica selettiva, E2E, delega ai peer). Vedi §3.
+
+### F6 — Strumenti e connettori
+- ✅ F6.2 web search (ddgs, `tools/search.py`, protezione errori-retry)
+- ✅ F6.4 MCP (rotte `mcp.py`+oauth, catalogo connettori, skill builtin versionate `builtin_skills.py`)
+- ◐ F6.5 email: trasporto smtp presente negli adattatori canale, non provata end-to-end
+- ◐ F6.6 revoca plugin: manager con enable/disable; segnalazione lavori dipendenti da fare
+- ⬜ F6.1 ToolGrant separato per strumento (oggi le capability sono per-run)
+- ⬜ F6.3 connettore Trello (mai avviato)
+
+### F7 — Automazioni
+- ✅ F7.3 scheduler persistente DBOS con misfire policy e deduplica (`application/cron_manager.py`, `cron_contracts.py`, `cron_dispatcher.py`)
+- ◐ F7.1 conversazione→metodo: c'è `skill_reflection.py` (lezioni apprese), manca la promozione esplicita a routine
+- ◐ F7.2 routine con schema/riepilogo (creatore UI esiste nel pannello lavoro)
+- ◐ F7.4 trigger esterni (webhook relay, msgraph); ◐ F7.5 pausa/modifica (rotta pause)
+- **Debito noto**: la vista "Automazioni" della sidebar gira ancora su dati simulati — le routine vere sono solo nel pannello lavoro (violazione Fonte: motore, da collegare)
+
+### F8 — Memoria e formazione
+- ✅ F8.1 budget di contesto e riassunti con provenienza (`models/context_summary.py`, parity Hermes)
+- ✅ F8.3 correzione→lezione→riprova (`application/skill_reflection.py`)
+- ◐ F8.2 memorie per ambito con isolamento progetto (memory ports + ledger); promozione decisioni condivise da fare
+- ◐ F8.4 invalidazione su revoca; ◐ F8.5 retrieval semantico (Mem0/Qdrant locali, backends esterni)
+
+### F9 — Modelli e costi
+- ✅ F9.1 adattatori locali multipli (Ollama, OpenAI-compatibile, LM Studio…)
+- ✅ F9.2 ledger budget con riserve atomiche e ricevute persistenti (`application/budgets.py`, `budget_settlement.py`)
+- ◐ F9.3 settings separati (esiste il pannello, perimetro da ordinare)
+- ◐ F9.4 diagnostica connessione (prova chat, `/v1/health`, `/v1/diagnostics/db`)
+- ⬜ F9.5 routing automatico qualità/costo
+
+### F10 — Release e operatività
+- ✅ F10.1 installer Mac (DMG/ZIP arm64, pipeline firma/notarizzazione)
+- ◐ F10.4 diagnostica: health con stato db, recovery mode con quarantena e diagnosi in chat, backup automatici giornalieri con retention
+- ◐ F10.5 macchina pulita: restore drill verificato 2026-10-07; pilot 2-5 utenti da fare (dopo F5)
+- ⬜ F10.2 stress 100 file/50 progetti; ⬜ F10.3 accessibilità; ◐ F10.6 inventario licenze
+
+### Consegnato oltre il piano
+- **Chat assistant-ui ufficiale**: thread del registry verbatim, streaming
+  live con ragionamento separato, tool group dentro il thread, ragionamento
+  e tool visibili anche nello storico (`feat f74e1eb0`)
+- **Parity Hermes**: guardia turni 500 con riassunto al limite, sessione
+  residente con snapshot, prompt tier volatile, web search ddgs
+- **Robustezza DB**: recovery mode all'avvio (quarantena+ricostruzione+
+  diagnosi narrata in chat), chiusura run zombie, CPU a riposo 1-2%
+- **Canali reali**: WhatsApp via sidecar `wa-rs-bridge` (pairing vivo e
+  riconnesso), adattatori Telegram/Discord/Slack/Matrix/Ntfy/webhook —
+  il piano metteva WhatsApp in F11 fuori beta: anticipate
+- **Desktop Electron** con motore incorporato e sessione autenticata
+- **Kanban** (`kanban.db` + rotta) — prima del piano F11 "gruppi"
+
+---
+
+## 2. Debiti aperti verificati (non-previsti dal piano)
+
+| Debito | Stato | Dove |
+|---|---|---|
+| Vista Automazioni su dati simulati | da collegare alle routine vere | `research/2026-10-07-feedback-desktop.md` |
+| Vista Compiti/filtri incomprensibile | da rifare contro F5 (persona≠device) | idem |
+| Connettori duplicati con i canali | da unificare/etichettare | idem |
+| Errori connettore visibili | ✅ corretto 2026-10-07 | commit feedback |
+| Gap parity Hermes: anti-loop in streaming, think inline nel pane, clean-EOF, coda al confine tool-call | da portare | `research/evidence/2026-10-07-parity-rc35/RIASSUNTO-TEST.md` |
+| Anomalia: conversazione scomparsa dopo riavvio (2026-10-07) | da indagare se si ripete | log sessione |
+| ConflictError transitorio in `expire_waiting` | osservato, non bloccante | sessione 2026-10-02 |
+
+---
+
+## 3. Cosa resta da fare, in ordine
+
+1. **F5 — multiutente tra macchine** (il blocco strategico, visione
+   confermata da Fabio): F5.1 identità device/persona + pairing, F5.2
+   replica selettiva, F5.3 E2E, F5.4 outbox onesto, F5.5 delega ai peer,
+   F5.6 peer revocato/offline. Gate: due Mac su reti diverse (contributo
+   di Giulia visibile a Fabio, terzo peer negato, file ripreso, delega unica).
+   Subito dopo: rifare Compiti contro le identità reali.
+2. **Automazioni**: collegare la vista sidebar alle routine del motore
+   (Fonte: motore) e completare F7.1 (conversazione→routine promossa).
+3. **Connettori**: unificare catalogo connettori/canali, F6.1 ToolGrant,
+   primo connettore verticale (Trello o equivalente scelto da Fabio).
+4. **Gap parity Hermes** (quattro fix mirati, ~1 giorno).
+5. **F10.2/F10.3** stress e accessibilità prima del pilot.
+6. **F9.5** routing automatico (dopo dati di usage reali dal pilot).
+
+### Regola di lavoro (invariata)
+Contratto e gate prima dell'implementazione; test delle invarianti e dei
+guasti; nessuna fase dichiarata completa con soli mock; Fonte:
+simulazione|motore mai mescolate; errori tipizzati mai nascosti.
+
+---
+
+## 4. Archivio e fonti
+
+- Piano storico fasi F0-F11 con testi originali: `development/2026-09-17-piano-sviluppo.md` (non rieseguire le fasi qui segnate fatte)
+- Visione prodotto: `VISIONE-PRODOTTO.md` · uso: `USO-HOMUN.md` · motore/affidabilità: `MOTORE-AFFIDABILITA-E-FORMAZIONE.md`
+- Evidenze per data: `research/` (80 documenti, archivio immutabile) · matrix parità Hermes: `research/evidence/`
+- Stato tecnico precedente (congelato al 2026-09-30): `STATO.md` — sostituito da questo documento per l'avanzamento
+- Registro documenti: `REGISTRO-DOCUMENTI.md`
