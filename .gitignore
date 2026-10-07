@@ -63,3 +63,9 @@ apps/desktop/dist-installers/
 apps/desktop/node_modules/
 
 .audit-hermes-ref/
+
+# il bridge WhatsApp avviato a mano dalla repo root creerebbe wa-bridge.db qui:
+# il DB vivo è nella dir dati del motore (WA_BRIDGE_DB), mai nel repo
+wa-bridge.db
+wa-bridge.db-shm
+wa-bridge.db-wal
