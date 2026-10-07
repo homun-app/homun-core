@@ -21,11 +21,22 @@ function describeCron(cron: string): string {
 
 export function EngineRoutines({
   routines,
+  works = [],
+  onCreateFromWork,
   onChanged,
   onUpdate,
   onSkipNext,
 }: {
   routines: EngineRoutine[];
+  /** Lavori che possono diventare il modello di una nuova routine. */
+  works?: Array<{
+    id: string;
+    title: string;
+    status?: string | undefined;
+    engineStatus?: string | undefined;
+    enginePlan?: Array<{ title: string; assignee_id?: string }> | undefined;
+  }> | undefined;
+  onCreateFromWork?: ((workId: string, input: { name: string; cron: string }) => Promise<void>) | undefined;
   onChanged?: (() => Promise<void>) | undefined;
   onUpdate?: ((routine: EngineRoutine, changes: { name: string; cron: string }) => Promise<void>) | undefined;
   onSkipNext?: ((routine: EngineRoutine) => Promise<void>) | undefined;
@@ -74,6 +85,7 @@ export function EngineRoutines({
         <EngineGoalDashboard />
       ) : (
         <>
+          {onCreateFromWork && <EngineRoutineFreeCreator works={works} onCreate={onCreateFromWork} />}
           {routines.length === 0 && (
             <div className="homun-empty-state">
               <div className="homun-empty-state__icon">
@@ -131,6 +143,108 @@ export function EngineRoutines({
   )}
   <HomunErrorNotice error={actionError} />
 </section>
+  );
+}
+
+/** Creazione libera dalla vista Automazioni: il modello è un lavoro esistente. */
+function EngineRoutineFreeCreator({
+  works,
+  onCreate,
+}: {
+  works: Array<{
+    id: string; title: string; status?: string | undefined; engineStatus?: string | undefined;
+    enginePlan?: Array<{ title: string; assignee_id?: string }> | undefined;
+  }>;
+  onCreate: (workId: string, input: { name: string; cron: string }) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  // solo lavori con un piano idoneo a fare da modello: il motore rifiuta i
+  // passi senza titolo o assegnatario, meglio non proporli proprio
+  const candidates = works.filter((w) =>
+    (w.engineStatus === "completed" || w.engineStatus === "ready") &&
+    Array.isArray(w.enginePlan) && w.enginePlan.length > 0 &&
+    w.enginePlan.every((step) => step.title.trim() && step.assignee_id));
+  const [workId, setWorkId] = useState(candidates[0]?.id ?? "");
+  const selected = candidates.find((w) => w.id === workId) ?? candidates[0];
+  const [name, setName] = useState("");
+  const [phrase, setPhrase] = useState("ogni lunedì alle 9");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const cron = cadenceToCron(phrase);
+  const effectiveName = name.trim() || selected?.title || "";
+
+  if (!open)
+    return (
+      <section className="cw-routine-creator cw-routine-creator--free" aria-label="Nuova routine">
+        <button type="button" className="cw-primary" onClick={() => setOpen(true)}>
+          Nuova routine
+        </button>
+        <p className="cw-hint">
+          Scegli un lavoro riuscito come modello e la cadenza: ogni ricorrenza crea un lavoro nuovo che aspetta il tuo via.
+        </p>
+      </section>
+    );
+
+  return (
+    <form className="cw-routine-creator" aria-label="Nuova routine"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!cron || !selected || saving) return;
+        setSaving(true);
+        setError(null);
+        try {
+          await onCreate(selected.id, { name: effectiveName, cron });
+          setOpen(false);
+          setName("");
+        } catch (cause) {
+          setError(cause);
+        } finally {
+          setSaving(false);
+        }
+      }}>
+      <h4>Nuova routine</h4>
+      <label>
+        Lavoro modello
+        <select value={selected?.id ?? ""} disabled={saving || candidates.length === 0}
+          onChange={(e) => setWorkId(e.target.value)}>
+          {candidates.map((w) => (
+            <option key={w.id} value={w.id}>{w.title}</option>
+          ))}
+        </select>
+      </label>
+      {candidates.length === 0 && (
+        <p className="cw-hint" role="alert">
+          Servono lavori completati da usare come modello: chiudi un lavoro e torna qui.
+        </p>
+      )}
+      <label>
+        Nome della routine
+        <input value={name} maxLength={80} disabled={saving}
+          placeholder={selected?.title ?? "Nome"} onChange={(e) => setName(e.target.value)} />
+      </label>
+      <label>
+        Quando
+        <input value={phrase} maxLength={120} disabled={saving}
+          onChange={(e) => setPhrase(e.target.value)}
+          placeholder="Es. ogni lunedì alle 9 · il primo del mese alle 8:30" />
+      </label>
+      {cron ? (
+        <p className="cw-hint" role="status">Cron <code>{cron}</code></p>
+      ) : (
+        <p className="cw-hint" role="alert">
+          Non ho capito la cadenza: prova «ogni lunedì alle 9», «ogni giorno alle 8:30», «il primo del mese alle 9» oppure scrivi un cron a 5 campi.
+        </p>
+      )}
+      <div className="cs-actions">
+        <button className="cw-primary" disabled={saving || !cron || !selected}>
+          {saving ? "Creo la routine…" : "Crea la routine"}
+        </button>
+        <button type="button" className="cs-link" disabled={saving} onClick={() => setOpen(false)}>
+          Annulla
+        </button>
+      </div>
+      <HomunErrorNotice error={error} />
+    </form>
   );
 }
 

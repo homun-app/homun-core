@@ -39,7 +39,7 @@ import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import type { EngineTeam } from "@/lib/engine-projects-client";
 import { renameEngineWork } from "@/lib/engine-work-naming";
 import { closeEngineWork, reviseEnginePlan, setEngineWorkBudget, setEngineWorkDue, setEngineWorkProject, startEngineWork, submitEngineArtifact } from "@/lib/engine-work-lifecycle";
-import { createEngineRoutine, routineEngineAction, updateEngineRoutine, type EngineRoutine } from "@/lib/engine-routines-client";
+import { createEngineRoutine, routineEngineAction, routineTemplateFromWork, updateEngineRoutine, type EngineRoutine } from "@/lib/engine-routines-client";
 import { createEngineSkill } from "@/lib/engine-mcp-client";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
 import { confirmWorkIntake, proposeWorkIntake } from "@/lib/engine-intake-client";
@@ -71,6 +71,7 @@ export type EngineWorkspaceState = {
   setDue: (work: Work, dueDate: string | null) => Promise<void>;
   setProject: (work: Work, projectId: string | null) => Promise<void>;
   createRoutine: (input: { name: string; cron: string; conversationId: string; template: EngineRoutine["template"] }) => Promise<void>;
+  createRoutineFromWork: (workId: string, input: { name: string; cron: string }) => Promise<void>;
   routineAction: (routineId: string, action: "pause" | "resume" | "stop" | "skip_next", expectedVersion: number) => Promise<void>;
   updateRoutine: (routineId: string, expectedVersion: number, changes: { name?: string; cron?: string }) => Promise<void>;
   revisePlan: (work: Work, action: { insertAfterStepId?: string | null; newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string }; removeStepId?: string }) => Promise<void>;
@@ -641,6 +642,18 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     },
     createRoutine: async (input) => {
       await createEngineRoutine(input);
+      await refresh();
+    },
+    createRoutineFromWork: async (workId, input) => {
+      const work = works.find((w) => w.id === workId);
+      if (!work || work.source !== "engine") {
+        throw new Error("Lavoro modello non trovato nel motore");
+      }
+      await createEngineRoutine({
+        ...input,
+        conversationId: work.engineConversationId ?? "",
+        template: routineTemplateFromWork(work),
+      });
       await refresh();
     },
     routineAction: async (routineId, action, expectedVersion) => {

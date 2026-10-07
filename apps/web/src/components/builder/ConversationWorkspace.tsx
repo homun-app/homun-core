@@ -1136,7 +1136,7 @@ export function ConversationWorkspace() {
         />
         {/* Diagnostics live in Settings; blocking errors use HomunErrorNotice. */}
         {space ? (
-          <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined} engineTeams={engine.backend === "engine" ? engine.teams : undefined} engineRoutines={engine.backend === "engine" ? engine.routines : undefined} onUpdateRoutine={engine.backend === "engine" ? (r, ch) => engine.updateRoutine(r.id, r.revision, ch) : undefined} onSkipNextRoutine={engine.backend === "engine" ? (r) => engine.routineAction(r.id, "skip_next", r.revision) : undefined}
+          <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined} engineTeams={engine.backend === "engine" ? engine.teams : undefined} engineRoutines={engine.backend === "engine" ? engine.routines : undefined} onUpdateRoutine={engine.backend === "engine" ? (r, ch) => engine.updateRoutine(r.id, r.revision, ch) : undefined} onSkipNextRoutine={engine.backend === "engine" ? (r) => engine.routineAction(r.id, "skip_next", r.revision) : undefined} onCreateRoutineFromWork={engine.backend === "engine" ? (workId, input) => engine.createRoutineFromWork(workId, input) : undefined}
             onSetEngineDue={engine.backend === "engine" ? engine.setDue : undefined}
             engineMode={engine.backend === "engine"} onRefreshEngine={engine.backend === "engine" ? engine.refresh : undefined}
             space={space}

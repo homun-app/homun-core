@@ -43,6 +43,7 @@ type Props = {
   engineAgents?: EngineAgentProfile[] | undefined;
   engineTeams?: EngineTeam[] | undefined;
   engineRoutines?: EngineRoutine[] | undefined;
+  onCreateRoutineFromWork?: ((workId: string, input: { name: string; cron: string }) => Promise<void>) | undefined;
   engineMode?: boolean;
   space: SpaceView;
   spaceInitial: string;
@@ -93,6 +94,7 @@ export function ConversationWorkspaceSpaceHost({
   engineAgents,
   engineTeams,
   engineRoutines,
+  onCreateRoutineFromWork,
   onRefreshEngine,
   onUpdateRoutine,
   onSkipNextRoutine,
@@ -235,6 +237,8 @@ export function ConversationWorkspaceSpaceHost({
     return (
       <EngineRoutines
         routines={engineRoutines ?? []}
+        works={works}
+        onCreateFromWork={onCreateRoutineFromWork}
         onChanged={onRefreshEngine}
         onUpdate={onUpdateRoutine}
         onSkipNext={onSkipNextRoutine}
