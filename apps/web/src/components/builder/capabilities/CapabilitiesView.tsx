@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { SettingsToggleSwitch } from "../SettingsToggleSwitch";
@@ -59,6 +59,7 @@ export function CapabilitiesView() {
   const [error, setError] = useState<unknown>(null);
 
   const [busy, setBusy] = useState<string | null>(null);
+  const noticeRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [draftFields, setDraftFields] = useState<Record<string, string>>({});
   const [newFieldKey, setNewFieldKey] = useState("");
@@ -107,15 +108,20 @@ export function CapabilitiesView() {
     setExpanded(c.id);
   }
 
-  async function act(key: string, operation: () => Promise<unknown>) {
-    if (busy) return;
+  async function act(key: string, operation: () => Promise<unknown>): Promise<boolean> {
+    if (busy) return false;
     setBusy(key);
     setError(null);
     try {
       await operation();
       await refresh();
+      return true;
     } catch (cause) {
       setError(cause);
+      // l'avviso vive in cima alla pagina: se l'utente è sceso nella lista
+      // non lo vedrebbe mai (il flusso "Connetti" falliva in silenzio)
+      noticeRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return false;
     } finally {
       setBusy(null);
     }
@@ -199,7 +205,7 @@ export function CapabilitiesView() {
         </div>
       </header>
 
-      <HomunErrorNotice error={error} />
+      <div ref={noticeRef}><HomunErrorNotice error={error} /></div>
 
       <main className="cap-grid-wrap">
         {loading ? (
@@ -465,6 +471,10 @@ export function CapabilitiesView() {
                           } else {
                             setOauthLink({ name: k.name, url: flow.authorize_url });
                           }
+                        }).then((ok) => {
+                          // niente autorizzazione in arrivo: il popup resta
+                          // bianco e l'errore si legge solo in cima alla pagina
+                          if (!ok && popup && !popup.closed) popup.close();
                         });
                       }}
                     >

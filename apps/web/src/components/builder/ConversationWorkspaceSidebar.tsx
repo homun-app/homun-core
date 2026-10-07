@@ -65,18 +65,25 @@ type Props = {
 };
 
 function groupWorksByDate(items: Work[]) {
-  const now = Date.now();
-  const oneDay = 24 * 60 * 60 * 1000;
+  /** Raggruppamento per giorno di calendario locale, sulla data reale del
+      motore (updated_at). I work senza data vanno in coda senza inventarne
+      una: la suddivisione deve riflettere eventi veri, non l'ordine di lista. */
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const todayStart = startOfDay(new Date());
+  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
   const today: Work[] = [];
   const yesterday: Work[] = [];
   const older: Work[] = [];
 
-  items.forEach((w, i) => {
-    const time = w.startedAt ? new Date(w.startedAt).getTime() : now - i * (8 * 60 * 60 * 1000);
-    const diff = now - time;
-    if (diff < oneDay) {
+  items.forEach((w) => {
+    if (!w.startedAt) {
+      older.push(w);
+      return;
+    }
+    const time = new Date(w.startedAt).getTime();
+    if (time >= todayStart) {
       today.push(w);
-    } else if (diff < 2 * oneDay) {
+    } else if (time >= yesterdayStart) {
       yesterday.push(w);
     } else {
       older.push(w);
@@ -376,7 +383,7 @@ export function ConversationWorkspaceSidebar({
 
             {older.length > 0 && (
               <>
-                <div className="cw-sb-date-label">Settimana scorsa</div>
+                <div className="cw-sb-date-label">Precedenti</div>
                 {older.map((w) => (
                   <button
                     key={w.id}

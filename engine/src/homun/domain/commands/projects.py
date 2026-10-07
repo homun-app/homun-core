@@ -15,10 +15,22 @@ from homun.domain.commands.membership import _normalize_member_ids
 from homun.domain.commands.membership import _normalize_team_ids
 
 
+def _require_unique_project_name(store, name: str, *, exclude_id: str | None = None) -> None:
+    """I progetti attivi hanno nome univoco: la sidebar e i selettori lo usano
+    come etichetta, un duplicato rende ambigua la destinazione di lavori e chat."""
+    normalized = name.strip().casefold()
+    for existing in store.projects.values():
+        if existing.id == exclude_id or existing.status == "archived":
+            continue
+        if (existing.name or "").strip().casefold() == normalized:
+            raise ValidationError(f"A project named '{name.strip()}' already exists")
+
+
 def _project_create(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     name = str(payload.get("name", "")).strip()
     if not name:
         raise ValidationError("Project name is required")
+    _require_unique_project_name(ctx.store, name)
     member_ids = _normalize_member_ids(ctx, payload.get("member_ids"))
     team_ids = _normalize_team_ids(ctx, payload.get("team_ids"))
     status = str(payload.get("status", "active") or "active").strip()
@@ -65,6 +77,7 @@ def _project_update(ctx: CommandContext, actor: Actor, command_id: str, payload:
         name = str(payload.get("name", "")).strip()
         if not name:
             raise ValidationError("Project name is required")
+        _require_unique_project_name(ctx.store, name, exclude_id=project.id)
         project.name = name
     if "description" in payload:
         project.description = str(payload.get("description") or "")
@@ -129,6 +142,19 @@ def _project_create_from_conversation(
     if conversation.project_id is not None:
         raise ValidationError("Conversation already belongs to a project")
     name = str(payload.get("name", "")).strip() or conversation.title
+    normalized = name.strip().casefold()
+    existing = next((p for p in ctx.store.projects.values()
+                     if p.status != "archived"
+                     and (p.name or "").strip().casefold() == normalized), None)
+    if existing is not None:
+        # il titolo del lavoro genera nomi ripetuti: si aggrega al progetto omonimo
+        conversation.project_id = existing.id
+        conversation.version += 1
+        conversation.updated_at = utc_now()
+        existing.conversation_ids = list(dict.fromkeys(
+            [*(existing.conversation_ids or []), conversation.id]))
+        return {"project_id": existing.id, "conversation_id": conversation.id,
+                "conversation_version": conversation.version, "reused": True}
     member_ids = _normalize_member_ids(ctx, payload.get("member_ids"))
     team_ids = _normalize_team_ids(ctx, payload.get("team_ids"))
     project = Project(

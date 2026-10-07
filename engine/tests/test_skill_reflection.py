@@ -30,7 +30,7 @@ def _completed_run(ctx, actor, *, skills=True, messages=None, agent_id=None):
     unique = _uuid.uuid4().hex[:8]
     agent_id = agent_id or _apply(ctx, actor, f'ag-{unique}', 'agent.create',
                                   {'name': f'Atlas-{unique}'})['agent_id']
-    project = _apply(ctx, actor, f'p-{unique}', 'project.create', {'name': 'P'})['project_id']
+    project = _apply(ctx, actor, f'p-{unique}', 'project.create', {'name': f'P-{unique}'})['project_id']
     conversation = _apply(ctx, actor, f'c-{unique}', 'conversation.create',
                           {'title': 'P', 'project_id': project})['conversation_id']
     work = _apply(ctx, actor, f'w-{unique}', 'work.create', {

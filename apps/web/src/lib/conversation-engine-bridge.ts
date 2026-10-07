@@ -20,6 +20,8 @@ import {
 } from "./interpretation-display.ts";
 
 export type EngineWorkRecord = {
+  created_at?: string;
+  updated_at?: string;
   id: string;
   title: string;
   objective: string;
@@ -230,6 +232,11 @@ export function engineWorkToUiWork(
     requester: "Fabio",
     reviewer: "Fabio",
   };
+  // data reale del motore per il raggruppamento per giorno nella sidebar
+  const workDate = record.updated_at ?? record.created_at;
+  if (workDate) {
+    work.startedAt = workDate;
+  }
   if (record.project_id) {
     work.projectId = record.project_id;
   }

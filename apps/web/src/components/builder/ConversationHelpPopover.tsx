@@ -56,8 +56,8 @@ export function ConversationHelpPopover({
           className="linear-menu-popover"
           style={{
             bottom: "calc(100% + 10px)",
-            left: "-120px",
-            width: "280px",
+            left: 0,
+            width: "min(240px, 72vw)",
             zIndex: 120,
           }}
           role="menu"
