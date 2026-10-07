@@ -56,7 +56,27 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   client peer `pair_with_host`/`remote_request`, middleware Bearer-persona
   sempre attivo (no-op in session mode, abilita i peer in dev).
   Verificato dal vivo su HTTP reale. Test: `test_remote_pairing_f52.py` (6).
-- ⬜ Fette 3-6: replica selettiva, outbox, E2E, delega.
+- ✅ **Fetta 3** (2026-10-07) — replica selettiva in lettura per progetto:
+  snapshot di bootstrap + feed eventi con cursor (sequence dell'host) su
+  `/v1/remote/{events,snapshot}`, perimetro = solo ciò che la policy
+  autorizza (revoca del grant interrompe lo stream); lato peer
+  `sync_remote_project` con proiezione in tabella separata, marcata
+  Fonte: motore remoto. Test: `test_remote_replication_f53.py` (3).
+- ✅ **Fetta 4** (2026-10-07) — contributi remoti con outbox onesto:
+  `POST /v1/remote/commands` (received ≠ accepted, perimetro comandi
+  limitato), outbox peer con stati pending/delivered/conflict — host
+  assente = in attesa di consegna, mai salvato; flush ordinato e dedup
+  per command_id. Test: `test_remote_outbox_f54.py` (3).
+- ✅ **Fetta 6 (core)** (2026-10-07) — delega ai peer: `PeerAssignment`
+  con offer/accept/return/revoke; ritorno idempotente per fingerprint
+  (stesso risultato riconferma, diverso = conflitto), scadenza valutata
+  a ogni tocco, solo l'assegnatario tocca; endpoint remoti
+  `/remote/assignments` + accept/return. Test: `test_delegation_f56.py` (3).
+- ◐ **Fetta 5 (E2E)**: NON iniziata — cifratura per oggetto/destinatario e
+  transfer con manifest: serve review del protocollo prima (doc
+  distribuzione dati §3). Il pilot su VPN non la richiede.
+- ⬜ Collegamento delega↔ledger budget (riserva atomica sugli assignment)
+  e reconcile dopo timeout: passo successivo della fetta 6.
 
 ### F6 — Strumenti e connettori
 - ✅ F6.2 web search (ddgs, `tools/search.py`, protezione errori-retry)

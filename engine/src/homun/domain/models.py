@@ -100,6 +100,29 @@ class Person(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class PeerAssignment(BaseModel):
+    """F5.5 — delega di un passo a un peer: risultato unico, ricevuta.
+
+    L'offerta riserva input e budget dichiarativi; il ritorno è idempotente
+    per assignment: lo stesso risultato non duplica, uno diverso è conflitto."""
+    id: str
+    workspace_id: str
+    work_id: str
+    assignee_person_id: str
+    capability: str
+    input_hash: str
+    input_ref: dict = Field(default_factory=dict)
+    model_attempts_reserved: int = 0
+    status: str = "offered"  # offered|accepted|returned|failed|expired|revoked
+    result: dict | None = None
+    model_attempts_used: int | None = None
+    issued_by: str = ""
+    expires_at: datetime | None = None
+    returned_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 class PersonDevice(BaseModel):
     """Dispositivo associato a una persona; revocabile da solo (F5.1)."""
     id: str

@@ -183,3 +183,56 @@ def remote_commands(workspace_id: str, body: RemoteCommandRequest,
         return submit_remote_command(ctx, actor, body.model_dump())
     except DomainError as exc:
         raise _http_error(exc) from exc
+
+@router.get("/workspaces/{workspace_id}/remote/assignments")
+def remote_assignments(workspace_id: str,
+                       x_homun_actor_id: str | None = Header(default=None),
+                       x_homun_actor_name: str | None = Header(default=None)):
+    """Le deleghe offerte alla persona autenticata."""
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    from homun.domain.commands.delegation import list_assignments_for
+    return {"items": list_assignments_for(ctx, ctx.repository.snapshot(), actor.id)}
+
+
+class AssignmentActionRequest(BaseModel):
+    command_id: str = Field(min_length=1, max_length=160)
+    result: dict = Field(default_factory=dict)
+    model_attempts_used: int | None = Field(default=None, ge=0)
+
+
+@router.post("/workspaces/{workspace_id}/remote/assignments/{assignment_id}/accept")
+def remote_assignment_accept(workspace_id: str, assignment_id: str,
+                             x_homun_actor_id: str | None = Header(default=None),
+                             x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    from homun.domain.ids import new_id
+    try:
+        with ctx.repository.locked():
+            with ctx.repository.transaction() as store:
+                out = ctx.service.for_store(store).apply(
+                    actor, f"racc:{new_id('cmd')}", "delegation.accept",
+                    {"assignment_id": assignment_id})
+            ctx.service.store = store
+        return out
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/workspaces/{workspace_id}/remote/assignments/{assignment_id}/return")
+def remote_assignment_return(workspace_id: str, assignment_id: str,
+                             body: AssignmentActionRequest,
+                             x_homun_actor_id: str | None = Header(default=None),
+                             x_homun_actor_name: str | None = Header(default=None)):
+    """Ritorno con ricevuta: idempotente sullo stesso risultato."""
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        with ctx.repository.locked():
+            with ctx.repository.transaction() as store:
+                out = ctx.service.for_store(store).apply(
+                    actor, body.command_id, "delegation.return",
+                    {"assignment_id": assignment_id, "result": body.result,
+                     "model_attempts_used": body.model_attempts_used})
+            ctx.service.store = store
+        return out
+    except DomainError as exc:
+        raise _http_error(exc) from exc

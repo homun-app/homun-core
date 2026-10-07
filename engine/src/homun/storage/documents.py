@@ -23,6 +23,7 @@ ENTITY_TYPES = {
     "skill": ("skills", models.Skill),
     "person": ("persons", models.Person),
     "person_device": ("person_devices", models.PersonDevice),
+    "peer_assignment": ("peer_assignments", models.PeerAssignment),
 }
 
 

@@ -56,6 +56,9 @@ from homun.domain.commands.external import (
     _skill_create, _skill_patch, _skill_approve, _skill_reject, _skill_archive,
 )
 from homun.domain.commands.conversations import append_engine_message
+from homun.domain.commands.delegation import (
+    delegation_offer, delegation_accept, delegation_return, delegation_revoke,
+)
 from homun.domain.commands.identity import (
     _person_bootstrap, _person_invite, _person_confirm, _person_revoke, _device_revoke,
 )
@@ -68,6 +71,10 @@ from homun.domain.commands.budgets import work_set_budget
 HANDLERS = {
     "person.bootstrap": _person_bootstrap,
     "person.invite": _person_invite,
+    "delegation.offer": delegation_offer,
+    "delegation.accept": delegation_accept,
+    "delegation.return": delegation_return,
+    "delegation.revoke": delegation_revoke,
     "person.confirm": _person_confirm,
     "person.revoke": _person_revoke,
     "device.revoke": _device_revoke,
