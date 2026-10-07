@@ -106,6 +106,7 @@ class PersonDevice(BaseModel):
     workspace_id: str
     person_id: str
     name: str = ""
+    key_fingerprint: str | None = None
     status: str = "confirmed"  # pending | confirmed | revoked
     last_seen_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)

@@ -89,7 +89,8 @@ def _person_confirm(ctx: CommandContext, actor: Actor, command_id: str, payload:
                     display_name=display_name, role=str(invite.get("role") or "member"))
     device = PersonDevice(id=str(payload.get("device_id") or person_id + ":dev1"),
                           workspace_id=ctx.store.workspace_id, person_id=person_id,
-                          name=str(payload.get("device_name") or "")[:120])
+                          name=str(payload.get("device_name") or "")[:120],
+                          key_fingerprint=str(payload.get("key_fingerprint") or "") or None)
     ctx.store.persons[person.id] = person
     ctx.store.person_devices[device.id] = device
     invite["person_id"] = person.id

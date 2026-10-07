@@ -37,7 +37,8 @@ class SessionAuthMiddleware:
         elif scope['method'] == 'OPTIONS' and origin:
             # CORS middleware answers preflight; no handler or data is reached.
             return await self.app(scope, receive, send)
-        elif scope['path'] in {'/v1/contribution-portal/read', '/v1/contribution-portal/respond', '/v1/session/redeem'} and scope['method'] == 'POST':
+        elif scope['path'] in {'/v1/contribution-portal/read', '/v1/contribution-portal/respond', '/v1/session/redeem',
+                    '/v1/remote/pair', '/v1/remote/pair/confirm'} and scope['method'] == 'POST':
             # These exact routes authenticate a scoped invitation themselves.
             # They ignore actor headers and never accept the desktop token.
             return await self.app(scope, receive, send)
@@ -66,3 +67,42 @@ class SessionAuthMiddleware:
                     scope = {**scope, 'headers': trusted}
                     return await self.app(scope, receive, send)
         await response(scope, receive, send)
+
+class PersonBearerHeaderMiddleware:
+    """Risolve il Bearer di una sessione persona nell'header attore.
+
+    Sempre attivo: con SessionAuthMiddleware è un no-op (l'attore è già
+    stato iniettato e validato); in dev-insecure abilita le chiamate dei
+    peer — il token del dispositivo identifica la persona anche senza il
+    middleware di sessione. Mai sovrascrive un actor header esistente."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http':
+            return await self.app(scope, receive, send)
+        headers = [(key, value) for key, value in scope['headers']]
+        has_actor = any(key.lower() == b'x-homun-actor-id' for key, _ in headers)
+        bearer = next((value for key, value in headers
+                       if key.lower() == b'authorization'), b'')
+        resolved = None if has_actor else self._resolve(bearer)
+        if resolved:
+            headers.append((b'x-homun-actor-id', resolved.encode('ascii')))
+            headers.append((b'x-homun-actor-name', resolved.encode('ascii')))
+            scope = {**scope, 'headers': headers}
+        return await self.app(scope, receive, send)
+
+    def _resolve(self, bearer: bytes) -> str | None:
+        token = bearer.decode('latin1').removeprefix('Bearer ').strip()
+        if not token:
+            return None
+        try:
+            from homun.context import get_context
+            from homun.identity import PersonSessionStore
+            ctx = get_context()
+            store = PersonSessionStore(ctx.repository.connection(), ctx.repository.lock)
+            session = store.resolve(token)
+            return session['person_id'] if session else None
+        except Exception:
+            return None

@@ -47,7 +47,16 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   Persone (i collaboratori dimostrativi sono stati rimossi).
   Test: `test_identity_f51.py` (6). Restano della fetta: esperienza di
   riscatto guidata lato client (con la fetta 2).
-- ⬜ Fette 2-6: pairing/trasporto, replica, outbox, E2E, delega.
+- ✅ **Fetta 2** (2026-10-07) — pairing remoto con prova di possesso:
+  `peers/` con chiave Ed25519 del dispositivo (privata mai in rete),
+  `/v1/remote/pair` in due passaggi (presentazione con chiave pubblica e
+  nonce di sfida → firma: l'invito si consuma solo a firma giusta, un
+  impostore non lo brucia), versione protocollo esplicita, sfida breve
+  (10 min), token di trasporto legato al dispositivo con revoca immediata,
+  client peer `pair_with_host`/`remote_request`, middleware Bearer-persona
+  sempre attivo (no-op in session mode, abilita i peer in dev).
+  Verificato dal vivo su HTTP reale. Test: `test_remote_pairing_f52.py` (6).
+- ⬜ Fette 3-6: replica selettiva, outbox, E2E, delega.
 
 ### F6 — Strumenti e connettori
 - ✅ F6.2 web search (ddgs, `tools/search.py`, protezione errori-retry)

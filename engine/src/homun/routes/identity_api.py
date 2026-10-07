@@ -106,3 +106,37 @@ def redeem_session(body: RedeemRequest):
         return redeem_invite(ctx, body.token, body.model_dump())
     except DomainError as exc:
         raise _http_error(exc) from exc
+
+class PairPresentRequest(BaseModel):
+    invite_token: str = Field(min_length=10, max_length=200)
+    display_name: str = Field(min_length=1, max_length=120)
+    device_name: str = Field(default="", max_length=120)
+    public_key: str = Field(min_length=40, max_length=400)
+    protocol_version: int = Field(ge=1, le=99)
+
+
+class PairConfirmRequest(BaseModel):
+    pairing_id: str = Field(min_length=4, max_length=80)
+    signature: str = Field(min_length=8, max_length=200)
+
+
+@router.post("/remote/pair")
+def remote_pair_present(body: PairPresentRequest):
+    """Passo 1 del pairing remoto: presentazione con chiave pubblica."""
+    ctx = get_context()
+    from homun.identity.pairing import present_pairing
+    try:
+        return present_pairing(ctx, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/remote/pair/confirm")
+def remote_pair_confirm(body: PairConfirmRequest):
+    """Passo 2: firma della nonce → sessione di trasporto del dispositivo."""
+    ctx = get_context()
+    from homun.identity.pairing import confirm_pairing
+    try:
+        return confirm_pairing(ctx, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc

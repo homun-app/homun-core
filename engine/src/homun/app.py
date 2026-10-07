@@ -135,6 +135,8 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
         # il browser vede "Failed to fetch" su ogni POST con header custom
         allow_private_network=True,
     )
+    from homun.routes.session_auth import PersonBearerHeaderMiddleware
+    app.add_middleware(PersonBearerHeaderMiddleware)
     if session_token:
         from homun.routes.session_auth import SessionAuthMiddleware
         app.add_middleware(SessionAuthMiddleware, token=session_token, origins=allowed_origins or [], actor_id=session_actor_id)
