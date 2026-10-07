@@ -95,7 +95,7 @@ replica selettiva, E2E, delega ai peer). Vedi §3.
 
 | Debito | Stato | Dove |
 |---|---|---|
-| Vista Automazioni su dati simulati | da collegare alle routine vere | `research/2026-10-07-feedback-desktop.md` |
+| ~~Vista Automazioni senza creazione~~ | ✅ corretto 2026-10-07: creator in vista con lavori modello pre-filtrati | `research/2026-10-07-feedback-desktop.md` |
 | Vista Compiti/filtri incomprensibile | da rifare contro F5 (persona≠device) | idem |
 | Connettori duplicati con i canali | da unificare/etichettare | idem |
 | Errori connettore visibili | ✅ corretto 2026-10-07 | commit feedback |
@@ -107,12 +107,12 @@ replica selettiva, E2E, delega ai peer). Vedi §3.
 
 ## 3. Cosa resta da fare, in ordine
 
-1. **F5 — multiutente tra macchine** (il blocco strategico, visione
-   confermata da Fabio): F5.1 identità device/persona + pairing, F5.2
-   replica selettiva, F5.3 E2E, F5.4 outbox onesto, F5.5 delega ai peer,
-   F5.6 peer revocato/offline. Gate: due Mac su reti diverse (contributo
-   di Giulia visibile a Fabio, terzo peer negato, file ripreso, delega unica).
-   Subito dopo: rifare Compiti contro le identità reali.
+1. **F5 — multiutente tra macchine**: specifica esecutiva pronta in
+   `development/2026-10-07-f5-collaborazione-specifica.md` (6 fette con
+   contratti e test, fondamenta esistenti mappate, decisioni D1–D4 con
+   default proposto). Prima fetta: persone/ruoli/sessioni vere + inviti
+   (3-4 giorni, nessuna rete, nessuna decisione pendente) — sblocca anche
+   il rifacimento di Compiti. Gate: due Mac su reti diverse.
 2. **Automazioni**: collegare la vista sidebar alle routine del motore
    (Fonte: motore) e completare F7.1 (conversazione→routine promossa).
 3. **Connettori**: unificare catalogo connettori/canali, F6.1 ToolGrant,
