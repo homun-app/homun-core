@@ -165,3 +165,21 @@ def remote_snapshot(workspace_id: str, project_id: str,
         return _snapshot(ctx, actor, project_id=project_id)
     except DomainError as exc:
         raise _http_error(exc) from exc
+
+class RemoteCommandRequest(BaseModel):
+    command_id: str = Field(min_length=1, max_length=160)
+    type: str = Field(min_length=1, max_length=80)
+    payload: dict = Field(default_factory=dict)
+
+
+@router.post("/workspaces/{workspace_id}/remote/commands")
+def remote_commands(workspace_id: str, body: RemoteCommandRequest,
+                    x_homun_actor_id: str | None = Header(default=None),
+                    x_homun_actor_name: str | None = Header(default=None)):
+    """Comando dal peer: ricevuto ≠ accettato ≠ completato."""
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    from homun.identity.remote_commands import submit_remote_command
+    try:
+        return submit_remote_command(ctx, actor, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc
