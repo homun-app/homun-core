@@ -1,7 +1,7 @@
 """F5.1 — rotte identità: persone, inviti, riscatto sessione."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from homun.context import get_context
@@ -251,3 +251,67 @@ def peers_projections():
     ctx = get_context()
     from homun.peers.store import list_projections
     return {"items": list_projections(ctx.data_dir)}
+
+class PeerConnectRequest(BaseModel):
+    host: str = Field(min_length=8, max_length=200)
+    invite_token: str = Field(min_length=10, max_length=200)
+    display_name: str = Field(min_length=1, max_length=120)
+    device_name: str = Field(default="", max_length=120)
+
+
+class PeerSyncRequest(BaseModel):
+    project_id: str = Field(min_length=4, max_length=80)
+
+
+@router.post("/peers/connect")
+def peers_connect(body: PeerConnectRequest,
+                  x_homun_actor_id: str | None = Header(default=None),
+                  x_homun_actor_name: str | None = Header(default=None)):
+    """Onboarding guidato: QUESTA installazione entra in uno spazio remoto
+    riscattando l'invito con la chiave del proprio dispositivo."""
+    request_context(get_context().workspace_id, x_homun_actor_id, x_homun_actor_name)
+    ctx = get_context()
+    from homun.peers import pair_with_host
+    from homun.peers.store import PeerConnections, device_key_path
+    try:
+        connection = pair_with_host(body.host, body.invite_token, body.display_name,
+                                    body.device_name or "Homun di questo Mac",
+                                    device_key_path(ctx.data_dir))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, detail={"code": "remote_unavailable",
+                                         "message": f"Pairing fallito: {exc}"}) from exc
+    PeerConnections(ctx.data_dir).upsert(
+        host=connection.host, workspace_id=connection.workspace_id,
+        person_id=connection.person_id, device_id=connection.device_id,
+        device_token=connection.device_token,
+        key_fingerprint=connection.key_fingerprint, display_name=body.display_name)
+    return {"host": connection.host, "workspace_id": connection.workspace_id,
+            "person_id": connection.person_id, "device_id": connection.device_id,
+            "key_fingerprint": connection.key_fingerprint}
+
+
+@router.post("/peers/connections/{host_path:path}/sync")
+def peers_sync(host_path: str, body: PeerSyncRequest,
+               x_homun_actor_id: str | None = Header(default=None),
+               x_homun_actor_name: str | None = Header(default=None)):
+    """Sincronizza ORA la proiezione di un progetto condiviso."""
+    request_context(get_context().workspace_id, x_homun_actor_id, x_homun_actor_name)
+    ctx = get_context()
+    from homun.peers import sync_remote_project
+    from homun.peers.store import PeerConnections, peers_db_path
+    connection = PeerConnections(ctx.data_dir).connection(host_path)
+    if connection is None:
+        raise HTTPException(404, detail={"code": "not_found",
+                                         "message": "Unknown remote host"})
+    try:
+        view = sync_remote_project(connection, peers_db_path(ctx.data_dir),
+                                   body.project_id)
+    except Exception as exc:
+        raise HTTPException(502, detail={"code": "remote_unavailable",
+                                         "message": f"Sync fallito: {exc}"}) from exc
+    return {"host": view["host"], "project": view["snapshot"].get("project"),
+            "cursor": view["cursor"],
+            "conversations": len(view["snapshot"].get("conversations", [])),
+            "works": len(view["snapshot"].get("works", []))}

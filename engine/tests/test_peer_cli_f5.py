@@ -148,3 +148,15 @@ def test_pilot_flow_end_to_end_with_cli(host, tmp_path):
         peers_route = client.get("/v1/peers/connections", headers=OWNER)
         assert peers_route.status_code == 200
         assert peers_route.json()["items"] == []
+
+
+def test_peers_routes_connect_unreachable_is_typed(host, tmp_path):
+    """Host irraggiungibile: errore tipizzato remote_unavailable, non un 500."""
+    app, ctx, _ = host
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post("/v1/peers/connect", headers=OWNER,
+                               json={"host": "http://127.0.0.1:9",  # porta chiusa
+                                     "invite_token": "x" * 20,
+                                     "display_name": "T"})
+        assert response.status_code == 502
+        assert response.json()["detail"]["code"] == "remote_unavailable"

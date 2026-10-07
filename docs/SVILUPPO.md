@@ -80,6 +80,14 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   (porte diverse, data dir diverse): pair → grant → sync → contributo
   arrivato all'host → delega offerta/accettata/restituita con ricevuta.
   Test: `test_peer_cli_f5.py`.
+- ✅ **Onboarding e pannello UI** (2026-10-07) — Impostazioni → Spazi
+  remoti: «Entra nello spazio» con host+invito+nome (il motore riscatta
+  con la chiave del proprio dispositivo, `POST /v1/peers/connect`),
+  elenco connessioni con fingerprint, proiezioni sincronizzate con
+  badge Fonte: motore remoto e «Sincronizza ora». Verificato nel browser
+  end-to-end: il dev engine è entrato in un terzo engine come peer e il
+  progetto condiviso appare nel pannello. Host irraggiungibile = errore
+  tipizzato remote_unavailable.
 - ◐ **Fetta 5 (E2E)**: NON iniziata — cifratura per oggetto/destinatario e
   transfer con manifest: serve review del protocollo prima (doc
   distribuzione dati §3). Il pilot su VPN non la richiede.

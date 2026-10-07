@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
+import { Globe,
   X,
   Settings2,
   UserRound,
@@ -29,6 +29,7 @@ import { ConversationUnifiedModelsSection } from "./ConversationUnifiedModelsSec
 import { ConversationUnifiedPluginsSection } from "./ConversationUnifiedPluginsSection";
 import { ConversationBudgetSettingsSection } from "./ConversationModelsSettingsSection";
 import { EnginePeopleSection } from "./EnginePeopleSection";
+import { EngineRemoteSpacesSection } from "./EngineRemoteSpacesSection";
 import { ConversationAutomationsSettingsSection } from "./ConversationAutomationsSettingsSection";
 import { ConversationReviewQueuesSection } from "./ConversationReviewQueuesSection";
 import { ConversationMemorySettingsSection } from "./ConversationMemorySettingsSection";
@@ -72,6 +73,7 @@ const settingGroups: SettingsGroup[] = [
     title: "Governance Aziendale",
     items: [
       { id: "people", label: "Directory Collaboratori", icon: UsersRound },
+      { id: "remote-spaces", label: "Spazi remoti", icon: Globe },
       { id: "memory", label: "Policy & Memoria Globale", icon: BookMarked },
       { id: "agents", label: "Catalogo Agenti dello Spazio", icon: Bot },
       { id: "skills", label: "Catalogo Skill", icon: Sparkles },
@@ -319,6 +321,7 @@ export function ConversationSettings({
             <ConversationBudgetSettingsSection draft={draft} onChange={change} />
           )}
           {section === "people" && <EnginePeopleSection />}
+          {section === "remote-spaces" && <EngineRemoteSpacesSection />}
           {(section === "plugins" || section === "skills") && <CapabilitiesView />}
           {section === "automations" && <ConversationAutomationsSettingsSection />}
           {section === "review" && <ConversationReviewQueuesSection actorId="person_fabio" />}
