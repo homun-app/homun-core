@@ -21,7 +21,7 @@ def test_sqlite_failure_has_typed_transport_error(tmp_path, monkeypatch):
     try:
         def unavailable():
             raise sqlite3.OperationalError('private internal database path')
-        monkeypatch.setattr(ctx.repository, 'load', unavailable)
+        monkeypatch.setattr(ctx.repository, '_load', unavailable)
         client = TestClient(create_app(), raise_server_exceptions=False)
         response = client.get('/v1/workspaces/ws_local/conversations')
         assert response.status_code == 503

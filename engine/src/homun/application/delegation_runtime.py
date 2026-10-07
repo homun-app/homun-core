@@ -49,7 +49,7 @@ def _view(child):
 
 def inspect_child(ctx, actor, run, delegation_id):
     with ctx.repository.locked():
-        store = ctx.repository.load()
+        store = ctx.repository.snapshot()
         parent = admitted_parent(ctx, store, actor, run)
         handle = parent.get('_delegations', {}).get(delegation_id)
         if not handle:
@@ -83,7 +83,7 @@ def merge_snapshot(current, snapshot):
 def has_pending(ctx, run):
     if run.get('_delegation_parent'):
         return False
-    snapshot = ctx.repository.load()
+    snapshot = ctx.repository.snapshot()
     return any(r.result.get('_delegation_parent', {}).get('run_id') == run['id']
                and (r.result['status'] not in TERMINAL or not r.result.get('_delegation_admitted'))
                for r in snapshot.commands.values())
@@ -92,7 +92,7 @@ def has_pending(ctx, run):
 
 def live_count(ctx, run, snapshot=None):
     """Read authoritative child commands, including parked/retrying children."""
-    snapshot = ctx.repository.load() if snapshot is None else snapshot
+    snapshot = ctx.repository.snapshot() if snapshot is None else snapshot
     return sum(record.result.get('_delegation_parent', {}).get('run_id') == run['id']
                and record.result['status'] not in TERMINAL
                for record in snapshot.commands.values())
@@ -102,13 +102,21 @@ def reconcile_delegations(ctx, *, limit=50):
     """Admit completed child receipts and release unused parent budget once."""
     from homun.application.agent_run_fencing import _fence
     admitted = []
-    for record in ctx.repository.load().commands.values():
-        if len(admitted) >= limit:
-            break
-        if not record.result.get('_delegation_parent'):
-            continue
+    # pre-filtro read-only sulla snapshot: la transazione (parse completo)
+    # si apre solo quando c'è davvero un figlio da ammettere
+    candidates = [
+        record.result for record in ctx.repository.snapshot().commands.values()
+        if record.result.get('_delegation_parent')
+        and record.result.get('status') in TERMINAL
+        and not record.result.get('_delegation_admitted')
+    ][:limit]
+    for child_snapshot in candidates:
         with ctx.repository.locked():
             with ctx.repository.transaction() as store:
+                record = store.commands.get(child_snapshot.get('id'))
+                if record is None:
+                    continue
+                child = record.result
                 child = store.commands[record.command_id].result
                 binding, parent = parent_for(store, child)
                 if not parent:

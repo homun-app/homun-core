@@ -101,7 +101,7 @@ def test_approved_ssh_run_executes_once(setup, server, monkeypatch):
     key = str(server.root / 'client')
     body = {'command_id': 'run', 'expected_version': 1, 'material_ids': [], 'terminal_backend': 'ssh',
             'ssh_host': '127.0.0.1', 'ssh_user': server.user, 'ssh_port': server.port,
-            'ssh_host_key': server.host_key, 'ssh_key_path': key}
+            'ssh_host_key': server.host_key, 'ssh_key_path': key, 'memory': False, 'skills': False}
     proposal = agent_runs.propose(ctx, actor, work, body)
     assert agent_runs.propose(ctx, actor, work, body)['id'] == proposal['id']
     assert 'key_path' not in proposal['terminal']

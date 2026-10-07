@@ -22,12 +22,17 @@ from homun.policy.work import require_work_access
 
 PROPOSAL_TYPE = 'agent_run.propose'
 ACTIVE = {'pending_approval', 'queued', 'running', 'waiting_input', 'waiting_external', 'waiting_automation', 'paused'}
+import logging
+
 from homun.domain.capabilities import AGENT_RUN
 LIMITS = AGENT_RUN.limits
 
 
 def public(run):
     item = deepcopy({k: v for k, v in run.items() if not k.startswith('_')})
+    if '_approval_channel' in run:
+        # The stamp stays internal (underscore); clients read the official field.
+        item['approval_channel'] = run['_approval_channel']
     terminal = item.get('terminal')
     if isinstance(terminal, dict):
         terminal.pop('key_path', None)
@@ -110,6 +115,40 @@ def authority(ctx, store, actor, run, *, approve=False, running=False):
     return work, agent
 
 
+
+def _inject_volatile(ctx, run) -> None:
+    """Parte volatile del prompt Hermes: memoria della persona e indice skill.
+
+    Solo se il run porta le capability (già gate sui tool); la memoria è
+    snapshot gelato al propose come Hermes (cache del prefisso intatta).
+    """
+    try:
+        persona_notes: list[str] = []
+        if run.get('memory'):
+            actor = Actor.model_validate(run['_actor'])
+            from homun.memory.visibility import matches_context
+            for note in (ctx.memory.list(scope='person', subject_id=actor.id,
+                                          include_deleted=False) if ctx.memory else []):
+                if note.status == 'approved':
+                    persona_notes.append(note.text[:400])
+        skills: list[dict] = []
+        if run.get('skills'):
+            store = ctx.repository.load()
+            for skill in sorted(store.skills.values(), key=lambda k: k.created_at):
+                if skill.status == 'approved':
+                    skills.append({'name': skill.name, 'description': skill.description})
+        if not persona_notes and not skills:
+            return
+        from homun.models.prompt_injection import volatile_parts
+        block = volatile_parts(persona_notes, [], skills[:80])
+        if not block:
+            return
+        system = run['_messages'][0]
+        system['content'] = system['content'] + chr(10)*2 + block
+    except Exception:
+        logging.getLogger(__name__).warning(
+            'iniezione memoria/skill nel prompt saltata per %s', run.get('id'), exc_info=True)
+
 def propose(ctx, actor, work_id, body):
     from homun.application.agent_mcp import discover, validate_bindings
     bindings = discover(ctx, actor, work_id, body)
@@ -186,6 +225,11 @@ def propose(ctx, actor, work_id, body):
                 project = store.projects.get(work.project_id)
                 if project and getattr(project, 'agent_model_overrides', None):
                     connection_id = project.agent_model_overrides.get(assignee_id)
+            if work.project_id and not body.get('allowed_tools'):
+                project = store.projects.get(work.project_id)
+                allow = (getattr(project, 'agent_tool_overrides', None) or {}).get(assignee_id)
+                if isinstance(allow, list) and allow:
+                    body['allowed_tools'] = list(allow)
             if not connection_id and agent:
                 connection_id = agent.preferred_connection_id
             if not connection_id:
@@ -193,7 +237,7 @@ def propose(ctx, actor, work_id, body):
             if connection_id is None:
                 raise ValidationError('Choose an active model connection')
             run = {'id': body['command_id'], 'work_id': work_id, 'status': 'pending_approval',
-                   'expected_version': pinned, 'materials': materials, 'team': team, 'person': person, 'limits': dict(LIMITS),
+                   'expected_version': pinned, 'materials': materials, 'team': team, 'person': person, 'limits': body.get('limits') if isinstance(body.get('limits'), dict) and all(isinstance(v, int) and v > 0 for v in body['limits'].values()) else dict(LIMITS),
                    'tool_version': 'adaptive-materials-v1', 'assignee_id': assignee_id,
                    '_step_id': current_step(store, work).id,
                    'executor_name': agent.name if agent else 'Homun', 'connection_id': connection_id,
@@ -234,13 +278,16 @@ def propose(ctx, actor, work_id, body):
                     ctx.data_dir, actor.workspace_id, body)
                 run['_cwd'] = str(cwd_path)
                 run['_workspace_root'] = str(workspace_root)
+                from homun.models.native_prompt import hermes_guidance
                 run['_messages'] = [m.model_dump() for m in initial_messages(
                     run['_objective'],
                     run['_instructions'],
                     cwd=cwd_path,
                     workspace_root=workspace_root,
                     expand_refs=True,
+                    base_guidance=hermes_guidance(run.get('connection_id')),
                 )]
+                _inject_volatile(ctx, run)
             from homun.application.agent_tool_registry import registry_for
             if bindings and not agent_native.enabled(run):
                 raise ValidationError('External agent tools require native model support')
@@ -311,18 +358,30 @@ def propose(ctx, actor, work_id, body):
                 if not agent_native.enabled(run):
                     raise ValidationError('Desktop computer use requires native model support')
                 run['desktop'] = {'policy': 'native-desktop-v1', 'version': 1}
+            # Knowledge capabilities default ON when the connection supports
+            # native tools (Hermes-parity out of the box); explicit flags win.
+            _native = agent_native.enabled(run)
+            for _capability in ('memory', 'skills'):
+                if body.get(_capability) is None:
+                    body.pop(_capability, None)
+                if _capability not in body:
+                    body[_capability] = _native
             if body.get('memory'):
-                if not agent_native.enabled(run):
+                if not _native:
                     raise ValidationError('Memory tools require native model support')
                 run['memory'] = {'policy': 'scoped-workspace-v1', 'version': 1}
             if body.get('skills'):
-                if not agent_native.enabled(run):
+                if not _native:
                     raise ValidationError('Skills tools require native model support')
                 run['skills'] = {'policy': 'workspace-catalog-v1', 'version': 1}
             if body.get('delegation'):
                 if not agent_native.enabled(run):
                     raise ValidationError('Delegation tools require native model support')
                 run['delegation'] = {'policy': 'isolated-subagent-v1', 'version': 1}
+            if body.get('computer_use'):
+                if not agent_native.enabled(run):
+                    raise ValidationError('Computer use requires native model support')
+                run['computer_use'] = {'policy': 'cua-driver-supervised-v1', 'version': 1}
             if body.get('clarify'):
                 if not agent_native.enabled(run):
                     raise ValidationError('Clarify tools require native model support')
@@ -443,6 +502,13 @@ def list_runs(ctx, actor, work_id):
 
 
 def resume_waiting(ctx, run_id):
+    # precontrollo read-only: senza risposta matura la transazione non si apre
+    peek = ctx.repository.snapshot().commands.get(run_id)
+    if peek is None or (peek.result or {}).get('status') != 'waiting_input':
+        return False
+    if not any(c.status == 'resolved' for c in ctx.repository.snapshot().contributions.values()
+               if c.id == (peek.result or {}).get('request_id')):
+        return False
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             run = lookup(store, run_id)

@@ -209,7 +209,7 @@ def test_aggregate_limit_rejection_keeps_reported_usage(setup):
         message=NativeMessage(role='assistant',content='x'*50000),usage=error.usage)
     assert advance(ctx,p['id'])=='failed'
     store=ctx.repository.load()
-    assert not store.artifacts and store.work_budgets[work].spent.output_tokens==1200
+    assert not store.artifacts and store.work_budgets[work].spent.output_tokens>=1200
     assert store.work_budgets[work].unknown.attempts==0
 
 

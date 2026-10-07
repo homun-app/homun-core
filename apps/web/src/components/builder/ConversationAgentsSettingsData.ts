@@ -114,7 +114,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     responsibility: "Definisce requisiti, roadmap e scompone gli obiettivi in deliverable operativi.",
     instructions:
       "Sei l'Architetto del Prodotto. Il tuo compito è analizzare la visione dell'utente, chiarire ambiguità e strutturare piani d'azione pragmatici con criteri di accettazione verificabili.",
-    autonomyMode: "semi",
+    autonomyMode: "supervised",
     capabilities: ["web_search", "filesystem"],
   },
   {
@@ -123,7 +123,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     responsibility: "Scrive codice pulito, esegue refactoring e implementa soluzioni end-to-end.",
     instructions:
       "Sei uno sviluppatore senior. Scrivi codice modulare, tipizzato e ben documentato. Preferisci soluzioni semplici ed estendibili, testando sempre la coerenza dell'architettura.",
-    autonomyMode: "strict",
+    autonomyMode: "supervised",
     capabilities: ["code_sandbox", "filesystem", "mcp_tools"],
   },
   {
@@ -132,28 +132,28 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     responsibility: "Esplora documentazione tecnica, analizza mercati e sintetizza dati complessi.",
     instructions:
       "Sei un ricercatore meticoloso. Raccogli fonti autorevoli, verifichi informazioni e fornisci sintesi strutturate con pro, contro ed evidenze verificabili.",
-    autonomyMode: "semi",
+    autonomyMode: "supervised",
     capabilities: ["web_search", "filesystem"],
   },
 ];
 
 export const AUTONOMY_LEVELS: AutonomyLevel[] = [
   {
-    id: "strict",
-    title: "Supervisione stretta (Consigliato per codice e scritture)",
-    desc: "L'agente richiede conferma umana prima di eseguire qualsiasi strumento, modifica file o azione esterna.",
+    id: "supervised",
+    title: "Supervisione umana (staging)",
+    desc: "Ogni run, comando e modifica file attende l'approvazione di una persona nelle code di revisione. Consigliato per codice e scritture.",
     icon: ShieldAlert,
   },
   {
-    id: "semi",
-    title: "Semi-autonomo (Consigliato per ricerca e analisi)",
-    desc: "Esegue letture e ricerche in autonomia; richiede approvazione solo per modifiche permanenti o comandi critici.",
-    icon: ShieldCheck,
-  },
-  {
     id: "autonomous",
-    title: "Autonomia operativa",
-    desc: "Procede autonomamente su tutte le fasi interne e notifica l'utente al termine del lavoro.",
+    title: "Autonomo (auto-approvazione policy)",
+    desc: "I run e i gate in container vengono approvati dalla policy in modo tracciato (marcati 'auto-approvazione prevista'); resta tutto nel registro di audit.",
     icon: Zap,
   },
 ];
+
+/** Etichetta del badge per il livello di autonomia (valori del motore: supervised|autonomous). */
+export function autonomyLabel(mode?: string): string {
+  if (mode === "autonomous") return "Autonomo";
+  return "Supervisione umana";
+}

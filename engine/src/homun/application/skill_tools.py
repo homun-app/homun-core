@@ -7,7 +7,26 @@ approved by a human person. Staged skills cannot be executed or viewed as truste
 from __future__ import annotations
 
 import uuid
-from homun.domain.errors import ValidationError
+from homun.domain.errors import ConflictError, ValidationError
+from homun.domain.models import utc_now
+
+
+def _record_usage(ctx, skill) -> int:
+    """Lightweight counter; usage is telemetry, not a domain event."""
+    try:
+        with ctx.repository.locked():
+            with ctx.repository.transaction() as store:
+                tracked = store.skills.get(skill.id)
+                if tracked is not None:
+                    tracked.usage_count = tracked.usage_count + 1
+                    tracked.last_used_at = utc_now()
+                    count = tracked.usage_count
+                else:
+                    count = skill.usage_count
+            ctx.service.store = store
+        return count
+    except Exception:
+        return skill.usage_count
 
 
 def execute(ctx, actor, run, tool, args):
@@ -64,6 +83,8 @@ def execute(ctx, actor, run, tool, args):
                 "message": f"Skill '{skill.name}' is {skill.status} (quarantined) and requires human approval before use.",
             }
 
+        usage_count = _record_usage(ctx, skill)
+
         return {
             "id": skill.id,
             "name": skill.name,
@@ -73,6 +94,7 @@ def execute(ctx, actor, run, tool, args):
             "resources": sorted(list((skill.resources or {}).keys())),
             "author_type": skill.author_type,
             "revision": skill.revision,
+            "usage_count": usage_count,
         }
 
     if tool == "skill_resource":
@@ -175,9 +197,59 @@ def execute(ctx, actor, run, tool, args):
             "message": f"Skill '{skill.name}' trust status updated to {res['status']}.",
         }
 
+    if tool == "skill_patch":
+        skill_id = (args.get("skill_id") or "").strip()
+        name = (args.get("name") or "").strip().lower()
+        if not skill_id and not name:
+            return {"error_code": "invalid_arguments", "message": "Specify skill_id or name"}
+        body = str(args.get("body") or "").strip()
+        if not body:
+            return {"error_code": "invalid_arguments", "message": "A patched body is required"}
+
+        skill = store.skills.get(skill_id) if skill_id else None
+        if skill is None and name:
+            for s in store.skills.values():
+                if s.name.lower() == name:
+                    skill = s
+                    break
+        if skill is None:
+            return {"error_code": "skill_not_found", "message": f"Skill not found: {skill_id or name}"}
+        if skill.author_type != "agent":
+            return {
+                "error_code": "skill_not_agent_managed",
+                "message": "The agent may only patch agent-authored (curator-managed) skills.",
+            }
+
+        cmd_id = f"cmd_skq_{uuid.uuid4().hex[:12]}"
+        payload = {
+            "skill_id": skill.id,
+            "expected_version": int(args.get("expected_version") or skill.revision),
+            "body": body,
+            "author_type": "agent",
+        }
+        if args.get("description"):
+            payload["description"] = str(args["description"]).strip()[:120]
+        try:
+            with ctx.repository.locked():
+                with ctx.repository.transaction() as write_store:
+                    ctx.service.store = write_store
+                    res = ctx.service.apply(actor, cmd_id, "skill.patch", payload)
+                ctx.service.store = write_store
+            ctx.persist()
+        except ConflictError as exc:
+            return {"error_code": exc.code, "message": exc.message}
+        return {
+            "status": res["status"],
+            "skill_id": skill.id,
+            "name": skill.name,
+            "revision": res["revision"],
+            "message": "Patch staged: an approved skill returns to quarantine until a person approves it.",
+        }
+
     if tool == "skill_propose":
         name = args["name"].strip()
-        description = args["description"].strip()
+        # Forgive-and-truncate: a hard error here makes small models retry-loop.
+        description = args["description"].strip()[:120]
         body = args["body"].strip()
         tags = [str(t).strip() for t in (args.get("tags") or []) if str(t).strip()]
         resources = {str(k).strip(): str(v) for k, v in (args.get("resources") or {}).items() if str(k).strip()}

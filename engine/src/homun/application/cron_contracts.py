@@ -41,6 +41,7 @@ class CronJob:
     error_count: int = 0
     consecutive_errors: int = 0
     quota_hold: bool = False
+    auto_approve: bool = False   # agent runs staged by this job may start without a per-fire human approval
     last_output: Optional[str] = None
     owner_actor: Optional[Dict[str, Any]] = None
     source_work_id: Optional[str] = None
@@ -76,6 +77,7 @@ class CronJob:
             error_count=int(data.get("error_count") or 0),
             consecutive_errors=int(data.get("consecutive_errors") or 0),
             quota_hold=bool(data.get("quota_hold") or False),
+            auto_approve=bool(data.get("auto_approve") or False),
             last_output=data.get("last_output"),
             owner_actor=data.get("owner_actor"),
             source_work_id=data.get("source_work_id"),

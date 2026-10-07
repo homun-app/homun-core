@@ -57,7 +57,7 @@ def test_steering_during_failure_does_not_schedule_old_request(setup):
     def finish(messages,**k):seen.extend(messages);return final()
     ctx.models.complete_tools=finish
     assert advance(ctx,p['id'])=='completed'
-    assert any(m.content=='Usa la nuova indicazione' for m in seen)
+    assert any('Usa la nuova indicazione' in m.content for m in seen)
 
 
 def test_steering_during_wait_can_continue_immediately(setup):

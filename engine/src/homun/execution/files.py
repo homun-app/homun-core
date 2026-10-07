@@ -17,6 +17,13 @@ class FileChangedError(ValidationError):
 
 
 def _parts(path,*,directory=False):
+    # "." and "./" are how models ask for the workspace root; normalize, don't refuse.
+    if isinstance(path,str):
+        stripped=path.strip()
+        if stripped in {'.','./'}:
+            path=''
+        elif stripped.startswith('./') and stripped not in {'.','./'}:
+            path=stripped[2:]
     if directory and path=='':return []
     if (not isinstance(path,str) or not path or len(path)>1024 or '\\' in path
             or '\x00' in path or any(p in {'','..','.'} for p in path.split('/'))):

@@ -13,7 +13,7 @@ from homun.domain.errors import DomainError
 
 
 def _session_waiting(ctx, session_id, snapshot=None):
-    snapshot = ctx.repository.load() if snapshot is None else snapshot
+    snapshot = ctx.repository.snapshot() if snapshot is None else snapshot
     candidates = [r.result for r in snapshot.commands.values()
                   if r.type == 'agent_run.propose' and isinstance(r.result, dict)
                   and (r.result.get('id') == session_id or r.result.get('work_id') == session_id)]
@@ -112,7 +112,7 @@ def wake_due_automation(ctx, *, now=None, limit=20):
     from homun.application.agent_run_fencing import _fence
     now = time.time() if now is None else float(now)
     woke = []
-    for record in ctx.repository.load().commands.values():
+    for record in ctx.repository.snapshot().commands.values():
         if len(woke) >= limit:
             break
         if record.type != PROPOSAL_TYPE or record.result.get('status') != 'waiting_automation':

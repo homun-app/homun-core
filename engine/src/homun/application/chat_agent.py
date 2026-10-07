@@ -1,0 +1,394 @@
+"""Conversazioni con l'agente: la chat singola funziona come ci si aspetta.
+
+Una conversazione può essere legata a un agente; da quel momento ogni
+messaggio della persona avvia (o_steera) un run nativo dell'agente su quel
+testo, e la risposta finale dell'agente torna nella conversazione come
+messaggio. Niente cerimonia di lavoro: il lavoro chat è nascosto e riusato.
+I gate (terminale, modifiche file) restano quelli del motore.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import secrets
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from homun.domain.errors import DomainError, NotFoundError, ValidationError
+from homun.domain.capabilities import AGENT_RUN
+from homun.domain.models import Actor, utc_now
+
+logger = logging.getLogger(__name__)
+
+STATE_FILENAME = "chat_agents.json"
+CHAT_WORK_TITLE = "Chat agente"
+
+
+def _state_path(ctx) -> Path:
+    return ctx.data_dir / STATE_FILENAME
+
+
+def _load(ctx) -> Dict[str, Any]:
+    try:
+        data = json.loads(_state_path(ctx).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        logger.warning("chat agent state illegibile, si riparte da zero", exc_info=True)
+        return {}
+
+
+def _save(ctx, state: Dict[str, Any]) -> None:
+    path = _state_path(ctx)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def binding_for(ctx, conversation_id: str) -> Optional[Dict[str, Any]]:
+    entry = _load(ctx).get(conversation_id)
+    return entry if isinstance(entry, dict) and entry.get("agent_id") else None
+
+
+def bind(ctx, actor: Actor, conversation_id: str, agent_id: str) -> Dict[str, Any]:
+    store = ctx.repository.snapshot()
+    if conversation_id not in store.conversations:
+        raise NotFoundError(f"Conversation not found: {conversation_id}")
+    agent = store.agents.get(agent_id)
+    if agent is None or agent.status == "retired":
+        raise NotFoundError(f"Agent not found: {agent_id}")
+    state = _load(ctx)
+    state[conversation_id] = {"agent_id": agent_id}
+    _save(ctx, state)
+    return {"conversation_id": conversation_id, "agent_id": agent_id}
+
+
+def unbind(ctx, conversation_id: str) -> bool:
+    state = _load(ctx)
+    removed = state.pop(conversation_id, None) is not None
+    if removed:
+        _save(ctx, state)
+    return removed
+
+
+def _active_chat_run(store, conversation_id: str):
+    """Un run nativo attivo del lavoro chat di questa conversazione."""
+    from homun.application.agent_runs import PROPOSAL_TYPE
+    for record in store.commands.values():
+        if record.type != PROPOSAL_TYPE or not isinstance(record.result, dict):
+            continue
+        run = record.result
+        if run.get("status") not in {"queued", "running", "waiting_input",
+                                     "waiting_external", "waiting_automation", "paused"}:
+            continue
+        work = store.works.get(run.get("work_id", ""))
+        if work and work.primary_conversation_id == conversation_id \
+                and work.title == CHAT_WORK_TITLE:
+            return run
+    return None
+
+
+LIMITS = AGENT_RUN.limits
+
+CHAT_PERSONA_NAME = "Homun"
+
+
+def default_chat_agent(store) -> Optional[str]:
+    """La persona della chat: un agente dedicato, non il primo del registro."""
+    homun = [a for a in store.agents.values()
+             if a.name == CHAT_PERSONA_NAME and a.status == "active"]
+    if homun:
+        return sorted(homun, key=lambda a: a.created_at)[0].id
+    others = [a for a in sorted(store.agents.values(), key=lambda a: a.created_at)
+              if a.status == "active"]
+    return others[0].id if others else None
+
+
+def ensure_chat_persona(ctx, actor: Actor) -> Optional[str]:
+    """Crea una volta la persona della chat ('Homun'), se non esiste."""
+    store = ctx.repository.snapshot()
+    existing = default_chat_agent(store)
+    if existing and next(a for a in store.agents.values() if a.id == existing).name == CHAT_PERSONA_NAME:
+        return existing
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as write_store:
+            svc = ctx.service.for_store(write_store)
+            result = svc.apply(actor, f"chat-persona:{secrets.token_hex(3)}", "agent.create", {
+                "name": CHAT_PERSONA_NAME, "role": "Assistente della chat",
+                "instructions": "Sei l'assistente operativo di Homun: rispondi in modo diretto e "
+                "utile nella lingua della persona, usa gli strumenti quando servono (ricerca web, "
+                "memoria, skill) e riporta i risultati in modo sintetico.",
+                "autonomy_mode": "supervised",
+            })
+        ctx.service.store = write_store
+    return str(result["agent_id"])
+
+
+def handles(ctx, store, body) -> bool:
+    """Il messaggio va all'agente invece che al solo interprete testuale.
+
+    Conversazioni legate esplicitamente, oppure il default del workspace
+    (primo agente attivo): la chat funziona come una chat con un agente.
+    """
+    if body.type != "conversation.post_message":
+        return False
+    conversation_id = str(body.payload.get("conversation_id") or "")
+    if binding_for(ctx, conversation_id) is not None:
+        return True
+    return default_chat_agent(store) is not None
+
+
+def _new_chat_work(ctx, actor: Actor, conversation_id: str, agent_id: str,
+                   text: str) -> str:
+    """Lavoro chat del turno: objective = il messaggio della persona."""
+    import secrets as _secrets
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as write_store:
+            svc = ctx.service.for_store(write_store)
+            work_id = svc.apply(actor, f"chat-work:{_secrets.token_hex(4)}",
+                                "work.create", {
+                                    "conversation_id": conversation_id,
+                                    "title": CHAT_WORK_TITLE,
+                                    "objective": text.strip()[:2000] or "Rispondi in chat.",
+                                })["work_id"]
+            version = write_store.works[work_id].version
+            svc.apply(actor, f"chat-plan:{_secrets.token_hex(4)}",
+                      "plan.propose", {
+                          "work_id": work_id, "expected_version": version,
+                          "steps": [{"title": "Chat", "assignee_id": agent_id,
+                                     "capability": "agent_run"}]})
+            version = write_store.works[work_id].version
+            svc.apply(actor, f"chat-accept:{_secrets.token_hex(4)}",
+                      "plan.accept", {"work_id": work_id, "expected_version": version})
+        ctx.service.store = write_store
+    return str(work_id)
+
+
+
+
+def _bind_history(ctx, store, run_id: str, conversation_id: str) -> None:
+    """La chat è una conversazione: i turni precedenti entrano nel contesto."""
+    try:
+        from homun.models.native_turn import NativeMessage
+        messages = sorted(
+            (m for m in store.messages.values()
+             if m.conversation_id == conversation_id
+             and m.author_id in {"person_fabio", "person_local", "homun_engine"}),
+            key=lambda m: m.created_at)
+        recent = messages[:-1][-20:]
+        if not recent:
+            return
+        with ctx.repository.locked():
+            with ctx.repository.transaction() as write_store:
+                run = write_store.commands.get(run_id)
+                if run is None or '_messages' not in run.result:
+                    return
+                msgs = run.result['_messages']
+                history = []
+                for m in recent:
+                    role = "assistant" if m.author_id == "homun_engine" else "user"
+                    text = m.text.strip()[:2000]
+                    if text:
+                        history.append(NativeMessage(role=role, content=text).model_dump())
+                if history:
+                    run.result['_messages'] = [msgs[0]] + history + [msgs[-1]]
+            ctx.service.store = write_store
+    except Exception:
+        logger.warning("bind storia saltato per %s", run_id, exc_info=True)
+
+def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
+                    connection_id: str | None = None) -> Dict[str, Any]:
+    """Avvia il run della risposta; il testo torna in chat quando completa.
+
+    ``connection_id`` è il modello scelto dalla persona nel composer: il run
+    della chat usa quello, non quello dell'agente d'ufficio.
+    """
+    from homun.application.agent_runs import propose
+    entry = binding_for(ctx, conversation_id)
+    store = ctx.repository.snapshot()
+    if entry is None:
+        agent_id = default_chat_agent(store)
+        if agent_id is None:
+            raise ValidationError("Conversazione non legata a un agente")
+        entry = bind(ctx, actor, conversation_id, agent_id)
+    active = _active_chat_run(store, conversation_id)
+    if active is not None:
+        # un run è già in volo su questa chat: il messaggio lo steera
+        from homun.application.agent_control import control_in_store
+        work = store.works[active["work_id"]]
+        control_in_store(ctx, store, actor, work.id, active["id"], {
+            "command_id": f"chat-steer:{secrets.token_hex(6)}",
+            "expected_version": work.version, "action": "steer", "text": text}, echo=False)
+        return {"agent_run_id": active["id"], "steered": True}
+
+    work_id = _new_chat_work(ctx, actor, conversation_id, entry["agent_id"], text)
+    version = ctx.repository.snapshot().works[work_id].version
+    body = {
+        "command_id": f"chat-run:{secrets.token_hex(6)}",
+        "expected_version": version, "material_ids": [],
+        "web_pages": True,
+        # streaming live del parziale: la chat mostra ragionamento e testo
+        # mentre il modello lavora (parity Hermes)
+        "native_stream": True,
+    }
+    if connection_id:
+        body["connection_id"] = connection_id
+    # la chat è conversazione, non consegna singola. Parity Hermes:
+    # max_iterations 500 di default per il parent, e al limite il run chiede
+    # un riassunto (handle_max_iterations) invece di fallire — la guardia
+    # anti-loop vera sono gli stall-guard dei finish gates.
+    body["limits"] = {**dict(LIMITS), "max_turns": 500, "max_model_attempts": 600,
+                      "max_observation_characters": 1_000_000}
+    try:
+        run = propose(ctx, actor, work_id, body)
+    except ValidationError:
+        # la ricerca web richiede run nativi: chat testuale senza, il resto invariato
+        body.pop("web_pages")
+        body["command_id"] = f"chat-run:{secrets.token_hex(6)}"
+        run = propose(ctx, actor, work_id, body)
+    logger.info("chat-turn conv=%s agent=%s run=%s connection=%s modello_scelto=%s",
+                conversation_id, entry.get("agent_id"), run.get("id"),
+                run.get("connection_id"), connection_id or "(default agente)")
+    # continuità: i turni precedenti entrano nel contesto del run appena creato
+    _bind_history(ctx, ctx.repository.snapshot(), run["id"], conversation_id)
+    # Chi scrive in chat ha già deciso: il run parte subito, timbrato.
+    from homun.application.agent_runs import approve
+    owner = Actor(id=actor.id, workspace_id=ctx.workspace_id,
+                  display_name="Chat", kind="person")
+    approve(ctx, owner, work_id, run["id"], {
+        "command_id": f"chat-ap:{secrets.token_hex(6)}",
+        "expected_version": run["expected_version"], "digest": run["digest"]})
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as write_store:
+            record = write_store.commands.get(run["id"])
+            if record is not None:
+                record.result["_approval_channel"] = "chat:person"
+                record.result["_chat_conversation_id"] = conversation_id
+        ctx.service.store = write_store
+    return {"agent_run_id": run["id"], "steered": False}
+
+
+def _final_answer(run: Dict[str, Any]) -> str:
+    import re as _re
+    user_message = next((m.get("content") for m in reversed(run.get("_messages") or [])
+                         if isinstance(m, dict) and m.get("role") == "user"), None)
+    messages = run.get("_messages") or []
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "assistant" \
+                and str(message.get("content") or "").strip():
+            text = str(message["content"]).strip()
+            # il blocco di ragionamento non è la risposta: via dal testo consegnato
+            text = _re.sub(r"<think>.*?</think>", "", text, flags=_re.DOTALL).strip()
+            text = text or str(message["content"]).strip()
+            return _presentable(text, run, user_message)
+    for observation in reversed(run.get("observations") or []):
+        text = str((observation or {}).get("message") or "").strip()
+        if text:
+            return _presentable(text, run, user_message)
+    return ""
+
+
+import re as _re2
+from homun.models.finish_gates import strip_think_blocks
+_PREAMBLE_MARKERS = _re2.compile(
+    r"^(?:[\w\s,'\"()\-–—:]{0,120}?(?:now|ok okay|alright)\b[^.!?\n]{0,80}[.!?]\s*)",
+    _re2.IGNORECASE)
+
+
+def _presentable(text: str, run: Dict[str, Any], user_message: str | None) -> str:
+    """La risposta come la vedrebbe dalla chat di Hermes: gate sul testo,
+    preambolo discorsivo di apertura rimosso, lingua dichiarata rispettata."""
+    clean = strip_think_blocks(text)
+    # preambolo meta ("I have good material now. …", "Let me summarize …"):
+    # la prima frase che parla del processo, non dell'utente, salta se seguita
+    # da sostanza; una risposta intera non viene toccata (lunghezza < soglia no).
+    # frasi meta iniziali a catena: finché parlano del compito (o citano la
+    # domanda) e c'è sostanza dopo, salgono via; la prima frase che risponde
+    # resta. Risposta corta o pulita: intoccata.
+    meta_re = _re2.compile(
+        r"\b(this is|the user|the request|the person|i have|i now|let me|"
+        r"i'll now|i will now|now let me|no tools|no tool needed|i can see|based on|"
+        r"i'll provide|i will provide|i need to|looking at|after reviewing|"
+        r"my final|final answer|here('s| is)|i should|i must|it's a simple|simple identity|"
+        r"l'utente|la richiesta|ho trovato|ora ho|adesso|riassumo|devo)\b",
+        _re2.IGNORECASE)
+    while len(clean) > 120:
+        stop = _re2.search(r"[.!?:\n]", clean[1:])
+        end = stop.start() + 1 if stop else len(clean)
+        sentence, remainder = clean[:end + 1], clean[end + 1:]
+        quoted = bool(user_message) and user_message[:30].lower() in sentence.lower()
+        if not remainder.strip() or not (meta_re.search(sentence) or quoted):
+            break
+        clean = remainder.lstrip()
+    return clean or text
+
+
+def deliver_chat_answers(ctx) -> int:
+    """Pump: le risposte dei run chat completati tornano in conversazione."""
+    from homun.application.agent_runs import PROPOSAL_TYPE
+    delivered = 0
+    store = ctx.repository.snapshot()
+    for record in store.commands.values():
+        if record.type != PROPOSAL_TYPE or not isinstance(record.result, dict):
+            continue
+        run = record.result
+        if run.get("_chat_delivered") or not run.get("_chat_conversation_id"):
+            continue
+        if run.get("status") == "failed":
+            code = str(run.get("error_code") or "failed")
+            failed_conv = run.get("_chat_conversation_id")
+            logger.warning("chat-run FAILED conv=%s run=%s errore=%s",
+                           failed_conv, run.get("id"), code)
+            conversation_id = failed_conv
+            if not conversation_id or conversation_id not in store.conversations:
+                continue
+            try:
+                with ctx.repository.locked():
+                    with ctx.repository.transaction() as write_store:
+                        ctx.service.for_store(write_store).append_engine_message(
+                            actor=Actor(id="person_local", workspace_id=ctx.workspace_id,
+                                        display_name="Homun"),
+                            command_id=f"chat-error:{run['id'][:16]}:{secrets.token_hex(3)}",
+                            conversation_id=str(conversation_id),
+                            author_id="homun_engine",
+                            text=f"⚠️ La risposta non è andata a buon fine ({code}). "
+                                 "Controlla il modello selezionato nei dettagli del tentativo.",
+                            event_type="message.interpreted",
+                            event_payload={"agent_run_id": run["id"], "chat": True,
+                                           "error_code": code})
+                        target = write_store.commands.get(run["id"])
+                        if target is not None:
+                            target.result["_chat_delivered"] = True
+                ctx.service.store = write_store
+            except Exception:
+                logger.warning("consegna errore chat fallita", exc_info=True)
+            else:
+                delivered += 1
+            continue
+        if run.get("status") not in {"completed", "waiting_input"}:
+            continue
+        conversation_id = run.get("_chat_conversation_id")
+        if not conversation_id or binding_for(ctx, str(conversation_id)) is None:
+            continue
+        answer = _final_answer(run) or ("(run completato senza risposta testuale)")
+        try:
+            with ctx.repository.locked():
+                with ctx.repository.transaction() as write_store:
+                    ctx.service.for_store(write_store).append_engine_message(
+                        actor=Actor(id="person_local", workspace_id=ctx.workspace_id,
+                                    display_name="Homun"),
+                        command_id=f"chat-answer:{run['id'][:16]}:{secrets.token_hex(3)}",
+                        conversation_id=str(conversation_id),
+                        author_id="homun_engine",
+                        text=answer,
+                        event_type="message.interpreted",
+                        event_payload={"agent_run_id": run["id"], "chat": True})
+                    target = write_store.commands.get(run["id"])
+                    if target is not None:
+                        target.result["_chat_delivered"] = True
+                ctx.service.store = write_store
+            delivered += 1
+            logger.info("chat-answer consegnata conv=%s run=%s chars=%d",
+                        conversation_id, run.get("id"), len(answer))
+        except Exception:
+            logger.warning("consegna risposta chat fallita per %s", run.get("id"), exc_info=True)
+    return delivered

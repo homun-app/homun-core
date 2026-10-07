@@ -51,10 +51,15 @@ def complete(ctx,run,messages,**kwargs):
             return
         counts={key:event[key] for key in ('chunks','text_chars','tool_calls')
                 if type(event.get(key)) is int and event[key]>=0}
+        # il parziale accumulato alimenta lo streaming live della chat:
+        # la SSE del run lo legge dal record ogni quarto di secondo
+        text=event.get('text')
         with ctx.repository.locked(),ctx.repository.transaction() as store:
             current,valid=current_run(store)
             if valid:
                 current['stream_progress']=counts
+                if isinstance(text,str):
+                    current['stream_partial']={'text': text[-200_000:]}
         last_progress=now
 
     try:

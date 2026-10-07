@@ -130,11 +130,15 @@ class DualWriteMemoryPort:
         *,
         work_id: str | None = None,
         project_id: str | None = None,
+        scope: str | None = None,
+        subject_id: str | None = None,
         include_deleted: bool = False,
     ) -> list[MemoryNote]:
         return self.ledger.list(
             work_id=work_id,
             project_id=project_id,
+            scope=scope,
+            subject_id=subject_id,
             include_deleted=include_deleted,
         )
 
@@ -145,12 +149,18 @@ class DualWriteMemoryPort:
         actor_id: str,
         work_id: str | None = None,
         project_id: str | None = None,
+        scope: str | None = None,
+        subject_id: str | None = None,
+        source_memory_id: str | None = None,
     ) -> MemoryNote:
         note = self.ledger.add_approved(
             text=text,
             actor_id=actor_id,
             work_id=work_id,
             project_id=project_id,
+            scope=scope,
+            subject_id=subject_id,
+            source_memory_id=source_memory_id,
         )
         self._index_note(note)
         return note
@@ -167,21 +177,48 @@ class DualWriteMemoryPort:
         self._forget_mem0(memory_id)
         return note
 
-    def export(self, *, project_id: str | None = None) -> list[MemoryNote]:
-        return self.ledger.export(project_id=project_id)
+    def export(
+        self,
+        *,
+        project_id: str | None = None,
+        scope: str | None = None,
+        subject_id: str | None = None,
+    ) -> list[MemoryNote]:
+        return self.ledger.export(project_id=project_id, scope=scope, subject_id=subject_id)
 
     def recall(
         self,
         query: str,
         *,
         project_id: str | None = None,
+        work_id: str | None = None,
+        agent_id: str | None = None,
+        person_id: str | None = None,
+        scope: str | None = None,
+        subject_id: str | None = None,
+        include_global: bool = True,
         limit: int = 10,
     ) -> list[MemoryNote]:
         cleaned = query.strip()
         if not cleaned:
             return []
-        if self._mem0 is None:
-            return self.ledger.recall(cleaned, project_id=project_id, limit=limit)
+        # Scoped/curated recall is ledger-authoritative: the vector index has
+        # no notion of scope, so visibility is enforced after retrieval only
+        # for the legacy project-only path below.
+        curated = scope is not None or subject_id is not None or work_id is not None \
+            or agent_id is not None or person_id is not None or not include_global
+        if self._mem0 is None or curated:
+            return self.ledger.recall(
+                cleaned,
+                project_id=project_id,
+                work_id=work_id,
+                agent_id=agent_id,
+                person_id=person_id,
+                scope=scope,
+                subject_id=subject_id,
+                include_global=include_global,
+                limit=limit,
+            )
         try:
             raw = self._mem0.search(
                 cleaned,

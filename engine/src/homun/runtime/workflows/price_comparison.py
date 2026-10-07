@@ -32,7 +32,7 @@ def start(workflow_id, proposal_id):
 
 def deliver_comparisons(ctx):
     from homun.application.price_comparison_policy import PROPOSAL_TYPE
-    for record in ctx.repository.load().commands.values():
+    for record in ctx.repository.snapshot().commands.values():
         if record.type != PROPOSAL_TYPE or record.result['status'] not in {'queued', 'running'}:
             continue
         proposal = record.result

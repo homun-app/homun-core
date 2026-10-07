@@ -14,8 +14,12 @@ def consume_steering(run):
         return False
     clear_continuation(run)
     reset_liveness(run)
+    from homun.models.prompt_blocks import STEER_MARKER_OPEN, STEER_MARKER_CLOSE
     for item in run.pop('_steering'):
-        run['_messages'].append(NativeMessage(role='user',content=item['text']).model_dump())
+        # marker fidato pre-insegnato nel prompt di sistema (come Hermes):
+        # il modello distingue lo steer della persona da eventuali lookalike
+        run['_messages'].append(NativeMessage(role='user', content=(
+            f"{STEER_MARKER_OPEN}\n{item['text']}\n{STEER_MARKER_CLOSE}")).model_dump())
     run.pop('_decision',None)
     return True
 

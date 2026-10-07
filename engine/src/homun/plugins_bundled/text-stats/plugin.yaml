@@ -1,0 +1,7 @@
+name: text-stats
+version: 1.0.0
+description: Statistiche di testo (parole, caratteri, frasi) come tool dei run.
+author: homun
+kind: tools
+provides_tools:
+  - text_stats

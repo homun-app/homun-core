@@ -406,3 +406,109 @@ def test_plugin_routes_api(tmp_path):
     assert resp.status_code == 200
     assert not pdir.exists()
     assert (data_dir / "info.json").exists()  # Retained!
+
+
+def test_startup_discovery_loads_bundled_plugins():
+    """app.py discovers <home>/plugins plus the engine's bundled tree."""
+    import importlib
+    from homun.application import plugin_manager as pm_mod
+    from homun.application.plugin_storage import set_homun_home_override, reset_homun_home_override
+    import tempfile, pathlib
+
+    pm_mod.reset_plugin_manager()
+    home = pathlib.Path(tempfile.mkdtemp())
+    token = set_homun_home_override(home)
+    try:
+        # il bundled text-stats esiste nel pacchetto: simula la discovery di app.py
+        from homun.application.plugin_loader import iter_plugin_dirs
+        bundled = pathlib.Path(pm_mod.__file__).parents[1] / "plugins_bundled"
+        found = list(iter_plugin_dirs(bundled))
+        assert any(p.name == "text-stats" for p in found)
+        for plugin_dir in found:
+            pm_mod.get_plugin_manager().load_from_directory(plugin_dir, config={})
+        summary = pm_mod.get_plugin_manager().summary()
+        assert summary["plugins_count"] >= 1
+        assert any(t == "text_stats" for t in summary.get("tools", [])) or summary["tools_count"] >= 1
+    finally:
+        reset_homun_home_override(token)
+        pm_mod.reset_plugin_manager()
+
+
+def test_install_requires_exact_sha():
+    from fastapi.testclient import TestClient
+    from homun.app import create_app
+    from homun.context import create_context, reset_context_for_tests
+    import pathlib, tempfile
+    tmp = tempfile.mkdtemp()
+    reset_context_for_tests(create_context(workspace_id="ws_local",
+                                           db_path=pathlib.Path(tmp) / "ws.db",
+                                           data_dir=pathlib.Path(tmp), for_tests=True))
+    app = create_app()
+    client = TestClient(app)
+    if True:
+        short = client.post("/v1/plugins/install", json={"repo": "https://example.com/x.git", "sha": "abc123"})
+        assert short.status_code == 422  # pydantic: 40 hex obbligatori
+        missing = client.post("/v1/plugins/install",
+                              json={"repo": "https://example.com/x.git",
+                                    "sha": "0" * 39 + "1"})  # sha valido ma repo inesistente
+        assert missing.status_code in (400, 404, 504)
+    reset_context_for_tests(None)
+
+
+def test_install_from_local_git_repo(tmp_path):
+    """Clone + checkout SHA esatto + validazione manifest, end-to-end su un repo git locale."""
+    import json as _json
+    import subprocess
+    from fastapi.testclient import TestClient
+    from homun.app import create_app
+    from homun.context import create_context, reset_context_for_tests
+    from homun.application import plugin_manager as pm_mod
+    from homun.application.plugin_storage import set_homun_home_override, reset_homun_home_override
+
+    src = tmp_path / "src-repo"
+    src.mkdir()
+    (src / "plugin.yaml").write_text("name: echo-plugin\nversion: 0.1.0\ndescription: prova\nauthor: test\nkind: tools\n")
+    (src / "__init__.py").write_text(
+        "from homun.models.agent_turn import ToolDefinition\n"
+        "from homun.tools.registry import ToolEntry\n"
+        "from pydantic import BaseModel\n"
+        "class A(BaseModel):\n    text: str\n"
+        "def register(ctx):\n"
+        "    ctx.register_tool(ToolEntry(definition=ToolDefinition(name='echo_tool',"
+        " description='echo', input_schema=A.model_json_schema()), toolset='plugins',"
+        " version='1', arguments_model=A,"
+        " handler=lambda c, a, r, args: {'echo': args.get('text')}, replay='read_only'))\n")
+    def git(*args):
+        subprocess.run(["git", "-C", str(src), *args], check=True, capture_output=True)
+    git("init", "-q")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
+    git("add", "-A")
+    git("commit", "-qm", "plugin")
+    sha = subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"],
+                         capture_output=True, text=True, check=True).stdout.strip()
+
+    home = tmp_path / "home"
+    home.mkdir()
+    pm_mod.reset_plugin_manager()
+    token = set_homun_home_override(home)
+    try:
+        app = create_app()
+        client = TestClient(app)
+        if True:
+            response = client.post("/v1/plugins/install",
+                                   json={"repo": str(src), "sha": sha})
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert body["name"] == "echo-plugin" and body["loaded"] is True
+            listed = client.get("/v1/plugins").json()
+            assert listed["plugins_count"] >= 1
+            assert any(p["name"] == "echo-plugin" for p in listed["plugins"])
+            # sha inesistente → rifiuto tipizzato
+            bogus = client.post("/v1/plugins/install",
+                                json={"repo": str(src), "sha": "f" * 40})
+            assert bogus.status_code == 400 and bogus.json()["detail"]["code"] == "sha_not_found"
+    finally:
+        reset_homun_home_override(token)
+        pm_mod.reset_plugin_manager()
+        reset_context_for_tests(None)

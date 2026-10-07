@@ -217,18 +217,13 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     }
     const prior = messageOverlay[work.id] ?? work.messages;
     const startedAt = Date.now();
+    // Chat istantanea: solo la bolla della persona. L'attività dell'agente
+    // la mostra il blocco live via SSE — nessuno stato di caricamento.
     setMessageOverlay((current) => ({
       ...current,
       [work.id]: [
         ...(current[work.id] ?? work.messages),
         { who: "you", sender: "Fabio", text: effectiveText },
-        {
-          who: "agent",
-          sender: "Homun",
-          text: "",
-          partial: true,
-          wait: { phase: "reading", startedAt },
-        },
       ],
     }));
     try {
@@ -354,10 +349,19 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
           });
         },
       });
-      setMessageOverlay((current) => ({
-        ...current,
-        [work.id]: [...prior, { who: "you", sender: "Fabio", text }, assistantFromPosted(posted)],
-      }));
+      if (posted.chatAgent) {
+        // Chat con l'agente: la risposta arriva dal run (blocco live + evento
+        // messaggio). Qui restano solo le parole della persona.
+        setMessageOverlay((current) => ({
+          ...current,
+          [work.id]: [...prior, { who: "you", sender: "Fabio", text }],
+        }));
+      } else {
+        setMessageOverlay((current) => ({
+          ...current,
+          [work.id]: [...prior, { who: "you", sender: "Fabio", text }, assistantFromPosted(posted)],
+        }));
+      }
     } catch (cause) {
       if (isHomunClientError(cause) && cause.code === "request_cancelled") {
         setMessageOverlay((current) => ({

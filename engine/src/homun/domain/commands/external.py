@@ -116,8 +116,8 @@ def _validate_skill_payload(payload: dict[str, Any]) -> str:
     if not name:
         raise ValidationError("Skill name is required")
     description = str(payload.get("description") or "").strip()
-    if len(description) > 60:
-        raise ValidationError("Skill description must be at most 60 characters")
+    if len(description) > 120:
+        raise ValidationError("Skill description must be at most 120 characters")
     return name
 
 

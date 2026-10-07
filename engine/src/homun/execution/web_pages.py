@@ -239,9 +239,25 @@ def search_hits(raw: bytes, limit: int = 5) -> list[dict[str, str]]:
 
 
 def search_public(query: str) -> dict:
-    """Return a short public result list. An empty list is not an invented answer."""
+    """Return a short public result list via the ddgs package (Hermes 1:1):
+    backoff e rotazione backend gestiti dalla libreria, non da noi."""
     if not isinstance(query, str) or not query.strip() or len(query) > 500 or "\n" in query or "\r" in query:
         return {"error_code": "web_query_refused", "message": "The search query is empty or not a single line"}
+    try:
+        from ddgs import DDGS
+        raw = list(DDGS(timeout=10).text(query.strip(), max_results=5))
+        results = [{"url": r.get("href") or r.get("url") or "",
+                    "title": r.get("title") or "",
+                    "snippet": r.get("body") or r.get("snippet") or ""} for r in raw if (r.get("href") or r.get("url"))]
+        if results:
+            return {"provider": "ddgs", "query": query.strip(), "results": results}
+    except ImportError:
+        pass
+    except Exception:
+        pass
+    return _search_public_html(query)
+def _search_public_html(query: str) -> dict:
+    """Fallback: scraping HTML diretto se ddgs non è installato."""
     payload = urlencode({"q": query.strip()}).encode()
     try:
         scheme, host, port, path, address = _classify("https://html.duckduckgo.com/html/")

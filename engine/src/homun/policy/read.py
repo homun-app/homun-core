@@ -25,8 +25,16 @@ def _require_reference(store, actor, kind, ident):
     elif kind == 'run':
         run = store.runs.get(ident)
         if run is None:
+            # I run agentici vivono nel journal comandi, non in store.runs:
+            # un evento che li referenzia resta leggibile col lavoro d'origine.
+            record = store.commands.get(str(ident))
+            run = (record.result if record is not None
+                   and record.type == 'agent_run.propose'
+                   and isinstance(record.result, dict) else None)
+        if run is None:
             raise NotFoundError('Unknown event run')
-        require_work_access(store, actor, run.work_id, 'read')
+        require_work_access(store, actor, run['work_id']
+                            if isinstance(run, dict) else run.work_id, 'read')
     elif kind in {'material', 'grant'}:
         record = getattr(store, kind + 's').get(ident)
         if record is None:

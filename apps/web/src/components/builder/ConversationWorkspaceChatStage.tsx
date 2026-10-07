@@ -3,6 +3,10 @@
  * Owns presentation; shell owns state and passes storageStatus / callbacks.
  */
 
+import { Markdown as ChatMarkdown } from "./ChatMarkdown";
+import { ConversationAgentLive } from "./ConversationAgentLive";
+import { ConversationBrowserPip } from "./ConversationBrowserPip";
+import { useConversationEventStream } from "@/hooks/useConversationEventStream";
 import { EngineWorkIntake } from "./EngineWorkIntake";
 import { EnginePlanRelayTimeline } from "./EnginePlanRelayTimeline";
 import { ConversationMarginaliaSpine } from "./ConversationMarginaliaSpine";
@@ -13,6 +17,7 @@ import { ConversationAgentWait } from "./ConversationAgentWait";
 import { ConversationAvatar } from "./ConversationAvatar";
 import type { CatalogPlan } from "./ConversationCatalogPlan";
 import { isHumanMember, memberProfile } from "./conversation-members";
+import { buildMentionRefs } from "./conversation-mentions";
 import type { ConversationScenario } from "./conversation-scenarios";
 import type { SpaceData } from "./ConversationSpace";
 import { ConversationWorkspaceWelcome } from "./ConversationWorkspaceWelcome";
@@ -173,32 +178,12 @@ export function ConversationWorkspaceChatStage({
     window.addEventListener("homun:inspect-agent", handler);
     return () => window.removeEventListener("homun:inspect-agent", handler);
   }, [engineAgents, agentNames]);
-  const mentionRefs = [
-    ...scenarios
-      .filter(
-        (s, i) =>
-          memberProfile(s.agent, spaceData.profiles).invitation !== "pending" &&
-          scenarios.findIndex((a) => a.agent === s.agent) === i &&
-          !spaceData.removedPeople?.includes(s.agent),
-      )
-      .map((s) => ({
-        id: s.agent,
-        name: s.agent,
-        kind: "member" as const,
-        description: s.role,
-      })),
-    // Engine roster members are mentionable too: the squad the person built
-    // with the motor must answer @ even when no demo scenario carries them.
-    ...(engineAgents ?? [])
-      .filter((agent) => agent.status === "active")
-      .filter((agent) => !scenarios.some((s) => s.agent === agent.name))
-      .map((agent) => ({
-        id: agent.id,
-        name: agent.name,
-        kind: "member" as const,
-        description: agent.role,
-      })),
-  ];
+  const mentionRefs = buildMentionRefs(scenarios, spaceData, engineAgents);
+
+  const agentStream = useConversationEventStream(
+    engineMode ? work?.engineConversationId : undefined,
+    { onNewMessage: onRefreshEngine },
+  );
 
   useEffect(() => {
     if (historyRef.current && (work?.messages.length || engineIntake?.proposal)) {
@@ -241,8 +226,10 @@ export function ConversationWorkspaceChatStage({
                   <small>
                     {m.sender || (m.who === "you" ? work.requester || "Tu" : scenario!.agent)}
                   </small>
-                  {m.wait ? (
+                  {m.wait && !engineMode ? (
                     <ConversationAgentWait phase={m.wait.phase} startedAt={m.wait.startedAt} />
+                  ) : m.who === "agent" ? (
+                    <ChatMarkdown content={cleanMessageText(m.text)} streaming={m.partial} />
                   ) : (
                     <p className={m.partial ? "cw-message-partial" : undefined}>{cleanMessageText(m.text)}</p>
                   )}
@@ -296,6 +283,15 @@ export function ConversationWorkspaceChatStage({
                   )}
                 </article>
               ))}
+              {engineMode && <ConversationAgentLive
+                stream={agentStream}
+                hiddenWhenAnswered={(work?.messages ?? []).some((m, i) =>
+                  i >= work.messages.length - 3 && m.who === "agent" && !m.partial)}
+              />}
+              <ConversationBrowserPip
+                conversationId={engineMode ? work?.engineConversationId ?? undefined : undefined}
+                runActive={agentStream.runActive}
+              />
               {work.catalogPlan &&
                 work.catalogPlan.steps.filter((step) => step.result).length > 0 && (
                   <div className="cc-chat-results">
@@ -422,7 +418,9 @@ export function ConversationWorkspaceChatStage({
             modelConnectionId={modelConnectionId}
             onModelConnectionIdChange={onModelConnectionIdChange}
           />
-          {historyLoading && <p className="cw-hint" role="status">Caricamento conversazione…</p>}
+          {historyLoading && (work?.messages ?? []).length === 0 && (
+            <p className="cw-hint" role="status">Caricamento conversazione…</p>
+          )}
           {engineMode && engineBusy && onCancelInFlight && (
             <p className="cw-hint cw-engine-busy" role="status">
               Homun sta aspettando la risposta del modello: la conversazione mostra i passaggi

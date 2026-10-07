@@ -50,6 +50,9 @@ class AgentProfile(BaseModel):
     # known to be able to execute. Declarations never grant authorization —
     # grants and policy decide access per project.
     capabilities: list[str] = Field(default_factory=list, max_length=8)
+    # Per-app allowlist for computer use: autonomous agents may drive these
+    # apps without a per-action gate; sensitive surfaces always gate anyway.
+    computer_use_apps: list[str] = Field(default_factory=list, max_length=12)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -284,6 +287,8 @@ class Skill(BaseModel):
     author_type: str = "person"  # person | agent
     author_id: str = ""
     revision: int = 1
+    usage_count: int = 0
+    last_used_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

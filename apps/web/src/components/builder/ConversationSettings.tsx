@@ -21,6 +21,7 @@ import {
   Zap,
   ArrowLeft,
   Search,
+  ClipboardCheck,
 } from "lucide-react";
 import { ConversationUpdateStatus } from "./ConversationUpdateStatus";
 import { ConversationSelect } from "./ConversationSelect";
@@ -29,8 +30,10 @@ import { ConversationUnifiedPluginsSection } from "./ConversationUnifiedPluginsS
 import { ConversationBudgetSettingsSection } from "./ConversationModelsSettingsSection";
 import { ConversationPeopleSettingsSection } from "./ConversationPeopleSettingsSection";
 import { ConversationAutomationsSettingsSection } from "./ConversationAutomationsSettingsSection";
+import { ConversationReviewQueuesSection } from "./ConversationReviewQueuesSection";
 import { ConversationMemorySettingsSection } from "./ConversationMemorySettingsSection";
 import { ConversationAgentsSettingsSection } from "./ConversationAgentsSettingsSection";
+import { ConversationSkillsSettingsSection } from "./ConversationSkillsSettingsSection";
 import { ConversationGatewayChannelsSection } from "./ConversationGatewayChannelsSection";
 import { ConversationEngineMaintenanceSection } from "./ConversationEngineMaintenanceSection";
 import { CapabilitiesView } from "./capabilities/CapabilitiesView";
@@ -62,6 +65,7 @@ const settingGroups: SettingsGroup[] = [
     items: [
       { id: "notifications", label: "Canali & Messaggistica", icon: Bell },
       { id: "automations", label: "Automazioni di sfondo", icon: Zap },
+      { id: "review", label: "Code di revisione", icon: ClipboardCheck },
     ],
   },
   {
@@ -70,6 +74,7 @@ const settingGroups: SettingsGroup[] = [
       { id: "people", label: "Directory Collaboratori", icon: UsersRound },
       { id: "memory", label: "Policy & Memoria Globale", icon: BookMarked },
       { id: "agents", label: "Catalogo Agenti dello Spazio", icon: Bot },
+      { id: "skills", label: "Catalogo Skill", icon: Sparkles },
     ],
   },
   {
@@ -316,7 +321,9 @@ export function ConversationSettings({
           {section === "people" && <ConversationPeopleSettingsSection />}
           {(section === "plugins" || section === "skills") && <CapabilitiesView />}
           {section === "automations" && <ConversationAutomationsSettingsSection />}
+          {section === "review" && <ConversationReviewQueuesSection actorId="person_fabio" />}
           {section === "agents" && <ConversationAgentsSettingsSection actorId="person_fabio" />}
+          {section === "skills" && <ConversationSkillsSettingsSection actorId="person_fabio" />}
           {section === "projects" && (
             <div className="cv-settings-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <h3 style={{ margin: 0, fontSize: 16 }}>Project Hub</h3>

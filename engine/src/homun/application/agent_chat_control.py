@@ -11,7 +11,10 @@ def route_message(ctx,store,actor,body,result):
     for record in store.commands.values():
         if record.type!=PROPOSAL_TYPE:continue
         run=record.result
-        work=store.works[run['work_id']]
+        # run orfani (il loro lavoro non esiste più, es. dopo un ripristino)
+        # non instradano né bloccano la conversazione: si saltano
+        work=store.works.get(run.get('work_id'))
+        if work is None:continue
         if (run['status'] in {'queued','running','paused'} and agent_native.enabled(run)
                 and conversation_id in work.conversation_ids
                 and actor.kind=='person' and actor.id in {work.owner_id,work.reviewer_id}):

@@ -11,6 +11,7 @@ import { memberProfile, isHumanMember } from "./conversation-members";
 import { type SpaceData, type SpaceView, spacePeople } from "./ConversationSpace";
 import { ConversationSearch } from "./ConversationSearch";
 import { ConversationWorkspaceChatStage } from "./ConversationWorkspaceChatStage";
+import { EngineChatStage } from "./chat/EngineChatStage";
 import { ConversationWorkspacePreview } from "./ConversationWorkspacePreview";
 import { ConversationWorkspaceSidebar } from "./ConversationWorkspaceSidebar";
 import { ConversationWorkspaceSpaceHost } from "./ConversationWorkspaceSpaceHost";
@@ -21,7 +22,7 @@ import { ConversationFloatingAgentWidget } from "./ConversationFloatingAgentWidg
 import { ConversationWorkspaceWorkPanel, registerPlanAgent } from "./ConversationWorkspaceWorkPanel";
 import { initialScenarios, scenarioForWork } from "./conversation-scenarios";
 import { applyBoardMove, boardMoveSuccessMessage, validateBoardMove } from "./conversation-board-move";
-import { buildDemoBootstrap, resolveDemoMode } from "./conversation-demo-mode";
+import { demoWorkspaceBootstrap } from "./conversation-demo-mode";
 import { downloadPrototypeExport, downloadWorkResult } from "./conversation-export";
 import { buildMaterialLibrary } from "./conversation-material-library";
 import { buildConversationSearchEntries, openWorkResultPreview } from "./conversation-search-entries";
@@ -29,7 +30,6 @@ import { isCompletedNoticeForViewer, isPendingForViewer, workspaceWorkStatus } f
 import { useConversationPrototypeStorage } from "./useConversationPrototypeStorage";
 import { type Phase, type Work } from "./conversation-types";
 import { useEffect, useReducer, useRef, useState } from "react";
-import { ConversationEngineBanner } from "./ConversationEngineBanner";
 import { useChatAutoScroll } from "@/hooks/useChatAutoScroll";
 import { useEngineWorkspace } from "@/hooks/useEngineWorkspace";
 import { useWorkDestinationScroll, type WorkDestination } from "@/hooks/useWorkDestinationScroll";
@@ -40,14 +40,13 @@ import { parseConversationNavigation } from "@/lib/conversation-navigation";
 import {
   parsePlanInsert,
   parsePlanReorder,
+  reorderPlanSteps,
   stripTrailingMention,
 } from "@/lib/conversation-plan-commands";
-
 import { projectWorkspaceData } from "@/lib/engine-project-projection";
 export type { Work } from "./conversation-types";
-const demoMode = resolveDemoMode();
-const { storageKey } = demoMode;
-const demoBootstrap = buildDemoBootstrap(demoMode);
+const { storageKey, bootstrap: demoBootstrap } = demoWorkspaceBootstrap();
+
 export function ConversationWorkspace() {
   const [active, setActive] = useState<string | null>(null);
   const engine = useEngineWorkspace(active);
@@ -629,35 +628,23 @@ export function ConversationWorkspace() {
     }
 
     if (work?.catalogPlan && work.phase !== "approved" && /^sposta\s/i.test(text)) {
-      const reorder = parsePlanReorder(text);
       const plan = work.catalogPlan;
-      if (reorder) {
-        const from = plan.steps.findIndex((s) =>
-          s.title.toLowerCase().includes(reorder.itemTitle.toLowerCase()),
-        );
-        const target = plan.steps.findIndex((s) =>
-          s.title.toLowerCase().includes(reorder.anchorTitle.toLowerCase()),
-        );
-        if (from >= plan.completed && target >= plan.completed && from !== target) {
-          const steps = plan.steps.filter((_, i) => i !== from);
-          const to =
-            steps.findIndex((s) => s.id === plan.steps[target]!.id) +
-            (reorder.relation === "dopo" ? 1 : 0);
-          steps.splice(to, 0, plan.steps[from]!);
-          setPlanEdit({ workId: work.id, plan: { ...plan, steps } });
-          patch({
-            messages: [
-              ...work.messages,
-              { who: "you", text },
-              {
-                who: "agent",
-                text: "Ti propongo questo ordine. I passaggi già conclusi rimangono invariati.",
-              },
-            ],
-          });
-          setPanel(true);
-          return;
-        }
+      const reorder = parsePlanReorder(text);
+      const steps = reorder ? reorderPlanSteps(plan.steps, plan.completed, reorder) : null;
+      if (steps) {
+        setPlanEdit({ workId: work.id, plan: { ...plan, steps } });
+        patch({
+          messages: [
+            ...work.messages,
+            { who: "you", text },
+            {
+              who: "agent",
+              text: "Ti propongo questo ordine. I passaggi già conclusi rimangono invariati.",
+            },
+          ],
+        });
+        setPanel(true);
+        return;
       }
       setNotice(
         "Per riordinare indica i titoli di due passaggi futuri: Sposta Tradurre il catalogo dopo Preparare la bozza.",
@@ -1037,10 +1024,6 @@ export function ConversationWorkspace() {
     openResultPreview: (w) =>
       openWorkResultPreview(w, scenarios, spaceData.profiles, open, setPreview),
   });
-  function download() {
-    if (!scenario || !work) return;
-    downloadWorkResult({ scenario, work });
-  }
   if (!loaded)
     return (
       <div className="cw-loading" role="status">
@@ -1222,6 +1205,22 @@ export function ConversationWorkspace() {
             }
             unavailable={!!spaceData.removedPeople?.includes(scenario.agent)}
           />
+        ) : engine.backend === "engine" ? (
+          <EngineChatStage
+            engine={engine}
+            work={work}
+            activeWorkId={active}
+            preferences={preferences}
+            setPreferences={setPreferences}
+            notice={notice}
+            setNotice={setNotice}
+            assignee={assignee}
+            scenarios={scenarios}
+            spaceData={displaySpaceData}
+            onOpenSpace={openSpace}
+            onCreateExample={create}
+            onSend={send}
+          />
         ) : (
           <ConversationWorkspaceChatStage
             work={work}
@@ -1250,9 +1249,9 @@ export function ConversationWorkspace() {
             modelConnectionId={preferences.preferredModelConnectionId ?? ""}
             onModelConnectionIdChange={(connId) => setPreferences((p) => ({ ...p, preferredModelConnectionId: connId }))}
             onClearNotice={() => setNotice("")}
-            engineMode={engine.backend === "engine"} engineIntake={engine.intake} onRefreshEngine={engine.refresh}
-            engineAgents={engine.backend === "engine" ? engine.agents : undefined} agentNames={engine.backend === "engine" ? Object.fromEntries(engine.agents.map((agent) => [agent.id, agent.name])) : undefined}
-            onStartWork={work?.source === "engine" ? () => engine.startWork(work) : undefined} engineBusy={engine.busy} historyLoading={engine.historyLoading}
+            engineMode={false} engineIntake={undefined} onRefreshEngine={engine.refresh}
+            engineAgents={undefined} agentNames={undefined}
+            onStartWork={undefined} engineBusy={engine.busy} historyLoading={engine.historyLoading}
             onConfirmPatch={(messageIndex) => {
               if (!work) return;
               void engine.confirmPatch(work, messageIndex).catch(() => {
@@ -1349,7 +1348,7 @@ export function ConversationWorkspace() {
           scenario={scenario}
           modalRef={modal}
           onClose={() => setPreview(false)}
-          onDownload={download}
+          onDownload={() => { if (scenario && work) downloadWorkResult({ scenario, work }); }}
         />
       )}
     </div>

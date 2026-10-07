@@ -118,13 +118,15 @@ def test_agent_skill_is_always_staged_and_never_self_approves(client):
     assert ok.status_code == 200 and ok.json()["status"] == "approved"
     items = tc.get("/v1/workspaces/ws_local/skills", headers=H).json()["items"]
     by_name = {i["name"]: i["status"] for i in items}
-    assert by_name == {"Confronto listini": "approved", "Manuale fornitori": "approved"}
+    # The builtin catalog may seed more skills; the staging invariants are these two.
+    assert by_name["Confronto listini"] == "approved"
+    assert by_name["Manuale fornitori"] == "approved"
 
 
 def test_skill_description_cap_and_archived_immutable(client):
     tc, _ = client
     too_long = tc.post("/v1/workspaces/ws_local/skills", headers=H, json={
-        "command_id": "s3", "name": "X", "description": "d" * 61, "body": "",
+        "command_id": "s3", "name": "X", "description": "d" * 121, "body": "",
     })
     assert too_long.status_code == 400
     created = tc.post("/v1/workspaces/ws_local/skills", headers=H, json={

@@ -18,9 +18,11 @@ class RunRequest(RunToolPolicy):
     ssh_key_path: str | None = Field(default=None, max_length=4096)
     web_pages: bool = False
     browser: bool = False
-    memory: bool = False
-    skills: bool = False
+    # None = caller did not choose: the engine default applies (native → on).
+    memory: bool | None = None
+    skills: bool | None = None
     delegation: bool = False
+    computer_use: bool = False
     clarify: bool = False
     goals: bool = False
     cron: bool = False

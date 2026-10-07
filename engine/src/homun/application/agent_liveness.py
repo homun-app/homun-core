@@ -34,7 +34,14 @@ def trailing_intent(text):
 
 
 def defer(run, decision):
-    if run.get('_liveness_version') != 1 or not trailing_intent(decision.message):
+    from homun.models.finish_gates import gate_final_response
+    user_message = next((m.get('content') for m in reversed(run.get('_messages') or [])
+                         if isinstance(m, dict) and m.get('role') == 'user'), None)
+    verdict = gate_final_response(decision.message or '', user_message=user_message,
+                                  had_tool_results=bool(run.get('observations')),
+                                  continuations=run.get('_liveness_nudges', 0))
+    italian_tail = trailing_intent(decision.message or '')
+    if run.get('_liveness_version') != 1 or (verdict.accept and not italian_tail):
         return False
     attempts = run.get('_liveness_nudges', 0)
     if attempts >= MAX_NUDGES:

@@ -49,6 +49,7 @@ export type AgentRun = AgentRunPolicy & {
   observations: { tool: string; message?: string; result: unknown }[];
   clarify_request?: {id: string | null; qid: string; question: string; choices: string[] | null; multi_select: boolean}[];
   request_id?: string; artifact_id?: string; error_code?: string;
+  approval_channel?: string;
 };
 
 async function request(workId: string, suffix = '', body?: unknown) {

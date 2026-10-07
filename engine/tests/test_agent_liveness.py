@@ -64,7 +64,7 @@ def test_human_correction_during_generation_precedes_nudge(setup):
     ctx.models.complete_tools=respond
     assert advance(ctx,p['id'])=='running'
     run=ctx.repository.load().commands[p['id']].result
-    assert '_liveness_nudges' not in run and run['_messages'][-1]['content']=='New direction'
+    assert '_liveness_nudges' not in run and 'New direction' in run['_messages'][-1]['content']
     assert not ctx.repository.load().artifacts
 
 

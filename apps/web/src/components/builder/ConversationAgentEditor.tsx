@@ -70,7 +70,7 @@ export function ConversationAgentEditor({
   const [formConnectionId, setFormConnectionId] = useState<string>(
     agent?.preferred_connection_id ?? "",
   );
-  const [formAutonomy, setFormAutonomy] = useState(agent?.autonomy_mode ?? "semi");
+  const [formAutonomy, setFormAutonomy] = useState(agent?.autonomy_mode ?? "supervised");
   const [formCapabilities, setFormCapabilities] = useState<string[]>(
     agent?.capabilities ?? ["web_search", "filesystem"],
   );

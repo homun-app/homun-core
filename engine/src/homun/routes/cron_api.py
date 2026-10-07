@@ -47,6 +47,72 @@ def post_fire_due(body: FireDueRequest,
     return {"workspace_id": body.workspace_id, "count": len(results), "results": results}
 
 
+class CronJobCreateRequest(BaseModel):
+    schedule: str = Field(min_length=1, max_length=120)
+    prompt: Optional[str] = None
+    name: Optional[str] = None
+    skills: Optional[list] = None
+    script: Optional[str] = None
+    no_agent: bool = False
+    workdir: Optional[str] = None
+    model_pin: Optional[str] = None
+    provider_pin: Optional[str] = None
+    context_from: Optional[list] = None
+    repeat: Optional[int] = None
+    deliver: str = "local"
+    auto_approve: bool = False
+    source_work_id: Optional[str] = None
+    paused: bool = False
+
+
+@router.post("/jobs")
+def create_cron_job(body: CronJobCreateRequest,
+                    x_homun_actor_id: str | None = Header(default=None),
+                    x_homun_actor_name: str | None = Header(default=None)) -> Dict[str, Any]:
+    """Human cron job creation ( cron manuale)."""
+    ctx, actor = request_context("ws_local" if not hasattr(body, "workspace_id") else body.workspace_id,
+                                 x_homun_actor_id, x_homun_actor_name)
+    if actor.kind != "person":
+        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Persons only"})
+    mgr = CronManager(workspace_id=ctx.workspace_id)
+    try:
+        job = mgr.create_job(
+            body.schedule, prompt=body.prompt, name=body.name, skills=body.skills,
+            script=body.script, no_agent=body.no_agent, workdir=body.workdir,
+            model_pin=body.model_pin, provider_pin=body.provider_pin,
+            context_from=body.context_from, repeat=body.repeat, deliver=body.deliver,
+            auto_approve=body.auto_approve,
+            owner_actor=actor.model_dump(mode="json"), source_work_id=body.source_work_id,
+            paused=body.paused)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "validation_error", "message": str(exc)})
+    return {"job": job.to_dict()}
+
+
+@router.get("/deliveries")
+def get_deliveries(workspace_id: str = 'ws_local',
+                   x_homun_actor_id: str | None = Header(default=None),
+                   x_homun_actor_name: str | None = Header(default=None)) -> Dict[str, Any]:
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    if actor.kind != 'person':
+        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Persons only"})
+    mgr = CronManager(workspace_id=workspace_id)
+    deliveries = mgr.get_deliveries()
+    return {"workspace_id": workspace_id, "count": len(deliveries), "deliveries": deliveries}
+
+
+@router.post("/deliveries/dispatch")
+def dispatch_deliveries(body: FireDueRequest,
+                        x_homun_actor_id: str | None = Header(default=None),
+                        x_homun_actor_name: str | None = Header(default=None)) -> Dict[str, Any]:
+    """Manually drain queued cron deliveries (the pump also does this)."""
+    ctx, actor = request_context(body.workspace_id, x_homun_actor_id, x_homun_actor_name)
+    if actor.kind != 'person':
+        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Persons only"})
+    from homun.application.cron_deliveries import deliver_pending
+    return deliver_pending(ctx, limit=max(1, min(body.limit, 100)))
+
+
 @router.get("/providers/chronos")
 def chronos_status() -> Dict[str, Any]:
     status = ChronosProvider().status().to_dict()

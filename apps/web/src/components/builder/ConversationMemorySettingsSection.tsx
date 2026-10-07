@@ -16,6 +16,7 @@ import {
   listEngineMemories,
   recallEngineMemories,
   rectifyEngineMemory,
+  memoryScopeLabel,
   type EngineMemoryNote,
   type EngineMemoryStatus,
 } from "@/lib/engine-memory-client";
@@ -432,7 +433,7 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
               <div key={`hit-${h.id}`} className="p-2.5 rounded-lg bg-white border border-[#dce4d5] text-xs text-[#1c2d22]">
                 <p>{h.text}</p>
                 <span className="text-[10px] text-[#647a6d] block mt-1">
-                  {h.project_id ? `📁 Progetto: ${h.project_id}` : "🌐 Spazio Generale"} · {h.status}
+                  {memoryScopeLabel(h)} · {h.status}
                 </span>
               </div>
             ))}
@@ -493,7 +494,7 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
                   <div className="flex items-center justify-between pt-2 border-t border-[rgba(255,255,255,0.06)] text-[11px] text-[#9db3ad]">
                     <div className="flex items-center gap-2">
                       <span className="px-2 py-0.5 rounded bg-[#182b26] text-[#8fe3d0] border border-[#253a33]">
-                        {note.project_id ? `Progetto: ${note.project_id}` : "Spazio Globale"}
+                        {memoryScopeLabel(note)}
                       </span>
                       <span>Stato: {note.status}</span>
                     </div>

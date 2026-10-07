@@ -32,7 +32,8 @@ class EngineContext:
     session_operations: SessionOperations = field(default_factory=SessionOperations)
 
     def snapshot(self) -> EngineContext:
-        return replace(self, service=self.service.for_store(self.repository.load()))
+        # vista read-only condivisa: le richieste GET non riparsano lo store
+        return replace(self, service=self.service.for_store(self.repository.snapshot()))
 
     def close(self) -> None:
         if self.memory_connection is not None:
@@ -94,6 +95,59 @@ def create_context(
         )
         resources.pop_all()
         return ctx
+
+
+def create_context_with_recovery(
+    *,
+    workspace_id: str = DEFAULT_WORKSPACE_ID,
+    db_path: Path | str | None = None,
+    data_dir: Path | str | None = None,
+    for_tests: bool = False,
+    encryption_key: bytes | None = None,
+) -> EngineContext:
+    """Avvia il contesto anche davanti a un workspace corrotto.
+
+    Un DB con pagine danneggiate o righe che non validano più non deve fermare
+    il motore: si mette l'originale in quarantena, si ricostruisce il salvabile
+    e si riparte, con un rapporto persistente che salute e chat mostrano.
+    Gli errori di configurazione (chiave, permessi) restano fatali: non sono
+    corruzione e mascherarli peggiorerebbe la diagnosi.
+    """
+    import logging
+    import sqlite3
+
+    from pydantic import ValidationError
+
+    from homun.storage.encryption import EncryptionError
+    from homun.storage.recovery import salvage_workspace, write_report
+
+    path = Path(db_path) if db_path is not None else default_db_path(workspace_id)
+    root = Path(data_dir) if data_dir is not None else path.parent
+    resolved_key = configured_workspace_key(encryption_key)
+    logger = logging.getLogger(__name__)
+
+    def _is_corruption(exc: Exception) -> bool:
+        # senza chiave configurata, un file non-SQLite è garbage o corruzione;
+        # con chiave configurata uno sblocco fallito è configurazione, fatale
+        return not (isinstance(exc, EncryptionError) and resolved_key is not None)
+
+    try:
+        return create_context(workspace_id=workspace_id, db_path=db_path,
+                              data_dir=data_dir, for_tests=for_tests,
+                              encryption_key=encryption_key)
+    except (sqlite3.DatabaseError, ValidationError, EncryptionError) as exc:
+        if not _is_corruption(exc):
+            raise
+        logger.error("Workspace corrotto (%s): %s — avvio in recovery",
+                     type(exc).__name__, exc)
+        report = salvage_workspace(path, workspace_id, encryption_key=resolved_key)
+        write_report(root, report)
+        logger.error("Recovery mode=%s tabelle=%s problemi=%d — originali in %s",
+                     report.mode, report.tables, len(report.issues),
+                     report.quarantine_dir)
+        return create_context(workspace_id=workspace_id, db_path=db_path,
+                              data_dir=data_dir, for_tests=for_tests,
+                              encryption_key=encryption_key)
 
 
 

@@ -14,6 +14,10 @@ from homun import context as context_mod
 from homun.context import create_context, get_context, reset_context_for_tests
 from homun.routes import backup, capabilities, domain, health, material_reads, mcp, memory, models, price_comparisons, intake, routines, synthesis, tool_chains
 from homun.routes import agent_runs, sessions, terminal, work_outputs, workspace_edits
+from homun.routes import approval_relay
+from homun.routes import computer_use_api
+from homun.routes import mcp_oauth_api
+from homun.routes import chat_agent_api
 from homun.routes.errors import storage_error_handler
 
 DEFAULT_HOST = "127.0.0.1"
@@ -29,11 +33,43 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     owns_context = context_mod._CONTEXT is None
     root = default_data_dir() if owns_context else context_mod._CONTEXT.data_dir
     with engine_lease(root):
+        backup_task = None
         try:
             if owns_context:
-                reset_context_for_tests(create_context())
+                # un workspace corrotto non ferma il motore: quarantena,
+                # ricostruzione del salvabile e rapporto persistente
+                from homun.context import create_context_with_recovery
+                from homun.storage.recovery import db_state
+                reset_context_for_tests(create_context_with_recovery())
+                recovery = db_state(root)
+                if recovery["state"] != "ok":
+                    import logging as _logging
+                    _logging.getLogger(__name__).error(
+                        "Avvio in recovery mode=%s — diagnosi in chat", recovery["state"])
+                    try:
+                        from homun.application.recovery_narrator import seed_recovery_conversation
+                        seed_recovery_conversation(get_context(), recovery["report"])
+                    except Exception:
+                        _logging.getLogger(__name__).exception(
+                            "Diagnosi del recovery non scritta in chat")
             ctx = get_context()
             recover_materials(ctx)
+            try:
+                from homun.application.plugin_loader import iter_plugin_dirs
+                from homun.application.plugin_manager import get_plugin_manager
+                from homun.application.plugin_storage import (
+                    load_plugins_config, plugins_root)
+                from pathlib import Path as _P
+                bundled = _P(__file__).resolve().parent / "plugins_bundled"
+                config = load_plugins_config()
+                roots = [root for root in (plugins_root(), bundled) if root.is_dir()]
+                for root in roots:
+                    for plugin_dir in iter_plugin_dirs(root):
+                        get_plugin_manager().load_from_directory(
+                            plugin_dir, config=config)
+            except Exception:
+                import logging as _logging
+                _logging.getLogger(__name__).exception("Plugin startup discovery failed")
             try:
                 from homun.application.mcp_sampling import install_product_sampling
                 from homun.models.port import ChatMessage
@@ -59,8 +95,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             except Exception:
                 pass
             async with runtime_lifespan(ctx):
-                yield
+                # prevenzione dati: backup consistente giornaliero con retention
+                from homun.application.backup_schedule import start_backup_scheduler
+                backup_task = start_backup_scheduler(ctx)
+                try:
+                    yield
+                finally:
+                    backup_task.cancel()
         finally:
+            if backup_task is not None:
+                backup_task.cancel()
             try:
                 from homun.application.mcp_client import set_elicitation_callback
                 set_elicitation_callback(None)
@@ -84,8 +128,12 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
         CORSMiddleware,
         allow_origins=allowed_origins if allowed_origins is not None else ["http://127.0.0.1:4183", "http://localhost:4183"],
         allow_credentials=False,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
+        # i Chromium moderni mandano Access-Control-Request-Private-Network
+        # sui preflight verso 127.0.0.1: senza questo flag rispondono 400 e
+        # il browser vede "Failed to fetch" su ogni POST con header custom
+        allow_private_network=True,
     )
     if session_token:
         from homun.routes.session_auth import SessionAuthMiddleware
@@ -110,6 +158,13 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(backup.router)
     app.include_router(models.router)
     app.include_router(memory.router)
+    app.include_router(approval_relay.router)
+    app.include_router(computer_use_api.router)
+    app.include_router(mcp_oauth_api.router)
+    app.include_router(chat_agent_api.router)
+    from homun.application import approval_relay as _relay_app
+    from homun.routes.channel_ingress_api import get_channel_registry
+    _relay_app.set_registry_provider(get_channel_registry)
     app.include_router(routines.router)
     app.include_router(mcp.router)
     from homun.routes import openai_api

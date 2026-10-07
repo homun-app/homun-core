@@ -10,6 +10,7 @@ provider-fallback tranche.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 import ssl
 from email.utils import parsedate_to_datetime

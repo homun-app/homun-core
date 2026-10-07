@@ -10,8 +10,24 @@ def execute(ctx, actor, run, tool, args):
     if tool == 'web_extract':
         if version >= 3:
             from homun.execution.web_cache import cached_fetch_page
-            return cached_fetch_page(args['url'])
-        return fetch_page(args['url'])
+            fetched = cached_fetch_page(args['url'])
+        else:
+            fetched = fetch_page(args['url'])
+        # I modelli locali hanno finestre piccole: la pagina entra nel
+        # contesto già contenuta, mai intera a far fallire il run.
+        if isinstance(fetched, dict) and isinstance(fetched.get('text'), str):
+            from pathlib import Path as _P
+            from homun.execution.web_truncate import (
+                DEFAULT_EXTRACT_CHAR_LIMIT, store_full_text, truncate_with_footer)
+            text = fetched['text']
+            limit = DEFAULT_EXTRACT_CHAR_LIMIT
+            if len(text) > limit:
+                cache = _P(ctx.data_dir) / 'cache' / 'web'
+                stored = store_full_text(cache, str(args.get('url') or ''), text)
+                model_text, was_truncated = truncate_with_footer(
+                    text, str(args.get('url') or ''), limit, stored_path=stored)
+                fetched = {**fetched, 'text': model_text, 'truncated': was_truncated}
+        return fetched
     if tool == 'web_search':
         if version == 1:
             return {

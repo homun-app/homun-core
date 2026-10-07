@@ -10,7 +10,7 @@ def reconcile_cron_runs(ctx, *, store=None, now=None, limit=50):
     store = store or get_cron_store()
     now = time.time() if now is None else float(now)
     workspace_id = ctx.workspace_id
-    snapshot = ctx.repository.load()
+    snapshot = ctx.repository.snapshot()
     results = []
     for job in store.list_jobs(workspace_id):
         for occurrence in store.list_occurrences(workspace_id, job.id):

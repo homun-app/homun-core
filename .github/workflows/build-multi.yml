@@ -1,0 +1,106 @@
+name: Build multi-OS (validation)
+
+# Native 3-OS packaging validation on the v1 pipeline skeleton:
+# macOS arm64 · Windows x64 · Linux x64 (ubuntu-22.04: older glibc for
+# broader compatibility). Each job builds the PyInstaller engine bundle on
+# its own host, fetches the pinned cua-driver, then packages the Electron
+# app — unsigned artifacts only; the signed macOS release channel stays in
+# build.yml until the Windows/Linux builds are proven.
+#
+# Security: no untrusted github.event.* input is interpolated into run
+# steps; the only ${{ }} inside commands are static matrix values.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14 # Apple Silicon
+            platform: mac
+            python_cmd: python3
+          - os: windows-latest # x64
+            platform: win
+            python_cmd: python
+          - os: ubuntu-22.04 # older glibc -> broader Linux compatibility
+            platform: linux
+            python_cmd: python3
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Python (builder host)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Linux build deps
+        if: matrix.platform == 'linux'
+        timeout-minutes: 8
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends binutils
+
+      - name: Fetch cua-driver (pinned)
+        id: cua
+        shell: bash
+        run: |
+          version="$(cat tools/cua-driver-version.txt | tr -d '[:space:]')"
+          path="$(tools/fetch_cua_driver.sh "$version")"
+          echo "binary=$path" >> "$GITHUB_OUTPUT"
+          "$path" --version || true
+
+      - name: Build engine bundle
+        timeout-minutes: 40
+        shell: bash
+        run: |
+          ${{ matrix.python_cmd }} tools/build_engine_bundle.py --cua-driver "${{ steps.cua.outputs.binary }}"
+
+      - name: Build web + desktop package
+        timeout-minutes: 30
+        shell: bash
+        run: |
+          npm ci
+          npm run build
+          node apps/desktop/scripts/package-app.mjs
+
+      - name: Checksums
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p dist-installers
+          find dist/desktop -name '*.zip' -o -name '*.tar.gz' | while read -r archive; do
+            cp "$archive" dist-installers/
+            [ -f "$archive.sha256" ] && cp "$archive.sha256" dist-installers/
+          done
+
+      - name: Upload installer artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: homun-${{ matrix.platform }}-unsigned
+          path: dist-installers
+          if-no-files-found: error
+          retention-days: 14

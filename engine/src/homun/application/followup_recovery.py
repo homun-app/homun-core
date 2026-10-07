@@ -31,6 +31,18 @@ def _terminal(record, code):
 def claim_next(ctx, *, now=None) -> Delivery | None:
     """Atomically claim one due follow-up; never reapply its user command."""
     now = now or utc_now()
+    # pre-scansione read-only: a riposo nessun follow-up è dovuto e la
+    # transazione (parse completo dello store) non si apre affatto
+    due = any(
+        record.type == 'conversation.post_message'
+        and record.followup_status in {'processing', 'failed'}
+        and not (record.followup_status == 'processing' and record.followup_expires_at
+                 and record.followup_expires_at > now)
+        and not (record.followup_status == 'failed' and (record.followup_next_attempt_at is None
+                 or record.followup_next_attempt_at > now))
+        for record in ctx.repository.snapshot().commands.values())
+    if not due:
+        return None
     selected = None
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:

@@ -8,6 +8,7 @@ from functools import wraps
 from threading import RLock
 
 from homun.domain.errors import NotFoundError, ValidationError
+from homun.memory.visibility import matches_context
 from homun.memory.types import MemoryNote, new_memory_id, utc_now
 
 SCHEMA = """
@@ -52,6 +53,8 @@ class SqliteMemoryPort:
         *,
         work_id: str | None = None,
         project_id: str | None = None,
+        scope: str | None = None,
+        subject_id: str | None = None,
         include_deleted: bool = False,
     ) -> list[MemoryNote]:
         notes = self._all()
@@ -60,6 +63,10 @@ class SqliteMemoryPort:
             if not include_deleted and note.status == "deleted":
                 continue
             if work_id is not None and note.work_id != work_id:
+                continue
+            if scope is not None and note.scope != scope:
+                continue
+            if subject_id is not None and note.subject_id != subject_id:
                 continue
             if project_id is not None:
                 if project_id == "global":
@@ -79,16 +86,27 @@ class SqliteMemoryPort:
         actor_id: str,
         work_id: str | None = None,
         project_id: str | None = None,
+        scope: str | None = None,
+        subject_id: str | None = None,
+        source_memory_id: str | None = None,
     ) -> MemoryNote:
         cleaned = text.strip()
         if not cleaned:
             raise ValidationError("Memory text is required")
+        resolved_scope = scope or ("project" if project_id else "global")
+        if resolved_scope not in ("project", "agent", "person", "global"):
+            raise ValidationError(f"Invalid memory scope: {resolved_scope}")
+        if resolved_scope in ("agent", "person") and not subject_id:
+            raise ValidationError(f"scope={resolved_scope} requires subject_id")
         note = MemoryNote(
             id=new_memory_id(),
             workspace_id=self.workspace_id,
             text=cleaned,
             work_id=work_id,
             project_id=project_id,
+            scope=resolved_scope,
+            subject_id=subject_id,
+            source_memory_id=source_memory_id,
             status="approved",
             created_by=actor_id,
         )
@@ -119,24 +137,53 @@ class SqliteMemoryPort:
         self._upsert(note)
         return note
 
-    def export(self, *, project_id: str | None = None) -> list[MemoryNote]:
-        return self.list(project_id=project_id, include_deleted=False)
+    def export(
+        self,
+        *,
+        project_id: str | None = None,
+        scope: str | None = None,
+        subject_id: str | None = None,
+    ) -> list[MemoryNote]:
+        return self.list(project_id=project_id, scope=scope, subject_id=subject_id, include_deleted=False)
 
     def recall(
         self,
         query: str,
         *,
         project_id: str | None = None,
+        work_id: str | None = None,
+        agent_id: str | None = None,
+        person_id: str | None = None,
+        scope: str | None = None,
+        subject_id: str | None = None,
+        include_global: bool = True,
         limit: int = 10,
     ) -> list[MemoryNote]:
         needle = query.strip().lower()
         if not needle:
             return []
+        curated = scope is not None or subject_id is not None or work_id is not None \
+            or agent_id is not None or person_id is not None or not include_global
         matches = []
         for note in self._all():
             if note.status == "deleted":
                 continue
-            if project_id is not None:
+            if scope is not None:
+                if note.scope != scope:
+                    continue
+                if subject_id is not None and note.subject_id != subject_id:
+                    continue
+            elif curated:
+                if not matches_context(
+                    note,
+                    project_id=project_id,
+                    work_id=work_id,
+                    agent_id=agent_id,
+                    person_id=person_id,
+                    include_global=include_global,
+                ):
+                    continue
+            elif project_id is not None:
                 if not (note.project_id == project_id or note.project_id in (None, "", "global")):
                     continue
             if needle in note.text.lower():

@@ -33,7 +33,7 @@ def test_parse_native_calls_and_reject_truncated_or_reasoning_only():
 
 def native_start(ctx, actor, work, material, extra=None):
     ctx.models.set_active('openai_compatible')
-    p=propose(ctx,actor,work,{'command_id':'run','expected_version':1,'material_ids':[material] + ([extra] if extra else [])})
+    p=propose(ctx,actor,work,{'command_id':'run','expected_version':1,'material_ids':[material] + ([extra] if extra else []),'memory':False,'skills':False})
     approve(ctx,actor,work,p['id'],{'command_id':'approve','digest':p['digest'],'expected_version':p['expected_version']})
     return p
 

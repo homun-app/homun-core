@@ -36,8 +36,23 @@ export type Skill = {
   tags: string[];
   status: "staged" | "approved" | "archived";
   author_type: "person" | "agent";
+  author_id: string;
   revision: number;
+  resources: string[];
+  usage_count: number;
+  last_used_at: string | null;
   body: string | null;
+};
+
+export type SkillSyncResult = {
+  created?: string[];
+  updated?: string[];
+  skipped?: string[];
+  archived?: string[];
+  kept_human?: string[];
+  rebased?: string[];
+  note?: string;
+  [key: string]: unknown;
 };
 
 async function mcpFetch(path: string, init: RequestInit): Promise<Response> {
@@ -101,11 +116,22 @@ export async function probeEngineServer(serverId: string): Promise<ProbeResult> 
   return (await response.json()) as ProbeResult;
 }
 
-export async function listEngineSkills(): Promise<Skill[]> {
-  const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/skills`,
+export async function listEngineSkills(includeArchived = false): Promise<Skill[]> {
+  const response = await mcpFetch(
+    `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/skills${includeArchived ? "?include_archived=true" : ""}`,
     { method: "GET", headers: jsonHeaders });
-  if (!response.ok) throw new Error(`List skills failed: HTTP ${response.status}`);
+  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Catalogo skill non disponibile");
   return ((await response.json()) as { items: Skill[] }).items ?? [];
+}
+
+export async function syncEngineSkills(input?: { path?: string; rebase?: boolean }): Promise<SkillSyncResult> {
+  const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/skills/sync`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ path: input?.path ?? "", rebase: input?.rebase ?? false }),
+  });
+  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Sincronizzazione skill non riuscita");
+  return (await response.json()) as SkillSyncResult;
 }
 
 export async function createEngineSkill(input: {
@@ -275,4 +301,37 @@ export function approveEngineToolDelivery(preview: ExternalDeliveryPreview, comm
   return deliveryRequest(preview.proposal_id, {
     command_id: commandId, expected_version: preview.expected_version, digest: preview.digest,
   });
+}
+
+export type HostedConnector = {
+  name: string;
+  description: string;
+  url: string;
+  keywords: string[];
+  server_id: string | null;
+  connected: boolean;
+  declared: boolean;
+};
+
+export async function listEngineConnectors(): Promise<HostedConnector[]> {
+  const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/connectors`,
+    { method: "GET", headers: jsonHeaders });
+  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Catalogo connettori non disponibile");
+  return ((await response.json()) as { items: HostedConnector[] }).items ?? [];
+}
+
+export async function installEngineConnector(name: string): Promise<{ server_id: string }> {
+  const response = await mcpFetch(
+    `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/connectors/${encodeURIComponent(name)}/install`,
+    { method: "POST", headers: jsonHeaders });
+  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Installazione connettore non riuscita");
+  return (await response.json()) as { server_id: string };
+}
+
+export async function startConnectorOAuth(serverId: string): Promise<{ authorize_url: string }> {
+  const response = await mcpFetch(
+    `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/connectors/${encodeURIComponent(serverId)}/oauth/start`,
+    { method: "POST", headers: jsonHeaders });
+  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Avvio OAuth non riuscito");
+  return (await response.json()) as { authorize_url: string };
 }

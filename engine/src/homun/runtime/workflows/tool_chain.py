@@ -46,7 +46,7 @@ def run_chain(ctx, steps):
 
 def _run_core(ctx, steps, runner):
     for step in steps:
-        record = ctx.repository.load().commands.get(step['proposal_id'])
+        record = ctx.repository.snapshot().commands.get(step['proposal_id'])
         if record is None or record.type not in ('material_read.propose', 'price_comparison.propose'):
             continue
         if record.result['status'] == 'blocked':
@@ -63,7 +63,7 @@ def _run_core(ctx, steps, runner):
         except Exception:
             _block_remaining(ctx, steps, step['proposal_id'])
             return
-        outcome = ctx.repository.load().commands.get(step['proposal_id'])
+        outcome = ctx.repository.snapshot().commands.get(step['proposal_id'])
         if outcome is None or outcome.result['status'] != 'completed':
             _block_remaining(ctx, steps, step['proposal_id'])
             return
@@ -170,7 +170,7 @@ def start(workflow_id, steps):
 
 def deliver_chains(ctx):
     from homun.application.tool_chains import PROPOSAL_TYPE
-    for record in ctx.repository.load().commands.values():
+    for record in ctx.repository.snapshot().commands.values():
         if record.type != PROPOSAL_TYPE or record.result['status'] not in {'queued', 'running'}:
             continue
         chain = record.result

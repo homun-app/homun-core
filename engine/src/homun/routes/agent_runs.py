@@ -74,6 +74,7 @@ class RunView(RunToolPolicy):
     request_id: str | None = None
     artifact_id: str | None = None
     error_code: str | None = None
+    approval_channel: str | None = None
 
 
 class RunList(BaseModel):
@@ -109,6 +110,48 @@ def approve_run(workspace_id: str, work_id: str, run_id: str, body: RunApproval,
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
     try:
         return approve(ctx, actor, work_id, run_id, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+class ComputerUseApproval(BaseModel):
+    digest: str
+
+
+@router.get('/works/{work_id}/computer-use')
+def list_computer_use(workspace_id: str, work_id: str,
+                      x_homun_actor_id: str | None = Header(default=None),
+                      x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        from homun.application.computer_use_jobs import list_for_work
+        return list_for_work(ctx, actor, work_id)
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post('/works/{work_id}/computer-use/{proposal_id}/approve')
+def approve_computer_use(workspace_id: str, work_id: str, proposal_id: str,
+                         body: ComputerUseApproval,
+                         x_homun_actor_id: str | None = Header(default=None),
+                         x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        from homun.application.computer_use_jobs import approve
+        return approve(ctx, actor, work_id, proposal_id, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post('/works/{work_id}/computer-use/{proposal_id}/reject')
+def reject_computer_use(workspace_id: str, work_id: str, proposal_id: str,
+                        body: ComputerUseApproval,
+                        x_homun_actor_id: str | None = Header(default=None),
+                        x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        from homun.application.computer_use_jobs import reject
+        return reject(ctx, actor, work_id, proposal_id, body.model_dump())
     except DomainError as exc:
         raise _http_error(exc) from exc
 

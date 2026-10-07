@@ -3,6 +3,7 @@ from homun.application.runtime_calls import complete_summary
 from homun.application import agent_native, agent_recovery, budgets
 from homun.application.agent_runs import authority, lookup
 from homun.application.agent_usage import charge, reserve as reserve_usage
+import logging
 from homun.domain.errors import ValidationError
 from homun.domain.models import Actor, BudgetCounters, utc_now
 from homun.models.context_plan import plan_context, build_checkpoint, project_checkpoint
@@ -73,25 +74,41 @@ def prepare(ctx,run,tools):
             agent_recovery.begin(current,'summary')
             current['model_attempts']+=1
         ctx.service.store=store
+    from types import SimpleNamespace
+    settled = False
     try:
         result=complete_summary(ctx, run, request,connection_id=run['connection_id'],
             context_window=policy['context_window'],max_output_tokens=output_tokens)
     except NativeModelError as exc:
         charge(ctx,actor,run,reservation,exc.usage,reason=exc.code)
-        if not exc.retryable:
-            _defer_if_stale(ctx,run)
-            raise ContextSummaryError('Context summary generation failed; history was retained') from exc
-        outcome=agent_recovery.schedule(ctx,actor,run,exc,phase='summary',
-            expected_steering=run.get('_steering',[]))
-        if outcome not in {'waiting','fenced'}:
-            raise ContextSummaryError('Context summary generation failed; history was retained') from exc
-        # The wait holds no lease; the workflow's busy path resumes preparation when due.
-        raise ContextPreparationDeferred() from exc
+        if exc.retryable:
+            outcome=agent_recovery.schedule(ctx,actor,run,exc,phase='summary',
+                expected_steering=run.get('_steering',[]))
+            if outcome in {'waiting','fenced'}:
+                # The wait holds no lease; the busy path resumes preparation when due.
+                raise ContextPreparationDeferred() from exc
+        # Il riassunto è un'ottimizzazione, non un requisito: il run continua
+        # con un riassunto deterministico invece di morire a fine lavoro.
+        logging.getLogger(__name__).warning(
+            'riassunto di contesto non disponibile (%s): degrado deterministico per %s',
+            exc.code, run.get('id'))
+        settled = exc.usage is not None
+        result=SimpleNamespace(message=SimpleNamespace(content=(
+            '[riassunto di contesto non disponibile: cronologia ridotta deterministicamente. '
+            'I turni di mezzo sono stati omessi per rispettare la finestra del modello.]'),
+            tool_calls=None), usage=None)
     except Exception as exc:
         charge(ctx, actor, run, reservation, getattr(exc, 'usage', None))
         _defer_if_stale(ctx,run)
-        raise ContextSummaryError('Context summary generation failed; history was retained') from exc
-    charge(ctx,actor,run,reservation,getattr(result,'usage',None))
+        logging.getLogger(__name__).warning(
+            'riassunto di contesto fallito (%s): degrado deterministico per %s',
+            exc, run.get('id'))
+        settled = getattr(exc, 'usage', None) is not None
+        result=SimpleNamespace(message=SimpleNamespace(content=(
+            '[riassunto di contesto non disponibile: cronologia ridotta deterministicamente.]'),
+            tool_calls=None), usage=None)
+    if not settled:
+        charge(ctx,actor,run,reservation,getattr(result,'usage',None))
     _defer_if_stale(ctx,run)
     candidate=build_checkpoint(messages,plan,summary_text(result),tools)
     candidate['coverage']['sampled']=bool(clipped) or (run.get('_context_checkpoint') or {}).get('coverage',{}).get('sampled',False)

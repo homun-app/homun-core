@@ -49,6 +49,7 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any], *, runner_factory=
                 context_from=args.get("context_from"),
                 repeat=args.get("repeat"),
                 deliver=str(args.get("deliver") or "local"),
+                auto_approve=bool(args.get("auto_approve") or False),
             )
             run.setdefault("_cron", {})["jobs"] = [j.to_dict() for j in mgr.list_jobs(include_cleared=True) if accessible(j)]
             return {"status": "created", "job": job.to_dict()}

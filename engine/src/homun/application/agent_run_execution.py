@@ -1,5 +1,6 @@
 """One persisted adaptive turn; DBOS drives repetition and recovery."""
 import json
+import logging
 from copy import deepcopy
 from datetime import datetime, timedelta
 from uuid import uuid4
@@ -16,6 +17,7 @@ from homun.application.agent_streaming import complete as complete_native
 from homun.domain.errors import DomainError, ValidationError
 from homun.domain.models import Actor, BudgetCounters, utc_now
 from homun.models.agent_turn import AgentDecision, decide
+from homun.models.finish_gates import strip_think_blocks
 from homun.models.native_errors import (
     NETWORK,
     RATE_LIMITED,
@@ -26,6 +28,16 @@ from homun.models.native_errors import (
 
 
 from homun.application.agent_run_fencing import LEASE_SECONDS
+
+logger = logging.getLogger(__name__)
+
+# Parity Hermes (context_compressor.MAX_ITERATIONS_SUMMARY_REQUEST): al limite
+# di iterazioni il run chiede un riassunto con una chiamata senza tool e
+# completa con quello — la persona riceve sempre una risposta, mai un errore.
+CHAT_SUMMARY_REQUEST = (
+    "You've reached the maximum number of tool-calling iterations allowed. Please provide a final response "
+    "summarizing what you've found and accomplished so far, without calling any more tools."
+)
 
 
 class _ModelFailure(Exception):
@@ -57,7 +69,14 @@ def _claim(ctx, run_id, epoch=None):
             actor = Actor.model_validate(run['_actor'])
             authority(ctx, store, actor, run, running=True)
             if run['turns'] >= run['limits']['max_turns']:
-                raise ValidationError('Adaptive run reached its turn limit')
+                # Parity Hermes (handle_max_iterations): il run chat al limite
+                # chiede il riassunto e completa; solo se ci ricasca muore.
+                if run.get('_chat_conversation_id') and not run.get('_summarize_due'):
+                    run['_summarize_due'] = True
+                    run.setdefault('_messages', []).append(
+                        {"role": "user", "content": CHAT_SUMMARY_REQUEST})
+                else:
+                    raise ValidationError('Adaptive run reached its turn limit')
             if len(json.dumps(run['observations'])) > run['limits']['max_observation_characters']:
                 raise ValidationError('Adaptive run reached its observation limit')
             if agent_native.enabled(run):
@@ -94,7 +113,8 @@ def _decision(ctx, run):
         return agent_native.decision_model(run).model_validate(run['_decision'])
     actor = Actor.model_validate(run['_actor'])
     from homun.application.agent_tool_bridge import visible_definitions
-    tools = visible_definitions(run, registry_for(run))
+    # riassunto di fine budget: chiamata senza tool, il modello può solo rispondere
+    tools = [] if run.get('_summarize_due') else visible_definitions(run, registry_for(run))
     messages = prepare_context(ctx,run,tools) if agent_native.enabled(run) else None
     moa_enabled = agent_native.enabled(run) and run.get('moa', {}).get('policy') == 'mixture-of-agents-v1'
     reservation = None
@@ -221,6 +241,28 @@ def _decision(ctx, run):
     return decision
 
 
+
+def _looks_like_pure_reasoning(text: str, run: dict) -> bool:
+    """Il finale narra il compito invece di rispondere (modello locale senza tag think)."""
+    import re as _re
+    clean = text.strip()
+    if not clean or len(clean) > 700:
+        return False
+    if clean.startswith(('1.', '-', '**')):
+        return False
+    user = next((m.get('content') for m in reversed(run.get('_messages') or [])
+                 if isinstance(m, dict) and m.get('role') == 'user'), '') or ''
+    _META_WORDS = "this is|the user|the request|i should|i will|i must|no tools|no tool|simple|question|answer|i need|let me|i can|based on|devo|rispondo|domanda|semplice"
+    meta = _re.compile("(" + _META_WORDS + ")", _re.IGNORECASE)
+    sentences = [x for x in _re.split(r'[.!?\n]', clean) if x.strip()]
+    if not sentences:
+        return False
+    hits = sum(1 for x in sentences if meta.search(x))
+    first_line = clean.split(chr(10))[0]
+    echo = (user[:25].lower() in clean.lower()
+            or ('"' in first_line and '?' in first_line))
+    return hits * 2 >= len(sentences) and echo
+
 def _dispatch_allowed(ctx, actor, run):
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
@@ -328,6 +370,25 @@ def advance(ctx, run_id, *, epoch=None):
                 # Malformed arguments/readability are observations the model can correct.
                 observation = {'error_code': exc.code, 'message': exc.message}
         automation_evaluation = None
+        if decision.kind == 'finish' and agent_native.enabled(run) \
+                and not run.get('_delegation_parent') and not run.get('_reasoning_nudge') \
+                and _looks_like_pure_reasoning(
+                    strip_think_blocks(decision.message or ''), run):
+            run['_reasoning_nudge'] = True
+            from homun.models.native_turn import NativeMessage as _NM
+            run['_messages'].append(_NM(role='user', content=(
+                '[SYSTEM] Your last reply reasoned about the task instead of answering. '
+                'Reply now with the actual answer for the user, in their language. '
+                'Do not describe what you will do.')).model_dump())
+            run.pop('_decision', None)
+            logger.warning('finish rifiutato (solo ragionamento): rilancio')
+            with ctx.repository.locked():
+                with ctx.repository.transaction() as store:
+                    target = store.commands.get(run_id)
+                    if target is not None and target.result.get('_lease_token') == token:
+                        target.result.update(run)
+                ctx.service.store = store
+            return 'running'
         if decision.kind == 'finish' and not run.get('_delegation_parent'):
             from homun.application.agent_automation import evaluate_finish
             from homun.application.delegation_runtime import has_pending
@@ -410,10 +471,13 @@ def advance(ctx, run_id, *, epoch=None):
                         {'work_id': work.id, 'expected_version': work.version,
                          'title': f'Risultato · {work.title}', 'content': content})
                     current.update(status='completed', artifact_id=result['artifact_id'])
-                    service.append_engine_message(actor=actor, command_id=f'{run_id}:report',
-                        conversation_id=work.primary_conversation_id, author_id='homun_engine',
-                        text=f'{current["executor_name"]} ha preparato il risultato. Puoi verificarlo e chiedere modifiche.',
-                        event_payload={'work_id': work.id, 'agent_run_id': run_id, 'artifact_id': result['artifact_id']})
+                    # Nelle conversazioni chat il risultato arriva già come
+                    # risposta: la notifica di ciclo lavoro sarebbe rumore.
+                    if not current.get('_chat_conversation_id'):
+                        service.append_engine_message(actor=actor, command_id=f'{run_id}:report',
+                            conversation_id=work.primary_conversation_id, author_id='homun_engine',
+                            text=f'{current["executor_name"]} ha preparato il risultato. Puoi verificarlo e chiedere modifiche.',
+                            event_payload={'work_id': work.id, 'agent_run_id': run_id, 'artifact_id': result['artifact_id']})
                 current.pop('_active_call_id', None)
                 current.pop('_decision', None)
                 current.pop('_lease_token', None)
@@ -443,12 +507,43 @@ def advance(ctx, run_id, *, epoch=None):
             return ctx.repository.load().commands[run_id].result['status']
         return outcome
     except DomainError as exc:
+        import logging
+        logging.getLogger(__name__).warning('advance(%s) DomainError %s', run_id, exc.code, exc_info=exc)
         return fail(ctx, run_id, exc.code, token=token,
                     blocked=exc.code in {'permission_denied', 'version_conflict', 'not_found'}, epoch=epoch,
                     expected_steering=expected_steering)
     except NativeModelError as exc:
         return fail(ctx, run_id, exc.code, token=token, epoch=epoch, expected_steering=expected_steering)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        # Una risposta malformata (argomenti invalidi, id riusati, JSON rotto)
+        # è correggibile dal modello, non un fallimento del run: chiudi le
+        # chiamate pendili con esito onesto e fai riprovare (i tentativi
+        # restanovincolati da max_model_attempts).
+        try:
+            run = ctx.repository.load().commands.get(run_id)
+            current = run.result if run is not None else None
+            if isinstance(current, dict) and agent_native.enabled(current) and current.get('_lease_token') == token \
+                    and agent_native.pending(current):
+                from homun.application.agent_control_history import close_pending
+                close_pending(current)
+                from homun.models.native_turn import NativeMessage
+                current['_messages'].append(NativeMessage(role='user', content=(
+                    f'[SYSTEM] Your last tool call was invalid ({str(exc)[:200]}). '
+                    'Re-issue the call with corrected arguments, or answer the user.')).model_dump())
+                with ctx.repository.locked():
+                    with ctx.repository.transaction() as store:
+                        target = store.commands.get(run_id)
+                        if target is not None and target.result.get('_lease_token') == token:
+                            target.result.update(current)
+                            target.result.pop('_decision', None)
+                            target.result.pop('_lease_token', None)
+                            target.result.pop('_lease_until', None)
+                    ctx.service.store = store
+                logging.getLogger(__name__).warning(
+                    'advance(%s) risposta malformata (%s): il modello riprova', run_id, exc)
+                return ctx.repository.load().commands[run_id].result['status']
+        except Exception:
+            logging.getLogger(__name__).warning('recupero malformito fallito per %s', run_id, exc_info=True)
         return fail(ctx, run_id, 'agent_run_invalid_decision', token=token, epoch=epoch, expected_steering=expected_steering)
     except RuntimeError:
         return fail(ctx, run_id, 'agent_run_model_error', token=token, epoch=epoch, expected_steering=expected_steering)

@@ -37,6 +37,17 @@ async def runtime_lifespan(ctx):
     from homun.runtime.dispatcher import deliver_pending
     from homun.application.budgets import recover_pending
     recovered = recover_pending(ctx)
+    try:
+        import os
+        catalog_dir = os.environ.get("HOMUN_SKILL_CATALOG_DIR")
+        if catalog_dir:
+            from homun.application.skill_catalog_sync import sync_skill_catalog
+            sync_skill_catalog(ctx, catalog_dir)
+        else:
+            from homun.application.skill_seeding import seed_builtin_skills
+            seed_builtin_skills(ctx)
+    except Exception:
+        logging.getLogger(__name__).exception("Skill catalog bootstrap failed")
     if recovered:
         logging.getLogger(__name__).info("Budget recovery charged %d stale reservations as unknown", recovered)
     stop = asyncio.Event()
@@ -68,6 +79,26 @@ async def runtime_lifespan(ctx):
             except Exception:
                 logging.getLogger(__name__).exception("Cron due-fire pass failed")
             try:
+                from homun.application import cron_deliveries as _cron_delivery_pass
+                await asyncio.to_thread(_cron_delivery_pass.deliver_pending, ctx)
+            except Exception:
+                logging.getLogger(__name__).exception("Cron delivery pass failed")
+            try:
+                from homun.application.skill_curator import maybe_curate
+                await asyncio.to_thread(maybe_curate, ctx)
+            except Exception:
+                logging.getLogger(__name__).exception("Skill curation pass failed")
+            try:
+                from homun.application.chat_agent import deliver_chat_answers
+                await asyncio.to_thread(deliver_chat_answers, ctx)
+            except Exception:
+                logging.getLogger(__name__).exception("Chat answer delivery pass failed")
+            try:
+                from homun.application.approval_relay import notify_pending
+                await asyncio.to_thread(notify_pending, ctx)
+            except Exception:
+                logging.getLogger(__name__).exception("Approval relay notify pass failed")
+            try:
                 from homun.application.delegation_runtime import reconcile_delegations
                 await asyncio.to_thread(reconcile_delegations, ctx, limit=20)
                 await asyncio.to_thread(wake_due_automation, ctx, limit=20)
@@ -77,6 +108,7 @@ async def runtime_lifespan(ctx):
                 await asyncio.wait_for(stop.wait(), timeout=0.5)
             except TimeoutError:
                 pass
+
 
     async def channel_poller_loop():
         from homun.application.whatsapp_bridge_process import ensure_whatsapp_bridge

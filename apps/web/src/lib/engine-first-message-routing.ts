@@ -30,7 +30,10 @@ export async function routeEngineFirstMessage(
     isNewRequest: work.title === "Nuova richiesta",
   };
   if (resolveFirstMessageRoute(base) !== "propose") return { route: "chat" };
-  return classifyFreshRequest(work.id, text, signal);
+  // La chat è una chat: il primo messaggio va in conversazione e risponde
+  // l'agente (con i suoi run). Nessuna proposta di lavoro forzata: la
+  // classificazione-in-contratto resta per le richieste su accordi conferiti.
+  return { route: "chat" };
 }
 
 /** Routes the first message of a just-created work: no intake can exist yet. */
