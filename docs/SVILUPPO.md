@@ -72,6 +72,14 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   (stesso risultato riconferma, diverso = conflitto), scadenza valutata
   a ogni tocco, solo l'assegnatario tocca; endpoint remoti
   `/remote/assignments` + accept/return. Test: `test_delegation_f56.py` (3).
+- ✅ **Toolkit pilot** (2026-10-07) — `homun peer …` dal terminale: pair
+  (con chiave del dispositivo in data dir), status (connessioni + outbox),
+  projects, sync, message, assignments/accept/return. Store connessioni in
+  `remote-peers.db`; rotte lato peer `/v1/peers/{connections,projections}`
+  per la UI futura. **Pilot dimostrato dal vivo su due engine reali**
+  (porte diverse, data dir diverse): pair → grant → sync → contributo
+  arrivato all'host → delega offerta/accettata/restituita con ricevuta.
+  Test: `test_peer_cli_f5.py`.
 - ◐ **Fetta 5 (E2E)**: NON iniziata — cifratura per oggetto/destinatario e
   transfer con manifest: serve review del protocollo prima (doc
   distribuzione dati §3). Il pilot su VPN non la richiede.

@@ -236,3 +236,18 @@ def remote_assignment_return(workspace_id: str, assignment_id: str,
         return out
     except DomainError as exc:
         raise _http_error(exc) from exc
+
+@router.get("/peers/connections")
+def peers_connections():
+    """Le connessioni remote di QUESTA installazione (lato peer)."""
+    ctx = get_context()
+    from homun.peers.store import PeerConnections
+    return {"items": PeerConnections(ctx.data_dir).list()}
+
+
+@router.get("/peers/projections")
+def peers_projections():
+    """Le proiezioni remote sincronizzate (Fonte: motore remoto)."""
+    ctx = get_context()
+    from homun.peers.store import list_projections
+    return {"items": list_projections(ctx.data_dir)}
