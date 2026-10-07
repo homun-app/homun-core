@@ -31,11 +31,17 @@ Ogni punto con root cause verificata nel codice.
 ## Differiti (servono decisioni/design)
 
 5. **Compiti: gestione e filtri incomprensibili** — i filtri chiedono "me"
-   in un contesto mono-utente. Da rifare dopo il multiutente. **Visione
-   dichiarata dall'utente**: il multiutente NON è più utenti sullo stesso
-   computer, ma **utenti su macchine diverse che condividono memorie,
-   azioni ecc.** — architettura da progettare (federazione/relay tra
-   engine, non solo sessioni multiple locali).
+   in un contesto mono-utente. Da rifare dopo il multiutente. **La visione
+   era già scritta** e il feedback di oggi la conferma: **F5 del piano di
+   sviluppo** (`docs/development/2026-09-17-piano-sviluppo.md`) — identità
+   del device e della persona distinte (F5.1), replica autorizzata per
+   spazio/progetto con cursor e snapshot (F5.2), cifratura end-to-end con
+   chiavi per destinatari (F5.3), outbox e UI onesta (F5.4), delega ai peer
+   (F5.5), peer revocato/offline (F5.6) — con gate pilot su **due Mac e
+   reti diverse**. `VISIONE-PRODOTTO.md` §2/§8: gestione degli utenti,
+   accesso del cliente, confini di accesso, "come servire più utenti e
+   dispositivi mantenendo l'esperienza locale semplice". Nel codice
+   `identity/` e `peers/` non esistono: F5 è a zero, tutta da costruire.
 6. **Automazioni non creabili** — root cause: la vista "Automazioni" di
    ConversationSpace gira su `SpaceData.routines` **simulate** (modifica
    locale); le routine vere del motore esistono (`EngineRoutineCreator`)
