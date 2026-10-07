@@ -69,3 +69,8 @@ apps/desktop/node_modules/
 wa-bridge.db
 wa-bridge.db-shm
 wa-bridge.db-wal
+
+# artefatti locali: il flusso engine è requirements.lock (npm run engine:install)
+engine/uv.lock
+# configurazione locale dell'ambiente di sviluppo
+.zcodeignore
