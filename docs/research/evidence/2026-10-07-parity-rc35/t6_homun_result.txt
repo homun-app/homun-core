@@ -1,0 +1,2 @@
+run: completed | turns: 2
+-- terminal_execute | {'status': 'exited', 'exit_code': 0, 'timed_out': None, 'oom_killed': False, 'logs': {'text': '', 'truncated': False, 'tail_only': True, 'line_limit': 1000}, 'error_code': None, 'error': None, 'job_id': 'terminal:d540c64f1bb4476145db35495c0bb4a52b0a2

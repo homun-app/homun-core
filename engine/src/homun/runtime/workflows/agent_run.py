@@ -121,6 +121,15 @@ def deliver_agent_runs(ctx):
             workflow_state = get_workflow_status(run['_workflow_id']).upper()
         except Exception:
             workflow_state = ''
+        if workflow_state:
+            # Lo snapshot di questo giro può essere più vecchio del workflow:
+            # un run che ha appena messo un terminal job in approvazione passa
+            # per waiting_external dopo che il workflow è già SUCCESS. Si
+            # rilegge fresco prima di qualunque chiusura fatale.
+            fresh = ctx.repository.snapshot().commands.get(record.command_id)
+            fresh_status = fresh.result.get('status') if isinstance(fresh and fresh.result, dict) else None
+            if fresh_status not in (None, 'queued', 'running'):
+                continue
         if any(mark in workflow_state for mark in ('CANCEL', 'FAIL', 'ERROR')):
             fail(ctx, run['id'], 'agent_run_workflow_lost', epoch=run['_epoch'],
                  expected_steering=run.get('_steering', []))

@@ -9,19 +9,19 @@ IMAGE='sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6'
 CMD='echo HERMES-TERM-OK > term_test.txt'
 
 WORK=$(curl -s -X POST "$ENG/v1/workspaces/$WS/commands" -H "$ACT" -H "$CT" -d '{
-  "command_id": "t6-work", "type": "work.create",
+  "command_id": "t6-work-'$(date +%s)'", "type": "work.create",
   "payload": {"conversation_id": "'"$(cat /tmp/parity_conv_id)"'", "title": "T6 terminal parity",
     "objective": "Use terminal_execute exactly once to run this exact command: '"$CMD"'. Then report the exit code and finish."}
 }')
 W=$(echo "$WORK" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["work_id"])')
 echo "W=$W"
 RUN=$(curl -s -X POST "$ENG/v1/workspaces/$WS/works/$W/agent-runs" -H "$ACT" -H "$CT" -d '{
-  "command_id": "t6-run", "expected_version": 1, "material_ids": [], "terminal_image": "'"$IMAGE"'" }')
+  "command_id": "t6-run-'$(date +%s)'", "expected_version": 1, "material_ids": [], "terminal_image": "'"$IMAGE"'" }')
 RID=$(echo "$RUN" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 DG=$(echo "$RUN" | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
 EV=$(echo "$RUN" | python3 -c 'import json,sys; print(json.load(sys.stdin)["expected_version"])')
 curl -s -X POST "$ENG/v1/workspaces/$WS/works/$W/agent-runs/$RID/approve" -H "$ACT" -H "$CT" \
-  -d '{"command_id":"t6-ap","expected_version":'"$EV"',"digest":"'"$DG"'"}' > /dev/null
+  -d '{"command_id":"t6-ap-$(date +%s)","expected_version":'"$EV"',"digest":"'"$DG"'"}' > /dev/null
 echo "run approved $RID"
 
 for i in $(seq 1 60); do
