@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from homun.domain.models import (
+from homun.domain.models import (Person, PersonDevice,
     AccessGrant,
     AgentProfile,
     ArtifactVersion,
@@ -31,6 +31,8 @@ class WorkspaceStore:
         self.teams: dict[str, Team] = {}
         self.projects: dict[str, Project] = {}
         self.grants: dict[str, AccessGrant] = {}
+        self.persons: dict[str, Person] = {}
+        self.person_devices: dict[str, PersonDevice] = {}
         self.materials: dict[str, MaterialVersion] = {}
         self.conversations: dict[str, Conversation] = {}
         self.messages: dict[str, Message] = {}

@@ -36,10 +36,18 @@ streaming interrompibile, Mem0 locale).
 - F4.5 review su versione + autonomia (`autonomy_mode` supervised/autonomous con auto-approvazione policy)
 - F4.6 pausa/annulla/steer/ripresa: `application/agent_control.py`, visibili in chat e pannello lavori
 
-### F5 — Collaborazione tra applicazioni ⬜ **ZERO**
-`identity/` e `peers/` non esistono. È il prossimo grande blocco (visione
-confermata: utenti su macchine diverse, identità device/persona distinte,
-replica selettiva, E2E, delega ai peer). Vedi §3.
+### F5 — Collaborazione tra applicazioni ◐ **fetta 1 consegnata (2026-10-07)**
+Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
+- ✅ **Fetta 1** — persone, inviti monouso, sessioni: `Person`/`PersonDevice`
+  nel dominio, comandi invite/confirm/revoke/bootstrap, inviti monouso con
+  secret validato nel comando, `POST /v1/session/redeem` che apre sessioni
+  legate alla persona, registry sessioni con revoca persona/dispositivo,
+  middleware multi-persona retrocompatibile col token del desktop, bootstrap
+  owner con continuità degli AccessGrant esistenti, pannello Impostazioni →
+  Persone (i collaboratori dimostrativi sono stati rimossi).
+  Test: `test_identity_f51.py` (6). Restano della fetta: esperienza di
+  riscatto guidata lato client (con la fetta 2).
+- ⬜ Fette 2-6: pairing/trasporto, replica, outbox, E2E, delega.
 
 ### F6 — Strumenti e connettori
 - ✅ F6.2 web search (ddgs, `tools/search.py`, protezione errori-retry)

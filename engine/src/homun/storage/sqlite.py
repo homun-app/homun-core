@@ -95,6 +95,12 @@ class SqliteWorkspaceRepository:
         """
         return self._conn
 
+    @property
+    def lock(self) -> RLock:
+        """Il lock grezzo del repository, per store operativi affiancati
+        (sessioni delle persone) che devono serializzarsi con le transazioni."""
+        return self._lock
+
     @contextmanager
     def locked(self):
         """Serialize access to the shared connection, including online backups."""

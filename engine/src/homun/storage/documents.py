@@ -21,6 +21,8 @@ ENTITY_TYPES = {
     "routine": ("routines", models.Routine),
     "external_server": ("external_servers", models.ExternalServer),
     "skill": ("skills", models.Skill),
+    "person": ("persons", models.Person),
+    "person_device": ("person_devices", models.PersonDevice),
 }
 
 

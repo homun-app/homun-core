@@ -13,6 +13,20 @@ class SessionAuthMiddleware:
         self.actor_id = actor_id
         self.app, self.token, self.origins = app, token, frozenset(origins)
 
+    def _resolve_registry_session(self, bearer: bytes) -> str | None:
+        token = bearer.decode('latin1').removeprefix('Bearer ').strip()
+        if not token:
+            return None
+        try:
+            from homun.context import get_context
+            from homun.identity import PersonSessionStore
+            ctx = get_context()
+            store = PersonSessionStore(ctx.repository.connection(), ctx.repository.lock)
+            session = store.resolve(token)
+            return session['person_id'] if session else None
+        except Exception:
+            return None
+
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'http':
             return await self.app(scope, receive, send)
@@ -23,23 +37,32 @@ class SessionAuthMiddleware:
         elif scope['method'] == 'OPTIONS' and origin:
             # CORS middleware answers preflight; no handler or data is reached.
             return await self.app(scope, receive, send)
-        elif scope['path'] in {'/v1/contribution-portal/read', '/v1/contribution-portal/respond'} and scope['method'] == 'POST':
+        elif scope['path'] in {'/v1/contribution-portal/read', '/v1/contribution-portal/respond', '/v1/session/redeem'} and scope['method'] == 'POST':
             # These exact routes authenticate a scoped invitation themselves.
             # They ignore actor headers and never accept the desktop token.
             return await self.app(scope, receive, send)
-        elif not secrets.compare_digest(headers.get(b'authorization', b''), ('Bearer '+self.token).encode()):
-            response = JSONResponse(status_code=401, content={'detail': {'code': 'session_required', 'message': 'A valid local session is required'}})
         else:
-            actor_headers = [value for key, value in scope['headers'] if key.lower() == b'x-homun-actor-id']
-            if actor_headers and actor_headers != [self.actor_id.encode('ascii')]:
-                response = JSONResponse(status_code=403, content={'detail': {
-                    'code': 'session_actor_mismatch', 'message': 'Actor does not match the authenticated local session'}})
+            bearer = headers.get(b'authorization', b'')
+            resolved_actor = None
+            if secrets.compare_digest(bearer, ('Bearer ' + self.token).encode()):
+                resolved_actor = self.actor_id  # sessione locale del launcher (desktop/dev)
             else:
-                # Replace cosmetic names too; identity always originates in the launcher.
-                trusted = [(key, value) for key, value in scope['headers']
-                           if key.lower() not in {b'x-homun-actor-id', b'x-homun-actor-name'}]
-                trusted.extend([(b'x-homun-actor-id', self.actor_id.encode('ascii')),
-                                (b'x-homun-actor-name', self.actor_id.encode('ascii'))])
-                scope = {**scope, 'headers': trusted}
-                return await self.app(scope, receive, send)
+                # F5: sessioni delle persone riscattate da invito — l'attore
+                # è la persona, non un id fisso del launcher
+                resolved_actor = self._resolve_registry_session(bearer)
+            if resolved_actor is None:
+                response = JSONResponse(status_code=401, content={'detail': {'code': 'session_required', 'message': 'A valid local session is required'}})
+            else:
+                actor_headers = [value for key, value in scope['headers'] if key.lower() == b'x-homun-actor-id']
+                if actor_headers and actor_headers != [resolved_actor.encode('ascii')]:
+                    response = JSONResponse(status_code=403, content={'detail': {
+                        'code': 'session_actor_mismatch', 'message': 'Actor does not match the authenticated local session'}})
+                else:
+                    # Replace cosmetic names too; identity always originates in the session.
+                    trusted = [(key, value) for key, value in scope['headers']
+                               if key.lower() not in {b'x-homun-actor-id', b'x-homun-actor-name'}]
+                    trusted.extend([(b'x-homun-actor-id', resolved_actor.encode('ascii')),
+                                    (b'x-homun-actor-name', resolved_actor.encode('ascii'))])
+                    scope = {**scope, 'headers': trusted}
+                    return await self.app(scope, receive, send)
         await response(scope, receive, send)

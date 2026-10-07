@@ -86,6 +86,31 @@ class Team(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class Person(BaseModel):
+    """F5.1: persona dello spazio — identità umana distinta dal dispositivo.
+
+    Il ruolo è nello spazio; l'accesso ai dati passa solo da AccessGrant
+    (subject_id = person id), mai implicito."""
+    id: str
+    workspace_id: str
+    display_name: str
+    role: str = "member"  # owner | admin | member
+    status: str = "active"  # active | revoked
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class PersonDevice(BaseModel):
+    """Dispositivo associato a una persona; revocabile da solo (F5.1)."""
+    id: str
+    workspace_id: str
+    person_id: str
+    name: str = ""
+    status: str = "confirmed"  # pending | confirmed | revoked
+    last_seen_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class AccessGrant(BaseModel):
     id: str
     workspace_id: str

@@ -56,6 +56,9 @@ from homun.domain.commands.external import (
     _skill_create, _skill_patch, _skill_approve, _skill_reject, _skill_archive,
 )
 from homun.domain.commands.conversations import append_engine_message
+from homun.domain.commands.identity import (
+    _person_bootstrap, _person_invite, _person_confirm, _person_revoke, _device_revoke,
+)
 from homun.domain.commands.projects import ensure_project_for_work
 from homun.domain.commands.materials import register_prepared_material
 
@@ -63,6 +66,11 @@ from homun.domain.commands.naming import work_rename, conversation_rename
 from homun.domain.commands.budgets import work_set_budget
 
 HANDLERS = {
+    "person.bootstrap": _person_bootstrap,
+    "person.invite": _person_invite,
+    "person.confirm": _person_confirm,
+    "person.revoke": _person_revoke,
+    "device.revoke": _device_revoke,
     "work.rename": work_rename,
     "work.set_budget": work_set_budget,
     "conversation.rename": conversation_rename,

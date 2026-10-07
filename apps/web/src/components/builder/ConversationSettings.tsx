@@ -28,7 +28,7 @@ import { ConversationSelect } from "./ConversationSelect";
 import { ConversationUnifiedModelsSection } from "./ConversationUnifiedModelsSection";
 import { ConversationUnifiedPluginsSection } from "./ConversationUnifiedPluginsSection";
 import { ConversationBudgetSettingsSection } from "./ConversationModelsSettingsSection";
-import { ConversationPeopleSettingsSection } from "./ConversationPeopleSettingsSection";
+import { EnginePeopleSection } from "./EnginePeopleSection";
 import { ConversationAutomationsSettingsSection } from "./ConversationAutomationsSettingsSection";
 import { ConversationReviewQueuesSection } from "./ConversationReviewQueuesSection";
 import { ConversationMemorySettingsSection } from "./ConversationMemorySettingsSection";
@@ -318,7 +318,7 @@ export function ConversationSettings({
           {section === "budget" && (
             <ConversationBudgetSettingsSection draft={draft} onChange={change} />
           )}
-          {section === "people" && <ConversationPeopleSettingsSection />}
+          {section === "people" && <EnginePeopleSection />}
           {(section === "plugins" || section === "skills") && <CapabilitiesView />}
           {section === "automations" && <ConversationAutomationsSettingsSection />}
           {section === "review" && <ConversationReviewQueuesSection actorId="person_fabio" />}
