@@ -7,6 +7,30 @@ truth: the released version's section is written into the GitHub Release body
 Section headers are `## Highlights` / `## Improvements` / `## Fixes` (H2), and
 each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 
+## [0.2.1002] — 2026-10-08
+
+Spaces collaborate: another machine joins yours with an invite, sees only the projects you share, contributes and takes delegated work — all with a verifiable device identity.
+
+## Highlights
+- **People, invites and real sessions.** Single-use invites create persons with roles; sessions are bound to the person and die with their revocation, which also closes devices, grants and delegations. Access stays explicit: an invited person sees nothing until you share a project.
+- **Pairing between machines with proof of possession.** A device joins with its own Ed25519 key and must sign a challenge: the invite is consumed only on the correct signature, so a stolen or mistyped token burns nothing.
+- **Selective read replication.** A peer subscribes to a shared project's events by cursor and browses conversations, works and messages marked *Fonte: motore remoto*, read-only, in a store separate from its own space.
+- **Remote contributions with an honest outbox.** Delivery is distinct from outcome (a version conflict is delivered, not accepted); when the host is down commands wait as "in attesa di consegna" — never shown as saved — and flush in order on reconnect.
+- **Delegation to peers with a single result.** Assignments carry input hash and reserved attempts; an identical return reconfirms the receipt, a different one is an explicit conflict, expiry closes without ghost results.
+- **Peer onboarding and reading in the app.** Settings → Spazi remoti enters with an invite and shows synced projects; the sidebar view reads remote conversations with markdown; `homun peer` covers the full flow from the terminal.
+
+## Improvements
+- **Chat on the official assistant-ui thread**: streaming with separated reasoning, collapsible tool groups, markdown tables; reasoning and tool calls stay visible in history too.
+- **Engine resilience**: recovery mode on corrupt databases (quarantine, deterministic salvage, diagnosis narrated in chat), daily backups with retention, zombie run closure, periodic WAL checkpoints; idle CPU down to 1-2%.
+- **Automations create routines from the view**, choosing a successful work as model with cadence preview; the "+" inside a project inherits its memory, materials and permissions.
+- **Three-OS build validation** on every PR (macOS, Linux, Windows) with pinned external driver dependencies.
+
+## Fixes
+- **Conversation writes now enforce authority before mutation** (project write access), closing a gap that mattered once remote peers existed.
+- **Pairing validates the invite on presentation and never persists its secret**; local invite redemption is localhost-only.
+- **Connector failures are visible** (error surfaced in view, failed OAuth popup closed); project names are unique with reuse on auto-creation.
+- **Date grouping in the sidebar uses real engine timestamps** on calendar days, never invented ones.
+
 ## [Unreleased]
 
 ## Highlights
