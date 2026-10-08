@@ -20,7 +20,9 @@ curl -fsSL -o "$script" "$SH_URL"
 if [ "$VERSION" != "latest" ]; then
   export CUA_DRIVER_RS_VERSION="$VERSION"
 fi
-/bin/bash "$script"
+# l'installer stampa istruzioni informative: su stdout dev'esserci SOLO il
+# percorso del binario (il chiamante lo cattura e lo scrive in GITHUB_OUTPUT)
+/bin/bash "$script" >&2
 
 for candidate in \
   "$HOME/.local/bin/cua-driver" \
