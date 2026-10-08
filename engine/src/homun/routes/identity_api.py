@@ -1,7 +1,7 @@
 """F5.1 — rotte identità: persone, inviti, riscatto sessione."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from homun.context import get_context
@@ -97,9 +97,14 @@ def revoke_device(workspace_id: str, device_id: str,
 
 
 @router.post("/session/redeem")
-def redeem_session(body: RedeemRequest):
-    """Riscatta un invito persona: apre la sessione. Senza sessione attiva:
-    l'invito stesso è la prova, come il portale contributi."""
+def redeem_session(body: RedeemRequest, request: Request):
+    """Riscatta un invito persona: apre la sessione. Solo dal localhost:
+    senza prova di possesso della chiave del dispositivo è il percorso di
+    bootstrap locale; dalla rete si passa da /v1/remote/pair (2 passaggi)."""
+    client_host = request.client.host if request.client else ""
+    if client_host not in {"127.0.0.1", "::1", "localhost", "testclient"}:
+        raise HTTPException(403, detail={"code": "local_only",
+                                         "message": "Il riscatto locale è consentito solo dal localhost: dalla rete usare il pairing remoto"})
     ctx = get_context()
     from homun.identity import redeem_invite
     try:
@@ -118,6 +123,7 @@ class PairPresentRequest(BaseModel):
 class PairConfirmRequest(BaseModel):
     pairing_id: str = Field(min_length=4, max_length=80)
     signature: str = Field(min_length=8, max_length=200)
+    invite_token: str = Field(min_length=10, max_length=200)
 
 
 @router.post("/remote/pair")

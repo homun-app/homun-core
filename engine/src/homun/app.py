@@ -34,6 +34,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     root = default_data_dir() if owns_context else context_mod._CONTEXT.data_dir
     with engine_lease(root):
         backup_task = None
+        wal_task = None
         try:
             if owns_context:
                 # un workspace corrotto non ferma il motore: quarantena,
@@ -98,13 +99,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 # prevenzione dati: backup consistente giornaliero con retention
                 from homun.application.backup_schedule import start_backup_scheduler
                 backup_task = start_backup_scheduler(ctx)
+                from homun.application.backup_schedule import start_wal_checkpoint_scheduler
+                wal_task = start_wal_checkpoint_scheduler(ctx)
                 try:
                     yield
                 finally:
                     backup_task.cancel()
+                    wal_task.cancel()
         finally:
-            if backup_task is not None:
-                backup_task.cancel()
+            for task in (backup_task, wal_task):
+                if task is not None:
+                    task.cancel()
             try:
                 from homun.application.mcp_client import set_elicitation_callback
                 set_elicitation_callback(None)

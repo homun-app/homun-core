@@ -58,6 +58,25 @@ def present_pairing(ctx, body: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         raise ValidationError(f"Invalid device public key: {exc}") from exc
 
+    # l'invito si valida alla presentazione: senza un invito attivo e col
+    # secret giusto non si crea alcuna sfida (l'endpoint è senza sessione,
+    # non deve diventare una fabbrica di record) e il secret NON viene
+    # mai persistito nella sfida — solo il suo hash.
+    import hashlib
+    invite_token = str(body.get("invite_token") or "")
+    invite_id, _, invite_secret = invite_token.partition(".")
+    from homun.domain.commands.identity import PERSON_INVITE_KIND
+    snapshot = ctx.repository.snapshot()
+    invite_record = snapshot.commands.get(invite_id)
+    if (invite_record is None or invite_record.type != PERSON_INVITE_KIND
+            or not secrets.compare_digest(
+                str(invite_record.result.get("secret_hash") or ""),
+                hashlib.sha256(invite_secret.encode()).hexdigest())):
+        raise ValidationError("Invalid invitation token")
+    invite_result = invite_record.result
+    if invite_result.get("status") != "active" or invite_result.get("person_id"):
+        raise ValidationError("Invitation already used or revoked")
+
     pairing_id = new_id("pair")
     nonce = secrets.token_urlsafe(32)
     expires_at = (datetime.now(timezone.utc) +
@@ -70,8 +89,8 @@ def present_pairing(ctx, body: dict[str, Any]) -> dict[str, Any]:
                 store.workspace_id, pairing_id, system_actor, {
                     "id": pairing_id, "kind": DEVICE_PAIRING_KIND,
                     "status": "pending", "nonce": nonce,
-                    "invite_id": str(body.get("invite_token") or "").partition(".")[0],
-                    "invite_token": str(body.get("invite_token") or ""),
+                    "invite_id": invite_id,
+                    "invite_secret_hash": hashlib.sha256(invite_secret.encode()).hexdigest(),
                     "public_key": public_key, "key_fingerprint": fingerprint,
                     "device_name": str(body.get("device_name") or "")[:120],
                     "display_name": str(body.get("display_name") or "")[:120],
@@ -92,11 +111,18 @@ def confirm_pairing(ctx, body: dict[str, Any]) -> dict[str, Any]:
     from homun.domain.errors import PermissionDeniedError, ValidationError
     pairing_id = str(body.get("pairing_id") or "")
     signature = str(body.get("signature") or "")
+    import hashlib
+    invite_token = str(body.get("invite_token") or "")
+    invite_id, _, invite_secret = invite_token.partition(".")
 
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             record = _challenge_record(store, pairing_id)
             challenge = record.result
+            if not secrets.compare_digest(
+                    str(challenge.get("invite_secret_hash") or ""),
+                    hashlib.sha256(invite_secret.encode()).hexdigest()):
+                raise PermissionDeniedError("Invitation does not match the challenge")
             if not _challenge_alive(challenge):
                 challenge["status"] = "expired"
                 raise PermissionDeniedError("Pairing challenge expired or already used")
@@ -112,15 +138,14 @@ def confirm_pairing(ctx, body: dict[str, Any]) -> dict[str, Any]:
                 # l'invito intatto — si può riprovare con la firma giusta
                 raise PermissionDeniedError("Signature does not prove the device key")
 
-            invite_token = str(challenge["invite_token"])
             person_id = new_id("person")
             device_id = new_id("pdev")
             system_actor = Actor(id="homun_engine", workspace_id=ctx.workspace_id,
                                  display_name="Homun", kind="agent")
             result = ctx.service.for_store(store).apply(
                 system_actor, f"confirm:{pairing_id}", "person.confirm", {
-                    "invite_id": challenge["invite_id"],
-                    "secret": invite_token.partition(".")[2],
+                    "invite_id": invite_id,
+                    "secret": invite_secret,
                     "person_id": person_id,
                     "display_name": challenge.get("display_name") or "Dispositivo remoto",
                     "device_id": device_id,

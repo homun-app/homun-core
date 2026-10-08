@@ -24,6 +24,11 @@ def require_command_authority(store, actor, command_type, payload, cached_result
     elif command_type in {'material.update', 'material.archive'}:
         material = _lookup(store.materials, payload.get('material_id', ''), 'Material')
         require_project_capability(store, actor, material.project_id, 'write')
+    elif command_type in {'conversation.post_message', 'conversation.rename'}:
+        # F5: con persone e peer remote la conversazione è una risorsa protetta
+        # come le altre — scrivere richiede accesso in scrittura anche la
+        # prima volta, non solo al replay della risposta in cache.
+        require_conversation_access(store, actor, str(payload.get('conversation_id', '')), 'write')
     elif command_type == 'grant.revoke':
         grant = _lookup(store.grants, str(payload.get('grant_id', '')).strip(), 'Grant')
         require_project_capability(store, actor, grant.resource_id, 'admin')

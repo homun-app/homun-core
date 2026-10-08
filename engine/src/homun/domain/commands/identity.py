@@ -124,6 +124,12 @@ def _person_revoke(ctx: CommandContext, actor: Actor, command_id: str, payload: 
     for device in ctx.store.person_devices.values():
         if device.person_id == person.id:
             device.status = "revoked"
+    # le deleghe verso la persona revocata si chiudono: mai risultati da
+    # un assegnatario che non può più autenticarsi
+    for assignment in ctx.store.peer_assignments.values():
+        if assignment.assignee_person_id == person.id and assignment.status in ("offered", "accepted"):
+            assignment.status = "revoked"
+            assignment.updated_at = utc_now()
     ctx._emit(actor=actor, command_id=command_id, aggregate_id=person.id,
               aggregate_type="person", aggregate_version=2,
               event_type="person.revoked", payload={"person_id": person.id})

@@ -56,6 +56,7 @@ def _pair_and_grant(client: TestClient, ctx, tmp_path, project_id) -> RemoteConn
         "public_key": identity.public_b64, "protocol_version": 1}).json()
     confirm = client.post("/v1/remote/pair/confirm", json={
         "pairing_id": present["pairing_id"],
+            "invite_token": invite,
         "signature": identity.sign(present["nonce"])}).json()
     _apply_host(ctx, "g1", "grant.issue", {
         "project_id": project_id, "subject_id": confirm["person_id"], "capability": "write"})

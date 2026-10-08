@@ -60,3 +60,32 @@ def start_backup_scheduler(ctx, *, interval_seconds: float = DEFAULT_INTERVAL_SE
         run_backup_loop(ctx, interval_seconds=interval_seconds, retention=retention),
         name="homun-backup-scheduler",
     )
+
+async def run_wal_checkpoint_loop(ctx, *, interval_seconds: float = 300) -> None:
+    """Checkpoint PASSIVE periodico del WAL del workspace.
+
+    Con synchronous=FULL ogni commit è durabile nel WAL, quindi il crash di
+    un processo non perde dati; il punto debole resta un checkpoint interrotto
+    da kill -9 con un WAL lungo. Piegare il WAL nel main ogni pochi minuti
+    riduce quella finestra quasi a zero, a costo di una richiesta PASSIVE
+    che non blocca i writer."""
+    import asyncio
+    import logging
+    logger = logging.getLogger(__name__)
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            def _checkpoint() -> int:
+                with ctx.repository.locked() as conn:
+                    return conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()[0]
+            await asyncio.to_thread(_checkpoint)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("checkpoint WAL periodico fallito", exc_info=True)
+
+
+def start_wal_checkpoint_scheduler(ctx, *, interval_seconds: float = 300) -> asyncio.Task:
+    return asyncio.create_task(
+        run_wal_checkpoint_loop(ctx, interval_seconds=interval_seconds),
+        name="homun-wal-checkpoint")

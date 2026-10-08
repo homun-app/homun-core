@@ -59,6 +59,7 @@ def _pair_giulia(client, tmp_path):
         "public_key": identity.public_b64, "protocol_version": 1}).json()
     confirm = client.post("/v1/remote/pair/confirm", json={
         "pairing_id": present["pairing_id"],
+        "invite_token": invite,
         "signature": identity.sign(present["nonce"])}).json()
     return confirm
 

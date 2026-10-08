@@ -113,12 +113,12 @@ def test_wrong_signature_keeps_invite_alive(app, tmp_path):
             "protocol_version": 1}).json()
         # l'impostore firma con la sua chiave: rifiutato
         bad = client.post("/v1/remote/pair/confirm", json={
-            "pairing_id": present["pairing_id"],
+            "pairing_id": present["pairing_id"], "invite_token": invite,
             "signature": imposter.sign(present["nonce"])})
         assert bad.status_code in (401, 403)
         # la firma giusta riesce: invito e sfida erano intatti
         good = client.post("/v1/remote/pair/confirm", json={
-            "pairing_id": present["pairing_id"],
+            "pairing_id": present["pairing_id"], "invite_token": invite,
             "signature": honest.sign(present["nonce"])})
         assert good.status_code == 200, good.text
         assert good.json()["device_token"]
@@ -155,7 +155,7 @@ def test_expired_challenge_rejected(app, tmp_path):
                 record.result["expires_at"] = (
                     datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
         late = client.post("/v1/remote/pair/confirm", json={
-            "pairing_id": present["pairing_id"],
+            "pairing_id": present["pairing_id"], "invite_token": invite,
             "signature": identity.sign(present["nonce"])})
         assert late.status_code in (401, 403)
         # e l'invito non è stato consumato

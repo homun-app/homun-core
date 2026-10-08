@@ -65,6 +65,7 @@ def pair_with_host(host: str, invite_token: str, display_name: str,
     })
     confirm = _post(f"{host.rstrip('/')}/v1/remote/pair/confirm", {
         "pairing_id": present["pairing_id"],
+        "invite_token": invite_token,
         "signature": identity.sign(present["nonce"]),
     })
     return RemoteConnection(

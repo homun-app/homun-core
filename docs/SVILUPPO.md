@@ -153,7 +153,8 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
 | Connettori duplicati con i canali | da unificare/etichettare | idem |
 | Errori connettore visibili | ✅ corretto 2026-10-07 | commit feedback |
 | Gap parity Hermes: anti-loop in streaming, think inline nel pane, clean-EOF, coda al confine tool-call | da portare | `research/evidence/2026-10-07-parity-rc35/RIASSUNTO-TEST.md` |
-| Anomalia: conversazione scomparsa dopo riavvio (2026-10-07) | da indagare se si ripete | log sessione |
+| Anomalia: conversazione scomparsa dopo riavvio (2026-10-07) | indagata 2026-10-08: zero eventi anche per la creazione → coerente con WAL perso durante kill -9 con checkpoint interrotto. Mitigazione: checkpoint WAL periodico (5 min) nel lifespan. Da osservare se si ripete | engine/storage |
+| ~~post_message senza controllo authority~~ | ✅ corretto 2026-10-08 (revisione F5): buco pre-mutation critico con i peer | policy/commands.py |
 | ConflictError transitorio in `expire_waiting` | osservato, non bloccante | sessione 2026-10-02 |
 
 ---
