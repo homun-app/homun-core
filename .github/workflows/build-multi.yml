@@ -92,6 +92,15 @@ jobs:
           npm run build
           node apps/desktop/scripts/package-app.mjs
 
+      - name: Build .deb and AppImage (Linux)
+        if: matrix.platform == 'linux'
+        working-directory: apps/desktop
+        timeout-minutes: 15
+        run: |
+          npm ci
+          npm run release:prepare
+          npx electron-builder --linux deb AppImage --publish never
+
       - name: Checksums
         if: always()
         shell: bash
@@ -102,6 +111,10 @@ jobs:
             cp "$archive" dist-installers/
             if [ -f "$archive.sha256" ]; then cp "$archive.sha256" dist-installers/; fi
           done
+          # .deb e AppImage escono da electron-builder in apps/desktop/dist-installers
+          find apps/desktop/dist-installers -type f \( -name '*.deb' -o -name '*.AppImage' \) 2>/dev/null | while read -r pkg; do
+            cp "$pkg" dist-installers/
+          done || true
 
       - name: Upload installer artifact
         if: always()

@@ -2,7 +2,7 @@
   "name": "homun-desktop",
   "productName": "Homun",
   "version": "0.2.1002",
-  "description": "Homun local workspace",
+  "description": "Homun \u2014 il tuo spazio di lavoro con la squadra AI",
   "main": "src/main.cjs",
   "private": true,
   "scripts": {
@@ -70,6 +70,27 @@
     },
     "dmg": {
       "writeUpdateInfo": false
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Office",
+      "maintainer": "Fabio Cantone <fabio.cantone@gmail.com>",
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     }
-  }
+  },
+  "homepage": "https://github.com/homun-app/homun-core",
+  "author": "Fabio Cantone"
 }
