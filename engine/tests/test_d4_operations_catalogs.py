@@ -60,6 +60,10 @@ def test_daemon_lifecycle_start_restart_and_stop(tmp_path: Path):
 # 2. Batch Eval Runner: Canonical Executor & Trajectory Store
 # ---------------------------------------------------------------------------
 
+from conftest import requires_local_provider
+
+
+@requires_local_provider
 def test_batch_eval_runner_with_canonical_executor(tmp_path: Path):
     data_dir = tmp_path / "homun_data"
     traj_store = TrajectoryStore(data_dir / "trajectories")
@@ -91,6 +95,7 @@ def test_batch_eval_runner_with_canonical_executor(tmp_path: Path):
     assert len(trajectories) >= 2
 
 
+@requires_local_provider
 def test_research_api_batch_endpoint_uses_canonical_executor(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("HOMUN_DATA_DIR", str(tmp_path))
     app = create_app()

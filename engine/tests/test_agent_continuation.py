@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
+from conftest import requires_local_provider
 from test_native_agent import native_start
 from homun.application.agent_run_execution import advance
 from homun.context import create_context
@@ -182,6 +183,7 @@ def test_join_preserves_mid_token_boundaries(parts,expected):
     assert join_parts(parts)==expected
 
 
+@requires_local_provider
 def test_large_assembled_final_has_same_contract_after_crash(setup):
     from homun.application.agent_run_execution import _claim, _decision
     ctx,actor,work,material=setup;p=native_start(ctx,actor,work,material)
@@ -199,6 +201,7 @@ def test_large_assembled_final_has_same_contract_after_crash(setup):
     assert next(iter(ctx.repository.load().artifacts.values())).content.startswith(first+'Final.')
 
 
+@requires_local_provider
 def test_aggregate_limit_rejection_keeps_reported_usage(setup):
     ctx,actor,work,material=setup;p=native_start(ctx,actor,work,material)
     first=''.join(f'Unique row {i:04d}.\n' for i in range(1000))
