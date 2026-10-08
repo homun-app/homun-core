@@ -95,9 +95,13 @@ def test_corrupt_pages_boot_with_recovery(ctx, tmp_path):
 
     # la corruzione deve essere effettiva: se le pagine colpite erano libere
     # l'avvio pulito è legittimo e il recovery non ha nulla da fare
-    conn = sqlite3.connect(db_path)
-    check = conn.execute('PRAGMA quick_check').fetchone()[0]
-    conn.close()
+    # (su Linux quick_check può lanciare DatabaseError invece di restituirla)
+    try:
+        conn = sqlite3.connect(db_path)
+        check = conn.execute('PRAGMA quick_check').fetchone()[0]
+        conn.close()
+    except sqlite3.DatabaseError:
+        check = 'database disk image is malformed'
 
     recovered = create_context_with_recovery(db_path=db_path, data_dir=tmp_path,
                                              for_tests=True)

@@ -71,7 +71,7 @@ export async function stageApp({ sourceRoot, stage, engineDir, webDir }) {
     await cp(path.join(sourceRoot, 'apps/desktop/src', name), path.join(appDir, 'src', name));
   }
   await writeFile(path.join(appDir, 'package.json'), JSON.stringify({
-    name: 'homun-desktop', productName: 'Homun', version: appVersion,
+    name: 'homun-desktop', productName: 'Homun', version: appVersion, author: 'Homun',
     description: 'Homun local workspace', main: 'src/main.cjs', private: true,
   }, null, 2));
   const web = path.join(stage, 'web');
