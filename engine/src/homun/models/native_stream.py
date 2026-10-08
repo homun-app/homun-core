@@ -1,16 +1,23 @@
 """Bounded SSE/NDJSON framing and native tool delta assembly.
 
 No deltas are executable until terminal provider evidence and normal native
-response validation succeed. Progress events deliberately contain counts only.
+response validation succeed. Progress events deliberately contain counts only
+plus the assembled text/reasoning so live UI can follow the stream.
 """
 import json
 
-from homun.models.native_errors import NativeModelError, MALFORMED, TRUNCATED
+from homun.models.native_errors import (
+    NativeModelError, MALFORMED, TRUNCATED, CLEAN_EOF, REPETITION,
+)
+from homun.models.repetition import RunawayStreamWatch
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_FRAME_BYTES = 256 * 1024
 MAX_FRAMES = 16384
 MAX_ARGUMENT_CHARS = 65536
+
+# Provider reasoning channel keys (OpenAI-compat + common aliases).
+_REASONING_DELTA_KEYS = ('reasoning', 'reasoning_content', 'thinking')
 
 
 class NativeStream:
@@ -20,10 +27,14 @@ class NativeStream:
         self.event = []
         self.event_size = self.bytes = self.chunks = 0
         self.content = ''
+        self.reasoning = ''
         self.calls = {}
         self.reason = None
         self.terminal = False
+        self.finish_reason_seen = False
         self.usage = {}
+        self.content_watch = RunawayStreamWatch()
+        self.reasoning_watch = RunawayStreamWatch()
 
     def fail(self, text='Malformed native stream'):
         raise NativeModelError(MALFORMED, text, retryable=False)
@@ -66,7 +77,12 @@ class NativeStream:
         if self.chunks > MAX_FRAMES: self.fail('Native stream exceeds fragment limit')
         if not self.ollama and raw == b'[DONE]':
             if self.reason is None:
-                raise NativeModelError(TRUNCATED, 'Stream ended without finish reason', retryable=False)
+                # Clean server close without finish_reason — not a transport drop.
+                raise NativeModelError(
+                    CLEAN_EOF,
+                    'Server closed the stream without finish_reason (not a network error)',
+                    retryable=False,
+                )
             self.terminal = True
             return
         try:
@@ -79,9 +95,16 @@ class NativeStream:
         except (ValueError, TypeError, KeyError, AttributeError) as exc:
             self.fail('Invalid native stream fragment')
         if self.on_delta:
-            self.on_delta({'type':'native_stream_progress', 'chunks':self.chunks,
-                           'text_chars':len(self.content), 'tool_calls':len(self.calls),
-                           'text':self.content})
+            event = {
+                'type': 'native_stream_progress',
+                'chunks': self.chunks,
+                'text_chars': len(self.content),
+                'tool_calls': len(self.calls),
+                'text': self.content,
+            }
+            if self.reasoning:
+                event['reasoning'] = self.reasoning
+            self.on_delta(event)
 
     def capture_usage(self, body):
         raw = body if self.ollama else body.get('usage')
@@ -97,6 +120,20 @@ class NativeStream:
         if content is not None:
             if not isinstance(content, str): self.fail()
             self.content += content
+            if self.content_watch.feed(content):
+                raise NativeModelError(
+                    REPETITION, 'Stream cut: runaway repetition', retryable=False,
+                )
+        for key in _REASONING_DELTA_KEYS:
+            value = delta.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, str): self.fail()
+            self.reasoning += value
+            if self.reasoning_watch.feed(value):
+                raise NativeModelError(
+                    REPETITION, 'Stream cut: runaway repetition', retryable=False,
+                )
 
     def openai_delta(self, body):
         choices = body.get('choices')
@@ -133,6 +170,7 @@ class NativeStream:
         if reason is not None:
             if not isinstance(reason, str): self.fail()
             self.reason = reason
+            self.finish_reason_seen = True
 
     def ollama_delta(self, body):
         if self.terminal: self.fail()
@@ -150,6 +188,7 @@ class NativeStream:
             self.calls[len(self.calls)] = call
         if body.get('done') is True:
             self.reason = body.get('done_reason')
+            self.finish_reason_seen = self.reason is not None
             self.terminal = True
         elif body.get('done') is not False:
             self.fail('Ollama stream lacks done marker')
@@ -159,6 +198,7 @@ class NativeStream:
             self.line(self.buffer)
             self.buffer = b''
         if not self.terminal or self.reason is None:
+            # Abrupt close / missing terminal evidence — distinct from clean EOF.
             raise NativeModelError(TRUNCATED, 'Stream lacks terminal evidence', retryable=False)
         if not self.ollama:
             if sorted(self.calls) != list(range(len(self.calls))): self.fail('Tool indices are not contiguous')

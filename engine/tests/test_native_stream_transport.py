@@ -91,15 +91,17 @@ def test_ollama_native_stream(tmp_path,monkeypatch):
     assert 'stream_options' not in requests[0]
 
 
-@pytest.mark.parametrize('parts', [
-    [sse(chunk({'content':'partial'})),sse('[DONE]')],
-    [sse(chunk({'content':'partial'},'stop'))],
+@pytest.mark.parametrize('parts,code', [
+    # Clean server close without finish_reason — not a transport drop.
+    ([sse(chunk({'content':'partial'})),sse('[DONE]')], 'agent_model_clean_eof'),
+    # Abrupt end with finish_reason but no [DONE] terminal — truncated.
+    ([sse(chunk({'content':'partial'},'stop'))], 'agent_model_truncated'),
 ])
-def test_missing_terminal_evidence_fails(tmp_path,monkeypatch,parts):
+def test_missing_terminal_evidence_fails(tmp_path,monkeypatch,parts,code):
     with server(parts) as (url,_):
         registry=models(tmp_path,url,monkeypatch)
         with pytest.raises(NativeModelError) as caught: invoke(registry)
-    assert caught.value.code == 'agent_model_truncated'
+    assert caught.value.code == code
     assert not caught.value.retryable
     assert caught.value.usage.input_tokens is None
 

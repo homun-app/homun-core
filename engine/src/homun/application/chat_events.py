@@ -86,12 +86,25 @@ def _split_partial(text: str, run: Dict[str, Any]) -> tuple[str, str]:
 
 
 def _yield_stream_state(run_id: str, streamed: Dict[str, tuple], run: Dict[str, Any]):
-    """Stato live del parziale in-flight (stream_partial del record): reasoning
-    e testo completi, il client sostituisce — idempotente, niente delta."""
-    partial = (run.get("stream_partial") or {}).get("text")
-    if not isinstance(partial, str) or not partial:
+    """Live in-flight partial (stream_partial): full reasoning + text replace.
+
+    When the provider already streamed a native reasoning channel, prefer that
+    pane and do not promote think tags from content (Hermes
+    ``_native_reasoning_streamed`` equivalent). Otherwise split inline think tags.
+    """
+    partial_obj = run.get("stream_partial") or {}
+    partial = partial_obj.get("text")
+    native_reasoning = partial_obj.get("reasoning")
+    has_native = isinstance(native_reasoning, str) and bool(native_reasoning.strip())
+    if has_native:
+        reasoning = native_reasoning.strip()
+        visible = partial if isinstance(partial, str) else ""
+    else:
+        if not isinstance(partial, str) or not partial:
+            return []
+        reasoning, visible = _split_partial(partial, run)
+    if not reasoning and not visible:
         return []
-    reasoning, visible = _split_partial(partial, run)
     current = (reasoning, visible)
     if streamed.get(f"state:{run_id}") == current:
         return []

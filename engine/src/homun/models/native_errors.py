@@ -32,6 +32,7 @@ TLS = 'agent_model_tls'
 OVERFLOW = 'agent_model_overflow'
 EMPTY = 'agent_model_empty_response'
 TRUNCATED = 'agent_model_truncated'
+CLEAN_EOF = 'agent_model_clean_eof'
 MALFORMED = 'agent_model_malformed'
 REPETITION = 'agent_model_repetition'
 
@@ -45,7 +46,9 @@ _LABELS = {
     AUTH: 'Provider rejected credentials', QUOTA: 'Provider quota or billing exhausted',
     INVALID_REQUEST: 'Provider rejected the request', TLS: 'TLS verification failed',
     OVERFLOW: 'Request exceeds the model context window', EMPTY: 'Model returned an empty response',
-    TRUNCATED: 'Model response was truncated', MALFORMED: 'Model response was malformed',
+    TRUNCATED: 'Model response was truncated',
+    CLEAN_EOF: 'Server closed the stream without finish_reason (not a network error)',
+    MALFORMED: 'Model response was malformed',
 }
 
 # Error classifier pattern tables, lowercased substrings.
