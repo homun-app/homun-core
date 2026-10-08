@@ -88,6 +88,13 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   end-to-end: il dev engine è entrato in un terzo engine come peer e il
   progetto condiviso appare nel pannello. Host irraggiungibile = errore
   tipizzato remote_unavailable.
+- ✅ **Lettura remota nel thread** (2026-10-08) — sidebar → Spazi remoti:
+  lista progetti condivisi, apertura con sync automatica, conversazioni
+  con messaggi renderizzati in markdown, lavori, tutto read-only col
+  badge «Fonte: motore remoto · sola lettura». Rotta
+  `GET /v1/peers/projection`. Verificato nel browser con un terzo engine
+  come host. Runbook del pilot pronto:
+  `development/2026-10-08-pilot-runbook.md`.
 - ◐ **Fetta 5 (E2E)**: NON iniziata — cifratura per oggetto/destinatario e
   transfer con manifest: serve review del protocollo prima (doc
   distribuzione dati §3). Il pilot su VPN non la richiede.

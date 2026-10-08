@@ -70,3 +70,28 @@ export async function syncEnginePeerProject(host: string, projectId: string): Pr
     method: "POST", body: JSON.stringify({ project_id: projectId }),
   });
 }
+
+export type PeerProjectionContent = {
+  source: "remote-engine";
+  host: string;
+  project_id: string;
+  cursor: number;
+  snapshot: {
+    project: { id: string; name: string; status: string };
+    conversations: Array<{
+      id: string; title: string; archived: boolean;
+      messages: Array<{ id: string; author_id: string; text: string; created_at: string }>;
+    }>;
+    works: Array<{ id: string; title: string; objective: string; status: string }>;
+  };
+};
+
+export async function fetchEnginePeerProjection(host: string, projectId: string): Promise<PeerProjectionContent> {
+  const body = await peersFetch(
+    `/v1/peers/projection?host=${encodeURIComponent(host)}&project_id=${encodeURIComponent(projectId)}`);
+  const view = body as PeerProjectionContent;
+  if (!view?.snapshot?.project) {
+    throw new HomunClientError("validation_error", "Proiezione remota non valida");
+  }
+  return view;
+}

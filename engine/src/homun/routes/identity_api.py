@@ -321,3 +321,19 @@ def peers_sync(host_path: str, body: PeerSyncRequest,
             "cursor": view["cursor"],
             "conversations": len(view["snapshot"].get("conversations", [])),
             "works": len(view["snapshot"].get("works", []))}
+
+@router.get("/peers/projection")
+def peers_projection(host: str, project_id: str):
+    """Il contenuto letto della proiezione remota: conversazioni con messaggi
+    e lavori del progetto condiviso, read-only (Fonte: motore remoto)."""
+    pass
+    ctx = get_context()
+    from pathlib import Path as _Path
+    from homun.peers.replication import RemoteProjection
+    projection = RemoteProjection(_Path(ctx.data_dir) / "remote-peers.db",
+                                  host, project_id)
+    view = projection.view()
+    if not view["snapshot"]:
+        raise HTTPException(404, detail={"code": "not_found",
+                                         "message": "Proiezione mai sincronizzata: prima 'sync'"})
+    return view

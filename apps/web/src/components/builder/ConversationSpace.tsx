@@ -41,6 +41,7 @@ export type SpaceData = {
   routines: SpaceRoutine[];
 };
 export type SpaceView =
+  | "Spazi remoti"
   | "Squadra"
   | "Progetti"
   | "Automazioni"

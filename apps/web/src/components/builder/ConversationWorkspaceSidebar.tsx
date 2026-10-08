@@ -1,7 +1,7 @@
 /**
  * Refined left navigation matching modern Linear/Cursor UI.
  */
-import {
+import { Globe,
   ChevronsUpDown,
   PanelLeft,
   Search,
@@ -244,6 +244,18 @@ export function ConversationWorkspaceSidebar({
             <span className="cw-sb-count">{(docCount || 0) + (libraryCount || 0)}</span>
           )}
         </button>
+
+        {engineMode && (
+          <button
+            className={`cw-sb-nav-item ${space === "Spazi remoti" ? "active" : ""}`}
+            onClick={() => onOpenSpace("Spazi remoti")}
+          >
+            <div className="cw-sb-item-left">
+              <Globe size={15} />
+              <span>Spazi remoti</span>
+            </div>
+          </button>
+        )}
 
         <button
           className={`cw-sb-nav-item ${space === "Automazioni" ? "active" : ""}`}

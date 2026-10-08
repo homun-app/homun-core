@@ -38,6 +38,7 @@ import { MessagingView } from "./messaging/MessagingView";
 import { EngineDocuments } from "./EngineDocuments";
 import { UnifiedDocumentsAndMaterials } from "./UnifiedDocumentsAndMaterials";
 import { EngineRoutines } from "./EngineRoutines";
+import { EngineRemoteSpacesBrowser } from "./EngineRemoteSpacesBrowser";
 import type { EngineRoutine } from "@/lib/engine-routines-client";
 type Props = {
   engineAgents?: EngineAgentProfile[] | undefined;
@@ -233,6 +234,8 @@ export function ConversationWorkspaceSpaceHost({
     );
   }
 
+  if (engineMode && space === "Spazi remoti")
+    return <EngineRemoteSpacesBrowser />;
   if (engineMode && space === "Automazioni")
     return (
       <EngineRoutines
@@ -346,6 +349,9 @@ export function ConversationWorkspaceSpaceHost({
 
   if (space === "Canali") {
     return <MessagingView />;
+  }
+  if (space === "Spazi remoti") {
+    return <EngineRemoteSpacesBrowser />;
   }
 
   return (

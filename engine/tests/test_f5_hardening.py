@@ -168,3 +168,24 @@ def test_person_revocation_closes_open_assignments(host, tmp_path):
         _apply(ctx, "rev1", "person.revoke", {"person_id": confirm["person_id"]})
         store = ctx.repository.snapshot()
         assert store.peer_assignments[offered["assignment_id"]].status == "revoked"
+
+
+def test_projection_route_reads_synced_content(host, tmp_path):
+    """La proiezione completa è leggibile solo dopo il sync: 404 onesto prima."""
+    app, ctx = host
+    project = _apply(ctx, "pr1", "project.create", {"name": "Condiviso lettura"})["project_id"]
+    conv = _apply(ctx, "prc1", "conversation.create",
+                  {"title": "Chat", "project_id": project})["conversation_id"]
+    _apply(ctx, "prm1", "conversation.post_message",
+           {"conversation_id": conv, "text": "Contenuto **con markdown**"})
+    with TestClient(app) as client:
+        confirm = _pair(client, ctx, tmp_path, project_id=project)
+        headers = {"Authorization": f"Bearer {confirm['device_token']}"}
+        # mai sincronizzato: 404 tipizzato (autenticati come owner locale)
+        missing = client.get(f"/v1/peers/projection?host=nessuno&project_id={project}",
+                             headers=OWNER)
+        assert missing.status_code == 404
+        # sync via rotta peer e poi lettura
+        sync = client.post(f"/v1/peers/connections/nessuno/sync",
+                           headers=OWNER, json={"project_id": project})
+        assert sync.status_code == 404
