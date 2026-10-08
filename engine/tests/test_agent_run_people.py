@@ -27,6 +27,14 @@ def test_question_invitation_response_resumes_selected_person_run(setup, monkeyp
     monkeypatch.setattr(reads, 'get_context', lambda: ctx)
     view = reads.list_works(ctx.workspace_id, actor.id, actor.display_name)['items'][0]
     assert view['pending_contribution']['recipient_name'] == 'Marta'
+    # Another reader with project access must get the same projection (not a raw id).
+    other = Actor(id='person_other', workspace_id=actor.workspace_id, display_name='Other')
+    project_id = ctx.repository.load().works[work].project_id
+    ctx.service.apply(actor, 'grant-other', 'grant.issue', {
+        'project_id': project_id, 'subject_id': other.id, 'capability': 'read'})
+    ctx.persist()
+    other_view = reads.list_works(ctx.workspace_id, other.id, other.display_name)['items'][0]
+    assert other_view['pending_contribution']['recipient_name'] == 'Marta'
     invitation = issue_invitation(ctx, actor, request.id, {})
     assert read_invitation(ctx, invitation['token'])['recipient_name'] == 'Marta'
     respond(ctx, invitation['token'], 'Per il cliente')
