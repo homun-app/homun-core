@@ -39,6 +39,9 @@ Spaces collaborate: another machine joins yours with an invite, sees only the pr
 - **Scoped human contributions.** Named recipients can answer one request through an expiring, revocable link; an adaptive run can resume from that answer. Reachable hosting remains a prerequisite.
 
 ## Fixes
+- **Linux: the bundled engine no longer requests an executable stack.** Some python-build-standalone interpreters ship libpython with a RWE GNU_STACK that recent glibc refuses to load; the build now clears and verifies that flag on every ELF in the bundle, so .deb/AppImage installs start the engine on first run without manual patchelf.
+
+## Fixes
 - **Model retries remain bounded after a crash.** Corrections interrupt stale waits immediately, and malformed usage counters cannot reduce recorded spending.
 - **Materials and Plugins use the engine from the sidebar.** Files, previews, archival and capability settings share the persisted engine state; denied access clears stale previews.
 - **Task deadlines persist from the Tasks view**, with saving feedback and typed errors.

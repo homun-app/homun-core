@@ -14,11 +14,16 @@ import os
 import platform
 import stat
 import shutil
+import struct
 import subprocess
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# ELF program-header identifiers for the execstack hardening below.
+PT_GNU_STACK = 0x6474E551
+PF_X = 0x1
 
 # Native build targets: PyInstaller bundles for the host, never cross-compiles.
 HOST_TARGETS = {
@@ -53,6 +58,72 @@ def artifact_inventory(root):
         elif not stat.S_ISDIR(mode):
             raise ValueError('Unsupported bundle artifact: ' + name)
     return inventory
+
+
+def clear_execstack(image):
+    """Return ``image`` with PF_X cleared on PT_GNU_STACK, or None when untouched.
+
+    glibc >= 2.39 refuses to dlopen objects that request an executable stack,
+    and some interpreters still request one: python-build-standalone releases
+    cut around March 2026 ship libpython with a RWE GNU_STACK (LLVM 22 stopped
+    emitting .note.GNU-stack; fixed upstream by python-build-standalone#1064).
+    Raises ValueError for ELF images whose program headers cannot be located.
+    """
+    if len(image) < 64 or image[:4] != b'\x7fELF':
+        return None
+    endian = {1: '<', 2: '>'}.get(image[5])
+    if endian is None:
+        raise ValueError('unknown ELF byte order')
+    if image[4] == 2:
+        phoff, = struct.unpack_from(endian + 'Q', image, 0x20)
+        phentsize, phnum = struct.unpack_from(endian + 'HH', image, 0x36)
+        flags_at = 4
+    elif image[4] == 1:
+        phoff, = struct.unpack_from(endian + 'I', image, 0x1C)
+        phentsize, phnum = struct.unpack_from(endian + 'HH', image, 0x2A)
+        flags_at = 24
+    else:
+        raise ValueError('unknown ELF class')
+    if phnum == 0xFFFF:
+        raise ValueError('extended program header count is unsupported')
+    patched = None
+    for index in range(phnum):
+        entry = phoff + index * phentsize
+        if entry + phentsize > len(image):
+            raise ValueError('program header table outside the file')
+        if struct.unpack_from(endian + 'I', image, entry)[0] != PT_GNU_STACK:
+            continue
+        flags = struct.unpack_from(endian + 'I', image, entry + flags_at)[0]
+        if not flags & PF_X:
+            continue
+        if patched is None:
+            patched = bytearray(image)
+        struct.pack_into(endian + 'I', patched, entry + flags_at, flags & ~PF_X)
+    return bytes(patched) if patched is not None else None
+
+
+def clear_bundle_execstack(root):
+    """Clear executable GNU_STACK on every regular ELF under ``root``.
+
+    Returns the names of patched files; the caller re-verifies before
+    distribution because a bundle that still requests execstack is dead on
+    arrival on current glibc (engine dlopen fails, app exits).
+    """
+    patched = []
+    for path in sorted(root.rglob('*')):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            replacement = clear_execstack(path.read_bytes())
+        except ValueError as error:
+            raise ValueError(f'Unparseable ELF in bundle: {path.name}: {error}')
+        if replacement is not None:
+            path.write_bytes(replacement)
+            patched.append(path.relative_to(root).as_posix())
+    for name in patched:
+        if clear_execstack((root / name).read_bytes()) is not None:
+            raise ValueError(f'Executable GNU_STACK survived patching: {name}')
+    return patched
 
 
 def main():
@@ -108,6 +179,13 @@ def main():
         bundled.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(driver, bundled)
         bundled.chmod(bundled.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    if target['os'] == 'linux':
+        try:
+            hardened = clear_bundle_execstack(dist / 'engine')
+        except ValueError as error:
+            raise SystemExit(f'Engine bundle execstack hardening failed: {error}')
+        if hardened:
+            print('Cleared executable GNU_STACK on: ' + ', '.join(hardened))
     current_sources = {path.relative_to(ROOT).as_posix()
                        for path in (ROOT / 'engine/src/homun').rglob('*.py')}
     current_sources |= {path.relative_to(ROOT).as_posix()

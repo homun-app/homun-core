@@ -29,8 +29,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Generated engine inventory
-        run: python -m pytest -q engine/packaging/test_inventory.py
+      - name: Generated engine inventory and execstack hardening
+        run: python -m pytest -q engine/packaging
       - name: Desktop boundary and owned engine tests
         run: node --test apps/desktop/tests/*.test.cjs
         env:
