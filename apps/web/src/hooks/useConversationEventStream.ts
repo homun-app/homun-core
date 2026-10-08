@@ -66,45 +66,82 @@ export function useConversationEventStream(
     let tools: StreamToolEvent[] = [];
     let runActive = false;
     let runStatus: string | null = null;
+    let liveReasoning = "";
+    let liveVisible: string | null = null;
 
-    const recompute = (connected: boolean) =>
+    const recomputeLive = (connected: boolean) =>
       setState((prev) => {
+        if (liveVisible !== null) {
+          return {
+            connected,
+            answerText: answer,
+            thinking: liveReasoning,
+            visibleText: liveVisible,
+            tools: [...tools],
+            runActive,
+            runStatus: runStatus ?? prev.runStatus,
+          };
+        }
         const { thinking, visible } = splitThink(answer);
-        return { connected, answerText: answer, thinking, visibleText: visible,
-                 tools: [...tools], runActive, runStatus: runStatus ?? prev.runStatus };
+        return {
+          connected,
+          answerText: answer,
+          thinking,
+          visibleText: visible,
+          tools: [...tools],
+          runActive,
+          runStatus: runStatus ?? prev.runStatus,
+        };
       });
 
-    source.onopen = () => recompute(true);
+    source.onopen = () => recomputeLive(true);
     source.addEventListener("run_started", (event) => {
       const data = JSON.parse((event as MessageEvent).data) as { status: string };
       runActive = true;
       runStatus = data.status;
       answer = "";
+      liveReasoning = "";
+      liveVisible = null;
       tools = [];
-      recompute(true);
+      recomputeLive(true);
+    });
+    source.addEventListener("stream_state", (event) => {
+      const data = JSON.parse((event as MessageEvent).data) as {
+        reasoning?: string;
+        text?: string;
+      };
+      liveReasoning = String(data.reasoning ?? "");
+      liveVisible = String(data.text ?? "");
+      recomputeLive(true);
     });
     source.addEventListener("text_delta", (event) => {
-      const data = JSON.parse((event as MessageEvent).data) as { delta: string };
-      answer += data.delta;
-      recompute(true);
+      const data = JSON.parse((event as MessageEvent).data) as {
+        delta: string;
+        reset?: boolean;
+      };
+      answer = data.reset ? data.delta : answer + data.delta;
+      // Canonical text_delta wins over a stale stream_state prefix.
+      liveVisible = null;
+      recomputeLive(true);
     });
     source.addEventListener("tool_result", (event) => {
       const data = JSON.parse((event as MessageEvent).data) as StreamToolEvent;
       tools = [...tools, { tool: data.tool ?? "?", message: data.message ?? "" }];
-      recompute(true);
+      recomputeLive(true);
     });
     source.addEventListener("run_finished", (event) => {
       const data = JSON.parse((event as MessageEvent).data) as { status: string };
       runActive = false;
       runStatus = data.status;
-      recompute(true);
+      liveVisible = null;
+      recomputeLive(true);
     });
-    source.addEventListener("message", (event) => {
-      recompute(true);
+    source.addEventListener("message", () => {
+      recomputeLive(true);
       onNewMessageRef.current?.();
     });
     source.onerror = () => {
-      // il server chiuso o rete giù: EventSource riprova da solo
+      // Server closed or network down: EventSource retries on its own.
       setState((prev) => ({ ...prev, connected: false }));
     };
     return () => source.close();

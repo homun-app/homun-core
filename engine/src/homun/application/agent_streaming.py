@@ -15,6 +15,8 @@ def complete(ctx,run,messages,**kwargs):
     token=run['_lease_token']
     last_progress=0.0
     last_renewal=0.0
+    last_partial_chars=0
+    last_reasoning_chars=0
     actor=Actor.model_validate(run['_actor'])
 
     def current_run(store):
@@ -45,21 +47,36 @@ def complete(ctx,run,messages,**kwargs):
                 return False
 
     def progress(event):
-        nonlocal last_progress
+        # Throttle progress counts at ~4 Hz, but always flush stream_partial when
+        # commentary grows or tool_calls arrive — otherwise the tool-call boundary
+        # keeps a stale prefix and the UI loses the commentary tail.
+        nonlocal last_progress, last_partial_chars, last_reasoning_chars
         now=monotonic()
-        if now-last_progress < 0.25:
+        text=event.get('text')
+        reasoning=event.get('reasoning')
+        tool_calls=event.get('tool_calls')
+        text_chars=len(text) if isinstance(text,str) else 0
+        reasoning_chars=len(reasoning) if isinstance(reasoning,str) else 0
+        grew=text_chars>last_partial_chars or reasoning_chars>last_reasoning_chars
+        tools_arrived=type(tool_calls) is int and tool_calls>0
+        due=now-last_progress>=0.25
+        if not due and not grew and not tools_arrived:
             return
         counts={key:event[key] for key in ('chunks','text_chars','tool_calls')
                 if type(event.get(key)) is int and event[key]>=0}
-        # il parziale accumulato alimenta lo streaming live della chat:
-        # la SSE del run lo legge dal record ogni quarto di secondo
-        text=event.get('text')
         with ctx.repository.locked(),ctx.repository.transaction() as store:
             current,valid=current_run(store)
             if valid:
                 current['stream_progress']=counts
-                if isinstance(text,str):
-                    current['stream_partial']={'text': text[-200_000:]}
+                if isinstance(text,str) or isinstance(reasoning,str):
+                    partial={}
+                    if isinstance(text,str):
+                        partial['text']=text[-200_000:]
+                        last_partial_chars=text_chars
+                    if isinstance(reasoning,str) and reasoning:
+                        partial['reasoning']=reasoning[-200_000:]
+                        last_reasoning_chars=reasoning_chars
+                    current['stream_partial']=partial
         last_progress=now
 
     try:
