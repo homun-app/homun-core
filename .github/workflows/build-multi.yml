@@ -100,7 +100,7 @@ jobs:
           [ -d dist/desktop ] || exit 0
           find dist/desktop -type f \( -name '*.zip' -o -name '*.tar.gz' \) | while read -r archive; do
             cp "$archive" dist-installers/
-            [ -f "$archive.sha256" ] && cp "$archive.sha256" dist-installers/
+            if [ -f "$archive.sha256" ]; then cp "$archive.sha256" dist-installers/; fi
           done
 
       - name: Upload installer artifact
