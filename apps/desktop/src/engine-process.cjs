@@ -1,5 +1,5 @@
 /** Own exactly one engine process; startup failure always tears it down. */
-const { spawn } = require('node:child_process');
+const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -17,8 +17,10 @@ function bundledCuaDriver(cwd) {
 const { randomBytes } = require('node:crypto');
 const { once } = require('node:events');
 const { setTimeout: delay } = require('node:timers/promises');
+const { promisify } = require('node:util');
+const execFileAsync = promisify(execFile);
 
-async function startEngine({ executable, args = [], dataDir, cwd, timeout = 20000, signal }) {
+async function launchOnce({ executable, args = [], dataDir, cwd, timeout = 20000, signal }) {
   const token = randomBytes(32).toString('hex');
   const child = spawn(executable, [...args, 'serve', '--port', '0'], {
     cwd, stdio: ['pipe', 'pipe', 'pipe'],
@@ -26,7 +28,7 @@ async function startEngine({ executable, args = [], dataDir, cwd, timeout = 2000
       HOMUN_SESSION_ACTOR_ID: 'person_fabio', HOMUN_MEMORY_BACKEND: 'sqlite', HOMUN_PARENT_WATCHDOG: '1', PYTHONUNBUFFERED: '1',
       ...(process.env.HOMUN_CUA_DRIVER_BIN ? {} : { HOMUN_CUA_DRIVER_BIN: bundledCuaDriver(cwd) }) },
   });
-  let baseUrl, exited = false, failed = false, buffer = '';
+  let baseUrl, exited = false, failed = false, buffer = '', startupFailure;
   child.once('error', () => { failed = true; });
   child.once('exit', () => { exited = true; });
   child.stderr.on('data', c => { if (process.env.HOMUN_ENGINE_DEBUG_LOG) require('node:fs').appendFileSync(process.env.HOMUN_ENGINE_DEBUG_LOG, c); }); // Provider/storage diagnostics must not leak into renderer.
@@ -40,6 +42,8 @@ async function startEngine({ executable, args = [], dataDir, cwd, timeout = 2000
           const { port } = JSON.parse(line.slice(13));
           if (Number.isInteger(port) && port > 0 && port < 65536) baseUrl = `http://127.0.0.1:${port}`;
         } catch { failed = true; }
+      } else if (line.startsWith('HOMUN_STARTUP_FAILED ')) {
+        try { startupFailure = JSON.parse(line.slice(21)); } catch { startupFailure = { reason: 'unreadable' }; }
       }
     }
   });
@@ -63,13 +67,59 @@ async function startEngine({ executable, args = [], dataDir, cwd, timeout = 2000
           const probeSignal = signal ? AbortSignal.any([signal, probeTimeout]) : probeTimeout;
           const response = await fetch(baseUrl + '/v1/health', { headers: { Authorization: `Bearer ${token}` }, signal: probeSignal });
           if (response.ok && (await response.json()).status === 'ok' && canBecomeReady()) {
-            return { baseUrl, token, stop, child };
+            return { engine: { baseUrl, token, stop, child } };
           }
         } catch { /* Startup isn't ready yet. */ }
       }
       await delay(50);
     }
-    throw new Error('The owned Homun engine did not become ready');
-  } catch (error) { await stop(); throw error; }
+    await stop();
+    const error = new Error('The owned Homun engine did not become ready');
+    if (startupFailure) error.info = { startupFailure };
+    return { error };
+  } catch (error) {
+    await stop();
+    if (startupFailure && !error.info) error.info = { startupFailure };
+    return { error };
+  }
+}
+
+function processAlive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error.code === 'EPERM'; }
+}
+
+async function releaseBusyHolder(pid) {
+  // The engine names the stale owner of the data dir on stdout; verify it is
+  // really a Homun engine before killing, so a recycled pid never turns the
+  // recovery into a shotgun.
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return { killed: false, reason: 'holder-unknown', holderPid: pid ?? null };
+  if (!processAlive(pid)) return { killed: true, recoveredFrom: pid };
+  try {
+    const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'command=']);
+    if (!/homun/i.test(stdout)) return { killed: false, reason: 'foreign-process', holderPid: pid };
+  } catch { return { killed: false, reason: 'holder-unknown', holderPid: pid }; }
+  try { process.kill(pid, 'SIGTERM'); }
+  catch (error) { if (error.code !== 'ESRCH') return { killed: false, reason: 'not-permitted', holderPid: pid }; }
+  for (let i = 0; i < 10 && processAlive(pid); i++) await delay(300);
+  if (!processAlive(pid)) return { killed: true, recoveredFrom: pid };
+  try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+  for (let i = 0; i < 6 && processAlive(pid); i++) await delay(300);
+  return processAlive(pid) ? { killed: false, reason: 'unkillable', holderPid: pid } : { killed: true, recoveredFrom: pid };
+}
+
+async function startEngine(options) {
+  const first = await launchOnce(options);
+  if (first.engine) return first.engine;
+  const failure = first.error.info?.startupFailure;
+  if (failure?.reason !== 'engine-dir-busy' || options.signal?.aborted) throw first.error;
+  const recovery = Number.isInteger(failure.holder_pid)
+    ? await releaseBusyHolder(failure.holder_pid)
+    : { killed: false, reason: 'holder-unknown', holderPid: failure.holder_pid ?? null };
+  if (!recovery.killed) { first.error.info = { ...first.error.info, recovery }; throw first.error; }
+  const retry = await launchOnce(options);
+  if (retry.engine) { retry.engine.recoveredFromPid = recovery.recoveredFrom; return retry.engine; }
+  retry.error.info = { ...retry.error.info, recovery };
+  throw retry.error;
 }
 module.exports = { startEngine };

@@ -26,13 +26,21 @@ DEFAULT_PORT = 8765
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    from homun.storage.lease import engine_lease
+    from homun.storage.lease import EngineBusyError, engine_lease
     from homun.application.lifecycle import runtime_lifespan
     from homun.application.material_ingest import recover_materials
     from homun.storage.paths import default_data_dir
     owns_context = context_mod._CONTEXT is None
     root = default_data_dir() if owns_context else context_mod._CONTEXT.data_dir
-    with engine_lease(root):
+
+    def _announce_busy(error: EngineBusyError) -> None:
+        # The desktop parses this stdout line to recover a stale data-dir owner;
+        # uvicorn would only log the traceback to stderr, which the user never sees.
+        import json
+        print('HOMUN_STARTUP_FAILED ' + json.dumps(
+            {'reason': 'engine-dir-busy', 'holder_pid': error.holder_pid}), flush=True)
+
+    with engine_lease(root, on_busy=_announce_busy):
         backup_task = None
         wal_task = None
         try:

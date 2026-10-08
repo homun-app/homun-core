@@ -41,10 +41,15 @@ def serve(args):
     if os.environ.get('HOMUN_PARENT_WATCHDOG') == '1':
         from threading import Thread
         import signal
+        import time
         def watch_parent():
             # EOF means the owning desktop disappeared, even after SIGKILL.
             sys.stdin.buffer.read()
             os.kill(os.getpid(), signal.SIGTERM)
+            # A wedged graceful shutdown would keep the data-dir lease hostage;
+            # escalate like the desktop's own stop() does.
+            time.sleep(10)
+            os.kill(os.getpid(), signal.SIGKILL)
         Thread(target=watch_parent, daemon=True, name='desktop-owner').start()
     origins = ['homun://app'] if token else ['http://127.0.0.1:4183', 'http://localhost:4183']
     app = create_app(session_token=token, allowed_origins=origins,

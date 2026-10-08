@@ -176,6 +176,24 @@ def test_server_obtains_lease_before_creating_context(tmp_path, monkeypatch):
             pass
 
 
+def test_busy_startup_announces_holder_pid_on_stdout(tmp_path, monkeypatch, capsys):
+    import os as _os
+    from fastapi.testclient import TestClient
+    from homun import app, context
+    from homun.storage.lease import engine_lease, EngineBusyError
+    source = tmp_path/'busy'
+    monkeypatch.setenv('HOMUN_DATA_DIR', str(source))
+    monkeypatch.setattr(context, '_CONTEXT', None)
+    with engine_lease(source), pytest.raises(EngineBusyError):
+        with TestClient(app.create_app()):
+            pass
+    out = capsys.readouterr().out
+    line = next(l for l in out.splitlines() if l.startswith('HOMUN_STARTUP_FAILED '))
+    payload = json.loads(line.split(' ', 1)[1])
+    assert payload['reason'] == 'engine-dir-busy'
+    assert payload['holder_pid'] == _os.getpid()
+
+
 def test_installation_restore_rejects_nonempty_ds_store_destination(tmp_path):
     from homun.storage.installation_backup import create_installation_backup, restore_installation_backup
     source = tmp_path/'source'
