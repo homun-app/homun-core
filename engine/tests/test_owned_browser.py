@@ -13,13 +13,23 @@ from homun.execution.owned_browser import OwnedBrowser, read_page
 from homun.models.native_turn import NativeMessage, ToolCall
 from test_agent_runs import setup
 
+import pytest
 
+from homun.execution.owned_browser import chrome_path
+
+requires_owned_browser = pytest.mark.skipif(
+    chrome_path() is None,
+    reason='richiede Chrome/Chromium locale, assente sui runner CI')
+
+
+@requires_owned_browser
 def test_private_page_does_not_start_a_browser(tmp_path):
     result = read_page(tmp_path / "browser", "http://127.0.0.1/secret")
     assert result["error_code"] == "web_address_refused"
     assert not (tmp_path / "browser").exists()
 
 
+@requires_owned_browser
 def test_owned_browser_reads_example_and_spares_another_process(tmp_path):
     sibling = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)
     try:
@@ -34,6 +44,7 @@ def test_owned_browser_reads_example_and_spares_another_process(tmp_path):
         time.sleep(0.2)
 
 
+@requires_owned_browser
 def test_owned_browser_dismisses_a_native_dialog_without_accepting_it(tmp_path):
     browser = OwnedBrowser(tmp_path / "browser")
     try:
@@ -47,6 +58,7 @@ def test_owned_browser_dismisses_a_native_dialog_without_accepting_it(tmp_path):
         "type": "confirm", "message": "homun-dialog-proof", "action": "dismiss"}]
 
 
+@requires_owned_browser
 def test_approved_run_reads_in_an_owned_browser(setup):
     ctx, actor, work, _ = setup
     ctx.models.set_active("openai_compatible")
@@ -68,6 +80,7 @@ def test_approved_run_reads_in_an_owned_browser(setup):
         close_browser(proposal["id"])
 
 
+@requires_owned_browser
 def test_private_form_open_does_not_start_a_browser(tmp_path):
     result = execute(type("Ctx", (), {"data_dir": tmp_path})(), None, {
         "id": "run", "browser": {"policy": "owned-headless-v1", "version": 3},
@@ -76,6 +89,7 @@ def test_private_form_open_does_not_start_a_browser(tmp_path):
     assert not (tmp_path / "execution").exists()
 
 
+@requires_owned_browser
 def test_owned_browser_fills_a_public_field_and_clicks_its_button(tmp_path):
     browser = open_browser(tmp_path, "form-proof")
     try:
@@ -105,6 +119,7 @@ def test_owned_browser_fills_a_public_field_and_clicks_its_button(tmp_path):
         close_browser("form-proof")
 
 
+@requires_owned_browser
 def test_owned_browser_saves_a_png_of_the_public_page(tmp_path):
     browser = open_browser(tmp_path, "shot-proof")
     dest = tmp_path / "shots" / "page.png"
@@ -123,6 +138,7 @@ def test_owned_browser_saves_a_png_of_the_public_page(tmp_path):
     assert not (tmp_path / "execution" / "browsers" / "shot-proof").exists()
 
 
+@requires_owned_browser
 def test_owned_browser_interacts_inside_iframe(tmp_path):
     browser = open_browser(tmp_path, "iframe-proof")
     browser.include_frames = True
@@ -160,6 +176,7 @@ def test_owned_browser_interacts_inside_iframe(tmp_path):
         close_browser("iframe-proof")
 
 
+@requires_owned_browser
 def test_version_5_populates_iframe_and_version_4_ignores_it(tmp_path):
     browser = open_browser(tmp_path, "v4-v5-proof")
     try:
@@ -182,6 +199,7 @@ def test_version_5_populates_iframe_and_version_4_ignores_it(tmp_path):
         close_browser("v4-v5-proof")
 
 
+@requires_owned_browser
 def test_owned_browser_accepts_native_dialog_and_collects_console_logs(tmp_path):
     browser = OwnedBrowser(tmp_path / "browser")
     try:
