@@ -25,6 +25,7 @@ export function EngineChatStage({
   onOpenSpace,
   onCreateExample,
   onSend,
+  newChatProject,
 }: {
   engine: EngineWorkspaceState;
   work: Work | undefined;
@@ -41,6 +42,7 @@ export function EngineChatStage({
     | undefined;
   onCreateExample: (index: number) => void;
   onSend: (text: string, attachments: File[]) => void;
+  newChatProject?: { id: string; name: string } | null | undefined;
 }) {
   return (
     <EngineAgentChat
@@ -49,6 +51,7 @@ export function EngineChatStage({
       onSend={onSend}
       notice={notice}
       onClearNotice={() => setNotice("")}
+      newChatProject={newChatProject}
       engineBusy={engine.busy}
       onCancelInFlight={() => engine.cancelInFlight()}
       historyLoading={engine.historyLoading}

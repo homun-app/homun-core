@@ -16,6 +16,7 @@ export type EngineSendContext = {
   bumpOwnSend: () => void;
   autonomyLevel?: AutonomyLevel | undefined;
   modelConnectionId?: string | undefined;
+  projectId?: string | undefined;
 };
 
 export function handleEngineSend({
@@ -28,6 +29,7 @@ export function handleEngineSend({
   bumpOwnSend,
   autonomyLevel,
   modelConnectionId,
+  projectId,
 }: EngineSendContext): boolean {
   if (engine.backend !== "engine") return false;
 
@@ -76,6 +78,6 @@ export function handleEngineSend({
   }
 
   // First message of a new work: create draft and route
-  sendEngineFirstMessage(engine, text, open, setNotice, bumpOwnSend, attachments, autonomyLevel, modelConnectionId);
+  sendEngineFirstMessage(engine, text, open, setNotice, bumpOwnSend, attachments, autonomyLevel, modelConnectionId, projectId);
   return true;
 }

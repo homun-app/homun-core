@@ -21,6 +21,8 @@ type Props = {
   engineMode?: boolean;
   onRefreshEngine?: (() => Promise<void>) | undefined;
   onOpenSpace?: ((space: "Progetti" | "Squadra" | "Materiali", initial?: string, selected?: string) => void) | undefined;
+  /** La nuova conversazione nascerà in questo progetto (eredità di memoria). */
+  newChatProject?: { id: string; name: string } | null | undefined;
 };
 
 export function ConversationWorkspaceWelcome({
@@ -31,6 +33,7 @@ export function ConversationWorkspaceWelcome({
   engineMode = false,
   onRefreshEngine,
   onOpenSpace,
+  newChatProject,
 }: Props) {
   const [showTeamOnboarding, setShowTeamOnboarding] = useState(false);
 
@@ -40,6 +43,12 @@ export function ConversationWorkspaceWelcome({
       <h1 className="cw-welcome-title">
         {assignee ? `Cosa affidiamo a ${assignee}?` : "Come possiamo aiutarti oggi?"}
       </h1>
+      {newChatProject && (
+        <p className="cw-welcome-project-hint" role="status">
+          Nuova conversazione nel progetto <strong>{newChatProject.name}</strong>:
+          eredita memoria, materiali e permessi del progetto.
+        </p>
+      )}
       <p className="cw-welcome-subtitle">
         {assignee
           ? "Descrivi l'obiettivo, i vincoli e i materiali. L'agente si occuperà dell'esecuzione."

@@ -17,6 +17,7 @@ import { AgentChat } from "./AgentChat";
 import { useChatStream } from "./useChatStream";
 
 type Props = {
+  newChatProject?: { id: string; name: string } | null | undefined;
   conversationId: string | undefined;
   activeWorkId: string | null;
   onSend: (text: string, attachments: File[]) => void;
@@ -41,6 +42,7 @@ type Props = {
 };
 
 export function EngineAgentChat({
+  newChatProject,
   conversationId,
   activeWorkId,
   onSend,
@@ -97,6 +99,7 @@ export function EngineAgentChat({
               engineMode
               onRefreshEngine={onRefreshEngine}
               onOpenSpace={onOpenSpace}
+              newChatProject={newChatProject}
             />
           )}
         </div>

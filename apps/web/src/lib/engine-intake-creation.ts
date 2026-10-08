@@ -12,11 +12,13 @@ export async function createIntakeConversation(
   text: string,
   signal: AbortSignal,
   onError: (error: unknown) => void,
+  projectId?: string | undefined,
 ) {
   const created = await createEngineConversationAndWork({
     title: "Nuova richiesta",
     objective: "Obiettivo da concordare",
     actor: defaultLocalActor(),
+    ...(projectId ? { projectId } : {}),
   });
   try {
     // The first message gets the same question/work routing as any other:

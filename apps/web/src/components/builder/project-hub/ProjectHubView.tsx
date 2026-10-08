@@ -76,9 +76,19 @@ export function ProjectHubView({
     } else if (selectedId) {
       setCurrentProjectId(selectedId);
     } else if (!currentProjectId && (engineProjectsList[0]?.id || simProjects[0]?.id)) {
-      setCurrentProjectId(engineProjectsList[0]?.id || simProjects[0]?.id || "");
+      const first = engineProjectsList[0]?.id || simProjects[0]?.id || "";
+      setCurrentProjectId(first);
+      // L'auto-selezione del primo progetto risale allo spazio: chi è
+      // nell'hub È in quel progetto (il '+' erediterà memoria e permessi).
     }
   }, [selectedId, engineProjectsList, simProjects]);
+
+  // Auto-selezione allineata allo spazio: chi è nell'hub È in quel progetto
+  // (il «+» erediterà memoria e permessi). Un selectedId già valorizzato
+  // spezza il ciclo dopo la prima risalita.
+  useEffect(() => {
+    if (!selectedId && currentProjectId) onSelectProject(currentProjectId);
+  }, [selectedId, currentProjectId, onSelectProject]);
 
   useEffect(() => {
     if (!isEngine) return;

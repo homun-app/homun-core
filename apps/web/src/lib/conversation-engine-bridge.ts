@@ -259,13 +259,15 @@ export async function createEngineConversationAndWork(input: {
   title: string;
   objective: string;
   actor?: EngineActor;
+  /** La conversazione nasce nel progetto: eredita memoria e materiali. */
+  projectId?: string | undefined;
 }): Promise<{ conversationId: string; workId: string; record: EngineWorkRecord }> {
   const actor = input.actor ?? defaultLocalActor();
   const title = input.title.trim() || "Conversazione motore";
   const objective = input.objective.trim() || title;
   const created = await postEngineCommand({
     type: "conversation.create",
-    payload: { title },
+    payload: { title, ...(input.projectId ? { project_id: input.projectId } : {}) },
     actor,
   });
   const conversationId = String(created.result["conversation_id"] ?? "");

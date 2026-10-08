@@ -75,7 +75,7 @@ export type EngineWorkspaceState = {
   routineAction: (routineId: string, action: "pause" | "resume" | "stop" | "skip_next", expectedVersion: number) => Promise<void>;
   updateRoutine: (routineId: string, expectedVersion: number, changes: { name?: string; cron?: string }) => Promise<void>;
   revisePlan: (work: Work, action: { insertAfterStepId?: string | null; newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string }; removeStepId?: string }) => Promise<void>;
-  createWork: (title: string, objective: string, draftOnly?: boolean) => Promise<Work | null>;
+  createWork: (title: string, objective: string, draftOnly?: boolean, projectId?: string) => Promise<Work | null>;
   postMessage: (work: Work, text: string, attachments?: File[], autonomyLevel?: AutonomyLevel, modelConnectionId?: string) => Promise<void>;
   confirmPatch: (work: Work, messageIndex: number) => Promise<void>;
   discardPatch: (work: Work, messageIndex: number) => void;
@@ -169,7 +169,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     setBusy(false);
   }
 
-  async function createWork(_title: string, objective: string, draftOnly = false): Promise<Work | null> {
+  async function createWork(_title: string, objective: string, draftOnly = false, projectId?: string): Promise<Work | null> {
     if (backend !== "engine" || !engineReady) return null;
     const signal = beginRequest();
     try {
@@ -183,10 +183,11 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
                 title: "Nuova richiesta",
                 objective: "Obiettivo da concordare",
                 actor: defaultLocalActor(),
+                ...(projectId ? { projectId } : {}),
               })
             ).record as unknown as Record<string, unknown>,
           )
-        : await createIntakeConversation(objective, signal, setError);
+        : await createIntakeConversation(objective, signal, setError, projectId);
       await refresh();
       return engineWorkToUiWork(record, []);
     } catch (cause) {

@@ -160,9 +160,15 @@ export function ConversationWorkspace() {
     setWorks((all) => all.map((w) => (w.id === active ? { ...w, ...change } : w)));
   }
   const [destination, setDestination] = useState<WorkDestination>(null);
+  // Il '+' dentro la vista Progetti: la prossima conversazione nasce nel
+  // progetto aperto e ne eredita memoria, materiali e permessi.
+  const [newChatProjectId, setNewChatProjectId] = useState<string | null>(null);
   function open(id: string | null, selector = "") {
     if (window.innerWidth <= 800) setSidebarOpen(false);
-    if (id) setDestination({ id, selector, stamp: Date.now() });
+    if (id) {
+      setDestination({ id, selector, stamp: Date.now() });
+      setNewChatProjectId(null);
+    }
     if (id && works.some((w) => w.id === id && w.phase === "approved"))
       setSeenResults((current) => [...new Set([...current, `${viewer}:${id}`])]);
     setAssignee("");
@@ -200,7 +206,7 @@ export function ConversationWorkspace() {
       // Never reuse demo scenario titles as identity — objective text is the work title.
       const title = (text || s.initial || s.title).trim().slice(0, 100) || "Lavoro motore";
       const objective = (text || s.initial).trim() || title;
-      void engine.createWork(title, objective).then((created) => {
+      void engine.createWork(title, objective, false, projectId ?? newChatProjectId ?? undefined).then((created) => {
         if (created) {
           open(created.id);
           setNotice(`Lavoro creato · ${created.id}`);
@@ -623,6 +629,7 @@ export function ConversationWorkspace() {
       bumpOwnSend,
       autonomyLevel: preferences.autonomyLevel,
       modelConnectionId: preferences.preferredModelConnectionId || undefined,
+      projectId: newChatProjectId ?? undefined,
     })) {
       return;
     }
@@ -1091,7 +1098,11 @@ export function ConversationWorkspace() {
         searchShortcut={searchShortcut}
         onSearchOpen={() => setSearchOpen(true)}
         onCloseSidebar={() => setSidebarOpen(false)}
-        onNewConversation={() => open(null)}
+        onNewConversation={() => {
+          const inProjects = (space as string | null) === "Progetti";
+          setNewChatProjectId(inProjects && spaceSelected ? spaceSelected : null);
+          open(null);
+        }}
         space={space}
         onOpenSpace={openSpace}
         engineMode={engine.backend === "engine"}
@@ -1125,7 +1136,11 @@ export function ConversationWorkspace() {
             viewer={viewer} onViewerChange={(next) => { setViewer(next); setNotifications(false); }}
             spaceData={displaySpaceData}
             works={engine.backend === "engine" ? engine.works : works}
-            onOpenWork={open} onNewConversation={() => open(null)}
+            onOpenWork={open} onNewConversation={() => {
+              const inProjects = (space as string | null) === "Progetti";
+              setNewChatProjectId(inProjects && spaceSelected ? spaceSelected : null);
+              open(null);
+            }}
             spaceInitial={spaceInitial} onOpenSpace={openSpace} scenario={scenario} scenarios={scenarios} workActions={work ? conversationActions(work) : undefined}
           />
         )}
@@ -1220,6 +1235,10 @@ export function ConversationWorkspace() {
             onOpenSpace={openSpace}
             onCreateExample={create}
             onSend={send}
+            newChatProject={newChatProjectId ? {
+              id: newChatProjectId,
+              name: displaySpaceData.projects.find((p) => p.id === newChatProjectId)?.name ?? newChatProjectId,
+            } : null}
           />
         ) : (
           <ConversationWorkspaceChatStage
