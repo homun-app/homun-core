@@ -71,7 +71,7 @@ jobs:
           if [ "${{ matrix.platform }}" = "win" ]; then
             # install.sh non spedisce prebuilt Windows: installer PowerShell
             powershell -NoProfile -Command "irm https://cua.ai/driver/install.ps1 | iex"
-            path="$HOME/.local/bin/cua-driver.exe"
+            path="$LOCALAPPDATA/Programs/Cua/cua-driver/bin/cua-driver.exe"
           else
             path="$(tools/fetch_cua_driver.sh "$version")"
           fi
