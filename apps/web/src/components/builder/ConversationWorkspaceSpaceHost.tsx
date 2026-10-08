@@ -1,3 +1,4 @@
+import { EngineOrganizationOnboarding } from "./EngineOrganizationOnboarding";
 /**
  * Space views host: tasks, materials, plugins, team/projects/automations, new member.
  * Keeps ConversationWorkspace as a thin router between space and conversation stages.
@@ -15,7 +16,11 @@ import {
   type SpaceView,
 } from "./ConversationSpace";
 import { ConversationTasks } from "./ConversationTasks";
-import { initialScenarios, scenarioForWork, type ConversationScenario } from "./conversation-scenarios";
+import {
+  initialScenarios,
+  scenarioForWork,
+  type ConversationScenario,
+} from "./conversation-scenarios";
 import type { Work } from "./conversation-types";
 
 import { EngineWorkspaceProjects } from "./EngineWorkspaceProjects";
@@ -26,13 +31,20 @@ import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import type { EngineTeam } from "@/lib/engine-projects-client";
 import { EngineWorkspaceAgents } from "./EngineWorkspaceAgents";
 import { EngineWorkspaceTeams } from "./EngineWorkspaceTeams";
+import { HomunClientError } from "@/lib/homun-errors";
+import { EngineMaterials } from "./EngineMaterials";
+import { CapabilitiesView } from "./capabilities/CapabilitiesView";
+import { MessagingView } from "./messaging/MessagingView";
 import { EngineDocuments } from "./EngineDocuments";
+import { UnifiedDocumentsAndMaterials } from "./UnifiedDocumentsAndMaterials";
 import { EngineRoutines } from "./EngineRoutines";
+import { EngineRemoteSpacesBrowser } from "./EngineRemoteSpacesBrowser";
 import type { EngineRoutine } from "@/lib/engine-routines-client";
 type Props = {
   engineAgents?: EngineAgentProfile[] | undefined;
   engineTeams?: EngineTeam[] | undefined;
   engineRoutines?: EngineRoutine[] | undefined;
+  onCreateRoutineFromWork?: ((workId: string, input: { name: string; cron: string }) => Promise<void>) | undefined;
   engineMode?: boolean;
   space: SpaceView;
   spaceInitial: string;
@@ -67,13 +79,26 @@ type Props = {
   onUpdateMaterial: (item: ConversationMaterial) => void;
   onRemoveMaterial: (id: string) => void;
   onLinkMaterial: (id: string, workId: string) => void;
+  onSetEngineDue?: ((work: Work, due: string | null) => Promise<void>) | undefined;
   onRefreshEngine?: (() => Promise<void>) | undefined;
-  onUpdateRoutine?: ((routine: EngineRoutine, changes: { name: string; cron: string }) => Promise<void>) | undefined;
+  onUpdateRoutine?:
+    | ((routine: EngineRoutine, changes: { name: string; cron: string }) => Promise<void>)
+    | undefined;
   onSkipNextRoutine?: ((routine: EngineRoutine) => Promise<void>) | undefined;
+  sidebarOpen?: boolean | undefined;
+  onOpenSidebar?: (() => void) | undefined;
 };
 
 export function ConversationWorkspaceSpaceHost({
-  engineMode = false, engineAgents, engineTeams, engineRoutines, onRefreshEngine, onUpdateRoutine, onSkipNextRoutine,
+  onSetEngineDue,
+  engineMode = false,
+  engineAgents,
+  engineTeams,
+  engineRoutines,
+  onCreateRoutineFromWork,
+  onRefreshEngine,
+  onUpdateRoutine,
+  onSkipNextRoutine,
   space,
   spaceInitial,
   spaceSelected,
@@ -102,15 +127,44 @@ export function ConversationWorkspaceSpaceHost({
   onUpdateMaterial,
   onRemoveMaterial,
   onLinkMaterial,
+  sidebarOpen,
+  onOpenSidebar,
 }: Props) {
   if (engineMode && space === "Squadra")
     return (
-      <>
-        <EngineWorkspaceAgents agents={engineAgents ?? []} onChanged={onRefreshEngine} />
-        <EngineWorkspaceTeams teams={engineTeams ?? []} agents={engineAgents ?? []} onChanged={onRefreshEngine} />
-      </>
+      <div className="cw-squad-layout">
+        <EngineOrganizationOnboarding onChanged={onRefreshEngine} />
+        <EngineWorkspaceAgents
+          agents={engineAgents ?? []}
+          profiles={spaceData.profiles}
+          removedPeople={spaceData.removedPeople}
+          onChanged={onRefreshEngine}
+          onCreateMember={() => onOpenSpace("Nuovo collaboratore")}
+          initialFilter={spaceInitial}
+        />
+        <EngineWorkspaceTeams
+          teams={engineTeams ?? []}
+          agents={engineAgents ?? []}
+          onChanged={onRefreshEngine}
+        />
+      </div>
     );
-  if (engineMode && space === "Progetti") return <EngineWorkspaceProjects projects={spaceData.projects} works={visibleWorks} selected={spaceSelected} onProject={(id) => onOpenSpace("Progetti", "", id)} onWork={onOpenWork} />;
+  if (space === "Progetti")
+    return (
+      <EngineWorkspaceProjects
+        projects={spaceData.projects}
+        works={visibleWorks}
+        selected={spaceSelected}
+        onProject={(id) => onOpenSpace("Progetti", "", id)}
+        onWork={onOpenWork}
+        onCreateWork={(projId) =>
+          onCreateFreeWork("Nuovo lavoro", "Descrivi l'obiettivo di questa attività...", [], projId)
+        }
+        engineMode={engineMode}
+        sidebarOpen={sidebarOpen}
+        onOpenSidebar={onOpenSidebar}
+      />
+    );
 
   if (space === "Nuovo collaboratore") {
     return (
@@ -146,6 +200,7 @@ export function ConversationWorkspaceSpaceHost({
   if (space === "Compiti") {
     return (
       <ConversationTasks
+        initialView={spaceInitial || "Elenco"}
         onReveal={onRevealPanel}
         onMove={onMoveWork}
         items={visibleWorks.map((w) => ({
@@ -165,27 +220,41 @@ export function ConversationWorkspaceSpaceHost({
             : {}),
         }))}
         onOpen={onOpenWork}
-        onDue={(id, due) =>
-          setWorks((current) => current.map((w) => (w.id === id ? { ...w, due } : w)))
-        }
+        onDue={async (id, due) => {
+          if (engineMode) {
+            const work = works.find((item) => item.id === id);
+            if (!work || !onSetEngineDue)
+              throw new HomunClientError("not_found", "Lavoro non disponibile: ricarica la vista.");
+            await onSetEngineDue(work, due || null);
+          } else {
+            setWorks((current) => current.map((w) => (w.id === id ? { ...w, due } : w)));
+          }
+        }}
       />
     );
   }
 
+  if (engineMode && space === "Spazi remoti")
+    return <EngineRemoteSpacesBrowser />;
   if (engineMode && space === "Automazioni")
     return (
       <EngineRoutines
         routines={engineRoutines ?? []}
+        works={works}
+        onCreateFromWork={onCreateRoutineFromWork}
         onChanged={onRefreshEngine}
         onUpdate={onUpdateRoutine}
         onSkipNext={onSkipNextRoutine}
       />
     );
-  if (space === "Documenti") {
-    return <EngineDocuments projects={spaceData.projects.map((p) => ({ id: p.id, name: p.name }))} />;
-  }
-  if (space === "Materiali") {
-    return (
+  if (engineMode && space === "Materiali") return <EngineMaterials projects={spaceData.projects} />;
+  if (space === "Documenti" || space === "Materiali") {
+    const documentsView = (
+      <EngineDocuments projects={spaceData.projects.map((p) => ({ id: p.id, name: p.name }))} />
+    );
+    const materialsView = engineMode ? (
+      <EngineMaterials projects={spaceData.projects} />
+    ) : (
       <ConversationMaterials
         onReveal={onRevealPanel}
         key={spaceVersion}
@@ -264,17 +333,25 @@ export function ConversationWorkspaceSpaceHost({
         initialId={spaceSelected}
       />
     );
+
+    return (
+      <UnifiedDocumentsAndMaterials
+        activeTab={spaceInitial === "materials" || space === "Materiali" ? "materials" : "documents"}
+        documentsView={documentsView}
+        materialsView={materialsView}
+      />
+    );
   }
 
   if (space === "Plugin") {
-    return (
-      <ConversationPlugins
-        onReveal={onRevealPanel}
-        data={spaceData}
-        onChange={setSpaceData}
-        onMember={(n) => onOpenSpace("Squadra", "", `person:${n}`)}
-      />
-    );
+    return <CapabilitiesView />;
+  }
+
+  if (space === "Canali") {
+    return <MessagingView />;
+  }
+  if (space === "Spazi remoti") {
+    return <EngineRemoteSpacesBrowser />;
   }
 
   return (

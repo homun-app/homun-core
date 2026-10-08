@@ -1,0 +1,19 @@
+{
+  "model": "qwen3.5:4b via local Ollama",
+  "image": "sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132",
+  "container_started": false,
+  "edit_ids": [
+    "file-edit:34f0d85599ff314e90fa346bce894d6410bca1dcc6209109d10396be1e8459d5"
+  ],
+  "checks": {
+    "search_then_patch_approved_once": true,
+    "file_unchanged_until_approval": true,
+    "delivery_matches_patched_bytes": true
+  },
+  "tools": [
+    "search_workspace_files",
+    "read_workspace_lines",
+    "patch_workspace_file",
+    "deliver_workspace_file"
+  ]
+}

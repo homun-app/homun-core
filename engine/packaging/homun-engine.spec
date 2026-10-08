@@ -1,4 +1,6 @@
-# macOS arm64 onedir bundle. No optional Mem0/Qdrant memory profile.
+# Onedir bundle: macOS arm64 by default; Windows/Linux builds pass
+# HOMUN_TARGET_ARCH=none (target_arch is macOS-only in PyInstaller).
+import os
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_submodules, collect_data_files, copy_metadata
 
@@ -14,13 +16,16 @@ for package in ('pydantic', 'logfire'):
     datas += collect_data_files(package, include_py_files=True)
 hiddenimports += collect_submodules('pydantic_ai.models')
 hiddenimports += collect_submodules('pydantic_ai.providers')
-for distribution in ('homun-engine', 'dbos', 'pydantic-ai', 'pydantic-ai-slim', 'uvicorn'):
+for distribution in ('homun-engine', 'dbos', 'pydantic-ai-slim', 'uvicorn'):
     datas += copy_metadata(distribution, recursive=True)
 a = Analysis([str(root / 'entrypoint.py')], pathex=[], binaries=binaries, datas=datas,
              hiddenimports=hiddenimports, hookspath=[], runtime_hooks=[],
              excludes=['mem0', 'qdrant_client', 'pytest', 'tkinter'], noarchive=False)
 pyz = PYZ(a.pure)
+_target_arch = os.environ.get('HOMUN_TARGET_ARCH') or 'arm64'
+if _target_arch == 'none':
+    _target_arch = None
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='homun-engine',
-          debug=False, strip=False, upx=False, console=True, target_arch='arm64',
+          debug=False, strip=False, upx=False, console=True, target_arch=_target_arch,
           codesign_identity=None, entitlements_file=None)
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='engine')

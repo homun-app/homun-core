@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -10,8 +10,7 @@ from pydantic import BaseModel, Field
 from homun.domain.states import StepStatus, WorkStatus
 
 
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+from homun.domain.timestamps import utc_now
 
 
 class Actor(BaseModel):
@@ -39,6 +38,7 @@ class AgentProfile(BaseModel):
     avatar: str | None = None
     instructions: str = ""
     preferred_connection_id: str | None = None
+    fallback_connection_id: str | None = None
     status: str = "active"  # draft | active | paused | retired
     # Professional identity (structured, queryable, versioned).
     responsibility: str = ""
@@ -50,6 +50,9 @@ class AgentProfile(BaseModel):
     # known to be able to execute. Declarations never grant authorization —
     # grants and policy decide access per project.
     capabilities: list[str] = Field(default_factory=list, max_length=8)
+    # Per-app allowlist for computer use: autonomous agents may drive these
+    # apps without a per-action gate; sensitive surfaces always gate anyway.
+    computer_use_apps: list[str] = Field(default_factory=list, max_length=12)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -64,6 +67,8 @@ class Project(BaseModel):
     member_ids: list[str] = Field(default_factory=list)
     conversation_ids: list[str] = Field(default_factory=list)
     status: str = "active"  # active | archived
+    agent_model_overrides: dict[str, str] = Field(default_factory=dict)
+    agent_tool_overrides: dict[str, list[str]] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -79,6 +84,55 @@ class Team(BaseModel):
     status: str = "active"  # active | archived
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class Person(BaseModel):
+    """F5.1: persona dello spazio — identità umana distinta dal dispositivo.
+
+    Il ruolo è nello spazio; l'accesso ai dati passa solo da AccessGrant
+    (subject_id = person id), mai implicito."""
+    id: str
+    workspace_id: str
+    display_name: str
+    role: str = "member"  # owner | admin | member
+    status: str = "active"  # active | revoked
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class PeerAssignment(BaseModel):
+    """F5.5 — delega di un passo a un peer: risultato unico, ricevuta.
+
+    L'offerta riserva input e budget dichiarativi; il ritorno è idempotente
+    per assignment: lo stesso risultato non duplica, uno diverso è conflitto."""
+    id: str
+    workspace_id: str
+    work_id: str
+    assignee_person_id: str
+    capability: str
+    input_hash: str
+    input_ref: dict = Field(default_factory=dict)
+    model_attempts_reserved: int = 0
+    status: str = "offered"  # offered|accepted|returned|failed|expired|revoked
+    result: dict | None = None
+    model_attempts_used: int | None = None
+    issued_by: str = ""
+    expires_at: datetime | None = None
+    returned_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class PersonDevice(BaseModel):
+    """Dispositivo associato a una persona; revocabile da solo (F5.1)."""
+    id: str
+    workspace_id: str
+    person_id: str
+    name: str = ""
+    key_fingerprint: str | None = None
+    status: str = "confirmed"  # pending | confirmed | revoked
+    last_seen_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class AccessGrant(BaseModel):
@@ -163,8 +217,11 @@ class ContributionRequest(BaseModel):
     step_id: str
     to_actor_id: str
     need: str
+    questions: list[dict] | None = None
     status: str = "pending"  # pending | resolved | rejected
     response_text: str | None = None
+    draft_response_text: str | None = None
+    resolution: str | None = None  # answered | expired; expiry is not human consent
     response_material_ids: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
     resolved_at: datetime | None = None
@@ -251,6 +308,13 @@ class ExternalServer(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     url: str = ""
     headers: dict[str, str] = Field(default_factory=dict)
+    # OAuth/mTLS (H36): optional; OAuth remains refuse-until-wired, mTLS uses client certs.
+    oauth_client_id: str = ""
+    oauth_authorization_url: str = ""
+    oauth_token_url: str = ""
+    oauth_scopes: list[str] = Field(default_factory=list)
+    mtls_cert_path: str = ""
+    mtls_key_path: str = ""
     tools_include: list[str] = Field(default_factory=list)
     tools_exclude: list[str] = Field(default_factory=list)
     status: str = "enabled"  # enabled | disabled
@@ -267,69 +331,19 @@ class Skill(BaseModel):
     description: str = Field(default="", max_length=120)
     body: str = ""
     tags: list[str] = Field(default_factory=list)
+    resources: dict[str, str] = Field(default_factory=dict)
     status: str = "staged"  # staged | approved | archived
     author_type: str = "person"  # person | agent
     author_id: str = ""
     revision: int = 1
+    usage_count: int = 0
+    last_used_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
 
-class BudgetCounters(BaseModel):
-    """Unknown usage stays unknown: absent values are never filled with zero."""
-
-    attempts: int = 0
-    input_tokens: int = 0
-    output_tokens: int = 0
-
-
-class BudgetCaps(BaseModel):
-    model_attempts: int = 40
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-
-
-class BudgetReservation(BaseModel):
-    """In-flight estimate held before a provider call; reconciled or recovered."""
-
-    id: str
-    created_at: datetime = Field(default_factory=utc_now)
-    estimate: BudgetCounters = Field(default_factory=BudgetCounters)
-    purpose: str = ""
-    actor_id: str = ""
-
-
-class BudgetAllocation(BaseModel):
-    """Delegate sub-cap inside the work envelope: own limit, own counters.
-
-    A delegate that exhausts its allocation stops even when the work envelope
-    still has room; other actors are unaffected (the Hermes subagent lesson).
-    """
-
-    actor_id: str
-    model_attempts: int = 10
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    reserved: BudgetCounters = Field(default_factory=BudgetCounters)
-    spent: BudgetCounters = Field(default_factory=BudgetCounters)
-    unknown: BudgetCounters = Field(default_factory=BudgetCounters)
-
-
-class WorkBudget(BaseModel):
-    """Persisted per-work spend envelope over model attempts and tokens."""
-
-    id: str
-    workspace_id: str
-    work_id: str
-    version: int = 1
-    caps: BudgetCaps = Field(default_factory=BudgetCaps)
-    reserved: BudgetCounters = Field(default_factory=BudgetCounters)
-    spent: BudgetCounters = Field(default_factory=BudgetCounters)
-    unknown: BudgetCounters = Field(default_factory=BudgetCounters)
-    pending: list[BudgetReservation] = Field(default_factory=list)
-    allocations: dict[str, BudgetAllocation] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
+from homun.domain.budget_models import (BudgetCounters, BudgetCaps, BudgetReservation,
+    BudgetUsageReceipt, BudgetAllocation, WorkBudget)
 
 
 class Run(BaseModel):

@@ -1,0 +1,111 @@
+/** Adaptive run transport: stable operations recover lost responses. */
+import { ENGINE_DEFAULT_BASE_URL } from './engine-client.ts';
+import { DEFAULT_WORKSPACE_ID, defaultLocalActor, domainFetch, listEngineWorks } from './engine-domain-client.ts';
+import { homunErrorFromHttp } from './homun-errors.ts';
+import type { Work } from '../components/builder/conversation-types.ts';
+
+export type AgentRunPolicy = {
+  surface?: 'cli' | 'tui' | 'web' | 'desktop' | 'bot_screen' | 'headless';
+  toolset?: 'full' | 'readonly' | 'minimal';
+  allowed_tools?: string[] | null;
+  denied_tools?: string[];
+  micro_compaction?: boolean;
+  native_stream?: boolean;
+  parallel_read_tools?: boolean;
+};
+export type AgentRun = AgentRunPolicy & {
+  id: string; work_id: string; digest: string; expected_version: number;
+  status: 'pending_approval' | 'queued' | 'running' | 'waiting_input' | 'waiting_external' | 'waiting_automation' | 'completed' | 'failed' | 'blocked' | 'paused' | 'cancelled';
+  stream_progress?: { chunks: number; text_chars: number; tool_calls: number };
+  automation_wait?: { reason: string };
+  external_request_id?: string;
+  terminal_request_id?: string;
+  terminal_wait_id?: string;
+  file_edit_request_id?: string;
+  terminal?: {image?: string; policy: string; host?: string; user?: string; port?: number};
+  web_pages?: {policy: string; version: number};
+  browser?: {policy: string; version: number};
+  memory?: {policy: string; version: number};
+  skills?: {policy: string; version: number};
+  delegation?: {policy: string; version: number};
+  clarify?: {policy: string; version: number};
+  goals?: {policy: string; version: number};
+  cron?: {policy: string; version: number};
+  session_management?: {policy: string; version: number};
+  gateway?: {policy: string; version: number};
+  code_execution?: {policy: string; version: number};
+  plugins?: {policy: string; version: number};
+  moa?: {policy: string; version: number; preset?: string; fanout?: string; privacy_filter?: string};
+  external_tools?: {server_id: string; server_name: string; tool: string; name: string; description: string}[];
+  tool_version: string;
+  tools?: { name: string; toolset: string; version: string; schema_hash: string; definition_hash: string; kind: 'tool' | 'ask'; replay: 'read_only' | 'model' | 'never' }[];
+  team?: { id: string; name: string; members: {id: string; name: string; role: string}[] };
+  person?: { id: string; name: string };
+  history_redacted?: boolean;
+  recovery?: { status: 'waiting' | 'recovered' | 'interrupted' | 'exhausted'; phase: string; attempts: number; error_code?: string; next_attempt_at?: string };
+  executor_name: string; connection_id: string; fallback_connection_id?: string; turns: number;
+  materials: { id: string; title: string; version: number; sha256: string }[];
+  limits: { max_turns: number };
+  observations: { tool: string; message?: string; result: unknown }[];
+  clarify_request?: {id: string | null; qid: string; question: string; choices: string[] | null; multi_select: boolean}[];
+  request_id?: string; artifact_id?: string; error_code?: string;
+  approval_channel?: string;
+};
+
+async function request(workId: string, suffix = '', body?: unknown) {
+  const response = await domainFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/works/${encodeURIComponent(workId)}/agent-runs${suffix}`, {
+    method: body ? 'POST' : 'GET',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Homun-Actor-Id': defaultLocalActor().id },
+    ...(body ? {body: JSON.stringify(body)} : {}),
+  }, ENGINE_DEFAULT_BASE_URL, 30000);
+  const result = await response.json();
+  if (!response.ok) throw homunErrorFromHttp(response.status, result, 'Esecuzione Homun non disponibile');
+  return result;
+}
+export async function listAgentRuns(workId: string): Promise<AgentRun[]> {
+  return (await request(workId)).items;
+}
+export async function prepareAgentRun(work: Work, materialIds: string[], commandId: string, teamId?: string, personId?: string, serverIds?: string[], terminalImage?: string, terminalBackend?: 'local' | 'ssh', ssh?: {host: string; user: string; port: number; hostKey: string; keyPath: string}, webPages?: boolean, browser?: boolean, memory?: boolean, skills?: boolean, delegation?: boolean, clarify?: boolean, goals?: boolean, cron?: boolean, sessionManagement?: boolean, gateway?: boolean, codeExecution?: boolean, plugins?: boolean, moa?: boolean | {preset?: string; fanout?: string; privacy_filter?: string}, fallbackConnectionId?: string, policy?: AgentRunPolicy): Promise<AgentRun> {
+  const existing = (await listAgentRuns(work.id)).find(p => p.id === commandId);
+  if (existing) return existing;
+  const current = (await listEngineWorks()).find(w => w['id'] === work.id);
+  if (!current) throw homunErrorFromHttp(404, {detail:'Lavoro non accessibile'}, 'Lavoro non accessibile');
+  return request(work.id, '', { ...policy, command_id: commandId, expected_version: current['version'], material_ids: materialIds, ...(terminalBackend === 'local' ? {terminal_backend: 'local'} : terminalBackend === 'ssh' && ssh ? {terminal_backend: 'ssh', ssh_host: ssh.host, ssh_user: ssh.user, ssh_port: ssh.port, ssh_host_key: ssh.hostKey, ssh_key_path: ssh.keyPath} : terminalImage ? {terminal_image: terminalImage} : {}), ...(serverIds?.length ? {server_ids: serverIds} : {}), ...(teamId ? {team_id: teamId} : {}), ...(personId ? {person_id: personId} : {}), ...(webPages ? {web_pages: true} : {}), ...(browser ? {browser: true} : {}), ...(memory ? {memory: true} : {}), ...(skills ? {skills: true} : {}), ...(delegation ? {delegation: true} : {}), ...(clarify ? {clarify: true} : {}), ...(goals ? {goals: true} : {}), ...(cron ? {cron: true} : {}), ...(sessionManagement ? {session_management: true} : {}), ...(gateway ? {gateway: true} : {}), ...(codeExecution ? {code_execution: true} : {}), ...(plugins ? {plugins: true} : {}), ...(moa ? {moa: typeof moa === 'object' ? moa : true} : {}), ...(fallbackConnectionId ? {fallback_connection_id: fallbackConnectionId} : {}) });
+}
+export function approveAgentRun(workId: string, run: AgentRun, commandId: string): Promise<AgentRun> {
+  return request(workId, `/${encodeURIComponent(run.id)}/approve`, {
+    command_id: commandId, expected_version: run.expected_version, digest: run.digest,
+  });
+}
+
+export type AgentControlAction = 'steer' | 'redirect' | 'pause' | 'resume' | 'cancel';
+/** Keep this operation for retries, including the pinned version after a lost response. */
+export type AgentControlOperation = { commandId: string; expectedVersion?: number };
+export async function controlAgentRun(
+  workId: string, runId: string, action: AgentControlAction,
+  operation: AgentControlOperation, text?: string,
+): Promise<AgentRun> {
+  if (operation.expectedVersion === undefined) {
+    const current = (await listEngineWorks()).find(w => w['id'] === workId);
+    if (!current) throw homunErrorFromHttp(404, {detail:'Lavoro non accessibile'}, 'Lavoro non accessibile');
+    operation.expectedVersion = current['version'] as number;
+  }
+  return request(workId, `/${encodeURIComponent(runId)}/control`, {
+    command_id: operation.commandId, expected_version: operation.expectedVersion,
+    action, ...(text !== undefined ? {text} : {}),
+  });
+}
+
+export type SideQuestionResult = {
+  answer: string;
+  usage: { prompt_tokens: number; completion_tokens: number; cost_estimate?: number };
+  attempted_tools?: string[];
+  run_id: string;
+  work_id: string;
+  main_transcript_unchanged: boolean;
+};
+
+export function sideQuestionAgentRun(workId: string, runId: string, question: string): Promise<SideQuestionResult> {
+  return request(workId, `/${encodeURIComponent(runId)}/side-question`, { question });
+}
+

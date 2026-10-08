@@ -13,11 +13,29 @@ export type EngineMemoryNote = {
   text: string;
   work_id: string | null;
   project_id: string | null;
+  scope?: "project" | "agent" | "person" | "global";
+  subject_id?: string | null;
   status: "approved" | "rectified" | "deleted";
   created_at: string;
   updated_at: string;
   created_by: string;
 };
+
+/** Etichetta umana dello scope: chi vede quella memoria e perché. */
+export function memoryScopeLabel(note: EngineMemoryNote): string {
+  switch (note.scope) {
+    case "person":
+      return `Personale · ${note.subject_id ?? "?"}`;
+    case "agent":
+      return `Agente · ${note.subject_id ?? "?"}`;
+    case "project":
+      return "Progetto";
+    case "global":
+      return "Spazio globale";
+    default:
+      return note.project_id ? "Progetto" : "Spazio globale";
+  }
+}
 
 export type MemoryListResult = {
   memories: EngineMemoryNote[];

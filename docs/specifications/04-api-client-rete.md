@@ -1,5 +1,7 @@
 # 04 — API, client e rete tra installazioni
 
+> Stato di implementazione al 23/9 nella [matrice corrente](STATO-IMPLEMENTAZIONE.md). Le prescrizioni e le prove datate sotto restano requisiti o fotografie della loro tranche, non certificazione del prodotto corrente.
+
 Stato: v0.1 da analizzare. **C:** Python + API indipendenti + React iniziale + possibilità Flutter + collegamento remoto. Endpoint e protocolli seguenti sono **P**, non API già esistenti. [Indice](README.md).
 
 ## AP-01 — Topologia

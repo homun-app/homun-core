@@ -2,6 +2,7 @@
 from copy import deepcopy
 from homun.application.price_comparisons import cached, save
 from homun.application.intake_policy import PROPOSAL_TYPE, authority, digest, idle, lookup, permission_snapshot, public
+from homun.application.organization_context import organization_background
 from homun.application.intake_brief import brief_changes, preserve_staffing, stabilize
 from homun.domain.capabilities import require_capability
 from homun.domain.errors import BudgetExhaustedError, ConflictError, ValidationError
@@ -76,6 +77,8 @@ def _resolve_plan_assignee(store, name, fallback_agent_id):
         for agent in store.agents.values():
             if agent.status == 'active' and agent.name.strip().casefold() == wanted:
                 return agent.id
+    if wanted:
+        raise ConflictError('Plan phase collaborator is no longer active')
     return fallback_agent_id
 
 
@@ -139,7 +142,7 @@ def propose(ctx, actor, work_id, body):
     try:
         brief = synthesize(ctx.models, original, agents, previous_brief=previous_brief,
                            latest_request=text, capabilities=capabilities, language=language,
-                           usage_out=usage)
+                           usage_out=usage, organization_context=organization_background(store, actor))
     except BaseException as cause:
         # The call may have consumed provider budget even on failure.
         work_budgets.reconcile_unknown(ctx, actor, work_id, reservation)
@@ -151,13 +154,6 @@ def propose(ctx, actor, work_id, body):
             selected = next((a for a in agents if a['id'] == brief.suggested_agent_id), None)
             if brief.suggested_agent_id and not selected:
                 raise ValueError('Suggested agent does not exist in active roster')
-            collaborator_name = None
-            if selected:
-                collaborator_name = selected['name']
-            elif brief.new_agent:
-                collaborator_name = brief.new_agent.name
-            if not _plan_step_assignee_names_valid(brief.plan_steps, agents, collaborator_name):
-                raise ValueError('Plan step assignee is not a roster collaborator')
             if previous_brief:
                 values = stabilize(brief, previous_brief)
             else:
@@ -165,6 +161,12 @@ def propose(ctx, actor, work_id, body):
             values['suggested_agent'] = {k: selected[k] for k in ('id', 'name', 'role', 'revision')} if selected else None
             if previous_brief:
                 values = preserve_staffing(values, previous_brief, agents, owner_id=work.owner_id)
+            # Validate the effective agreement: a staffing-only clarification
+            # may legitimately echo old assignments before normalization.
+            collaborator = values.get('suggested_agent') or values.get('new_agent')
+            collaborator_name = collaborator.get('name') if collaborator else None
+            if not _plan_step_assignee_names_valid(values.get('plan_steps'), agents, collaborator_name):
+                raise ValueError('Plan step assignee is not a roster collaborator')
             changes = brief_changes(previous_brief, values)
             error = None
         except (ValueError, TypeError):
@@ -213,10 +215,10 @@ def confirm(ctx,actor,work_id,proposal_id,body):
             idle(work)
             if proposal['status']!='pending_confirmation' or work.version!=proposal['expected_version']:
                 raise ConflictError('Proposal or work changed; propose again')
-            if require_capability(proposal['capability']).kind == 'executable' and not (selected or proposal['new_agent']):
-                raise ValidationError('Propose a collaborator before confirming CSV work')
             service=ctx.service.for_store(store)
             owner=selected['id'] if selected else work.owner_id
+            if not (selected or proposal['new_agent']) and 'staffing' in proposal.get('changed_fields', []):
+                owner = work.reviewer_id or actor.id
             if proposal['new_agent']:
                 if not body.get('create_agent',False):
                     raise ValidationError('Explicit creation confirmation is required')

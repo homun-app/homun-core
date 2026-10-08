@@ -30,7 +30,7 @@ class SuggestedAgent(BaseModel):
 
 class PlanStepPayload(BaseModel):
     title: str
-    capability: Literal['compare_csv', 'read_material', 'synthesize', 'general'] = 'general'
+    capability: Literal['compare_csv', 'read_material', 'synthesize', 'general', 'agent_run'] = 'general'
     expected_materials: list[str] = Field(default_factory=list)
     output_expected: str = ''
     assignee: str = ''
@@ -54,7 +54,7 @@ class IntakeProposal(BaseModel):
     suggested_agent: SuggestedAgent | None = None
     new_agent: NewAgent | None = None
     rationale: str
-    capability: Literal['compare_csv','read_material','synthesize','general']
+    capability: Literal['compare_csv','read_material','synthesize','general','agent_run']
     original_request: str
     changed_fields: list[str] = Field(default_factory=list)
     changes: list[BriefChange] = Field(default_factory=list)

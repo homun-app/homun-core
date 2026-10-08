@@ -11,6 +11,7 @@ import json
 from copy import deepcopy
 
 from homun.application.price_comparisons import cached, save
+from homun.application.executor import resolve_executor
 from homun.domain.capabilities import SYNTHESIZE
 from homun.domain.errors import (ConflictError, DomainError, NotFoundError,
                                  PermissionDeniedError, ValidationError)
@@ -71,13 +72,26 @@ def _skill_bindings(store, skill_ids):
     return bindings
 
 
+def validate_bindings(ctx, store, actor, proposal):
+    """The approved source identities remain fixed through publication."""
+    work = store.works[proposal['work_id']]
+    resolve_executor(store, proposal['assignee_id'], human_owner_id=work.owner_id)
+    for expected in proposal['materials']:
+        actual, _ = _source(ctx, store, actor, expected['id'])
+        if actual != expected:
+            raise ConflictError('Synthesis material changed; create a new proposal')
+    for binding in proposal['skills']:
+        skill = store.skills.get(binding['id'])
+        if skill is None or skill.status != 'approved' or skill.revision != binding['revision']:
+            raise ConflictError('Skill changed; create a new proposal')
+
+
 def synthesis_assignee(store, work):
     """Who writes: the synthesize phase's assignee, else the work owner."""
     from homun.application.phase_execution import phase_plan_step
     step = phase_plan_step(store, work, 'synthesize')
-    if step is not None and step.assignee_id in store.agents:
-        return store.agents[step.assignee_id], step
-    return store.agents.get(work.owner_id), None
+    assignee_id = step.assignee_id if step is not None else work.owner_id
+    return resolve_executor(store, assignee_id, human_owner_id=work.owner_id), step
 
 
 def _source(ctx, store, actor, material_id):
@@ -109,8 +123,7 @@ def propose(ctx, actor, work_id, body):
                 raise ValidationError('Too many procedures for one synthesis')
             skills = _skill_bindings(store, skill_ids)
             agent, step = synthesis_assignee(store, work)
-            if agent is None or agent.status != 'active':
-                raise ValidationError('Synthesis requires an active assigned collaborator')
+            assignee_id = agent.id if agent else work.owner_id
             record, fingerprint = cached(store, actor, body['command_id'], PROPOSAL_TYPE, payload)
             if record:
                 authority(store, actor, record.result)
@@ -125,13 +138,14 @@ def propose(ctx, actor, work_id, body):
             service = ctx.service.for_store(store)
             pinned = propose_pin_version(
                 service, store, actor, work, 'synthesize', body['command_id'], body['expected_version'],
-                {'title': 'Scrivi la sintesi concordata', 'assignee_id': agent.id,
+                {'title': 'Scrivi la sintesi concordata', 'assignee_id': assignee_id,
+                 'capability': 'synthesize',
                  'output_expected': 'Bozza in Markdown da revisionare'},
             )
             proposal = {
                 'id': body['command_id'], 'status': 'pending_approval', 'work_id': work_id,
                 'expected_version': pinned, 'tool_version': SYNTHESIZE.tool_version,
-                'materials': bindings, 'skills': skills, 'assignee_id': agent.id,
+                'materials': bindings, 'skills': skills, 'assignee_id': assignee_id,
                 'step_title': step.title if step is not None else work.title,
                 'language': (body.get('language') or None),
                 'limits': {'max_materials': SYNTHESIZE.limits['max_materials'],
@@ -157,10 +171,7 @@ def approve(ctx, actor, work_id, proposal_id, body):
             record, fingerprint = cached(store, actor, body['command_id'], 'synthesis.approve', payload)
             if body['digest'] != proposal['digest'] or body['expected_version'] != proposal['expected_version']:
                 raise ConflictError('Approval does not match the proposed action and revision')
-            for binding in proposal['skills']:
-                skill = store.skills.get(binding['id'])
-                if skill is None or skill.status != 'approved' or skill.revision != binding['revision']:
-                    raise ConflictError('Skill changed; create a new proposal')
+            validate_bindings(ctx, store, actor, proposal)
             if record:
                 return deepcopy(public(proposal))
             if proposal['status'] != 'pending_approval':

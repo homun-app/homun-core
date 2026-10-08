@@ -93,6 +93,9 @@ def main(argv: list[str] | None = None) -> int:
     verify.add_argument("backup_dir")
     verify.set_defaults(func=_cmd_backup_verify)
 
+    from homun.peers.cli import add_parser as _peer_parser
+    _peer_parser(sub)
+
     args = parser.parse_args(argv)
     if args.command is None:
         # Backward compatible: `python -m homun` still starts the server.

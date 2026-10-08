@@ -3,13 +3,21 @@
  * Owns presentation; shell owns state and passes storageStatus / callbacks.
  */
 
+import { Markdown as ChatMarkdown } from "./ChatMarkdown";
+import { ConversationAgentLive } from "./ConversationAgentLive";
+import { ConversationBrowserPip } from "./ConversationBrowserPip";
+import { useConversationEventStream } from "@/hooks/useConversationEventStream";
 import { EngineWorkIntake } from "./EngineWorkIntake";
-import { Check, Sparkles, X } from "lucide-react";
-import type { ReactNode, RefObject } from "react";
+import { EnginePlanRelayTimeline } from "./EnginePlanRelayTimeline";
+import { ConversationMarginaliaSpine } from "./ConversationMarginaliaSpine";
+import { EngineAgentProfileModal } from "./EngineAgentProfileModal";
+import { Check, Sparkles, X, Copy, Bookmark, BookmarkCheck } from "lucide-react";
+import { useEffect, useState, type ReactNode, type RefObject } from "react";
 import { ConversationAgentWait } from "./ConversationAgentWait";
 import { ConversationAvatar } from "./ConversationAvatar";
 import type { CatalogPlan } from "./ConversationCatalogPlan";
 import { isHumanMember, memberProfile } from "./conversation-members";
+import { buildMentionRefs } from "./conversation-mentions";
 import type { ConversationScenario } from "./conversation-scenarios";
 import type { SpaceData } from "./ConversationSpace";
 import { ConversationWorkspaceWelcome } from "./ConversationWorkspaceWelcome";
@@ -18,6 +26,7 @@ import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { StudioChatInput } from "./StudioChatInput";
 import { WorkPatchPreviewCard } from "./WorkPatchPreviewCard";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
+import type { AutonomyLevel } from "./conversation-preferences";
 
 type Props = {
   work: Work | undefined;
@@ -54,6 +63,13 @@ type Props = {
   onSaveMemory?: ((messageIndex: number) => void) | undefined;
   onSaveSkill?: ((messageIndex: number) => void) | undefined;
   onCancelInFlight?: () => void;
+  agentNames?: Record<string, string> | undefined;
+  onStartWork?: (() => Promise<void>) | undefined;
+  onOpenSpace?: (space: "Progetti" | "Squadra" | "Materiali", initial?: string, selected?: string) => void;
+  autonomyLevel?: AutonomyLevel | undefined;
+  onAutonomyLevelChange?: ((level: AutonomyLevel) => void) | undefined;
+  modelConnectionId?: string | undefined;
+  onModelConnectionIdChange?: ((connectionId: string) => void) | undefined;
 };
 
 export function ConversationWorkspaceChatStage({
@@ -91,33 +107,92 @@ export function ConversationWorkspaceChatStage({
   onSaveMemory,
   onSaveSkill,
   onCancelInFlight,
+  agentNames,
+  onStartWork,
+  onOpenSpace,
+  autonomyLevel,
+  onAutonomyLevelChange,
+  modelConnectionId,
+  onModelConnectionIdChange,
 }: Props) {
-  const mentionRefs = [
-    ...scenarios
-      .filter(
-        (s, i) =>
-          memberProfile(s.agent, spaceData.profiles).invitation !== "pending" &&
-          scenarios.findIndex((a) => a.agent === s.agent) === i &&
-          !spaceData.removedPeople?.includes(s.agent),
-      )
-      .map((s) => ({
-        id: s.agent,
-        name: s.agent,
-        kind: "member" as const,
-        description: s.role,
-      })),
-    // Engine roster members are mentionable too: the squad the person built
-    // with the motor must answer @ even when no demo scenario carries them.
-    ...(engineAgents ?? [])
-      .filter((agent) => agent.status === "active")
-      .filter((agent) => !scenarios.some((s) => s.agent === agent.name))
-      .map((agent) => ({
-        id: agent.id,
-        name: agent.name,
-        kind: "member" as const,
-        description: agent.role,
-      })),
-  ];
+  const [inspectedAgent, setInspectedAgent] = useState<EngineAgentProfile | null>(null);
+
+  const handleInspectAgent = (agentOrIdOrName: string | EngineAgentProfile) => {
+    if (!agentOrIdOrName) return;
+    if (typeof agentOrIdOrName === "object" && "id" in agentOrIdOrName) {
+      setInspectedAgent(agentOrIdOrName);
+      return;
+    }
+    const idOrName = String(agentOrIdOrName).trim();
+    if (idOrName === "person_fabio" || idOrName.toLowerCase() === "homun") {
+      setInspectedAgent({
+        id: "homun",
+        workspace_id: "ws_local",
+        revision: 1,
+        name: "Homun",
+        role: "Coordinatore del lavoro",
+        responsibility: "Coordinamento della squadra, pianificazione e orchestrazione sicura dei flussi operativi.",
+        specializations: ["Orchestrazione collaborativa", "Coordinamento agenti", "Supervisione umana"],
+        status: "active",
+        autonomy_mode: "supervised",
+        capabilities: ["general"],
+        instructions: "Coordina l'esecuzione del lavoro nel rispetto delle autorizzazioni dell'utente, supervisiona i passaggi critici e gestisce le staffette tra collaboratori.",
+        method: "Collaborativo con supervisione umana.",
+      });
+      return;
+    }
+    const found = (engineAgents ?? []).find(
+      (a) =>
+        a.id === idOrName ||
+        a.name.toLowerCase() === idOrName.toLowerCase() ||
+        (agentNames?.[idOrName] && agentNames[idOrName].toLowerCase() === a.name.toLowerCase())
+    );
+    if (found) {
+      setInspectedAgent(found);
+      return;
+    }
+    const name = agentNames?.[idOrName] ?? idOrName;
+    setInspectedAgent({
+      id: idOrName,
+      workspace_id: "ws_local",
+      revision: 1,
+      name,
+      role: "Collaboratore Specializzato",
+      responsibility: "Collaboratore operativo nel flusso di lavoro.",
+      specializations: ["Attività operative", "Ricerca"],
+      status: "active",
+      autonomy_mode: "supervised",
+      capabilities: ["general"],
+      instructions: "Esegue le attività assegnate sotto la supervisione dell'utente.",
+      method: "Coordinato da Homun.",
+    });
+  };
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const customEvent = e as CustomEvent<string | EngineAgentProfile>;
+      if (customEvent.detail) {
+        handleInspectAgent(customEvent.detail);
+      }
+    };
+    window.addEventListener("homun:inspect-agent", handler);
+    return () => window.removeEventListener("homun:inspect-agent", handler);
+  }, [engineAgents, agentNames]);
+  const mentionRefs = buildMentionRefs(scenarios, spaceData, engineAgents);
+
+  const agentStream = useConversationEventStream(
+    engineMode ? work?.engineConversationId : undefined,
+    { onNewMessage: onRefreshEngine },
+  );
+
+  useEffect(() => {
+    if (historyRef.current && (work?.messages.length || engineIntake?.proposal)) {
+      historyRef.current.scrollTo({
+        top: historyRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [work?.messages.length, engineIntake?.proposal?.digest]);
 
   return (
     <div className={`cw-stage ${work && panelOpen ? "with-panel" : ""}`}>
@@ -128,26 +203,7 @@ export function ConversationWorkspaceChatStage({
             disabilitate.
           </p>
         )}
-        {work && scenario && (
-          <div className="cw-conversation-head">
-            <ConversationAvatar
-              name={scenario.agent}
-              human={isHumanMember(scenario.agent, spaceData.profiles)}
-              large
-            />
-            <div>
-              <strong>{work.catalogPlan ? work.title : scenario.agent}</strong>
-              <span>
-                {work.catalogPlan ? "Conversazione del lavoro" : scenario.role} <i />{" "}
-                {work.autonomy === "autonomous"
-                  ? "Autonomo su questo lavoro"
-                  : "Sotto supervisione"}
-              </span>
-            </div>
-            <span className="cw-private">Conversazione di lavoro</span>
-            {conversationActions(work)}
-          </div>
-        )}
+
         <div className="cw-history" ref={historyRef}>
           {!work ? (
             <ConversationWorkspaceWelcome
@@ -156,6 +212,8 @@ export function ConversationWorkspaceChatStage({
               spaceData={spaceData}
               onCreateExample={onCreateExample}
               engineMode={engineMode}
+              onRefreshEngine={onRefreshEngine}
+              onOpenSpace={onOpenSpace}
             />
           ) : (
             <>
@@ -163,42 +221,57 @@ export function ConversationWorkspaceChatStage({
               {work.messages.map((m, i) => (
                 <article
                   key={i}
-                  data-message={`${work.id}:${i}`}
                   className={`cw-message ${m.who}`}
                 >
                   <small>
                     {m.sender || (m.who === "you" ? work.requester || "Tu" : scenario!.agent)}
                   </small>
-                  {m.wait ? (
+                  {m.wait && !engineMode ? (
                     <ConversationAgentWait phase={m.wait.phase} startedAt={m.wait.startedAt} />
+                  ) : m.who === "agent" ? (
+                    <ChatMarkdown content={cleanMessageText(m.text)} streaming={m.partial} />
                   ) : (
-                    <p className={m.partial ? "cw-message-partial" : undefined}>{m.text}</p>
+                    <p className={m.partial ? "cw-message-partial" : undefined}>{cleanMessageText(m.text)}</p>
                   )}
-                  {engineMode &&
-                    m.who === "agent" &&
-                    !m.partial &&
-                    onSaveMemory &&
-                    (m.memorySaved ? (
-                      <p className="cw-hint cw-memory-saved">Salvato in memoria</p>
-                    ) : (
+                  {m.who === "agent" && !m.partial && (
+                    <div className="cw-msg-actions">
                       <button
                         type="button"
-                        className="cs-link cw-memory-promote"
-                        disabled={engineBusy}
-                        onClick={() => onSaveMemory(i)}
+                        className="cw-msg-action-btn"
+                        title="Copia messaggio"
+                        onClick={() => navigator.clipboard.writeText(cleanMessageText(m.text))}
                       >
-                        Salva in memoria
+                        <Copy size={13} />
                       </button>
-                    ))}
-                  {engineMode && m.who === "agent" && !m.partial && onSaveSkill && (
-                    <button
-                      type="button"
-                      className="cs-link cw-memory-promote"
-                      disabled={engineBusy}
-                      onClick={() => onSaveSkill(i)}
-                    >
-                      Salva come procedura
-                    </button>
+                      {engineMode && onSaveMemory && (
+                        m.memorySaved ? (
+                          <span className="cw-msg-action-saved" title="Salvato in memoria">
+                            <BookmarkCheck size={13} />
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="cw-msg-action-btn"
+                            disabled={engineBusy}
+                            title="Salva in memoria"
+                            onClick={() => onSaveMemory(i)}
+                          >
+                            <Bookmark size={13} />
+                          </button>
+                        )
+                      )}
+                      {engineMode && onSaveSkill && (
+                        <button
+                          type="button"
+                          className="cw-msg-action-btn"
+                          disabled={engineBusy}
+                          title="Salva come procedura"
+                          onClick={() => onSaveSkill(i)}
+                        >
+                          <Sparkles size={13} />
+                        </button>
+                      )}
+                    </div>
                   )}
                   {m.patchProposal && !m.patchResolved && onConfirmPatch && onDiscardPatch && (
                     <WorkPatchPreviewCard
@@ -210,6 +283,15 @@ export function ConversationWorkspaceChatStage({
                   )}
                 </article>
               ))}
+              {engineMode && <ConversationAgentLive
+                stream={agentStream}
+                hiddenWhenAnswered={(work?.messages ?? []).some((m, i) =>
+                  i >= work.messages.length - 3 && m.who === "agent" && !m.partial)}
+              />}
+              <ConversationBrowserPip
+                conversationId={engineMode ? work?.engineConversationId ?? undefined : undefined}
+                runActive={agentStream.runActive}
+              />
               {work.catalogPlan &&
                 work.catalogPlan.steps.filter((step) => step.result).length > 0 && (
                   <div className="cc-chat-results">
@@ -299,8 +381,23 @@ export function ConversationWorkspaceChatStage({
               )}
             </>
           )}
+          {engineMode && work?.source === "engine" && work.enginePlan && work.enginePlan.length > 0 && (
+            <EnginePlanRelayTimeline
+              work={work}
+              agentNames={agentNames}
+              busy={engineBusy}
+              onStartWork={onStartWork}
+              onInspectAgent={handleInspectAgent}
+            />
+          )}
           {engineMode && work?.source === "engine" && engineIntake && (
-            <EngineWorkIntake key={work.id} work={work} intake={engineIntake} onChanged={onRefreshEngine} />
+            <EngineWorkIntake
+              key={work.id}
+              work={work}
+              intake={engineIntake}
+              onChanged={onRefreshEngine}
+              onInspectAgent={handleInspectAgent}
+            />
           )}
         </div>
         <div className="cw-composer">
@@ -316,8 +413,14 @@ export function ConversationWorkspaceChatStage({
             disabled={engineMode && historyLoading}
             onSend={onSend}
             references={mentionRefs}
+            autonomyLevel={autonomyLevel}
+            onAutonomyLevelChange={onAutonomyLevelChange}
+            modelConnectionId={modelConnectionId}
+            onModelConnectionIdChange={onModelConnectionIdChange}
           />
-          {historyLoading && <p className="cw-hint" role="status">Caricamento conversazione…</p>}
+          {historyLoading && (work?.messages ?? []).length === 0 && (
+            <p className="cw-hint" role="status">Caricamento conversazione…</p>
+          )}
           {engineMode && engineBusy && onCancelInFlight && (
             <p className="cw-hint cw-engine-busy" role="status">
               Homun sta aspettando la risposta del modello: la conversazione mostra i passaggi
@@ -335,17 +438,25 @@ export function ConversationWorkspaceChatStage({
               </button>
             </p>
           )}
-          <div className="cw-composer-caption">
-            <span>
-              <Sparkles size={12} /> Scrivi naturalmente. Usa @ per un collaboratore.
-            </span>
-            {!engineMode && (
-              <span title={storageStatus}>{`Simulazione · ${storageStatus}`}</span>
-            )}
-          </div>
+
         </div>
       </section>
-      {details}
+      {!panelOpen && <ConversationMarginaliaSpine work={work} intake={engineIntake} />}
+      {panelOpen && details}
+      {inspectedAgent && (
+        <EngineAgentProfileModal
+          agent={inspectedAgent}
+          onClose={() => setInspectedAgent(null)}
+        />
+      )}
     </div>
   );
+}
+
+function cleanMessageText(text: string): string {
+  return text
+    .replace(/\.?\s*Fonte:\s*motore\.?/gi, "")
+    .replace(/\.?\s*Fonte\s+motore\.?/gi, "")
+    .replace(/\.?\s*Fonte:\s*simulazione\.?/gi, "")
+    .trim();
 }

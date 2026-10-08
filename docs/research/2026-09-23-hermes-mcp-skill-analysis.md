@@ -1,5 +1,7 @@
 # Analisi — Come Hermes Agent implementa MCP e Skill (23/09/2026)
 
+> Ricerca datata conservata. Il [confronto d’uso aggiornato](2026-09-23-hermes-homun-utilizzo.md) include Desktop, Bot Mode e casi raccontati dagli utenti. Non riutilizzare come attuali i limiti upstream, i conteggi o le priorità di questa fotografia senza riverifica.
+
 > Fonti: documentazione ufficiale [hermes-agent.nousresearch.com](https://hermes-agent.nousresearch.com/docs)
 > (pagine MCP Integration, Skills System, guida «Use MCP with Hermes»), repo
 > [github.com/NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)

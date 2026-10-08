@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 test('packaging stages only shell and explicit runtime assets, never workspace secrets', async () => {
-  const { stageApp } = await import('../scripts/package-app.mjs');
+  const { stageApp, NATIVE_PROFILES } = await import('../scripts/package-app.mjs');
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'homun-package-test-'));
   try {
     for (const dir of ['apps/desktop/src', 'engine', 'runtime', 'web', 'stage', 'engine/src/homun', 'engine/packaging', 'tools']) await fs.mkdir(path.join(root, dir), { recursive: true });
@@ -18,7 +18,8 @@ test('packaging stages only shell and explicit runtime assets, never workspace s
     await fs.writeFile(path.join(root, 'runtime/homun-engine'), 'binary');
     await fs.writeFile(path.join(root, 'web/index.html'), 'web');
     const digest = data => require('node:crypto').createHash('sha256').update(data).digest('hex');
-    const receipt = { python_version: '3.13.12', architecture: 'arm64',
+    const receipt = { python_version: '3.13.12',
+      architecture: NATIVE_PROFILES[process.platform].receiptArch,
       locks: { 'requirements.lock': digest('lock'), 'requirements-packaging.lock': digest('lock') },
       source_sha256: digest(''), build_inputs: {}, artifact_files: [{name:'homun-engine',sha256:digest('binary')}]  };
     for (const name of ['engine/packaging/homun-engine.spec', 'engine/packaging/entrypoint.py', 'tools/build_engine_bundle.py', 'engine/pyproject.toml']) {

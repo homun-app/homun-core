@@ -87,6 +87,9 @@ def admit(ctx: EngineContext, actor: Actor, body: CommandRequest) -> Delivery:
             result = service.apply(actor, body.command_id, body.type, body.payload)
             record = store.commands[body.command_id]
             token = None
+            if body.type == 'conversation.post_message' and record.followup_status == 'none':
+                from homun.application.agent_chat_control import route_message
+                route_message(ctx,store,actor,body,result)
             if body.type == 'conversation.post_message' and record.followup_status == 'completed':
                 # Cached replies carry the same source authority as fresh replies.
                 authorized_conversation_work(store, actor, body.payload.get('conversation_id', ''))
@@ -108,6 +111,41 @@ def admit(ctx: EngineContext, actor: Actor, body: CommandRequest) -> Delivery:
 
 
 def complete(ctx: EngineContext, delivery: Delivery) -> dict:
+    # Conversazioni legate a un agente: il messaggio avvia (o steera) il run
+    # dell'agente e la risposta torna in chat — la chat singola è con l'agente.
+    if (delivery.token is not None and delivery.body.type == "conversation.post_message"
+            and getattr(delivery.actor, "kind", "person") == "person"):
+        from homun.application import chat_agent
+        store_now = ctx.repository.snapshot()
+        if chat_agent.handles(ctx, store_now, delivery.body):
+            from homun.domain.errors import DomainError as _DE
+            try:
+                chat_agent.ensure_chat_persona(ctx, delivery.actor)
+                outcome = chat_agent.start_chat_turn(
+                    ctx, delivery.actor,
+                    str(delivery.body.payload.get("conversation_id") or ""),
+                    str(delivery.body.payload.get("text") or ""),
+                    connection_id=(str(delivery.body.payload.get("connection_id") or "").strip()
+                                   or None))
+            except _DE as exc:
+                fail(ctx, delivery, exc.code)
+                raise
+            with ctx.repository.locked():
+                with ctx.repository.transaction() as store:
+                    record = store.commands.get(delivery.body.command_id)
+                    if record is not None and record.followup_token == delivery.token:
+                        record.result = {**record.result, "assistant_text": None,
+                                         "agent_run_id": outcome["agent_run_id"],
+                                         "steered": outcome["steered"]}
+                        record.followup_status = "completed"
+                        record.followup_token = None
+                        record.followup_expires_at = None
+                ctx.service.store = store
+            _publish(ctx, store)
+            return {"message_id": record.result.get("message_id"),
+                    "agent_run_id": outcome["agent_run_id"],
+                    "steered": outcome["steered"],
+                    "chat_agent": True}
     if delivery.token is None:
         from homun.runtime.dispatcher import deliver_pending
         result = deliver_pending(ctx, command_id=delivery.body.command_id,
@@ -117,7 +155,7 @@ def complete(ctx: EngineContext, delivery: Delivery) -> dict:
         # Admission snapshots are not authority after time spent in a queue.
         # Read fresh grants without holding the repository lock across a model call.
         with ctx.repository.locked():
-            current = ctx.repository.load()
+            current = ctx.repository.snapshot()
             require_followup_authority(current, delivery.actor, delivery.body)
             model_context = replace(ctx, service=ctx.service.for_store(current))
         prepared, display = prepare_interpretation(

@@ -9,6 +9,27 @@ each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 
 ## [Unreleased]
 
+## Highlights
+- **Work directly with Homun without creating a specialist bot.** Optional company onboarding proposes a small team for recurring responsibilities.
+- **Adaptive work over approved materials.** Homun can read, search, consult selected AI teammates, request clarification and deliver a reviewable result with persisted progress.
+- **Scoped human contributions.** Named recipients can answer one request through an expiring, revocable link; an adaptive run can resume from that answer. Reachable hosting remains a prerequisite.
+
+## Fixes
+- **Model retries remain bounded after a crash.** Corrections interrupt stale waits immediately, and malformed usage counters cannot reduce recorded spending.
+- **Materials and Plugins use the engine from the sidebar.** Files, previews, archival and capability settings share the persisted engine state; denied access clears stale previews.
+- **Task deadlines persist from the Tasks view**, with saving feedback and typed errors.
+- **Tool chains resume after artifact publication without duplicating results**, preserving DBOS journal step order.
+- **Synthesis respects the assigned collaborator's budget and approved sources**, preserving known token counts in partial usage reports and blocking further calls at exhausted limits.
+- **Routine recovery reconciles cron and timezone drift** while preserving pause state.
+- **Manual update checks offer the available version only once.**
+
+## Improvements
+- **Recover from model context rejection through bounded compaction.** Homun preserves original history, respects output and attempt limits, and stops explicitly when protected context cannot shrink.
+- **Durable context checkpoints for native agent runs.** Automatic summaries preserve original history, recent corrections and complete tool rounds; configured model limits and separate usage accounting remain explicit.
+- **Pause, resume and redirect native agent work.** Chat corrections reach the active run; pending tools survive pause, stale responses cannot publish, and revoked source history remains hidden.
+- **Native agent tool rounds in the Homun engine**, with persisted call/result history and pending-call recovery after human input; Hermes-derived execution guidance includes MIT attribution.
+- **Current usage and developer documentation**, with verified limits and a dated Hermes usage comparison.
+
 ## [0.2.1001] — 2026-09-23
 
 Updating becomes a visible, guided flow: you watch the download and choose when to restart.

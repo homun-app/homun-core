@@ -1,11 +1,42 @@
 # Documentazione Homun 2
 
-- [Stato verificato corrente](STATO.md): implementazione, prove e limiti ancora aperti.
-- [Passaggio a un altro modello](handoff/2026-09-19-ripresa-sviluppo-homun.md): contesto completo e percorso di prosecuzione.
-- [Specifiche di prodotto](specifications/README.md): requisiti e distinzione fra decisioni e proposte.
-- [Roadmap](../roadmap.md): avanzamento per area.
-- [Transizione dal vecchio Homun](development/transizione-homun.md): criteri di sostituzione e migrazione.
-- [Ultima verifica UX e motore](research/2026-09-19-conversational-intake-ux-verification.md).
-- [Confronto Hermes](research/2026-09-19-hermes-homun-comparison.md) e [lezioni da altri sistemi](research/2026-09-19-agent-systems-lessons.md): ricerca datata, non certificazione dei runtime upstream.
+Aggiornamento: 7 ottobre 2026, documento unico di sviluppo.
 
-I documenti di ricerca e consegna precedenti conservano la cronologia delle prove. Per lo stato attuale partire da `STATO.md`; per istruzioni operative usare anche il codice e `AGENTS.md`. Un piano o una specifica approvata non dimostra da sola che una funzione sia implementata.
+## Da dove iniziare
+
+- **[Documento unico di sviluppo](SVILUPPO.md)** — cosa è fatta e cosa resta, per fase F0-F11, auditato sul codice (2026-10-07).
+
+- [Prova pratica Hermes / OpenHands SDK](research/2026-09-23-prova-hermes-openhands.md): prove locali ripetute, correzione e ripresa, evidenze e confini di integrazione.
+
+- [Sistemi agentici open source](research/2026-09-23-sistemi-agentici-open-source.md): confronto, prompt, evidenze e shortlist di riuso per Homun.
+
+- [Hermes: riuso prima di nuova implementazione](research/2026-09-23-hermes-codice-prima-di-reinventare.md): prima ispezione del codice e decisioni tecniche da verificare.
+
+- [Tranche operativa](research/2026-09-23-homun-operativo-verifica.md): uso diretto, squadra, contributi, prove e limiti.
+
+- [Visione e distanza dal codice](research/2026-09-23-visione-prodotto-gap.md): uso diretto, onboarding aziendale e squadra persone–bot; priorità proposte.
+
+- [Uso di Homun](USO-HOMUN.md): percorsi concreti, risultato atteso e limiti.
+- **[Documento unico di sviluppo](SVILUPPO.md)**: cosa è fatta e cosa resta, per fase F0-F11, auditato sul codice (2026-10-07). Punto d'ingresso.
+- [Confronto con Hermes](research/2026-09-23-hermes-homun-utilizzo.md): documentazione upstream aggiornata, testimonianze e implicazioni per Homun.
+- [Passaggio corrente](handoff/2026-09-23-consolidamento-e-ux.md): punto fermo tecnico e prossimo lavoro UX.
+- [Roadmap](../roadmap.md): avanzamento e priorità.
+
+- [Primo nucleo Homun derivato da Hermes](research/2026-09-23-owned-core-verifica.md): cronologia nativa, strumenti persistenti e ripresa; perimetro e prove.
+
+- [Parità Hermes: matrice completa](research/2026-09-23-hermes-parity-matrix.md) e [controlli verificati](research/2026-09-23-agent-controls-verifica.md) e [contesto persistente](research/2026-09-23-agent-context-verifica.md), [recupero provider](research/2026-09-23-agent-recovery-verifica.md) e [overflow](research/2026-09-23-agent-overflow-verifica.md).
+
+## Sviluppo e prodotto
+
+- [Specifiche](specifications/README.md): requisiti, proposte e decisioni; non elenco delle funzioni consegnate.
+- [Visione](VISIONE-PRODOTTO.md) e [affidabilità/formazione](MOTORE-AFFIDABILITA-E-FORMAZIONE.md): indirizzi di prodotto da preservare.
+- [Motore](../engine/README.md), [contratti API](../contracts/README.md), [desktop](../apps/desktop/README.md), [packaging](../engine/packaging/README.md) e [release](release.md).
+- [Transizione](development/transizione-homun.md): criteri di sostituzione del vecchio Homun.
+- [Prove del consolidamento](research/2026-09-23-consolidamento-verifica.md) e [rianalisi precedente](research/2026-09-23-rianalisi-progetto.md).
+
+Il [registro completo](REGISTRO-DOCUMENTI.md) classifica tutti i documenti di
+questa area e i manuali collegati. Le cartelle `research`, `ux` e i piani datati
+conservano evidenze o proposte dell'epoca; un piano completato non certifica una
+release. Lo [STATO precedente](STATO-2026-09-22.md) resta una fotografia storica.
+Per le affermazioni correnti prevalgono STATO, codice e prove datate pertinenti;
+per i requisiti prevalgono le decisioni dell'utente, non le supposizioni di una ricerca.

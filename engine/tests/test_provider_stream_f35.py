@@ -65,6 +65,29 @@ def test_openai_compat_stream_parses_sse_chunks() -> None:
     assert provider.last_stream_result.usage.output_tokens == 2
 
 
+def test_stream_cancel_check_interrupts_mid_stream(tmp_path: Path) -> None:
+    registry = build_default_registry(tmp_path, for_tests=True)
+    count = 0
+
+    def cancel_after_first():
+        nonlocal count
+        count += 1
+        return count > 1
+
+    chunks = list(
+        registry.stream(
+            [ChatMessage(role="user", content="Test long stream sentence for chunking")],
+            provider_id="fake",
+            cancel_check=cancel_after_first,
+        )
+    )
+    # Interrupted after first chunk
+    assert len(chunks) == 1
+    assert registry.list_usage()
+    last_usage = registry.list_usage()[-1]
+    assert last_usage.status in {"cancelled", "ok"}
+
+
 def test_chat_stream_emits_tokens_before_result(tmp_path: Path) -> None:
     reset_context_for_tests(
         create_context(workspace_id="ws_local", db_path=tmp_path / "ws.db", data_dir=tmp_path, for_tests=True)

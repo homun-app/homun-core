@@ -181,6 +181,25 @@ def test_http_two_projects_isolation_and_export(tmp_path: Path) -> None:
         )
         assert export_b.status_code == 200
         assert [m["text"] for m in export_b.json()["memories"]] == ["Segreto Beta log"]
+
+        # Review endpoint: preview
+        rev_preview = client.post(
+            f"/v1/workspaces/{ctx.workspace_id}/memories/review",
+            json={"action": "preview", "min_similarity": 0.5},
+            headers=headers,
+        )
+        assert rev_preview.status_code == 200
+        assert rev_preview.json()["status"] == "preview"
+        assert rev_preview.json()["total_reviewed"] == 2
+
+        # Review endpoint: prune
+        rev_prune = client.post(
+            f"/v1/workspaces/{ctx.workspace_id}/memories/review",
+            json={"action": "prune", "min_similarity": 0.5},
+            headers=headers,
+        )
+        assert rev_prune.status_code == 200
+        assert rev_prune.json()["status"] == "pruned"
     finally:
         reset_context_for_tests(None)
         ctx.repository.close()

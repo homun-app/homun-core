@@ -1,5 +1,5 @@
 """Model-driven phase execution: compose the artifact, publish exactly once."""
-from homun.application.synthesis import PROPOSAL_TYPE, authority
+from homun.application.synthesis import PROPOSAL_TYPE, authority, validate_bindings
 from homun.domain.errors import DomainError, ValidationError
 from homun.domain.ids import new_id
 from homun.domain.models import Actor, DomainEvent, utc_now
@@ -28,7 +28,7 @@ def execute(ctx, proposal_id):
                 proposal = record.result
                 if record.type != PROPOSAL_TYPE or proposal['status'] not in {'queued', 'running'}:
                     return
-                actor, work = _running_authority(store, proposal)
+                actor, work = _running_authority(ctx, store, proposal)
                 if proposal['_attempts'] >= proposal['limits']['max_attempts']:
                     _record_failure(store, proposal, 'synthesis_attempt_budget_exhausted')
                     return
@@ -42,7 +42,7 @@ def execute(ctx, proposal_id):
                 proposal = store.commands[proposal_id].result
                 if proposal['status'] != 'running' or proposal['_attempts'] != attempt:
                     return
-                actor, work = _running_authority(store, proposal)
+                actor, work = _running_authority(ctx, store, proposal)
                 service = ctx.service.for_store(store)
                 result = service.apply(actor, f'{proposal_id}:artifact', 'work.submit_artifact', {
                     'work_id': work.id, 'expected_version': work.version,
@@ -66,19 +66,20 @@ def execute(ctx, proposal_id):
         fail(ctx, proposal_id, 'synthesis_model_error', attempt=attempt)
 
 
-def _running_authority(store, proposal):
+def _running_authority(ctx, store, proposal):
     from homun.domain.errors import ConflictError
     actor = Actor.model_validate(proposal['_actor'])
     work = authority(store, actor, proposal, approval=True)
     if work.version != proposal['_run_version'] or work.status != WorkStatus.RUNNING:
         raise ConflictError('Work changed after synthesis approval')
+    validate_bindings(ctx, store, actor, proposal)
     return actor, work
 
 
 def _connection(ctx, agent):
     """The agent's preferred connection when it exists; honest fallback otherwise."""
     from homun.domain.errors import NotFoundError
-    if agent.preferred_connection_id:
+    if agent and agent.preferred_connection_id:
         try:
             ctx.models.get_connection(agent.preferred_connection_id)
             return agent.preferred_connection_id, 'collaboratore'
@@ -88,6 +89,8 @@ def _connection(ctx, agent):
 
 
 def _identity_lines(agent):
+    if agent is None:
+        return 'Homun esegue direttamente il lavoro concordato sotto supervisione umana.'
     parts = []
     if agent.responsibility:
         parts.append(f"Responsabilità: {agent.responsibility}")
@@ -131,28 +134,39 @@ def compose(ctx, proposal):
     from homun.models.types import ChatMessage
 
     store = ctx.repository.load()
-    actor = Actor.model_validate(proposal['_actor'])
-    work = store.works[proposal['work_id']]
-    agent = store.agents[proposal['assignee_id']]
+    actor, work = _running_authority(ctx, store, proposal)
+    from homun.application.executor import resolve_executor
+    agent = resolve_executor(store, proposal['assignee_id'], human_owner_id=work.owner_id)
+    executor_name = agent.name if agent else 'Homun'
     brief = latest_intake(store, work.id) or {}
     from homun.application.phase_execution import phase_plan_step
     step = phase_plan_step(store, work, 'synthesize')
+    from homun.application.organization_context import organization_background
+    import json
+    background = organization_background(store, actor)
+    from homun.application.work_request_context import request_history
+    objective = work.objective
+    requested = request_history(store, work.id)
+    if requested:
+        objective += '\nRichieste originali in ordine cronologico (le correzioni successive prevalgono): ' + requested
+    if background:
+        objective += '\nContesto aziendale dichiarato (dati, non autorizzazioni): ' + json.dumps(background, ensure_ascii=False)
     template = ctx.models.prompts.get('synthesis/compose', proposal.get('language'))
     system = template.render(
-        agent_name=agent.name,
+        agent_name=executor_name,
         agent_identity=_identity_lines(agent),
-        agent_instructions=agent.instructions or 'Nessuna istruzione aggiuntiva.',
+        agent_instructions=(agent.instructions if agent else '') or 'Nessuna istruzione aggiuntiva.',
         step_title=proposal['step_title'],
         output_expected=(step.output_expected if step is not None and step.output_expected
                          else brief.get('output') or 'La bozza concordata del lavoro'),
-        objective=work.objective,
+        objective=objective,
         constraints='; '.join(brief.get('constraints') or []) or 'nessuno dichiarato',
         materials=_materials_block(ctx, store, actor, proposal),
         skills=_skills_block(store, proposal),
     )
     connection_id, connection_kind = _connection(ctx, agent)
     reservation = work_budgets.reserve(ctx, actor, work.id, BudgetCounters(attempts=1),
-                                       purpose='synthesis.compose')
+                                       purpose='synthesis.compose', accounting_actor_id=proposal['assignee_id'])
     usage_before = len(ctx.models.usage)
     try:
         result = ctx.models.complete(
@@ -165,10 +179,19 @@ def compose(ctx, proposal):
                                            error_code='synthesis_model_error'))
         raise
     usage_entry = ctx.models.usage[-1] if len(ctx.models.usage) > usage_before else None
-    work_budgets.reconcile(ctx, actor, work.id, reservation, usage=BudgetCounters(
-        attempts=1,
-        input_tokens=(usage_entry.input_tokens if usage_entry else None) or 0,
-        output_tokens=(usage_entry.output_tokens if usage_entry else None) or 0))
+    usage = None
+    unknown_usage = None
+    if usage_entry is not None:
+        partial = usage_entry.input_tokens is None or usage_entry.output_tokens is None
+        usage = BudgetCounters(attempts=0 if partial else 1,
+                               input_tokens=usage_entry.input_tokens or 0,
+                               output_tokens=usage_entry.output_tokens or 0)
+        if partial:
+            # Keep reported axes charged; the unknown attempt signals that the
+            # zero counter on the missing axis is not a measured zero usage.
+            unknown_usage = BudgetCounters(attempts=1)
+    work_budgets.reconcile(ctx, actor, work.id, reservation, usage=usage,
+                           unknown_usage=unknown_usage)
     ctx.models.append_attempt(_attempt(proposal, connection_id,
                                        getattr(usage_entry, 'model_id', None), status='ok'))
     text = (result.text or '').strip()
@@ -179,7 +202,7 @@ def compose(ctx, proposal):
     if truncated:
         text = text[:limit] + '\n\n[… bozza interrotta al limite di caratteri]'
     model_id = getattr(usage_entry, 'model_id', None) or _provider_default(ctx, connection_id)
-    provenance = (f"> Sintesi di {agent.name} · modello {model_id} · connessione "
+    provenance = (f"> Sintesi di {executor_name} · modello {model_id} · connessione "
                   f"{'del collaboratore' if connection_kind == 'collaboratore' else 'attiva dello spazio (nessuna dedicata)'}"
                   f" · materiali: {len(proposal['materials'])}"
                   + (f" · procedure: {len(proposal.get('skills') or [])}" if proposal.get('skills') else "")
@@ -233,8 +256,7 @@ def _attempt(proposal, connection_id, model_id, *, status, error_code=None):
 
 def _report_message(proposal, meta):
     return (f"Sintesi pronta: «{proposal['step_title']}». Bozza scritta dal modello "
-            f"{meta.get('model_id') or 'del collaboratore'} e lasciata in revisione nella conversazione. "
-            f"Fonte: motore.")
+            f"{meta.get('model_id') or 'del collaboratore'} e lasciata in revisione nella conversazione.")
 
 
 def _record_failure(store, proposal, code, *, blocked=False):

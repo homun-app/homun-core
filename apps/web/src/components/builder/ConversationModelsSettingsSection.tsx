@@ -21,6 +21,7 @@ import {
   type UsageAttemptRow,
 } from "@/lib/engine-models-client";
 import { ConversationSelect } from "./ConversationSelect";
+import { SettingsCustomSelect } from "./SettingsCustomSelect";
 import type { ConversationPreferences } from "./conversation-preferences";
 
 type Props = {
@@ -116,7 +117,7 @@ export function ConversationModelsConnectionSection({ onExecution }: {
         <>
           <p>
             Provider attivo: <code>{active}</code>
-            {verifiedHint ? ` · ${verifiedHint}` : ""}. Le richieste chat (Fonte motore) usano
+            {verifiedHint ? ` · ${verifiedHint}` : ""}. Le richieste chat usano
             questo collegamento — non la demo IndexedDB.
           </p>
           <div className="cv-settings-card">
@@ -128,17 +129,15 @@ export function ConversationModelsConnectionSection({ onExecution }: {
             <label>
               Modello Ollama
               {ollamaTags.length > 0 ? (
-                <select
-                  value={ollamaTags.includes(ollamaModel) ? ollamaModel : ollamaTags[0]}
-                  onChange={(event) => setOllamaModel(event.target.value)}
-                  aria-label="Modello Ollama"
-                >
-                  {ollamaTags.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
+                <SettingsCustomSelect
+                  value={ollamaTags.includes(ollamaModel) ? ollamaModel : (ollamaTags[0] ?? "")}
+                  onChange={(val) => setOllamaModel(val)}
+                  options={ollamaTags.map((name) => ({
+                    value: name,
+                    label: name,
+                  }))}
+                  placeholder="Seleziona modello Ollama..."
+                />
               ) : (
                 <input
                   value={ollamaModel}

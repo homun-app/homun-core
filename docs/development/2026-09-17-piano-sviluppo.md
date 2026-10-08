@@ -1,5 +1,7 @@
 # Homun — piano di sviluppo del motore e del prodotto
 
+> Piano storico di costruzione. Avanzamento corrente nella [roadmap](../../roadmap.md) e nella [matrice requisiti](../specifications/STATO-IMPLEMENTAZIONE.md); non rieseguire le fasi già implementate sulla base delle caselle originali.
+
 > **Piano storico del 17 settembre.** Le indicazioni “da validare” e “non implementato” descrivono quel momento. Pydantic AI + DBOS sono stati adottati e il primo flusso reale è verificato. Per stato e prosecuzione usare [STATO.md](../STATO.md) e la [specifica di passaggio](../handoff/2026-09-19-ripresa-sviluppo-homun.md).
 
 > Specifica consolidata da analizzare: [pacchetto v0.1](../specifications/README.md). Chiarisce decisioni, proposte e scelta ancora aperta del backend memoria; prevale sulle ipotesi non confermate di questo documento.

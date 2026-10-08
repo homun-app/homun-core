@@ -21,6 +21,7 @@ from homun.domain.commands.teams import _team_create
 from homun.domain.commands.teams import _team_update
 from homun.domain.commands.teams import _team_archive
 from homun.domain.commands.conversations import _conversation_create
+from homun.domain.commands.conversations import _conversation_archive
 from homun.domain.commands.conversations import _conversation_post_message
 from homun.domain.commands.projects import _project_create
 from homun.domain.commands.projects import _project_create_from_conversation
@@ -32,6 +33,7 @@ from homun.domain.commands.materials import _material_create
 from homun.domain.commands.materials import _material_update
 from homun.domain.commands.materials import _material_archive
 from homun.domain.commands.work import _work_create
+from homun.domain.commands.work import _work_archive
 from homun.domain.commands.work import _work_link_conversation
 from homun.domain.commands.plans import _plan_propose
 from homun.domain.commands.plans import _plan_accept
@@ -41,17 +43,25 @@ from homun.domain.commands.patches import _work_apply_patch
 from homun.domain.commands.execution import _work_start
 from homun.domain.commands.execution import _work_request_contribution
 from homun.domain.commands.execution import _work_provide_contribution
+from homun.domain.commands.contribution_drafts import save_draft
 from homun.domain.commands.reviews import _work_submit_artifact
 from homun.domain.commands.reviews import _work_review
 from homun.domain.commands.work import _work_pause
 from homun.domain.commands.work import _work_cancel
 from homun.domain.commands.work import _work_set_due
+from homun.domain.commands.work import _work_set_project
 from homun.domain.commands.routines import _routine_create, _routine_pause, _routine_resume, _routine_stop, _routine_skip_next, _routine_update
 from homun.domain.commands.external import (
     _external_create, _external_update, _external_remove,
     _skill_create, _skill_patch, _skill_approve, _skill_reject, _skill_archive,
 )
 from homun.domain.commands.conversations import append_engine_message
+from homun.domain.commands.delegation import (
+    delegation_offer, delegation_accept, delegation_return, delegation_revoke,
+)
+from homun.domain.commands.identity import (
+    _person_bootstrap, _person_invite, _person_confirm, _person_revoke, _device_revoke,
+)
 from homun.domain.commands.projects import ensure_project_for_work
 from homun.domain.commands.materials import register_prepared_material
 
@@ -59,6 +69,15 @@ from homun.domain.commands.naming import work_rename, conversation_rename
 from homun.domain.commands.budgets import work_set_budget
 
 HANDLERS = {
+    "person.bootstrap": _person_bootstrap,
+    "person.invite": _person_invite,
+    "delegation.offer": delegation_offer,
+    "delegation.accept": delegation_accept,
+    "delegation.return": delegation_return,
+    "delegation.revoke": delegation_revoke,
+    "person.confirm": _person_confirm,
+    "person.revoke": _person_revoke,
+    "device.revoke": _device_revoke,
     "work.rename": work_rename,
     "work.set_budget": work_set_budget,
     "conversation.rename": conversation_rename,
@@ -69,6 +88,7 @@ HANDLERS = {
     "team.update": _team_update,
     "team.archive": _team_archive,
     "conversation.create": _conversation_create,
+    "conversation.archive": _conversation_archive,
     "conversation.post_message": _conversation_post_message,
     "project.create": _project_create,
     "project.create_from_conversation": _project_create_from_conversation,
@@ -80,6 +100,7 @@ HANDLERS = {
     "material.update": _material_update,
     "material.archive": _material_archive,
     "work.create": _work_create,
+    "work.archive": _work_archive,
     "work.link_conversation": _work_link_conversation,
     "plan.propose": _plan_propose,
     "plan.accept": _plan_accept,
@@ -89,11 +110,13 @@ HANDLERS = {
     "work.start": _work_start,
     "work.request_contribution": _work_request_contribution,
     "work.provide_contribution": _work_provide_contribution,
+    "work.save_contribution_draft": save_draft,
     "work.submit_artifact": _work_submit_artifact,
     "work.review": _work_review,
     "work.pause": _work_pause,
     "work.cancel": _work_cancel,
     "work.set_due": _work_set_due,
+    "work.set_project": _work_set_project,
     "routine.create": _routine_create,
     "routine.pause": _routine_pause,
     "routine.resume": _routine_resume,

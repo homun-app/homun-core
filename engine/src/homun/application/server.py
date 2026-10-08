@@ -3,11 +3,31 @@ import json
 import os
 import socket
 import sys
+import logging
+
 import uvicorn
 from homun.app import create_app
 
 
+def _configure_logging(dev: bool) -> None:
+    """Traccia applicativa leggibile: un solo formato, livelli sensati.
+
+    HOMUN_LOG_LEVEL=INFO di default; DEBUG per il giro diagnostico completo.
+    """
+    import os
+    level = os.environ.get("HOMUN_LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
+    for noisy in ("httpx", "httpcore", "dbos", "uvicorn.access", "mcp"):
+        logging.getLogger(noisy).setLevel(max(logging.WARNING, getattr(logging, level)))
+
+
 def serve(args):
+    _configure_logging(getattr(args, 'dev_insecure', False))
     token = os.environ.get('HOMUN_SESSION_TOKEN')
     if args.host not in {'127.0.0.1', '::1'}:
         print('The local engine only binds to loopback', file=sys.stderr)
@@ -35,6 +55,10 @@ def serve(args):
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.bind((args.host, args.port))
+        from homun.application.engine_listening import set_listening_port
+
+        # Channel sidecars spawned by the engine call back on this port.
+        set_listening_port(sock.getsockname()[1])
         # Reserved socket, not a readiness claim. Parent polls authenticated health.
         print('HOMUN_SOCKET '+json.dumps({'port': sock.getsockname()[1]}), flush=True)
         uvicorn.Server(uvicorn.Config(app, log_level='warning', access_log=False)).run(sockets=[sock])

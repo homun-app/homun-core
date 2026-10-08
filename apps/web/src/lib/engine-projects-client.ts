@@ -22,6 +22,8 @@ export type EngineProject = {
   member_ids: string[];
   conversation_ids: string[];
   status: string;
+  agent_model_overrides?: Record<string, string>;
+  agent_tool_overrides?: Record<string, string[]>;
 };
 
 export type EngineTeam = {
@@ -176,19 +178,20 @@ export async function createEngineProject(input: {
   description?: string;
   memberIds?: string[];
   teamIds?: string[];
+  agentModelOverrides?: Record<string, string>;
+  agentToolOverrides?: Record<string, string[]>;
   actor?: EngineActor;
 }): Promise<{ projectId: string; version: number }> {
   const actor = input.actor ?? defaultLocalActor();
-  const result = await postEngineCommand({
-    type: "project.create",
-    payload: {
-      name: input.name,
-      description: input.description ?? "",
-      member_ids: input.memberIds ?? [],
-      team_ids: input.teamIds ?? [],
-    },
-    actor,
-  });
+  const payload: Record<string, unknown> = {
+    name: input.name,
+    description: input.description ?? "",
+    member_ids: input.memberIds ?? [],
+    team_ids: input.teamIds ?? [],
+  };
+  if (input.agentModelOverrides) payload["agent_model_overrides"] = input.agentModelOverrides;
+  if (input.agentToolOverrides) payload["agent_tool_overrides"] = input.agentToolOverrides;
+  const result = await postEngineCommand({ type: "project.create", payload, actor });
   return {
     projectId: String(result.result["project_id"] ?? ""),
     version: typeof result.result["version"] === "number" ? result.result["version"] : 1,
@@ -203,24 +206,22 @@ export async function updateEngineProject(input: {
   memberIds?: string[];
   teamIds?: string[];
   status?: string;
+  agentModelOverrides?: Record<string, string>;
+  agentToolOverrides?: Record<string, string[]>;
   actor?: EngineActor;
 }): Promise<{ version: number }> {
   const actor = input.actor ?? defaultLocalActor();
-  const payload: Record<string, unknown> = {
-    project_id: input.projectId,
-    expected_version: input.expectedVersion,
-  };
+  const payload: Record<string, unknown> = { project_id: input.projectId, expected_version: input.expectedVersion };
   if (input.name !== undefined) payload["name"] = input.name;
   if (input.description !== undefined) payload["description"] = input.description;
   if (input.memberIds !== undefined) payload["member_ids"] = input.memberIds;
   if (input.teamIds !== undefined) payload["team_ids"] = input.teamIds;
   if (input.status !== undefined) payload["status"] = input.status;
+  if (input.agentModelOverrides !== undefined) payload["agent_model_overrides"] = input.agentModelOverrides;
+  if (input.agentToolOverrides !== undefined) payload["agent_tool_overrides"] = input.agentToolOverrides;
   const result = await postEngineCommand({ type: "project.update", payload, actor });
   return {
-    version:
-      typeof result.result["version"] === "number"
-        ? result.result["version"]
-        : input.expectedVersion + 1,
+    version: typeof result.result["version"] === "number" ? result.result["version"] : input.expectedVersion + 1,
   };
 }
 

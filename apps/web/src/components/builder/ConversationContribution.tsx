@@ -1,7 +1,9 @@
 import { ConversationMemberPicker } from "./ConversationMemberPicker";
 import type { MemberProfile } from "./conversation-members";
-import { useRef, useState } from "react";
+import { useRef, useState, useMemo } from "react";
 import type { Work } from "./conversation-types";
+import { EngineClarifyCard } from "./EngineClarifyCard";
+import { parseClarifyNeed } from "@/lib/engine-clarify-parser";
 
 export function ConversationContribution({
   work,
@@ -34,7 +36,7 @@ export function ConversationContribution({
   const request = work.request;
   const pending = request?.status === "pending";
   const canManage = viewer === (work.requester || "Fabio") || viewer === work.reviewer;
-  const canReply = pending && viewer === request.to && !request.childId;
+  const canReply = pending && viewer === request.to && !request.childId && !request.viaInvitation;
   return (
     <div className="cw-contribution">
       {pending ? (
@@ -66,6 +68,17 @@ export function ConversationContribution({
               Apri il contributo dell’agente ↗
             </button>
           ) : canReply ? (
+            parseClarifyNeed(request.need).isStructured ? (
+              <EngineClarifyCard
+                need={request.need}
+                deadline={work.due || undefined}
+                requestId={work.engineContributionRequestId || undefined}
+                onDeliver={(answer, uploadedFiles) => {
+                  onDeliver(answer, uploadedFiles, ids);
+                  setIds([]);
+                }}
+              />
+            ) : (
             <>
               <textarea
                 aria-label="Risposta alla richiesta"
@@ -132,9 +145,14 @@ export function ConversationContribution({
                 Invia contributo
               </button>
             </>
+            )
           ) : (
             <p className="cw-hint">
-              La richiesta è nelle notifiche di {request.to}. Il lavoro rimane in attesa.
+              {request.viaInvitation
+                ? `Il lavoro aspetta il contributo di ${request.to}. Condividi il link riservato dalla sezione Invito al contributo.`
+                : work.source === "engine"
+                  ? `Il lavoro aspetta il contributo di ${request.to}.`
+                  : `La richiesta è nelle notifiche di ${request.to}. Il lavoro rimane in attesa.`}
             </p>
           )}
         </>

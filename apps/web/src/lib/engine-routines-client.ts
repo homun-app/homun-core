@@ -139,3 +139,25 @@ export async function previewEngineCron(
   const body = (await response.json()) as { next: string[] };
   return body.next ?? [];
 }
+
+export function routineTemplateFromWork(work: {
+  title: string;
+  engineObjective?: string | undefined;
+  enginePlan?: Array<{
+    title: string;
+    assignee_id?: string | undefined;
+    capability: string;
+    output_expected?: string | undefined;
+  }> | undefined;
+}) {
+  return {
+    title: work.title,
+    objective: work.engineObjective ?? work.title,
+    plan_steps: (work.enginePlan ?? []).map((step) => ({
+      title: step.title,
+      assignee_id: step.assignee_id ?? "",
+      capability: step.capability,
+      output_expected: step.output_expected ?? "",
+    })),
+  };
+}

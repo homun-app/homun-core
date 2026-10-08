@@ -1,5 +1,7 @@
 # Homun — visione del prodotto e base per il piano
 
+> Riferimento di visione. Al 23/9 lo stato reale è in [STATO](STATO.md), i percorsi attuali nella [guida d’uso](USO-HOMUN.md). Autonomia estesa e collaborazione remota qui descritte non sono dichiarazioni di funzionalità già consegnate.
+
 Aggiornato: 16 settembre 2026.
 
 Questo documento raccoglie la discussione con Fabio. Le sezioni distinguono

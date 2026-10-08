@@ -30,21 +30,26 @@ export function ConversationCapabilitiesSettingsSection() {
         if (!response.ok) throw new Error(`Catalogo capacità: HTTP ${response.status}`);
         return (await response.json()) as { items: CapabilityItem[] };
       })
-      .then((body) => { if (active) setItems(body.items); })
-      .catch((cause) => { if (active) setError(cause); });
-    return () => { active = false; };
+      .then((body) => {
+        if (active) setItems(body.items);
+      })
+      .catch((cause) => {
+        if (active) setError(cause);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   return (
     <>
       <ConversationMcpSettingsSection />
-      <h3>Capacità del motore</h3>
+      <h3>Capacità disponibili</h3>
       <p>
-        Ciò che la tua squadra sa fare davvero, dal registro del motore: le capacità elencate
-        qui sono le uniche che i collaboratori possono eseguire. Nessuno può prometterti
-        altro.
+        Ciò che la tua squadra sa fare davvero: le capacità elencate qui
+        sono le uniche che i collaboratori possono eseguire. Nessuno può prometterti altro.
       </p>
-      {items === null && !error && <p role="status">Leggo il catalogo del motore…</p>}
+      {items === null && !error && <p role="status">Caricamento del catalogo…</p>}
       {items?.map((item) => (
         <div className="cv-settings-card" key={item.id}>
           <strong>{item.summary}</strong>
@@ -61,8 +66,8 @@ export function ConversationCapabilitiesSettingsSection() {
       <div className="cv-settings-card">
         <strong>Plugin esterni e MCP</strong>
         <p>
-          Non ancora disponibili. Quando arriveranno, compariranno qui con permessi espliciti
-          per collaboratore: mai attivati in silenzio.
+          I server dichiarati e gli strumenti ammessi sono elencati qui sopra. Ogni esecuzione
+          richiede una tua approvazione esplicita.
         </p>
       </div>
       <HomunErrorNotice error={error} />

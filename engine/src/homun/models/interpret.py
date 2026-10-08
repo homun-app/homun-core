@@ -44,6 +44,7 @@ def _interpret_via_json_completion(
     *,
     roster: list[RosterEntry],
     conversation_context: ConversationContext | None = None,
+    provider: Any | None = None,
 ) -> MessageInterpretation:
     roster_lines = "\n".join(
         f"- {entry.id} | {entry.display_name} | {entry.kind}" for entry in roster
@@ -54,10 +55,12 @@ def _interpret_via_json_completion(
         f"Reply with ONE JSON object only, no markdown, matching:\n{prompts.get('interpret/schema_hint').text}\n\n"
         f"{_prompt_with_preamble(conversation_context, f'Roster:\n{roster_lines}\n\nUser message:\n{text}')}"
     )
+    prov_id = getattr(provider, "provider_id", "openai_compatible")
     completion = registry.complete(
         [*(conversation_context.messages if conversation_context else []),
          ChatMessage(role="user", content=prompt)],
-        provider_id="openai_compatible",
+        provider_id=prov_id,
+        connection_id=getattr(provider, "id", prov_id),
     )
     raw = _extract_json_object(completion.text)
     return MessageInterpretation.model_validate(raw)
@@ -69,20 +72,21 @@ def _interpret_via_pydantic_ai(
     *,
     roster: list[RosterEntry],
     conversation_context: ConversationContext | None = None,
+    provider: Any | None = None,
 ) -> MessageInterpretation:
     from homun.models.adapters.pydantic_ai import (
         build_openai_compatible_chat_model,
         structured_output,
     )
 
-    provider = registry._openai
-    api_key = provider._api_key()
+    prov = provider or registry._openai
+    api_key = prov._api_key()
     if not api_key:
-        raise RuntimeError("openai_compatible provider has no API key configured")
+        raise RuntimeError(f"{getattr(prov, 'provider_id', 'provider')} has no API key configured")
 
     model = build_openai_compatible_chat_model(
-        model_id=provider.default_model,
-        base_url=provider.base_url,
+        model_id=prov.default_model,
+        base_url=prov.base_url,
         api_key=api_key,
     )
     roster_lines = "\n".join(
@@ -111,27 +115,33 @@ def run_interpret(
     if provider_id == "fake":
         return registry._fake.interpret(text, roster=roster)
 
-    if provider_id != "openai_compatible":
+    get_prov = getattr(registry, "_get_provider", None)
+    if get_prov is None:
+        providers = getattr(registry, "_providers", None)
+        get_prov = providers.get if providers is not None else (lambda _pid: None)
+    provider = get_prov(provider_id)
+    if provider is None and provider_id == "openai_compatible":
+        provider = registry._openai
+    if provider is None:
         raise KeyError(f"Unknown provider for interpret: {provider_id}")
 
-    provider = registry._openai
     if not provider._api_key():
-        raise RuntimeError("openai_compatible provider has no API key configured")
+        raise RuntimeError(f"{provider_id} provider has no API key configured")
 
-    host = provider.base_url.lower()
+    host = getattr(provider, "base_url", "").lower()
     local = "127.0.0.1" in host or "localhost" in host
     # Local Ollama rarely supports reliable tool/structured retries — prefer JSON prompt.
     if local:
         try:
-            return _interpret_via_json_completion(registry, text, roster=roster, conversation_context=conversation_context)
+            return _interpret_via_json_completion(registry, text, roster=roster, conversation_context=conversation_context, provider=provider)
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"Local model interpret failed: {exc}") from exc
 
     try:
-        return _interpret_via_pydantic_ai(registry, text, roster=roster, conversation_context=conversation_context)
+        return _interpret_via_pydantic_ai(registry, text, roster=roster, conversation_context=conversation_context, provider=provider)
     except Exception:  # noqa: BLE001
         try:
-            return _interpret_via_json_completion(registry, text, roster=roster, conversation_context=conversation_context)
+            return _interpret_via_json_completion(registry, text, roster=roster, conversation_context=conversation_context, provider=provider)
         except Exception as fallback_exc:  # noqa: BLE001
             raise RuntimeError(
                 f"Model interpret failed (structured + JSON fallback): {fallback_exc}"

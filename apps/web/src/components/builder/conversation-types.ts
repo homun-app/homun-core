@@ -37,6 +37,10 @@ export type ConversationMessage = {
   text: string;
   /** F3.5: in-flight / incomplete assistant turn (not yet final). */
   partial?: boolean;
+  /** Ragionamento (think) del run che ha prodotto il turno — visibile nello storico. */
+  reasoning?: string;
+  /** Chiamate tool del run che ha prodotto il turno — visibili nello storico. */
+  tools?: Array<{ tool: string; message: string }>;
   /** In-flight wait state: shown instead of text until the turn resolves. */
   wait?: AgentWait;
   /** F3.5a: user explicitly promoted this turn to approved memory. */
@@ -63,7 +67,7 @@ export type Work = {
   archived?: boolean;
   catalogPlan?: CatalogPlan;
   coordinatedBy?: string;
-  request?: { to: string; need: string; status: "pending" | "resolved"; childId?: string };
+  request?: { to: string; viaInvitation?: boolean; need: string; status: "pending" | "resolved"; childId?: string };
   routineId?: string;
   runNumber?: number;
   startedAt?: string;
@@ -83,6 +87,7 @@ export type Work = {
   engineOwnerName?: string;
   /** Engine plan/artifact revision counters (Fonte=motore); 0 = none yet. */
   enginePlanRevision?: number;
+  engineRevisionRequested?: boolean;
   engineArtifactVersion?: number;
   /** Accepted plan steps (phase ladder) from the engine works list. */
   enginePlan?: EnginePlanStepProjection[] | undefined;

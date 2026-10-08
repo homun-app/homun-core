@@ -57,6 +57,11 @@ def approve_starts_phase(service, store, actor, work, capability, command_id):
     """Plan acceptance + start for plan-less works; for phased ones the approval
     itself is the supervised go (start the phase if the work is still ready)."""
     if phase_plan_step(store, work, capability) is not None:
+        # Tool-created plans carry their capability before they are accepted.
+        # Approval must accept that draft before starting its execution.
+        if work.status == WorkStatus.DRAFT:
+            service.apply(actor, f"{command_id}:accept", 'plan.accept', {
+                'work_id': work.id, 'expected_version': work.version})
         if work.status == WorkStatus.READY:
             service.apply(actor, f"{command_id}:start", 'work.start', {
                 'work_id': work.id, 'expected_version': work.version, 'durable': False})

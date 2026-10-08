@@ -39,3 +39,9 @@ class CommandInProgressError(DomainError):
 
 class BudgetExhaustedError(DomainError):
     code = "budget_exhausted"
+
+
+class BackendUnavailableError(DomainError):
+    """Raised when a required external or OS backend is not configured or not ready."""
+
+    code = "backend_unavailable"

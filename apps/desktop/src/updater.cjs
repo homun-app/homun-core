@@ -129,7 +129,7 @@ async function checkNow() {
     const result = await autoUpdater.checkForUpdates();
     const version = result?.updateInfo?.version ?? null;
     const available = version ? autoUpdater.currentVersion.compare(version) < 0 : false;
-    if (available) offerUpdate(result.updateInfo);
+    // update-available owns the dialog for both automatic and manual checks.
     return { current, available, version };
   } catch (error) {
     return { current, available: false, version: null, error: error.message };

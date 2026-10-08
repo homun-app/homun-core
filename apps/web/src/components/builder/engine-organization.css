@@ -1,0 +1,224 @@
+/* Modern AI Organization Onboarding Banner & Editor */
+.organization-onboarding {
+  margin: 0;
+  text-align: left;
+}
+
+.org-onboarding-minimal-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.org-onboarding-minimal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #52525b;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.org-onboarding-minimal-btn:hover {
+  background: rgba(0, 0, 0, 0.03);
+  color: #18181b;
+  border-color: rgba(0, 0, 0, 0.16);
+}
+
+.org-onboarding-minimal-arrow {
+  color: #a1a1aa;
+  font-size: 12px;
+  transition: transform 0.1s ease;
+}
+
+.org-onboarding-minimal-btn:hover .org-onboarding-minimal-arrow {
+  transform: translateX(2px);
+  color: #18181b;
+}
+
+.org-onboarding-banner {
+  display: none;
+}
+
+.org-onboarding-banner__left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.org-onboarding-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #f0fdf4;
+  color: #16a34a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.org-onboarding-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #18181b;
+  margin-bottom: 2px;
+}
+
+.org-onboarding-desc {
+  font-size: 13px;
+  color: #71717a;
+  line-height: 1.4;
+}
+
+.org-onboarding-cta-btn {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #18181b;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.1s ease;
+  flex-shrink: 0;
+}
+
+.org-onboarding-cta-btn:hover {
+  background: #f4f4f5;
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.org-onboarding-expanded {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  padding: 20px 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.org-onboarding-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.org-onboarding-head__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #18181b;
+}
+
+.org-sparkle-icon {
+  color: #16a34a;
+}
+
+.org-onboarding-close-btn {
+  background: transparent;
+  border: none;
+  color: #71717a;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.org-onboarding-close-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #18181b;
+}
+
+.organization-editor h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #18181b;
+  margin: 0 0 6px;
+}
+
+.organization-editor p {
+  font-size: 13px;
+  color: #71717a;
+  line-height: 1.5;
+  margin: 0 0 8px;
+}
+
+.organization-editor label {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #27272a;
+}
+
+.organization-editor textarea,
+.organization-editor select {
+  width: 100%;
+  padding: 8px 12px;
+  color: #18181b;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+  transition: border-color 0.12s ease;
+}
+
+.organization-editor textarea:focus,
+.organization-editor select:focus {
+  outline: none;
+  border-color: #18181b;
+}
+
+.organization-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 16px 0 10px;
+}
+
+.organization-actions .cw-secondary {
+  width: auto !important;
+  background: #f4f4f5 !important;
+  color: #18181b !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 6px !important;
+  padding: 6px 14px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.organization-actions .cw-secondary:hover:not(:disabled) {
+  background: #e4e4e7 !important;
+}
+
+.organization-role {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 12px 0;
+}
+
+.organization-role h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #18181b;
+  margin: 0 0 4px;
+}

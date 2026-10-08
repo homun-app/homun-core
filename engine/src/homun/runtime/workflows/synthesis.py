@@ -32,7 +32,7 @@ def start(workflow_id, proposal_id):
 
 def deliver_syntheses(ctx):
     from homun.application.synthesis import PROPOSAL_TYPE
-    for record in ctx.repository.load().commands.values():
+    for record in ctx.repository.snapshot().commands.values():
         if record.type != PROPOSAL_TYPE or record.result['status'] not in {'queued', 'running'}:
             continue
         try:

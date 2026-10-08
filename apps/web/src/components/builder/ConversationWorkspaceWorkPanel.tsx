@@ -28,6 +28,7 @@ import { EngineWorkspaceWorkPanel } from "./EngineWorkspaceWorkPanel";
 
 type Props = {
   work: Work;
+  onRefreshEngine?: (() => Promise<void>) | undefined;
   scenario: ConversationScenario;
   viewer: string;
   spaceData: SpaceData;
@@ -98,11 +99,12 @@ export function ConversationWorkspaceWorkPanel({
   engineBusy = false,
   engineIntake,
   onApplyObjectivePatch, onRename, onCloseWork, onStartWork, onSubmitArtifact,
-  onCreateRoutine, onSetBudget, onSetDue, onRevisePlan, agents, agentNames,
+  onRefreshEngine, onCreateRoutine, onSetBudget, onSetDue, onRevisePlan, agents, agentNames,
 }: Props) {
   if (work.source === "engine")
     return (
       <EngineWorkspaceWorkPanel
+        onRefreshEngine={onRefreshEngine}
         ownerName={work.engineOwnerName}
         onRename={onRename}
         work={work}
@@ -180,9 +182,13 @@ export function ConversationWorkspaceWorkPanel({
         </button>
       )}
       {!work.catalogPlan && <p className="cw-outcome">{scenario.outcome}</p>}
-      {work.projectId && (
+      {work.projectId ? (
         <button className="cs-link" onClick={() => onOpenSpace("Progetti", "", work.projectId)}>
           Progetto: {spaceData.projects.find((p) => p.id === work.projectId)?.name} ↗
+        </button>
+      ) : (
+        <button className="cs-link" style={{ color: "#8a9a86" }} onClick={() => onOpenSpace("Progetti")}>
+          Nessun progetto · Assegna ↗
         </button>
       )}
       <div className="cw-owner" hidden={!!work.catalogPlan}>

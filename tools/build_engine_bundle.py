@@ -1,17 +1,31 @@
 #!/usr/bin/env python3
-"""Build a standalone arm64 engine using fresh, hash-locked build dependencies."""
+"""Build a standalone engine using fresh, hash-locked build dependencies.
+
+Native builds only (PyInstaller does not cross-compile): validated host
+targets are macOS arm64, Linux x86_64 and Windows AMD64, each on its own
+runner. ``--cua-driver`` copies a pre-verified driver binary into the
+bundle (engine/bin/) so the receipt inventory pins it like every other
+artifact.
+"""
 import argparse
 import hashlib
 import json
 import os
-import stat
 import platform
-from pathlib import Path
+import stat
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Native build targets: PyInstaller bundles for the host, never cross-compiles.
+HOST_TARGETS = {
+    ('Darwin', 'arm64'): {'os': 'mac', 'target_arch': 'arm64'},
+    ('Linux', 'x86_64'): {'os': 'linux', 'target_arch': 'none'},
+    ('Windows', 'AMD64'): {'os': 'win', 'target_arch': 'none'},
+}
 
 
 def run(*args, cwd=ROOT):
@@ -44,9 +58,13 @@ def artifact_inventory(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--python', default='3.13.12', help='Build interpreter; bundled runtime does not require it')
+    parser.add_argument('--cua-driver', default=None,
+                        help='Pre-verified cua-driver binary to bundle into engine/bin/')
     args = parser.parse_args()
-    if platform.system() != 'Darwin' or platform.machine() != 'arm64':
-        raise SystemExit('This packaging target requires a macOS arm64 build host')
+    target = HOST_TARGETS.get((platform.system(), platform.machine()))
+    if target is None:
+        raise SystemExit('Unsupported build host: native targets are '
+                         'macOS arm64, Linux x86_64, Windows AMD64')
     uv = shutil.which('uv')
     if not uv:
         raise SystemExit('uv is required only on the build host')
@@ -54,7 +72,7 @@ def main():
     dist.mkdir(exist_ok=True)
     def engine_inputs():
         sources = sorted((ROOT / 'engine/src/homun').rglob('*.py'))
-        prompts = sorted((ROOT / 'engine/src/homun/prompts').rglob('*.txt'))
+        prompts = sorted((ROOT / 'engine/src/homun').rglob('*.txt'))
         return sources, prompts
 
     sources, prompt_files = engine_inputs()
@@ -67,7 +85,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='homun-engine-build-') as directory:
         build = Path(directory)
         venv = build / 'venv'
-        python = venv / 'bin/python'
+        python = venv / ('Scripts/python.exe' if target['os'] == 'win' else 'bin/python')
         run(uv, 'venv', '--python', args.python, venv)
         python_version = subprocess.check_output([str(python), '-c', 'import platform; print(platform.python_version())'], text=True).strip()
         if python_version != '3.13.12':
@@ -77,12 +95,23 @@ def main():
         run(uv, 'pip', 'install', '--python', python, '--no-deps', '--no-build-isolation', ROOT / 'engine')
         # A failed replacement build must never retain an earlier valid receipt.
         (dist / 'engine/build-receipt.json').unlink(missing_ok=True)
-        run(python, '-m', 'PyInstaller', '--noconfirm', '--clean', '--distpath', dist,
-            '--workpath', build / 'work', ROOT / 'engine/packaging/homun-engine.spec')
+        env = {**os.environ, 'HOMUN_TARGET_ARCH': target['target_arch']}
+        subprocess.run([str(python), '-m', 'PyInstaller', '--noconfirm', '--clean',
+                        '--distpath', str(dist), '--workpath', str(build / 'work'),
+                        str(ROOT / 'engine/packaging/homun-engine.spec')],
+                       cwd=ROOT, check=True, env=env)
+    if args.cua_driver:
+        driver = Path(args.cua_driver).expanduser().resolve()
+        if not driver.is_file():
+            raise SystemExit(f'cua-driver binary not found: {driver}')
+        bundled = dist / 'engine' / 'bin' / ('cua-driver.exe' if target['os'] == 'win' else 'cua-driver')
+        bundled.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(driver, bundled)
+        bundled.chmod(bundled.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     current_sources = {path.relative_to(ROOT).as_posix()
                        for path in (ROOT / 'engine/src/homun').rglob('*.py')}
     current_sources |= {path.relative_to(ROOT).as_posix()
-                        for path in (ROOT / 'engine/src/homun/prompts').rglob('*.txt')}
+                        for path in (ROOT / 'engine/src/homun').rglob('*.txt')}
     expected_sources = {name for name in inputs if name.startswith('engine/src/')}
     if current_sources != expected_sources or any(
         not (ROOT / name).is_file() or hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest
@@ -100,7 +129,8 @@ def main():
                'locks': {name: hashlib.sha256((ROOT / 'engine' / name).read_bytes()).hexdigest()
                          for name in ('requirements.lock', 'requirements-packaging.lock')}}
     (dist / 'engine/build-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
-    print(dist / 'engine/homun-engine')
+    engine_exe = dist / 'engine' / ('homun-engine.exe' if target['os'] == 'win' else 'homun-engine')
+    print(engine_exe)
 
 
 if __name__ == '__main__':

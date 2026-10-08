@@ -730,6 +730,7 @@ httpx2==2.13.0 \
     --hash=sha256:fc12720cedf72faa26cca6b4ca394e05c894e7d7933fc45cafe767960804e49a
     # via
     #   -c engine/requirements.lock
+    #   homun-engine (engine/pyproject.toml)
     #   anthropic
     #   fastmcp-slim
     #   genai-prices
@@ -918,6 +919,7 @@ jsonschema==4.26.0 \
     --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
     # via
     #   -c engine/requirements.lock
+    #   homun-engine (engine/pyproject.toml)
     #   mcp
 jsonschema-specifications==2025.9.1 \
     --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe \
@@ -955,6 +957,7 @@ mcp==2.2.0 \
     --hash=sha256:bde982589473a060ae145e3406e9a5333fe538c97229ba841f5a7f92be004f81
     # via
     #   -c engine/requirements.lock
+    #   homun-engine (engine/pyproject.toml)
     #   fastmcp-slim
 mcp-types==2.2.0 \
     --hash=sha256:d3ed53703ddd10d9c6399f29d322bb66f3f67ab41348ac8556ba23e07fedefad \
@@ -1537,6 +1540,7 @@ referencing==0.37.0 \
     --hash=sha256:44aefc3142c5b842538163acb373e24cce6632bd54bdb01b21ad5863489f50d8
     # via
     #   -c engine/requirements.lock
+    #   homun-engine (engine/pyproject.toml)
     #   jsonschema
     #   jsonschema-specifications
 regex==2026.9.10 \

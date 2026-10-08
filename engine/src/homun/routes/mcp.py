@@ -1,14 +1,14 @@
 """MCP server declarations and skills transport."""
 from __future__ import annotations
 from typing import Any
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, Query, HTTPException
 from pydantic import BaseModel, Field
 
 from homun.context import get_context
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _actor_from_headers, _http_error
 from homun.routes.price_comparisons import request_context
-from homun.application import external_tools
+from homun.application import external_tools, external_delivery
 from homun.application.mcp_catalog import catalog_public
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["mcp", "skills"])
@@ -140,6 +140,10 @@ class ToolApproveRequest(BaseModel):
     digest: str
 
 
+class ToolDeliveryRequest(ToolApproveRequest):
+    expected_version: int = Field(ge=1)
+
+
 class SkillCreateRequest(BaseModel):
     command_id: str = Field(min_length=1, max_length=160)
     name: str = Field(min_length=1, max_length=80)
@@ -188,8 +192,31 @@ def approve_tool_call(workspace_id: str, proposal_id: str, body: ToolApproveRequ
         raise _http_error(exc) from exc
 
 
+@router.get("/mcp/tools/{proposal_id}/delivery")
+def preview_tool_delivery(workspace_id: str, proposal_id: str,
+                          x_homun_actor_id: str | None = Header(default=None),
+                          x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        return external_delivery.preview(ctx, actor, proposal_id)
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/mcp/tools/{proposal_id}/delivery")
+def approve_tool_delivery(workspace_id: str, proposal_id: str, body: ToolDeliveryRequest,
+                          x_homun_actor_id: str | None = Header(default=None),
+                          x_homun_actor_name: str | None = Header(default=None)):
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    try:
+        return external_delivery.deliver(ctx, actor, proposal_id, body.model_dump())
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
 @router.get("/skills")
 def list_skills(workspace_id: str,
+                include_archived: bool = Query(default=False),
                 x_homun_actor_id: str | None = Header(default=None),
                 x_homun_actor_name: str | None = Header(default=None)):
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
@@ -199,9 +226,12 @@ def list_skills(workspace_id: str,
     return {"items": [{
         "id": skill.id, "name": skill.name, "description": skill.description,
         "tags": skill.tags, "status": skill.status,
-        "author_type": skill.author_type, "revision": skill.revision,
+        "author_type": skill.author_type, "author_id": skill.author_id,
+        "revision": skill.revision, "resources": sorted((skill.resources or {}).keys()),
+        "usage_count": skill.usage_count, "last_used_at": skill.last_used_at,
         "body": skill.body if include_body else None,
     } for skill in sorted(store.skills.values(), key=lambda s: s.created_at)
+        if include_archived or skill.status != "archived"
         for include_body in [True]]}
 
 
@@ -242,6 +272,49 @@ def archive_skill(workspace_id: str, skill_id: str, body: SkillActionRequest,
                   x_homun_actor_id: str | None = Header(default=None),
                   x_homun_actor_name: str | None = Header(default=None)):
     return _skill_action(workspace_id, skill_id, "archive", body, x_homun_actor_id, x_homun_actor_name)
+
+
+@router.post("/skills/sync")
+def sync_skill_catalog_route(workspace_id: str, body: dict,
+                             x_homun_actor_id: str | None = Header(default=None),
+                             x_homun_actor_name: str | None = Header(default=None)):
+    """Sync skills from a catalog repository checkout (see homun-skills)."""
+    from homun.application.skill_catalog_sync import sync_skill_catalog
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    if actor.kind != "person":
+        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Persons only"})
+    path = str((body or {}).get("path") or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail={
+            "code": "catalog_path_required",
+            "message": "Il percorso del repository delle skill è obbligatorio "
+                       "(un sync senza percorso archivierebbe l'intero catalogo)."})
+    return sync_skill_catalog(ctx, path, rebase=bool((body or {}).get("rebase")))
+
+
+@router.post("/skills/seed")
+def seed_skills(workspace_id: str,
+                x_homun_actor_id: str | None = Header(default=None),
+                x_homun_actor_name: str | None = Header(default=None)):
+    """(Re)apply the builtin skill catalog; existing skills are never touched."""
+    from homun.application.skill_seeding import seed_builtin_skills
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    if actor.kind != "person":
+        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Persons only"})
+    return seed_builtin_skills(ctx)
+
+
+@router.post("/skills/curate")
+def curate_skills(workspace_id: str,
+                  x_homun_actor_id: str | None = Header(default=None),
+                  x_homun_actor_name: str | None = Header(default=None)):
+    """Force one skill-curation pass (stale staged and never-used archives)."""
+    from fastapi import HTTPException
+    from homun.application.skill_curator import maybe_curate
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    if actor.kind != "person":
+        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Persons only"})
+    return maybe_curate(ctx, force=True) or {"archived": 0, "skipped": [], "note": "noop"}
 
 
 def _skill_action(workspace_id: str, skill_id: str, action: str, body: SkillActionRequest,

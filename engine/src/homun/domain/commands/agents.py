@@ -20,6 +20,8 @@ def _validate_connection_id(ctx: CommandContext, connection_id: str | None) -> s
     if ctx._known_connection_ids is not None:
         known = set(ctx._known_connection_ids())
         if cid not in known:
+            if ":" in cid and cid.split(":", 1)[0] in known:
+                return cid
             raise ValidationError(f"Unknown model connection: {cid}")
     return cid
 
@@ -92,13 +94,45 @@ def _identity_from_payload(payload: dict[str, Any], agent: AgentProfile, *, crea
         agent.autonomy_mode = _parse_autonomy(payload.get("autonomy_mode"))
     if create or "capabilities" in payload:
         agent.capabilities = _parse_capabilities(payload.get("capabilities"))
+    if create or "computer_use_apps" in payload:
+        agent.computer_use_apps = _parse_computer_use_apps(payload.get("computer_use_apps"))
+
+
+def _parse_computer_use_apps(raw: Any) -> list[str]:
+    """App allowlist for computer use: names, deduplicated, bounded."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValidationError("computer_use_apps must be a list")
+    items: list[str] = []
+    for item in raw:
+        text = str(item).strip()
+        if text and len(text) <= 64 and text.casefold() not in {i.casefold() for i in items}:
+            items.append(text)
+        if len(items) >= 12:
+            break
+    return items
 
 
 def _agent_create(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     name = str(payload.get("name", "")).strip()
     if not name:
         raise ValidationError("Agent name is required")
+    clash = next(
+        (
+            agent
+            for agent in ctx.store.agents.values()
+            if agent.name.casefold() == name.casefold() and agent.status != "retired"
+        ),
+        None,
+    )
+    if clash is not None and not payload.get("allow_duplicate_name"):
+        raise ValidationError(
+            f"An agent named '{name}' already exists ({clash.id}); "
+            "reuse it with agent.update or pass allow_duplicate_name to create anyway"
+        )
     connection_id = _validate_connection_id(ctx, payload.get("preferred_connection_id"))
+    fallback_connection_id = _validate_connection_id(ctx, payload.get("fallback_connection_id"))
     avatar_raw = payload.get("avatar")
     avatar = str(avatar_raw).strip() if avatar_raw is not None and str(avatar_raw).strip() else None
     agent = AgentProfile(
@@ -109,6 +143,7 @@ def _agent_create(ctx: CommandContext, actor: Actor, command_id: str, payload: d
         avatar=avatar,
         instructions=str(payload.get("instructions", "") or ""),
         preferred_connection_id=connection_id,
+        fallback_connection_id=fallback_connection_id,
         status=_parse_agent_status(ctx, payload.get("status"), default="active"),
     )
     _identity_from_payload(payload, agent, create=True)
@@ -170,6 +205,10 @@ def _agent_update(ctx: CommandContext, actor: Actor, command_id: str, payload: d
         agent.preferred_connection_id = _validate_connection_id(ctx,
             payload.get("preferred_connection_id")
         )
+    if "fallback_connection_id" in payload:
+        agent.fallback_connection_id = _validate_connection_id(ctx,
+            payload.get("fallback_connection_id")
+        )
     if "status" in payload:
         agent.status = _parse_agent_status(ctx, payload.get("status"), default=agent.status)
     _identity_from_payload(payload, agent, create=False)
@@ -187,6 +226,7 @@ def _agent_update(ctx: CommandContext, actor: Actor, command_id: str, payload: d
             "role": agent.role,
             "status": agent.status,
             "preferred_connection_id": agent.preferred_connection_id,
+            "fallback_connection_id": agent.fallback_connection_id,
         },
     )
     return {
@@ -196,6 +236,7 @@ def _agent_update(ctx: CommandContext, actor: Actor, command_id: str, payload: d
         "role": agent.role,
         "instructions": agent.instructions,
         "preferred_connection_id": agent.preferred_connection_id,
+        "fallback_connection_id": agent.fallback_connection_id,
         "status": agent.status,
         "avatar": agent.avatar,
         "responsibility": agent.responsibility,

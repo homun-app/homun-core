@@ -35,9 +35,11 @@ def _budgeted_interpret(ctx, actor, work, body, conversation_id, text, roster, c
     the provider call and a crash leaves a recoverable trace. Conversations
     without a work stay unbudgeted, exactly like the rest of the domain.
     """
+    target_prov = body.payload.get("connection_id") or body.payload.get("provider_id")
     if work is None:
         return ctx.models.interpret(
             text, roster=roster, conversation_context=conversation_context,
+            provider_id=target_prov,
             context=AttemptContext(command_id=body.command_id, conversation_id=conversation_id,
                                    work_id=None, actor_id=actor.id, purpose="interpret"))
     from homun.application import budgets as work_budgets
@@ -49,6 +51,7 @@ def _budgeted_interpret(ctx, actor, work, body, conversation_id, text, roster, c
     try:
         interpretation = ctx.models.interpret(
             text, roster=roster, conversation_context=conversation_context,
+            provider_id=target_prov,
             context=AttemptContext(command_id=body.command_id, conversation_id=conversation_id,
                                    work_id=work.id, actor_id=actor.id, purpose="interpret"))
     except BaseException:

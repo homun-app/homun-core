@@ -1,0 +1,97 @@
+{
+  "h16_status": {
+    "platform": "darwin",
+    "platform_supported": true,
+    "installed": true,
+    "ready": true,
+    "can_grant": true,
+    "accessibility": true,
+    "screen_recording": true,
+    "permission_mode": "restricted",
+    "active_app": null,
+    "active_window_id": null
+  },
+  "h16_apps": [
+    {
+      "app": "Finder",
+      "pid": 101,
+      "bundle_id": "com.apple.finder",
+      "is_active": false
+    },
+    {
+      "app": "Code",
+      "pid": 4201,
+      "bundle_id": "com.microsoft.VSCode",
+      "is_active": true
+    },
+    {
+      "app": "Terminal",
+      "pid": 5512,
+      "bundle_id": "com.apple.Terminal",
+      "is_active": false
+    },
+    {
+      "app": "Google Chrome",
+      "pid": 6011,
+      "bundle_id": "com.google.Chrome",
+      "is_active": false
+    }
+  ],
+  "h16_capture": {
+    "declared_w": 1200,
+    "declared_h": 800,
+    "png_bytes": 70,
+    "real_w": 1,
+    "real_h": 1,
+    "elements": [
+      "Run",
+      "Search file",
+      "Editor"
+    ],
+    "app": "Code"
+  },
+  "h16_actions": {
+    "click": {
+      "ok": true,
+      "action": "click",
+      "message": "Clicked target 1",
+      "code": null,
+      "delivery_mode": "background",
+      "details": {
+        "ref": 1,
+        "coords": [
+          10,
+          10
+        ]
+      }
+    },
+    "type": {
+      "ok": true,
+      "action": "type",
+      "message": "Typed 10 characters",
+      "code": null,
+      "delivery_mode": "background",
+      "details": {
+        "chars": 10
+      }
+    }
+  },
+  "h34_before_restart": {
+    "conns": 1,
+    "snap": "t1",
+    "steering": 1,
+    "approvals": 1,
+    "artifacts": 1,
+    "transport_declared": "ssh"
+  },
+  "h34_after_new_instance": {
+    "conns": 0,
+    "snap": null,
+    "steering_drain": [],
+    "approvals_resolve": null
+  },
+  "h34_code_refs": [
+    "engine/src/homun/application/surface_gateway_manager.py",
+    "engine/src/homun/routes/surface_gateway_api.py"
+  ]
+}

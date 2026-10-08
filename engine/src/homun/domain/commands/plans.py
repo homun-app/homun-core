@@ -124,6 +124,7 @@ def _plan_revise(ctx: CommandContext, actor: Actor, command_id: str, payload: di
             assignee_id=assignee_id,
             depends_on=[str(x) for x in new_step_payload.get("depends_on", [])],
             output_expected=str(new_step_payload.get("output_expected", "")),
+            capability=str(new_step_payload.get("capability", "general")),
         )
         if insert_after:
             index = next((i for i, s in enumerate(new_steps) if s.id == insert_after), None)

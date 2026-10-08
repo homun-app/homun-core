@@ -39,6 +39,29 @@ def _conversation_create(ctx: CommandContext, actor: Actor, command_id: str, pay
     return {"conversation_id": conversation.id, "project_id": project_id}
 
 
+def _conversation_archive(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Archive a conversation out of active lists (reversible with restore=true)."""
+    from homun.policy.work import require_conversation_access
+    conversation = ctx.get_conversation(str(payload.get("conversation_id", "")))
+    require_conversation_access(ctx.store, actor, conversation.id, "write")
+    ctx._require_expected_version(conversation.version, payload.get("expected_version"))
+    restore = bool(payload.get("restore", False))
+    conversation.archived = not restore
+    conversation.version += 1
+    conversation.updated_at = utc_now()
+    ctx._emit(
+        actor=actor,
+        command_id=command_id,
+        aggregate_id=conversation.id,
+        aggregate_type="conversation",
+        aggregate_version=conversation.version,
+        event_type="conversation.restored" if restore else "conversation.archived",
+        payload={"archived": conversation.archived},
+    )
+    return {"conversation_id": conversation.id, "version": conversation.version,
+            "archived": conversation.archived}
+
+
 def _conversation_post_message(
     ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]
 ) -> dict[str, Any]:

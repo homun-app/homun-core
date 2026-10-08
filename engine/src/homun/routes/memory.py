@@ -16,10 +16,24 @@ class AddMemoryRequest(BaseModel):
     text: str
     work_id: str | None = None
     project_id: str | None = None
+    scope: str | None = Field(default=None, description="project | agent | person | global")
+    subject_id: str | None = Field(default=None, description="agent/person id for scoped notes")
 
 
 class RectifyMemoryRequest(BaseModel):
     text: str
+
+
+class PromoteMemoryRequest(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=100)
+
+
+class MemoryReviewRequest(BaseModel):
+    action: str = Field(default="preview", description="'preview' or 'prune'")
+    min_similarity: float = Field(default=0.75, ge=0.1, le=1.0)
+    project_id: str | None = None
+    query: str | None = None
+    limit: int = Field(default=20, ge=1, le=100)
 
 
 class MemoryListResponse(BaseModel):
@@ -55,6 +69,8 @@ def list_memories(
     workspace_id: str,
     work_id: str | None = Query(default=None),
     project_id: str | None = Query(default=None),
+    scope: str | None = Query(default=None),
+    subject_id: str | None = Query(default=None),
     include_deleted: bool = Query(default=False),
 ) -> MemoryListResponse:
     _require_workspace(workspace_id)
@@ -62,6 +78,8 @@ def list_memories(
     notes = ctx.memory.list(
         work_id=work_id,
         project_id=project_id,
+        scope=scope,
+        subject_id=subject_id,
         include_deleted=include_deleted,
     )
     return MemoryListResponse(memories=notes)
@@ -85,10 +103,13 @@ def recall_memories(
 def export_memories(
     workspace_id: str,
     project_id: str | None = Query(default=None),
+    scope: str | None = Query(default=None),
+    subject_id: str | None = Query(default=None),
 ) -> MemoryListResponse:
     _require_workspace(workspace_id)
     ctx = get_context()
-    return MemoryListResponse(memories=ctx.memory.export(project_id=project_id))
+    return MemoryListResponse(memories=ctx.memory.export(
+        project_id=project_id, scope=scope, subject_id=subject_id))
 
 
 @router.post("", response_model=MemoryNote)
@@ -100,12 +121,38 @@ def add_memory(
     _require_workspace(workspace_id)
     ctx = get_context()
     try:
+        scope = body.scope
+        subject_id = body.subject_id
+        if scope == "person" and not subject_id:
+            subject_id = _actor_id(x_homun_actor_id)
         return ctx.memory.add_approved(
             text=body.text,
             actor_id=_actor_id(x_homun_actor_id),
             work_id=body.work_id,
             project_id=body.project_id,
+            scope=scope,
+            subject_id=subject_id,
         )
+    except (ValidationError, NotFoundError) as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/{memory_id}/promote")
+def promote_memory(
+    workspace_id: str,
+    memory_id: str,
+    body: PromoteMemoryRequest,
+    x_homun_actor_id: str | None = Header(default=None),
+) -> dict:
+    """Promote a project lesson into an agent's transferable craft memory."""
+    _require_workspace(workspace_id)
+    ctx = get_context()
+    from homun.application.memory_promote import promote_to_agent
+    from homun.domain.models import Actor
+    actor = Actor(id=_actor_id(x_homun_actor_id), workspace_id=ctx.workspace_id,
+                  display_name="Promoter")
+    try:
+        return promote_to_agent(ctx, actor, memory_id, body.agent_id)
     except (ValidationError, NotFoundError) as exc:
         raise _http_error(exc) from exc
 
@@ -141,3 +188,61 @@ def delete_memory(
         return ctx.memory.delete(memory_id, actor_id=_actor_id(x_homun_actor_id))
     except (ValidationError, NotFoundError) as exc:
         raise _http_error(exc) from exc
+
+
+@router.get("/packs/{agent_id}")
+def export_agent_pack(workspace_id: str, agent_id: str) -> dict:
+    """Export a trained agent's dossier (identity + craft memory + skills)."""
+    _require_workspace(workspace_id)
+    ctx = get_context()
+    from homun.application.memory_packs import export_pack
+    try:
+        return export_pack(ctx, agent_id)
+    except (ValidationError, NotFoundError) as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/packs/import")
+def import_agent_pack(
+    workspace_id: str,
+    body: dict,
+    x_homun_actor_id: str | None = Header(default=None),
+) -> dict:
+    """Import an agent dossier; skills land in staging quarantine."""
+    _require_workspace(workspace_id)
+    ctx = get_context()
+    from homun.application.memory_packs import import_pack
+    from homun.domain.models import Actor
+    actor = Actor(id=_actor_id(x_homun_actor_id), workspace_id=ctx.workspace_id,
+                  display_name="Importer")
+    try:
+        return import_pack(ctx, actor, body)
+    except (ValidationError, NotFoundError) as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/review")
+def review_memories(
+    workspace_id: str,
+    body: MemoryReviewRequest,
+    x_homun_actor_id: str | None = Header(default=None),
+) -> dict:
+    _require_workspace(workspace_id)
+    ctx = get_context()
+    if not hasattr(ctx, "memory") or ctx.memory is None:
+        raise HTTPException(status_code=503, detail={"code": "memory_unavailable", "message": "Memory store is not available"})
+
+    from homun.application.memory_review_core import perform_memory_review
+
+    try:
+        return perform_memory_review(
+            memory_port=ctx.memory,
+            action=body.action,
+            min_similarity=body.min_similarity,
+            project_id=body.project_id,
+            query=body.query,
+            limit=body.limit,
+            actor_id=_actor_id(x_homun_actor_id),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "validation_error", "message": str(exc)})

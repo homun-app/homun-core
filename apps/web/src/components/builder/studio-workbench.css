@@ -176,7 +176,7 @@
   background: #e7eadd;
   border: 1px solid #d9dfcf;
   border-radius: 10px;
-  font-family: Georgia, serif;
+  font-family: var(--font-sans);
   font-size: 22px;
 }
 .st-team-title {
@@ -306,7 +306,7 @@
   margin-left: -5px;
 }
 .st-side-note h3 {
-  font-family: Georgia, serif;
+  font-family: var(--font-sans);
   font-size: 18px !important;
   line-height: 1.35;
 }
@@ -4131,7 +4131,7 @@
   width: 48px;
   height: 48px;
   border-radius: 16px;
-  font: bold 31px Georgia;
+  font: bold 31px var(--font-sans);
   transform: rotate(-6deg);
   margin-bottom: 22px;
 }

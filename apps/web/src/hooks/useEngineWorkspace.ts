@@ -26,6 +26,7 @@ import {
   ingestEngineMaterial,
   provideEngineContribution,
 } from "@/lib/engine-projects-client";
+import { ingestWorkAttachments } from "@/lib/engine-workspace-attachments";
 import { useEngineStatus } from "@/hooks/useEngineStatus";
 import type { EngineDataSource } from "@/lib/engine-client";
 import { isHomunClientError } from "@/lib/homun-errors";
@@ -37,11 +38,13 @@ import { useWorkIntake, type WorkIntakeState } from "./useWorkIntake";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import type { EngineTeam } from "@/lib/engine-projects-client";
 import { renameEngineWork } from "@/lib/engine-work-naming";
-import { closeEngineWork, reviseEnginePlan, setEngineWorkBudget, setEngineWorkDue, startEngineWork, submitEngineArtifact } from "@/lib/engine-work-lifecycle";
-import { createEngineRoutine, routineEngineAction, updateEngineRoutine, type EngineRoutine } from "@/lib/engine-routines-client";
+import { closeEngineWork, reviseEnginePlan, setEngineWorkBudget, setEngineWorkDue, setEngineWorkProject, startEngineWork, submitEngineArtifact } from "@/lib/engine-work-lifecycle";
+import { createEngineRoutine, routineEngineAction, routineTemplateFromWork, updateEngineRoutine, type EngineRoutine } from "@/lib/engine-routines-client";
 import { createEngineSkill } from "@/lib/engine-mcp-client";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
-import { proposeWorkIntake } from "@/lib/engine-intake-client";
+import { confirmWorkIntake, proposeWorkIntake } from "@/lib/engine-intake-client";
+import { approveAgentRun, prepareAgentRun } from "@/lib/engine-agent-run-client";
+import type { AutonomyLevel } from "@/components/builder/conversation-preferences";
 import { applyIntakePreview } from "@/lib/engine-intake-display";
 import { routeEngineFirstMessage, type FirstMessageRoute } from "@/lib/engine-first-message-routing";
 export type EngineWorkspaceState = {
@@ -66,12 +69,14 @@ export type EngineWorkspaceState = {
   submitArtifact: (work: Work, title: string, content: string) => Promise<void>;
   setWorkBudget: (work: Work, modelAttempts: number) => Promise<void>;
   setDue: (work: Work, dueDate: string | null) => Promise<void>;
+  setProject: (work: Work, projectId: string | null) => Promise<void>;
   createRoutine: (input: { name: string; cron: string; conversationId: string; template: EngineRoutine["template"] }) => Promise<void>;
+  createRoutineFromWork: (workId: string, input: { name: string; cron: string }) => Promise<void>;
   routineAction: (routineId: string, action: "pause" | "resume" | "stop" | "skip_next", expectedVersion: number) => Promise<void>;
   updateRoutine: (routineId: string, expectedVersion: number, changes: { name?: string; cron?: string }) => Promise<void>;
   revisePlan: (work: Work, action: { insertAfterStepId?: string | null; newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string }; removeStepId?: string }) => Promise<void>;
-  createWork: (title: string, objective: string, draftOnly?: boolean) => Promise<Work | null>;
-  postMessage: (work: Work, text: string) => Promise<void>;
+  createWork: (title: string, objective: string, draftOnly?: boolean, projectId?: string) => Promise<Work | null>;
+  postMessage: (work: Work, text: string, attachments?: File[], autonomyLevel?: AutonomyLevel, modelConnectionId?: string) => Promise<void>;
   confirmPatch: (work: Work, messageIndex: number) => Promise<void>;
   discardPatch: (work: Work, messageIndex: number) => void;
   applyObjectivePatch: (work: Work, nextObjective: string) => Promise<void>;
@@ -164,7 +169,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     setBusy(false);
   }
 
-  async function createWork(_title: string, objective: string, draftOnly = false): Promise<Work | null> {
+  async function createWork(_title: string, objective: string, draftOnly = false, projectId?: string): Promise<Work | null> {
     if (backend !== "engine" || !engineReady) return null;
     const signal = beginRequest();
     try {
@@ -178,10 +183,11 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
                 title: "Nuova richiesta",
                 objective: "Obiettivo da concordare",
                 actor: defaultLocalActor(),
+                ...(projectId ? { projectId } : {}),
               })
             ).record as unknown as Record<string, unknown>,
           )
-        : await createIntakeConversation(objective, signal, setError);
+        : await createIntakeConversation(objective, signal, setError, projectId);
       await refresh();
       return engineWorkToUiWork(record, []);
     } catch (cause) {
@@ -190,25 +196,36 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     } finally { endRequest(signal); }
   }
 
-  async function postMessage(work: Work, text: string): Promise<void> {
+  async function postMessage(work: Work, text: string, attachments?: File[], autonomyLevel?: AutonomyLevel, modelConnectionId?: string): Promise<void> {
     if (backend !== "engine" || work.source !== "engine" || !work.engineConversationId) {
       throw new Error("postMessage requires an engine-backed work");
     }
     const signal = beginRequest();
+    let effectiveText = text;
+    if (attachments && attachments.length > 0) {
+      try {
+        await ingestWorkAttachments(work, attachments);
+        const fileNames = attachments.map((f) => f.name).join(", ");
+        effectiveText = text
+          ? `${text}\n\n📎 Allegati archiviati: ${fileNames}`
+          : `📎 Allegati archiviati: ${fileNames}`;
+      } catch (err) {
+        if (!isHomunClientError(err) || err.code !== "request_cancelled") {
+          setError(err);
+        }
+        endRequest(signal);
+        throw err;
+      }
+    }
     const prior = messageOverlay[work.id] ?? work.messages;
     const startedAt = Date.now();
+    // Chat istantanea: solo la bolla della persona. L'attività dell'agente
+    // la mostra il blocco live via SSE — nessuno stato di caricamento.
     setMessageOverlay((current) => ({
       ...current,
       [work.id]: [
         ...(current[work.id] ?? work.messages),
-        { who: "you", sender: "Fabio", text },
-        {
-          who: "agent",
-          sender: "Homun",
-          text: "",
-          partial: true,
-          wait: { phase: "reading", startedAt },
-        },
+        { who: "you", sender: "Fabio", text: effectiveText },
       ],
     }));
     try {
@@ -216,11 +233,77 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
       // message (and its language) before a work proposal is forced. Any
       // routing failure keeps today's durable propose path, which surfaces its
       // own typed errors.
-      const routed = (await routeEngineFirstMessage(work, text, signal).catch((cause) => {
+      const routed = (await routeEngineFirstMessage(work, effectiveText, signal).catch((cause) => {
         if (isHomunClientError(cause) && cause.code === "request_cancelled") throw cause;
         return { route: "propose" as const };
       })) as FirstMessageRoute;
       if (routed.route === "propose") {
+        if (autonomyLevel === "autonomous") {
+          // Autonomous mode: propose and immediately confirm the intake, then auto-prepare & approve the agent run
+          setMessageOverlay((current) => ({
+            ...current,
+            [work.id]: (current[work.id] ?? work.messages).map((message) =>
+              message.who === "agent" && message.partial && message.wait
+                ? { ...message, wait: { phase: "preparing", startedAt } }
+                : message,
+            ),
+          }));
+          const intake = await proposeWorkIntake(
+            work.id,
+            effectiveText,
+            work.revision,
+            crypto.randomUUID(),
+            signal,
+            routed.language,
+          );
+          await confirmWorkIntake(
+            work.id,
+            intake,
+            crypto.randomUUID(),
+            Boolean(intake.new_agent),
+          );
+          bumpIntakeSeq();
+          await refresh();
+
+          const runCmdId = crypto.randomUUID();
+          const preparedRun = await prepareAgentRun(
+            work,
+            work.materialIds ?? [],
+            runCmdId,
+            modelConnectionId || undefined,
+            undefined,
+            [],
+            undefined,
+            "local",
+            undefined,
+            true, // webPages
+            true, // browser
+            true, // memory
+            true, // skills
+            true, // delegation
+            true, // clarify
+            true, // goals
+            true, // cron
+            true, // sessionManagement
+            true, // gateway
+            true, // codeExecution
+            true, // plugins
+            undefined,
+            undefined,
+            { toolset: "full", micro_compaction: true, native_stream: true },
+          );
+          await approveAgentRun(work.id, preparedRun, crypto.randomUUID());
+          await refresh();
+
+          setMessageOverlay((current) => ({
+            ...current,
+            [work.id]: (current[work.id] ?? work.messages).filter(
+              (m) => !(m.who === "agent" && m.partial),
+            ),
+          }));
+          return;
+        }
+
         // The wait stays visible through synthesis: an honest phase instead of
         // a mute gap between the message and the agreement card.
         setMessageOverlay((current) => ({
@@ -231,7 +314,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
               : message,
           ),
         }));
-        await proposeWorkIntake(work.id, text, work.revision, crypto.randomUUID(), signal, routed.language);
+        await proposeWorkIntake(work.id, effectiveText, work.revision, crypto.randomUUID(), signal, routed.language);
         bumpIntakeSeq();
         await refresh();
         // The request is durable (the engine posts it before synthesis) and
@@ -249,6 +332,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
       const posted = await postEngineConversationMessage({
         conversationId: work.engineConversationId,
         text,
+        connectionId: modelConnectionId || undefined,
         actor: defaultLocalActor(),
         signal,
         onToken: (chunk) => {
@@ -267,10 +351,19 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
           });
         },
       });
-      setMessageOverlay((current) => ({
-        ...current,
-        [work.id]: [...prior, { who: "you", sender: "Fabio", text }, assistantFromPosted(posted)],
-      }));
+      if (posted.chatAgent) {
+        // Chat con l'agente: la risposta arriva dal run (blocco live + evento
+        // messaggio). Qui restano solo le parole della persona.
+        setMessageOverlay((current) => ({
+          ...current,
+          [work.id]: [...prior, { who: "you", sender: "Fabio", text }],
+        }));
+      } else {
+        setMessageOverlay((current) => ({
+          ...current,
+          [work.id]: [...prior, { who: "you", sender: "Fabio", text }, assistantFromPosted(posted)],
+        }));
+      }
     } catch (cause) {
       if (isHomunClientError(cause) && cause.code === "request_cancelled") {
         setMessageOverlay((current) => ({
@@ -480,39 +573,8 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     setError(null);
     try {
       const actor = defaultLocalActor();
-      let projectId = work.projectId;
-      if (!projectId && work.engineConversationId) {
-        const conversations = await listEngineConversations();
-        const conversation = conversations.find((c) => c.id === work.engineConversationId);
-        if (conversation?.project_id) {
-          projectId = conversation.project_id;
-        } else if (conversation) {
-          const ensured = await ensureEngineProjectForConversation({
-            conversationId: conversation.id,
-            expectedVersion: conversation.version,
-            name: work.title,
-            actor,
-          });
-          projectId = ensured.projectId;
-        }
-      }
-      if (!projectId) {
-        throw new Error("Work has no project for material ingest");
-      }
-      const ingestedIds: string[] = [...materialIds];
-      for (const file of files) {
-        const relativePath =
-          "webkitRelativePath" in file && file.webkitRelativePath
-            ? String(file.webkitRelativePath)
-            : undefined;
-        const ingested = await ingestEngineMaterial({
-          projectId,
-          file,
-          ...(relativePath ? { relativePath } : {}),
-          actor,
-        });
-        ingestedIds.push(ingested.materialId);
-      }
+      const ingested = await ingestWorkAttachments(work, files);
+      const ingestedIds = [...materialIds, ...ingested.map((item) => item.materialId)];
       await provideEngineContribution({
         requestId,
         expectedVersion: work.revision,
@@ -575,8 +637,24 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
       await setEngineWorkDue(work.id, work.revision, dueDate);
       await refresh();
     },
+    setProject: async (work, projectId) => {
+      await setEngineWorkProject(work.id, work.revision, projectId);
+      await refresh();
+    },
     createRoutine: async (input) => {
       await createEngineRoutine(input);
+      await refresh();
+    },
+    createRoutineFromWork: async (workId, input) => {
+      const work = works.find((w) => w.id === workId);
+      if (!work || work.source !== "engine") {
+        throw new Error("Lavoro modello non trovato nel motore");
+      }
+      await createEngineRoutine({
+        ...input,
+        conversationId: work.engineConversationId ?? "",
+        template: routineTemplateFromWork(work),
+      });
       await refresh();
     },
     routineAction: async (routineId, action, expectedVersion) => {

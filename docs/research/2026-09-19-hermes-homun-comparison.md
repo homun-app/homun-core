@@ -1,5 +1,7 @@
 # Hermes e Homun: confronto delle fondamenta
 
+> Ricerca datata conservata. Il [confronto d’uso aggiornato](2026-09-23-hermes-homun-utilizzo.md) include Desktop, Bot Mode e casi raccontati dagli utenti. Non riutilizzare come attuali i limiti upstream, i conteggi o le priorità di questa fotografia senza riverifica.
+
 > **Rapporto storico / ricerca datata.** Le prove, i conteggi, gli artefatti e i limiti descritti sono riferiti a questa tranche, non allo stato finale della giornata. Per implementazione e problemi ancora aperti consultare lo [stato verificato corrente](../STATO.md); per riprendere il lavoro usare la [specifica di passaggio](../handoff/2026-09-19-ripresa-sviluppo-homun.md). Le proposte qui contenute non sono automaticamente tutte implementate.
 
 Data: 19 settembre 2026. Stato: analisi e proposta da discutere con Fabio; nessuna modifica al runtime o alle decisioni architetturali adottate.

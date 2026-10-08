@@ -1,0 +1,13 @@
+{
+  "image": "sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132",
+  "runtime": "real Docker, no model/API/UI",
+  "checks": {
+    "nonzero_exit_preserved": true,
+    "restart_did_not_repeat_effect": true,
+    "scoped_file_and_logs": true,
+    "background_stop": true,
+    "sibling_unchanged": true,
+    "removed_job_not_redispatched": true,
+    "owned_containers_removed": true
+  }
+}

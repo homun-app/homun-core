@@ -11,7 +11,7 @@ The build uses a fresh temporary virtual environment. `engine/requirements.lock`
 
 The output is an **onedir bundle**: `dist/engine/homun-engine` and its sibling `_internal` directory must travel together. Electron should copy the complete `dist/engine` directory to `resources/engine`. The executable embeds Python and does not launch the developer interpreter. Build inputs are pinned; byte-for-byte reproducibility across machines, SDK versions and code signatures is not claimed.
 
-The profile uses the SQLite memory ledger and explicitly excludes optional Mem0 and Qdrant client modules. It does not introduce SQLCipher; the crypto spike remains separate. Provider adapters included by the runtime lock remain in the bundle. No model server, model weights, credentials, data directory or user files are bundled.
+The profile uses the SQLite memory ledger and explicitly excludes optional Mem0 and Qdrant client modules. The standard bundle does not enable workspace encryption. The source supports explicit opt-in SQLCipher with an optional driver; this is not full-profile encryption or a certified encrypted distribution. Provider adapters included by the runtime lock remain in the bundle. No model server, model weights, credentials, data directory or user files are bundled.
 
 The spec collects Homun/DBOS package data and dynamic imports, Uvicorn modules, Pydantic AI model/provider modules, and their distribution metadata. Installed Logfire/Pydantic integration uses source inspection during import, so Pydantic and Logfire Python source data must also be included. This was identified by the first frozen startup regression.
 
@@ -23,7 +23,7 @@ To regenerate build tooling pins deliberately:
 uv pip compile engine/requirements-packaging.in --python-version 3.13 --generate-hashes --output-file engine/requirements-packaging.lock --no-config
 ```
 
-Relevant primary documentation: [PyInstaller spec files](https://pyinstaller.org/en/stable/spec-files.html), [PyInstaller hook utilities](https://pyinstaller.org/en/stable/hooks.html). Output is locally ad-hoc signed by PyInstaller, not Developer ID signed or notarized. Distribution signing and testing on a clean second Mac remain release gates.
+Relevant primary documentation: [PyInstaller spec files](https://pyinstaller.org/en/stable/spec-files.html), [PyInstaller hook utilities](https://pyinstaller.org/en/stable/hooks.html). Output is locally ad-hoc signed by PyInstaller, not Developer ID signed or notarized. Distribution signing/notarization is configured in the [CI release pipeline](../../docs/release.md). A successful signed upgrade and testing on a clean second Mac remain separate acceptance evidence.
 
 ## Local verification — 2026-09-19
 
@@ -36,3 +36,5 @@ The startup and restart smoke ran with no source checkout as working directory, 
 Artifact binding: `artifact_files` enumerates every generated regular file or symlink except the receipt itself. File entries contain canonical relative `name` and SHA-256; symlink entries contain `name` and `symlink` target. Escaping or dangling symlinks are rejected. Directories are implicit. Verify the exact inventory before and after copying into Electron, rejecting added, missing or modified files. The builder removes any previous receipt before replacing the bundle so a failed build cannot retain a stale acceptance marker.
 
 Inventory regression: `python3 -m unittest discover -s engine/packaging -p 'test_*.py'` exercises regular files, internal symlinks, receipt exclusion and an escaping symlink.
+
+Current source verification: [23 September consolidation](../../docs/research/2026-09-23-consolidamento-verifica.md). The source and inventory checks do not rebuild or certify the signed bundle.

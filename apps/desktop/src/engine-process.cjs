@@ -1,5 +1,19 @@
 /** Own exactly one engine process; startup failure always tears it down. */
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+
+// The installer bundles cua-driver next to the engine venv when present;
+// surface it to the engine without overriding an explicit user setting.
+function bundledCuaDriver(cwd) {
+  try {
+    const dev = path.join(cwd, 'engine/.venv/bin/cua-driver');
+    if (fs.existsSync(dev)) return dev;
+    const packaged = path.join(process.resourcesPath || '', 'engine', 'bin', 'cua-driver');
+    if (fs.existsSync(packaged)) return packaged;
+  } catch (_) { /* unavailable resources path: engine falls back to PATH */ }
+  return undefined;
+}
 const { randomBytes } = require('node:crypto');
 const { once } = require('node:events');
 const { setTimeout: delay } = require('node:timers/promises');
@@ -9,7 +23,8 @@ async function startEngine({ executable, args = [], dataDir, cwd, timeout = 2000
   const child = spawn(executable, [...args, 'serve', '--port', '0'], {
     cwd, stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, HOMUN_DATA_DIR: dataDir, HOMUN_SESSION_TOKEN: token,
-      HOMUN_SESSION_ACTOR_ID: 'person_fabio', HOMUN_MEMORY_BACKEND: 'sqlite', HOMUN_PARENT_WATCHDOG: '1', PYTHONUNBUFFERED: '1' },
+      HOMUN_SESSION_ACTOR_ID: 'person_fabio', HOMUN_MEMORY_BACKEND: 'sqlite', HOMUN_PARENT_WATCHDOG: '1', PYTHONUNBUFFERED: '1',
+      ...(process.env.HOMUN_CUA_DRIVER_BIN ? {} : { HOMUN_CUA_DRIVER_BIN: bundledCuaDriver(cwd) }) },
   });
   let baseUrl, exited = false, failed = false, buffer = '';
   child.once('error', () => { failed = true; });

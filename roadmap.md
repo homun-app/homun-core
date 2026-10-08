@@ -1,8 +1,8 @@
 # Roadmap Homun
 
-Aggiornata al 22 settembre 2026 (piani multi-fase end-to-end, chiusura con
-esito, gestione agenti/team, impostazioni ristrutturate, suggerimenti modelli,
-budget/scadenze/revisione piano da UI, libreria Documenti, routine a motore). percorsi motore reali e simulazione convivono esplicitamente. Lo [stato verificato](docs/STATO.md) e l’[ultima consegna](docs/research/2026-09-21-stabilita-conversazione.md) definiscono il perimetro provato; le funzioni del prototipo non diventano automaticamente funzionalità motore.
+Aggiornata al 23 settembre 2026. Lo [stato verificato](docs/STATO.md) e il
+[consolidamento](docs/research/2026-09-23-consolidamento-verifica.md) distinguono
+capacità attuali, prove e limiti. I percorsi simulati restano espliciti.
 
 ## Prototipo UX (simulato)
 
@@ -43,13 +43,25 @@ budget/scadenze/revisione piano da UI, libreria Documenti, routine a motore). pe
 - [x] Intake conversazionale: sintesi distinta, proposta agente/nuovo profilo, conferma e riepilogo compatto
 - [x] Stabilità strutturale del brief nelle riformulazioni: campi modificati dichiarati, conservazione engine-side, diff esplicito e lettura non interrotta dai refresh
 - [x] Stabilità della conversazione: scroll ancorato a chi legge (policy testata), attese del modello oneste nel transcript (fasi + tempo), 409 a versione stantia con recupero guidato e proposta stantia ritirata
-- [x] Distinzione domanda/lavoro: classificazione backend senza stato, una domanda resta in chat senza creare lavori o collaboratori
+- [x] Distinzione domanda/lavoro: classificazione backend senza stato, una domanda resta in chat senza imporre un brief o un collaboratore; il client crea ancora un Work di supporto
 - [x] Registro unico delle capacità: fonte singola per vocabolario, versione tool, limiti ed effetti; disponibilità interrogabile per attore; intake alimentato dal catalogo reale
 - [x] Prompt esterni al codice e multilingua: file nel pacchetto con varianti it/en, store con fallback, lingua per workspace (`HOMUN_LANGUAGE`) e per richiesta, rilevamento automatico in classificazione
 - [x] Seconda capacità locale limitata: lettura autorizzata di un materiale → artifact con estratto, provenienza e revisione umana (fonte condivisa con il confronto CSV, DBOS idempotente)
 - [x] Budget per lavoro con riserve atomiche: persistito, riconciliazione con token reali o incognito (mai zero), recupero dei pendini, esaurimento tipizzato che si alza solo esplicitamente; collegato a intake, interpretazione e piano
 - [x] Contesto autorizzato esteso: stato lavoro, accordo confermato, riferimenti materiali (versione/hash) e memoria nel contesto del modello, con rivalidazione identità prima degli effetti
-- [ ] Loop operativo multi-tool e budget per delegati *(fetta 1–2 routine a motore faite il 22/9: ricorrenze supervisionate su cron DBOS, pausa/riprendi/salta/termina, revisione modello; budget per delegati ancora aperto)*
+- [x] Catene di lettura/confronto con recupero e allocazioni budget per collaboratore; sintesi contabilizzata sull'assegnatario
+- [x] Piani multi-fase, revisione, sintesi e chiusura supervisionata con esito
+- [x] Routine cron supervisionate con pausa/riprendi/salta/termina e riconciliazione cadenza/fuso
+- [x] Materiali, Plugin e scadenze di Compiti collegati allo stato persistente del motore
+- [ ] Contratto di recupero degli effetti MCP esterni
+- [x] Guida d'uso e confronto documentato Hermes/Homun, con capacità e testimonianze distinte
+- [x] [Analisi visione/codice](docs/research/2026-09-23-visione-prodotto-gap.md): uso diretto e squadra aziendale
+- [x] Uso diretto senza profilo artificiale e onboarding opzionale con contesto/squadra persistenti
+- [x] Ciclo adattivo limitato ai materiali autorizzati: decisioni, strumenti, chiarimenti, ripresa e revisione
+- [x] Consultazione dei collaboratori del team e portale di contributo umano circoscritto
+- [ ] Analisi UX con utenti: meno passaggi, proposta di squadra comprensibile, continuità del lavoro
+- [ ] Estensione del ciclo a web/MCP con contratti di recupero degli effetti
+- [ ] Account umani verificati e collaborazione tra installazioni
 
 ## Consolidamento delle fondamenta — aggiornato al 19 settembre 2026
 
@@ -62,7 +74,9 @@ budget/scadenze/revisione piano da UI, libreria Documenti, routine a motore). pe
 - [ ] Identità multiutente esterne, driver cifrato/Keychain e distribuzione firmata
 - [x] Ingestione con pubblicazione atomica e recovery; backup offline v2 di originali + runtime
 - [x] Recupero automatico dei follow-up modello e accettazione del lavoro reale CSV
-- [ ] Generalizzazione del loop con strumenti e budget oltre la capacità CSV *(fasi eseguibili per confronto/lettura su piani multi-fase il 22/9; oltre CSV ancora aperto)*
+- [x] Generalizzazione alle capacità locali di lettura e sintesi con budget e fonti approvate; ulteriori strumenti richiedono contratti specifici
 
 Dettagli e limiti: [stato corrente](docs/STATO.md). La [prima consegna delle fondamenta](docs/research/2026-09-19-production-foundations-delivery.md) conserva le prove storiche di quella tranche.
 Le spunte attestano il perimetro provato; non certificano la release desktop o un agente autonomo completo.
+
+Base della discussione: [confronto d’uso](docs/research/2026-09-23-hermes-homun-utilizzo.md) e [guida Homun](docs/USO-HOMUN.md).

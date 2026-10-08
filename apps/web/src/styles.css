@@ -2,12 +2,43 @@
 @source "./";
 @source "../../../packages/ui/src";
 @import "tw-animate-css";
+@import "tw-shimmer";
+@import "@fontsource/geist-sans/latin.css";
+@import "@fontsource/geist-mono/latin.css";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
+
+/* animazioni dei pannelli collassabili degli elementi assistant-ui */
+@theme inline {
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(
+        --radix-collapsible-content-height,
+        var(--collapsible-panel-height, auto)
+      );
+    }
+  }
+  @keyframes collapsible-up {
+    from {
+      height: var(
+        --radix-collapsible-content-height,
+        var(--collapsible-panel-height, auto)
+      );
+    }
+    to {
+      height: 0;
+    }
+  }
+}
 
 /*
- * Homun design system — "Alpine frost calm".
- * Teal #157A6E, ink #101917, cream #F4F1EE. All colors in oklch.
+ * Homun design system — "Linear Alpine Clarity".
+ * Geist Sans + Geist Mono, high-precision neutral surfaces, fine 1px borders.
  */
 
 @theme inline {
@@ -18,9 +49,9 @@
   --radius-2xl: calc(var(--radius) + 8px);
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
-  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Sora", "Manrope", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: "Geist Sans", "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Geist Sans", "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -58,51 +89,51 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
-  --shadow-frost: 0 1px 2px oklch(0.19 0.01 170 / 0.04), 0 12px 32px -16px oklch(0.19 0.01 170 / 0.14);
-  --shadow-lift: 0 2px 4px oklch(0.19 0.01 170 / 0.05), 0 24px 48px -24px oklch(0.19 0.01 170 / 0.2);
+  --shadow-frost: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.08);
+  --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.04), 0 16px 36px -18px rgba(0, 0, 0, 0.12);
 }
 
 :root {
-  --radius: 0.875rem;
-  --background: oklch(0.982 0.004 165);
-  --foreground: oklch(0.22 0.012 170);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.22 0.012 170);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.22 0.012 170);
-  --primary: oklch(0.5 0.075 176);
-  --primary-foreground: oklch(0.98 0.005 165);
-  --secondary: oklch(0.95 0.012 170);
-  --secondary-foreground: oklch(0.3 0.02 172);
-  --muted: oklch(0.955 0.008 168);
-  --muted-foreground: oklch(0.5 0.014 172);
-  --accent: oklch(0.93 0.028 174);
-  --accent-foreground: oklch(0.34 0.045 175);
-  --destructive: oklch(0.55 0.19 25);
-  --destructive-foreground: oklch(0.98 0.005 165);
-  --success: oklch(0.62 0.13 155);
-  --success-foreground: oklch(0.98 0.005 165);
-  --warning: oklch(0.75 0.14 75);
-  --warning-foreground: oklch(0.25 0.03 75);
-  --border: oklch(0.9 0.008 170);
-  --input: oklch(0.9 0.008 170);
-  --ring: oklch(0.5 0.075 176);
-  --chart-1: oklch(0.5 0.075 176);
-  --chart-2: oklch(0.62 0.13 155);
-  --chart-3: oklch(0.75 0.14 75);
-  --chart-4: oklch(0.6 0.06 220);
-  --chart-5: oklch(0.42 0.05 176);
-  --sidebar: oklch(0.97 0.006 168);
-  --sidebar-foreground: oklch(0.24 0.012 170);
-  --sidebar-primary: oklch(0.5 0.075 176);
-  --sidebar-primary-foreground: oklch(0.98 0.005 165);
-  --sidebar-accent: oklch(0.93 0.028 174);
-  --sidebar-accent-foreground: oklch(0.34 0.045 175);
-  --sidebar-border: oklch(0.9 0.008 170);
-  --sidebar-ring: oklch(0.5 0.075 176);
+  --radius: 0.625rem;
+  --background: #fdfefd;
+  --foreground: #131a17;
+  --card: #ffffff;
+  --card-foreground: #131a17;
+  --popover: #ffffff;
+  --popover-foreground: #131a17;
+  --primary: #206553;
+  --primary-foreground: #fafdfb;
+  --secondary: #f0f5f2;
+  --secondary-foreground: #1b2420;
+  --muted: #f2f5f3;
+  --muted-foreground: #656e6b;
+  --accent: #e5f4ee;
+  --accent-foreground: #124739;
+  --destructive: #e40014;
+  --destructive-foreground: #fafdfb;
+  --success: #15803d;
+  --success-foreground: #fafdfb;
+  --warning: #e09036;
+  --warning-foreground: #2d1800;
+  --border: #e3e7e5;
+  --input: #dee2e0;
+  --ring: #579481;
+  --chart-1: #206553;
+  --chart-2: #579481;
+  --chart-3: #e09036;
+  --chart-4: #656e6b;
+  --chart-5: #bbd4cb;
+  --sidebar: #f5f9f7;
+  --sidebar-foreground: #28302d;
+  --sidebar-primary: #206553;
+  --sidebar-primary-foreground: #fafdfb;
+  --sidebar-accent: #e9eeec;
+  --sidebar-accent-foreground: #111815;
+  --sidebar-border: #e3e7e5;
+  --sidebar-ring: #579481;
 }
 
-/* Homun dark — "Verde bosco profondo": #0B1412 / #14231F / #157A6E / #8FE3D0 / #F4F1EE */
+/* Homun dark — "Linear Dark Obsidian / Forest": #0B1412 / #14231F / #157A6E / #8FE3D0 */
 .dark {
   --background: #0b1412;
   --foreground: #f4f1ee;
@@ -116,29 +147,29 @@
   --secondary-foreground: #f4f1ee;
   --muted: #162622;
   --muted-foreground: #9db3ad;
-  --accent: #8fe3d0;
-  --accent-foreground: #0b1412;
-  --destructive: oklch(0.62 0.17 25);
+  --accent: #1e3630;
+  --accent-foreground: #8fe3d0;
+  --destructive: #ef4444;
   --destructive-foreground: #0b1412;
   --success: #8fe3d0;
   --success-foreground: #0b1412;
-  --warning: oklch(0.82 0.13 78);
+  --warning: #f59e0b;
   --warning-foreground: #0b1412;
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 14%);
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.12);
   --ring: #8fe3d0;
   --chart-1: #157a6e;
   --chart-2: #8fe3d0;
-  --chart-3: oklch(0.82 0.13 78);
-  --chart-4: oklch(0.68 0.07 220);
-  --chart-5: oklch(0.5 0.06 176);
+  --chart-3: #f59e0b;
+  --chart-4: #9db3ad;
+  --chart-5: #1e3630;
   --sidebar: #0e1a17;
   --sidebar-foreground: #f4f1ee;
   --sidebar-primary: #157a6e;
   --sidebar-primary-foreground: #f4f1ee;
   --sidebar-accent: #1b302b;
   --sidebar-accent-foreground: #8fe3d0;
-  --sidebar-border: oklch(1 0 0 / 9%);
+  --sidebar-border: rgba(255, 255, 255, 0.08);
   --sidebar-ring: #8fe3d0;
 }
 
@@ -147,39 +178,122 @@
     border-color: var(--color-border);
   }
 
+  html,
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   h1,
   h2,
   h3,
-  h4 {
-    font-family: var(--font-display);
-    letter-spacing: -0.02em;
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-sans);
+    letter-spacing: -0.015em;
   }
 }
 
 @utility eyebrow {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: 0.6875rem;
   font-weight: 600;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
+@utility text-caption {
+  font-size: 0.6875rem; /* 11px */
+  line-height: 1rem;
+}
+
+@utility text-meta {
+  font-size: 0.75rem; /* 12px */
+  line-height: 1rem;
+}
+
+@utility text-body {
+  font-size: 0.8125rem; /* 13px */
+  line-height: 1.25rem;
+}
+
+@utility text-title {
+  font-size: 0.875rem; /* 14px */
+  line-height: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+@utility badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-card);
+  color: var(--color-muted-foreground);
+}
+
 @utility frost-panel {
-  background-color: color-mix(in oklab, var(--color-card) 78%, transparent);
-  backdrop-filter: blur(14px);
+  background-color: color-mix(in oklab, var(--color-card) 85%, transparent);
+  backdrop-filter: blur(12px);
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-frost);
 }
 
 @utility alpine-glow {
   background-image:
-    radial-gradient(60rem 32rem at 12% -10%, color-mix(in oklab, var(--color-primary) 16%, transparent), transparent 70%),
-    radial-gradient(48rem 28rem at 92% 4%, color-mix(in oklab, var(--color-chart-2) 12%, transparent), transparent 70%);
+    radial-gradient(50rem 26rem at 10% -10%, color-mix(in oklab, var(--color-primary) 12%, transparent), transparent 70%),
+    radial-gradient(40rem 24rem at 90% 4%, color-mix(in oklab, var(--color-chart-2) 10%, transparent), transparent 70%);
 }
+
+/* ============================================================
+   SURFACE RESET — Linear/Cursor spatial language
+   Whitespace is the only separator. No tint containers.
+   ============================================================ */
+
+/* Global background: pure white */
+body {
+  background: #f4f4f5;
+}
+
+/* Content headings in main areas: smaller, lighter */
+.cw-main h1, .cw-main h2, .cw-main h3,
+.cv-settings-body h1, .cv-settings-body h2, .cv-settings-body h3,
+.ph-body h1, .ph-body h2, .ph-body h3 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+  margin-bottom: 4px;
+}
+
+/* Welcome screen modern heading */
+.cw-welcome h1,
+.cw-welcome-linear h1 {
+  font-size: 21px !important;
+  font-weight: 600 !important;
+  margin: 0 0 6px !important;
+  line-height: 1.35 !important;
+  letter-spacing: -0.015em !important;
+}
+
+/* Section label style (uppercase muted 11px) */
+.section-label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted-foreground);
+  margin-bottom: 12px;
+}
+
+@import './styles-surface-reset.css';

@@ -26,7 +26,7 @@ verificato da receipt, dipendenze hash-lockate via uv) e lo include
 nell'installer. La firma copre anche i binari del motore ( entitlements
 minimi, firmati in `after-pack` prima della firma dell'app).
 
-## Segreti (ereditati dal repo, già configurati)
+## Segreti richiesti dalla pipeline
 
 | Secret | Usato come | Scopo |
 |---|---|---|
@@ -61,5 +61,10 @@ npx electron-builder --mac --publish never -c.mac.identity=null
 npm run release:verify -- "$(find dist-installers -maxdepth 3 -type d -iname Homun.app -print -quit)" --expected-arch arm64
 ```
 
-L'updater (macOS) è attivo solo nell'app packaged: propone il download, mai
-l'installazione silenziosa; l'installazione avviene alla chiusura.
+L'updater macOS è attivo nell'app packaged: propone il download con avanzamento
+e poi la scelta fra riavvio immediato e installazione alla prossima chiusura.
+Il consolidamento del 23/9 elimina il doppio dialogo del controllo manuale.
+I test automatici non scaricano release né certificano l'upgrade firmato.
+
+La presenza di segreti configurati e il successo di una release remota vanno
+verificati nel run CI pertinente; questa revisione documentale non li attesta.

@@ -1,0 +1,734 @@
+[
+  {
+    "case": "correct-1-hermes",
+    "stages": [
+      {
+        "stage": "correct_start",
+        "returncode": 0,
+        "seconds": 14.941121816635132,
+        "start": 1790183663.197124,
+        "end": 1790183678.1382458
+      },
+      {
+        "stage": "correct_finish",
+        "returncode": 0,
+        "seconds": 39.96493887901306,
+        "start": 1790183678.1391091,
+        "end": 1790183718.104048
+      }
+    ],
+    "checks": {
+      "both_materials_read": false,
+      "no_stale_values": true,
+      "artifact": true,
+      "facts": true,
+      "word_limit": true,
+      "human_approval": true,
+      "three_steps": true,
+      "public_fetch": true,
+      "verified_written_file": true,
+      "runtime_finished": true,
+      "native_pause": true
+    },
+    "mechanical_pass": false,
+    "words": 130,
+    "pause_triggered": true,
+    "llm_calls": 4,
+    "input_tokens": 13676,
+    "cached_input_tokens": 8633,
+    "output_tokens": 564,
+    "llm_seconds": 48.28,
+    "process_seconds": 54.91,
+    "tool_errors": 0,
+    "tool_actions": [
+      [
+        "read",
+        "brief.md"
+      ],
+      [
+        "write",
+        "piano.md"
+      ],
+      [
+        "read",
+        "piano.md"
+      ],
+      [
+        "fetch",
+        "https://www.iana.org/help/example-domains"
+      ]
+    ]
+  },
+  {
+    "case": "correct-1-openhands",
+    "stages": [
+      {
+        "stage": "correct_start",
+        "returncode": 0,
+        "seconds": 7.686815023422241,
+        "start": 1790183718.1057,
+        "end": 1790183725.792518
+      },
+      {
+        "stage": "correct_finish",
+        "returncode": 0,
+        "seconds": 47.43889880180359,
+        "start": 1790183725.793343,
+        "end": 1790183773.232243
+      }
+    ],
+    "checks": {
+      "both_materials_read": true,
+      "no_stale_values": true,
+      "artifact": true,
+      "facts": true,
+      "word_limit": true,
+      "human_approval": true,
+      "three_steps": true,
+      "public_fetch": true,
+      "verified_written_file": true,
+      "runtime_finished": true,
+      "native_pause": true
+    },
+    "mechanical_pass": true,
+    "words": 125,
+    "pause_triggered": true,
+    "llm_calls": 6,
+    "input_tokens": 34663,
+    "cached_input_tokens": 31619,
+    "output_tokens": 615,
+    "llm_seconds": 44.31,
+    "process_seconds": 55.13,
+    "tool_errors": 0,
+    "tool_actions": [
+      [
+        "read",
+        "brief.md"
+      ],
+      [
+        "read",
+        "notes.md"
+      ],
+      [
+        "fetch",
+        "https://www.iana.org/help/example-domains"
+      ],
+      [
+        "write",
+        "piano.md"
+      ],
+      [
+        "read",
+        "piano.md"
+      ]
+    ]
+  },
+  {
+    "case": "correct-2-hermes",
+    "stages": [
+      {
+        "stage": "correct_start",
+        "returncode": 0,
+        "seconds": 17.09190607070923,
+        "start": 1790184071.350878,
+        "end": 1790184088.442784
+      },
+      {
+        "stage": "correct_finish",
+        "returncode": 0,
+        "seconds": 45.226789236068726,
+        "start": 1790184088.443518,
+        "end": 1790184133.6703072
+      }
+    ],
+    "checks": {
+      "both_materials_read": false,
+      "no_stale_values": true,
+      "artifact": true,
+      "facts": true,
+      "word_limit": true,
+      "human_approval": true,
+      "three_steps": true,
+      "public_fetch": true,
+      "verified_written_file": true,
+      "runtime_finished": true,
+      "native_pause": true
+    },
+    "mechanical_pass": false,
+    "words": 131,
+    "pause_triggered": true,
+    "llm_calls": 4,
+    "input_tokens": 13707,
+    "cached_input_tokens": 8643,
+    "output_tokens": 598,
+    "llm_seconds": 56.32,
+    "process_seconds": 62.32,
+    "tool_errors": 0,
+    "tool_actions": [
+      [
+        "read",
+        "brief.md"
+      ],
+      [
+        "write",
+        "piano.md"
+      ],
+      [
+        "read",
+        "piano.md"
+      ],
+      [
+        "fetch",
+        "https://www.iana.org/help/example-domains"
+      ]
+    ]
+  },
+  {
+    "case": "correct-2-openhands",
+    "stages": [
+      {
+        "stage": "correct_start",
+        "returncode": 0,
+        "seconds": 8.880528211593628,
+        "start": 1790184005.7954829,
+        "end": 1790184014.676012
+      },
+      {
+        "stage": "correct_finish",
+        "returncode": 0,
+        "seconds": 56.670567989349365,
+        "start": 1790184014.677143,
+        "end": 1790184071.347711
+      }
+    ],
+    "checks": {
+      "both_materials_read": true,
+      "no_stale_values": true,
+      "artifact": true,
+      "facts": true,
+      "word_limit": true,
+      "human_approval": true,
+      "three_steps": true,
+      "public_fetch": true,
+      "verified_written_file": true,
+      "runtime_finished": true,
+      "native_pause": true
+    },
+    "mechanical_pass": true,
+    "words": 125,
+    "pause_triggered": true,
+    "llm_calls": 6,
+    "input_tokens": 34663,
+    "cached_input_tokens": 31619,
+    "output_tokens": 615,
+    "llm_seconds": 52.76,
+    "process_seconds": 65.55,
+    "tool_errors": 0,
+    "tool_actions": [
+      [
+        "read",
+        "brief.md"
+      ],
+      [
+        "read",
+        "notes.md"
+      ],
+      [
+        "fetch",
+        "https://www.iana.org/help/example-domains"
+      ],
+      [
+        "write",
+        "piano.md"
+      ],
+      [
+        "read",
+        "piano.md"
+      ]
+    ]
+  },
+  {
+    "case": "delivery-1-hermes",
+    "stages": [
+      {
+        "stage": "delivery",
+        "returncode": 0,
+        "seconds": 46.178855895996094,
+        "start": 1790183569.136502,
+        "end": 1790183615.315358
+      }
+    ],
+    "checks": {
+      "both_materials_read": true,
+      "no_stale_values": true,
+      "artifact": true,
+      "facts": true,
+      "word_limit": true,
+      "human_approval": true,
+      "three_steps": true,
+      "public_fetch": true,
+      "verified_written_file": true,
+      "runtime_finished": true,
+      "native_pause": true
+    },
+    "mechanical_pass": true,
+    "words": 118,
+    "pause_triggered": false,
+    "llm_calls": 5,
+    "input_tokens": 20239,
+    "cached_input_tokens": 15256,
+    "output_tokens": 553,
+    "llm_seconds": 42.84,
+    "process_seconds": 46.18,
+    "tool_errors": 0,
+    "tool_actions": [
+      [
+        "read",
+        "brief.md"
+      ],
+      [
+        "read",
+        "notes.md"
+      ],
+      [
+        "fetch",
+        "https://www.iana.org/help/example-domains"
+      ],
+      [
+        "write",
+        "piano.md"
+      ],
+      [
+        "read",
+        "piano.md"
+      ]
+    ]
+  },
+  {
+    "case": "delivery-1-openhands",
+    "stages": [
+      {
+        "stage": "delivery",
+        "returncode": 0,
+        "seconds": 47.87839221954346,
+        "start": 1790183615.317261,
+        "end": 1790183663.195654
+      }
+    ],
+    "checks": {
+      "both_materials_read": true,
+      "no_stale_values": true,
+      "artifact": true,
+      "facts": true,
+      "word_limit": true,
+      "human_approval": true,
+      "three_steps": true,
+      "public_fetch": true,
+      "verified_written_file": true,
+      "runtime_finished": true,
+      "native_pause": true
+    },
+    "mechanical_pass": true,
+    "words": 122,
+    "pause_triggered": false,
+    "llm_calls": 6,
+    "input_tokens": 34247,
+    "cached_input_tokens": 31334,
+    "output_tokens": 630,
+    "llm_seconds": 43.07,
+    "process_seconds": 47.88,
+    "tool_errors": 0,
+    "tool_actions": [
+      [
+        "read",
+        "brief.md"
+      ],
+      [
+        "read",
+        "notes.md"
+      ],
+      [
+        "fetch",
+        "https://www.iana.org/help/example-domains"
+      ],
+      [
+        "write",
+        "piano.md"
+      ],
+      [
+        "read",
+        "piano.md"
+      ]
+    ]
+  },
+  {
+    "case": "delivery-2-hermes",
+    "stages": [
+      {
+        "stage": "delivery",
+        "returncode": 0,
+        "seconds": 65.10206007957458,
+        "start": 1790183940.6889741,
+        "end": 1790184005.791035
+      }
+    ],
+    "checks": {
+      "both_materials_read": true,
+      "no_stale_values": true,
+      "artifact": true,
+      "facts": true,
+      "word_limit": true,
+      "human_approval": true,
+      "three_steps": true,
+      "public_fetch": true,
+      "verified_written_file": true,
+      "runtime_finished": true,
+      "native_pause": true
+    },
+    "mechanical_pass": true,
+    "words": 118,
+    "pause_triggered": false,
+    "llm_calls": 5,
+    "input_tokens": 20239,
+    "cached_input_tokens": 15268,
+    "output_tokens": 554,
+    "llm_seconds": 60.72,
+    "process_seconds": 65.1,
+    "tool_errors": 0,
+    "tool_actions": [
+      [
+        "read",
+        "brief.md"
+      ],
+      [
+        "read",
+        "notes.md"
+      ],
+      [
+        "fetch",
+        "https://www.iana.org/help/example-domains"
+      ],
+      [
+        "write",
+        "piano.md"
+      ],
+      [
+        "read",
+        "piano.md"
+      ]
+    ]
+  },
+  {
+    "case": "delivery-2-openhands",
+    "stages": [
+      {
+        "stage": "delivery",
+        "returncode": 0,
+        "seconds": 56.3406400680542,
+        "start": 1790183884.346572,
+        "end": 1790183940.687212
+      }
+    ],
+    "checks": {
+      "both_materials_read": true,
+      "no_stale_values": true,
+      "artifact": true,
+      "facts": true,
+      "word_limit": true,
+      "human_approval": true,
+      "three_steps": true,
+      "public_fetch": true,
+      "verified_written_file": true,
+      "runtime_finished": true,
+      "native_pause": true
+    },
+    "mechanical_pass": true,
+    "words": 122,
+    "pause_triggered": false,
+    "llm_calls": 6,
+    "input_tokens": 34247,
+    "cached_input_tokens": 31334,
+    "output_tokens": 630,
+    "llm_seconds": 50.98,
+    "process_seconds": 56.34,
+    "tool_errors": 0,
+    "tool_actions": [
+      [
+        "read",
+        "brief.md"
+      ],
+      [
+        "read",
+        "notes.md"
+      ],
+      [
+        "fetch",
+        "https://www.iana.org/help/example-domains"
+      ],
+      [
+        "write",
+        "piano.md"
+      ],
+      [
+        "read",
+        "piano.md"
+      ]
+    ]
+  },
+  {
+    "case": "resume-1-hermes",
+    "stages": [
+      {
+        "stage": "resume_start",
+        "returncode": 0,
+        "seconds": 17.086272954940796,
+        "start": 1790183773.234365,
+        "end": 1790183790.320638
+      },
+      {
+        "stage": "resume_finish",
+        "returncode": 0,
+        "seconds": 40.244094133377075,
+        "start": 1790183790.3214478,
+        "end": 1790183830.565542
+      }
+    ],
+    "checks": {
+      "both_materials_read": true,
+      "no_stale_values": true,
+      "artifact": true,
+      "facts": true,
+      "word_limit": true,
+      "human_approval": true,
+      "three_steps": true,
+      "public_fetch": true,
+      "verified_written_file": true,
+      "runtime_finished": true,
+      "native_pause": true
+    },
+    "mechanical_pass": true,
+    "words": 140,
+    "pause_triggered": true,
+    "llm_calls": 5,
+    "input_tokens": 20541,
+    "cached_input_tokens": 15445,
+    "output_tokens": 576,
+    "llm_seconds": 51.54,
+    "process_seconds": 57.33,
+    "tool_errors": 0,
+    "tool_actions": [
+      [
+        "read",
+        "brief.md"
+      ],
+      [
+        "read",
+        "notes.md"
+      ],
+      [
+        "fetch",
+        "https://www.iana.org/help/example-domains"
+      ],
+      [
+        "write",
+        "piano.md"
+      ],
+      [
+        "read",
+        "piano.md"
+      ]
+    ]
+  },
+  {
+    "case": "resume-1-openhands",
+    "stages": [
+      {
+        "stage": "resume_start",
+        "returncode": 0,
+        "seconds": 7.508440971374512,
+        "start": 1790183830.567174,
+        "end": 1790183838.075615
+      },
+      {
+        "stage": "resume_finish",
+        "returncode": 0,
+        "seconds": 46.26844596862793,
+        "start": 1790183838.076375,
+        "end": 1790183884.344821
+      }
+    ],
+    "checks": {
+      "both_materials_read": true,
+      "no_stale_values": true,
+      "artifact": true,
+      "facts": true,
+      "word_limit": true,
+      "human_approval": true,
+      "three_steps": true,
+      "public_fetch": true,
+      "verified_written_file": true,
+      "runtime_finished": true,
+      "native_pause": true
+    },
+    "mechanical_pass": true,
+    "words": 126,
+    "pause_triggered": true,
+    "llm_calls": 6,
+    "input_tokens": 34405,
+    "cached_input_tokens": 31431,
+    "output_tokens": 583,
+    "llm_seconds": 43.22,
+    "process_seconds": 53.78,
+    "tool_errors": 0,
+    "tool_actions": [
+      [
+        "read",
+        "brief.md"
+      ],
+      [
+        "read",
+        "notes.md"
+      ],
+      [
+        "fetch",
+        "https://www.iana.org/help/example-domains"
+      ],
+      [
+        "write",
+        "piano.md"
+      ],
+      [
+        "read",
+        "piano.md"
+      ]
+    ]
+  },
+  {
+    "case": "resume-2-hermes",
+    "stages": [
+      {
+        "stage": "resume_start",
+        "returncode": 0,
+        "seconds": 18.590110063552856,
+        "start": 1790184196.241719,
+        "end": 1790184214.831829
+      },
+      {
+        "stage": "resume_finish",
+        "returncode": 0,
+        "seconds": 52.07328701019287,
+        "start": 1790184214.832719,
+        "end": 1790184266.906006
+      }
+    ],
+    "checks": {
+      "both_materials_read": true,
+      "no_stale_values": true,
+      "artifact": true,
+      "facts": true,
+      "word_limit": true,
+      "human_approval": true,
+      "three_steps": true,
+      "public_fetch": true,
+      "verified_written_file": true,
+      "runtime_finished": true,
+      "native_pause": true
+    },
+    "mechanical_pass": true,
+    "words": 140,
+    "pause_triggered": true,
+    "llm_calls": 5,
+    "input_tokens": 20541,
+    "cached_input_tokens": 15445,
+    "output_tokens": 576,
+    "llm_seconds": 64.07,
+    "process_seconds": 70.66,
+    "tool_errors": 0,
+    "tool_actions": [
+      [
+        "read",
+        "brief.md"
+      ],
+      [
+        "read",
+        "notes.md"
+      ],
+      [
+        "fetch",
+        "https://www.iana.org/help/example-domains"
+      ],
+      [
+        "write",
+        "piano.md"
+      ],
+      [
+        "read",
+        "piano.md"
+      ]
+    ]
+  },
+  {
+    "case": "resume-2-openhands",
+    "stages": [
+      {
+        "stage": "resume_start",
+        "returncode": 0,
+        "seconds": 6.741814851760864,
+        "start": 1790184133.6721191,
+        "end": 1790184140.413934
+      },
+      {
+        "stage": "resume_finish",
+        "returncode": 0,
+        "seconds": 55.8250093460083,
+        "start": 1790184140.4146109,
+        "end": 1790184196.2396212
+      }
+    ],
+    "checks": {
+      "both_materials_read": true,
+      "no_stale_values": true,
+      "artifact": true,
+      "facts": true,
+      "word_limit": true,
+      "human_approval": true,
+      "three_steps": true,
+      "public_fetch": true,
+      "verified_written_file": true,
+      "runtime_finished": true,
+      "native_pause": true
+    },
+    "mechanical_pass": true,
+    "words": 126,
+    "pause_triggered": true,
+    "llm_calls": 6,
+    "input_tokens": 34405,
+    "cached_input_tokens": 31431,
+    "output_tokens": 583,
+    "llm_seconds": 51.63,
+    "process_seconds": 62.57,
+    "tool_errors": 0,
+    "tool_actions": [
+      [
+        "read",
+        "brief.md"
+      ],
+      [
+        "read",
+        "notes.md"
+      ],
+      [
+        "fetch",
+        "https://www.iana.org/help/example-domains"
+      ],
+      [
+        "write",
+        "piano.md"
+      ],
+      [
+        "read",
+        "piano.md"
+      ]
+    ]
+  }
+]

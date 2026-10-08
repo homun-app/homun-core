@@ -27,6 +27,22 @@ def assistant_text_from_message(message: dict[str, Any]) -> str:
     return ""
 
 
+def _transport_failure(exc: Exception, message: str) -> RuntimeError:
+    """RuntimeError with structured hints for native error classification.
+
+    Type and message stay identical to the legacy raise so non-native callers
+    see no behavior change; ``status_code``/``headers``/``reason`` let the
+    native transport classify without parsing strings apart.
+    """
+    failure = RuntimeError(message)
+    if isinstance(exc, HTTPError):
+        failure.status_code = exc.code  # type: ignore[attr-defined]
+        failure.headers = exc.headers  # type: ignore[attr-defined]
+    elif isinstance(exc, URLError):
+        failure.reason = exc.reason  # type: ignore[attr-defined]
+    return failure
+
+
 class OpenAICompatibleProvider:
     """Talks to OpenAI-compatible /v1/chat/completions (also Ollama-compatible gateways)."""
 
@@ -39,7 +55,9 @@ class OpenAICompatibleProvider:
         base_url: str = "https://api.openai.com/v1",
         default_model: str = "gpt-4o-mini",
         timeout_seconds: float = 120.0,
+        provider_id: str = "openai_compatible",
     ) -> None:
+        self.provider_id = provider_id
         self._secrets = secrets
         self.base_url = base_url.rstrip("/")
         self.default_model = default_model
@@ -47,9 +65,27 @@ class OpenAICompatibleProvider:
         self.last_stream_result: CompletionResult | None = None
 
     def _api_key(self) -> str | None:
-        key = self._secrets.get(SECRET_KEY)
+        key = self._secrets.get(f"provider:{self.provider_id}:api_key") or self._secrets.get(SECRET_KEY)
         if key:
             return key
+        try:
+            from homun.application.credential_pool import get_credential_pool
+            pool = get_credential_pool()
+            cred = pool.acquire_credential(self.provider_id)
+            if cred and cred.secret_value:
+                return cred.secret_value
+        except Exception:
+            pass
+        try:
+            from homun.application.provider_registry import get_provider_registry
+            prof = get_provider_registry().get_profile(self.provider_id)
+            if prof and prof.env_vars:
+                for ev in prof.env_vars:
+                    val = os.environ.get(ev)
+                    if val and val.strip():
+                        return val.strip()
+        except Exception:
+            pass
         # Local OpenAI-compatible gateways (e.g. Ollama) often need no real key.
         host = self.base_url.lower()
         if "127.0.0.1" in host or "localhost" in host:
@@ -72,8 +108,8 @@ class OpenAICompatibleProvider:
             return root
         return None
 
-    def verify_connection(self) -> VerifyResult:
-        api_key = self._api_key()
+    def verify_connection(self, *, api_key_override: str | None = None) -> VerifyResult:
+        api_key = api_key_override or self._api_key()
         if not api_key:
             return VerifyResult(
                 ok=False,
@@ -206,7 +242,13 @@ class OpenAICompatibleProvider:
             usage=usage,
         )
 
-    def stream(self, messages: list[ChatMessage], *, model_id: str | None = None) -> Iterator[str]:
+    def stream(
+        self,
+        messages: list[ChatMessage],
+        *,
+        model_id: str | None = None,
+        cancel_check: Any | None = None,
+    ) -> Iterator[str]:
         """Yield text deltas from the provider; set last_stream_result when finished."""
         api_key = self._api_key()
         if not api_key:
@@ -217,38 +259,38 @@ class OpenAICompatibleProvider:
         pieces: list[str] = []
         input_tokens: int | None = None
         output_tokens: int | None = None
+        interrupted = False
 
-        if self._ollama_native_root() is not None:
-            for piece, usage_bits in self._iter_ollama_stream(model, chat_messages):
-                if piece:
-                    pieces.append(piece)
-                    yield piece
-                if usage_bits.get("input_tokens") is not None:
-                    input_tokens = int(usage_bits["input_tokens"])
-                if usage_bits.get("output_tokens") is not None:
-                    output_tokens = int(usage_bits["output_tokens"])
-        else:
-            for piece, usage_bits in self._iter_openai_sse_stream(model, chat_messages, api_key=api_key):
-                if piece:
-                    pieces.append(piece)
-                    yield piece
-                if usage_bits.get("input_tokens") is not None:
-                    input_tokens = int(usage_bits["input_tokens"])
-                if usage_bits.get("output_tokens") is not None:
-                    output_tokens = int(usage_bits["output_tokens"])
+        stream_iter = (
+            self._iter_ollama_stream(model, chat_messages)
+            if self._ollama_native_root() is not None
+            else self._iter_openai_sse_stream(model, chat_messages, api_key=api_key)
+        )
+        for piece, usage_bits in stream_iter:
+            if piece:
+                pieces.append(piece)
+                yield piece
+            if cancel_check is not None and callable(cancel_check) and cancel_check():
+                interrupted = True
+                break
+            if usage_bits.get("input_tokens") is not None:
+                input_tokens = int(usage_bits["input_tokens"])
+            if usage_bits.get("output_tokens") is not None:
+                output_tokens = int(usage_bits["output_tokens"])
 
         text = "".join(pieces)
+        note = "Stream interrupted by cancellation." if interrupted else "Streamed completion; unknown tokens stay null."
         usage = UsageEntry(
             id=new_id("usage"),
             provider_id=self.provider_id,
             model_id=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            status="ok" if text else "unknown",
-            notes="Streamed completion; unknown tokens stay null.",
+            status="cancelled" if interrupted else ("ok" if text else "unknown"),
+            notes=note,
         )
         self.last_stream_result = CompletionResult(
-            text=text or "(empty completion)",
+            text=text or ("(interrupted completion)" if interrupted else "(empty completion)"),
             model_id=model,
             provider_id=self.provider_id,
             usage=usage,
@@ -309,9 +351,9 @@ class OpenAICompatibleProvider:
                     yield piece, usage_bits
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {exc.code}: {detail[:300]}") from exc
+            raise _transport_failure(exc, f"HTTP {exc.code}: {detail[:300]}") from exc
         except URLError as exc:
-            raise RuntimeError(str(exc.reason)) from exc
+            raise _transport_failure(exc, str(exc.reason)) from exc
 
     def _iter_ollama_stream(
         self, model: str, chat_messages: list[dict[str, str]]
@@ -364,9 +406,9 @@ class OpenAICompatibleProvider:
                     yield piece, usage_bits
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {exc.code}: {detail[:300]}") from exc
+            raise _transport_failure(exc, f"HTTP {exc.code}: {detail[:300]}") from exc
         except URLError as exc:
-            raise RuntimeError(str(exc.reason)) from exc
+            raise _transport_failure(exc, str(exc.reason)) from exc
 
     def _post_ollama_chat(self, body: dict[str, Any]) -> dict[str, Any]:
         root = self._ollama_native_root()
@@ -379,24 +421,28 @@ class OpenAICompatibleProvider:
 
     def _post_url(self, url: str, body: dict[str, Any], *, api_key: str) -> dict[str, Any]:
         data = json.dumps(body).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+        }
+        if "anthropic.com" in url:
+            headers["x-api-key"] = api_key
+            headers["anthropic-version"] = "2023-06-01"
         request = Request(
             url,
             data=data,
             method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-                "Accept": "application/json",
-            },
+            headers=headers,
         )
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
                 raw = response.read().decode("utf-8")
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {exc.code}: {detail[:300]}") from exc
+            raise _transport_failure(exc, f"HTTP {exc.code}: {detail[:300]}") from exc
         except URLError as exc:
-            raise RuntimeError(str(exc.reason)) from exc
+            raise _transport_failure(exc, str(exc.reason)) from exc
         parsed = json.loads(raw)
         if not isinstance(parsed, dict):
             raise RuntimeError("Provider returned non-object JSON")

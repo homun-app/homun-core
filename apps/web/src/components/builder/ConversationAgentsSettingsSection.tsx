@@ -1,5 +1,7 @@
 /**
- * Settings → Agenti: list / create / edit Homun AgentProfile on the engine.
+ * Settings → Agenti & Ruoli: Squad management for AI collaborators.
+ * Every agent can use its own dedicated LLM model, fallback model, thinking mode, and autonomy policy.
+ * Small modular shell using ConversationAgentEditor in-place.
  */
 
 import { useEffect, useState } from "react";
@@ -11,48 +13,83 @@ import {
   updateEngineAgent,
   type EngineAgentProfile,
 } from "@/lib/engine-agents-client";
-import { listModelConnections, postModelChat } from "@/lib/engine-models-client";
-import { ConversationSelect } from "./ConversationSelect";
+import { listModelConnections } from "@/lib/engine-models-client";
+import {
+  UsersRound,
+  Bot,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Settings2,
+  Brain,
+  Shield,
+  ShieldAlert,
+  Zap,
+  Layers,
+  Cpu,
+} from "lucide-react";
+import {
+  ROLE_TEMPLATES,
+  autonomyLabel,
+  parseAgentCognitiveConfig,
+  serializeAgentCognitiveConfig,
+  type RoleTemplate,
+} from "./ConversationAgentsSettingsData";
+import {
+  ConversationAgentEditor,
+  type AgentSavePayload,
+} from "./ConversationAgentEditor";
+import "./conversation-agents-settings.css";
 
 type Props = {
   actorId?: string;
 };
 
-const STATUS_OPTIONS = [
-  { value: "draft", label: "Bozza" },
-  { value: "active", label: "Attivo" },
-  { value: "paused", label: "In pausa" },
-  { value: "retired", label: "Ritirato" },
-];
-
 export function ConversationAgentsSettingsSection({ actorId = "person_fabio" }: Props) {
   const status = useEngineStatus();
-  const engineReady = status.connection === "connected" && status.capabilities?.features.domain;
+  const engineReady = status.connection === "connected" && status.capabilities?.features.agents;
+
   const [agents, setAgents] = useState<EngineAgentProfile[]>([]);
-  const [connections, setConnections] = useState<Array<{ id: string; display_name: string }>>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [role, setRole] = useState("");
-  const [instructions, setInstructions] = useState("");
-  const [connectionId, setConnectionId] = useState("");
-  const [agentStatus, setAgentStatus] = useState("active");
-  const [provaPrompt, setProvaPrompt] = useState("Ciao, presentati in una frase.");
-  const [provaReply, setProvaReply] = useState<string | null>(null);
+  const [connections, setConnections] = useState<
+    Array<{ id: string; display_name: string; kind?: string; model_id?: string }>
+  >([]);
   const [busy, setBusy] = useState(false);
-  const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
 
-  const selected = agents.find((item) => item.id === selectedId) ?? null;
+  // In-place editor state
+  const [editingAgent, setEditingAgent] = useState<EngineAgentProfile | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
 
   async function refresh() {
-    const [items, conns] = await Promise.all([
-      listEngineAgents(),
-      listModelConnections().catch(() => ({ items: [] as Array<{ id: string; display_name: string }> })),
-    ]);
-    setAgents(items);
-    setConnections(conns.items.map((c) => ({ id: c.id, display_name: c.display_name })));
-    if (selectedId && !items.some((item) => item.id === selectedId)) {
-      setSelectedId(null);
+    setBusy(true);
+    try {
+      const [items, conns] = await Promise.all([
+        listEngineAgents(),
+        listModelConnections().catch(() => ({
+          items: [] as Array<{
+            id: string;
+            display_name: string;
+            kind?: string;
+            model_id: string;
+          }>,
+        })),
+      ]);
+      setAgents(items);
+      setConnections(
+        conns.items.map((c) => {
+          const item: { id: string; display_name: string; kind?: string; model_id?: string } = {
+            id: c.id,
+            display_name: c.display_name,
+          };
+          if (c.kind) item.kind = c.kind;
+          if (c.model_id) item.model_id = c.model_id;
+          return item;
+        }),
+      );
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -61,231 +98,306 @@ export function ConversationAgentsSettingsSection({ actorId = "person_fabio" }: 
       setAgents([]);
       return;
     }
-    void refresh().catch((cause: unknown) => setError(cause));
+    void refresh();
   }, [engineReady, status.connection]);
 
-  useEffect(() => {
-    if (!selected) {
-      return;
+  function openCreate(template?: RoleTemplate) {
+    if (template) {
+      setEditingAgent({
+        id: "",
+        workspace_id: "",
+        name: template.name,
+        role: template.role,
+        responsibility: template.responsibility,
+        instructions: template.instructions,
+        autonomy_mode: template.autonomyMode,
+        capabilities: template.capabilities,
+        revision: 1,
+        status: "active",
+      });
+    } else {
+      setEditingAgent(null);
     }
-    setName(selected.name);
-    setRole(selected.role ?? "");
-    setInstructions(selected.instructions ?? "");
-    setConnectionId(selected.preferred_connection_id ?? "");
-    setAgentStatus(selected.status || "active");
-  }, [selectedId, selected?.revision]);
+    setIsCreating(true);
+  }
 
-  function resetForm() {
-    setSelectedId(null);
-    setName("");
-    setRole("");
-    setInstructions("");
-    setConnectionId("");
-    setAgentStatus("active");
-    setProvaReply(null);
+  function openEdit(agent: EngineAgentProfile) {
+    setIsCreating(false);
+    setEditingAgent(agent);
+  }
+
+  function closeEditor() {
+    setEditingAgent(null);
+    setIsCreating(false);
+  }
+
+  async function handleSaveAgent(payload: AgentSavePayload) {
+    setBusy(true);
+    setError(null);
+    try {
+      const serializedMethod = serializeAgentCognitiveConfig(
+        editingAgent?.method,
+        payload.cognitiveConfig,
+      );
+
+      if (isCreating || !editingAgent?.id) {
+        await createEngineAgent({
+          name: payload.name,
+          role: payload.role,
+          instructions: payload.instructions,
+          preferredConnectionId: payload.preferredConnectionId,
+          actor: { id: actorId, displayName: "Fabio" },
+        });
+      } else {
+        await updateEngineAgent({
+          agentId: editingAgent.id,
+          expectedVersion: editingAgent.revision,
+          role: payload.role,
+          instructions: payload.instructions,
+          preferredConnectionId: payload.preferredConnectionId,
+          responsibility: payload.responsibility,
+          autonomyMode: payload.autonomyMode,
+          capabilities: payload.capabilities,
+          method: serializedMethod,
+          actor: { id: actorId, displayName: "Fabio" },
+        });
+      }
+
+      await refresh();
+      closeEditor();
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (status.connection !== "connected") {
     return (
-      <>
-        <h3>Agenti</h3>
-        <p>
-          Avvia il motore (<code>npm run engine:dev</code>) per creare e modificare collaboratori AI.
-          Nessun fallback in simulazione.
-        </p>
-      </>
+      <div className="cv-agents-wrap">
+        <div className="cv-agents-header">
+          <h3>Squadra Agenti & Ruoli Specializzati</h3>
+          <p>Collega l’applicazione desktop Homun per visualizzare e configurare la tua squadra di agenti.</p>
+        </div>
+      </div>
     );
   }
 
-  if (!engineReady) {
+  // Se l'utente sta creando o modificando un agente, mostra l'editor in-place
+  if (isCreating || editingAgent) {
     return (
-      <>
-        <h3>Agenti</h3>
-        <p>Il motore è connesso ma la capability <code>domain</code> non è disponibile.</p>
-      </>
+      <div className="cv-agents-wrap">
+        <HomunErrorNotice error={error} />
+        <ConversationAgentEditor
+          agent={editingAgent}
+          isCreating={isCreating}
+          connections={connections}
+          onSave={handleSaveAgent}
+          onCancel={closeEditor}
+          busy={busy}
+        />
+      </div>
     );
   }
 
   return (
-    <>
-      <h3>Agenti Homun</h3>
-      <p>
-        Profilo persistente sul motore (istruzioni + collegamento ModelPort). L&apos;id è stabile; il
-        nome non è una chiave. Actor: <code>{actorId}</code>.
-      </p>
-
-      <div className="cv-settings-card">
-        <strong>Elenco</strong>
-        {!agents.length ? (
-          <p>Nessun agente ancora. Creane uno sotto.</p>
-        ) : (
-          <ul className="cv-settings-memory-list">
-            {agents.map((agent) => (
-              <li key={agent.id}>
-                <button
-                  type="button"
-                  className={selectedId === agent.id ? "cw-primary" : "cw-secondary"}
-                  disabled={busy}
-                  onClick={() => setSelectedId(agent.id)}
-                >
-                  {agent.name}
-                  {agent.role ? ` · ${agent.role}` : ""} · {agent.status}
-                </button>
-                <small>
-                  <code>{agent.id}</code>
-                </small>
-              </li>
-            ))}
-          </ul>
-        )}
-        <button type="button" className="cw-secondary" disabled={busy} onClick={resetForm}>
-          Nuovo agente
-        </button>
-      </div>
-
-      <div className="cv-settings-card">
-        <strong>{selected ? "Modifica profilo" : "Crea agente"}</strong>
-        <label>
-          Nome
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            aria-label="Nome agente"
-          />
-        </label>
-        <label>
-          Ruolo breve
-          <input
-            value={role}
-            onChange={(event) => setRole(event.target.value)}
-            aria-label="Ruolo agente"
-          />
-        </label>
-        <label>
-          Istruzioni
-          <textarea
-            value={instructions}
-            onChange={(event) => setInstructions(event.target.value)}
-            rows={4}
-            aria-label="Istruzioni agente"
-          />
-        </label>
-        <label>
-          Collegamento modello (ModelPort)
-          <select
-            value={connectionId}
-            onChange={(event) => setConnectionId(event.target.value)}
-            aria-label="Collegamento modello preferito"
-          >
-            <option value="">Attivo dello spazio</option>
-            {connections.map((conn) => (
-              <option key={conn.id} value={conn.id}>
-                {conn.display_name} ({conn.id})
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Stato
-          <ConversationSelect
-            label="Stato agente"
-            value={agentStatus}
-            options={STATUS_OPTIONS}
-            onChange={(value) => setAgentStatus(value)}
-          />
-        </label>
-        <button
-          type="button"
-          className="cw-primary"
-          disabled={busy || !name.trim()}
-          onClick={() => {
-            setBusy(true);
-            setError(null);
-            setInfo(null);
-            const preferred = connectionId.trim() || null;
-            const task = selected
-              ? updateEngineAgent({
-                  agentId: selected.id,
-                  expectedVersion: selected.revision,
-                  role: role.trim(),
-                  instructions: instructions,
-                  preferredConnectionId: preferred,
-                  status: agentStatus,
-                }).then(async () => {
-                  setInfo(`Agente aggiornato · revisione ${selected.revision + 1}`);
-                  await refresh();
-                })
-              : createEngineAgent({
-                  name: name.trim(),
-                  role: role.trim(),
-                  instructions,
-                  preferredConnectionId: preferred,
-                  status: agentStatus,
-                }).then(async (created) => {
-                  setInfo(`Agente creato · ${created.agentId}`);
-                  setSelectedId(created.agentId);
-                  await refresh();
-                });
-            void task.catch((cause: unknown) => setError(cause)).finally(() => setBusy(false));
-          }}
-        >
-          {selected ? "Salva modifiche" : "Crea agente"}
-        </button>
-      </div>
-
-      {selected ? (
-        <div className="cv-settings-card">
-          <strong>Prova come agente</strong>
+    <div className="cv-agents-wrap">
+      {/* Intestazione Sezione */}
+      <div className="cv-agents-header flex items-center justify-between">
+        <div>
+          <h3>Squadra Agenti & Modelli Indipendenti</h3>
           <p>
-            Chat ModelPort con system = istruzioni del profilo (non è una run completa). Usa il
-            collegamento preferito se impostato.
+            Ogni agente opera con il proprio modello LLM specializzato, parametri cognitivi di riflessione e strumenti dedicati.
           </p>
-          <label>
-            Messaggio
-            <textarea
-              value={provaPrompt}
-              onChange={(event) => setProvaPrompt(event.target.value)}
-              rows={2}
-              aria-label="Messaggio prova agente"
-            />
-          </label>
+        </div>
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            className="cw-secondary"
-            disabled={busy || !provaPrompt.trim()}
-            onClick={() => {
-              setBusy(true);
-              setError(null);
-              setInfo(null);
-              setProvaReply(null);
-              const messages: Array<{ role: "system" | "user"; content: string }> = [];
-              if (instructions.trim()) {
-                messages.push({ role: "system", content: instructions.trim() });
-              }
-              messages.push({ role: "user", content: provaPrompt.trim() });
-              void postModelChat(messages, {
-                ...(connectionId.trim() ? { connectionId: connectionId.trim() } : {}),
-              })
-                .then((result) => {
-                  setProvaReply(result.text);
-                  setInfo(`Risposta da ${result.provider_id} · ${result.model_id}`);
-                })
-                .catch((cause: unknown) => setError(cause))
-                .finally(() => setBusy(false));
-            }}
+            onClick={() => void refresh()}
+            disabled={busy}
+            className="cv-unified-btn is-subtle text-xs"
+            title="Aggiorna lista squadra"
           >
-            Invia prova
+            <RefreshCw className={`w-3.5 h-3.5 ${busy ? "animate-spin" : ""}`} />
+            <span>Aggiorna</span>
           </button>
-          {provaReply ? (
-            <p className="cv-settings-note" role="status">
-              {provaReply}
-            </p>
-          ) : null}
+          <button
+            type="button"
+            onClick={() => openCreate()}
+            disabled={busy}
+            className="cv-unified-btn is-primary text-xs"
+          >
+            <Plus size={14} />
+            <span>Aggiungi Agente</span>
+          </button>
         </div>
-      ) : null}
+      </div>
 
       <HomunErrorNotice error={error} />
-      {info ? <p className="cv-settings-note">{info}</p> : null}
-    </>
+
+      {/* Banner Esplicativo Modello per Agente */}
+      <div className="cv-agents-explainer">
+        <div className="cv-agents-explainer__icon">
+          <Brain size={18} />
+        </div>
+        <div className="cv-agents-explainer__text">
+          <strong>Modelli eterogenei per compiti specifici</strong>
+          <p>
+            Assegna Claude 3.7 per compiti di architettura e codice, GPT-4o per analisi multimodale o sintesi, e modelli locali Ollama (Llama 3.3) per elaborazioni senza costi di token o fallback resiliente offline.
+          </p>
+        </div>
+      </div>
+
+      {/* Elenco Agenti Attivi */}
+      <div className="cv-agents-list">
+        {agents.length === 0 ? (
+          <div className="p-8 rounded-xl bg-white border border-[#dce4d5] text-center space-y-4">
+            <Bot size={36} className="text-[#203c32] mx-auto opacity-70" />
+            <div>
+              <strong className="text-sm font-semibold text-[#1c2d22] block">
+                Nessun collaboratore configurato
+              </strong>
+              <p className="text-xs text-[#647a6d] mt-1">
+                Inizia con uno dei ruoli predefiniti raccomandati per strutturare la tua squadra.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 justify-center pt-2">
+              {ROLE_TEMPLATES.map((tmpl) => (
+                <button
+                  key={tmpl.role}
+                  type="button"
+                  onClick={() => openCreate(tmpl)}
+                  className="cv-unified-btn is-subtle text-xs"
+                >
+                  <Plus size={13} />
+                  <span>{tmpl.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          agents.map((agent) => {
+            const cognitive = parseAgentCognitiveConfig(agent.method);
+            const assignedConn = connections.find(
+              (c) => c.id === agent.preferred_connection_id,
+            );
+            const fallbackConn = connections.find(
+              (c) => c.id === cognitive.fallback_connection_id,
+            );
+
+            return (
+              <div key={agent.id} className="cv-agent-card">
+                <div className="cv-agent-card__top">
+                  <div className="cv-agent-card__identity">
+                    <div className="cv-agent-card__avatar">
+                      <Bot size={22} className="text-[#8fe3d0]" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4>{agent.name}</h4>
+                        <span className="cv-agent-card__badge-role">
+                          {agent.role || "Specialista"}
+                        </span>
+                        {agent.status === "active" && (
+                          <span className="cv-agent-card__badge-status is-active">Attivo</span>
+                        )}
+                      </div>
+                      <p className="cv-agent-card__responsibility">
+                        {agent.responsibility ||
+                          (agent.instructions ? agent.instructions.slice(0, 110) + "..." : "Collaboratore operativo del team")}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => openEdit(agent)}
+                    className="cv-unified-btn is-subtle text-xs"
+                  >
+                    <Settings2 size={13} />
+                    <span>Configura</span>
+                  </button>
+                </div>
+
+                {/* Badges del Cervello & Parametri Cognitivi */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[rgba(255,255,255,0.06)] text-[11px]">
+                  {/* Modello Primario */}
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[rgba(21,122,110,0.18)] border border-[rgba(143,227,208,0.2)] text-[#8fe3d0]">
+                    <Cpu size={12} />
+                    <span className="font-medium">
+                      {assignedConn
+                        ? `${assignedConn.display_name} (${assignedConn.model_id ?? assignedConn.id})`
+                        : agent.preferred_connection_id
+                        ? agent.preferred_connection_id
+                        : "Modello Predefinito Spazio"}
+                    </span>
+                  </div>
+
+                  {/* Fallback Resilience */}
+                  {fallbackConn && (
+                    <div className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#182b26] border border-[#253a33] text-[#38bdf8]">
+                      <Shield size={11} />
+                      <span>Fallback: {fallbackConn.display_name}</span>
+                    </div>
+                  )}
+
+                  {/* Thinking Mode */}
+                  {cognitive.thinking_mode && (
+                    <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-[rgba(168,85,247,0.15)] border border-[rgba(168,85,247,0.3)] text-purple-300">
+                      <Brain size={11} />
+                      <span>Thinking ON</span>
+                    </div>
+                  )}
+
+                  {/* Temperatura */}
+                  <div className="px-2 py-0.5 rounded bg-[#111c18] border border-[rgba(255,255,255,0.08)] text-[#9db3ad] font-mono">
+                    temp: {cognitive.temperature ?? 0.5}
+                  </div>
+
+                  {/* Autonomia — valori del motore: supervised | autonomous */}
+                  <div
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded border ${
+                      agent.autonomy_mode === "autonomous"
+                        ? "bg-[rgba(21,122,110,0.18)] border-[rgba(143,227,208,0.2)] text-[#8fe3d0]"
+                        : "bg-[#111c18] border-[rgba(255,255,255,0.08)] text-[#9db3ad]"
+                    }`}
+                  >
+                    {agent.autonomy_mode === "autonomous" ? (
+                      <Zap size={11} />
+                    ) : (
+                      <ShieldAlert size={11} />
+                    )}
+                    <span>{autonomyLabel(agent.autonomy_mode)}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Preset Ruoli Rapidi */}
+      {agents.length > 0 && (
+        <div className="p-4 rounded-xl bg-[#edf2e7] border border-[rgba(104,122,89,0.12)] space-y-2">
+          <span className="text-xs font-semibold text-[#1c2d22] flex items-center gap-1.5">
+            <Sparkles size={13} className="text-[#203c32]" />
+            <span>Aggiungi rapidamente un ruolo specializzato alla squadra:</span>
+          </span>
+          <div className="flex flex-wrap gap-2 pt-1">
+            {ROLE_TEMPLATES.map((tmpl) => (
+              <button
+                key={tmpl.role}
+                type="button"
+                onClick={() => openCreate(tmpl)}
+                className="cv-unified-btn is-subtle text-xs"
+              >
+                <Plus size={12} />
+                <span>{tmpl.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

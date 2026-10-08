@@ -13,15 +13,17 @@ from homun.domain.models import Actor
 ECHO_SERVER = textwrap.dedent("""
     import json, sys
     tools = [
-        {"name": "list_issues", "description": "elenco"},
-        {"name": "create_issue", "description": "crea"},
-        {"name": "delete_customer", "description": "distruttivo"},
+        {"name": "list_issues", "description": "elenco", "inputSchema": {"type": "object"}},
+        {"name": "create_issue", "description": "crea", "inputSchema": {"type": "object"}},
+        {"name": "delete_customer", "description": "distruttivo", "inputSchema": {"type": "object"}},
     ]
     for line in sys.stdin:
         line = line.strip()
         if not line:
             continue
         req = json.loads(line)
+        if "id" not in req:
+            continue
         if req.get("method") == "initialize":
             reply = {"jsonrpc": "2.0", "id": req["id"], "result": {
                 "protocolVersion": "2025-06-18",
@@ -116,13 +118,15 @@ def test_agent_skill_is_always_staged_and_never_self_approves(client):
     assert ok.status_code == 200 and ok.json()["status"] == "approved"
     items = tc.get("/v1/workspaces/ws_local/skills", headers=H).json()["items"]
     by_name = {i["name"]: i["status"] for i in items}
-    assert by_name == {"Confronto listini": "approved", "Manuale fornitori": "approved"}
+    # The builtin catalog may seed more skills; the staging invariants are these two.
+    assert by_name["Confronto listini"] == "approved"
+    assert by_name["Manuale fornitori"] == "approved"
 
 
 def test_skill_description_cap_and_archived_immutable(client):
     tc, _ = client
     too_long = tc.post("/v1/workspaces/ws_local/skills", headers=H, json={
-        "command_id": "s3", "name": "X", "description": "d" * 61, "body": "",
+        "command_id": "s3", "name": "X", "description": "d" * 121, "body": "",
     })
     assert too_long.status_code == 400
     created = tc.post("/v1/workspaces/ws_local/skills", headers=H, json={
@@ -144,13 +148,15 @@ def test_external_tool_proposal_flow_e2e(client, tmp_path):
         import json, sys
         for line in sys.stdin:
             req = json.loads(line.strip())
+            if "id" not in req:
+                continue
             if req.get("method") == "initialize":
                 reply = {"jsonrpc": "2.0", "id": req["id"], "result": {
                     "protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
                     "serverInfo": {"name": "echo-call", "version": "1.0"}}}
             elif req.get("method") == "tools/list":
                 reply = {"jsonrpc": "2.0", "id": req["id"], "result": {"tools": [
-                    {"name": "list_issues", "description": "elenco"}]}}
+                    {"name": "list_issues", "description": "elenco", "inputSchema": {"type": "object"}}]}}
             elif req.get("method") == "tools/call":
                 args = req["params"]["arguments"]
                 reply = {"jsonrpc": "2.0", "id": req["id"], "result": {

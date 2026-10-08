@@ -31,6 +31,6 @@ La protezione Bearer è middleware configurato all'avvio e non viene inferita da
 
 - [`openapi/v1-health.yaml`](openapi/v1-health.yaml) e [`openapi/v1-domain.yaml`](openapi/v1-domain.yaml) sono descrizioni manuali parziali delle tranche iniziali/F2, conservate come riferimento storico; non descrivono tutta l'API attuale.
 - [`schemas/domain-f1.json`](schemas/domain-f1.json) descrive le forme della tranche F1; non sostituisce i modelli correnti del motore.
-- Persistenza attuale: SQLite locale non cifrato; cifratura = D-CRYPTO-01.
+- Persistenza: SQLite locale per default; opt-in SQLCipher con chiave esplicita e driver opzionale. Cifratura di tutto il profilo e recupero chiavi restano D-CRYPTO-01/D-KEY-01; vedere il [manuale motore](../engine/README.md).
 
 La specifica di prodotto per la superficie completa resta in `docs/specifications/04-api-client-rete.md`.

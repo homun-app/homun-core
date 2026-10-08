@@ -58,3 +58,13 @@ describe("engineWorkToUiWork", () => {
     assert.equal(work.engineArtifactVersion, 1);
   });
 });
+
+it('projects named portal recipients without exposing actor ids as names', () => {
+  const work = engineWorkToUiWork(parseEngineWorkRecord({
+    id:'work_1', status:'waiting_input',
+    pending_contribution:{id:'question', to_actor_id:'person_generated', recipient_name:'Marta',
+      need:'Confermi la scadenza?', status:'pending', step_id:'question'},
+  }));
+  assert.equal(work.request?.to, 'Marta');
+  assert.equal(work.request?.viaInvitation, true);
+});

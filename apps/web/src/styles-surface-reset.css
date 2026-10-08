@@ -1,0 +1,1599 @@
+/*
+ * STYLES-SURFACE-RESET.CSS
+ * ========================
+ * Removes all green-tint card containers and heavy borders from content areas.
+ * Philosophy: Linear/Cursor — whitespace is the only separator.
+ * Import this LAST in styles.css so it wins without !important where possible.
+ */
+
+/* ---- ph- (Project Hub) surfaces ---- */
+
+/* Stats box: remove the bordered box, let stats flow */
+.ph-overview-stats {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  gap: 32px;
+  margin-bottom: 32px;
+}
+
+.ph-stat-metric-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.ph-stat-metric-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Tab bar: clean transparent tabs, no full-bleed border-bottom */
+.ph-tabs {
+  border-bottom: none !important;
+  gap: 4px;
+  padding-bottom: 0;
+}
+
+.ph-tab {
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-muted-foreground);
+  border-bottom: none !important;
+  border-radius: 6px;
+}
+
+.ph-tab:hover {
+  background: rgba(0, 0, 0, 0.02);
+  color: var(--foreground);
+}
+
+.ph-tab--active {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+/* Tab pill count: smaller and muted */
+.ph-tab-pill {
+  font-size: 10px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  padding: 0;
+  border-radius: 0;
+}
+
+.ph-tab--active .ph-tab-pill {
+  background: transparent;
+  color: var(--color-muted-foreground);
+}
+
+/* Body: white background */
+.ph-body {
+  background: #ffffff;
+  padding: 28px 32px 48px;
+}
+
+/* Card title: smaller */
+.ph-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+/* Card subtitle */
+.ph-card-subtitle {
+  font-size: 13px;
+  color: var(--color-muted-foreground);
+}
+
+/* Agent cards: clean floating cards, zero horizontal divider lines */
+.ph-agent-card {
+  background: transparent;
+  border: none !important;
+  border-radius: 8px;
+  padding: 14px 16px;
+  transition: background 0.12s ease;
+}
+
+.ph-agent-card:hover {
+  box-shadow: none;
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* Agent avatar: subtle */
+.ph-agent-avatar {
+  background: var(--color-sidebar-accent);
+  color: var(--foreground);
+}
+
+/* Memory items: flat list with zero horizontal lines */
+.ph-memory-item {
+  background: transparent;
+  border: none !important;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 2px;
+  transition: background 0.12s ease;
+}
+
+.ph-memory-item:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.ph-memory-item--global {
+  background: transparent;
+  border: none !important;
+}
+
+/* Empty state: no border box */
+.ph-empty {
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  padding: 48px 24px;
+}
+
+.ph-empty-icon {
+  color: var(--color-muted-foreground);
+  opacity: 0.5;
+}
+
+/* Tool chips: minimal */
+.ph-tool-chip {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-muted-foreground);
+  font-size: 11px;
+}
+
+.ph-tool-chip:hover {
+  border-color: var(--foreground);
+  color: var(--foreground);
+}
+
+.ph-tool-chip--enabled {
+  background: transparent;
+  border-color: var(--foreground);
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+/* Table: minimal */
+.ph-table {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.ph-table th {
+  background: transparent;
+  border-bottom: none !important;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ph-table td {
+  padding: 10px 12px;
+  border-bottom: none !important;
+  color: var(--foreground);
+}
+
+.ph-table tr:hover td {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* Promote button */
+.ph-btn-promote {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--foreground);
+}
+
+.ph-btn-promote:hover {
+  background: var(--foreground);
+  color: #ffffff;
+  border-color: var(--foreground);
+}
+
+/* Header & Topbar: seamless white, no separation line */
+.cw-topbar,
+.ph-context-bar,
+.ph-header {
+  background: #ffffff !important;
+  border-bottom: none !important;
+  border: none !important;
+}
+
+/* Override badge */
+.ph-override-badge {
+  background: var(--color-sidebar-accent);
+  color: var(--foreground);
+}
+
+/* ---- cv-people surfaces ---- */
+
+.cv-people-onboard {
+  background: transparent;
+  border: 1px dashed var(--color-border);
+}
+
+.cv-people-card {
+  background: transparent;
+  border: none !important;
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.cv-people-card:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.cv-people-card__avatar {
+  background: var(--color-sidebar-accent);
+  color: var(--foreground);
+}
+
+.cv-people-card__badge-role {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-muted-foreground);
+}
+
+.cv-people-card__badge-admin {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--foreground);
+}
+
+/* Invite button */
+.cv-people-invite {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--foreground);
+}
+
+/* ---- cv-unified (plugins) surfaces ---- */
+
+.cv-unified-empty {
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  color: var(--color-muted-foreground);
+}
+
+.cv-unified-code-preview {
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--color-border);
+}
+
+.cv-unified-explain-box {
+  background: transparent;
+  border: none;
+  border-left: 2px solid var(--color-border);
+  border-radius: 0;
+  padding: 4px 12px;
+  margin-top: 8px;
+}
+
+.cv-unified-dropdown-item:hover {
+  background: var(--color-sidebar-accent);
+  color: var(--foreground);
+}
+
+.cv-unified-explain-tool-pill {
+  background: var(--color-sidebar-accent);
+  border: 1px solid var(--color-border);
+  color: var(--foreground);
+}
+
+/* ---- cv-settings-card (used across all settings sections) ---- */
+
+.cv-settings-card {
+  background: transparent;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0;
+  border-radius: 0;
+  padding-bottom: 24px;
+  margin-bottom: 24px;
+}
+
+.cv-settings-card:last-child {
+  margin-bottom: 0;
+}
+
+/* ---- People section banner (Team build) ---- */
+.cv-people-build-banner,
+[class*='build-banner'],
+[class*='cta-banner'] {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+/* ---- Error / status text: inline, no background ---- */
+[class*='-error'],
+[class*='-unreachable'],
+[class*='-notice'] {
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: inline;
+}
+
+/* ---- Engine maintenance section ---- */
+[class*='engine-card'],
+[class*='maintenance-card'] {
+  background: transparent;
+  border: none !important;
+  border-radius: 0;
+  padding-bottom: 24px;
+  margin-bottom: 24px;
+}
+
+/* ================================================================
+   BUTTON SYSTEM RESET — Linear/Cursor style
+   Primary actions become ghost; heavy green CTAs are toned down.
+   ================================================================ */
+
+/* Ghost button — default action button throughout the app */
+.ph-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  transition: background 0.1s ease;
+  white-space: nowrap;
+}
+.ph-btn-ghost:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* Override ph-btn-primary to ghost style */
+.ph-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  transition: background 0.1s ease;
+  white-space: nowrap;
+}
+.ph-btn-primary:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* ph-btn-secondary: even lighter */
+.ph-btn-secondary {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-muted-foreground);
+}
+.ph-btn-secondary:hover {
+  color: var(--foreground);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+/* Sidebar new button: ghost on light sidebar */
+.cw-new {
+  background: transparent;
+  color: var(--foreground);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  padding: 6px 10px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  font-weight: 500;
+  font-size: 13px;
+  transition: background 0.1s ease;
+  width: 100%;
+  cursor: pointer;
+}
+.cw-new:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.04);
+  opacity: 1;
+}
+
+/* ================================================================
+   STATS RESET — muted labels, smaller values
+   ================================================================ */
+
+.ph-stat-metric-label {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-muted-foreground);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.ph-stat-metric-val {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--foreground);
+  line-height: 1.2;
+}
+
+.ph-stat-metric-sub {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-muted-foreground);
+  margin-top: 0;
+}
+
+/* ================================================================
+   WORK LIST ROWS — flat, neutral, Linear-like
+   ================================================================ */
+
+.ph-work-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.ph-work-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-bottom: none !important;
+  cursor: pointer;
+  transition: background 0.1s ease;
+  border-radius: 6px;
+}
+
+.ph-work-row:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.ph-work-row__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ph-work-row__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-muted-foreground);
+  flex-shrink: 0;
+}
+
+.ph-work-row__icon--done {
+  color: var(--color-muted-foreground);
+  flex-shrink: 0;
+}
+
+.ph-work-row__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.ph-work-row__meta {
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  margin-top: 1px;
+}
+
+.ph-work-row__action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.ph-work-row:hover .ph-work-row__action {
+  opacity: 1;
+}
+
+/* ================================================================
+   EMPTY STATE — minimal, no icon
+   ================================================================ */
+
+.ph-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 24px 0;
+  text-align: left;
+  background: transparent;
+  border: none;
+  gap: 8px;
+}
+
+.ph-empty-icon {
+  display: none;
+}
+
+.ph-empty-title {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--color-muted-foreground);
+  margin: 0;
+}
+
+.ph-empty-desc {
+  display: none;
+}
+
+/* Card header: tighter */
+.ph-card-header {
+  margin-bottom: 12px;
+}
+
+.ph-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--foreground);
+  letter-spacing: 0;
+}
+
+.ph-card-subtitle {
+  display: none;
+}
+
+/* ================================================================
+   SPACE VIEWS & GENERIC HEADINGS RESET (Compiti, Squadra, etc.)
+   ================================================================ */
+
+.cs-stage {
+  background: #ffffff;
+}
+
+.cs-stage .cw-conversation {
+  background: #ffffff;
+}
+
+.cs-stage .cs-title,
+.cm-page-heading .cs-title {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  margin: 6px 0 2px !important;
+  color: var(--foreground) !important;
+  letter-spacing: -0.01em;
+}
+
+.cs-stage .cs-intro {
+  font-size: 13px !important;
+  color: var(--color-muted-foreground) !important;
+  margin-bottom: 16px !important;
+}
+
+.cw-overline {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+  color: var(--color-muted-foreground) !important;
+}
+
+/* Actions in space headers: ghost buttons */
+.cs-actions .cw-primary,
+.cs-actions .cw-secondary,
+.cs-create-actions .cw-primary,
+.cs-create-actions .cw-secondary {
+  background: transparent !important;
+  border: 1px solid var(--color-border) !important;
+  color: var(--foreground) !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  padding: 5px 10px !important;
+  box-shadow: none !important;
+}
+
+.cs-actions .cw-primary:hover,
+.cs-actions .cw-secondary:hover,
+.cs-create-actions .cw-primary:hover,
+.cs-create-actions .cw-secondary:hover {
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* ================================================================
+   COMPITI (TASKS) RESET — Linear/Cursor style
+   ================================================================ */
+
+.ct-focus-filters {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.ct-focus-filters button {
+  background: transparent !important;
+  border: 1px solid var(--color-border) !important;
+  color: var(--color-muted-foreground) !important;
+  border-radius: 6px !important;
+  padding: 4px 10px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.ct-focus-filters button[aria-pressed="true"] {
+  background: rgba(0, 0, 0, 0.05) !important;
+  color: var(--foreground) !important;
+  border-color: var(--foreground) !important;
+  font-weight: 600 !important;
+}
+
+.ct-focus-filters button:hover {
+  background: rgba(0, 0, 0, 0.03) !important;
+  color: var(--foreground) !important;
+}
+
+.ct-focus-filters button span {
+  font-size: 10px;
+  color: var(--color-muted-foreground);
+}
+
+.ct-card-row {
+  margin-bottom: 2px;
+  border-radius: 6px;
+  transition: background 0.1s ease;
+}
+
+.ct-card-row:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.ct-card {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 10px 12px !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+}
+
+.ct-card strong {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--foreground) !important;
+}
+
+.ct-card small {
+  font-size: 11px !important;
+  color: var(--color-muted-foreground) !important;
+  margin-top: 2px !important;
+}
+
+.ct-manage {
+  background: transparent !important;
+  border: none !important;
+  color: var(--color-muted-foreground) !important;
+  opacity: 0.6;
+  cursor: pointer;
+  padding: 4px 8px !important;
+  border-radius: 4px;
+}
+
+.ct-manage:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Kanban board */
+.ct-board {
+  gap: 16px !important;
+  padding: 12px 0 !important;
+}
+
+.ct-board > section {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+}
+
+.ct-board h3 {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  color: var(--color-muted-foreground) !important;
+  margin-bottom: 8px !important;
+}
+
+.ct-board .ct-card {
+  border: 1px solid var(--color-border) !important;
+  background: #ffffff !important;
+  margin-bottom: 6px !important;
+}
+
+.ct-board .ct-card:hover {
+  border-color: var(--foreground) !important;
+}
+
+/* Calendar */
+.ct-calendar {
+  gap: 2px !important;
+}
+
+.ct-calendar > div {
+  background: transparent !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  min-height: 80px !important;
+}
+
+/* ================================================================
+   MATERIALI (MATERIALS) RESET
+   ================================================================ */
+
+.cm-materials .cm-material-row {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 2px 10px !important;
+  margin-bottom: 2px !important;
+  transition: background 0.1s ease;
+}
+
+.cm-materials .cm-material-row:hover {
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.cm-materials .cm-material-row:has(.active) {
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+
+.cw .cm-filter-chip {
+  background: transparent !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  color: var(--color-muted-foreground) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  padding: 4px 10px !important;
+  box-shadow: none !important;
+}
+
+.cw .cm-filter-chip:hover {
+  background: rgba(0, 0, 0, 0.03) !important;
+  color: var(--foreground) !important;
+  border-color: var(--foreground) !important;
+}
+
+.cw .cm-filter-chip[data-active="true"] {
+  background: rgba(0, 0, 0, 0.05) !important;
+  border-color: var(--foreground) !important;
+  color: var(--foreground) !important;
+}
+
+.cm-filter-chip small {
+  background: transparent !important;
+  color: var(--color-muted-foreground) !important;
+  font-size: 10px !important;
+  padding: 0 !important;
+}
+
+.cm-filter-popover.cw {
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08) !important;
+  border-radius: 8px !important;
+}
+
+/* ================================================================
+   WORKSPACE STAGE & MAIN CONTENT PANELS
+   Removes the sage/beige #f0f2eb rounded box across all spaces.
+   Content flows directly on the white canvas (#ffffff).
+   ================================================================ */
+
+section.cw-workspace,
+.cw .cw-main > .cw-workspace,
+.cw-stage,
+.cs-stage {
+  background: transparent !important;
+  border-radius: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 24px 32px 48px !important;
+  max-width: 1200px;
+  width: 100%;
+}
+
+/* Inspector / Right-hand aside panels: clean divider, flat white background */
+aside.cw-workspace,
+.cw-workspace.cs-panel {
+  background: #ffffff !important;
+  border-radius: 0 !important;
+  border: none !important;
+  border-left: 1px solid var(--color-border) !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 24px 20px !important;
+}
+
+/* Header in workspace sections */
+.cw-panel-top {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  margin-bottom: 16px !important;
+}
+
+.cw-panel-top h2 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+  margin: 0 !important;
+}
+
+.cw-workspace h2 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+
+/* Filters bar: standard modern input layout */
+.cw-documents__filters {
+  display: flex !important;
+  gap: 8px !important;
+  align-items: center !important;
+  margin-bottom: 16px !important;
+}
+
+.cw-documents__filters label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  padding: 6px 10px !important;
+  flex: 1 !important;
+  transition: border-color 0.12s ease !important;
+}
+
+.cw-documents__filters label:focus-within {
+  border-color: var(--foreground) !important;
+}
+
+.cw-documents__filters input {
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+  font-size: 13px !important;
+  color: var(--foreground) !important;
+  padding: 0 !important;
+  width: 100% !important;
+}
+
+.cw-documents__filters select {
+  height: 32px !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--color-border) !important;
+  background: #ffffff !important;
+  font-size: 13px !important;
+  color: var(--foreground) !important;
+  padding: 0 10px !important;
+}
+
+/* Document & Material rows: flat, zero shadow, whitespace separation */
+.cw-documents__list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  border-top: none !important;
+}
+
+.cw-document {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 8px 10px !important;
+  box-shadow: none !important;
+  cursor: pointer !important;
+  transition: background 0.1s ease !important;
+}
+
+.cw-document:hover {
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.cw-document header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: 100% !important;
+}
+
+.cw-document header .cs-link {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--foreground) !important;
+  text-decoration: none !important;
+}
+
+.cw-document header small {
+  margin-left: auto !important;
+  font-size: 11px !important;
+  color: var(--color-muted-foreground) !important;
+}
+
+.cw-document__content {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  padding: 12px !important;
+  font-size: 12px !important;
+  font-family: var(--font-mono, monospace) !important;
+  margin: 10px 0 !important;
+}
+
+/* Routines (Automazioni) */
+.cw-routines__list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  border-top: none !important;
+}
+
+.cw-routine {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 10px 12px !important;
+  box-shadow: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  transition: background 0.1s ease !important;
+}
+
+.cw-routine:hover {
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.cw-routine header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+
+.cw-routine header strong {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+
+.cw-routine header small {
+  font-size: 11px !important;
+  color: var(--color-muted-foreground) !important;
+}
+
+/* ================================================================
+   INLINE TABS & NAVIGATION (ZERO LINES — PILL/WHITESPACE STYLE)
+   ================================================================ */
+
+.ph-inline-tabs {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  border-bottom: none !important;
+  margin-bottom: 20px !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+.ph-inline-tab {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 6px 12px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--color-muted-foreground) !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  transition: all 0.12s ease !important;
+  white-space: nowrap !important;
+  line-height: 1 !important;
+}
+
+.ph-inline-tab:hover {
+  color: var(--foreground) !important;
+  background: rgba(0, 0, 0, 0.03) !important;
+}
+
+.ph-inline-tab.is-active,
+.ph-inline-tab[aria-selected="true"] {
+  color: var(--foreground) !important;
+  background: rgba(0, 0, 0, 0.06) !important;
+  font-weight: 600 !important;
+}
+
+.ph-inline-tab-count {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  color: var(--color-muted-foreground) !important;
+  background: rgba(0, 0, 0, 0.04) !important;
+  padding: 1px 6px !important;
+  border-radius: 999px !important;
+}
+
+.ph-inline-tab.is-active .ph-inline-tab-count {
+  color: var(--foreground) !important;
+  background: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* ================================================================
+   HOMUN EMPTY STATE (GLOBAL STANDARD)
+   ================================================================ */
+
+.homun-empty-state {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  padding: 56px 24px !important;
+  margin: 20px 0 !important;
+  background: transparent !important;
+  border: 1px dashed var(--color-border) !important;
+  border-radius: 8px !important;
+}
+
+.homun-empty-state__icon {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 8px !important;
+  background: rgba(0, 0, 0, 0.03) !important;
+  color: var(--color-muted-foreground) !important;
+  margin-bottom: 14px !important;
+}
+
+.homun-empty-state__title {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+  margin: 0 0 6px 0 !important;
+}
+
+.homun-empty-state__description {
+  font-size: 13px !important;
+  color: var(--color-muted-foreground) !important;
+  max-width: 480px !important;
+  line-height: 1.5 !important;
+  margin: 0 0 16px 0 !important;
+}
+
+/* Sidebar resets: New conversation button & active links */
+.cw-new {
+  background: var(--foreground) !important;
+  color: #ffffff !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  padding: 6px 12px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  transition: all 0.12s ease !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08) !important;
+}
+
+.cw-new:hover:not(:disabled) {
+  opacity: 0.9 !important;
+}
+
+.cs-space-links button.active {
+  background: rgba(0, 0, 0, 0.05) !important;
+  color: var(--foreground) !important;
+  font-weight: 600 !important;
+}
+
+.cs-space-links button:hover {
+  background: rgba(0, 0, 0, 0.03) !important;
+  color: var(--foreground) !important;
+}
+
+/* Sidebar clean typography for project works */
+.cv-project-work {
+  color: var(--color-muted-foreground) !important;
+  font-size: 12px !important;
+}
+
+.cv-project-work:hover {
+  color: var(--foreground) !important;
+}
+
+.cw-routine-creator,
+.cw-team-editor,
+.cw-agent-editor,
+.cv-mcp-add {
+  border-top: none !important;
+  padding-top: 12px !important;
+}
+
+/* ================================================================
+   ENGINE AGENTS & TEAMS RESET
+   ================================================================ */
+
+.cw-agent-card {
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  padding: 16px 20px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease !important;
+}
+
+.cw-agent-card:hover {
+  background: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.14) !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.03) !important;
+}
+
+.cw-agent-cap-chip {
+  background: #f4f4f5 !important;
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  color: #3f3f46 !important;
+  border-radius: 5px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  padding: 2px 8px !important;
+}
+
+.cw-agent-spec-chip {
+  background: #f4f4f5 !important;
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  color: #71717a !important;
+  border-radius: 5px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  padding: 2px 8px !important;
+}
+
+.cw-squad-layout {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow-y: auto !important;
+}
+
+.cw-agent-compact-card {
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  min-height: auto !important;
+  padding: 10px 12px !important;
+}
+
+.cw-agent-compact-card:hover {
+  background: rgba(0, 0, 0, 0.015) !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+}
+
+.cw-team-card {
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  padding: 10px 14px !important;
+  box-shadow: none !important;
+  transition: all 0.1s ease !important;
+}
+
+.cw-team-card:hover {
+  background: rgba(0, 0, 0, 0.015) !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+}
+
+.cw-squad-empty-card {
+  display: none !important;
+}
+
+.cw-agents-empty {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* ================================================================
+   CHAT STAGE & MESSAGES RESET
+   ================================================================ */
+
+.cw-stage {
+  background: #ffffff !important;
+}
+
+.cw-conversation {
+  background: #ffffff !important;
+}
+
+.cw-message.you {
+  background: #f4f4f5 !important;
+  border: none !important;
+  color: var(--foreground) !important;
+  border-radius: 12px 12px 2px 12px !important;
+  padding: 12px 16px !important;
+}
+
+.cw-engine-banner {
+  background: transparent !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 8px !important;
+  color: var(--foreground) !important;
+}
+
+/* Floating composer box styling */
+.cw .st-sdk-composer {
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04) !important;
+  border-radius: 12px !important;
+}
+
+.cw .st-sdk-composer:focus-within {
+  border-color: var(--foreground) !important;
+}
+
+/* ================================================================
+   GLOBAL DIVIDER LINE ELIMINATION (Modals, Panels, Bars)
+   ================================================================ */
+
+.engine-status-bar,
+.engine-domain-panel,
+.cw-engine-banner,
+.organization-role,
+.cw-sidebar-foot,
+.cv-settings-sidebar__top,
+.cv-settings-sidebar,
+.cv-settings-dialog {
+  border-top: none !important;
+  border-bottom: none !important;
+}
+
+.cv-settings-sidebar {
+  border-right: 1px solid var(--color-border) !important;
+  background: #fafafa !important;
+}
+
+.cv-settings-dialog {
+  border: 1px solid var(--color-border) !important;
+  background: #ffffff !important;
+}
+
+.cv-settings-body {
+  background: #ffffff !important;
+}
+
+/* ================================================================
+   CLARIFY, PATCH PROPOSALS & DELIVERABLE REVIEW CARDS
+   Matches the Linear/Cursor card template: zero heavy color fills.
+   ================================================================ */
+
+.cw-clarify-card {
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+}
+
+.cw-clarify-header {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+
+.cw-clarify-legend {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--foreground) !important;
+}
+
+.cw-clarify-choice {
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  color: var(--foreground) !important;
+  transition: all 0.1s ease !important;
+}
+
+.cw-clarify-choice:hover {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border-color: var(--color-border) !important;
+}
+
+.cw-clarify-choice.is-selected {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-color: var(--foreground) !important;
+  color: var(--foreground) !important;
+  font-weight: 500 !important;
+}
+
+.cs-badge-recommended {
+  background: rgba(0, 0, 0, 0.06) !important;
+  color: var(--foreground) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  border-radius: 4px !important;
+}
+
+.cw-clarify-textarea {
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  background: #ffffff !important;
+  color: var(--foreground) !important;
+}
+
+.cw-clarify-textarea:focus {
+  border-color: var(--foreground) !important;
+  outline: none !important;
+}
+
+/* Patch proposals & chat deliverables */
+.cc-chat-proposal,
+.cc-step-editor,
+.cw-patch-preview {
+  background: #ffffff !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 8px !important;
+  padding: 16px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+}
+
+.cc-chat-proposal strong,
+.cw-patch-preview strong {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+
+/* Artifact review: 100% flat, NO container box, NO borders, NO tint */
+.cw-artifact-review-card,
+.cw-artifact-review-inline {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 16px 0 24px !important;
+}
+
+.cw-artifact-header h3,
+.cw-artifact-header h4 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+
+/* Artifact toolbar buttons: NEVER background, ONLY color change */
+.cw-artifact-toolbar button,
+.cw-artifact-toolbar button:hover,
+.cw-artifact-toolbar button:focus,
+.cw-artifact-toolbar button.is-active {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 4px !important;
+}
+
+.cw-artifact-toolbar button {
+  color: #a1a1aa !important;
+}
+
+.cw-artifact-toolbar button:hover {
+  color: var(--foreground, #18181b) !important;
+}
+
+.cw-artifact-toolbar button.is-active {
+  color: var(--foreground, #18181b) !important;
+  font-weight: 700 !important;
+}
+
+.cw-artifact-toolbar button.cw-artifact-copy-btn.is-copied {
+  color: #16a34a !important;
+}
+
+.cw-artifact-content {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+/* Streamdown table resets: completely flat, NO box wrapper, NO borders around table, NO green/dark thead */
+[data-streamdown="table-wrapper"],
+[data-streamdown="table-wrapper"] > div,
+[data-streamdown="table"],
+.cw-artifact-markdown table {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 12px 0 !important;
+}
+
+[data-streamdown="table-header"],
+[data-streamdown="table-header-cell"],
+.cw-artifact-markdown thead,
+.cw-artifact-markdown thead tr,
+.cw-artifact-markdown th {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+  color: #71717a !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  padding: 8px 12px !important;
+}
+
+[data-streamdown="table-cell"],
+.cw-artifact-markdown td {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
+  color: #18181b !important;
+  padding: 8px 12px !important;
+}
+
+[data-streamdown="table-row"]:last-child td,
+.cw-artifact-markdown tr:last-child td {
+  border-bottom: none !important;
+}
+
+[data-streamdown="table-row"]:hover td,
+.cw-artifact-markdown tr:hover td {
+  background: rgba(0, 0, 0, 0.015) !important;
+}
+
+/* ================================================================
+   RIGHT-HAND WORK PANEL (INSPECTOR TEMPLATE)
+   Clean flat layout matching Linear issue details.
+   ================================================================ */
+
+.cw-workspace.cw-engine-summary,
+.cw-details-panel {
+  background: #ffffff !important;
+  border-left: 1px solid var(--color-border) !important;
+}
+
+.cw-engine-summary h2 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+
+.cw-engine-summary h3 {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  color: var(--color-muted-foreground) !important;
+}
+
+.cw-engine-summary__facts dt {
+  color: var(--color-muted-foreground) !important;
+  font-size: 12px !important;
+}
+
+.cw-engine-summary__facts dd {
+  color: var(--foreground) !important;
+  font-size: 12px !important;
+}
+
+.cw-engine-summary__next {
+  border-top: none !important;
+  padding-top: 12px !important;
+}
+
+/* Sidebar and window background are identical (#f4f4f5), only .cw-main card is white */
+html,
+body,
+#root,
+.cw,
+.cw-sidebar,
+.cw .cw-sidebar {
+  background: #f4f4f5 !important;
+  border-right: none !important;
+}
+
+.cw-main {
+  background: #ffffff !important;
+  margin: 6px 6px 42px 6px !important;
+  height: calc(100dvh - 48px) !important;
+}
+.cw-sidebar-closed .cw-main {
+  margin: 6px 6px 42px 6px !important;
+}
+
+/* All icon and dock buttons: hover/active changes text/icon color ONLY, zero background tint */
+.linear-agent-dock-btn:hover,
+.linear-agent-dock-history:hover,
+.linear-floating-agent-btn:hover,
+.cw-sb-footer-btn:hover,
+.cw-sb-toggle-btn:hover,
+.cw-sb-section-header button:hover,
+.cw-icon:hover,
+.cv-chat-more:hover,
+.cw-msg-action-btn:hover,
+.cw-marginalia-btn:hover,
+.cw-topbar button:hover,
+.cw-conversation-head button:hover,
+.cw-artifact-toolbar button:hover,
+.cw-artifact-toolbar button.is-active,
+.ph-inline-tab:hover,
+.ph-inline-tab--action:hover,
+.ph-tab:hover,
+.st-sdk-composer button:hover,
+.cw-team-popover-close:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: var(--foreground, #18181b) !important;
+  box-shadow: none !important;
+}
+
+/* Chat step results: flat white, subtle hairline border */
+.cc-chat-results details {
+  background: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.cc-chat-results details summary {
+  color: #18181b !important;
+}
+
+/* Chat date separator */
+.cw-date {
+  color: #a1a1aa !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.08em !important;
+}
+
+

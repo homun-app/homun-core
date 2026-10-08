@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { CheckCircle2 } from "lucide-react";
+import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 export type TaskSummary = {
   id: string;
   title: string;
@@ -20,15 +22,22 @@ export function ConversationTasks({
   onOpen,
   onDue,
   onMove,
+  initialView = "Elenco",
 }: {
   onReveal: () => void;
   items: TaskSummary[];
   onOpen: (id: string) => void;
-  onDue: (id: string, date: string) => void;
+  onDue: (id: string, date: string) => void | Promise<void>;
   onMove: (id: string, phase: string) => string;
+  initialView?: string;
 }) {
+  const [savingDue, setSavingDue] = useState(false);
+  const [dueError, setDueError] = useState<unknown>(null);
   const [feedback, setFeedback] = useState("");
-  const [view, setView] = useState("Elenco");
+  const [view, setView] = useState(initialView);
+  if (initialView && ["Elenco", "Kanban", "Calendario"].includes(initialView) && view !== initialView) {
+    setView(initialView);
+  }
   const [focus, setFocus] = useState("Tutti");
   const [query, setQuery] = useState("");
   const [selected, setSelectedValue] = useState("");
@@ -64,15 +73,17 @@ export function ConversationTasks({
           onDragStart={(e) => e.dataTransfer.setData("text/plain", i.id)}
           onClick={() => onOpen(i.id)}
         >
-          <strong>{i.title}</strong>
-          <small>
-            {i.agent}
-            {i.unavailable ? " · agente eliminato" : ""} · {i.project || "Senza progetto"}
-          </small>
-          <small>
-            {i.status}
-            {i.due ? ` · ${i.due}` : ""}
-          </small>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className="ph-work-row__dot" />
+            <div>
+              <strong>{i.title}</strong>
+              <small>
+                {i.agent}
+                {i.unavailable ? " · eliminato" : ""} · {i.project || "Senza progetto"}
+                {i.due ? ` · ${i.due}` : ""}
+              </small>
+            </div>
+          </div>
         </button>
         <button
           className="ct-manage"
@@ -92,20 +103,6 @@ export function ConversationTasks({
     <div className="cw-stage with-panel cs-stage">
       <section className="cw-conversation">
         <div className="cw-history">
-          <span className="cw-overline">COMPITI</span>
-          <h1 className="cs-title">Il lavoro, a colpo d’occhio.</h1>
-          <p className="cs-intro">Le stesse conversazioni, viste per stato o scadenza.</p>
-          <div className="cs-actions">
-            {["Elenco", "Kanban", "Calendario"].map((v) => (
-              <button
-                key={v}
-                className={view === v ? "cw-primary" : "cw-secondary"}
-                onClick={() => setView(v)}
-              >
-                {v}
-              </button>
-            ))}
-          </div>
           <div className="ct-focus-filters" aria-label="Stato del lavoro">
             {["Tutti", "Richiede te", "In corso", "Risultati"].map((label) => (
               <button key={label} aria-pressed={focus === label} onClick={() => setFocus(label)}>
@@ -139,11 +136,20 @@ export function ConversationTasks({
             </p>
           )}
           {!visible.length && (
-            <p className="cw-hint">
-              Nessun compito. Inizia una conversazione dalla Home o da un progetto.
-            </p>
+            <div className="homun-empty-state">
+              <div className="homun-empty-state__icon">
+                <CheckCircle2 size={20} />
+              </div>
+              <h3 className="homun-empty-state__title">
+                {items.length === 0 ? "Nessun compito attivo" : "Nessun compito trovato"}
+              </h3>
+              <p className="homun-empty-state__description">
+                {items.length === 0
+                  ? "I compiti nascono automaticamente quando affidi un lavoro a un agente o collaboratore."
+                  : "Nessun lavoro corrisponde ai criteri di filtro o di ricerca impostati."}
+              </p>
+            </div>
           )}
-          {!visible.length && <p className="cw-hint">Nessun lavoro corrisponde a questi filtri.</p>}
           {view === "Elenco" ? (
             visible.map(card)
           ) : view === "Kanban" ? (
@@ -214,9 +220,22 @@ export function ConversationTasks({
                 type="date"
                 aria-label="Scadenza compito"
                 value={item.due.slice(0, 10)}
-                onChange={(e) => onDue(item.id, e.target.value)}
+                disabled={savingDue}
+                onChange={async (e) => {
+                  setSavingDue(true);
+                  setDueError(null);
+                  try {
+                    await onDue(item.id, e.target.value);
+                  } catch (cause) {
+                    setDueError(cause);
+                  } finally {
+                    setSavingDue(false);
+                  }
+                }}
               />
             </label>
+            {savingDue && <p role="status">Salvo la scadenza…</p>}
+            <HomunErrorNotice error={dueError} />
             <p className="cw-hint">
               {item.unavailable
                 ? "L’agente è stato eliminato. Lo storico è disponibile."
@@ -247,7 +266,9 @@ export function ConversationTasks({
               {items.filter((i) => i.phase === "review").length} risultati da verificare
               {(() => {
                 const today = new Date().toISOString().slice(0, 10);
-                const overdue = items.filter((i) => i.due && i.due.slice(0, 10) < today && !["approved"].includes(i.phase)).length;
+                const overdue = items.filter(
+                  (i) => i.due && i.due.slice(0, 10) < today && !["approved"].includes(i.phase),
+                ).length;
                 const todayDue = items.filter((i) => i.due && i.due.slice(0, 10) === today).length;
                 const bits = [];
                 if (overdue) bits.push(`${overdue} scadut${overdue === 1 ? "o" : "i"}`);

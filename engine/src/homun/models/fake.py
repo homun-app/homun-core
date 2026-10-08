@@ -85,13 +85,21 @@ class FakeProvider:
             usage=usage,
         )
 
-    def stream(self, messages: list[ChatMessage], *, model_id: str | None = None) -> Iterator[str]:
+    def stream(
+        self,
+        messages: list[ChatMessage],
+        *,
+        model_id: str | None = None,
+        cancel_check: Any | None = None,
+    ) -> Iterator[str]:
         result = self.complete(messages, model_id=model_id)
         self.last_stream_result = result
         size = 24
         text = result.text
         for i in range(0, len(text), size):
             yield text[i : i + size]
+            if cancel_check is not None and callable(cancel_check) and cancel_check():
+                break
 
     def interpret(self, text: str, *, roster: list[RosterEntry]) -> MessageInterpretation:
         """Structured interpret for CI — roster @ resolution only, not multilingual NLU."""

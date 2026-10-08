@@ -327,6 +327,7 @@ def test_agent_owner_cannot_approve_concrete_actions_person_gate(setup):
     # Delegate to a fresh agent: it becomes the owner, Fabio stays reviewer.
     brief['new_agent'] = {'name': 'Analista', 'role': 'Analisi', 'instructions': 'Confronta'}
     brief['suggested_agent_id'] = None
+    brief['changed_fields'] = ['staffing']
     p2 = intake_propose(ctx, actor, wid, {'command_id': 'i2', 'text': 'Con confronto', 'expected_version': 1})
     intake_confirm(ctx, actor, wid, p2['id'], {'command_id': 'ok', 'digest': p2['digest'],
                                                'expected_version': p2['expected_version'], 'create_agent': True})

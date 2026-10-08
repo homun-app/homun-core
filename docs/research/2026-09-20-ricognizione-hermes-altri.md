@@ -1,5 +1,7 @@
 # Ricognizione aggiornata: Hermes e altri sistemi agentici
 
+> Ricerca datata conservata. Il [confronto d’uso aggiornato](2026-09-23-hermes-homun-utilizzo.md) include Desktop, Bot Mode e casi raccontati dagli utenti. Non riutilizzare come attuali i limiti upstream, i conteggi o le priorità di questa fotografia senza riverifica.
+
 **Data:** 20 settembre 2026, dopo la conclusione del passo C (registro capacità + lettura materiale).
 **Scopo:** verificare se l'upstream ha evoluto le lezioni che guidano Homun e affinare il passo D. Nessuna modifica al codice in questa tranche: è analisi con raccomandazioni.
 

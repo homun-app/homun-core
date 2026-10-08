@@ -20,6 +20,8 @@ import {
 } from "./interpretation-display.ts";
 
 export type EngineWorkRecord = {
+  created_at?: string;
+  updated_at?: string;
   id: string;
   title: string;
   objective: string;
@@ -32,6 +34,7 @@ export type EngineWorkRecord = {
   current_plan_revision: number;
   current_artifact_version: number;
   intake_confirmed?: boolean;
+  revision_requested?: boolean;
   due_date?: string | null;
   plan?: Array<{
     id: string;
@@ -55,6 +58,7 @@ export type EngineWorkRecord = {
   pending_contribution?: {
     id: string;
     to_actor_id: string;
+    recipient_name?: string;
     need: string;
     status: string;
     step_id: string;
@@ -87,12 +91,14 @@ export function parseEngineWorkRecord(raw: Record<string, unknown>): EngineWorkR
   } else if ("reviewer_id" in raw) {
     record.reviewer_id = null;
   }
+  record.revision_requested = raw["revision_requested"] === true;
   const pending = raw["pending_contribution"];
   if (pending && typeof pending === "object") {
     const p = pending as Record<string, unknown>;
     record.pending_contribution = {
       id: String(p["id"] ?? ""),
       to_actor_id: String(p["to_actor_id"] ?? ""),
+      ...(typeof p["recipient_name"] === "string" ? {recipient_name: p["recipient_name"]} : {}),
       need: String(p["need"] ?? ""),
       status: String(p["status"] ?? "pending"),
       step_id: String(p["step_id"] ?? ""),
@@ -187,7 +193,6 @@ export function engineWorkToUiWork(
   record: EngineWorkRecord,
   messages?: ConversationMessage[],
 ): Work {
-  const statusLine = `Fonte motore · stato ${record.status} · v${record.version}`;
   const objectiveLine = record.objective
     ? `Obiettivo: ${record.objective}`
     : "Obiettivo non ancora specificato.";
@@ -198,7 +203,7 @@ export function engineWorkToUiWork(
           {
             who: "agent",
             sender: "Homun",
-            text: `${statusLine}\n${objectiveLine}\nQuesto lavoro è sul dominio SQLite del motore. Le azioni di simulazione restano disabilitate.`,
+            text: objectiveLine,
           },
         ];
   const work: Work = {
@@ -217,6 +222,7 @@ export function engineWorkToUiWork(
     engineStatus: record.status,
     engineObjective: record.objective,
     engineIntakeConfirmed: record.intake_confirmed ?? false,
+    engineRevisionRequested: record.revision_requested ?? false,
     enginePlan: record.plan as Work["enginePlan"],
     engineLatestArtifact: record.latest_artifact,
     engineDue: record.due_date,
@@ -226,16 +232,22 @@ export function engineWorkToUiWork(
     requester: "Fabio",
     reviewer: "Fabio",
   };
+  // data reale del motore per il raggruppamento per giorno nella sidebar
+  const workDate = record.updated_at ?? record.created_at;
+  if (workDate) {
+    work.startedAt = workDate;
+  }
   if (record.project_id) {
     work.projectId = record.project_id;
   }
   if (record.pending_contribution) {
     work.engineContributionRequestId = record.pending_contribution.id;
     work.request = {
-      to:
+      to: record.pending_contribution.recipient_name ?? (
         record.pending_contribution.to_actor_id === "person_fabio"
           ? "Fabio"
-          : record.pending_contribution.to_actor_id,
+          : record.pending_contribution.to_actor_id),
+      viaInvitation: Boolean(record.pending_contribution.recipient_name),
       need: record.pending_contribution.need,
       status: record.pending_contribution.status === "pending" ? "pending" : "resolved",
     };
@@ -247,13 +259,15 @@ export async function createEngineConversationAndWork(input: {
   title: string;
   objective: string;
   actor?: EngineActor;
+  /** La conversazione nasce nel progetto: eredita memoria e materiali. */
+  projectId?: string | undefined;
 }): Promise<{ conversationId: string; workId: string; record: EngineWorkRecord }> {
   const actor = input.actor ?? defaultLocalActor();
   const title = input.title.trim() || "Conversazione motore";
   const objective = input.objective.trim() || title;
   const created = await postEngineCommand({
     type: "conversation.create",
-    payload: { title },
+    payload: { title, ...(input.projectId ? { project_id: input.projectId } : {}) },
     actor,
   });
   const conversationId = String(created.result["conversation_id"] ?? "");
@@ -292,6 +306,7 @@ export async function createEngineConversationAndWork(input: {
 export async function postEngineConversationMessage(input: {
   conversationId: string;
   text: string;
+  connectionId?: string | undefined;
   actor?: EngineActor;
   roster?: Array<{ id: string; display_name: string; kind: "person" | "agent" | "other" }>;
   signal?: AbortSignal;
@@ -303,6 +318,7 @@ export async function postEngineConversationMessage(input: {
   interpretation: MessageInterpretation | null;
   assistantText: string;
   patchProposal: WorkPatchProposal | null;
+  chatAgent?: boolean;
 }> {
   const actor = input.actor ?? defaultLocalActor();
   let roster = input.roster;
@@ -334,6 +350,7 @@ export async function postEngineConversationMessage(input: {
       conversation_id: input.conversationId,
       text: input.text,
       roster,
+      ...(input.connectionId ? { connection_id: input.connectionId } : {}),
     },
     actor,
     ...(input.signal ? { signal: input.signal } : {}),
@@ -347,8 +364,12 @@ export async function postEngineConversationMessage(input: {
       : await postEngineCommandStream(commandInput);
   const interpretation = parseInterpretation(result.result["interpretation"]);
   const patchProposal = parseWorkPatchProposal(result.result["patch_proposal"]);
-  const assistantText =
-    typeof result.result["assistant_text"] === "string"
+  // Percorso chat-agente: nessun testo qui — la risposta arriva in conversazione
+  // quando il run completa (il blocco live mostra intanto il progredire).
+  const chatAgent = result.result["chat_agent"] === true;
+  const assistantText = chatAgent
+    ? ""
+    : typeof result.result["assistant_text"] === "string"
       ? result.result["assistant_text"]
       : interpretation
         ? formatInterpretationForUi(interpretation)
@@ -359,6 +380,7 @@ export async function postEngineConversationMessage(input: {
     interpretation,
     assistantText,
     patchProposal,
+    chatAgent,
   };
 }
 
@@ -390,12 +412,16 @@ export function assistantFromPosted(posted: {
   assistantMessageId?: string;
   assistantText: string;
   patchProposal: WorkPatchProposal | null;
+  reasoning?: string;
+  tools?: Array<{ tool: string; message: string }>;
 }): ConversationMessage {
   return {
     who: "agent",
     sender: "Homun",
     ...(posted.assistantMessageId ? { engineMessageId: posted.assistantMessageId } : {}),
     text: posted.assistantText,
+    ...(posted.reasoning ? { reasoning: posted.reasoning } : {}),
+    ...(posted.tools && posted.tools.length > 0 ? { tools: posted.tools } : {}),
     ...(posted.patchProposal
       ? {
           patchProposal: {

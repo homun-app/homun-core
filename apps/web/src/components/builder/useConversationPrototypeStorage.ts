@@ -79,7 +79,7 @@ export function useConversationPrototypeStorage(args: Args) {
           args.setActive(saved.view.active);
           args.setSpace(saved.view.space);
           args.setSidebarOpen(window.innerWidth > 800 && saved.view.sidebarOpen);
-          args.setPanel(saved.view.panel);
+          args.setPanel(false);
           args.setViewer(saved.view.viewer);
           args.setSpaceSelected(saved.view.selected || "");
         }

@@ -46,24 +46,29 @@ def run_chain(ctx, steps):
 
 def _run_core(ctx, steps, runner):
     for step in steps:
-        record = ctx.repository.load().commands.get(step['proposal_id'])
+        record = ctx.repository.snapshot().commands.get(step['proposal_id'])
         if record is None or record.type not in ('material_read.propose', 'price_comparison.propose'):
             continue
-        if record.result['status'] in {'completed', 'blocked'}:
-            continue
+        if record.result['status'] == 'blocked':
+            _block_remaining(ctx, steps, step['proposal_id'])
+            return
         if record.result['status'] == 'failed':
             _block_remaining(ctx, steps, step['proposal_id'])
             return
         try:
+            # Always invoke completed steps too: DBOS replay identifies calls
+            # by ordinal. Skipping one would replay its result for the next
+            # tool. The execution itself already fences completed proposals.
             runner(ctx, step['capability'], step['proposal_id'])
         except Exception:
             _block_remaining(ctx, steps, step['proposal_id'])
             return
-        outcome = ctx.repository.load().commands.get(step['proposal_id'])
+        outcome = ctx.repository.snapshot().commands.get(step['proposal_id'])
         if outcome is None or outcome.result['status'] != 'completed':
             _block_remaining(ctx, steps, step['proposal_id'])
             return
         if not _continue_if_more_steps(ctx, steps, step):
+            _block_remaining(ctx, steps, step['proposal_id'])
             return
     _mark_chain(ctx, steps, 'completed')
 
@@ -77,19 +82,28 @@ def _continue_if_more_steps(ctx, steps, finished_step):
     as events, without touching versions the steps are bound to. The last step
     leaves the work in REVIEW for the human.
     """
-    remaining = [s for s in steps
-                 if ctx.repository.load().commands.get(s['proposal_id']) is not None
-                 and ctx.repository.load().commands[s['proposal_id']].result['status']
-                 in {'queued', 'running', 'pending_approval'}]
-    if not remaining:
-        return True
     from homun.domain.ids import new_id
     from homun.domain.models import DomainEvent, utc_now
     from homun.domain.states import WorkStatus
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
+            following = steps[steps.index(finished_step) + 1:]
+            # On replay, only the last completed step owns the continuation.
+            if any(store.commands[s['proposal_id']].result['status'] == 'completed'
+                   for s in following):
+                return True
+            remaining = [s for s in following if store.commands[s['proposal_id']].result['status']
+                         in {'queued', 'running'}]
+            if not remaining:
+                return True
             chain_record = store.commands.get(_chain_id_of(steps))
+            if chain_record is None or chain_record.result['status'] not in {'queued', 'running'}:
+                return False
             work = store.works[chain_record.result['work_id']]
+            publication = store.commands.get(f"{finished_step['proposal_id']}:artifact")
+            if (publication is None or work.version != publication.result['version']
+                    or work.status not in {WorkStatus.REVIEW, WorkStatus.RUNNING}):
+                return False
             transitions = []
             if work.status == WorkStatus.REVIEW:
                 work.status = WorkStatus.READY
@@ -123,7 +137,6 @@ def _block_remaining(ctx, steps, failed_id):
     """A failed step keeps completed artifacts and blocks the rest of the chain."""
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
-            chain_id = next((s['proposal_id'] for s in steps if s['proposal_id'] == failed_id), None)
             for step in steps:
                 record = store.commands.get(step['proposal_id'])
                 if record is None:
@@ -157,7 +170,7 @@ def start(workflow_id, steps):
 
 def deliver_chains(ctx):
     from homun.application.tool_chains import PROPOSAL_TYPE
-    for record in ctx.repository.load().commands.values():
+    for record in ctx.repository.snapshot().commands.values():
         if record.type != PROPOSAL_TYPE or record.result['status'] not in {'queued', 'running'}:
             continue
         chain = record.result

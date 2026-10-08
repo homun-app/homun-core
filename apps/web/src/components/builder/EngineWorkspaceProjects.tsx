@@ -1,23 +1,43 @@
-/** Read-only authoritative projects and their real work links. */
-import type { SpaceProject } from './ConversationSpace';
-import type { Work } from './conversation-types';
+/**
+ * Project Hub entrypoint for engine-backed workspace projects.
+ * Replaces the old minimal list with the full ProjectHubView.
+ */
+import type { SpaceProject } from "./ConversationSpace";
+import type { Work } from "./conversation-types";
+import { ProjectHubView } from "./project-hub/ProjectHubView";
 
-export function EngineWorkspaceProjects({ projects, works, selected, onProject, onWork }: {
+export function EngineWorkspaceProjects({
+  projects,
+  works,
+  selected,
+  onProject,
+  onWork,
+  onCreateWork,
+  engineMode = false,
+  sidebarOpen,
+  onOpenSidebar,
+}: {
   projects: SpaceProject[];
   works: Work[];
   selected: string;
   onProject: (id: string) => void;
   onWork: (id: string) => void;
+  onCreateWork?: (projectId: string) => void;
+  engineMode?: boolean | undefined;
+  sidebarOpen?: boolean | undefined;
+  onOpenSidebar?: (() => void) | undefined;
 }) {
-  const visible = selected ? projects.filter(project => project.id === selected) : projects;
-  return <section className="cw-workspace" aria-label="Progetti">
-    <div className="cw-panel-top"><h2>Progetti</h2></div>
-    {selected && <button className="cs-link" onClick={() => onProject('')}>Tutti i progetti</button>}
-    {!visible.length && <p>Nessun progetto disponibile.</p>}
-    {visible.map(project => <section key={project.id}>
-      <h3><button className="cs-link" onClick={() => onProject(project.id)}>{project.name}</button></h3>
-      {project.brief && <p>{project.brief}</p>}
-      {works.filter(work => work.projectId === project.id).map(work => <p key={work.id}><button className="cw-secondary" onClick={() => onWork(work.id)}>{work.title} ↗</button></p>)}
-    </section>)}
-  </section>;
+  return (
+    <ProjectHubView
+      projects={projects}
+      works={works}
+      selectedId={selected}
+      onSelectProject={onProject}
+      onOpenWork={onWork}
+      onCreateWork={onCreateWork}
+      engineMode={engineMode}
+      sidebarOpen={sidebarOpen}
+      onOpenSidebar={onOpenSidebar}
+    />
+  );
 }

@@ -1,9 +1,15 @@
 /** Project materials as tool sources; reading never creates a project. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Work } from "@/components/builder/conversation-types";
-import { archiveEngineMaterial, ingestEngineMaterial, listEngineMaterials, type EngineMaterial } from "@/lib/engine-projects-client";
+import { listEngineMaterials, type EngineMaterial } from "@/lib/engine-projects-client";
 import { findEngineProjectForWork, resolveEngineProjectForWork } from "@/lib/engine-work-project";
-import { createMaterialRequestGuard, ingestMaterialFiles, notifyMaterialChange, subscribeMaterialChanges, type MaterialFailure } from "@/lib/project-materials-lifecycle";
+import {
+  createMaterialRequestGuard,
+  subscribeMaterialChanges,
+  type MaterialFailure,
+} from "@/lib/project-materials-lifecycle";
+
+import { archiveLibraryMaterial, uploadEngineMaterialFiles } from "@/lib/engine-material-library";
 
 export type IngestOutcome = {
   addedIds: string[];
@@ -23,7 +29,10 @@ export type ProjectMaterials = {
   remove: (material: EngineMaterial) => Promise<boolean>;
 };
 
-export function useProjectMaterials(work: Work, filter: (material: EngineMaterial) => boolean): ProjectMaterials {
+export function useProjectMaterials(
+  work: Work,
+  filter: (material: EngineMaterial) => boolean,
+): ProjectMaterials {
   const [materials, setMaterials] = useState<EngineMaterial[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -33,7 +42,10 @@ export function useProjectMaterials(work: Work, filter: (material: EngineMateria
   workRef.current = work;
   const filterRef = useRef(filter);
   filterRef.current = filter;
-  const scope = useMemo(() => ({ guard: createMaterialRequestGuard(), live: true }), [work.id, work.projectId, work.engineConversationId]);
+  const scope = useMemo(
+    () => ({ guard: createMaterialRequestGuard(), live: true }),
+    [work.id, work.projectId, work.engineConversationId],
+  );
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
   const active = () => scope.live && scopeRef.current === scope;
@@ -42,7 +54,9 @@ export function useProjectMaterials(work: Work, filter: (material: EngineMateria
     const current = scope.guard.begin();
     try {
       const projectId = await findEngineProjectForWork(workRef.current);
-      const items = projectId ? (await listEngineMaterials({ projectId })).filter(filterRef.current) : [];
+      const items = projectId
+        ? (await listEngineMaterials({ projectId })).filter(filterRef.current)
+        : [];
       if (scope.live && scopeRef.current === scope && current()) {
         setMaterials(items);
         setLoaded(true);
@@ -62,32 +76,43 @@ export function useProjectMaterials(work: Work, filter: (material: EngineMateria
     setBusy(false);
     setError(null);
     setFailures([]);
-    const refresh = () => { void reload().catch(() => { /* reload preserves the typed error */ }); };
+    const refresh = () => {
+      void reload().catch(() => {
+        /* reload preserves the typed error */
+      });
+    };
     const unsubscribe = subscribeMaterialChanges(refresh);
     refresh();
-    return () => { scope.live = false; scope.guard.invalidate(); unsubscribe(); };
+    return () => {
+      scope.live = false;
+      scope.guard.invalidate();
+      unsubscribe();
+    };
   }, [reload, scope]);
 
   async function ingest(files: File[]): Promise<IngestOutcome> {
-    if (!files.length) return { addedIds: [], eligibleIds: [], existing: 0, failed: 0, failures: [] };
+    if (!files.length)
+      return { addedIds: [], eligibleIds: [], existing: 0, failed: 0, failures: [] };
     const targetWork = workRef.current;
     setBusy(true);
     setError(null);
     setFailures([]);
     try {
       const projectId = await resolveEngineProjectForWork(targetWork, "Materiali del lavoro");
-      const outcome = await ingestMaterialFiles(files, (file) => ingestEngineMaterial({
-        projectId, file,
-        ...(file.webkitRelativePath ? { relativePath: file.webkitRelativePath } : {}),
-      }));
+      const outcome = await uploadEngineMaterialFiles(projectId, files);
       if (active()) setFailures(outcome.failures);
-      // Notify even if the following refresh fails: persistence already succeeded.
-      if (outcome.addedIds.length) notifyMaterialChange(projectId);
       let reloaded: EngineMaterial[] = [];
       if (active()) {
-        try { reloaded = await reload(); } catch { /* preserve successes and reload's typed error */ }
+        try {
+          reloaded = await reload();
+        } catch {
+          /* preserve successes and reload's typed error */
+        }
       }
-      return { ...outcome, eligibleIds: outcome.addedIds.filter((id) => reloaded.some((m) => m.id === id)) };
+      return {
+        ...outcome,
+        eligibleIds: outcome.addedIds.filter((id) => reloaded.some((m) => m.id === id)),
+      };
     } catch (cause) {
       if (active()) setError(cause);
       return { addedIds: [], eligibleIds: [], existing: 0, failed: files.length, failures: [] };
@@ -100,10 +125,13 @@ export function useProjectMaterials(work: Work, filter: (material: EngineMateria
     setBusy(true);
     setError(null);
     try {
-      await archiveEngineMaterial({ materialId: material.id, expectedVersion: material.version });
-      notifyMaterialChange(material.project_id);
+      await archiveLibraryMaterial(material);
       if (active()) {
-        try { await reload(); } catch { /* archive succeeded; reload preserves error */ }
+        try {
+          await reload();
+        } catch {
+          /* archive succeeded; reload preserves error */
+        }
       }
       return true;
     } catch (cause) {

@@ -8,7 +8,7 @@ function createProtocolHandler({ webRoot, engine }) {
     const url = new URL(request.url);
     if (url.protocol !== 'homun:' || url.host !== 'app') return new Response('Forbidden', { status: 403 });
     if (url.pathname.startsWith('/engine/v1/')) {
-      if (!['GET', 'POST', 'DELETE'].includes(request.method)) return new Response('Method not allowed', { status: 405 });
+      if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return new Response('Method not allowed', { status: 405 });
       const headers = new Headers({ Authorization: `Bearer ${engine.token}` });
       for (const name of ['accept', 'content-type', 'x-homun-actor-id', 'x-homun-actor-name', 'x-homun-command-id']) {
         const value = request.headers.get(name); if (value) headers.set(name, value);

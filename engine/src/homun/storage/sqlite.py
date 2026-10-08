@@ -61,17 +61,30 @@ class SqliteWorkspaceRepository:
         self.workspace_id = workspace_id
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
+        self._cache: WorkspaceStore | None = None
+        self._cache_generation = -1
         self._conn = _open_connection(path, encryption_key)
         try:
             initialize(self._conn, workspace_id)
             self._conn.execute("PRAGMA journal_mode=WAL")
+            # FULL: ogni commit fsynca il WAL. Il default NORMAL di WAL può
+            # lasciare pagine a metà su kill crudali: il costo è irrilevante
+            # per il traffico di un workspace locale.
+            self._conn.execute("PRAGMA synchronous=FULL")
             self._conn.execute("PRAGMA foreign_keys=ON")
+            self._conn.execute("PRAGMA busy_timeout=5000")
         except BaseException:
             self._conn.close()
             raise
 
     def close(self) -> None:
         with self._lock:
+            try:
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
+            self._cache = None
+            self._cache_generation = -1
             self._conn.close()
 
     def connection(self) -> sqlite3.Connection:
@@ -81,6 +94,12 @@ class SqliteWorkspaceRepository:
         and memory operations must run outside the domain transaction boundary.
         """
         return self._conn
+
+    @property
+    def lock(self) -> RLock:
+        """Il lock grezzo del repository, per store operativi affiancati
+        (sessioni delle persone) che devono serializzarsi con le transazioni."""
+        return self._lock
 
     @contextmanager
     def locked(self):
@@ -123,6 +142,26 @@ class SqliteWorkspaceRepository:
         store.commands = {key: CommandRecord.model_validate_json(payload) for key, payload in
                           self._conn.execute("SELECT command_id, payload FROM commands")}
         return store
+
+    def generation(self) -> int:
+        """Cursore di versione: una lettura sola, economica."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM meta WHERE key='generation'").fetchone()
+            return int(row[0]) if row else -1
+
+    def snapshot(self) -> WorkspaceStore:
+        """Vista read-only condivisa, stile Hermes (sessione residente):
+        il parsing avviene solo quando la generation cambia; le scritture
+        (load+transaction) restano isolate e invalidano qui il cursore.
+        I chiamanti NON devono mutare lo store restituito."""
+        with self._lock:
+            if self._cache is not None and self.generation() == self._cache_generation:
+                return self._cache
+            store = self._load()
+            self._cache = store
+            self._cache_generation = store._generation
+            return store
 
     def save(self, store: WorkspaceStore) -> None:
         with self._atomic(write=True):

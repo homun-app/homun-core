@@ -106,7 +106,7 @@ def build_reading(material, data, max_characters):
 
 def _report_message(proposal):
     return (f"Lettura completata: {material_title(proposal)}. "
-            f"Estratto e provenienza nell'artifact, pronto per la revisione umana. Fonte: motore.")
+            f"Estratto e provenienza nell'artifact, pronto per la revisione umana.")
 
 
 def _record_failure(store, proposal, code, *, blocked=False):

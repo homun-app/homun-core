@@ -7,6 +7,7 @@ export function ConversationProjectNav({
   onProject,
   onWork,
   onAll,
+  onCreate,
   onMove,
   actions,
 }: {
@@ -15,6 +16,7 @@ export function ConversationProjectNav({
   onProject: (id: string) => void;
   onWork: (id: string) => void;
   onAll: () => void;
+  onCreate?: () => void;
   onMove: (id: string, projectId: string) => void;
   actions: (id: string) => React.ReactNode;
 }) {
@@ -24,6 +26,15 @@ export function ConversationProjectNav({
   }
   function projectRow(p: SpaceProject) {
     const children = works.filter((w) => w.projectId === p.id);
+    const hasDuplicateName = projects.filter((item) => item.name === p.name).length > 1;
+    let label = p.name;
+    const firstChild = children[0];
+    if (hasDuplicateName && firstChild) {
+      const distinctPart = firstChild.title.replace(p.name, "").replace(/^[·\s-]+/, "");
+      if (distinctPart) {
+        label = `${p.name} · ${distinctPart}`;
+      }
+    }
     return (
       <div
         key={p.id}
@@ -38,7 +49,7 @@ export function ConversationProjectNav({
       >
         <div>
           <button
-            aria-label={`Conversazioni di ${p.name}`}
+            aria-label={`Conversazioni di ${label}`}
             aria-expanded={!closed.includes(p.id)}
             onClick={() => toggle(p.id)}
           >
@@ -49,7 +60,7 @@ export function ConversationProjectNav({
           </button>
           <button onClick={() => onProject(p.id)}>
             <Folder size={14} />
-            <span>{p.name}</span>
+            <span>{label}</span>
             <small>{children.length}</small>
           </button>
         </div>
@@ -74,7 +85,7 @@ export function ConversationProjectNav({
     <section className="cv-project-nav" aria-label="Organizzazione progetti">
       <div className="cv-project-toolbar">
         <button onClick={onAll}>Progetti</button>
-        <button aria-label="Gestisci progetti" onClick={onAll}>
+        <button aria-label="Nuovo progetto" title="Nuovo progetto" onClick={onCreate || onAll}>
           <Plus size={15} />
         </button>
       </div>

@@ -38,11 +38,19 @@ def _charged(budget) -> BudgetCounters:
 def _admit(budget, estimate: BudgetCounters):
     charged = _charged(budget)
     if (charged.attempts + estimate.attempts > budget.caps.model_attempts
-            or (budget.caps.input_tokens is not None
-                and charged.input_tokens + estimate.input_tokens > budget.caps.input_tokens)
-            or (budget.caps.output_tokens is not None
-                and charged.output_tokens + estimate.output_tokens > budget.caps.output_tokens)):
+            or _token_cap_exhausted(budget.caps.input_tokens, charged.input_tokens,
+                                    estimate.input_tokens, estimate.attempts)
+            or _token_cap_exhausted(budget.caps.output_tokens, charged.output_tokens,
+                                    estimate.output_tokens, estimate.attempts)):
         raise BudgetExhaustedError('Work budget exhausted; raise it with work.set_budget')
+
+
+def _token_cap_exhausted(cap, charged, estimated_tokens, attempts):
+    # An unknown (zero) estimate cannot admit another call once a token cap
+    # has already been reached. This is admission, not a per-call token bound:
+    # providers may still report actual usage above a non-exhausted estimate.
+    return cap is not None and (charged + estimated_tokens > cap
+                                or (attempts > 0 and charged >= cap))
 
 
 def _admit_allocation(budget, actor_id, estimate: BudgetCounters):
@@ -59,123 +67,119 @@ def _admit_allocation(budget, actor_id, estimate: BudgetCounters):
         if cap is None:
             continue
         charged = (getattr(allocation.spent, axis) + getattr(allocation.reserved, axis)
-                   + getattr(allocation.unknown, axis) + getattr(estimate, axis))
-        if charged > cap:
+                   + getattr(allocation.unknown, axis))
+        if _token_cap_exhausted(cap, charged, getattr(estimate, axis), estimate.attempts):
             raise BudgetExhaustedError(
                 f'Delegate budget exhausted for {actor_id}; raise its allocation with work.set_budget')
 
 
-def _settle_allocation(budget, reservation: BudgetReservation, *, usage: BudgetCounters | None):
-    """Move a reservation's counters inside the delegate allocation."""
-    allocation = budget.allocations.get(reservation.actor_id)
-    if allocation is None:
-        return
-    allocation.reserved = _diff(allocation.reserved, reservation.estimate)
-    if usage is not None:
-        allocation.spent = _sum(allocation.spent, usage)
-    else:
-        allocation.unknown = _sum(allocation.unknown, reservation.estimate)
+def check_capacity(store, actor, work_id, estimate, *, accounting_actor_id=None):
+    """Check a multi-call operation before starting it; each call still reserves.
+
+    Caller must hold the repository transaction. This is admission against the
+    current caps, not a guarantee against subsequent user budget changes.
+    """
+    require_work_access(store, actor, work_id)
+    budget = ensure(store, work_id)
+    _admit(budget, estimate)
+    _admit_allocation(budget, accounting_actor_id or actor.id, estimate)
+    return budget
 
 
-def reserve(ctx, actor, work_id, estimate: BudgetCounters, *, purpose='') -> str:
-    """Commit a reservation in its own transaction before the provider call."""
+def reserve(ctx, actor, work_id, estimate: BudgetCounters, *, purpose='', accounting_actor_id=None,
+            run_id=None, connection_id=None, provider_id=None, model_id=None) -> str:
+    """Authorize the caller; optionally charge the approved executor instead."""
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
-            require_work_access(store, actor, work_id)
-            budget = ensure(store, work_id)
-            _admit(budget, estimate)
-            _admit_allocation(budget, actor.id, estimate)
-            reservation = BudgetReservation(id=new_id('res'), estimate=estimate,
-                                            purpose=purpose, actor_id=actor.id)
-            budget.pending.append(reservation)
-            budget.reserved = _sum(budget.reserved, estimate)
-            allocation = budget.allocations.get(actor.id)
-            if allocation is not None:
-                allocation.reserved = _sum(allocation.reserved, estimate)
-            budget.version += 1
-            budget.updated_at = utc_now()
-            reservation_id = reservation.id
+            reservation_id = reserve_in_store(store, actor, work_id, estimate, purpose=purpose,
+                accounting_actor_id=accounting_actor_id, run_id=run_id, connection_id=connection_id,
+                provider_id=provider_id, model_id=model_id)
         ctx.service.store = store
     return reservation_id
 
 
-def _find(budget, reservation_id) -> BudgetReservation:
-    reservation = next((r for r in budget.pending if r.id == reservation_id), None)
-    if reservation is None:
-        raise NotFoundError('Budget reservation not found')
-    return reservation
+def reserve_in_store(store, actor, work_id, estimate, *, purpose='', accounting_actor_id=None,
+                     run_id=None, connection_id=None, provider_id=None, model_id=None):
+    charged_actor_id = accounting_actor_id or actor.id
+    budget = check_capacity(store, actor, work_id, estimate, accounting_actor_id=charged_actor_id)
+    reservation = BudgetReservation(id=new_id('res'), estimate=estimate, purpose=purpose,
+        actor_id=charged_actor_id, admitted_actor_id=actor.id, run_id=run_id,
+        connection_id=connection_id, provider_id=provider_id, model_id=model_id)
+    budget.pending.append(reservation)
+    budget.reserved = _sum(budget.reserved, estimate)
+    allocation = budget.allocations.get(charged_actor_id)
+    if allocation is not None:
+        allocation.reserved = _sum(allocation.reserved, estimate)
+    budget.version += 1
+    budget.updated_at = utc_now()
+    return reservation.id
 
 
-def reconcile(ctx, actor, work_id, reservation_id, *, usage: BudgetCounters | None = None):
-    """Successful call: charge actual usage when reported, else the estimate as unknown."""
+def _settle(ctx, actor, work_id, reservation_id, **kwargs):
+    from homun.application import budget_settlement
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             require_work_access(store, actor, work_id)
-            budget = ensure(store, work_id)
-            reservation = _find(budget, reservation_id)
-            budget.pending.remove(reservation)
-            budget.reserved = _diff(budget.reserved, reservation.estimate)
-            if usage is not None:
-                budget.spent = _sum(budget.spent, usage)
+            receipt = budget_settlement.settle_in_store(store, ensure(store, work_id), reservation_id, **kwargs)
+        ctx.service.store = store
+    return receipt
+
+
+
+def settle_admitted(ctx, actor, work_id, reservation_id, **kwargs):
+    """Retain metered evidence after IO even if the admitted caller lost access.
+
+    Only the original reservation caller may use this internal completion path;
+    it confers no read permission and does not admit another model invocation.
+    """
+    from homun.application import budget_settlement
+    from homun.domain.errors import PermissionDeniedError
+    from homun.policy import require_workspace_actor
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            require_workspace_actor(actor, store.workspace_id)
+            budget = store.work_budgets.get(work_id)
+            if budget is None:
+                raise NotFoundError('Work budget no longer exists')
+            reservation = next((r for r in budget.pending if r.id == reservation_id), None)
+            saved = reservation or store.budget_usage_receipts.get(reservation_id)
+            if saved is None or (hasattr(saved, 'work_id') and saved.work_id != work_id):
+                raise PermissionDeniedError('Reservation does not belong to this work')
+            if saved.admitted_actor_id:
+                if saved.admitted_actor_id != actor.id:
+                    raise PermissionDeniedError('Only the original admitted caller may settle this reservation')
             else:
-                budget.unknown = _sum(budget.unknown, reservation.estimate)
-            _settle_allocation(budget, reservation, usage=usage)
-            budget.version += 1
-            budget.updated_at = utc_now()
+                require_work_access(store, actor, work_id)  # Legacy admission has no recorded caller.
+            receipt = budget_settlement.settle_in_store(store, budget, reservation_id, **kwargs)
         ctx.service.store = store
+    return receipt
 
 
-def reconcile_unknown(ctx, actor, work_id, reservation_id):
-    """Failed or unreported call: the estimate is charged as unknown usage."""
-    with ctx.repository.locked():
-        with ctx.repository.transaction() as store:
-            require_work_access(store, actor, work_id)
-            budget = ensure(store, work_id)
-            reservation = _find(budget, reservation_id)
-            budget.pending.remove(reservation)
-            budget.reserved = _diff(budget.reserved, reservation.estimate)
-            budget.unknown = _sum(budget.unknown, reservation.estimate)
-            _settle_allocation(budget, reservation, usage=None)
-            budget.version += 1
-            budget.updated_at = utc_now()
-        ctx.service.store = store
+def reconcile(ctx, actor, work_id, reservation_id, *, usage: BudgetCounters | None = None,
+              unknown_usage: BudgetCounters | None = None, measured_usage=None, reason=''):
+    return _settle(ctx, actor, work_id, reservation_id, usage=usage, unknown_usage=unknown_usage,
+                   measured_usage=measured_usage, reason=reason)
+
+
+def reconcile_unknown(ctx, actor, work_id, reservation_id, *, reason=''):
+    return _settle(ctx, actor, work_id, reservation_id, reason=reason)
 
 
 def release(ctx, actor, work_id, reservation_id):
-    """Cancellation before the call: the estimate returns to the envelope untouched."""
-    with ctx.repository.locked():
-        with ctx.repository.transaction() as store:
-            require_work_access(store, actor, work_id)
-            budget = ensure(store, work_id)
-            reservation = _find(budget, reservation_id)
-            budget.pending.remove(reservation)
-            budget.reserved = _diff(budget.reserved, reservation.estimate)
-            allocation = budget.allocations.get(reservation.actor_id)
-            if allocation is not None:
-                allocation.reserved = _diff(allocation.reserved, reservation.estimate)
-            budget.version += 1
-            budget.updated_at = utc_now()
-        ctx.service.store = store
+    return _settle(ctx, actor, work_id, reservation_id, released=True)
 
 
 def recover_pending(ctx, *, now=None) -> int:
-    """Charge stale reservations from a crashed process as unknown usage."""
+    from homun.application import budget_settlement
     moment = now or utc_now()
     recovered = 0
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             for budget in store.work_budgets.values():
                 stale = [r for r in budget.pending if moment - r.created_at > PENDING_TTL]
-                if not stale:
-                    continue
                 for reservation in stale:
-                    budget.pending.remove(reservation)
-                    budget.reserved = _diff(budget.reserved, reservation.estimate)
-                    budget.unknown = _sum(budget.unknown, reservation.estimate)
-                    _settle_allocation(budget, reservation, usage=None)
+                    budget_settlement.settle_in_store(store, budget, reservation.id, reason='stale_reservation_recovered')
                     recovered += 1
-                budget.version += 1
-                budget.updated_at = utc_now()
         ctx.service.store = store
     return recovered
 

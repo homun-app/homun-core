@@ -1,0 +1,15 @@
+{
+  "image": "sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132",
+  "model": "scripted tool calls",
+  "container_started": true,
+  "checks": {
+    "both_running_before_stop": true,
+    "stopped_only_first": true,
+    "sibling_still_running": true,
+    "distinct_containers": true
+  },
+  "first_status": "exited",
+  "second_status": "running",
+  "first_container": "3bb422ceb01ab5727b1c004bcdbab845d40631dcf71c4c81a2e664a2aaf357a6",
+  "second_container": "01b92cab248c70a67772a99ba24a294f9285aa53c73442dea2c8acdf73a324a1"
+}

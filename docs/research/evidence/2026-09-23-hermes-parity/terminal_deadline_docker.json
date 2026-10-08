@@ -1,0 +1,13 @@
+{
+  "runtime": "real Docker, wall clock and SQLite reopen",
+  "timeout_seconds": 2,
+  "status": "exited",
+  "exit_code": 143,
+  "timed_out": true,
+  "checks": {
+    "deadline_survives_restart": true,
+    "expired_container_stopped": true,
+    "no_reexecution": true
+  },
+  "limitation": "Engine must run to enforce the deadline; engine-off time is reconciled on restart."
+}

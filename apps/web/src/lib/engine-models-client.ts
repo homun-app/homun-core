@@ -66,19 +66,139 @@ export async function listModelProviders(
   return (await response.json()) as ModelProvidersResponse;
 }
 
+export type ModelVerifyOptions = {
+  apiKey?: string | undefined;
+  baseUrl?: string | undefined;
+  modelId?: string | undefined;
+  engineBaseUrl?: string | undefined;
+};
+
 export async function verifyModelProvider(
   providerId: string,
-  baseUrl: string = ENGINE_DEFAULT_BASE_URL,
+  optionsOrBaseUrl?: ModelVerifyOptions | string,
 ): Promise<ModelVerifyResult> {
+  const opts: ModelVerifyOptions =
+    typeof optionsOrBaseUrl === "string"
+      ? { engineBaseUrl: optionsOrBaseUrl }
+      : (optionsOrBaseUrl ?? {});
+  const baseUrl = opts.engineBaseUrl ?? ENGINE_DEFAULT_BASE_URL;
+  const hasBody = Boolean(opts.apiKey || opts.baseUrl || opts.modelId);
   const response = await modelsFetch(
     `/v1/models/providers/${encodeURIComponent(providerId)}/verify`,
-    { method: "POST", headers: { Accept: "application/json" } },
+    {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      ...(hasBody
+        ? {
+            body: JSON.stringify({
+              api_key: opts.apiKey,
+              base_url: opts.baseUrl,
+              model_id: opts.modelId,
+            }),
+          }
+        : {}),
+    },
     baseUrl,
   );
   if (!response.ok) {
     await readError(response, `Verify provider failed with HTTP ${response.status}`);
   }
   return (await response.json()) as ModelVerifyResult;
+}
+
+export type UpsertConnectionInput = {
+  connection_id: string;
+  kind?: "fake" | "openai_compatible" | "pydantic_ai" | undefined;
+  display_name: string;
+  model_id: string;
+  base_url?: string | undefined;
+  api_key?: string | undefined;
+  context_window?: number | undefined;
+  max_output_tokens?: number | undefined;
+  engineBaseUrl?: string | undefined;
+};
+
+export async function upsertModelConnection(
+  input: UpsertConnectionInput,
+): Promise<ModelConnectionInfo> {
+  const baseUrl = input.engineBaseUrl ?? ENGINE_DEFAULT_BASE_URL;
+  const response = await modelsFetch(
+    "/v1/models/connections",
+    {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        connection_id: input.connection_id,
+        kind: input.kind ?? "openai_compatible",
+        display_name: input.display_name,
+        model_id: input.model_id,
+        base_url: input.base_url,
+        api_key: input.api_key,
+        context_window: input.context_window,
+        max_output_tokens: input.max_output_tokens ?? 8192,
+      }),
+    },
+    baseUrl,
+  );
+  if (!response.ok) {
+    await readError(response, `Upsert connection failed with HTTP ${response.status}`);
+  }
+  return (await response.json()) as ModelConnectionInfo;
+}
+
+export type PooledCredentialInfo = {
+  key_id: string;
+  provider: string;
+  masked_secret: string;
+  status: string;
+  is_available: boolean;
+  usage_count?: number;
+  error_count?: number;
+  last_used_at?: number;
+  last_error?: string | null;
+};
+
+export async function addPooledCredential(input: {
+  provider: string;
+  secret_value: string;
+  key_id?: string | undefined;
+  engineBaseUrl?: string | undefined;
+}): Promise<{ key_id: string; provider: string; status: string; masked_secret: string }> {
+  const baseUrl = input.engineBaseUrl ?? ENGINE_DEFAULT_BASE_URL;
+  const response = await modelsFetch(
+    "/v1/credentials/pool",
+    {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: input.provider,
+        secret_value: input.secret_value,
+        key_id: input.key_id,
+      }),
+    },
+    baseUrl,
+  );
+  if (!response.ok) {
+    await readError(response, `Add pooled credential failed with HTTP ${response.status}`);
+  }
+  return (await response.json()) as { key_id: string; provider: string; status: string; masked_secret: string };
+}
+
+export async function listPooledCredentials(
+  provider?: string,
+  engineBaseUrl?: string,
+): Promise<PooledCredentialInfo[]> {
+  const baseUrl = engineBaseUrl ?? ENGINE_DEFAULT_BASE_URL;
+  const url = provider ? `/v1/credentials/pool?provider=${encodeURIComponent(provider)}` : "/v1/credentials/pool";
+  const response = await modelsFetch(
+    url,
+    { method: "GET", headers: { Accept: "application/json" } },
+    baseUrl,
+  );
+  if (!response.ok) {
+    await readError(response, `List pooled credentials failed with HTTP ${response.status}`);
+  }
+  return (await response.json()) as PooledCredentialInfo[];
 }
 
 export async function completeWithModel(

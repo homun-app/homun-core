@@ -32,7 +32,7 @@ jobs:
       - name: Generated engine inventory
         run: python -m pytest -q engine/packaging/test_inventory.py
       - name: Desktop boundary and owned engine tests
-        run: node --test apps/desktop/tests/engine-process.test.cjs apps/desktop/tests/engine-startup-races.test.cjs apps/desktop/tests/protocol.test.cjs
+        run: node --test apps/desktop/tests/*.test.cjs
         env:
           HOMUN_TEST_PYTHON: python
       - name: Architecture boundaries and legacy budgets

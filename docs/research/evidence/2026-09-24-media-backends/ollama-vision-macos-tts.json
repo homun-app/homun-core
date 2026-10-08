@@ -1,0 +1,37 @@
+{
+  "vision_model": "gemma4:latest",
+  "tts": {
+    "error": null,
+    "audio_url": "file:///private/tmp/homun-real-media-21805/media/artifacts/tts-say-1790283663501.aiff",
+    "metadata": {
+      "provider": "macos_say",
+      "requested_provider": "macos_say",
+      "path": "/private/tmp/homun-real-media-21805/media/artifacts/tts-say-1790283663501.aiff",
+      "format": "aiff"
+    }
+  },
+  "vision": {
+    "error": null,
+    "description": "Red",
+    "tokens_used": 111,
+    "metadata": {
+      "source": "data:image/png;base64,iVBORw0K..."
+    }
+  },
+  "macos_probe": {
+    "platform": "darwin",
+    "platform_supported": true,
+    "installed": true,
+    "ready": false,
+    "can_grant": true,
+    "accessibility": false,
+    "screen_recording": false,
+    "permissions_verified": true,
+    "helpers": {
+      "screencapture": true,
+      "osascript": true
+    },
+    "error": "macOS Accessibility and/or Screen Recording permission is not granted for this process. Grant them in System Settings \u2192 Privacy & Security.",
+    "code": "permissions_required"
+  }
+}

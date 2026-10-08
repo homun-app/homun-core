@@ -1,0 +1,373 @@
+MIT License
+
+Copyright (c) 2025 Nous Research
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Homun provenance
+Source: https://github.com/NousResearch/hermes-agent
+Commit: c9dca726514b709cf6e677d236a79fc8d0627f37
+native_prompt.py adapts execution guidance from agent/prompt_builder.py.
+native_turn.py and application/agent_native.py reimplement canonical assistant/tool
+history, request projection and persist-before-execute logic described in
+agent/conversation_loop.py, agent/turn_request_assembly.py and agent/turn_tool_round.py.
+Homun changes: scoped materials/tools, contribution-mediated questions, one pending
+call per durable advance, existing authority/budget/review controls. No upstream
+runtime dependency. This notice covers the derived portions, not all Homun code.
+
+agent_control_history.py adapts interruption checkpoints and user correction
+placement from agent/interrupt_control.py and conversation_loop.py. Homun uses
+durable epochs/leases and explicit unknown outcomes in its own SQLite workflow.
+
+context_plan.py derives rough multilingual token estimation and closed-exchange
+context planning from agent/model_metadata.py and agent/context_compressor.py.
+context_summary.py adapts the structured checkpoint prompt from the latter.
+Homun preserves canonical history and stores separate hash-validated projections.
+
+models/native_errors.py adapts the failure taxonomy of agent/error_classifier.py
+and the Retry-After/jittered base-2 backoff of agent/retry_utils.py and
+agent/turn_recovery.py (compute_error_backoff): statuses and well-known body
+patterns map to a smaller Homun code set, raw provider bodies are never stored,
+and provider-reported usage is carried on the typed failure when present.
+application/agent_recovery.py adapts the retry placement of
+agent/turn_api_error.py (three total attempts per phase, waits outside any
+lease/transaction, corrections surviving backoff) onto Homun durable runs;
+application/agent_run_failures.py keeps the shared terminal-failure fence.
+
+Overflow recovery: application/agent_overflow.py and the forced context plan adapt
+agent/turn_overflow.py at the same pinned Hermes commit. Homun retains explicit
+window/output pins and durable authority/budget/control checks.
+
+Tool registry: tools/registry.py and application/agent_tool_registry.py adapt
+the single-entry schema/handler/toolset design of Hermes tools/registry.py at
+the same pinned commit. Homun builds immutable per-run contracts and validates
+manifest hashes before model/tool IO; discovery grants no additional authority.
+
+application/agent_mcp.py adapts namespacing and bounded hash-suffixed wire names
+from tools/mcp_tool_schema.py at the pinned commit. Homun hashes original server
+identity and tool name to prevent sanitized-name collisions. Native integration
+uses Homun approvals and durable receipts, without an upstream runtime.
+
+application/agent_results.py adapts complete-result storage and 40/60 head/tail
+previews from tools/tool_result_storage.py and tools/tool_output_truncate.py at
+the pinned commit. Homun uses private per-run SQLite JSON, SHA-256 references,
+scoped paged retrieval and retained error flags instead of host spill paths.
+
+tools/search.py derives BM25 scoring, rarest-query-token admission and minimum
+answerable-term coverage from tools/tool_search_catalog.py at the pinned commit.
+Homun adds deterministic name tie-breaking and Unicode tokenization, and indexes
+only the approved run registry. English stemming and deferred bridge not included.
+
+application/agent_tool_bridge.py derives progressive disclosure and the
+search/describe/call bridge from tools/tool_search.py and tool_search_validation.py
+at the pinned commit. Homun defers selected MCP schemas, pins bridge contracts
+per run, keeps canonical wrapper IDs, and resolves each action through its own
+approval/receipt flow. Native ordered rounds replace opaque bridge batches.
+
+models/repetition.py derives conservative repetition detection from
+agent/repetition_guard.py at the pinned commit. Homun retains the minimum
+length/repeat/dominance thresholds and distinct-line safeguard, but counts only
+nonoverlapping windows to avoid false positives on a single long separator.
+Native responses fail with a typed nonretryable code before history/tool dispatch,
+while provider-reported usage remains charged.
+
+Text continuation: models/truncation.py and application/agent_continuation*.py
+adapt visible-fragment nudges and bounded continuation from agent/turn_truncation.py
+and conversation_loop.py. Homun durably accepts at most three nudges, retains raw
+canonical fragments, and joins exact text without Hermes's inserted newlines to
+preserve mid-token URLs/JSON. A version-pinned validated 64k native decision
+contract is shared by creation and crash replay; approvals, controls and budgets
+remain authoritative. Incomplete tool arguments are never dispatched.
+
+application/agent_liveness.py derives the short trailing-continue-intent detector
+and bounded action nudge from agent/agent_runtime_helpers.py and
+agent/turn_final_response.py at the pinned commit. Homun adds the observed Italian
+shape, conservative quote/excerpt exclusions, durable counters and human-control
+fences. After two ineffective nudges it reports a typed stall instead of publishing
+another promise as a completed deliverable. This is not semantic task verification.
+
+execution/file_match.py derives the ordered fuzzy replacement chain from
+tools/fuzzy_match.py at the pinned commit. execution/file_syntax.py derives the
+lint-delta rule (new errors only; JSON/TOML fail closed) from
+tools/file_operations_lint.py. Homun keeps directory-descriptor confinement,
+exact human approval before any write, and does not run Hermes LSP or shell
+linters. Language-server diagnostics stay unavailable and are reported as such.
+
+execution/docker.py derives container hardening, hash-based ownership and
+reconnection patterns from tools/environments/docker.py at the pinned commit.
+Homun uses a separate container per immutable job, offline SHA256-pinned images,
+private workspaces, bounded CLI capture and durable exclusive dispatch intents.
+Agents reach this backend only through an approved terminal tool. Hermes is not a runtime dependency.
+
+application/agent_terminal_sessions.py derives background poll, wait, stop and
+one completion notice from tools/process_registry.py at the pinned commit.
+Each approved command keeps its own container. Stopping one session does not
+signal another. execution/docker_stdin.py delivers raw bytes to an already
+running container's pipe stdin and does not repeat an uncertain send.
+execution/pty_queries.py answers device-status, cursor-position and window-size
+queries once for a new background session started with a terminal. It reports
+the cursor at home and is not a screen emulator. Resize, signals and a full
+terminal remain unimplemented.
+execution/local_jobs.py runs an opt-in command on this computer in a private
+directory and does not inherit the parent environment. Hermes local execution
+scrubs a credential blocklist and otherwise inherits the user environment;
+Homun does not copy that inheritance. A local command is not a container:
+absolute paths and the network remain reachable, and stdin and a terminal are
+not provided.
+execution/ssh_jobs.py runs one approved command on an explicit host. Hermes SSH
+uses a persistent ControlMaster, accept-new host keys, and file sync of the
+agent home. Homun does not copy that: it ignores the person's SSH configuration
+and agent, pins the server public key in the approval, checks the private key
+fingerprint, and does not sync files. Stdin and a terminal are not provided.
+execution/web_pages.py reads one public page and refuses private addresses and
+credential-bearing URLs. Hermes tools/url_safety.py also covers proxies,
+fake-ip ranges and an option to allow private URLs. Homun does not copy those
+bypasses. web_search version 2 posts the query to DuckDuckGo's public HTML
+form and returns titles and URLs. Hermes uses the ddgs package and a keyless
+vendor ring. Homun does not copy those. Version 1 of the tool still reports
+that search is not configured.
+web_cache.py derives TTL result caching and query normalization from
+tools/web_result_cache.py at the pinned commit. Homun stores cached entries
+in memory with thread-safe access and monotonic TTL expiration; responses
+served by one-shot fallback rescue are never cached.
+web_providers.py and x_search.py derive named search provider resolution,
+one-shot fallback rescue, and X post/profile search from plugins/web/,
+tools/web_tools_rescue.py, and tools/x_search_tool.py at the pinned commit.
+Credential-requiring backends require explicit environment variables and fail
+closed when missing. Live adapters are wired for brave, tavily, duckduckgo-html,
+and xAI grok-4.5 responses with handle and date boundaries.
+execution/owned_browser.py starts headless Chrome with an engine-owned profile
+and closes that process group. A native dialog is dismissed and its message is
+returned; it is not accepted. A later contract can fill one text field from an
+accessibility ref and click that control. It can also save a PNG of that page.
+It does not capture the person's screen. Version 5 also collects interactive
+controls inside public child frames / iframes and refuses private frame addresses.
+Hermes browser control uses browser-use, a CDP supervisor (tools/browser_supervisor_frames.py)
+and the person's profile options. Homun does not copy those; it traverses child
+frames in process over the owned page socket.
+
+application/memory_contracts.py and application/memory_tools.py derive curated
+persistent memory inspection, bounded fact storage, deduplication, and session
+search from agent/memory_manager.py, tools/memory_tool.py, and
+tools/session_search_tool.py at the pinned commit. Homun maintains SQLite as the
+authoritative memory ledger, enforces project and conversation isolation, and
+requires explicit conversation access before returning historical session messages.
+
+application/skill_contracts.py and application/skill_tools.py derive progressive
+skill metadata discovery, full instruction body disclosure on demand, and learning/proposal
+from tools/skills_tool.py, tools/skill_manager.py, and tools/skills_guard.py at the
+pinned commit. Homun keeps unapproved or newly proposed skills in a staged quarantine
+until explicit human approval, refusing their execution or display as trusted instructions.
+
+application/delegation_contracts.py and application/delegation_tools.py derive
+isolated subagent execution, task delegation, bounded turn limits, structured output
+schema validation and repair, and background subagent polling/cancellation from
+tools/delegate_tool.py, tools/delegation_output_schema.py, and tools/async_delegation.py
+at the pinned commit. Homun executes subagents with isolated prompt envelopes, reserves
+budgets in the parent work envelope, validates JSON schemas while preserving raw work
+on repair failure, and tracks delegations durably across runs.
+
+application/clarify_contracts.py and application/clarify_tools.py derive
+human clarification, single and batched question dispatch, multi-select parsing,
+recommended option formatting, and partial timeout answer preservation from
+tools/clarify_tool.py and tools/clarify_gateway.py at the pinned commit.
+Homun preserves already-answered questions when timeouts occur, cleanly separates
+presentation labels from recorded responses, and distinguishes delivery failure
+from deliberate user inactivity.
+
+execution/checkpoint_manager.py, execution/working_diff.py, and execution/subagent_worktree.py
+derive filesystem snapshots, transparent shadow git stores, agent-write ledgers, selective
+rollback preserving subsequent user edits, working tree diff collection (including untracked
+files), and subagent git worktree isolation from tools/checkpoint_manager.py, tools/working_diff.py,
+and tools/subagent_worktree.py at the pinned commit.
+
+application/goal_contracts.py, application/goal_manager.py, and application/goal_tools.py
+derive persistent multi-turn goals, completion contracts (outcome, verification, constraints,
+boundaries, stop_when), deterministic quality gates, wait barriers (pid, session, seconds),
+fail-open auxiliary judging, and budget backstops from hermes_cli/goals.py and
+gateway/run_goals.py at the pinned commit. Homun evaluates goals without mutating system
+prompts or creating implicit Kanban cards.
+
+application/heartbeat_manager.py derives durable same-session idle recurring heartbeats,
+claim immediate reservation, claim rewind/abandon on cancelled admission or runner rejection,
+tick coalescing, human input preemption, and conversation boundary isolation across
+compression and reset from hermes_cli/heartbeat.py, gateway/run_heartbeat_acceptance.py,
+and gateway/run_heartbeat_restore.py at the pinned commit.
+
+application/loop_manager.py derives proactive recurring execution loops, fixed and self-paced
+cadence with exponential backoff and normalized digest comparisons, self-stop markers
+(LOOP_COMPLETE), count stops (--times), evidence-based judge stops (--until), and strict goal
+precedence (active goals defer loops; waiting/parked goals permit loops) from
+hermes_cli/loops.py and cli_loops_mixin.py at the pinned commit.
+
+application/cron_contracts.py, application/cron_manager.py, and application/cron_tools.py
+derive durable scheduling, cron/interval/one-shot/event parsing, payload preflight checks,
+chained context injection (context_from), script and agent execution, quota hold, deduplicated
+incident tracking, and non-local delivery queuing from cron/jobs.py, cron/executions.py,
+cron/incidents.py, cron/quota_hold.py, and tools/cronjob_tools.py at the pinned commit.
+
+application/session_contracts.py, application/session_storage.py, application/session_manager.py,
+and application/session_tools.py derive session lifecycle CRUD, working directory restoration,
+carrier-aware turn rewind, fork branching with lineage tracking, secret-redacted export,
+transcript import without identity drift, structured handoffs, SQLite WAL mode, FTS5 full-text
+indexing, database integrity checks, orphan message repair, and token accounting from
+hermes_state_sessions.py, hermes_state_rewind.py, hermes_state_timeline.py, hermes_state_fts.py,
+hermes_state_repair.py, hermes_state_usage.py, hermes_cli/session_export.py, and
+hermes_cli/foreign_sessions.py at the pinned commit.
+
+application/gateway_contracts.py, application/gateway_pairing.py, application/gateway_turn_lease.py,
+application/gateway_hosted_rooms.py, application/channel_adapters.py, and application/gateway_tools.py
+derive DM pairing codes with unambiguous alphabet, TTL expiry, rate limiting, failed attempt lockout,
+platform allowlists, strict per-session turn leasing with fail-closed timeout, multi-agent hosted rooms
+with role permissions and append-only event logging, and pluggable channel adapters (Telegram, Discord,
+Slack, WhatsApp, Webhook relay) from gateway/pairing.py, gateway/authz_mixin.py, gateway/turn_lease.py,
+gateway/hosted_rooms.py, and gateway/platforms/ at the pinned commit.
+
+application/side_question.py derives detached context-aware side questions (/btw), snapshot prefix
+trimming for role alternation, plain-text transcript rendering with tool call summaries, tool suppression,
+and parent run token/cost attribution from agent/side_question.py at the pinned commit.
+
+application/context_references.py and application/prompt_assembler.py derive context @-references (@file,
+@folder, @diff, @staged, @git, @url) with sensitive path / SSRF boundaries and size truncation,
+hierarchical instruction discovery with documented precedence (AGENTS.override.md > AGENTS.md > CLAUDE.md >
+.cursorrules), subdirectory ancestor walk hints, prompt-injection threat scanning, and context files
+manifest from agent/prompt_builder.py, agent/system_prompt.py, agent/context_file_sources.py,
+agent/context_references.py, and agent/subdirectory_hints.py at the pinned commit.
+
+application/code_execution_contracts.py, application/code_execution_rpc.py, and
+application/code_execution_tool.py derive Programmatic Tool Calling (PTC) via child process
+code execution, authenticated local RPC Unix domain / TCP loopback socket, tool whitelist
+enforcement, output truncation (40% head / 60% tail), execution timeouts, and call budget limits
+from tools/code_execution_tool.py and tools/code_execution_rpc.py at the pinned commit.
+
+application/moa_contracts.py, application/moa_filter.py, application/moa_alternation.py,
+application/moa_trace.py, and application/moa_coordinator.py derive Mixture of Agents (MoA)
+orchestration, advisory reference models (advisors only advise without tool schemas), acting
+aggregator execution of tools, fanout cadences (user_turn, per_iteration, every_n:N), privacy
+redaction of credentials/emails/phones, reactive same-role message merging, side-channel trace
+persistence, and truthful aggregate token and cost accounting from agent/moa_loop.py,
+agent/moa_alternation.py, and agent/moa_trace.py at the pinned commit.
+
+application/api_server_contracts.py, routes/openai_api.py, application/hosted_mcp_agent.py,
+and application/acp_adapter.py derive OpenAI-compatible API serving (/v1/chat/completions,
+/v1/models), SSE streaming, tool-calls conversion, Idempotency-Key duplicate caching,
+hosted MCP agent tool server (homun_task, homun_ask, homun_status), and Agent Client Protocol
+(ACP) IDE adapter with edit approval workflows from gateway/platforms/api_server*.py,
+acp_adapter/, and mcp_serve.py at the pinned commit.
+
+application/plugin_storage.py, application/plugin_contracts.py, application/plugin_loader.py,
+application/plugin_manager.py, and routes/plugins.py derive plugin manifests, dynamic directory
+discovery, sibling submodule isolation, capability registration ledger (tools, hooks, providers,
+platforms, commands, skills, panels, secrets), fail-closed policy hook dispatch, enable/disable
+lifecycle with zero stale capabilities, configuration reload, and persistent retained-data
+contract outside install trees from plugins/plugin_storage.py, plugins/plugin_loader.py,
+hermes_cli/plugins*.py, and hermes_cli/plugins_ledger.py at the pinned commit.
+
+application/provider_contracts.py, application/provider_registry.py, application/credential_pool.py,
+application/auxiliary_router.py, and routes/provider_api.py derive declarative provider profiles,
+inference registry, reasoning/thinking adaptation, media fixture and vision tool-result adaptation,
+schema adaptation, multi-credential pools with round-robin rotation, cooldowns (429/quota), and dead
+token classification, and prioritized auxiliary routing with complete failover audit logging from
+providers/base.py, providers/__init__.py, agent/credential_pool*.py, and agent/auxiliary_client.py
+at the pinned commit.
+application/codex_runtime.py, application/copilot_acp_client.py, application/relay_runtime.py,
+application/managed_tool_gateway.py, and routes/alternate_runtimes.py derive Codex App-Server
+JSON-RPC protocol adaptation, GitHub Copilot ACP stdio tool extraction (<tool_call>), NeMo Relay
+enterprise proxy session headers (x-dynamo-session-id), and managed vendor tool gateway routing
+with explicit service gap reporting when unconfigured from agent/codex_runtime.py,
+agent/copilot_acp_client.py, agent/relay_runtime.py, agent/relay_llm.py, and
+tools/managed_tool_gateway.py at the pinned commit.
+application/path_security.py, application/url_safety.py, application/secret_redaction.py,
+application/vault_store.py, application/write_approval_gate.py, and routes/safety_api.py derive
+path directory confinement, traversal checks, URL safety and SSRF blocking (cloud metadata,
+loopback, private ranges), userinfo/sensitive query credential checks, regex token and private
+key redaction, profile-scoped encrypted credential vault with opaque model handles and automatic
+fill redaction registration, and single-execution write approval gates with auditable refusal
+from tools/path_security.py, tools/url_safety.py, agent/redact.py, agent/vault_store.py,
+tools/write_approval.py, and tools/approval.py at the pinned commit.
+application/media_vision.py, application/media_image_gen.py, application/media_video_gen.py,
+application/media_stt.py, application/media_tts.py, application/media_voice_mode.py, and
+routes/media_api.py derive multimodal vision/video frame preparation, text-to-image generation
+and editing with catalog aspect ratios, video generation with duration clamping, audio STT
+transcription dispatch, markdown-normalized TTS speech synthesis and streaming chunks, and
+wake-word detection ("Hey Homun" / "Hey Hermes") with barge-in interruption from
+tools/vision_tools.py, tools/image_generation_tool.py, tools/image_generation_catalog.py,
+tools/video_generation_tool.py, tools/xai_video_tools.py, tools/transcription_tools.py,
+tools/tts_tool.py, tools/tts_streaming.py, tools/voice_mode.py, and tools/wake_word.py
+at the pinned commit.
+application/deliverable_policy.py, application/deliverable_extractor.py, application/deliverable_ledger.py,
+and routes/deliverables_api.py derive deliverable media classification (PDF, images, spreadsheets, audio,
+presentations), scratch/workspace directory confinement, code-block protection (ignoring literal example
+paths inside fenced code blocks or backtick expressions), and at-most-once delivery ledger tracking from
+gateway/media_policy.py, gateway/delivery.py, gateway/delivery_ledger.py, tools/bot_live_delivery.py,
+and website/docs/user-guide/features/deliverable-mode.md at the pinned commit.
+application/integration_homeassistant.py, application/integration_discord.py, application/integration_feishu.py,
+application/integration_yuanbao.py, application/integration_spotify.py, application/integration_meetings.py,
+and routes/integrations_api.py derive Home Assistant domain security gating and entity control, Discord
+server introspection and reversible role/pin operations, Feishu document plain-text reading and drive comment
+threads, Yuanbao group interaction, sticker dispatch, mention formatting and nickname disambiguation,
+Spotify playback and reversible library track management, and Google Meet session management and Microsoft
+Teams Graph meeting resource parsing from tools/homeassistant_tool.py, tools/discord_tool.py,
+tools/feishu_doc_tool.py, tools/feishu_drive_tool.py, tools/feishu_lark.py, tools/yuanbao_tools.py,
+plugins/spotify/, plugins/google_meet/, and plugins/teams_pipeline/ at the pinned commit.
+application/profile_operations.py, application/config_lifecycle.py, application/doctor_diagnostics.py,
+application/daemon_lifecycle.py, and routes/operations_api.py derive profile isolation, lifecycle operations,
+distribution bundles with SHA256 integrity verification, config schema migrations with automatic backups,
+doctor system diagnostics (platform, backends, dev tools, database integrity, schema status) with automated
+repair, and daemon lifecycle management (PID tracking, graceful shutdown, liveness verification) from
+hermes_cli/profiles.py, hermes_cli/profile_distribution.py, hermes_cli/config.py, hermes_cli/doctor.py,
+hermes_cli/doctor_platform.py, hermes_cli/doctor_tools.py, and hermes_cli/doctor_state.py at the pinned commit.
+application/trajectory_capture.py, application/trajectory_compression.py, application/batch_eval_runner.py,
+application/observability_exporter.py, and routes/research_api.py derive ShareGPT trajectory formatting,
+process-safe flock file appending, reasoning scratchpad conversion (<REASONING_SCRATCHPAD> to <think>),
+token budget trajectory compression protecting head and tail turns without severing tool call/response pairs,
+concurrent batch dataset runner with resume checkpointing and tool stats aggregation, and OpenTelemetry/Langfuse
+trace and span observation from agent/trajectory.py, trajectory_compressor.py, batch_runner.py,
+mini_swe_runner.py, and plugins/observability/langfuse at the pinned commit.
+application/surface_companion.py, application/surface_achievements.py, application/surface_tours_tips.py,
+application/surface_cleanup.py, application/surface_security_guidance.py, application/surface_catalog_packs.py,
+and routes/surface_catalog_api.py derive virtual companion state and ASCII skins, achievement milestone tracking
+and persistence, onboarding tours and context-aware tips, workspace disk cleanup and cache purging, security
+pattern scanning and guidance advisories, and the complete catalog manifest of bundled and optional skill packs
+with safe installation and uninstallation from agent/pet/, plugins/hermes-achievements/, tools/tour_tool.py,
+tools/tip_tool.py, plugins/disk-cleanup/, plugins/security-guidance/, and plugin-catalog/ at the pinned commit.
+application/kanban_contracts.py, application/kanban_store.py, application/kanban_workflow.py, and
+routes/kanban_api.py derive durable Kanban task orchestration (boards, columns, dependency tracking,
+worker claiming, heartbeat liveness, crashed worker recovery, and automatic dependency unblocking),
+card reviews with approve/changes_requested cycle, and PR contracts with verification gates from
+tools/kanban_tool.py and kanban/ at the pinned commit.
+application/desktop_contracts.py, application/desktop_ui_manager.py, application/computer_use_driver.py,
+and routes/desktop_api.py derive native desktop automation, OS readiness and TCC permission inspection,
+window enumeration and app focusing, screen/window SOM/vision/AX capture, destructive shortcut and shell
+injection blocking, window underneath reading, terminal buffer inspection, and in-app browser preview
+pane management, driving and persistent element annotations from tools/computer_use/, tools/desktop_ui.py,
+tools/read_window_tool.py, tools/read_terminal_tool.py, tools/preview_tool.py, tools/drive_preview_tool.py,
+and tools/annotate_preview_tool.py at the pinned commit.
+application/surface_contracts.py, application/surface_gateway_manager.py, and routes/surface_gateway_api.py
+derive multi-surface client connections (CLI, TUI, Desktop, Web/Dashboard, BotScreen), multi-transport
+support (local, SSH, URL, cloud), cross-surface live session synchronization, coherent task steering,
+unified approval queue resolution, and deliverable artifact registries from tui_gateway/contracts/,
+tui_gateway/server.py, tui_gateway/session_lifecycle.py, cli.py, and ui-tui/ at the pinned commit.
+
+
+
+
+
+
+

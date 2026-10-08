@@ -19,7 +19,9 @@ def deliver_pending(ctx, command_id: str | None = None, wait_seconds: float = 0)
     persisted workflow ID and DBOS message idempotency key. Claims serialize delivery per run so a contribution cannot overtake creation.
     Cancellation after the claim boundary is explicitly uncertain.
     """
-    snapshot = ctx.repository.load()
+    from homun.application.terminal_watchdog import reconcile as reconcile_terminal_deadlines
+    reconcile_terminal_deadlines(ctx)
+    snapshot = ctx.repository.snapshot()
     intents = sorted((i for i in snapshot.outbox.values() if not i.delivered and not i.cancelled),
                      key=lambda i: i.sequence)
     for candidate in intents:
@@ -48,12 +50,14 @@ def deliver_pending(ctx, command_id: str | None = None, wait_seconds: float = 0)
         from homun.runtime.workflows.price_comparison import deliver_comparisons
         from homun.runtime.workflows.synthesis import deliver_syntheses
         from homun.runtime.workflows.tool_chain import deliver_chains
+        from homun.runtime.workflows.agent_run import deliver_agent_runs
         deliver_comparisons(ctx)
         deliver_reads(ctx)
         deliver_syntheses(ctx)
         deliver_chains(ctx)
+        deliver_agent_runs(ctx)
         reconcile_runs(ctx, command_id=command_id, wait_seconds=wait_seconds)
-    store = ctx.repository.load()
+    store = ctx.repository.snapshot()
     if command_id is None:
         return None
     record = store.commands.get(command_id)
@@ -66,7 +70,7 @@ def deliver_pending(ctx, command_id: str | None = None, wait_seconds: float = 0)
 
 
 def reconcile_runs(ctx, *, command_id=None, wait_seconds=0):
-    snapshot = ctx.repository.load()
+    snapshot = ctx.repository.snapshot()
     for run in snapshot.runs.values():
         if run.status in {'completed', 'failed', 'cancelled'}:
             continue

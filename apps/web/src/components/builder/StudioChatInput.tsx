@@ -13,6 +13,11 @@ import {
   usePromptInputController,
 } from "../ai-elements/prompt-input";
 
+import { AutonomySelector } from "./AutonomySelector";
+import { AgentModelSelector } from "./AgentModelSelector";
+import { ComposerPlusMenu } from "./ComposerPlusMenu";
+import type { AutonomyLevel } from "./conversation-preferences";
+
 export type ChatReference = {
   id: string;
   name: string;
@@ -27,16 +32,33 @@ export function StudioChatInput({
   children,
   references,
   disabled = false,
+  autonomyLevel,
+  onAutonomyLevelChange,
+  modelConnectionId,
+  onModelConnectionIdChange,
 }: {
   label: string;
   disabled?: boolean;
   onSend: (text: string, files: File[], references?: ChatReference[]) => void;
   references?: ChatReference[];
   children?: ReactNode;
+  autonomyLevel?: AutonomyLevel | undefined;
+  onAutonomyLevelChange?: ((level: AutonomyLevel) => void) | undefined;
+  modelConnectionId?: string | undefined;
+  onModelConnectionIdChange?: ((connectionId: string) => void) | undefined;
 }) {
   return (
     <PromptInputProvider>
-      <Composer disabled={disabled} label={label} onSend={onSend} references={references || []}>
+      <Composer
+        disabled={disabled}
+        label={label}
+        onSend={onSend}
+        references={references || []}
+        autonomyLevel={autonomyLevel}
+        onAutonomyLevelChange={onAutonomyLevelChange}
+        modelConnectionId={modelConnectionId}
+        onModelConnectionIdChange={onModelConnectionIdChange}
+      >
         {children}
       </Composer>
     </PromptInputProvider>
@@ -48,6 +70,10 @@ function Composer({
   children,
   references = [],
   disabled = false,
+  autonomyLevel,
+  onAutonomyLevelChange,
+  modelConnectionId,
+  onModelConnectionIdChange,
 }: Parameters<typeof StudioChatInput>[0]) {
   const attachments = usePromptInputAttachments();
   const { textInput } = usePromptInputController();
@@ -91,6 +117,18 @@ function Composer({
     );
     setMention(null);
     nextCursor.current = mention.start + insertion.length;
+  }
+  function handleMentionAgent() {
+    const cur = textInput.value;
+    const insertion = cur.length > 0 && !cur.endsWith(" ") ? " @" : "@";
+    textInput.setInput(cur + insertion);
+    nextCursor.current = (cur + insertion).length;
+    setTimeout(() => {
+      if (input.current) {
+        input.current.focus();
+        detect(input.current);
+      }
+    }, 10);
   }
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -178,6 +216,7 @@ function Composer({
       <PromptInputBody>
         <PromptInputTextarea
           ref={input}
+          className="!min-h-[36px] !py-1 text-sm"
           onChange={(e) => detect(e.currentTarget)}
           onClick={(e) => detect(e.currentTarget)}
           aria-controls={mention ? menuId : undefined}
@@ -203,7 +242,7 @@ function Composer({
             }
           }}
           aria-label={label}
-          placeholder="Chiedi, crea, organizza…"
+          placeholder="Chiedi, crea o assegna un compito…"
           disabled={disabled || busy}
         />
       </PromptInputBody>
@@ -237,22 +276,51 @@ function Composer({
       {children}
       <PromptInputFooter>
         <PromptInputTools>
+          <ComposerPlusMenu
+            autonomyLevel={autonomyLevel}
+            onAutonomyLevelChange={onAutonomyLevelChange}
+            onAttachFiles={() => attachments.openFileDialog()}
+            onMentionAgent={handleMentionAgent}
+            disabled={disabled || busy}
+          />
+          {onAutonomyLevelChange && (
+            <AutonomySelector
+              value={autonomyLevel}
+              onChange={onAutonomyLevelChange}
+              disabled={disabled || busy}
+            />
+          )}
           <PromptInputButton
             aria-label="Allega file"
             title="Allega file · puoi anche trascinarli o incollarli"
             disabled={disabled || busy}
             onClick={() => attachments.openFileDialog()}
+            className="st-composer-attach-btn"
           >
-            <Paperclip size={17} />
+            <Paperclip size={15} />
           </PromptInputButton>
         </PromptInputTools>
-        <small className="st-muted">Demo locale · nessun modello collegato</small>
-        <PromptInputSubmit
-          aria-label="Invia messaggio"
-          disabled={disabled || busy || (!textInput.value.trim() && !attachments.files.length)}
-        >
-          <ArrowUp size={18} />
-        </PromptInputSubmit>
+
+        <div className="st-composer-footer-right">
+          {onModelConnectionIdChange && (
+            <AgentModelSelector
+              value={modelConnectionId ?? ""}
+              onChange={onModelConnectionIdChange}
+              compact={true}
+              side="top"
+              disabled={disabled || busy}
+            />
+          )}
+          {!onModelConnectionIdChange && (
+            <small className="st-muted">Demo locale · nessun modello collegato</small>
+          )}
+          <PromptInputSubmit
+            aria-label="Invia messaggio"
+            disabled={disabled || busy || (!textInput.value.trim() && !attachments.files.length)}
+          >
+            <ArrowUp size={16} />
+          </PromptInputSubmit>
+        </div>
       </PromptInputFooter>
       {error && <p role="alert">{error}</p>}
     </PromptInput>

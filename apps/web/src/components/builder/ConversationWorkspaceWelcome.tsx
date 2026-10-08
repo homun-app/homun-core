@@ -1,12 +1,11 @@
-/**
- * Empty-state welcome for a new simulated conversation.
- */
-
-import { ArrowUpRight } from "lucide-react";
+import { useState } from "react";
+import { FolderPlus, Users, Sparkles, FileSearch, ArrowUpRight } from "lucide-react";
+import { EngineOrganizationOnboarding } from "./EngineOrganizationOnboarding";
 import { ConversationAvatar } from "./ConversationAvatar";
 import { isHumanMember } from "./conversation-members";
 import type { ConversationScenario } from "./conversation-scenarios";
 import type { SpaceData } from "./ConversationSpace";
+import "./conversation-welcome-refined.css";
 
 const EXAMPLE_LABELS = [
   "Prepariamo il catalogo",
@@ -20,6 +19,10 @@ type Props = {
   spaceData: SpaceData;
   onCreateExample: (index: number) => void;
   engineMode?: boolean;
+  onRefreshEngine?: (() => Promise<void>) | undefined;
+  onOpenSpace?: ((space: "Progetti" | "Squadra" | "Materiali", initial?: string, selected?: string) => void) | undefined;
+  /** La nuova conversazione nascerà in questo progetto (eredità di memoria). */
+  newChatProject?: { id: string; name: string } | null | undefined;
 };
 
 export function ConversationWorkspaceWelcome({
@@ -28,75 +31,89 @@ export function ConversationWorkspaceWelcome({
   spaceData,
   onCreateExample,
   engineMode = false,
+  onRefreshEngine,
+  onOpenSpace,
+  newChatProject,
 }: Props) {
-  if (engineMode) {
-    return (
-      <div className="cw-welcome">
-        <span className="cw-overline">COMINCIAMO DA QUI</span>
-        <h1>
-          Scrivi cosa vuoi ottenere.
-          <br />
-          <em>Decidiamo insieme come farlo.</em>
-        </h1>
-        <p>
-          Raccontami il risultato che cerchi. Ti proporrò un obiettivo chiaro e il collaboratore
-          adatto, oppure un nuovo profilo da creare. Il lavoro parte dopo la tua conferma.
-        </p>
-        <span className="cw-example-note">
-          Esempio: «Prepara il catalogo prodotti per il cliente entro venerdì».
-        </span>
-      </div>
-    );
-  }
+  const [showTeamOnboarding, setShowTeamOnboarding] = useState(false);
 
   return (
-    <div className="cw-welcome">
-      <span className="cw-overline">MENO DA GESTIRE. PIÙ DA FARE.</span>
-      <h1>
-        {assignee ? (
-          <>
-            Cosa affidiamo
-            <br />
-            <em>a {assignee}?</em>
-          </>
-        ) : (
-          <>
-            Un pensiero in meno.
-            <br />
-            <em>Cominciamo da qui.</em>
-          </>
-        )}
+    <div className="cw-welcome-linear">
+      <div className="cw-welcome-mark">H</div>
+      <h1 className="cw-welcome-title">
+        {assignee ? `Cosa affidiamo a ${assignee}?` : "Come possiamo aiutarti oggi?"}
       </h1>
-      <p>
-        Racconta cosa vuoi ottenere.
-        <br />
-        La tua squadra ti aiuta a portarlo a termine.
+      {newChatProject && (
+        <p className="cw-welcome-project-hint" role="status">
+          Nuova conversazione nel progetto <strong>{newChatProject.name}</strong>:
+          eredita memoria, materiali e permessi del progetto.
+        </p>
+      )}
+      <p className="cw-welcome-subtitle">
+        {assignee
+          ? "Descrivi l'obiettivo, i vincoli e i materiali. L'agente si occuperà dell'esecuzione."
+          : "Chiedi quello che ti serve, assegna compiti alla squadra o avvia un nuovo progetto."}
       </p>
-      {!assignee && (
-        <div className="cw-examples">
-          {scenarios.slice(0, 3).map(
-            (s, i) =>
-              !spaceData.removedPeople?.includes(s.agent) && (
-                <button key={s.title} onClick={() => onCreateExample(i)}>
-                  <ConversationAvatar
-                    name={s.agent}
-                    human={isHumanMember(s.agent, spaceData.profiles)}
-                  />
-                  <span>
-                    {EXAMPLE_LABELS[i]}
-                    <small>Con {s.agent}</small>
-                  </span>
-                  <ArrowUpRight size={17} />
-                </button>
-              ),
-          )}
+
+      <div className="cw-welcome-pills">
+        {onOpenSpace && (
+          <button
+            type="button"
+            className="cw-welcome-pill"
+            onClick={() => onOpenSpace("Progetti", "", "new")}
+          >
+            <FolderPlus size={13} />
+            <span>Nuovo progetto</span>
+          </button>
+        )}
+
+        {engineMode ? (
+          <button
+            type="button"
+            className="cw-welcome-pill"
+            onClick={() => setShowTeamOnboarding((v) => !v)}
+          >
+            <Users size={13} />
+            <span>{showTeamOnboarding ? "Nascondi configurazione squadra" : "Costruisci squadra con AI"}</span>
+          </button>
+        ) : (
+          scenarios.slice(0, 3).map((s, i) =>
+            !spaceData.removedPeople?.includes(s.agent) ? (
+              <button
+                key={s.title}
+                type="button"
+                className="cw-welcome-pill"
+                onClick={() => onCreateExample(i)}
+              >
+                <ConversationAvatar
+                  name={s.agent}
+                  human={isHumanMember(s.agent, spaceData.profiles)}
+                />
+                <span>{EXAMPLE_LABELS[i]}</span>
+                <ArrowUpRight size={12} />
+              </button>
+            ) : null
+          )
+        )}
+
+        {onOpenSpace && (
+          <button
+            type="button"
+            className="cw-welcome-pill"
+            onClick={() => onOpenSpace("Materiali")}
+          >
+            <FileSearch size={13} />
+            <span>Consulta materiali</span>
+          </button>
+        )}
+      </div>
+
+      {engineMode && showTeamOnboarding && (
+        <div className="cw-welcome-inline-onboarding">
+          <EngineOrganizationOnboarding onChanged={onRefreshEngine} />
         </div>
       )}
-      <span className="cw-example-note">
-        {assignee
-          ? "Descrivi obiettivo, risultato atteso e vincoli. Puoi allegare i materiali."
-          : "Tre esempi guidati, oppure scrivi @ per affidare un lavoro libero."}
-      </span>
     </div>
   );
 }
+

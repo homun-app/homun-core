@@ -39,11 +39,11 @@ export function EngineSynthesis({
   }, []);
 
   return (
-    <section className="cw-price-tool" aria-label="Sintesi del collaboratore">
+    <section className="cw-price-tool" aria-label="Sintesi del lavoro">
       <details open={!idle || initiallyOpen || undefined}>
         <summary>Scrivi la sintesi</summary>
         <p>
-          Il collaboratore assegnato scriverà la bozza con il suo modello, a partire da obiettivo,
+          Homun, o il collaboratore scelto, scriverà la bozza a partire da obiettivo,
           vincoli, procedure approvate e i documenti che scegli. La bozza arriva in revisione:
           nessun invio esterno, nessuna approvazione automatica.
         </p>
@@ -117,8 +117,8 @@ export function EngineSynthesis({
               {p.skills?.length ? ` · procedure: ${p.skills.map((s) => s.name).join(", ")}` : ""}
             </p>
             <p className="cw-hint">
-              Scriverà la bozza il modello del collaboratore assegnato (o la connessione attiva
-              dello spazio, se non ne ha una dedicata — l'artifact lo dichiara). Approvando,
+              Homun usa la connessione attiva dello spazio. Un collaboratore scelto usa la propria
+              connessione dedicata, quando disponibile. La bozza dichiara il modello usato. Approvando,
               autorizzi questa esecuzione e questa fase.
             </p>
             <button className="cw-primary" disabled={synth.busy} onClick={() => void synth.approve()}>
@@ -131,7 +131,7 @@ export function EngineSynthesis({
         )}
         {p && p.status === "completed" && p.summary && (
           <p role="status">
-            <strong>Bozza pronta per la tua verifica.</strong> Modello {p.summary.model_id ?? "del collaboratore"},{" "}
+            <strong>Bozza pronta per la tua verifica.</strong> Modello {p.summary.model_id ?? "dello spazio"},{" "}
             connessione {p.summary.connection === "collaboratore" ? "dedicata del collaboratore" : "attiva dello spazio"}
             {p.summary.truncated ? ", bozza troncata al limite di caratteri" : ""}. Il risultato è in
             revisione nella conversazione.

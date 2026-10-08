@@ -8,60 +8,45 @@ import { ConversationContribution } from "./ConversationContribution";
 import { ConversationHumanWork } from "./ConversationHumanWork";
 import { type ConversationMaterial } from "./ConversationMaterials";
 import { memberProfile, isHumanMember } from "./conversation-members";
-import {
-  type SpaceData,
-  type SpaceView,
-  spacePeople,
-} from "./ConversationSpace";
+import { type SpaceData, type SpaceView, spacePeople } from "./ConversationSpace";
 import { ConversationSearch } from "./ConversationSearch";
 import { ConversationWorkspaceChatStage } from "./ConversationWorkspaceChatStage";
+import { EngineChatStage } from "./chat/EngineChatStage";
 import { ConversationWorkspacePreview } from "./ConversationWorkspacePreview";
 import { ConversationWorkspaceSidebar } from "./ConversationWorkspaceSidebar";
 import { ConversationWorkspaceSpaceHost } from "./ConversationWorkspaceSpaceHost";
 import { ConversationWorkspaceTopbar } from "./ConversationWorkspaceTopbar";
-import {
-  ConversationWorkspaceWorkPanel,
-  registerPlanAgent,
-} from "./ConversationWorkspaceWorkPanel";
+import { ConversationNotifications } from "./ConversationNotifications";
+import { ConversationWorkspaceBottomDock } from "./ConversationWorkspaceBottomDock";
+import { ConversationFloatingAgentWidget } from "./ConversationFloatingAgentWidget";
+import { ConversationWorkspaceWorkPanel, registerPlanAgent } from "./ConversationWorkspaceWorkPanel";
 import { initialScenarios, scenarioForWork } from "./conversation-scenarios";
-import {
-  applyBoardMove,
-  boardMoveSuccessMessage,
-  validateBoardMove,
-} from "./conversation-board-move";
-import { buildDemoBootstrap, resolveDemoMode } from "./conversation-demo-mode";
+import { applyBoardMove, boardMoveSuccessMessage, validateBoardMove } from "./conversation-board-move";
+import { demoWorkspaceBootstrap } from "./conversation-demo-mode";
 import { downloadPrototypeExport, downloadWorkResult } from "./conversation-export";
 import { buildMaterialLibrary } from "./conversation-material-library";
-import {
-  buildConversationSearchEntries,
-  openWorkResultPreview,
-} from "./conversation-search-entries";
-import {
-  isCompletedNoticeForViewer,
-  isPendingForViewer,
-  workspaceWorkStatus,
-} from "./conversation-work-status";
+import { buildConversationSearchEntries, openWorkResultPreview } from "./conversation-search-entries";
+import { isCompletedNoticeForViewer, isPendingForViewer, workspaceWorkStatus } from "./conversation-work-status";
 import { useConversationPrototypeStorage } from "./useConversationPrototypeStorage";
 import { type Phase, type Work } from "./conversation-types";
 import { useEffect, useReducer, useRef, useState } from "react";
-import { ConversationEngineBanner } from "./ConversationEngineBanner";
 import { useChatAutoScroll } from "@/hooks/useChatAutoScroll";
 import { useEngineWorkspace } from "@/hooks/useEngineWorkspace";
 import { useWorkDestinationScroll, type WorkDestination } from "@/hooks/useWorkDestinationScroll";
 import { isEngineBackedWork } from "@/lib/conversation-engine-bridge";
-import { sendEngineFirstMessage } from "@/lib/engine-first-send";
+import { handleEngineSend } from "@/lib/engine-send-handler";
+import { buildFreeWorkSpec } from "@/lib/conversation-freework";
 import { parseConversationNavigation } from "@/lib/conversation-navigation";
 import {
   parsePlanInsert,
   parsePlanReorder,
+  reorderPlanSteps,
   stripTrailingMention,
 } from "@/lib/conversation-plan-commands";
-
 import { projectWorkspaceData } from "@/lib/engine-project-projection";
 export type { Work } from "./conversation-types";
-const demoMode = resolveDemoMode();
-const { storageKey } = demoMode;
-const demoBootstrap = buildDemoBootstrap(demoMode);
+const { storageKey, bootstrap: demoBootstrap } = demoWorkspaceBootstrap();
+
 export function ConversationWorkspace() {
   const [active, setActive] = useState<string | null>(null);
   const engine = useEngineWorkspace(active);
@@ -79,10 +64,16 @@ export function ConversationWorkspace() {
   const [works, setWorks] = useState<Work[]>(() => demoBootstrap.works);
   const [workListOpen, setWorkListOpen] = useState(true);
   const [squadListOpen, setSquadListOpen] = useState(true);
-  const [panel, setPanel] = useState(true);
+  const [panel, setPanel] = useState(false);
   const searchShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K";
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 800);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = localStorage.getItem("homun:sidebar-width");
+    return saved ? Math.min(480, Math.max(180, parseInt(saved, 10))) : 250;
+  });
+  const handleSidebarWidthChange = (w: number) => { setSidebarWidth(w); localStorage.setItem("homun:sidebar-width", String(w)); };
   const [notifications, setNotifications] = useState(false);
+  const [floatingAgentOpen, setFloatingAgentOpen] = useState(false);
   const [seenResults, setSeenResults] = useState<string[]>([]);
   const [preview, setPreview] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -94,38 +85,11 @@ export function ConversationWorkspace() {
   const displaySpaceData = projectWorkspaceData(engine.backend, spaceData, engine.projects);
   const [searchOpen, setSearchOpen] = useState(false);
   const { resetting } = useConversationPrototypeStorage({
-    storageKey,
-    loaded,
-    setLoaded,
-    storageEnabled,
-    setStorageEnabled,
-    setStorageStatus,
-    scenarios,
-    setScenarios,
-    works,
-    setWorks,
-    materials,
-    setMaterials,
-    spaceData,
-    setSpaceData,
-    preferences,
-    setPreferences,
-    seenResults,
-    setSeenResults,
-    active,
-    setActive,
-    space,
-    setSpace,
-    sidebarOpen,
-    setSidebarOpen,
-    panel,
-    setPanel,
-    viewer,
-    setViewer,
-    spaceSelected,
-    setSpaceSelected,
-    attachmentIds,
-    materialDates,
+    storageKey, loaded, setLoaded, storageEnabled, setStorageEnabled, setStorageStatus,
+    scenarios, setScenarios, works, setWorks, materials, setMaterials, spaceData, setSpaceData,
+    preferences, setPreferences, seenResults, setSeenResults, active, setActive,
+    space, setSpace, sidebarOpen, setSidebarOpen, panel, setPanel, viewer, setViewer,
+    spaceSelected, setSpaceSelected, attachmentIds, materialDates,
   });
 
   useEffect(() => {
@@ -196,9 +160,15 @@ export function ConversationWorkspace() {
     setWorks((all) => all.map((w) => (w.id === active ? { ...w, ...change } : w)));
   }
   const [destination, setDestination] = useState<WorkDestination>(null);
+  // Il '+' dentro la vista Progetti: la prossima conversazione nasce nel
+  // progetto aperto e ne eredita memoria, materiali e permessi.
+  const [newChatProjectId, setNewChatProjectId] = useState<string | null>(null);
   function open(id: string | null, selector = "") {
     if (window.innerWidth <= 800) setSidebarOpen(false);
-    if (id) setDestination({ id, selector, stamp: Date.now() });
+    if (id) {
+      setDestination({ id, selector, stamp: Date.now() });
+      setNewChatProjectId(null);
+    }
     if (id && works.some((w) => w.id === id && w.phase === "approved"))
       setSeenResults((current) => [...new Set([...current, `${viewer}:${id}`])]);
     setAssignee("");
@@ -207,9 +177,7 @@ export function ConversationWorkspace() {
     setNotifications(false);
     setPreview(false);
     setContribution("");
-    setFiles([]);
-    setNotice("");
-    setPanel(true);
+    setFiles([]); setNotice(""); setPanel(false);
   }
   // Anchored follow while reading at the bottom; an own send always follows.
   const [ownSendSeq, bumpOwnSend] = useReducer((count: number) => count + 1, 0);
@@ -238,7 +206,7 @@ export function ConversationWorkspace() {
       // Never reuse demo scenario titles as identity — objective text is the work title.
       const title = (text || s.initial || s.title).trim().slice(0, 100) || "Lavoro motore";
       const objective = (text || s.initial).trim() || title;
-      void engine.createWork(title, objective).then((created) => {
+      void engine.createWork(title, objective, false, projectId ?? newChatProjectId ?? undefined).then((created) => {
         if (created) {
           open(created.id);
           setNotice(`Lavoro creato · ${created.id}`);
@@ -501,7 +469,8 @@ export function ConversationWorkspace() {
   }
   function moveConversation(id: string, projectId: string) {
     if (engine.backend === "engine") {
-      setNotice("Spostamento progetto: non ancora collegato al motore.");
+      const target = engine.works.find((w) => w.id === id);
+      if (target) void engine.setProject(target, projectId || null).catch(() => setNotice("Assegnazione progetto non riuscita."));
       return;
     }
     if (projectId && !spaceData.projects.some((p) => p.id === projectId)) return;
@@ -512,12 +481,10 @@ export function ConversationWorkspace() {
       return (
         <ConversationActions
           title={w.title}
-          projects={[]}
-          current=""
-          onRename={() =>
-            setNotice("Rinomina non ancora disponibile.")
-          }
-          onMove={() => setNotice("Spostamento progetto non ancora disponibile.")}
+          projects={spaceData.projects}
+          current={w.projectId || ""}
+          onRename={() => setNotice("Rinomina non ancora disponibile.")}
+          onMove={(projId) => moveConversation(w.id, projId)}
           onCreate={() => setNotice("Promozione a progetto non ancora collegata al motore.")}
           onRepeat={() => setNotice("Automazioni motore: non in questo slice.")}
         />
@@ -639,29 +606,7 @@ export function ConversationWorkspace() {
       });
       return undefined;
     }
-    const spec = {
-      ...initialScenarios[0]!,
-      agent: name,
-      icon: name.slice(0, 1),
-      role: memberProfile(name, spaceData.profiles).role,
-      color: "sage",
-      custom: true,
-      title: text.slice(0, 100),
-      initial: text,
-      input: "Le informazioni necessarie per questo incarico",
-      help: "Allega materiali o descrivi vincoli, fonti e risultato atteso. Se non servono altri materiali, scrivilo qui.",
-      outcome: "Un risultato coerente con la richiesta, da verificare insieme.",
-      steps: [
-        "Concordare risultato, informazioni e vincoli",
-        "Preparare il lavoro e segnalare eventuali dubbi",
-        "Consegnare il risultato per la tua verifica",
-      ],
-      result: "Consegna dimostrativa",
-      body:
-        "# Consegna dimostrativa\n\n## Incarico\n" +
-        text +
-        "\n\n## Risultato\nIl motore non è collegato: nessun lavoro è stato eseguito. Questa scheda serve a provare revisione e approvazione.\n\n## Da verificare nel prodotto finale\nRisultato completo, materiali utilizzati, fonti, limiti e azioni proposte.",
-    };
+    const spec = buildFreeWorkSpec(name, text, spaceData);
     const index = scenarios.length;
     setScenarios((current) => [...current, spec]);
     return create(index, text, attachments, projectId, spec);
@@ -674,62 +619,39 @@ export function ConversationWorkspace() {
       return;
     }
 
-    if (engine.backend === "engine") {
-      if (engine.gateError || attachments.length) {
-        setNotice(engine.gateError ? "App locale non pronta: impossibile salvare." : "Per il confronto usa i due campi file nella scheda Confronta due listini della conversazione. Gli allegati non sono stati inviati.");
-        return;
-      }
-      // One turn at a time, said out loud: a second send would silently abort
-      // the turn in flight (single-flight engine contract).
-      if (engine.busy) {
-        setNotice(
-          "Homun sta ancora completando il turno precedente: attendi la risposta oppure premi Annulla.",
-        );
-        return;
-      }
-      if (work && isEngineBackedWork(work)) {
-        bumpOwnSend();
-        void engine
-          .postMessage(work, text)
-          .then(() => setNotice(""))
-          .catch(() => setNotice("Invio al motore non riuscito. Controlla il banner errori."));
-        return;
-      }
-      // First message of a new work: open immediately, then postMessage routes it.
-      sendEngineFirstMessage(engine, text, open, setNotice, bumpOwnSend);
+    if (handleEngineSend({
+      engine,
+      work: work ?? null,
+      text,
+      attachments,
+      open,
+      setNotice,
+      bumpOwnSend,
+      autonomyLevel: preferences.autonomyLevel,
+      modelConnectionId: preferences.preferredModelConnectionId || undefined,
+      projectId: newChatProjectId ?? undefined,
+    })) {
       return;
     }
 
     if (work?.catalogPlan && work.phase !== "approved" && /^sposta\s/i.test(text)) {
-      const reorder = parsePlanReorder(text);
       const plan = work.catalogPlan;
-      if (reorder) {
-        const from = plan.steps.findIndex((s) =>
-          s.title.toLowerCase().includes(reorder.itemTitle.toLowerCase()),
-        );
-        const target = plan.steps.findIndex((s) =>
-          s.title.toLowerCase().includes(reorder.anchorTitle.toLowerCase()),
-        );
-        if (from >= plan.completed && target >= plan.completed && from !== target) {
-          const steps = plan.steps.filter((_, i) => i !== from);
-          const to =
-            steps.findIndex((s) => s.id === plan.steps[target]!.id) +
-            (reorder.relation === "dopo" ? 1 : 0);
-          steps.splice(to, 0, plan.steps[from]!);
-          setPlanEdit({ workId: work.id, plan: { ...plan, steps } });
-          patch({
-            messages: [
-              ...work.messages,
-              { who: "you", text },
-              {
-                who: "agent",
-                text: "Ti propongo questo ordine. I passaggi già conclusi rimangono invariati.",
-              },
-            ],
-          });
-          setPanel(true);
-          return;
-        }
+      const reorder = parsePlanReorder(text);
+      const steps = reorder ? reorderPlanSteps(plan.steps, plan.completed, reorder) : null;
+      if (steps) {
+        setPlanEdit({ workId: work.id, plan: { ...plan, steps } });
+        patch({
+          messages: [
+            ...work.messages,
+            { who: "you", text },
+            {
+              who: "agent",
+              text: "Ti propongo questo ordine. I passaggi già conclusi rimangono invariati.",
+            },
+          ],
+        });
+        setPanel(true);
+        return;
       }
       setNotice(
         "Per riordinare indica i titoli di due passaggi futuri: Sposta Tradurre il catalogo dopo Preparare la bozza.",
@@ -1109,10 +1031,6 @@ export function ConversationWorkspace() {
     openResultPreview: (w) =>
       openWorkResultPreview(w, scenarios, spaceData.profiles, open, setPreview),
   });
-  function download() {
-    if (!scenario || !work) return;
-    downloadWorkResult({ scenario, work });
-  }
   if (!loaded)
     return (
       <div className="cw-loading" role="status">
@@ -1122,6 +1040,7 @@ export function ConversationWorkspace() {
   return (
     <div
       className={`cw ${sidebarOpen ? "" : "cw-sidebar-closed"} ${preferences.textSize === "large" ? "cw-large-text" : ""} ${preferences.motion ? "" : "cw-reduce-motion"}`}
+      style={{ "--cw-sidebar-w": sidebarOpen ? `${sidebarWidth}px` : "0px" } as React.CSSProperties}
     >
       {settings && (
         <ConversationSettings
@@ -1179,9 +1098,14 @@ export function ConversationWorkspace() {
         searchShortcut={searchShortcut}
         onSearchOpen={() => setSearchOpen(true)}
         onCloseSidebar={() => setSidebarOpen(false)}
-        onNewConversation={() => open(null)}
+        onNewConversation={() => {
+          const inProjects = (space as string | null) === "Progetti";
+          setNewChatProjectId(inProjects && spaceSelected ? spaceSelected : null);
+          open(null);
+        }}
         space={space}
         onOpenSpace={openSpace}
+        engineMode={engine.backend === "engine"}
         spaceData={displaySpaceData}
         libraryCount={engine.backend === "engine" ? null : library.length} routineCount={engine.backend === "engine" ? engine.routines.filter((r) => r.status === "active").length : null}
         visibleWorks={visibleWorks}
@@ -1198,43 +1122,44 @@ export function ConversationWorkspace() {
         onToggleSquadList={() => setSquadListOpen(!squadListOpen)}
         preferences={preferences}
         onOpenSettings={() => setSettings(true)}
+        notificationCount={notificationCount}
+        onToggleNotifications={() => setNotifications(!notifications)}
+        sidebarWidth={sidebarWidth}
+        onSidebarWidthChange={handleSidebarWidthChange}
       />
       <main className={`cw-main ${panel ? "" : "cw-details-hidden"}`}>
-        <ConversationWorkspaceTopbar
-          engineMode={engine.backend === "engine"}
-          sidebarOpen={sidebarOpen}
-          onOpenSidebar={() => setSidebarOpen(true)}
-          space={space}
-          work={work}
-          preferences={preferences}
-          onOpenSettings={() => setSettings(true)}
-          viewer={viewer}
-          onViewerChange={(next) => {
-            setViewer(next);
-            setNotifications(false);
-          }}
-          spaceData={displaySpaceData}
-          notificationCount={notificationCount}
-          notificationsOpen={notifications}
-          onToggleNotifications={() => setNotifications(!notifications)}
-          onCloseNotifications={() => setNotifications(false)}
-          pending={pending}
-          completedNotices={completedNotices}
-          scenarios={scenarios}
-          onOpenWork={open}
-          showPanelToggle={!!(work || space)}
-          panelOpen={panel}
-          onTogglePanel={() => setPanel(!panel)}
+        {space !== "Progetti" && (
+          <ConversationWorkspaceTopbar
+            engineMode={engine.backend === "engine"}
+            sidebarOpen={sidebarOpen} onOpenSidebar={() => setSidebarOpen(true)}
+            space={space} work={work} preferences={preferences}
+            viewer={viewer} onViewerChange={(next) => { setViewer(next); setNotifications(false); }}
+            spaceData={displaySpaceData}
+            works={engine.backend === "engine" ? engine.works : works}
+            onOpenWork={open} onNewConversation={() => {
+              const inProjects = (space as string | null) === "Progetti";
+              setNewChatProjectId(inProjects && spaceSelected ? spaceSelected : null);
+              open(null);
+            }}
+            spaceInitial={spaceInitial} onOpenSpace={openSpace} scenario={scenario} scenarios={scenarios} workActions={work ? conversationActions(work) : undefined}
+          />
+        )}
+        <ConversationNotifications
+          isOpen={notifications} onClose={() => setNotifications(false)}
+          pending={pending} completedNotices={completedNotices}
+          scenarios={scenarios} spaceData={displaySpaceData} onOpenWork={open}
         />
-        {/* Engine diagnostics live in Settings, not above the conversation.
-            Errors that block work surface through HomunErrorNotice. */}
+        {/* Diagnostics live in Settings; blocking errors use HomunErrorNotice. */}
         {space ? (
-          <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined} engineTeams={engine.backend === "engine" ? engine.teams : undefined} engineRoutines={engine.backend === "engine" ? engine.routines : undefined} onUpdateRoutine={engine.backend === "engine" ? (r, ch) => engine.updateRoutine(r.id, r.revision, ch) : undefined} onSkipNextRoutine={engine.backend === "engine" ? (r) => engine.routineAction(r.id, "skip_next", r.revision) : undefined}
+          <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined} engineTeams={engine.backend === "engine" ? engine.teams : undefined} engineRoutines={engine.backend === "engine" ? engine.routines : undefined} onUpdateRoutine={engine.backend === "engine" ? (r, ch) => engine.updateRoutine(r.id, r.revision, ch) : undefined} onSkipNextRoutine={engine.backend === "engine" ? (r) => engine.routineAction(r.id, "skip_next", r.revision) : undefined} onCreateRoutineFromWork={engine.backend === "engine" ? (workId, input) => engine.createRoutineFromWork(workId, input) : undefined}
+            onSetEngineDue={engine.backend === "engine" ? engine.setDue : undefined}
             engineMode={engine.backend === "engine"} onRefreshEngine={engine.backend === "engine" ? engine.refresh : undefined}
             space={space}
             spaceInitial={spaceInitial}
             spaceSelected={spaceSelected}
             spaceVersion={spaceVersion}
+            sidebarOpen={sidebarOpen}
+            onOpenSidebar={() => setSidebarOpen(true)}
             spaceData={displaySpaceData}
             setSpaceData={setSpaceData}
             scenarios={scenarios}
@@ -1295,6 +1220,26 @@ export function ConversationWorkspace() {
             }
             unavailable={!!spaceData.removedPeople?.includes(scenario.agent)}
           />
+        ) : engine.backend === "engine" ? (
+          <EngineChatStage
+            engine={engine}
+            work={work}
+            activeWorkId={active}
+            preferences={preferences}
+            setPreferences={setPreferences}
+            notice={notice}
+            setNotice={setNotice}
+            assignee={assignee}
+            scenarios={scenarios}
+            spaceData={displaySpaceData}
+            onOpenSpace={openSpace}
+            onCreateExample={create}
+            onSend={send}
+            newChatProject={newChatProjectId ? {
+              id: newChatProjectId,
+              name: displaySpaceData.projects.find((p) => p.id === newChatProjectId)?.name ?? newChatProjectId,
+            } : null}
+          />
         ) : (
           <ConversationWorkspaceChatStage
             work={work}
@@ -1317,12 +1262,15 @@ export function ConversationWorkspace() {
             onApprovePlan={approvePlan}
             onApplyPlanEdit={(plan) => updatePlan(plan)}
             onCancelPlanEdit={() => setPlanEdit(null)}
-            onSend={send}
+            onSend={send} onOpenSpace={openSpace}
+            autonomyLevel={preferences.autonomyLevel}
+            onAutonomyLevelChange={(level) => setPreferences((p) => ({ ...p, autonomyLevel: level }))}
+            modelConnectionId={preferences.preferredModelConnectionId ?? ""}
+            onModelConnectionIdChange={(connId) => setPreferences((p) => ({ ...p, preferredModelConnectionId: connId }))}
             onClearNotice={() => setNotice("")}
-            engineMode={engine.backend === "engine"} engineIntake={engine.intake} onRefreshEngine={engine.refresh}
-            engineAgents={engine.backend === "engine" ? engine.agents : undefined}
-            engineBusy={engine.busy}
-            historyLoading={engine.historyLoading}
+            engineMode={false} engineIntake={undefined} onRefreshEngine={engine.refresh}
+            engineAgents={undefined} agentNames={undefined}
+            onStartWork={undefined} engineBusy={engine.busy} historyLoading={engine.historyLoading}
             onConfirmPatch={(messageIndex) => {
               if (!work) return;
               void engine.confirmPatch(work, messageIndex).catch(() => {
@@ -1338,7 +1286,7 @@ export function ConversationWorkspace() {
             onCancelInFlight={() => engine.cancelInFlight()}
             details={
               work && scenario ? (
-                <ConversationWorkspaceWorkPanel
+                <ConversationWorkspaceWorkPanel onRefreshEngine={engine.refresh}
                   work={work}
                   scenario={scenario}
                   viewer={viewer}
@@ -1390,34 +1338,36 @@ export function ConversationWorkspace() {
           />
         )}
       </main>
-      <input
-        ref={upload}
-        hidden
-        type="file"
-        multiple
-        onChange={(e) => {
-          setFiles([...files, ...Array.from(e.target.files || [])]);
-          e.target.value = "";
+      <ConversationWorkspaceBottomDock
+        space={space}
+        onToggleAgent={() => {
+          if (space) setFloatingAgentOpen((prev) => !prev);
+          else setActive(null);
         }}
+        isFloatingOpen={floatingAgentOpen}
+        works={engine.backend === "engine" ? engine.works : works}
+        activeWorkId={active}
+        onOpenWork={open}
       />
-      <input
-        ref={directory}
-        hidden
-        type="file"
-        multiple
-        {...{ webkitdirectory: "" }}
-        onChange={(e) => {
-          setFiles([...files, ...Array.from(e.target.files || [])]);
-          e.target.value = "";
-        }}
-      />
+      {space && (
+        <ConversationFloatingAgentWidget
+          isOpen={floatingAgentOpen}
+          onClose={() => setFloatingAgentOpen(false)}
+          onExpand={() => { setFloatingAgentOpen(false); setSpace(null); }}
+          onSend={(text) => { send(text, []); }}
+          work={work}
+          engineMode={engine.backend === "engine"}
+        />
+      )}
+      <input ref={upload} hidden type="file" multiple onChange={(e) => { setFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = ""; }} />
+      <input ref={directory} hidden type="file" multiple {...{ webkitdirectory: "" }} onChange={(e) => { setFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = ""; }} />
       {preview && work && scenario && (
         <ConversationWorkspacePreview
           work={work}
           scenario={scenario}
           modalRef={modal}
           onClose={() => setPreview(false)}
-          onDownload={download}
+          onDownload={() => { if (scenario && work) downloadWorkResult({ scenario, work }); }}
         />
       )}
     </div>

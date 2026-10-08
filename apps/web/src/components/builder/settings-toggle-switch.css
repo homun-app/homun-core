@@ -1,0 +1,52 @@
+/* Settings Toggle Switch - Homun Alpine Cream & Forest Theme */
+
+.cv-toggle-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 38px;
+  height: 22px;
+  padding: 2px;
+  border-radius: 9999px;
+  background-color: #dce4d5;
+  border: 1px solid #c8d4c1;
+  cursor: pointer;
+  transition: background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+  flex-shrink: 0;
+}
+
+.cv-toggle-switch:hover:not(.is-disabled) {
+  background-color: #cedbc6;
+}
+
+.cv-toggle-switch:focus-visible {
+  box-shadow: 0 0 0 2px #fbfbf8, 0 0 0 4px #203c32;
+}
+
+.cv-toggle-switch.is-checked {
+  background-color: #203c32;
+  border-color: #203c32;
+}
+
+.cv-toggle-switch.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cv-toggle-switch__thumb {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(32, 60, 50, 0.2);
+  transform: translateX(0);
+  transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cv-toggle-switch.is-checked .cv-toggle-switch__thumb {
+  transform: translateX(16px);
+  background-color: #ffffff;
+}

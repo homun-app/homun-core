@@ -1,6 +1,6 @@
 """Capability registry: the single source of truth for what the engine can run.
 
-Being registered, existing and authorized are distinct concepts (the Hermes
+Being registered, existing and authorized are distinct concepts (the
 lesson): this module only *describes* capabilities. Policies decide access,
 approval binds arguments and revisions, execution writes effects. Nothing here
 grants permissions.
@@ -135,8 +135,18 @@ SYNTHESIZE = CapabilitySpec(
     },
 )
 
-REGISTRY: Mapping[str, CapabilitySpec] = {spec.id: spec for spec in (COMPARE_CSV, READ_MATERIAL, SYNTHESIZE, GENERAL)}
-TRANSPORT_IDS = ('compare_csv', 'read_material', 'synthesize', 'general')
+AGENT_RUN = CapabilitySpec(
+    id='agent_run', kind='executable', tool_version='adaptive-materials-v1',
+    summary='Homun sceglie letture e ricerche nei materiali selezionati, osserva i risultati e prepara la consegna; può chiedere chiarimenti.',
+    inputs=('Obiettivo e fino a 12 materiali autorizzati',),
+    outputs=('Artifact Markdown in revisione umana',),
+    effects=('Lettura delle fonti selezionate, chiamate al modello, domande alla persona e artifact; nessun invio esterno.',),
+    limits={'max_turns': 8, 'max_model_attempts': 12, 'max_materials': 12,
+            'max_observation_characters': 64000}, timeout_seconds=600,
+)
+
+REGISTRY: Mapping[str, CapabilitySpec] = {spec.id: spec for spec in (COMPARE_CSV, READ_MATERIAL, SYNTHESIZE, GENERAL, AGENT_RUN)}
+TRANSPORT_IDS = ('compare_csv', 'read_material', 'synthesize', 'general', 'agent_run')
 """Public capability ids accepted by the intake transport; keep in sync with REGISTRY."""
 
 

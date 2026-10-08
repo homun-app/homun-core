@@ -1,0 +1,62 @@
+......F...F.F......F....F.F...F.......F.....F......F....FEEEEE........F  [100%]
+==================================== ERRORS ====================================
+________________ ERROR at setup of test_openai_models_endpoint _________________
+E   sqlite3.OperationalError: unable to open database file
+_________ ERROR at setup of test_openai_chat_completions_non_streaming _________
+E   sqlite3.OperationalError: unable to open database file
+________ ERROR at setup of test_openai_chat_completions_with_tool_calls ________
+E   sqlite3.OperationalError: unable to open database file
+_________ ERROR at setup of test_openai_chat_completions_streaming_sse _________
+E   sqlite3.OperationalError: unable to open database file
+__________ ERROR at setup of test_openai_chat_completions_idempotency __________
+E   sqlite3.OperationalError: unable to open database file
+=================================== FAILURES ===================================
+E   sqlite3.OperationalError: unable to open database file
+/Users/fabio/Projects/Homun/homun2/engine/src/homun/application/kanban_store.py:28: sqlite3.OperationalError: unable to open database file
+E   sqlite3.OperationalError: unable to open database file
+/Users/fabio/Projects/Homun/homun2/engine/src/homun/application/kanban_store.py:28: sqlite3.OperationalError: unable to open database file
+E   sqlite3.OperationalError: unable to open database file
+/Users/fabio/Projects/Homun/homun2/engine/src/homun/application/kanban_store.py:28: sqlite3.OperationalError: unable to open database file
+E   sqlite3.OperationalError: unable to open database file
+/Users/fabio/Projects/Homun/homun2/engine/src/homun/application/kanban_store.py:28: sqlite3.OperationalError: unable to open database file
+E   sqlite3.OperationalError: unable to open database file
+/Users/fabio/Projects/Homun/homun2/engine/src/homun/application/kanban_store.py:28: sqlite3.OperationalError: unable to open database file
+E   sqlite3.OperationalError: unable to open database file
+/Users/fabio/Projects/Homun/homun2/engine/src/homun/application/kanban_store.py:28: sqlite3.OperationalError: unable to open database file
+E   sqlite3.OperationalError: unable to open database file
+/Users/fabio/Projects/Homun/homun2/engine/src/homun/application/kanban_store.py:28: sqlite3.OperationalError: unable to open database file
+E   sqlite3.OperationalError: unable to open database file
+/Users/fabio/Projects/Homun/homun2/engine/src/homun/application/kanban_store.py:28: sqlite3.OperationalError: unable to open database file
+E   sqlite3.OperationalError: unable to open database file
+/Users/fabio/Projects/Homun/homun2/engine/src/homun/application/kanban_store.py:28: sqlite3.OperationalError: unable to open database file
+E   sqlite3.OperationalError: unable to open database file
+/Users/fabio/Projects/Homun/homun2/engine/src/homun/application/kanban_store.py:28: sqlite3.OperationalError: unable to open database file
+E   sqlite3.OperationalError: unable to open database file
+/Users/fabio/Projects/Homun/homun2/engine/src/homun/application/kanban_store.py:28: sqlite3.OperationalError: unable to open database file
+E   sqlite3.OperationalError: unable to open database file
+/Users/fabio/Projects/Homun/homun2/engine/src/homun/application/kanban_store.py:28: sqlite3.OperationalError: unable to open database file
+=============================== warnings summary ===============================
+engine/.venv/lib/python3.13/site-packages/starlette/testclient.py:53
+  /Users/fabio/Projects/Homun/homun2/engine/.venv/lib/python3.13/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED engine/tests/test_h41_media.py::test_media_api_routes - sqlite3.Operat...
+FAILED engine/tests/test_h16_desktop.py::test_desktop_api_endpoints - sqlite3...
+FAILED engine/tests/test_h34_surfaces.py::test_surface_gateway_api_endpoints
+FAILED engine/tests/test_h43_integrations.py::test_integrations_fastapi_endpoints
+FAILED engine/tests/test_h45_research.py::test_research_fastapi_endpoints - s...
+FAILED engine/tests/test_h23_kanban.py::test_kanban_fastapi_endpoints - sqlit...
+FAILED engine/tests/test_h42_deliverables.py::test_deliverables_api_routes - ...
+FAILED engine/tests/test_h39_runtimes.py::test_alternate_runtimes_api_routes
+FAILED engine/tests/test_h40_safety.py::test_safety_api_routes - sqlite3.Oper...
+FAILED engine/tests/test_h46_catalog.py::test_surface_catalog_fastapi_endpoints
+FAILED engine/tests/test_h44_operations.py::test_operations_fastapi_endpoints
+FAILED engine/tests/test_h38_providers.py::test_provider_routes_api - sqlite3...
+ERROR engine/tests/test_h35_protocols.py::test_openai_models_endpoint - sqlit...
+ERROR engine/tests/test_h35_protocols.py::test_openai_chat_completions_non_streaming
+ERROR engine/tests/test_h35_protocols.py::test_openai_chat_completions_with_tool_calls
+ERROR engine/tests/test_h35_protocols.py::test_openai_chat_completions_streaming_sse
+ERROR engine/tests/test_h35_protocols.py::test_openai_chat_completions_idempotency
+12 failed, 54 passed, 1 warning, 5 errors in 1.55s

@@ -39,8 +39,12 @@ output/playwright/
 .env.*
 !.env.example
 *.pem
-*.key
+.venv
 .venv/
+engine/.venv
+engine/.venv/
+**/.venv
+**/.venv/
 __pycache__/
 .pytest_cache/
 *.pyc
@@ -57,3 +61,16 @@ experiments/**/.data/
 apps/desktop/.package/
 apps/desktop/dist-installers/
 apps/desktop/node_modules/
+
+.audit-hermes-ref/
+
+# il bridge WhatsApp avviato a mano dalla repo root creerebbe wa-bridge.db qui:
+# il DB vivo è nella dir dati del motore (WA_BRIDGE_DB), mai nel repo
+wa-bridge.db
+wa-bridge.db-shm
+wa-bridge.db-wal
+
+# artefatti locali: il flusso engine è requirements.lock (npm run engine:install)
+engine/uv.lock
+# configurazione locale dell'ambiente di sviluppo
+.zcodeignore
