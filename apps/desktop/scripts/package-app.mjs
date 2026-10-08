@@ -8,11 +8,10 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { verifyEngineArtifact, verifyWebAssets } from './artifact-inventory.mjs';
-import { packager } from '@electron/packager';
 
 // Native verified profiles: build on the target OS itself. The receipt's
 // architecture is platform.machine() on the build host.
-const NATIVE_PROFILES = {
+export const NATIVE_PROFILES = {
   darwin: { packagerPlatform: 'darwin', packagerArch: 'arm64', receiptArch: 'arm64', tag: 'macos-arm64' },
   win32: { packagerPlatform: 'win32', packagerArch: 'x64', receiptArch: 'AMD64', tag: 'windows-x64' },
   linux: { packagerPlatform: 'linux', packagerArch: 'x64', receiptArch: 'x86_64', tag: 'linux-x64' },
@@ -121,6 +120,8 @@ export async function packageApp() {
   try {
     const inputs = await stageApp({ sourceRoot: root, stage, engineDir: path.join(root, 'dist/engine'), webDir: path.join(root, 'apps/web/dist') });
     const output = path.join(root, 'dist/desktop', new Date().toISOString().replace(/[:.]/g, '-'));
+    // lazy: i test di staging girano anche senza node_modules di build
+    const { packager } = await import('@electron/packager');
     const bundles = await packager({
       dir: inputs.appDir, name: 'Homun', appBundleId: 'dev.homun.desktop',
       appVersion: JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version || '0.2.0', electronVersion: inputs.electronVersion,
