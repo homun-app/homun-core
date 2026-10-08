@@ -205,10 +205,9 @@ CI: snapshot OpenAPI, cua-driver pinnato con stdout isolato e installer
 PowerShell su Windows (percorso %LOCALAPPDATA%), dipendenze Windows del
 bundle (pefile/pywin32-ctypes con hash), test packaging multi-architettura,
 packager lazy, test con provider reale o Chrome saltati dove mancano con
-motivo dichiarato. **Aperta su Apple**: la notarizzazione del tag
-v0.2.1002 fallisce con 403 «A required agreement is missing or has
-expired» — l'accordo legale del team Apple Developer va rinnovato dal
-titolare; dopo la firma, rifare il tag (o rilanciare la run) pubblica la
-release draft su homun-releases. Il codice e la pipeline sono pronti:
-l'ostacolo è solo amministrativo.
+motivo dichiarato. **Sbloccata su Apple** (2026-10-08, Fabio Cantone): il
+blocco notarizzazione del tag v0.2.1002 (403 «A required agreement is
+missing or has expired») era un problema amministrativo dell'accordo
+Apple Developer del team — ora risolto. Non è un problema di codice o
+pipeline; la notarizzazione non è più bloccata da quell'accordo.
 
