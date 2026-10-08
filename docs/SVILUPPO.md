@@ -196,3 +196,19 @@ simulazione|motore mai mescolate; errori tipizzati mai nascosti.
 - Evidenze per data: `research/` (80 documenti, archivio immutabile) · matrix parità Hermes: `research/evidence/`
 - Stato tecnico precedente (congelato al 2026-09-30): `STATO.md` — sostituito da questo documento per l'avanzamento
 - Registro documenti: `REGISTRO-DOCUMENTI.md`
+
+## Release 0.2.1002 (2026-10-08)
+
+PR #409 su main, tutte le build verdi (macOS firmata PR-validation, macOS
++ Linux + Windows multi-OS, checks backend/frontend). Sette giri di fix
+CI: snapshot OpenAPI, cua-driver pinnato con stdout isolato e installer
+PowerShell su Windows (percorso %LOCALAPPDATA%), dipendenze Windows del
+bundle (pefile/pywin32-ctypes con hash), test packaging multi-architettura,
+packager lazy, test con provider reale o Chrome saltati dove mancano con
+motivo dichiarato. **Aperta su Apple**: la notarizzazione del tag
+v0.2.1002 fallisce con 403 «A required agreement is missing or has
+expired» — l'accordo legale del team Apple Developer va rinnovato dal
+titolare; dopo la firma, rifare il tag (o rilanciare la run) pubblica la
+release draft su homun-releases. Il codice e la pipeline sono pronti:
+l'ostacolo è solo amministrativo.
+
