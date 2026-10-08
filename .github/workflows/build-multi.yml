@@ -97,7 +97,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist-installers
-          find dist/desktop -name '*.zip' -o -name '*.tar.gz' | while read -r archive; do
+          [ -d dist/desktop ] || exit 0
+          find dist/desktop -type f \( -name '*.zip' -o -name '*.tar.gz' \) | while read -r archive; do
             cp "$archive" dist-installers/
             [ -f "$archive.sha256" ] && cp "$archive.sha256" dist-installers/
           done
