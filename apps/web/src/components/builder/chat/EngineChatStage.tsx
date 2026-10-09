@@ -23,6 +23,7 @@ export function EngineChatStage({
   scenarios,
   spaceData,
   onOpenSpace,
+  onOpenModels,
   onCreateExample,
   onSend,
   newChatProject,
@@ -40,6 +41,7 @@ export function EngineChatStage({
   onOpenSpace:
     | ((space: "Progetti" | "Squadra" | "Materiali", initial?: string, selected?: string) => void)
     | undefined;
+  onOpenModels?: (() => void) | undefined;
   onCreateExample: (index: number) => void;
   onSend: (text: string, attachments: File[]) => void;
   newChatProject?: { id: string; name: string } | null | undefined;
@@ -63,6 +65,7 @@ export function EngineChatStage({
       references={buildMentionRefs(scenarios, spaceData, engine.agents)}
       onRefreshEngine={engine.refresh}
       onOpenSpace={onOpenSpace}
+      onOpenModels={onOpenModels}
       assignee={assignee}
       scenarios={scenarios}
       spaceData={spaceData}

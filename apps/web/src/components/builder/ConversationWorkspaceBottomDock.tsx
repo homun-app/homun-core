@@ -55,9 +55,9 @@ export function ConversationWorkspaceBottomDock({
         title={
           space
             ? isFloatingOpen
-              ? "Chiudi finestra agente"
-              : "Apri agente (sempre disponibile)"
-            : "Agente attivo"
+              ? "Chiudi finestra Homun"
+              : "Apri Homun (sempre disponibile)"
+            : "Homun attivo"
         }
       >
         <svg
@@ -73,7 +73,7 @@ export function ConversationWorkspaceBottomDock({
         >
           <polygon points="6 3 20 12 6 21 6 3" />
         </svg>
-        <span>Agente</span>
+        <span>Homun</span>
       </button>
 
       {onOpenWork && (

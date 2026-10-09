@@ -35,6 +35,7 @@ type Props = {
   onOpenSpace:
     | ((space: "Progetti" | "Squadra" | "Materiali", initial?: string, selected?: string) => void)
     | undefined;
+  onOpenModels?: (() => void) | undefined;
   assignee: string;
   scenarios: ConversationScenario[];
   spaceData: SpaceData;
@@ -58,6 +59,7 @@ export function EngineAgentChat({
   references,
   onRefreshEngine,
   onOpenSpace,
+  onOpenModels,
   assignee,
   scenarios,
   spaceData,
@@ -99,6 +101,7 @@ export function EngineAgentChat({
               engineMode
               onRefreshEngine={onRefreshEngine}
               onOpenSpace={onOpenSpace}
+              onOpenModels={onOpenModels}
               newChatProject={newChatProject}
             />
           )}

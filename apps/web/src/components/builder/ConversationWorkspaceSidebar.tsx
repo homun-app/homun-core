@@ -1,17 +1,13 @@
 /**
  * Refined left navigation matching modern Linear/Cursor UI.
  */
-import { Globe,
+import {
   ChevronsUpDown,
   PanelLeft,
   Search,
   SquarePen,
   ListTodo,
-  Layers,
   FileText,
-  Zap,
-  Puzzle,
-  Radio,
   Plus,
   ChevronDown,
   Settings,
@@ -29,6 +25,7 @@ import type { SpaceData, SpaceView } from "./ConversationSpace";
 import type { Work } from "./conversation-types";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import { ConversationHelpPopover } from "./ConversationHelpPopover";
+import { ConversationSidebarMoreNav as SidebarMoreNav } from "./ConversationSidebarMoreNav";
 import "./sidebar-refined.css";
 
 type Props = {
@@ -227,7 +224,7 @@ export function ConversationWorkspaceSidebar({
         >
           <div className="cw-sb-item-left">
             <Bot size={15} />
-            <span>Agenti</span>
+            <span>Squadra</span>
           </div>
           {activeAgentCount > 0 && <span className="cw-sb-count">{activeAgentCount}</span>}
         </button>
@@ -245,48 +242,12 @@ export function ConversationWorkspaceSidebar({
           )}
         </button>
 
-        {engineMode && (
-          <button
-            className={`cw-sb-nav-item ${space === "Spazi remoti" ? "active" : ""}`}
-            onClick={() => onOpenSpace("Spazi remoti")}
-          >
-            <div className="cw-sb-item-left">
-              <Globe size={15} />
-              <span>Spazi remoti</span>
-            </div>
-          </button>
-        )}
-
-        <button
-          className={`cw-sb-nav-item ${space === "Automazioni" ? "active" : ""}`}
-          onClick={() => onOpenSpace("Automazioni")}
-        >
-          <div className="cw-sb-item-left">
-            <Zap size={15} />
-            <span>Automazioni</span>
-          </div>
-          {routineCount !== null && routineCount > 0 && <span className="cw-sb-count">{routineCount}</span>}
-        </button>
-
-        <button
-          className={`cw-sb-nav-item ${space === "Plugin" ? "active" : ""}`}
-          onClick={() => onOpenSpace("Plugin")}
-        >
-          <div className="cw-sb-item-left">
-            <Puzzle size={15} />
-            <span>Plugin</span>
-          </div>
-        </button>
-
-        <button
-          className={`cw-sb-nav-item ${space === "Canali" ? "active" : ""}`}
-          onClick={() => onOpenSpace("Canali")}
-        >
-          <div className="cw-sb-item-left">
-            <Radio size={15} />
-            <span>Canali</span>
-          </div>
-        </button>
+        <SidebarMoreNav
+          engineMode={engineMode}
+          space={space}
+          onOpenSpace={onOpenSpace}
+          routineCount={routineCount}
+        />
       </div>
 
       {/* Scrollable Project, Work, and Agents List */}
@@ -413,10 +374,10 @@ export function ConversationWorkspaceSidebar({
           </div>
         )}
 
-        {/* Agents / Squadra Section */}
+        {/* Squadra list */}
         <div className="cw-sb-section-header" onClick={onToggleSquadList}>
           <div className="cw-sb-section-title-wrap">
-            <span>Agenti · {activeAgentCount}</span>
+            <span>Squadra · {activeAgentCount}</span>
             <ChevronDown
               size={12}
               style={{
@@ -461,7 +422,7 @@ export function ConversationWorkspaceSidebar({
                   </button>
                 ))}
             {engineAgents && engineAgents.filter((a) => a.status === "active").length === 0 && (
-              <div className="cw-sb-empty-sub">Nessun agente attivo</div>
+              <div className="cw-sb-empty-sub">Nessun collaboratore attivo</div>
             )}
             {!engineAgents &&
               uniqueAgents.map((s) => (

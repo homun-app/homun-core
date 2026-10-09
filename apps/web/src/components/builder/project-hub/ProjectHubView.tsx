@@ -387,7 +387,7 @@ export function ProjectHubView({
               {projectWorks.length > 0 && <span className="ph-icon-tab-badge">{projectWorks.length}</span>}
             </button>
             <button role="tab" aria-selected={activeTab === "agents"}
-              title="Squadra & Agenti"
+              title="Squadra"
               className={`ph-icon-tab ${activeTab === "agents" ? "is-active" : ""}`}
               onClick={() => setActiveTab("agents")}>
               <Bot size={15} />

@@ -10,8 +10,10 @@ test("operational notices are quiet when healthy but preserve errors, recovery a
     const failure = ui.render({ ...props, error: new Error("Provider non disponibile") });
     assert.match(failure, /role="alert"/);
     const offline = ui.render({ ...props, gateError: new Error("Connessione interrotta") });
-    assert.match(offline, /Connessione non disponibile/);
+    assert.match(offline, /Homun \(motore\) non è raggiungibile/);
+    assert.match(offline, /non passiamo alla simulazione/);
     assert.doesNotMatch(offline, /disabled=""/);
+    assert.doesNotMatch(offline, /passa alla simulazione/i);
     const recovery = ui.render({ ...props, followups: [{ commandId: "c1", conversationTitle: "Listini", status: "failed", attempts: 3, errorCode: "provider_unavailable" }] });
     assert.match(recovery, /Listini/);
     assert.match(recovery, /recupero automatico è terminato/);

@@ -12,6 +12,7 @@ import { type SpaceData, type SpaceView, spacePeople } from "./ConversationSpace
 import { ConversationSearch } from "./ConversationSearch";
 import { ConversationWorkspaceChatStage } from "./ConversationWorkspaceChatStage";
 import { EngineChatStage } from "./chat/EngineChatStage";
+import { ConversationEngineBanner } from "./ConversationEngineBanner";
 import { ConversationWorkspacePreview } from "./ConversationWorkspacePreview";
 import { ConversationWorkspaceSidebar } from "./ConversationWorkspaceSidebar";
 import { ConversationWorkspaceSpaceHost } from "./ConversationWorkspaceSpaceHost";
@@ -77,6 +78,11 @@ export function ConversationWorkspace() {
   const [seenResults, setSeenResults] = useState<string[]>([]);
   const [preview, setPreview] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [settingsSection, setSettingsSection] = useState("space");
+  function openSettings(section = "space") {
+    setSettingsSection(section);
+    setSettings(true);
+  }
   const [space, setSpace] = useState<SpaceView | null>(demoBootstrap.initialSpace);
   const [spaceInitial, setSpaceInitial] = useState("");
   const [spaceSelected, setSpaceSelected] = useState("");
@@ -614,7 +620,7 @@ export function ConversationWorkspace() {
   function send(text: string, attachments: File[]) {
     const navigation = !attachments.length ? parseConversationNavigation(text) : null;
     if (navigation) {
-      if (navigation.target === "settings") setSettings(true);
+      if (navigation.target === "settings") openSettings();
       else openSpace(navigation.view);
       return;
     }
@@ -1047,6 +1053,7 @@ export function ConversationWorkspace() {
           value={preferences}
           onSave={setPreferences}
           onClose={() => setSettings(false)}
+          initialSection={settingsSection}
           storageStatus={storageStatus}
           counts={{
             works: visibleWorks.filter((w) => !w.coordinatedBy).length,
@@ -1121,7 +1128,7 @@ export function ConversationWorkspace() {
         squadListOpen={squadListOpen}
         onToggleSquadList={() => setSquadListOpen(!squadListOpen)}
         preferences={preferences}
-        onOpenSettings={() => setSettings(true)}
+        onOpenSettings={() => openSettings()}
         notificationCount={notificationCount}
         onToggleNotifications={() => setNotifications(!notifications)}
         sidebarWidth={sidebarWidth}
@@ -1149,7 +1156,19 @@ export function ConversationWorkspace() {
           pending={pending} completedNotices={completedNotices}
           scenarios={scenarios} spaceData={displaySpaceData} onOpenWork={open}
         />
-        {/* Diagnostics live in Settings; blocking errors use HomunErrorNotice. */}
+        {engine.dataSource === "engine" && (
+          <ConversationEngineBanner
+            backend={engine.backend}
+            dataSourceSelected={engine.dataSource}
+            gateError={engine.gateError}
+            error={engine.error}
+            busy={engine.busy}
+            workCount={engine.works.length}
+            followups={engine.followups}
+            onRefresh={() => void engine.refresh()}
+            onOpenModels={() => openSettings("models")}
+          />
+        )}
         {space ? (
           <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined} engineTeams={engine.backend === "engine" ? engine.teams : undefined} engineRoutines={engine.backend === "engine" ? engine.routines : undefined} onUpdateRoutine={engine.backend === "engine" ? (r, ch) => engine.updateRoutine(r.id, r.revision, ch) : undefined} onSkipNextRoutine={engine.backend === "engine" ? (r) => engine.routineAction(r.id, "skip_next", r.revision) : undefined} onCreateRoutineFromWork={engine.backend === "engine" ? (workId, input) => engine.createRoutineFromWork(workId, input) : undefined}
             onSetEngineDue={engine.backend === "engine" ? engine.setDue : undefined}
@@ -1233,6 +1252,7 @@ export function ConversationWorkspace() {
             scenarios={scenarios}
             spaceData={displaySpaceData}
             onOpenSpace={openSpace}
+            onOpenModels={() => openSettings("models")}
             onCreateExample={create}
             onSend={send}
             newChatProject={newChatProjectId ? {

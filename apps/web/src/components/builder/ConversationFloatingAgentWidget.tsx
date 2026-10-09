@@ -53,7 +53,7 @@ export function ConversationFloatingAgentWidget({
   };
 
   return (
-    <aside className="linear-floating-agent" aria-label="Finestra rapida Agente">
+    <aside className="linear-floating-agent" aria-label="Finestra rapida Homun">
       <div className="linear-floating-agent-head">
         <div className="linear-floating-agent-title">
           <Sparkles size={14} style={{ color: "#16a34a" }} />
@@ -85,7 +85,7 @@ export function ConversationFloatingAgentWidget({
             <div className="linear-floating-agent-empty-icon">
               <Sparkles size={18} />
             </div>
-            <div className="linear-floating-agent-empty-title">Agente Homun</div>
+            <div className="linear-floating-agent-empty-title">Homun</div>
             <div className="linear-floating-agent-empty-desc">
               Chiedi qualunque cosa, affida compiti o coordina la squadra in qualsiasi momento.
             </div>
