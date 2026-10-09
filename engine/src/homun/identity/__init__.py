@@ -9,6 +9,7 @@ from homun.identity.invites import (
     issue_person_invite,
     list_people,
     list_invites,
+    require_owner_or_admin,
     revoke_invite,
     revoke_person,
     revoke_device,
@@ -17,7 +18,7 @@ from homun.identity.invites import (
 from homun.identity.sessions import PersonSessionStore, person_session_table
 
 __all__ = [
-    "issue_person_invite", "list_people", "list_invites", "revoke_invite",
-    "revoke_person", "revoke_device", "redeem_invite",
+    "issue_person_invite", "list_people", "list_invites", "require_owner_or_admin",
+    "revoke_invite", "revoke_person", "revoke_device", "redeem_invite",
     "PersonSessionStore", "person_session_table",
 ]

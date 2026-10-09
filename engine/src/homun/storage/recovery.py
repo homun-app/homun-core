@@ -104,13 +104,18 @@ def clear_report(data_dir: Path) -> None:
 
 
 def db_state(data_dir: Path) -> dict[str, Any]:
-    """Stato esposivo per health: ok quando l'ultimo avvio ha validato il DB."""
+    """Full recovery snapshot for owner/admin diagnostics — includes report internals."""
     data = last_report(data_dir)
     if not data:
         return {"state": "ok", "report": None}
     resolved = bool(data.get("resolved_at"))
     state = "ok" if resolved else data.get("mode", "unknown")
     return {"state": state, "report": data}
+
+
+def db_health_summary(data_dir: Path) -> dict[str, str]:
+    """Coarse DB readiness for public /health — state only, no recovery internals."""
+    return {"state": str(db_state(data_dir)["state"])}
 
 
 def _quarantine(path: Path) -> Path:

@@ -140,23 +140,48 @@ export async function previewEngineCron(
   return body.next ?? [];
 }
 
-export function routineTemplateFromWork(work: {
+/** Work shape used to build a routine template from a completed assignment. */
+export type RoutineWorkSource = {
   title: string;
   engineObjective?: string | undefined;
   enginePlan?: Array<{
     title: string;
     assignee_id?: string | undefined;
-    capability: string;
+    capability?: string | undefined;
     output_expected?: string | undefined;
   }> | undefined;
-}) {
+};
+
+/** Roster agents use `agent_*` ids; person/owner ids are rejected by routine.create. */
+export function isRoutineAgentAssignee(assigneeId: string | undefined): boolean {
+  return Boolean(assigneeId?.trim().startsWith("agent_"));
+}
+
+/**
+ * True when the work plan can become a routine template: non-empty steps,
+ * each with a title and an active roster agent assignee (not a person id).
+ */
+export function workSupportsRoutineTemplate(work: RoutineWorkSource): boolean {
+  const plan = work.enginePlan;
+  if (!Array.isArray(plan) || plan.length === 0) return false;
+  return plan.every(
+    (step) => step.title.trim().length > 0 && isRoutineAgentAssignee(step.assignee_id),
+  );
+}
+
+export function routineTemplateFromWork(work: RoutineWorkSource): EngineRoutine["template"] {
+  if (!workSupportsRoutineTemplate(work)) {
+    throw new Error(
+      "Routine template needs at least one plan step assigned to a roster agent",
+    );
+  }
   return {
     title: work.title,
     objective: work.engineObjective ?? work.title,
     plan_steps: (work.enginePlan ?? []).map((step) => ({
-      title: step.title,
-      assignee_id: step.assignee_id ?? "",
-      capability: step.capability,
+      title: step.title.trim(),
+      assignee_id: (step.assignee_id ?? "").trim(),
+      capability: step.capability ?? "general",
       output_expected: step.output_expected ?? "",
     })),
   };
