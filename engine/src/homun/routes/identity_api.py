@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from homun.context import get_context
-from homun.domain.errors import DomainError, ValidationError
+from homun.domain.errors import DomainError, NotFoundError, ValidationError
 from homun.routes.domain_support import _http_error
 from homun.routes.price_comparisons import request_context
 
@@ -200,9 +200,29 @@ def remote_assignments(workspace_id: str,
     return {"items": list_assignments_for(ctx, ctx.repository.snapshot(), actor.id)}
 
 
+@router.get("/workspaces/{workspace_id}/remote/assignments/{assignment_id}")
+def remote_assignment_get(workspace_id: str, assignment_id: str,
+                          x_homun_actor_id: str | None = Header(default=None),
+                          x_homun_actor_name: str | None = Header(default=None)):
+    """Interrogate one previous attempt (assignee only) before retrying."""
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    from homun.domain.commands.delegation import get_assignment_for
+    item = get_assignment_for(
+        ctx.repository.snapshot(), assignment_id=assignment_id, person_id=actor.id)
+    if item is None:
+        raise _http_error(NotFoundError("Assignment not found"))
+    return item
+
+
 class AssignmentActionRequest(BaseModel):
     command_id: str = Field(min_length=1, max_length=160)
     result: dict = Field(default_factory=dict)
+    model_attempts_used: int | None = Field(default=None, ge=0)
+
+
+class AssignmentReconcileRequest(BaseModel):
+    command_id: str = Field(min_length=1, max_length=160)
+    result: dict | None = None
     model_attempts_used: int | None = Field(default=None, ge=0)
 
 
@@ -243,6 +263,29 @@ def remote_assignment_return(workspace_id: str, assignment_id: str,
             ctx.service.store = store
         if out.get("status") == "expired":
             raise _http_error(ValidationError("Assignment expired"))
+        return out
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/workspaces/{workspace_id}/remote/assignments/{assignment_id}/reconcile")
+def remote_assignment_reconcile(workspace_id: str, assignment_id: str,
+                                body: AssignmentReconcileRequest,
+                                x_homun_actor_id: str | None = Header(default=None),
+                                x_homun_actor_name: str | None = Header(default=None)):
+    """After timeout: interrogate the previous attempt and release/settle its hold."""
+    ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    payload: dict = {"assignment_id": assignment_id}
+    if body.result is not None:
+        payload["result"] = body.result
+    if body.model_attempts_used is not None:
+        payload["model_attempts_used"] = body.model_attempts_used
+    try:
+        with ctx.repository.locked():
+            with ctx.repository.transaction() as store:
+                out = ctx.service.for_store(store).apply(
+                    actor, body.command_id, "delegation.reconcile", payload)
+            ctx.service.store = store
         return out
     except DomainError as exc:
         raise _http_error(exc) from exc
