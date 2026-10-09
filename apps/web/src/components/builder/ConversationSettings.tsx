@@ -1,32 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Globe,
-  X,
-  Settings2,
-  UserRound,
-  Bell,
-  Brain,
-  Cpu,
-  Database,
-  HelpCircle,
-  Archive,
-  Check,
-  ArrowUpRight,
-  BookMarked,
-  Bot,
-  Sparkles,
-  FolderKanban,
-  UsersRound,
-  Wallet,
-  Puzzle,
-  Zap,
-  ArrowLeft,
-  Search,
-  ClipboardCheck,
-} from "lucide-react";
+import { Check, ArrowLeft, Search } from "lucide-react";
 import { ConversationUpdateStatus } from "./ConversationUpdateStatus";
 import { ConversationSelect } from "./ConversationSelect";
 import { ConversationUnifiedModelsSection } from "./ConversationUnifiedModelsSection";
-import { ConversationUnifiedPluginsSection } from "./ConversationUnifiedPluginsSection";
 import { ConversationBudgetSettingsSection } from "./ConversationModelsSettingsSection";
 import { EnginePeopleSection } from "./EnginePeopleSection";
 import { EngineRemoteSpacesSection } from "./EngineRemoteSpacesSection";
@@ -35,62 +11,14 @@ import { ConversationReviewQueuesSection } from "./ConversationReviewQueuesSecti
 import { ConversationMemorySettingsSection } from "./ConversationMemorySettingsSection";
 import { ConversationAgentsSettingsSection } from "./ConversationAgentsSettingsSection";
 import { ConversationSkillsSettingsSection } from "./ConversationSkillsSettingsSection";
-import { ConversationGatewayChannelsSection } from "./ConversationGatewayChannelsSection";
 import { ConversationEngineMaintenanceSection } from "./ConversationEngineMaintenanceSection";
 import { CapabilitiesView } from "./capabilities/CapabilitiesView";
 import { MessagingView } from "./messaging/MessagingView";
 import { type ConversationPreferences } from "./conversation-preferences";
+import { SETTINGS_NAV_GROUPS } from "./conversation-settings-nav";
 import { setLanguage } from "@/lib/i18n";
 import "./conversation-settings.css";
 
-type SettingsGroup = {
-  title: string;
-  items: Array<{
-    id: string;
-    label: string;
-    icon: typeof UserRound;
-  }>;
-};
-
-const settingGroups: SettingsGroup[] = [
-  {
-    title: "Infrastruttura & Modelli",
-    items: [
-      { id: "models", label: "Provider & Modelli LLM", icon: Brain },
-      { id: "budget", label: "Budget & Routing", icon: Wallet },
-      { id: "plugins", label: "Plugin e strumenti", icon: Puzzle },
-    ],
-  },
-  {
-    title: "Canali & Supervisione",
-    items: [
-      { id: "notifications", label: "Canali & Messaggistica", icon: Bell },
-      { id: "automations", label: "Automazioni di sfondo", icon: Zap },
-      { id: "review", label: "Code di revisione", icon: ClipboardCheck },
-    ],
-  },
-  {
-    title: "Governance Aziendale",
-    items: [
-      { id: "people", label: "Directory Collaboratori", icon: UsersRound },
-      { id: "remote-spaces", label: "Spazi remoti", icon: Globe },
-      { id: "memory", label: "Policy & Memoria Globale", icon: BookMarked },
-      { id: "agents", label: "Catalogo Agenti dello Spazio", icon: Bot },
-      { id: "skills", label: "Catalogo Skill", icon: Sparkles },
-    ],
-  },
-  {
-    title: "Spazio & Sistema",
-    items: [
-      { id: "space", label: "Spazio e profilo", icon: UserRound },
-      { id: "preferences", label: "Aspetto & Preferenze", icon: Settings2 },
-      { id: "engine", label: "Manutenzione & Sistema", icon: Cpu },
-      { id: "archive", label: "Archivio", icon: Archive },
-      ...(import.meta.env.DEV ? [{ id: "data", label: "Dati della demo", icon: Database } as const] : []),
-      { id: "help", label: "Guida", icon: HelpCircle },
-    ],
-  },
-];
 export function ConversationSettings({
   value,
   onSave,
@@ -102,6 +30,7 @@ export function ConversationSettings({
   archived,
   storageStatus,
   counts,
+  initialSection = "space",
 }: {
   value: ConversationPreferences;
   onSave: (p: ConversationPreferences) => void;
@@ -113,9 +42,11 @@ export function ConversationSettings({
   archived: { id: string; title: string }[];
   storageStatus: string;
   counts: { works: number; projects: number; materials: number | null };
+  /** Open a specific settings section (e.g. models from first-run CTA). */
+  initialSection?: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [section, setSection] = useState("space");
+  const [section, setSection] = useState(initialSection);
   const [navSearch, setNavSearch] = useState("");
   const [draft, setDraft] = useState(value);
   const [saved, setSaved] = useState(false);
@@ -129,6 +60,9 @@ export function ConversationSettings({
     element?.showModal();
     return () => element?.close();
   }, []);
+  useEffect(() => {
+    setSection(initialSection);
+  }, [initialSection]);
   function change<K extends keyof ConversationPreferences>(key: K, v: ConversationPreferences[K]) {
     setDraft((p) => ({ ...p, [key]: v }));
     setSaved(false);
@@ -136,13 +70,6 @@ export function ConversationSettings({
   function close() {
     if (dirty) setDiscard(true);
     else onClose();
-  }
-  function navigate(page: "Squadra" | "Plugin" | "Materiali") {
-    if (dirty) {
-      setError("Salva o annulla le modifiche prima di aprire un’altra sezione.");
-      return;
-    }
-    onNavigate(page);
   }
   const valid =
     draft.spaceName.trim() &&
@@ -152,14 +79,12 @@ export function ConversationSettings({
     draft.perWorkBudget >= 0 &&
     draft.perWorkBudget <= draft.budget;
 
-  const filteredGroups = settingGroups
-    .map((g) => ({
-      ...g,
-      items: g.items.filter((item) =>
-        item.label.toLowerCase().includes(navSearch.trim().toLowerCase())
-      ),
-    }))
-    .filter((g) => g.items.length > 0);
+  const filteredGroups = SETTINGS_NAV_GROUPS.map((g) => ({
+    ...g,
+    items: g.items.filter((item) =>
+      item.label.toLowerCase().includes(navSearch.trim().toLowerCase()),
+    ),
+  })).filter((g) => g.items.length > 0);
 
   return (
     <dialog
@@ -198,7 +123,10 @@ export function ConversationSettings({
 
           <nav className="cv-settings-sidebar__nav" aria-label="Categorie impostazioni">
             {filteredGroups.map((group) => (
-              <div key={group.title} className="cv-settings-nav-group">
+              <div
+                key={group.title}
+                className={`cv-settings-nav-group cv-settings-nav-group--${group.level}`}
+              >
                 <span className="cv-settings-nav-group__title">{group.title}</span>
                 <div className="cv-settings-nav-group__items">
                   {group.items.map((s) => (

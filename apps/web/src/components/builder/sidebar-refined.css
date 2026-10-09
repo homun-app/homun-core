@@ -168,6 +168,27 @@
   font-weight: 600;
 }
 
+.cw-sb-more {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 2px;
+}
+
+.cw-sb-more-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 6px;
+  border-left: 1px solid rgba(0, 0, 0, 0.06);
+  margin-left: 10px;
+}
+
+.cw-sb-more-toggle .cw-sb-item-left {
+  color: #71717a;
+  font-weight: 500;
+}
+
 .cw-sb-item-left {
   display: flex;
   align-items: center;

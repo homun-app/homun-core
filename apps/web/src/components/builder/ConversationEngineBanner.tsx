@@ -16,6 +16,8 @@ type Props = {
   workCount: number;
   followups: Array<EngineFollowupNotice & { conversationTitle: string }>;
   onRefresh: () => void;
+  /** Optional deep-link into Impostazioni → modelli (never simulation). */
+  onOpenModels?: () => void;
 };
 
 export function ConversationEngineBanner({
@@ -27,6 +29,7 @@ export function ConversationEngineBanner({
   workCount,
   followups,
   onRefresh,
+  onOpenModels,
 }: Props) {
   if (dataSourceSelected === "simulation") {
     return (
@@ -50,12 +53,24 @@ export function ConversationEngineBanner({
       {!ready && (
         <>
           <p role="status">
-            Connessione non disponibile: il lavoro riprenderà quando l'app sarà di nuovo
-            accessibile.
+            Homun (motore) non è raggiungibile su questo computer. I lavori restano sul percorso
+            motore — non passiamo alla simulazione.
           </p>
-          <button type="button" className="cw-secondary" disabled={busy} onClick={onRefresh}>
-            Riprova la connessione
-          </button>
+          <p className="cw-engine-banner__hint">
+            Verifica che Homun sia avviato, poi riprova
+            {onOpenModels ? " o controlla i modelli collegati" : ""}.
+            {workCount === 0 ? " La lista lavori resta vuota finché la connessione non torna." : ""}
+          </p>
+          <div className="cw-engine-banner__row">
+            <button type="button" className="cw-secondary" disabled={busy} onClick={onRefresh}>
+              Riprova la connessione
+            </button>
+            {onOpenModels && (
+              <button type="button" className="cw-secondary" onClick={onOpenModels}>
+                Apri modelli
+              </button>
+            )}
+          </div>
         </>
       )}
       {followups.map((notice) => (

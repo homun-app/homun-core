@@ -9,12 +9,12 @@ import { HomunGuidanceNotice } from '@/components/HomunGuidanceNotice';
 import { listEngineTeams, type EngineTeam } from '@/lib/engine-projects-client';
 import { EngineRunRecipientPicker } from './EngineRunRecipientPicker';
 import { EngineMaterialSelection } from './EngineMaterialSelection';
-import { EngineAgentServerPicker } from './EngineAgentServerPicker';
 import { EngineAgentExternalApproval } from './EngineAgentExternalApproval';
 import { EngineAgentTerminalApproval } from './EngineAgentTerminalApproval';
 import { EngineWorkspaceEditApproval } from './EngineWorkspaceEditApproval';
 import { EngineAgentControls } from './EngineAgentControls';
 import { EngineDelegationList } from './EngineDelegationList';
+import { EngineAgentRunAdvancedOptions } from './EngineAgentRunAdvancedOptions';
 
 export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () => Promise<void> }) {
   const [terminalImage, setTerminalImage] = useState('');
@@ -74,55 +74,47 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       <HomunErrorNotice error={teamError} />
       <EngineRunRecipientPicker value={personId} disabled={run.busy} onBusyChange={setPersonBusy}
         onChange={id => { run.renew(); setPersonId(id); }} />
-      <EngineAgentServerPicker selected={serverIds} disabled={run.busy} onChange={ids => { run.renew(); setServerIds(ids); }} />
-      <label><input type="checkbox" checked={webPages} disabled={run.busy}
-        onChange={e => { run.renew(); setWebPages(e.target.checked); }} /> Leggi pagine web pubbliche</label>
-      {webPages && <p>Homun può cercare sul web pubblico e leggere il testo di una pagina http. Gli indirizzi privati sono rifiutati. La ricerca non entra negli account.</p>}
-      <label><input type="checkbox" checked={ownedBrowser} disabled={run.busy}
-        onChange={e => { run.renew(); setOwnedBrowser(e.target.checked); }} /> Apri un browser privato, senza il tuo profilo</label>
-      {ownedBrowser && <p>Homun avvia un browser separato e lo tiene aperto per questo lavoro. Può leggere la pagina, compilare un campo, premere un tasto e salvare una schermata della pagina. Non usa il profilo di Chrome di questo computer e non fotografa lo schermo. Non entra negli account da solo. Se la pagina apre una finestra nativa, la chiude senza confermare e riporta il testo.</p>}
-      <details><summary>Terminale (opzionale)</summary>
-        <p>Consenti a Homun di proporre comandi. Ogni comando richiederà la tua approvazione.</p>
-        <label><input type="checkbox" checked={localTerminal} disabled={run.busy}
-          onChange={e => { run.renew(); setLocalTerminal(e.target.checked); if (e.target.checked) setSshTerminal(false); }} /> Esegui su questo computer, senza container</label>
-        <label><input type="checkbox" checked={sshTerminal} disabled={run.busy}
-          onChange={e => { run.renew(); setSshTerminal(e.target.checked); if (e.target.checked) setLocalTerminal(false); }} /> Esegui via SSH su un host approvato</label>
-        {sshTerminal && <>
-          <p>Ogni comando resta da approvare. Homun non usa la configurazione SSH di questo computer e non copia i file.</p>
-          <label>Host<input value={sshHost} disabled={run.busy} onChange={e => { run.renew(); setSshHost(e.target.value.trim()); }} /></label>
-          <label>Utente<input value={sshUser} disabled={run.busy} onChange={e => { run.renew(); setSshUser(e.target.value.trim()); }} /></label>
-          <label>Porta<input value={sshPort} disabled={run.busy} onChange={e => { run.renew(); setSshPort(e.target.value.trim()); }} /></label>
-          <label>Percorso della chiave privata<input value={sshKeyPath} disabled={run.busy} onChange={e => { run.renew(); setSshKeyPath(e.target.value.trim()); }} /></label>
-          <label>Chiave pubblica del server<input value={sshHostKey} disabled={run.busy} onChange={e => { run.renew(); setSshHostKey(e.target.value.trim()); }} /></label>
-        </>}
-        {localTerminal
-          ? <p>I comandi usano la cartella del lavoro e non ereditano le variabili d'ambiente. Non sono isolati dalla rete né dai percorsi assoluti.</p>
-          : sshTerminal ? null
-          : <><p>Serve Docker locale con un’immagine già presente; non verrà scaricata automaticamente.</p>
-            <label>Identificativo completo dell’immagine Docker
-              <input value={terminalImage} disabled={run.busy} placeholder="sha256:…"
-                onChange={e => { run.renew(); setTerminalImage(e.target.value.trim()); }} />
-            </label>
-            {!terminalValid && <p role="alert">Inserisci sha256: seguito dalle 64 cifre esadecimali dell’immagine.</p>}
-          </>}
-      </details>
-      <details><summary>Capacità e strumenti avanzati</summary>
-        <p>Configura le capacità autonome abilitate per questo incarico:</p>
-        <label><input type="checkbox" checked={memory} disabled={run.busy}
-          onChange={e => { run.renew(); setMemory(e.target.checked); }} /> Memoria di progetto (consultazione e annotazione fatti)</label>
-        <label><input type="checkbox" checked={skills} disabled={run.busy}
-          onChange={e => { run.renew(); setSkills(e.target.checked); }} /> Competenze approvate e catalogo skill</label>
-        <label><input type="checkbox" checked={delegation} disabled={run.busy}
-          onChange={e => { run.renew(); setDelegation(e.target.checked); }} /> Deleghe a sotto-agenti specializzati</label>
-        <label><input type="checkbox" checked={clarify} disabled={run.busy}
-          onChange={e => { run.renew(); setClarify(e.target.checked); }} /> Chiarimenti strutturati interattivi</label>
-        <label><input type="checkbox" checked={codeExecution} disabled={run.busy}
-          onChange={e => { run.renew(); setCodeExecution(e.target.checked); }} /> Esecuzione programmatica script Python</label>
-      </details>
       <EngineMaterialSelection work={work} filter={eligibleForRead} uploadExtensions={READ_UPLOAD_EXTENSIONS}
         selected={selected} maxSelected={12} disabled={run.busy}
         emptyHint="Puoi partire dalla richiesta o aggiungere i documenti da consultare."
         onSelectionChange={ids => { run.renew(); setSelected(ids); }} />
+      <EngineAgentRunAdvancedOptions
+        busy={run.busy}
+        renew={run.renew}
+        serverIds={serverIds}
+        setServerIds={setServerIds}
+        webPages={webPages}
+        setWebPages={setWebPages}
+        ownedBrowser={ownedBrowser}
+        setOwnedBrowser={setOwnedBrowser}
+        localTerminal={localTerminal}
+        setLocalTerminal={setLocalTerminal}
+        sshTerminal={sshTerminal}
+        setSshTerminal={setSshTerminal}
+        terminalImage={terminalImage}
+        setTerminalImage={setTerminalImage}
+        terminalValid={terminalValid}
+        sshHost={sshHost}
+        setSshHost={setSshHost}
+        sshUser={sshUser}
+        setSshUser={setSshUser}
+        sshPort={sshPort}
+        setSshPort={setSshPort}
+        sshKeyPath={sshKeyPath}
+        setSshKeyPath={setSshKeyPath}
+        sshHostKey={sshHostKey}
+        setSshHostKey={setSshHostKey}
+        memory={memory}
+        setMemory={setMemory}
+        skills={skills}
+        setSkills={setSkills}
+        delegation={delegation}
+        setDelegation={setDelegation}
+        clarify={clarify}
+        setClarify={setClarify}
+        codeExecution={codeExecution}
+        setCodeExecution={setCodeExecution}
+      />
       <button className="cw-secondary" disabled={run.busy || personBusy || !terminalValid || !['draft','ready','failed'].includes(work.engineStatus ?? '')}
         onClick={() => void run.prepare(selected, teamId, personId, serverIds)}>{revising ? 'Prepara la revisione richiesta' : "Prepara l’esecuzione"}</button>
     </>}
@@ -142,7 +134,7 @@ export function EngineAgentRun({ work, onChanged }: { work: Work; onChanged: () 
       {p.web_pages?.version === 1 && <p>Homun può leggere pagine http pubbliche. Gli indirizzi privati sono rifiutati. La ricerca web non è configurata.</p>}
       {p.memory?.policy === 'scoped-workspace-v1' && <p>Homun può consultare la memoria persistente del progetto, annotare fatti importanti verificati e cercare messaggi passati nella sessione.</p>}
       {p.skills?.policy === 'workspace-catalog-v1' && <p>Homun può consultare le competenze e linee guida approvate dell’area di lavoro e proporre nuove competenze in quarantena in attesa di approvazione umana.</p>}
-      {p.delegation?.policy === 'isolated-subagent-v1' && <p>Homun può delegare compiti a sotto-agenti isolati con budget limitato, strumenti dedicati e convalida di schemi strutturati.</p>}
+      {p.delegation?.policy === 'isolated-subagent-v1' && <p>Homun può delegare compiti a collaboratori specializzati isolati con budget limitato, strumenti dedicati e convalida di schemi strutturati.</p>}
       {p.clarify?.policy === 'structured-clarify-v1' && <p>Homun può porre domande a scelta singola, multipla o aperta per chiarire requisiti e decisioni.</p>}
       {p.goals?.policy === 'persistent-goals-v1' && <p>Homun gestisce obiettivi persistenti su più turni con contratti di verifica, barriere di attesa e criteri di qualità deterministici.</p>}
       {p.cron?.policy === 'durable-cron-v1' && <p>Homun gestisce pianificazioni cron persistenti con esecuzione a script o agente, catena di contesti e tracciamento incidenti.</p>}

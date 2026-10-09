@@ -1,7 +1,5 @@
 import { createSimulationActions } from "./conversation-simulation-actions";
-import { ConversationSettings } from "./ConversationSettings";
 import { defaultPreferences, type ConversationPreferences } from "./conversation-preferences";
-import { resetPrototype } from "./conversation-storage";
 import { type CatalogPlan } from "./ConversationCatalogPlan";
 import { ConversationActions } from "./ConversationActions";
 import { ConversationContribution } from "./ConversationContribution";
@@ -12,6 +10,8 @@ import { type SpaceData, type SpaceView, spacePeople } from "./ConversationSpace
 import { ConversationSearch } from "./ConversationSearch";
 import { ConversationWorkspaceChatStage } from "./ConversationWorkspaceChatStage";
 import { EngineChatStage } from "./chat/EngineChatStage";
+import { ConversationWorkspaceEngineNotices } from "./ConversationWorkspaceEngineNotices";
+import { ConversationWorkspaceSettingsMount } from "./ConversationWorkspaceSettingsMount";
 import { ConversationWorkspacePreview } from "./ConversationWorkspacePreview";
 import { ConversationWorkspaceSidebar } from "./ConversationWorkspaceSidebar";
 import { ConversationWorkspaceSpaceHost } from "./ConversationWorkspaceSpaceHost";
@@ -23,7 +23,7 @@ import { ConversationWorkspaceWorkPanel, registerPlanAgent } from "./Conversatio
 import { initialScenarios, scenarioForWork } from "./conversation-scenarios";
 import { applyBoardMove, boardMoveSuccessMessage, validateBoardMove } from "./conversation-board-move";
 import { demoWorkspaceBootstrap } from "./conversation-demo-mode";
-import { downloadPrototypeExport, downloadWorkResult } from "./conversation-export";
+import { downloadWorkResult } from "./conversation-export";
 import { buildMaterialLibrary } from "./conversation-material-library";
 import { buildConversationSearchEntries, openWorkResultPreview } from "./conversation-search-entries";
 import { isCompletedNoticeForViewer, isPendingForViewer, workspaceWorkStatus } from "./conversation-work-status";
@@ -31,6 +31,7 @@ import { useConversationPrototypeStorage } from "./useConversationPrototypeStora
 import { type Phase, type Work } from "./conversation-types";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { useChatAutoScroll } from "@/hooks/useChatAutoScroll";
+import { useConversationSettingsOpen } from "@/hooks/useConversationSettingsOpen";
 import { useEngineWorkspace } from "@/hooks/useEngineWorkspace";
 import { useWorkDestinationScroll, type WorkDestination } from "@/hooks/useWorkDestinationScroll";
 import { isEngineBackedWork } from "@/lib/conversation-engine-bridge";
@@ -76,7 +77,7 @@ export function ConversationWorkspace() {
   const [floatingAgentOpen, setFloatingAgentOpen] = useState(false);
   const [seenResults, setSeenResults] = useState<string[]>([]);
   const [preview, setPreview] = useState(false);
-  const [settings, setSettings] = useState(false);
+  const { settingsOpen, settingsSection, openSettings, closeSettings } = useConversationSettingsOpen();
   const [space, setSpace] = useState<SpaceView | null>(demoBootstrap.initialSpace);
   const [spaceInitial, setSpaceInitial] = useState("");
   const [spaceSelected, setSpaceSelected] = useState("");
@@ -614,7 +615,7 @@ export function ConversationWorkspace() {
   function send(text: string, attachments: File[]) {
     const navigation = !attachments.length ? parseConversationNavigation(text) : null;
     if (navigation) {
-      if (navigation.target === "settings") setSettings(true);
+      if (navigation.target === "settings") openSettings();
       else openSpace(navigation.view);
       return;
     }
@@ -1042,49 +1043,24 @@ export function ConversationWorkspace() {
       className={`cw ${sidebarOpen ? "" : "cw-sidebar-closed"} ${preferences.textSize === "large" ? "cw-large-text" : ""} ${preferences.motion ? "" : "cw-reduce-motion"}`}
       style={{ "--cw-sidebar-w": sidebarOpen ? `${sidebarWidth}px` : "0px" } as React.CSSProperties}
     >
-      {settings && (
-        <ConversationSettings
-          value={preferences}
-          onSave={setPreferences}
-          onClose={() => setSettings(false)}
-          storageStatus={storageStatus}
-          counts={{
-            works: visibleWorks.filter((w) => !w.coordinatedBy).length,
-            projects: displaySpaceData.projects.length,
-            materials: engine.backend === "engine" ? null : library.length,
-          }}
-          archived={works.filter((w) => w.archived && !w.coordinatedBy)}
-          onRestore={(id) =>
-            setWorks((current) =>
-              current.map((w) =>
-                w.id === id || w.coordinatedBy === id ? { ...w, archived: false } : w,
-              ),
-            )
-          }
-          onNavigate={(page) => {
-            setSettings(false);
-            openSpace(page);
-          }}
-          onExport={() =>
-            downloadPrototypeExport({
-              preferences,
-              spaceData,
-              works,
-              materials: library,
-            })
-          }
-          onReset={async () => {
-            resetting.current = true;
-            try {
-              await resetPrototype(storageKey);
-              window.location.reload();
-            } catch (error) {
-              resetting.current = false;
-              throw error;
-            }
-          }}
-        />
-      )}
+      <ConversationWorkspaceSettingsMount
+        open={settingsOpen}
+        initialSection={settingsSection}
+        preferences={preferences}
+        onSave={setPreferences}
+        onClose={closeSettings}
+        storageStatus={storageStatus}
+        visibleWorks={visibleWorks}
+        displaySpaceData={displaySpaceData}
+        engineBackend={engine.backend}
+        library={library}
+        works={works}
+        setWorks={setWorks}
+        onNavigate={openSpace}
+        spaceData={spaceData}
+        storageKey={storageKey}
+        resetting={resetting}
+      />
       {searchOpen && <ConversationSearch entries={entries} onClose={() => setSearchOpen(false)} />}
       {sidebarOpen && (
         <button
@@ -1121,7 +1097,7 @@ export function ConversationWorkspace() {
         squadListOpen={squadListOpen}
         onToggleSquadList={() => setSquadListOpen(!squadListOpen)}
         preferences={preferences}
-        onOpenSettings={() => setSettings(true)}
+        onOpenSettings={() => openSettings()}
         notificationCount={notificationCount}
         onToggleNotifications={() => setNotifications(!notifications)}
         sidebarWidth={sidebarWidth}
@@ -1149,7 +1125,10 @@ export function ConversationWorkspace() {
           pending={pending} completedNotices={completedNotices}
           scenarios={scenarios} spaceData={displaySpaceData} onOpenWork={open}
         />
-        {/* Diagnostics live in Settings; blocking errors use HomunErrorNotice. */}
+        <ConversationWorkspaceEngineNotices
+          engine={engine}
+          onOpenModels={() => openSettings("models")}
+        />
         {space ? (
           <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined} engineTeams={engine.backend === "engine" ? engine.teams : undefined} engineRoutines={engine.backend === "engine" ? engine.routines : undefined} onUpdateRoutine={engine.backend === "engine" ? (r, ch) => engine.updateRoutine(r.id, r.revision, ch) : undefined} onSkipNextRoutine={engine.backend === "engine" ? (r) => engine.routineAction(r.id, "skip_next", r.revision) : undefined} onCreateRoutineFromWork={engine.backend === "engine" ? (workId, input) => engine.createRoutineFromWork(workId, input) : undefined}
             onSetEngineDue={engine.backend === "engine" ? engine.setDue : undefined}
@@ -1233,6 +1212,7 @@ export function ConversationWorkspace() {
             scenarios={scenarios}
             spaceData={displaySpaceData}
             onOpenSpace={openSpace}
+            onOpenModels={() => openSettings("models")}
             onCreateExample={create}
             onSend={send}
             newChatProject={newChatProjectId ? {

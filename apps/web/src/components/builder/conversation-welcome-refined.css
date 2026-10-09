@@ -86,3 +86,70 @@
   margin-top: 16px;
   text-align: left;
 }
+
+.cw-first-run {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 0 20px;
+  padding: 14px 16px;
+  text-align: left;
+  background: #fafafa;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  color: #3f3f46;
+}
+
+.cw-first-run svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #164e3f;
+}
+
+.cw-first-run__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.cw-first-run__body strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #18181b;
+  margin-bottom: 4px;
+}
+
+.cw-first-run__body p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #71717a;
+}
+
+.cw-first-run__steps {
+  margin: 8px 0 12px;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #52525b;
+}
+
+.cw-first-run__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 550;
+  color: #164e3f;
+  cursor: pointer;
+}
+
+.cw-first-run__cta:hover {
+  background: #f4f4f5;
+}

@@ -267,8 +267,8 @@ export function ConversationWorkspaceTopbar({
                   <button
                     type="button"
                     className="ph-coordinator-btn"
-                    aria-label={`Agenti in questa chat: ${involvedAgents.length}`}
-                    title={`Agenti in questa chat (${involvedAgents.length}): clicca per dettagli`}
+                    aria-label={`Squadra in questa chat: ${involvedAgents.length}`}
+                    title={`Squadra in questa chat (${involvedAgents.length}): clicca per dettagli`}
                   >
                     <ConversationAvatar
                       name={scenario?.agent || involvedAgents[0]?.name || "Homun"}
@@ -284,8 +284,8 @@ export function ConversationWorkspaceTopbar({
                     <strong>Squadra del lavoro</strong>
                     <span>
                       {involvedAgents.length === 1
-                        ? "1 agente assegnato"
-                        : `${involvedAgents.length} agenti coinvolti`}
+                        ? "1 collaboratore assegnato"
+                        : `${involvedAgents.length} collaboratori coinvolti`}
                     </span>
                   </div>
                   <div className="cw-agent-popover-list">

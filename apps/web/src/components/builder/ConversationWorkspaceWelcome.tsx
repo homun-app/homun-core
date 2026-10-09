@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { FolderPlus, Users, Sparkles, FileSearch, ArrowUpRight } from "lucide-react";
+import { FolderPlus, Users, FileSearch, ArrowUpRight } from "lucide-react";
 import { EngineOrganizationOnboarding } from "./EngineOrganizationOnboarding";
 import { ConversationAvatar } from "./ConversationAvatar";
+import { ConversationFirstRunChecklist } from "./ConversationFirstRunChecklist";
 import { isHumanMember } from "./conversation-members";
 import type { ConversationScenario } from "./conversation-scenarios";
 import type { SpaceData } from "./ConversationSpace";
@@ -21,6 +22,8 @@ type Props = {
   engineMode?: boolean;
   onRefreshEngine?: (() => Promise<void>) | undefined;
   onOpenSpace?: ((space: "Progetti" | "Squadra" | "Materiali", initial?: string, selected?: string) => void) | undefined;
+  /** Open Impostazioni → modelli for first-run CTA. */
+  onOpenModels?: (() => void) | undefined;
   /** La nuova conversazione nascerà in questo progetto (eredità di memoria). */
   newChatProject?: { id: string; name: string } | null | undefined;
 };
@@ -33,6 +36,7 @@ export function ConversationWorkspaceWelcome({
   engineMode = false,
   onRefreshEngine,
   onOpenSpace,
+  onOpenModels,
   newChatProject,
 }: Props) {
   const [showTeamOnboarding, setShowTeamOnboarding] = useState(false);
@@ -51,9 +55,11 @@ export function ConversationWorkspaceWelcome({
       )}
       <p className="cw-welcome-subtitle">
         {assignee
-          ? "Descrivi l'obiettivo, i vincoli e i materiali. L'agente si occuperà dell'esecuzione."
+          ? "Descrivi l'obiettivo, i vincoli e i materiali. Homun o il collaboratore scelto eseguiranno il lavoro."
           : "Chiedi quello che ti serve, assegna compiti alla squadra o avvia un nuovo progetto."}
       </p>
+
+      {engineMode && onOpenModels && <ConversationFirstRunChecklist onOpenModels={onOpenModels} />}
 
       <div className="cw-welcome-pills">
         {onOpenSpace && (
