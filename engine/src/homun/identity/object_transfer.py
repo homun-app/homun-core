@@ -23,7 +23,10 @@ from homun.domain.errors import DomainError, NotFoundError, PermissionDeniedErro
 from homun.domain.ids import new_id
 from homun.domain.models import Actor, DomainEvent
 from homun.peers.object_crypto import (
+    ANNOUNCE_ALLOWED_KEYS,
+    TRANSFER_META_ALLOWED_KEYS,
     TransferManifest,
+    assert_no_credentials_in_transfer,
     missing_chunk_indices,
     verify_chunk,
 )
@@ -161,6 +164,17 @@ def _announce_published(
             project = store.projects.get(project_id)
             if project is None or project.status == "archived":
                 raise NotFoundError("Project not found")
+            payload = {
+                "project_id": project_id,
+                "object_id": manifest.object_id,
+                "version": manifest.version,
+                "plaintext_size": manifest.plaintext_size,
+                "plaintext_sha256": manifest.plaintext_sha256,
+                "chunk_count": len(manifest.chunks),
+            }
+            assert_no_credentials_in_transfer(
+                payload, allowed_keys=ANNOUNCE_ALLOWED_KEYS, label="announce"
+            )
             event = DomainEvent(
                 event_id=new_id("evt"),
                 workspace_id=store.workspace_id,
@@ -171,14 +185,7 @@ def _announce_published(
                 type=EVENT_PUBLISHED,
                 actor_id=actor.id,
                 command_id=new_id("cmd"),
-                payload={
-                    "project_id": project_id,
-                    "object_id": manifest.object_id,
-                    "version": manifest.version,
-                    "plaintext_size": manifest.plaintext_size,
-                    "plaintext_sha256": manifest.plaintext_sha256,
-                    "chunk_count": len(manifest.chunks),
-                },
+                payload=payload,
             )
             store.events.append(event)
             sequence = event.sequence
@@ -206,6 +213,9 @@ def publish_object(
         "version": parsed.version,
         "manifest": parsed.to_dict(),
     }
+    assert_no_credentials_in_transfer(
+        meta, allowed_keys=TRANSFER_META_ALLOWED_KEYS, label="transfer meta"
+    )
     _write_meta(version_dir, meta)
     uploaded = 0
     if chunks_b64 is not None:
