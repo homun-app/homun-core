@@ -3493,7 +3493,9 @@
       "HealthResponse": {
         "properties": {
           "db": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "type": "string"
+            },
             "title": "Db",
             "type": "object"
           },
@@ -12234,8 +12236,42 @@
     },
     "/v1/diagnostics/db": {
       "get": {
-        "description": "Rapporto di recovery persistente: modalità, tabelle, problemi, quarantena.",
+        "description": "Full recovery report: mode, tables, issues, quarantine. Owner/admin only.",
         "operationId": "diagnostics_db_v1_diagnostics_db_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -12248,6 +12284,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Diagnostics Db",
