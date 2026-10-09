@@ -271,3 +271,104 @@ def test_expired_touch_releases_budget_reservation(host, tmp_path):
         assert budget.reserved.attempts == 0
         receipt = store.budget_usage_receipts[peer.budget_reservation_id]
         assert receipt.status == "released"
+
+
+def test_reconcile_after_timeout_releases_hold_and_blocks_blind_reoffer(host, tmp_path):
+    """Timed-out peer must be reconciled before the same input is reassigned."""
+    from homun.domain.errors import ValidationError
+
+    app, ctx = host
+    _, _, work = _setup(ctx)
+    with TestClient(app) as client:
+        confirm = _pair_giulia(client, tmp_path)
+        expires = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        first = _offer(ctx, work, confirm["person_id"], expires=expires)
+        headers = _headers(confirm)
+
+        # Interrogate the previous attempt.
+        seen = client.get(
+            f"/v1/workspaces/ws_local/remote/assignments/{first}", headers=headers)
+        assert seen.status_code == 200
+        assert seen.json()["id"] == first
+        assert seen.json()["status"] == "offered"
+
+        # Blind re-offer of the same input is refused while unresolved.
+        with pytest.raises(ValidationError, match="timed out unresolved"):
+            _offer(ctx, work, confirm["person_id"], expires=expires)
+
+        # Peer reconcile releases the ledger hold.
+        reconciled = client.post(
+            f"/v1/workspaces/ws_local/remote/assignments/{first}/reconcile",
+            headers=headers,
+            json={"command_id": "rec-1"})
+        assert reconciled.status_code == 200
+        body = reconciled.json()
+        assert body["status"] == "expired" and body["reconciled"] is True
+        assert body["previous"]["id"] == first
+
+        store = ctx.repository.snapshot()
+        peer = store.peer_assignments[first]
+        budget = store.work_budgets[work]
+        assert peer.status == "expired"
+        assert budget.reserved.attempts == 0
+        assert store.budget_usage_receipts[peer.budget_reservation_id].status == "released"
+
+        # Idempotent interrogation after reconcile.
+        again = client.post(
+            f"/v1/workspaces/ws_local/remote/assignments/{first}/reconcile",
+            headers=headers,
+            json={"command_id": "rec-2"})
+        assert again.status_code == 200
+        assert again.json()["idempotent"] is True
+        assert again.json()["previous"]["status"] == "expired"
+
+        # Only after reconcile may the same input be offered again.
+        second = _offer(ctx, work, confirm["person_id"])
+        assert second != first
+
+
+def test_reconcile_after_timeout_settles_late_result(host, tmp_path):
+    """Peer may settle known usage / late result via reconcile, not blind retry."""
+    app, ctx = host
+    _, _, work = _setup(ctx)
+    with TestClient(app) as client:
+        confirm = _pair_giulia(client, tmp_path)
+        expires = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        assignment = _offer(ctx, work, confirm["person_id"], expires=expires)
+        result = {"translated": "tardivo"}
+        out = client.post(
+            f"/v1/workspaces/ws_local/remote/assignments/{assignment}/reconcile",
+            headers=_headers(confirm),
+            json={"command_id": "rec-late", "result": result,
+                  "model_attempts_used": 4})
+        assert out.status_code == 200
+        assert out.json()["status"] == "returned"
+        assert out.json()["reconciled"] is True
+        store = ctx.repository.snapshot()
+        peer = store.peer_assignments[assignment]
+        budget = store.work_budgets[work]
+        assert peer.status == "returned" and peer.result == result
+        assert peer.model_attempts_used == 4
+        assert budget.reserved.attempts == 0
+        assert budget.spent.attempts == 4
+        receipt = store.budget_usage_receipts[peer.budget_reservation_id]
+        assert receipt.status == "partial"
+        assert receipt.reason == "peer_assignment_timeout_reconcile"
+
+
+def test_reconcile_refuses_while_assignment_still_open(host, tmp_path):
+    app, ctx = host
+    _, _, work = _setup(ctx)
+    with TestClient(app) as client:
+        confirm = _pair_giulia(client, tmp_path)
+        # Far-future expiry: still alive.
+        expires = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        assignment = _offer(ctx, work, confirm["person_id"], expires=expires)
+        refused = client.post(
+            f"/v1/workspaces/ws_local/remote/assignments/{assignment}/reconcile",
+            headers=_headers(confirm),
+            json={"command_id": "rec-early"})
+        assert refused.status_code in (400, 409)
+        store = ctx.repository.snapshot()
+        assert store.peer_assignments[assignment].status == "offered"
+        assert store.work_budgets[work].reserved.attempts == 20

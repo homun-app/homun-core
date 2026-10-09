@@ -111,7 +111,10 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   return riconcilia l'uso noto, revoke/scadenza rilasciano la hold; esaurimento
   tipizzato `budget_exhausted`. Store ops in `domain/budget_ops.py`, link in
   `domain/peer_budget.py`. Test: `test_delegation_f56.py` (+5).
-  Restano: reconcile dopo timeout lato peer (interrogare tentativo precedente).
+- ✅ Reconcile dopo timeout lato peer (2026-10-09) — `delegation.reconcile`
+  interroga il tentativo precedente e rilascia/liquida la hold; niente
+  riassegnazione cieca dello stesso `input_hash` finché l'offer/accept è
+  irrisolto. GET assignment + rotta/CLI reconcile. Test: `test_delegation_f56.py`.
 
 ### F6 — Strumenti e connettori
 - ✅ F6.2 web search (ddgs, `tools/search.py`, protezione errori-retry)

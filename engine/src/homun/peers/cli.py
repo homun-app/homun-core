@@ -103,8 +103,14 @@ def cmd_message(args: argparse.Namespace) -> int:
 def cmd_assignments(args: argparse.Namespace) -> int:
     from homun.peers import remote_request
     connection = _connection_or_die(args)
-    page = remote_request(
-        connection, f"/v1/workspaces/{connection.workspace_id}/remote/assignments")
+    assignment_id = getattr(args, "assignment", None)
+    if assignment_id:
+        page = remote_request(
+            connection,
+            f"/v1/workspaces/{connection.workspace_id}/remote/assignments/{assignment_id}")
+    else:
+        page = remote_request(
+            connection, f"/v1/workspaces/{connection.workspace_id}/remote/assignments")
     print(json.dumps(page, indent=2, ensure_ascii=False))
     return 0
 
@@ -130,6 +136,16 @@ def cmd_return(args: argparse.Namespace) -> int:
     result = json.loads(args.result) if args.result.startswith("{") else {"text": args.result}
     return _assignment_action(args, "return",
                               {"result": result, "model_attempts_used": args.attempts})
+
+
+def cmd_reconcile(args: argparse.Namespace) -> int:
+    extra: dict[str, Any] = {}
+    if args.result:
+        extra["result"] = (json.loads(args.result) if args.result.startswith("{")
+                           else {"text": args.result})
+    if args.attempts is not None:
+        extra["model_attempts_used"] = args.attempts
+    return _assignment_action(args, "reconcile", extra)
 
 
 def add_parser(sub: Any) -> None:
@@ -164,6 +180,8 @@ def add_parser(sub: Any) -> None:
 
     assignments = commands.add_parser("assignments", help="Deleghe offerte a te")
     assignments.add_argument("--host", required=True)
+    assignments.add_argument("--assignment", default=None,
+                             help="Interroga un tentativo precedente per id")
     assignments.set_defaults(func=cmd_assignments)
 
     accept = commands.add_parser("accept", help="Accetta una delega")
@@ -177,3 +195,12 @@ def add_parser(sub: Any) -> None:
     ret.add_argument("--result", required=True, help="JSON del risultato o testo")
     ret.add_argument("--attempts", default=None, type=int, help="Tentativi modello usati")
     ret.set_defaults(func=cmd_return)
+
+    reconcile = commands.add_parser(
+        "reconcile", help="Dopo timeout: interroga e rilascia/liquida la hold")
+    reconcile.add_argument("--host", required=True)
+    reconcile.add_argument("--assignment", required=True)
+    reconcile.add_argument("--result", default=None, help="JSON risultato tardivo opzionale")
+    reconcile.add_argument("--attempts", default=None, type=int,
+                           help="Tentativi modello usati da liquidare")
+    reconcile.set_defaults(func=cmd_reconcile)
