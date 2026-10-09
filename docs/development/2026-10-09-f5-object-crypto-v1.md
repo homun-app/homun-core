@@ -44,6 +44,11 @@ Router: `engine/src/homun/routes/object_transfer_api.py`
 Lo snapshot replica (`GET …/remote/snapshot`) include `object_transfers`
 filtrato allo stesso modo (grant + wrap). Nessun fallback in simulazione.
 
+Alla publish, l'host emette anche `object_transfer.published` sull'aggregato
+`project` (payload: object_id, version, hash/size plaintext, chunk_count —
+niente wrap né ciphertext). I peer con grant lo vedono su
+`GET …/remote/events?cursor=…`. Il fetch dei chunk resta gated da grant+wrap.
+
 Test HTTP: `engine/tests/test_object_transfer_http_f55.py`.
 
 ## Prove §5 coperture
@@ -57,8 +62,8 @@ Test HTTP: `engine/tests/test_object_transfer_http_f55.py`.
 ## Resto di F5.3
 
 1. ~~Rotte host/peer per pubblicare e riprendere transfer~~ ✅
-2. Integrazione outbox (annuncio transfer come evento di dominio) — parziale:
-   listing in snapshot; manca evento/cursor dedicato
+2. ~~Integrazione outbox (annuncio transfer come evento di dominio)~~ ✅
+   listing snapshot + `object_transfer.published` sul feed eventi/cursor
 3. Revoca: nuove versioni non wrappano dispositivi revocati; UX dichiara i
    limiti sulle copie già scaricate
 4. Credenziali: assert esplicito che secret store non entra nei transfer
