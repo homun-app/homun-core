@@ -4,6 +4,10 @@ Ciphertext and manifests live under the data directory. Peers fetch by chunk
 index and resume after disconnect. Authorization: project grant plus a
 confirmed device fingerprint listed as a recipient wrap. Credentials are
 never stored here.
+
+Publishing appends an `object_transfer.published` domain event on the project
+aggregate so peers with a read grant see the announce on the remote event
+cursor (snapshot listing remains the bootstrap path).
 """
 from __future__ import annotations
 
@@ -14,7 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from homun.domain.errors import DomainError, NotFoundError, PermissionDeniedError, ValidationError
-from homun.domain.models import Actor
+from homun.domain.ids import new_id
+from homun.domain.models import Actor, DomainEvent
 from homun.peers.object_crypto import (
     TransferManifest,
     missing_chunk_indices,
@@ -23,6 +28,8 @@ from homun.peers.object_crypto import (
 from homun.policy import require_project_capability
 
 _OBJECT_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
+
+EVENT_PUBLISHED = "object_transfer.published"
 
 
 class ObjectTransferError(DomainError):
@@ -115,6 +122,44 @@ def _transfer_status(version_dir: Path, manifest: TransferManifest) -> dict[str,
     }
 
 
+def _announce_published(
+    ctx,
+    actor: Actor,
+    *,
+    project_id: str,
+    manifest: TransferManifest,
+) -> int:
+    """Record a domain event so authorized peers see the transfer on the cursor."""
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            project = store.projects.get(project_id)
+            if project is None or project.status == "archived":
+                raise NotFoundError("Project not found")
+            event = DomainEvent(
+                event_id=new_id("evt"),
+                workspace_id=store.workspace_id,
+                aggregate_id=project_id,
+                aggregate_type="project",
+                aggregate_version=project.version,
+                sequence=store.next_sequence(),
+                type=EVENT_PUBLISHED,
+                actor_id=actor.id,
+                command_id=new_id("cmd"),
+                payload={
+                    "project_id": project_id,
+                    "object_id": manifest.object_id,
+                    "version": manifest.version,
+                    "plaintext_size": manifest.plaintext_size,
+                    "plaintext_sha256": manifest.plaintext_sha256,
+                    "chunk_count": len(manifest.chunks),
+                },
+            )
+            store.events.append(event)
+            sequence = event.sequence
+        ctx.service.store = store
+    return sequence
+
+
 def publish_object(
     ctx,
     actor: Actor,
@@ -146,12 +191,17 @@ def publish_object(
                 raise ValidationError(f"Invalid base64 for chunk {index}") from exc
             put_chunk(ctx, actor, parsed.object_id, parsed.version, index, blob)
             uploaded += 1
+    event_sequence = _announce_published(
+        ctx, actor, project_id=project_id, manifest=parsed
+    )
     status = _transfer_status(version_dir, parsed)
     return {
         "object_id": parsed.object_id,
         "version": parsed.version,
         "project_id": project_id,
         "uploaded_chunks": uploaded,
+        "event_sequence": event_sequence,
+        "event_type": EVENT_PUBLISHED,
         **status,
     }
 

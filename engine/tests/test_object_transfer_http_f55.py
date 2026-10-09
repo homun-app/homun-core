@@ -6,6 +6,7 @@ chunks and resumes after a partial download. No grant / no wrap → typed 403.
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -284,3 +285,66 @@ def test_corrupt_chunk_upload_rejected(host):
             content=b"not-the-ciphertext",
         )
         assert bad.status_code == 400
+
+
+def test_publish_announces_transfer_on_remote_event_cursor(host):
+    """Peers with a grant see object_transfer.published after the snapshot cursor."""
+    app, ctx, tmp_path = host
+    shared, private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        confirm, identity = _pair_giulia(client, tmp_path)
+        _grant(ctx, "g1", confirm["person_id"], shared, "read")
+        peer = {"Authorization": f"Bearer {confirm['device_token']}"}
+
+        snap = client.get(
+            f"/v1/workspaces/ws_local/remote/snapshot?project_id={shared}",
+            headers=peer,
+        )
+        assert snap.status_code == 200
+        cursor = snap.json()["cursor"]
+
+        sealed = _seal_for(identity, b"annuncio via eventi")
+        chunks_b64 = [
+            base64.b64encode(chunk).decode("ascii") for chunk in sealed.ciphertext_chunks
+        ]
+        published = client.post(
+            "/v1/workspaces/ws_local/remote/objects",
+            headers=OWNER,
+            json={
+                "project_id": shared,
+                "manifest": sealed.manifest.to_dict(),
+                "chunks_b64": chunks_b64,
+            },
+        )
+        assert published.status_code == 200, published.text
+        body = published.json()
+        assert body["event_type"] == "object_transfer.published"
+        assert body["event_sequence"] > cursor
+
+        page = client.get(
+            f"/v1/workspaces/ws_local/remote/events"
+            f"?project_id={shared}&cursor={cursor}",
+            headers=peer,
+        )
+        assert page.status_code == 200, page.text
+        items = page.json()["items"]
+        announce = next(
+            (item for item in items if item["type"] == "object_transfer.published"),
+            None,
+        )
+        assert announce is not None
+        assert announce["aggregate_type"] == "project"
+        assert announce["aggregate_id"] == shared
+        assert announce["sequence"] == body["event_sequence"]
+        assert announce["payload"]["object_id"] == "obj_listino"
+        assert announce["payload"]["version"] == 1
+        assert announce["payload"]["plaintext_sha256"] == sealed.manifest.plaintext_sha256
+        assert "wrapped_key" not in json.dumps(announce["payload"])
+        assert "recipients" not in announce["payload"]
+
+        # Private project feed must not carry the shared-project announce.
+        denied_private = client.get(
+            f"/v1/workspaces/ws_local/remote/events?project_id={private}&cursor=0",
+            headers=peer,
+        )
+        assert denied_private.status_code == 403
