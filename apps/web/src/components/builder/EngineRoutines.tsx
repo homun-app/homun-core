@@ -1,7 +1,12 @@
 /** Engine routines: the automation space — supervised recurring works. */
 import { useEffect, useState } from "react";
 import type { EngineRoutine } from "@/lib/engine-routines-client";
-import { listEngineRoutines, previewEngineCron, routineEngineAction } from "@/lib/engine-routines-client";
+import {
+  listEngineRoutines,
+  previewEngineCron,
+  routineEngineAction,
+  workSupportsRoutineTemplate,
+} from "@/lib/engine-routines-client";
 import { cadenceToCron } from "@/lib/cadence-language";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { ConversationSelectField } from "./ConversationSelect";
@@ -153,17 +158,16 @@ function EngineRoutineFreeCreator({
 }: {
   works: Array<{
     id: string; title: string; status?: string | undefined; engineStatus?: string | undefined;
-    enginePlan?: Array<{ title: string; assignee_id?: string }> | undefined;
+    engineObjective?: string | undefined;
+    enginePlan?: Array<{ title: string; assignee_id?: string; capability?: string; output_expected?: string }> | undefined;
   }>;
   onCreate: (workId: string, input: { name: string; cron: string }) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
-  // solo lavori con un piano idoneo a fare da modello: il motore rifiuta i
-  // passi senza titolo o assegnatario, meglio non proporli proprio
+  // Only works whose plan matches routine.create: titled steps on roster agents.
   const candidates = works.filter((w) =>
     (w.engineStatus === "completed" || w.engineStatus === "ready") &&
-    Array.isArray(w.enginePlan) && w.enginePlan.length > 0 &&
-    w.enginePlan.every((step) => step.title.trim() && step.assignee_id));
+    workSupportsRoutineTemplate(w));
   const [workId, setWorkId] = useState(candidates[0]?.id ?? "");
   const selected = candidates.find((w) => w.id === workId) ?? candidates[0];
   const [name, setName] = useState("");

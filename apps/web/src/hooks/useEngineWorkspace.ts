@@ -650,10 +650,11 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
       if (!work || work.source !== "engine") {
         throw new Error("Lavoro modello non trovato nel motore");
       }
+      const template = routineTemplateFromWork(work);
       await createEngineRoutine({
         ...input,
         conversationId: work.engineConversationId ?? "",
-        template: routineTemplateFromWork(work),
+        template,
       });
       await refresh();
     },

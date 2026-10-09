@@ -45,6 +45,10 @@ import {
   stripTrailingMention,
 } from "@/lib/conversation-plan-commands";
 import { projectWorkspaceData } from "@/lib/engine-project-projection";
+import {
+  routineTemplateFromWork,
+  workSupportsRoutineTemplate,
+} from "@/lib/engine-routines-client";
 export type { Work } from "./conversation-types";
 const { storageKey, bootstrap: demoBootstrap } = demoWorkspaceBootstrap();
 
@@ -1290,7 +1294,7 @@ export function ConversationWorkspace() {
                   onPreview={() => setPreview(true)}
                   engineBusy={engine.busy} onRename={work.source === "engine" ? (title) => engine.renameWork(work, title) : undefined}
                   engineIntake={engine.intake} onCloseWork={work.source === "engine" ? () => engine.closeWork(work) : undefined} onStartWork={work.source === "engine" ? () => engine.startWork(work) : undefined} onSubmitArtifact={work.source === "engine" ? (title, content) => engine.submitArtifact(work, title, content) : undefined}
-                  onSetBudget={work.source === "engine" ? (n) => engine.setWorkBudget(work, n) : undefined} onSetDue={work.source === "engine" ? (d) => engine.setDue(work, d) : undefined} onCreateRoutine={work.source === "engine" && work.engineStatus === "completed" ? ({ name, cron }) => engine.createRoutine({ name, cron, conversationId: work.engineConversationId ?? "", template: { title: work.title, objective: work.engineObjective ?? work.title, plan_steps: (work.enginePlan ?? []).map((step) => ({ title: step.title, assignee_id: step.assignee_id, capability: step.capability, output_expected: step.output_expected })) } }) : undefined} onRevisePlan={work.source === "engine" ? (action) => engine.revisePlan(work, action) : undefined}
+                  onSetBudget={work.source === "engine" ? (n) => engine.setWorkBudget(work, n) : undefined} onSetDue={work.source === "engine" ? (d) => engine.setDue(work, d) : undefined} onCreateRoutine={work.source === "engine" && work.engineStatus === "completed" && workSupportsRoutineTemplate(work) ? ({ name, cron }) => engine.createRoutine({ name, cron, conversationId: work.engineConversationId ?? "", template: routineTemplateFromWork(work) }) : undefined} onRevisePlan={work.source === "engine" ? (action) => engine.revisePlan(work, action) : undefined}
                   agents={engine.agents.map((agent) => ({ id: agent.id, name: agent.name, status: agent.status }))} agentNames={Object.fromEntries(engine.agents.map((agent) => [agent.id, agent.name]))}
                   {...(work.source === "engine"
                     ? {

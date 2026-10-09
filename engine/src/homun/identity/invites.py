@@ -43,13 +43,25 @@ def _bootstrap_owner_if_empty(ctx, actor: Actor) -> None:
         ctx.service.store = write_store
 
 
-def list_people(ctx, actor: Actor) -> dict[str, Any]:
+def require_owner_or_admin(
+    ctx,
+    actor: Actor,
+    *,
+    message: str = "Only an owner or admin may perform this action",
+):
+    """Bootstrap the first owner if needed, then require an active owner/admin."""
     _bootstrap_owner_if_empty(ctx, actor)
     store = ctx.repository.snapshot()
-    admin = store.persons.get(actor.id)
-    if admin is None or admin.status != "active" or admin.role not in ("owner", "admin"):
+    person = store.persons.get(actor.id)
+    if person is None or person.status != "active" or person.role not in ("owner", "admin"):
         from homun.domain.errors import PermissionDeniedError
-        raise PermissionDeniedError("Only an owner or admin can list people")
+        raise PermissionDeniedError(message)
+    return person
+
+
+def list_people(ctx, actor: Actor) -> dict[str, Any]:
+    require_owner_or_admin(ctx, actor, message="Only an owner or admin can list people")
+    store = ctx.repository.snapshot()
     people = []
     for person in sorted(store.persons.values(), key=lambda p: p.created_at):
         if person.status == "active" or True:  # i revocati restano visibili con stato esplicito
@@ -69,12 +81,8 @@ def list_people(ctx, actor: Actor) -> dict[str, Any]:
 
 def list_invites(ctx, actor: Actor) -> dict[str, Any]:
     from homun.domain.commands.identity import PERSON_INVITE_KIND
-    _bootstrap_owner_if_empty(ctx, actor)
+    require_owner_or_admin(ctx, actor, message="Only an owner or admin can list invites")
     store = ctx.repository.snapshot()
-    admin = store.persons.get(actor.id)
-    if admin is None or admin.status != "active" or admin.role not in ("owner", "admin"):
-        from homun.domain.errors import PermissionDeniedError
-        raise PermissionDeniedError("Only an owner or admin can list invites")
     invites = []
     for record in store.commands.values():
         if record.type != PERSON_INVITE_KIND:
