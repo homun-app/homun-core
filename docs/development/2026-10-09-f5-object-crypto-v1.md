@@ -58,14 +58,30 @@ Test HTTP: `engine/tests/test_object_transfer_http_f55.py`.
 - ✅ Relay material (manifest+ciphertext+wrap rubato) non decifra
 - ✅ Resume: chunk già verificati saltati; host riporta `missing_chunks`
 - ✅ Senza grant di progetto → 403 tipizzato
+- ✅ Revoca dispositivo: publish di nuove versioni rifiuta wrap verso
+  fingerprint revocati (`permission_denied`); sessioni del device muoiono
+- ✅ UX Impostazioni → Persone dichiara il limite sulle copie già scaricate
+  e decifrate (Homun non le cancella da remoto)
+
+## Revoca e copie già scaricate
+
+Alla `POST …/remote/objects` l'host confronta i `recipients` del manifest
+con i dispositivi `status=revoked` nello store: se un wrap punta a un
+fingerprint revocato, la publish fallisce. Le versioni già pubblicate
+prima della revoca restano sul disco host; il device revocato perde il
+token di trasporto e non ottiene più chunk. **Limite dichiarato**: una
+copia già scaricata e decifrata sul device non può essere cancellata da
+remoto — lo stesso testo è in Impostazioni → Persone.
+
+Test: `test_revoked_device_cannot_be_wrapped_on_new_versions`.
 
 ## Resto di F5.3
 
 1. ~~Rotte host/peer per pubblicare e riprendere transfer~~ ✅
 2. ~~Integrazione outbox (annuncio transfer come evento di dominio)~~ ✅
    listing snapshot + `object_transfer.published` sul feed eventi/cursor
-3. Revoca: nuove versioni non wrappano dispositivi revocati; UX dichiara i
-   limiti sulle copie già scaricate
+3. ~~Revoca: nuove versioni non wrappano dispositivi revocati; UX dichiara i
+   limiti sulle copie già scaricate~~ ✅
 4. Credenziali: assert esplicito che secret store non entra nei transfer
 5. Review indipendente del protocollo prima della beta con dati sensibili
 6. D-CRYPTO-01 (cifratura a riposo del profilo) resta separata

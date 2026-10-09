@@ -7,7 +7,9 @@ never stored here.
 
 Publishing appends an `object_transfer.published` domain event on the project
 aggregate so peers with a read grant see the announce on the remote event
-cursor (snapshot listing remains the bootstrap path).
+cursor (snapshot listing remains the bootstrap path). New versions refuse
+recipient wraps for revoked device fingerprints; already-downloaded copies
+remain a declared UX limit.
 """
 from __future__ import annotations
 
@@ -79,6 +81,30 @@ def _person_device_fingerprints(store, person_id: str) -> set[str]:
         and device.status == "confirmed"
         and device.key_fingerprint
     }
+
+
+def _revoked_device_fingerprints(store) -> set[str]:
+    return {
+        device.key_fingerprint
+        for device in store.person_devices.values()
+        if device.status == "revoked" and device.key_fingerprint
+    }
+
+
+def _assert_no_revoked_recipient_wraps(store, manifest: TransferManifest) -> None:
+    """New versions must not wrap keys for revoked devices (F5.3 revoke)."""
+    revoked = _revoked_device_fingerprints(store)
+    if not revoked:
+        return
+    blocked = [
+        wrap.device_fingerprint
+        for wrap in manifest.recipients
+        if wrap.device_fingerprint in revoked
+    ]
+    if blocked:
+        raise PermissionDeniedError(
+            "Cannot wrap object key for revoked devices on new versions"
+        )
 
 
 def _require_recipient(store, actor: Actor, manifest: TransferManifest) -> None:
@@ -172,6 +198,7 @@ def publish_object(
     store = ctx.repository.snapshot()
     require_project_capability(store, actor, project_id, "write")
     parsed = TransferManifest.from_dict(manifest)
+    _assert_no_revoked_recipient_wraps(store, parsed)
     version_dir = _version_dir(ctx.data_dir, parsed.object_id, parsed.version)
     meta = {
         "project_id": project_id,

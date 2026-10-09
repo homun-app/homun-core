@@ -287,6 +287,82 @@ def test_corrupt_chunk_upload_rejected(host):
         assert bad.status_code == 400
 
 
+def test_revoked_device_cannot_be_wrapped_on_new_versions(host):
+    """After device revoke, publish rejects manifests that still wrap that device."""
+    app, ctx, tmp_path = host
+    shared, _private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        confirm, identity = _pair_giulia(client, tmp_path)
+        _grant(ctx, "g1", confirm["person_id"], shared, "read")
+
+        v1 = _seal_for(identity, b"pre-revoca", version=1)
+        assert (
+            client.post(
+                "/v1/workspaces/ws_local/remote/objects",
+                headers=OWNER,
+                json={
+                    "project_id": shared,
+                    "manifest": v1.manifest.to_dict(),
+                    "chunks_b64": [
+                        base64.b64encode(chunk).decode("ascii")
+                        for chunk in v1.ciphertext_chunks
+                    ],
+                },
+            ).status_code
+            == 200
+        )
+
+        revoked = client.post(
+            f"/v1/workspaces/ws_local/devices/{confirm['device_id']}/revoke",
+            headers=OWNER,
+        )
+        assert revoked.status_code == 200, revoked.text
+
+        v2 = _seal_for(identity, b"post-revoca", version=2)
+        denied = client.post(
+            "/v1/workspaces/ws_local/remote/objects",
+            headers=OWNER,
+            json={
+                "project_id": shared,
+                "manifest": v2.manifest.to_dict(),
+                "chunks_b64": [
+                    base64.b64encode(chunk).decode("ascii")
+                    for chunk in v2.ciphertext_chunks
+                ],
+            },
+        )
+        assert denied.status_code == 403, denied.text
+        detail = denied.json().get("detail") or {}
+        assert detail.get("code") == "permission_denied"
+        assert "revoked" in (detail.get("message") or "").lower()
+
+        # Unknown fingerprint (never registered) is still publishable; only
+        # known-revoked devices are blocked on new versions.
+        from homun.peers.device_identity import generate_device_keypair
+
+        other = generate_device_keypair()
+        alternate = seal_object(
+            b"altro destinatario",
+            object_id="obj_listino",
+            version=2,
+            recipient_public_pems={other.fingerprint: other.public_pem},
+            chunk_size=1024,
+        )
+        ok = client.post(
+            "/v1/workspaces/ws_local/remote/objects",
+            headers=OWNER,
+            json={
+                "project_id": shared,
+                "manifest": alternate.manifest.to_dict(),
+                "chunks_b64": [
+                    base64.b64encode(chunk).decode("ascii")
+                    for chunk in alternate.ciphertext_chunks
+                ],
+            },
+        )
+        assert ok.status_code == 200, ok.text
+
+
 def test_publish_announces_transfer_on_remote_event_cursor(host):
     """Peers with a grant see object_transfer.published after the snapshot cursor."""
     app, ctx, tmp_path = host
