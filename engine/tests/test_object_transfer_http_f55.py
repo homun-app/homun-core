@@ -363,6 +363,101 @@ def test_revoked_device_cannot_be_wrapped_on_new_versions(host):
         assert ok.status_code == 200, ok.text
 
 
+def test_publish_rejects_manifest_with_credential_fields(host):
+    """Secret-store / credential keys must never travel in transfer JSON."""
+    app, ctx, tmp_path = host
+    shared, _private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        confirm, identity = _pair_giulia(client, tmp_path)
+        sealed = _seal_for(identity, b"benign payload")
+        tainted = sealed.manifest.to_dict()
+        tainted["api_key"] = "sk-must-not-publish"
+        denied = client.post(
+            "/v1/workspaces/ws_local/remote/objects",
+            headers=OWNER,
+            json={
+                "project_id": shared,
+                "manifest": tainted,
+                "chunks_b64": [
+                    base64.b64encode(chunk).decode("ascii")
+                    for chunk in sealed.ciphertext_chunks
+                ],
+            },
+        )
+        assert denied.status_code == 400, denied.text
+        detail = denied.json().get("detail") or {}
+        assert detail.get("code") == "object_crypto_error"
+        assert "credential" in (detail.get("message") or "").lower() or "unsupported" in (
+            detail.get("message") or ""
+        ).lower()
+
+
+def test_secret_store_values_never_appear_in_transfer_artifacts(host):
+    """Homun credentials stay in the secret store — not in transfer on-disk/API."""
+    app, ctx, tmp_path = host
+    marker = "sk-homun-transfer-leak-probe-9f3c2a1b"
+    ctx.models.secrets.put("openai_api_key", marker)
+    assert ctx.models.secrets.get("openai_api_key") == marker
+
+    shared, _private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        confirm, identity = _pair_giulia(client, tmp_path)
+        _grant(ctx, "g1", confirm["person_id"], shared, "read")
+        peer = {"Authorization": f"Bearer {confirm['device_token']}"}
+
+        sealed = _seal_for(identity, b"catalogo senza segreti")
+        chunks_b64 = [
+            base64.b64encode(chunk).decode("ascii") for chunk in sealed.ciphertext_chunks
+        ]
+        published = client.post(
+            "/v1/workspaces/ws_local/remote/objects",
+            headers=OWNER,
+            json={
+                "project_id": shared,
+                "manifest": sealed.manifest.to_dict(),
+                "chunks_b64": chunks_b64,
+            },
+        )
+        assert published.status_code == 200, published.text
+
+        manifest = client.get(
+            "/v1/workspaces/ws_local/remote/objects/obj_listino/versions/1",
+            headers=peer,
+        )
+        assert manifest.status_code == 200, manifest.text
+        listing = client.get(
+            f"/v1/workspaces/ws_local/remote/objects?project_id={shared}",
+            headers=peer,
+        )
+        assert listing.status_code == 200, listing.text
+        snap = client.get(
+            f"/v1/workspaces/ws_local/remote/snapshot?project_id={shared}",
+            headers=peer,
+        )
+        assert snap.status_code == 200, snap.text
+        events = client.get(
+            f"/v1/workspaces/ws_local/remote/events?project_id={shared}&cursor=0",
+            headers=peer,
+        )
+        assert events.status_code == 200, events.text
+
+        surfaces = [
+            published.text,
+            manifest.text,
+            listing.text,
+            snap.text,
+            events.text,
+            json.dumps(sealed.manifest.to_dict()),
+        ]
+        for path in (tmp_path / "object-transfers").rglob("*"):
+            if path.is_file():
+                surfaces.append(path.read_text(encoding="utf-8", errors="ignore"))
+        joined = "\n".join(surfaces)
+        assert marker not in joined
+        assert "openai_api_key" not in joined
+        assert "secret_store" not in joined
+
+
 def test_publish_announces_transfer_on_remote_event_cursor(host):
     """Peers with a grant see object_transfer.published after the snapshot cursor."""
     app, ctx, tmp_path = host

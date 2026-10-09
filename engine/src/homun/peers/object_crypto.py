@@ -45,9 +45,86 @@ PROTOCOL_ID = "homun-object-transfer/v1"
 DEFAULT_CHUNK_SIZE = 65_536
 OBJECT_KEY_BYTES = crypto_secretstream_xchacha20poly1305_KEYBYTES
 
+MANIFEST_ALLOWED_KEYS = frozenset({
+    "protocol",
+    "object_id",
+    "version",
+    "plaintext_sha256",
+    "plaintext_size",
+    "chunk_size",
+    "header_b64",
+    "chunks",
+    "recipients",
+})
+CHUNK_ALLOWED_KEYS = frozenset({"index", "sha256", "size"})
+RECIPIENT_ALLOWED_KEYS = frozenset({"device_fingerprint", "wrapped_key_b64"})
+ANNOUNCE_ALLOWED_KEYS = frozenset({
+    "project_id",
+    "object_id",
+    "version",
+    "plaintext_size",
+    "plaintext_sha256",
+    "chunk_count",
+})
+TRANSFER_META_ALLOWED_KEYS = frozenset({
+    "project_id",
+    "object_id",
+    "version",
+    "manifest",
+})
+
+# Defense in depth: refuse credential / secret-store field names even if a
+# future schema change widens an allowlist by mistake.
+_CREDENTIAL_FIELD_NAMES = frozenset({
+    "access_token",
+    "api_key",
+    "apikey",
+    "authorization",
+    "bearer",
+    "client_secret",
+    "credential",
+    "credentials",
+    "openai_api_key",
+    "password",
+    "passwd",
+    "private_key",
+    "refresh_token",
+    "secret",
+    "secrets",
+    "secret_store",
+    "token",
+    "workspace_key",
+})
+
 
 class ObjectCryptoError(DomainError):
     code = "object_crypto_error"
+
+
+def assert_no_credentials_in_transfer(
+    data: Mapping,
+    *,
+    allowed_keys: frozenset[str],
+    label: str,
+) -> None:
+    """Fail closed if transfer JSON carries credential / secret-store fields.
+
+    Object transfers may only use an allowlisted schema. Homun's secret store
+    and workspace keys must never appear in manifests, meta, or announce events.
+    """
+    if not isinstance(data, Mapping):
+        raise ObjectCryptoError(f"{label} must be an object")
+    unknown = sorted(str(key) for key in data if str(key) not in allowed_keys)
+    if unknown:
+        raise ObjectCryptoError(f"Unsupported {label} fields: {', '.join(unknown)}")
+    for key in data:
+        key_l = str(key).lower()
+        if key_l in _CREDENTIAL_FIELD_NAMES or key_l.endswith(
+            ("_secret", "_password", "_api_key")
+        ):
+            raise ObjectCryptoError(
+                f"Credentials must not appear in object transfers ({label}.{key})"
+            )
 
 
 @dataclass(frozen=True)
@@ -61,6 +138,9 @@ class ChunkDescriptor:
 
     @classmethod
     def from_dict(cls, data: Mapping) -> ChunkDescriptor:
+        assert_no_credentials_in_transfer(
+            data, allowed_keys=CHUNK_ALLOWED_KEYS, label="chunk"
+        )
         return cls(index=int(data["index"]), sha256=str(data["sha256"]), size=int(data["size"]))
 
 
@@ -77,6 +157,9 @@ class RecipientWrap:
 
     @classmethod
     def from_dict(cls, data: Mapping) -> RecipientWrap:
+        assert_no_credentials_in_transfer(
+            data, allowed_keys=RECIPIENT_ALLOWED_KEYS, label="recipient"
+        )
         return cls(
             device_fingerprint=str(data["device_fingerprint"]),
             wrapped_key_b64=str(data["wrapped_key_b64"]),
@@ -112,6 +195,9 @@ class TransferManifest:
 
     @classmethod
     def from_dict(cls, data: Mapping) -> TransferManifest:
+        assert_no_credentials_in_transfer(
+            data, allowed_keys=MANIFEST_ALLOWED_KEYS, label="manifest"
+        )
         if data.get("protocol") != PROTOCOL_ID:
             raise ObjectCryptoError("Unsupported object-transfer protocol")
         chunks = tuple(ChunkDescriptor.from_dict(item) for item in data.get("chunks", []))

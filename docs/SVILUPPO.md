@@ -103,9 +103,10 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   Dipendenza `pynacl`. Doc protocollo:
   `development/2026-10-09-f5-object-crypto-v1.md`. Test:
   `test_object_crypto_f55.py`, `test_object_transfer_http_f55.py`.
-  Crypto + HTTP + annuncio eventi + revoca wrap/UX limiti copie ✅.
-  Restano: assert credenziali fuori dai transfer, review indipendente.
-  Il pilot VPN non dipende da questa fetta.
+  Crypto + HTTP + annuncio eventi + revoca wrap/UX limiti copie +
+  assert credenziali fuori dai transfer ✅.
+  Resta: review indipendente del protocollo. Il pilot VPN non dipende
+  da questa fetta.
 - ✅ Collegamento delega↔ledger budget (2026-10-09) — `delegation.offer`
   riserva tentativi sul `WorkBudget` (`budget_reservation_id` sull'assignment);
   return riconcilia l'uso noto, revoke/scadenza rilasciano la hold; esaurimento

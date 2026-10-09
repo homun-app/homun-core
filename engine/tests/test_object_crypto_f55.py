@@ -6,11 +6,15 @@ relay material alone cannot decrypt; resume after missing chunks.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from homun.peers.device_identity import generate_device_keypair, key_fingerprint
 from homun.peers.object_crypto import (
     ObjectCryptoError,
+    TransferManifest,
+    assert_no_credentials_in_transfer,
     missing_chunk_indices,
     open_object,
     seal_object,
@@ -164,3 +168,42 @@ def test_empty_plaintext_roundtrip():
         recipient_private_pem=peer.private_pem,
         recipient_fingerprint=peer.fingerprint,
     ) == b""
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["api_key", "credentials", "secret", "secret_store", "workspace_key", "token"],
+)
+def test_manifest_rejects_credential_fields(field):
+    owner, _, _ = _devices()
+    sealed = seal_object(
+        b"benign",
+        object_id="obj_cred",
+        version=1,
+        recipient_public_pems={owner.fingerprint: owner.public_pem},
+    )
+    tainted = sealed.manifest.to_dict()
+    tainted[field] = "sk-should-never-travel"
+    with pytest.raises(ObjectCryptoError, match="[Cc]redential|Unsupported manifest"):
+        TransferManifest.from_dict(tainted)
+
+
+def test_assert_no_credentials_blocks_secret_store_field_name():
+    with pytest.raises(ObjectCryptoError, match="Credentials must not appear"):
+        assert_no_credentials_in_transfer(
+            {"project_id": "p", "secret_store": {"k": "v"}},
+            allowed_keys=frozenset({"project_id", "secret_store"}),
+            label="transfer meta",
+        )
+
+
+def test_object_crypto_module_does_not_import_secret_store():
+    import homun.peers.object_crypto as oc
+    import homun.identity.object_transfer as ot
+
+    for module in (oc, ot):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        assert "SecretStore" not in source
+        assert "models.secrets" not in source
+        assert "MemorySecretStore" not in source
+        assert "FileSecretStore" not in source

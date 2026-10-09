@@ -11,7 +11,7 @@ host/peer per pubblicare e riprendere i transfer (grant + wrap).
 | Wrap destinatario | libsodium SealedBox su X25519 | Chiave dispositivo Ed25519 convertita (libsodium) |
 | Payload | `crypto_secretstream_xchacha20poly1305` | Chunk autenticati, tag FINAL obbligatorio |
 | Manifest | JSON con hash plaintext + hash per chunk ciphertext | Ripresa dopo disconnessione |
-| Credenziali | Escluse | Non compaiono in manifest né in plaintext di transfer |
+| Credenziali | Escluse | Schema allowlist + assert: secret store / workspace key mai nei transfer |
 
 Il relay (o un peer senza wrap) vede solo ciphertext + metadati del
 manifest: non ottiene la chiave oggetto.
@@ -62,6 +62,9 @@ Test HTTP: `engine/tests/test_object_transfer_http_f55.py`.
   fingerprint revocati (`permission_denied`); sessioni del device muoiono
 - ✅ UX Impostazioni → Persone dichiara il limite sulle copie già scaricate
   e decifrate (Homun non le cancella da remoto)
+- ✅ Credenziali / secret store: manifest/meta/announce con allowlist;
+  campi `api_key`/`credentials`/… rifiutati; valori del secret store non
+  compaiono negli artefatti del transfer (`assert_no_credentials_in_transfer`)
 
 ## Revoca e copie già scaricate
 
@@ -82,7 +85,9 @@ Test: `test_revoked_device_cannot_be_wrapped_on_new_versions`.
    listing snapshot + `object_transfer.published` sul feed eventi/cursor
 3. ~~Revoca: nuove versioni non wrappano dispositivi revocati; UX dichiara i
    limiti sulle copie già scaricate~~ ✅
-4. Credenziali: assert esplicito che secret store non entra nei transfer
+4. ~~Credenziali: assert esplicito che secret store non entra nei transfer~~ ✅
+   allowlist schema + rifiuto campi credential; test che i valori del
+   secret store non compaiono in meta/API/eventi del transfer
 5. Review indipendente del protocollo prima della beta con dati sensibili
 6. D-CRYPTO-01 (cifratura a riposo del profilo) resta separata
 
