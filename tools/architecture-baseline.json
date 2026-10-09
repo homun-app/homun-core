@@ -5,7 +5,7 @@
     "apps/web/src/components/ai-elements/prompt-input.tsx": 1463,
     "apps/web/src/components/builder/ConversationMaterials.tsx": 959,
     "apps/web/src/components/builder/ConversationSpace.tsx": 1010,
-    "apps/web/src/components/builder/ConversationWorkspace.tsx": 1375,
+    "apps/web/src/components/builder/ConversationWorkspace.tsx": 1355,
     "apps/web/src/components/builder/StudioDocuments.tsx": 541,
     "apps/web/src/components/builder/StudioPlanningSimulation.tsx": 535,
     "apps/web/src/components/builder/StudioProcedures.tsx": 664,
