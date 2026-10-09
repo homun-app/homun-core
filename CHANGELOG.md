@@ -7,6 +7,52 @@ truth: the released version's section is written into the GitHub Release body
 Section headers are `## Highlights` / `## Improvements` / `## Fixes` (H2), and
 each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 
+## [0.2.1003] — 2026-10-09
+
+Pilot-ready Spaces: sealed object transfers between machines, honest peer delegation under budget, and installable Linux packages (.deb / AppImage).
+
+## Highlights
+- **Sealed object transfers between host and peer.** Chunked, resumable HTTP transfers with per-object wraps; credentials and secret stores never enter the transfer payload.
+- **Transfers announced on the remote event cursor**, so a peer learns about new sealed versions while reading the shared project — without a second polling channel.
+- **Revoked devices cannot receive new wraps.** Publishing a version whose wrap targets a revoked fingerprint is rejected; already-downloaded plaintext stays a local concern (declared in Settings → Persone).
+- **Peer delegation tied to the work budget**, with hold/release on offer, return, revoke and expiry; after a timeout the peer can reconcile the previous attempt instead of blind reassignment.
+- **Linux installers in the multi-OS pipeline** (.deb and AppImage) alongside the notarized macOS build path.
+
+## Improvements
+- **UX quick wins for first-run and navigation**: Squadra and Altro in the nav, clearer settings levels, and a tighter first-run path.
+- **Hermes streaming P0 gaps closed** so live battery scenarios stay green under interruption and partial usage.
+- **Engine recovery when the data directory is busy**, with a clear path instead of a silent startup failure.
+- **Recipient names for all work readers** and safer parity-command defaults.
+
+## Fixes
+- **Linux: the bundled engine no longer requests an executable stack.** Some python-build-standalone interpreters ship libpython with a RWE GNU_STACK that recent glibc refuses to load; the build now clears and verifies that flag on every ELF in the bundle, so .deb/AppImage installs start the engine on first run without manual patchelf.
+- **Live battery hygiene** for T2/T6 scripts and cron→chat leftovers.
+- **Copilot leftovers**: diagnostics auth, routine templates gated on real engine data, and the ddgs lock aligned with the engine env.
+- **Desktop packaging metadata** (homepage and author) required by electron-builder for `.deb`.
+
+## [Unreleased]
+
+## Highlights
+- **Work directly with Homun without creating a specialist bot.** Optional company onboarding proposes a small team for recurring responsibilities.
+- **Adaptive work over approved materials.** Homun can read, search, consult selected AI teammates, request clarification and deliver a reviewable result with persisted progress.
+- **Scoped human contributions.** Named recipients can answer one request through an expiring, revocable link; an adaptive run can resume from that answer. Reachable hosting remains a prerequisite.
+
+## Fixes
+- **Model retries remain bounded after a crash.** Corrections interrupt stale waits immediately, and malformed usage counters cannot reduce recorded spending.
+- **Materials and Plugins use the engine from the sidebar.** Files, previews, archival and capability settings share the persisted engine state; denied access clears stale previews.
+- **Task deadlines persist from the Tasks view**, with saving feedback and typed errors.
+- **Tool chains resume after artifact publication without duplicating results**, preserving DBOS journal step order.
+- **Synthesis respects the assigned collaborator's budget and approved sources**, preserving known token counts in partial usage reports and blocking further calls at exhausted limits.
+- **Routine recovery reconciles cron and timezone drift** while preserving pause state.
+- **Manual update checks offer the available version only once.**
+
+## Improvements
+- **Recover from model context rejection through bounded compaction.** Homun preserves original history, respects output and attempt limits, and stops explicitly when protected context cannot shrink.
+- **Durable context checkpoints for native agent runs.** Automatic summaries preserve original history, recent corrections and complete tool rounds; configured model limits and separate usage accounting remain explicit.
+- **Pause, resume and redirect native agent work.** Chat corrections reach the active run; pending tools survive pause, stale responses cannot publish, and revoked source history remains hidden.
+- **Native agent tool rounds in the Homun engine**, with persisted call/result history and pending-call recovery after human input; Hermes-derived execution guidance includes MIT attribution.
+- **Current usage and developer documentation**, with verified limits and a dated Hermes usage comparison.
+
 ## [0.2.1002] — 2026-10-08
 
 Spaces collaborate: another machine joins yours with an invite, sees only the projects you share, contributes and takes delegated work — all with a verifiable device identity.
@@ -30,32 +76,6 @@ Spaces collaborate: another machine joins yours with an invite, sees only the pr
 - **Pairing validates the invite on presentation and never persists its secret**; local invite redemption is localhost-only.
 - **Connector failures are visible** (error surfaced in view, failed OAuth popup closed); project names are unique with reuse on auto-creation.
 - **Date grouping in the sidebar uses real engine timestamps** on calendar days, never invented ones.
-
-## [Unreleased]
-
-## Highlights
-- **Work directly with Homun without creating a specialist bot.** Optional company onboarding proposes a small team for recurring responsibilities.
-- **Adaptive work over approved materials.** Homun can read, search, consult selected AI teammates, request clarification and deliver a reviewable result with persisted progress.
-- **Scoped human contributions.** Named recipients can answer one request through an expiring, revocable link; an adaptive run can resume from that answer. Reachable hosting remains a prerequisite.
-
-## Fixes
-- **Linux: the bundled engine no longer requests an executable stack.** Some python-build-standalone interpreters ship libpython with a RWE GNU_STACK that recent glibc refuses to load; the build now clears and verifies that flag on every ELF in the bundle, so .deb/AppImage installs start the engine on first run without manual patchelf.
-
-## Fixes
-- **Model retries remain bounded after a crash.** Corrections interrupt stale waits immediately, and malformed usage counters cannot reduce recorded spending.
-- **Materials and Plugins use the engine from the sidebar.** Files, previews, archival and capability settings share the persisted engine state; denied access clears stale previews.
-- **Task deadlines persist from the Tasks view**, with saving feedback and typed errors.
-- **Tool chains resume after artifact publication without duplicating results**, preserving DBOS journal step order.
-- **Synthesis respects the assigned collaborator's budget and approved sources**, preserving known token counts in partial usage reports and blocking further calls at exhausted limits.
-- **Routine recovery reconciles cron and timezone drift** while preserving pause state.
-- **Manual update checks offer the available version only once.**
-
-## Improvements
-- **Recover from model context rejection through bounded compaction.** Homun preserves original history, respects output and attempt limits, and stops explicitly when protected context cannot shrink.
-- **Durable context checkpoints for native agent runs.** Automatic summaries preserve original history, recent corrections and complete tool rounds; configured model limits and separate usage accounting remain explicit.
-- **Pause, resume and redirect native agent work.** Chat corrections reach the active run; pending tools survive pause, stale responses cannot publish, and revoked source history remains hidden.
-- **Native agent tool rounds in the Homun engine**, with persisted call/result history and pending-call recovery after human input; Hermes-derived execution guidance includes MIT attribution.
-- **Current usage and developer documentation**, with verified limits and a dated Hermes usage comparison.
 
 ## [0.2.1001] — 2026-09-23
 
