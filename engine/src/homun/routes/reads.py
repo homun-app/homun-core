@@ -2,6 +2,7 @@
 from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Query
 from homun.context import get_context
+from homun.application.contribution_invitations import _recipient_name
 from homun.application.conversation_messages import conversation_message_page
 from homun.domain.errors import NotFoundError, PermissionDeniedError
 from homun.policy.work import require_work_access
@@ -37,11 +38,12 @@ def list_works(
         )
         if pending is not None:
             payload["pending_contribution"] = pending.model_dump(mode="json")
-            person = next((r.result for r in ctx.service.store.commands.values()
-                           if r.type == 'person.define' and r.actor_id == actor.id
-                           and r.result.get('id') == pending.to_actor_id), None)
-            if person:
-                payload["pending_contribution"]["recipient_name"] = person['name']
+            # Resolve by recipient id (same as invitation code), not by who
+            # created the person.define record — other readers of this work
+            # must still see the human name.
+            name = _recipient_name(ctx.service.store, pending.to_actor_id)
+            if name:
+                payload["pending_contribution"]["recipient_name"] = name
         payload["intake_confirmed"] = has_confirmed_intake(ctx.service.store, work.id)
         plan = ctx.service.current_plan(work)
         if plan is not None:
