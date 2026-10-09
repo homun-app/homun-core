@@ -12,6 +12,7 @@ from typing import Any
 
 from homun.domain.command_context import CommandContext
 from homun.domain.models import Actor, Person, PersonDevice, utc_now
+from homun.domain.peer_budget import release_assignment
 
 PERSON_ROLES = ("owner", "admin", "member")
 PERSON_INVITE_KIND = "person.invite"
@@ -124,12 +125,12 @@ def _person_revoke(ctx: CommandContext, actor: Actor, command_id: str, payload: 
     for device in ctx.store.person_devices.values():
         if device.person_id == person.id:
             device.status = "revoked"
-    # le deleghe verso la persona revocata si chiudono: mai risultati da
-    # un assegnatario che non può più autenticarsi
+    # Close open delegations to the revoked person and release their budget holds.
     for assignment in ctx.store.peer_assignments.values():
         if assignment.assignee_person_id == person.id and assignment.status in ("offered", "accepted"):
             assignment.status = "revoked"
             assignment.updated_at = utc_now()
+            release_assignment(ctx.store, assignment, reason="peer_assignment_assignee_revoked")
     ctx._emit(actor=actor, command_id=command_id, aggregate_id=person.id,
               aggregate_type="person", aggregate_version=2,
               event_type="person.revoked", payload={"person_id": person.id})

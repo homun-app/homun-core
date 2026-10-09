@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from homun.app import create_app
 from homun.context import create_context, reset_context_for_tests
+from homun.domain.errors import BudgetExhaustedError
 from homun.domain.models import Actor
 
 LAUNCHER_TOKEN = "t" * 40
@@ -169,3 +170,104 @@ def test_revoked_assignment_rejected_and_only_assignee_touches(host, tmp_path):
         assert accept_as_stranger.status_code == 200  # Giulia vede le sue
         store = ctx.repository.snapshot()
         assert store.peer_assignments[assignment2].status == "offered"
+
+
+def test_offer_reserves_budget_ledger_atomically(host, tmp_path):
+    """Authority reserves model attempts on the work ledger at offer time."""
+    app, ctx = host
+    _, _, work = _setup(ctx)
+    with TestClient(app) as client:
+        confirm = _pair_giulia(client, tmp_path)
+        assignment = _offer(ctx, work, confirm["person_id"])
+        store = ctx.repository.snapshot()
+        budget = store.work_budgets[work]
+        peer = store.peer_assignments[assignment]
+        assert peer.budget_reservation_id
+        assert peer.model_attempts_reserved == 20
+        assert budget.reserved.attempts == 20
+        assert any(r.id == peer.budget_reservation_id for r in budget.pending)
+        pending = next(r for r in budget.pending if r.id == peer.budget_reservation_id)
+        assert pending.actor_id == confirm["person_id"]
+        assert pending.admitted_actor_id == "person_fabio"
+        assert pending.purpose.startswith("peer_assignment:")
+
+
+def test_return_settles_reserved_budget(host, tmp_path):
+    """Return charges known attempts and clears the in-flight reservation."""
+    app, ctx = host
+    _, _, work = _setup(ctx)
+    with TestClient(app) as client:
+        confirm = _pair_giulia(client, tmp_path)
+        assignment = _offer(ctx, work, confirm["person_id"])
+        headers = _headers(confirm)
+        client.post(f"/v1/workspaces/ws_local/remote/assignments/{assignment}/accept",
+                    headers=headers)
+        returned = client.post(
+            f"/v1/workspaces/ws_local/remote/assignments/{assignment}/return",
+            headers=headers,
+            json={"command_id": "ret-budget", "result": {"ok": True},
+                  "model_attempts_used": 7})
+        assert returned.status_code == 200
+        store = ctx.repository.snapshot()
+        peer = store.peer_assignments[assignment]
+        budget = store.work_budgets[work]
+        assert peer.budget_reservation_id
+        assert budget.reserved.attempts == 0
+        assert budget.spent.attempts == 7
+        assert not budget.pending
+        receipt = store.budget_usage_receipts[peer.budget_reservation_id]
+        assert receipt.status == "partial"
+        assert receipt.charged_known.attempts == 7
+        assert receipt.accounting_actor_id == confirm["person_id"]
+
+
+def test_offer_rejected_when_work_budget_exhausted(host, tmp_path):
+    app, ctx = host
+    _, _, work = _setup(ctx)
+    _apply(ctx, "cap", "work.set_budget",
+           {"work_id": work, "caps": {"model_attempts": 5}})
+    with TestClient(app) as client:
+        confirm = _pair_giulia(client, tmp_path)
+        with pytest.raises(BudgetExhaustedError):
+            _offer(ctx, work, confirm["person_id"])
+        store = ctx.repository.snapshot()
+        assert not store.peer_assignments
+        assert store.work_budgets[work].reserved.attempts == 0
+
+
+def test_revoke_releases_budget_reservation(host, tmp_path):
+    app, ctx = host
+    _, _, work = _setup(ctx)
+    with TestClient(app) as client:
+        confirm = _pair_giulia(client, tmp_path)
+        assignment = _offer(ctx, work, confirm["person_id"])
+        _apply(ctx, "rev-budget", "delegation.revoke",
+               {"work_id": work, "assignment_id": assignment})
+        store = ctx.repository.snapshot()
+        budget = store.work_budgets[work]
+        peer = store.peer_assignments[assignment]
+        assert budget.reserved.attempts == 0
+        assert budget.spent.attempts == 0
+        receipt = store.budget_usage_receipts[peer.budget_reservation_id]
+        assert receipt.status == "released"
+
+
+def test_expired_touch_releases_budget_reservation(host, tmp_path):
+    app, ctx = host
+    _, _, work = _setup(ctx)
+    with TestClient(app) as client:
+        confirm = _pair_giulia(client, tmp_path)
+        expires = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        assignment = _offer(ctx, work, confirm["person_id"], expires=expires)
+        late = client.post(
+            f"/v1/workspaces/ws_local/remote/assignments/{assignment}/return",
+            headers=_headers(confirm),
+            json={"command_id": "late-budget", "result": {"x": 1}})
+        assert late.status_code in (400, 409)
+        store = ctx.repository.snapshot()
+        budget = store.work_budgets[work]
+        peer = store.peer_assignments[assignment]
+        assert peer.status == "expired"
+        assert budget.reserved.attempts == 0
+        receipt = store.budget_usage_receipts[peer.budget_reservation_id]
+        assert receipt.status == "released"

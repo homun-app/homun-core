@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from homun.context import get_context
-from homun.domain.errors import DomainError
+from homun.domain.errors import DomainError, ValidationError
 from homun.routes.domain_support import _http_error
 from homun.routes.price_comparisons import request_context
 
@@ -219,6 +219,8 @@ def remote_assignment_accept(workspace_id: str, assignment_id: str,
                     actor, f"racc:{new_id('cmd')}", "delegation.accept",
                     {"assignment_id": assignment_id})
             ctx.service.store = store
+        if out.get("status") == "expired":
+            raise _http_error(ValidationError("Assignment expired"))
         return out
     except DomainError as exc:
         raise _http_error(exc) from exc
@@ -229,7 +231,7 @@ def remote_assignment_return(workspace_id: str, assignment_id: str,
                              body: AssignmentActionRequest,
                              x_homun_actor_id: str | None = Header(default=None),
                              x_homun_actor_name: str | None = Header(default=None)):
-    """Ritorno con ricevuta: idempotente sullo stesso risultato."""
+    """Return with receipt: idempotent on the same result."""
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
     try:
         with ctx.repository.locked():
@@ -239,6 +241,8 @@ def remote_assignment_return(workspace_id: str, assignment_id: str,
                     {"assignment_id": assignment_id, "result": body.result,
                      "model_attempts_used": body.model_attempts_used})
             ctx.service.store = store
+        if out.get("status") == "expired":
+            raise _http_error(ValidationError("Assignment expired"))
         return out
     except DomainError as exc:
         raise _http_error(exc) from exc
