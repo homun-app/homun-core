@@ -154,8 +154,9 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
         from homun.routes.session_auth import SessionAuthMiddleware
         app.add_middleware(SessionAuthMiddleware, token=session_token, origins=allowed_origins or [], actor_id=session_actor_id)
     app.include_router(health.router)
-    from homun.routes import identity_api
+    from homun.routes import identity_api, object_transfer_api
     app.include_router(identity_api.router)
+    app.include_router(object_transfer_api.router)
     app.include_router(domain.router)
     app.include_router(price_comparisons.router)
     app.include_router(material_reads.router)

@@ -1,7 +1,7 @@
-# F5 fetta 5 — object-transfer crypto v1 (library slice)
+# F5 fetta 5 — object-transfer crypto + HTTP transfer routes
 
-9 ottobre 2026. Prima fetta verticale di F5.3: primitive e prove di
-biblioteca. **Nessuna rotta HTTP e nessuna UI** in questo passo.
+9 ottobre 2026. Fette verticali di F5.3: libreria crypto, poi rotte HTTP
+host/peer per pubblicare e riprendere i transfer (grant + wrap).
 
 ## Protocollo `homun-object-transfer/v1`
 
@@ -26,19 +26,39 @@ Modulo: `engine/src/homun/peers/object_crypto.py`
   plaintext (fail-closed su corruzione / wrap assente)
 - `missing_chunk_indices` / `verify_chunk` per resume
 
-Test: `engine/tests/test_object_crypto_f55.py`.
+Test libreria: `engine/tests/test_object_crypto_f55.py`.
 
-## Prove §5 coperture in questa fetta
+## Rotte HTTP (host)
 
-- ✅ File cifrato corrotto/troncato rifiutato
-- ✅ Peer non autorizzato senza wrap non decifra
+Modulo store: `engine/src/homun/identity/object_transfer.py`  
+Router: `engine/src/homun/routes/object_transfer_api.py`
+
+| Metodo | Path | Auth |
+|---|---|---|
+| POST | `/v1/workspaces/{ws}/remote/objects` | grant **write** sul `project_id` |
+| PUT | `…/remote/objects/{id}/versions/{v}/chunks/{i}` | grant **write** |
+| GET | `…/remote/objects/{id}/versions/{v}` | grant **read** + wrap destinatario |
+| GET | `…/remote/objects/{id}/versions/{v}/chunks/{i}` | grant **read** + wrap (octet-stream) |
+| GET | `…/remote/objects?project_id=` | grant **read** + wrap (elenco) |
+
+Lo snapshot replica (`GET …/remote/snapshot`) include `object_transfers`
+filtrato allo stesso modo (grant + wrap). Nessun fallback in simulazione.
+
+Test HTTP: `engine/tests/test_object_transfer_http_f55.py`.
+
+## Prove §5 coperture
+
+- ✅ File cifrato corrotto/troncato rifiutato (libreria + upload HTTP)
+- ✅ Peer non autorizzato senza wrap non decifra / non legge manifest
 - ✅ Relay material (manifest+ciphertext+wrap rubato) non decifra
-- ✅ Resume: chunk già verificati saltati; chunk alterati richiedere
+- ✅ Resume: chunk già verificati saltati; host riporta `missing_chunks`
+- ✅ Senza grant di progetto → 403 tipizzato
 
-## Resto di F5.3 (non in questo PR)
+## Resto di F5.3
 
-1. Rotte host/peer per pubblicare e riprendere transfer (`/v1/remote/objects…`)
-2. Integrazione con replica/outbox e grant di progetto (solo destinatari col grant)
+1. ~~Rotte host/peer per pubblicare e riprendere transfer~~ ✅
+2. Integrazione outbox (annuncio transfer come evento di dominio) — parziale:
+   listing in snapshot; manca evento/cursor dedicato
 3. Revoca: nuove versioni non wrappano dispositivi revocati; UX dichiara i
    limiti sulle copie già scaricate
 4. Credenziali: assert esplicito che secret store non entra nei transfer

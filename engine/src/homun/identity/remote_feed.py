@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from homun.domain.models import Actor
+from homun.identity import object_transfer
 from homun.policy import require_project_capability
 from homun.policy.read import visible_event
 
@@ -107,5 +108,6 @@ def remote_snapshot(ctx, actor: Actor, *, project_id: str) -> dict[str, Any]:
                     "version": project.version},
         "conversations": conversations,
         "works": works,
+        "object_transfers": object_transfer.list_project_transfers(ctx, actor, project_id),
         "cursor": last_sequence,
     }
