@@ -116,6 +116,37 @@ def test_cron_job_auto_approve_starts_run(ctx, tmp_path):
         reset_store()
 
 
+def test_cron_agent_runner_reuses_shared_project(ctx, tmp_path):
+    """Second prompt job must not die on project name uniqueness (live battery gap)."""
+    from homun.application.cron_agent_runner import CRON_PROJECT_NAME, make_cron_runner
+    from homun.application.cron_manager import CronManager
+    from homun.application.cron_manager import reset_store
+    from homun.application.cron_store import CronStore, set_cron_store
+    actor = Actor(id='person_cron', workspace_id=ctx.workspace_id, display_name='Owner')
+    store = CronStore(tmp_path / 'cron.db')
+    set_cron_store(store)
+    try:
+        mgr = CronManager(workspace_id=ctx.workspace_id, store=store)
+        runner = make_cron_runner(ctx)
+        first = mgr.create_job('5m', prompt='prima', repeat=1,
+                              owner_actor=actor.model_dump(mode='json'), auto_approve=True)
+        second = mgr.create_job('5m', prompt='seconda', repeat=1,
+                               owner_actor=actor.model_dump(mode='json'), auto_approve=True)
+        occ1 = mgr.run_job(first.id, now=20, claim=mgr.claim_job_for_fire(first.id, now=20),
+                           custom_runner=runner)
+        occ2 = mgr.run_job(second.id, now=30, claim=mgr.claim_job_for_fire(second.id, now=30),
+                           custom_runner=runner)
+        assert occ1.status == 'running', occ1.error
+        assert occ2.status == 'running', occ2.error
+        projects = [p for p in ctx.repository.load().projects.values()
+                    if p.status != 'archived'
+                    and (p.name or '').strip().casefold() == CRON_PROJECT_NAME.casefold()]
+        assert len(projects) == 1
+        assert occ1.work_id != occ2.work_id
+    finally:
+        reset_store()
+
+
 def test_cron_job_without_auto_approve_keeps_gate(ctx, tmp_path):
     from homun.application.cron_agent_runner import make_cron_runner
     from homun.application.cron_manager import CronManager
