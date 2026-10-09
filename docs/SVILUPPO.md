@@ -106,8 +106,12 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   Crypto + HTTP + annuncio eventi + revoca wrap/UX limiti copie ✅.
   Restano: assert credenziali fuori dai transfer, review indipendente.
   Il pilot VPN non dipende da questa fetta.
-- ⬜ Collegamento delega↔ledger budget (riserva atomica sugli assignment)
-  e reconcile dopo timeout: passo successivo della fetta 6.
+- ✅ Collegamento delega↔ledger budget (2026-10-09) — `delegation.offer`
+  riserva tentativi sul `WorkBudget` (`budget_reservation_id` sull'assignment);
+  return riconcilia l'uso noto, revoke/scadenza rilasciano la hold; esaurimento
+  tipizzato `budget_exhausted`. Store ops in `domain/budget_ops.py`, link in
+  `domain/peer_budget.py`. Test: `test_delegation_f56.py` (+5).
+  Restano: reconcile dopo timeout lato peer (interrogare tentativo precedente).
 
 ### F6 — Strumenti e connettori
 - ✅ F6.2 web search (ddgs, `tools/search.py`, protezione errori-retry)

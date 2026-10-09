@@ -103,8 +103,9 @@ class Person(BaseModel):
 class PeerAssignment(BaseModel):
     """F5.5 — delega di un passo a un peer: risultato unico, ricevuta.
 
-    L'offerta riserva input e budget dichiarativi; il ritorno è idempotente
-    per assignment: lo stesso risultato non duplica, uno diverso è conflitto."""
+    Offer reserves attempts on the work budget ledger; return settles usage;
+    revoke/expiry release the hold. The return is idempotent per assignment:
+    the same result does not duplicate, a different one conflicts."""
     id: str
     workspace_id: str
     work_id: str
@@ -113,6 +114,7 @@ class PeerAssignment(BaseModel):
     input_hash: str
     input_ref: dict = Field(default_factory=dict)
     model_attempts_reserved: int = 0
+    budget_reservation_id: str | None = None
     status: str = "offered"  # offered|accepted|returned|failed|expired|revoked
     result: dict | None = None
     model_attempts_used: int | None = None

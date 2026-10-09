@@ -1,10 +1,11 @@
-"""F5.5/5.6 — delega di un passo a un peer: offerta, accettazione, ritorno unico.
+"""F5.5/F5.6 — peer step delegation: offer, accept, unique return, budget link.
 
-Il ritorno è idempotente per assignment: lo stesso payload conferma il
-risultato già registrato (il «risultato di delega unico» del gate pilot),
-un payload diverso è un conflitto esplicito. Scadenza e revoca chiudono
-l'assignment senza risultati fantasma; la riassegnazione dopo timeout
-richiede una nuova offerta, mai un retry cieco."""
+Return is idempotent per assignment: the same payload confirms the recorded
+result (pilot gate «unique delegation result»), a different payload is an
+explicit conflict. Expiry and revoke close the assignment without phantom
+results and release the work-budget reservation; reassignment after timeout
+requires a new offer, never a blind retry.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -15,6 +16,11 @@ from typing import Any
 from homun.domain.command_context import CommandContext
 from homun.domain.ids import new_id
 from homun.domain.models import Actor, PeerAssignment, utc_now
+from homun.domain.peer_budget import (
+    release_assignment,
+    reserve_for_assignment,
+    settle_assignment,
+)
 
 
 def _require_work_authority(ctx: CommandContext, actor: Actor, work_id: str) -> None:
@@ -37,6 +43,23 @@ def _alive(assignment: PeerAssignment) -> bool:
         return False
 
 
+def _expire(ctx: CommandContext, actor: Actor, command_id: str,
+            assignment: PeerAssignment) -> dict[str, Any]:
+    """Close an expired offer inside the command transaction (no raise).
+
+    Raising would roll back the status change and the budget release; return a
+    committed expired result so the route can still answer 4xx to the peer.
+    """
+    assignment.status = "expired"
+    assignment.updated_at = utc_now()
+    release_assignment(ctx.store, assignment, reason="peer_assignment_expired")
+    ctx._emit(actor=actor, command_id=command_id, aggregate_id=assignment.id,
+              aggregate_type="peer_assignment", aggregate_version=2,
+              event_type="delegation.expired",
+              payload={"assignment_id": assignment.id})
+    return {"assignment_id": assignment.id, "status": "expired"}
+
+
 def delegation_offer(ctx: CommandContext, actor: Actor, command_id: str,
                      payload: dict[str, Any]) -> dict[str, Any]:
     _require_work_authority(ctx, actor, str(payload.get("work_id") or ""))
@@ -50,6 +73,7 @@ def delegation_offer(ctx: CommandContext, actor: Actor, command_id: str,
         raise ValidationError("Delegated capability is required")
     input_ref = payload.get("input_ref") if isinstance(payload.get("input_ref"), dict) else {}
     expires_at = str(payload.get("expires_at") or "") or None
+    attempts = int(payload.get("model_attempts_reserved") or 0)
     assignment = PeerAssignment(
         id=new_id("assign"), workspace_id=ctx.store.workspace_id,
         work_id=str(payload.get("work_id")), assignee_person_id=assignee,
@@ -57,20 +81,29 @@ def delegation_offer(ctx: CommandContext, actor: Actor, command_id: str,
         input_hash=hashlib.sha256(
             json.dumps(input_ref, sort_keys=True).encode()).hexdigest(),
         input_ref=input_ref,
-        model_attempts_reserved=int(payload.get("model_attempts_reserved") or 0),
+        model_attempts_reserved=attempts,
         issued_by=actor.id, expires_at=expires_at)
+    # Reserve before publishing the assignment so exhaustion cannot leave an
+    # orphan offer without a ledger hold (same transaction as the command).
+    assignment.budget_reservation_id = reserve_for_assignment(
+        ctx.store, actor, work_id=assignment.work_id,
+        assignee_person_id=assignee, attempts=attempts,
+        assignment_id=assignment.id)
     ctx.store.peer_assignments[assignment.id] = assignment
     ctx._emit(actor=actor, command_id=command_id, aggregate_id=assignment.id,
               aggregate_type="peer_assignment", aggregate_version=1,
               event_type="delegation.offered",
               payload={"work_id": assignment.work_id, "assignee": assignee,
-                       "capability": capability, "input_hash": assignment.input_hash})
-    return {"assignment_id": assignment.id, "status": assignment.status}
+                       "capability": capability, "input_hash": assignment.input_hash,
+                       "budget_reservation_id": assignment.budget_reservation_id,
+                       "model_attempts_reserved": attempts})
+    return {"assignment_id": assignment.id, "status": assignment.status,
+            "budget_reservation_id": assignment.budget_reservation_id}
 
 
 def delegation_accept(ctx: CommandContext, actor: Actor, command_id: str,
                       payload: dict[str, Any]) -> dict[str, Any]:
-    """Solo l'assegnatario, solo finché l'offerta è viva."""
+    """Only the assignee, and only while the offer is alive."""
     from homun.domain.errors import PermissionDeniedError, ValidationError
     assignment = ctx.store.peer_assignments.get(str(payload.get("assignment_id") or ""))
     if assignment is None:
@@ -79,13 +112,11 @@ def delegation_accept(ctx: CommandContext, actor: Actor, command_id: str,
     if assignment.assignee_person_id != actor.id:
         raise PermissionDeniedError("Only the assignee may accept this delegation")
     if assignment.status == "accepted":
-        return {"assignment_id": assignment.id, "status": "accepted"}  # idempotente
+        return {"assignment_id": assignment.id, "status": "accepted"}  # idempotent
     if assignment.status != "offered":
         raise ValidationError(f"Assignment is {assignment.status}, not acceptable")
     if not _alive(assignment):
-        assignment.status = "expired"
-        assignment.updated_at = utc_now()
-        raise ValidationError("Assignment expired")
+        return _expire(ctx, actor, command_id, assignment)
     assignment.status = "accepted"
     assignment.updated_at = utc_now()
     ctx._emit(actor=actor, command_id=command_id, aggregate_id=assignment.id,
@@ -96,7 +127,7 @@ def delegation_accept(ctx: CommandContext, actor: Actor, command_id: str,
 
 def delegation_return(ctx: CommandContext, actor: Actor, command_id: str,
                       payload: dict[str, Any]) -> dict[str, Any]:
-    """Ritorno con ricevuta: stesso payload conferma, payload diverso confligge."""
+    """Return with receipt: same payload confirms, different payload conflicts."""
     from homun.domain.errors import PermissionDeniedError, ValidationError
     assignment = ctx.store.peer_assignments.get(str(payload.get("assignment_id") or ""))
     if assignment is None:
@@ -112,21 +143,24 @@ def delegation_return(ctx: CommandContext, actor: Actor, command_id: str,
         stored = hashlib.sha256(json.dumps(
             assignment.result or {}, sort_keys=True).encode()).hexdigest()
         if stored == fingerprint:
-            # ritorno duplicato identico: ricevuta riconfermata, zero doppi
+            # Duplicate identical return: receipt confirmed, no double charge.
             return {"assignment_id": assignment.id, "status": "returned",
                     "idempotent": True}
         raise ValidationError("Assignment already returned with a different result")
     if assignment.status not in ("accepted", "offered"):
         raise ValidationError(f"Assignment is {assignment.status}, not returnable")
     if not _alive(assignment):
-        assignment.status = "expired"
-        assignment.updated_at = utc_now()
-        raise ValidationError("Assignment expired")
+        return _expire(ctx, actor, command_id, assignment)
     assignment.status = "returned"
     assignment.result = result
     assignment.model_attempts_used = int(used) if used is not None else None
     assignment.returned_at = utc_now()
     assignment.updated_at = utc_now()
+    settle_assignment(
+        ctx.store, work_id=assignment.work_id,
+        reservation_id=assignment.budget_reservation_id,
+        used_attempts=assignment.model_attempts_used,
+        reason="peer_assignment_returned")
     ctx._emit(actor=actor, command_id=command_id, aggregate_id=assignment.id,
               aggregate_type="peer_assignment", aggregate_version=3,
               event_type="delegation.returned",
@@ -146,6 +180,7 @@ def delegation_revoke(ctx: CommandContext, actor: Actor, command_id: str,
         return {"assignment_id": assignment.id, "status": assignment.status}
     assignment.status = "revoked"
     assignment.updated_at = utc_now()
+    release_assignment(ctx.store, assignment, reason="peer_assignment_revoked")
     ctx._emit(actor=actor, command_id=command_id, aggregate_id=assignment.id,
               aggregate_type="peer_assignment", aggregate_version=4,
               event_type="delegation.revoked", payload={"assignment_id": assignment.id})
@@ -156,6 +191,7 @@ def list_assignments_for(ctx, store, person_id: str) -> list[dict[str, Any]]:
     return [{"id": a.id, "work_id": a.work_id, "capability": a.capability,
              "status": a.status, "input_ref": a.input_ref,
              "input_hash": a.input_hash, "expires_at": str(a.expires_at or ""),
-             "model_attempts_reserved": a.model_attempts_reserved}
+             "model_attempts_reserved": a.model_attempts_reserved,
+             "budget_reservation_id": a.budget_reservation_id}
             for a in sorted(store.peer_assignments.values(), key=lambda x: x.created_at)
             if a.assignee_person_id == person_id]
