@@ -83,7 +83,10 @@ export function EnginePeopleSection() {
       <h3><UsersRound size={15} /> Persone dello spazio</h3>
       <p className="cw-hint">
         Le persone entrano con un invito monouso e accedono solo ai progetti condivisi
-        con loro. Revocare una persona chiude le sue sessioni e i suoi permessi.
+        con loro. Revocare una persona o un dispositivo chiude le sessioni e impedisce
+        wrap sulle nuove versioni degli oggetti condivisi. Le copie già scaricate e
+        decifrate su quel dispositivo restano un limite dichiarato: Homun non può
+        cancellarle da remoto.
       </p>
 
       {newInvite && (

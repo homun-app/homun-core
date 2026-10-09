@@ -102,8 +102,9 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   (corrotto/rifiutato, peer non autorizzato, relay opaco, resume).
   Dipendenza `pynacl`. Doc protocollo:
   `development/2026-10-09-f5-object-crypto-v1.md`. Test:
-  `test_object_crypto_f55.py`. Restano: rotte transfer, integrazione
-  grant/replica, UX limiti copie già scaricate, review indipendente.
+  `test_object_crypto_f55.py`, `test_object_transfer_http_f55.py`.
+  Crypto + HTTP + annuncio eventi + revoca wrap/UX limiti copie ✅.
+  Restano: assert credenziali fuori dai transfer, review indipendente.
   Il pilot VPN non dipende da questa fetta.
 - ⬜ Collegamento delega↔ledger budget (riserva atomica sugli assignment)
   e reconcile dopo timeout: passo successivo della fetta 6.
