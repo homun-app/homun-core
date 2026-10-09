@@ -433,6 +433,45 @@
         "title": "AssignmentActionRequest",
         "type": "object"
       },
+      "AssignmentReconcileRequest": {
+        "properties": {
+          "command_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          },
+          "model_attempts_used": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Attempts Used"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          }
+        },
+        "required": [
+          "command_id"
+        ],
+        "title": "AssignmentReconcileRequest",
+        "type": "object"
+      },
       "AutomationCommand": {
         "additionalProperties": false,
         "properties": {
@@ -23758,6 +23797,88 @@
         ]
       }
     },
+    "/v1/workspaces/{workspace_id}/remote/assignments/{assignment_id}": {
+      "get": {
+        "description": "Interrogate one previous attempt (assignee only) before retrying.",
+        "operationId": "remote_assignment_get_v1_workspaces__workspace_id__remote_assignments__assignment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignment_id",
+            "required": true,
+            "schema": {
+              "title": "Assignment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remote Assignment Get",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
     "/v1/workspaces/{workspace_id}/remote/assignments/{assignment_id}/accept": {
       "post": {
         "operationId": "remote_assignment_accept_v1_workspaces__workspace_id__remote_assignments__assignment_id__accept_post",
@@ -23839,9 +23960,101 @@
         ]
       }
     },
+    "/v1/workspaces/{workspace_id}/remote/assignments/{assignment_id}/reconcile": {
+      "post": {
+        "description": "After timeout: interrogate the previous attempt and release/settle its hold.",
+        "operationId": "remote_assignment_reconcile_v1_workspaces__workspace_id__remote_assignments__assignment_id__reconcile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignment_id",
+            "required": true,
+            "schema": {
+              "title": "Assignment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignmentReconcileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remote Assignment Reconcile",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
     "/v1/workspaces/{workspace_id}/remote/assignments/{assignment_id}/return": {
       "post": {
-        "description": "Ritorno con ricevuta: idempotente sullo stesso risultato.",
+        "description": "Return with receipt: idempotent on the same result.",
         "operationId": "remote_assignment_return_v1_workspaces__workspace_id__remote_assignments__assignment_id__return_post",
         "parameters": [
           {
