@@ -95,9 +95,16 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   `GET /v1/peers/projection`. Verificato nel browser con un terzo engine
   come host. Runbook del pilot pronto:
   `development/2026-10-08-pilot-runbook.md`.
-- ◐ **Fetta 5 (E2E)**: NON iniziata — cifratura per oggetto/destinatario e
-  transfer con manifest: serve review del protocollo prima (doc
-  distribuzione dati §3). Il pilot su VPN non la richiede.
+- ◐ **Fetta 5 (E2E)** (2026-10-09) — **slice libreria v1**:
+  `peers/object_crypto.py` con chiave per oggetto/versione, wrap SealedBox
+  per destinatario (Ed25519→X25519), secretstream XChaCha20-Poly1305,
+  manifest riprendibile con hash per chunk. Prove §5 a livello libreria
+  (corrotto/rifiutato, peer non autorizzato, relay opaco, resume).
+  Dipendenza `pynacl`. Doc protocollo:
+  `development/2026-10-09-f5-object-crypto-v1.md`. Test:
+  `test_object_crypto_f55.py`. Restano: rotte transfer, integrazione
+  grant/replica, UX limiti copie già scaricate, review indipendente.
+  Il pilot VPN non dipende da questa fetta.
 - ⬜ Collegamento delega↔ledger budget (riserva atomica sugli assignment)
   e reconcile dopo timeout: passo successivo della fetta 6.
 
