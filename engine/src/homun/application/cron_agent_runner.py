@@ -5,6 +5,19 @@ from homun.application.cron_contracts import CronExecutionResult
 from homun.domain.errors import DomainError
 from homun.domain.models import Actor
 
+CRON_PROJECT_NAME = "Cron jobs"
+
+
+def _active_cron_project_id(ctx) -> str | None:
+    """Reuse the shared Cron jobs project; active names are workspace-unique."""
+    needle = CRON_PROJECT_NAME.casefold()
+    for project in ctx.repository.load().projects.values():
+        if project.status == "archived":
+            continue
+        if (project.name or "").strip().casefold() == needle:
+            return project.id
+    return None
+
 
 class CronAgentRunner:
     recovery_safe = True
@@ -65,9 +78,21 @@ class CronAgentRunner:
                         result = service.apply(actor, prefix + suffix, kind, arguments)
                     ctx.service.store = store
                 return result
-            project = apply(':project', 'project.create', {'name': 'Cron jobs'})
+
+            project_id = _active_cron_project_id(ctx)
+            if project_id is None:
+                try:
+                    project = apply(':project', 'project.create', {'name': CRON_PROJECT_NAME})
+                    project_id = project['project_id']
+                except DomainError as exc:
+                    # Race: another occurrence created the shared project first.
+                    if exc.code != 'validation_error':
+                        raise
+                    project_id = _active_cron_project_id(ctx)
+                    if project_id is None:
+                        raise
             conversation = apply(':conversation', 'conversation.create', {
-                'title': f'Cron {payload.get("job_id")}', 'project_id': project['project_id']})
+                'title': f'Cron {payload.get("job_id")}', 'project_id': project_id})
             work = apply(':work', 'work.create', {'conversation_id': conversation['conversation_id'],
                 'title': prompt[:80], 'objective': prompt})
             work_id = work['work_id']
@@ -100,6 +125,9 @@ class CronAgentRunner:
 def make_cron_runner(ctx, actor=None):
     base = CronAgentRunner()
     def bound(payload):
-        return base({**payload, 'ctx': ctx, 'actor': actor})
+        merged = {**payload, 'ctx': ctx}
+        if actor is not None:
+            merged['actor'] = actor
+        return base(merged)
     bound.recovery_safe = True
     return bound
