@@ -13,11 +13,17 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 class DeviceIdentity:
     def __init__(self, private_pem: bytes, public_pem: bytes) -> None:
         self._private = serialization.load_pem_private_key(private_pem, password=None)
+        self._private_pem = private_pem
         self.public_pem = public_pem
 
     @property
     def public_b64(self) -> str:
         return base64.b64encode(self.public_pem).decode("ascii")
+
+    @property
+    def private_pem(self) -> bytes:
+        """Local-only PEM. Never send this over the network."""
+        return self._private_pem
 
     @property
     def fingerprint(self) -> str:

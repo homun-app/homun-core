@@ -20,10 +20,21 @@ from homun.peers.pairing_client import (
     RemoteConnection,
     PROTOCOL_VERSION,
 )
+from homun.peers.object_crypto import (
+    ObjectCryptoError,
+    SealedObject,
+    TransferManifest,
+    missing_chunk_indices,
+    open_object,
+    seal_object,
+    verify_chunk,
+)
 
 __all__ = [
     "RemoteProjection", "sync_remote_project", "RemoteOutbox",
     "generate_device_keypair", "key_fingerprint", "sign_nonce",
     "load_device_identity", "DeviceIdentity",
     "pair_with_host", "remote_request", "RemoteConnection", "PROTOCOL_VERSION",
+    "ObjectCryptoError", "SealedObject", "TransferManifest",
+    "missing_chunk_indices", "open_object", "seal_object", "verify_chunk",
 ]
