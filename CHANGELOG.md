@@ -41,6 +41,29 @@ Linux AppImage can update itself from `homun-releases`, and the chat composer ma
 - **Native agent tool rounds in the Homun engine**, with persisted call/result history and pending-call recovery after human input; Hermes-derived execution guidance includes MIT attribution.
 - **Current usage and developer documentation**, with verified limits and a dated Hermes usage comparison.
 
+## [0.2.1003] — 2026-10-09
+
+Pilot-ready Spaces: sealed object transfers between machines, honest peer delegation under budget, and installable Linux packages (.deb / AppImage).
+
+## Highlights
+- **Sealed object transfers between host and peer.** Chunked, resumable HTTP transfers with per-object wraps; credentials and secret stores never enter the transfer payload.
+- **Transfers announced on the remote event cursor**, so a peer learns about new sealed versions while reading the shared project — without a second polling channel.
+- **Revoked devices cannot receive new wraps.** Publishing a version whose wrap targets a revoked fingerprint is rejected; already-downloaded plaintext stays a local concern (declared in Settings → Persone).
+- **Peer delegation tied to the work budget**, with hold/release on offer, return, revoke and expiry; after a timeout the peer can reconcile the previous attempt instead of blind reassignment.
+- **Linux installers in the multi-OS pipeline** (.deb and AppImage) alongside the notarized macOS build path.
+
+## Improvements
+- **UX quick wins for first-run and navigation**: Squadra and Altro in the nav, clearer settings levels, and a tighter first-run path.
+- **Hermes streaming P0 gaps closed** so live battery scenarios stay green under interruption and partial usage.
+- **Engine recovery when the data directory is busy**, with a clear path instead of a silent startup failure.
+- **Recipient names for all work readers** and safer parity-command defaults.
+
+## Fixes
+- **Linux: the bundled engine no longer requests an executable stack.** Some python-build-standalone interpreters ship libpython with a RWE GNU_STACK that recent glibc refuses to load; the build now clears and verifies that flag on every ELF in the bundle, so .deb/AppImage installs start the engine on first run without manual patchelf.
+- **Live battery hygiene** for T2/T6 scripts and cron→chat leftovers.
+- **Copilot leftovers**: diagnostics auth, routine templates gated on real engine data, and the ddgs lock aligned with the engine env.
+- **Desktop packaging metadata** (homepage and author) required by electron-builder for `.deb`.
+
 ## [0.2.1002] — 2026-10-08
 
 Spaces collaborate: another machine joins yours with an invite, sees only the projects you share, contributes and takes delegated work — all with a verifiable device identity.
