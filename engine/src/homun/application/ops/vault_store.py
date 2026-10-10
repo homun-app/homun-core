@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from cryptography.fernet import Fernet
 
-from homun.application.secret_redaction import register_vault_redaction_value
+from homun.application.ops.secret_redaction import register_vault_redaction_value
 
 logger = logging.getLogger(__name__)
 

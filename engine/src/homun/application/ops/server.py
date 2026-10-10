@@ -60,7 +60,7 @@ def serve(args):
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.bind((args.host, args.port))
-        from homun.application.engine_listening import set_listening_port
+        from homun.application.ops.engine_listening import set_listening_port
 
         # Channel sidecars spawned by the engine call back on this port.
         set_listening_port(sock.getsockname()[1])

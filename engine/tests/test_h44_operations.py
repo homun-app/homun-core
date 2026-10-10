@@ -6,16 +6,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.profile_operations import (
+from homun.application.ops.profile_operations import (
     ProfileOperationsManager,
     ProfileValidationError,
     ProfileNotFoundError,
 )
-from homun.application.config_lifecycle import (
+from homun.application.ops.config_lifecycle import (
     ConfigLifecycleManager,
     CURRENT_CONFIG_SCHEMA_VERSION,
 )
-from homun.application.doctor_diagnostics import DoctorDiagnostics
+from homun.application.ops.doctor_diagnostics import DoctorDiagnostics
 from homun.application.daemon_lifecycle import DaemonManager
 
 

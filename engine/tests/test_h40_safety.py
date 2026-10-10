@@ -14,7 +14,7 @@ from homun.application.path_security import (
     is_sensitive_system_path,
     validate_within_dir,
 )
-from homun.application.secret_redaction import (
+from homun.application.ops.secret_redaction import (
     clear_vault_redaction_values,
     mask_token,
     redact_secrets,
@@ -25,8 +25,8 @@ from homun.application.url_safety import (
     normalize_url_for_request,
     sensitive_query_param_name,
 )
-from homun.application.vault_store import VaultStore
-from homun.application.write_approval_gate import (
+from homun.application.ops.vault_store import VaultStore
+from homun.application.ops.write_approval_gate import (
     STATUS_APPROVED,
     STATUS_PENDING,
     STATUS_REJECTED,

@@ -14,7 +14,7 @@ from homun.storage.paths import default_data_dir
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
-    from homun.application.server import serve
+    from homun.application.ops.server import serve
     return serve(args)
 
 

@@ -128,7 +128,7 @@ def ensure_whatsapp_bridge(force: bool = False, allow_unconfigured: bool = False
         )
         return "binary-missing"
 
-    from homun.application.engine_listening import engine_base_url
+    from homun.application.ops.engine_listening import engine_base_url
 
     base_url = engine_base_url()
     callback_url = f"{base_url}/v1/gateway/channels/whatsapp/inbound" if base_url else ""

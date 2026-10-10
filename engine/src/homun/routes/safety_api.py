@@ -7,10 +7,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from homun.application.path_security import check_path_safety
-from homun.application.secret_redaction import redact_secrets
+from homun.application.ops.secret_redaction import redact_secrets
 from homun.application.url_safety import is_safe_url, normalize_url_for_request
-from homun.application.vault_store import VaultItemMetadata, VaultStore
-from homun.application.write_approval_gate import get_write_approval_gate
+from homun.application.ops.vault_store import VaultItemMetadata, VaultStore
+from homun.application.ops.write_approval_gate import get_write_approval_gate
 
 logger = logging.getLogger(__name__)
 

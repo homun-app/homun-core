@@ -68,7 +68,7 @@ def test_side_question_does_not_mutate_run_messages(setup):
 
 def test_write_approval_gate_survives_reopen(tmp_path, monkeypatch):
     monkeypatch.setenv("HOMUN_DATA_DIR", str(tmp_path))
-    from homun.application.write_approval_gate import WriteApprovalGate
+    from homun.application.ops.write_approval_gate import WriteApprovalGate
 
     gate = WriteApprovalGate(pending_dir=tmp_path / "approvals")
     rec = gate.stage_action("memory", "put", {"k": "v"}, summary="store fact")

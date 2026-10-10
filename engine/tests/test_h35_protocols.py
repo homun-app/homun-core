@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 
 from homun.app import create_app
 from homun.application.acp_adapter import AcpApprovalStatus, AcpServerAdapter
-from homun.application.api_server_contracts import GLOBAL_IDEMPOTENCY_STORE, IdempotencyStore
+from homun.application.ops.api_server_contracts import GLOBAL_IDEMPOTENCY_STORE, IdempotencyStore
 from homun.application.hosted_mcp_agent import HostedMcpAgentServer
 from homun.context import create_context, reset_context_for_tests
 from homun.models.native_turn import NativeMessage, ToolCall

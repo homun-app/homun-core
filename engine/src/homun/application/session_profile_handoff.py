@@ -71,7 +71,7 @@ def _compute_handoff_digest(payload: Dict[str, Any]) -> str:
 
 def default_profile_context_resolver(ctx: Any, target_profile_name: str) -> Any:
     """Default resolver mapping target profile name to an isolated EngineContext."""
-    from homun.application.profile_operations import ProfileNotFoundError, ProfileOperationsManager
+    from homun.application.ops.profile_operations import ProfileNotFoundError, ProfileOperationsManager
 
     profiles_dir = ctx.data_dir / "profiles"
     if profiles_dir.exists():
@@ -115,7 +115,7 @@ def prepare_handoff(ctx: Any, actor: Any, work_id: str, args: Dict[str, Any]) ->
 
     profiles_dir = ctx.data_dir / "profiles"
     if profiles_dir.exists():
-        from homun.application.profile_operations import ProfileOperationsManager
+        from homun.application.ops.profile_operations import ProfileOperationsManager
         ProfileOperationsManager(profiles_dir).get_profile(target_profile)
 
     with ctx.repository.locked():
@@ -343,7 +343,7 @@ def execute_handoff(ctx: Any, actor: Any, work_id: str, args: Dict[str, Any]) ->
     profile_mgr = None
     active_before = None
     if profiles_dir.exists():
-        from homun.application.profile_operations import ProfileOperationsManager
+        from homun.application.ops.profile_operations import ProfileOperationsManager
         profile_mgr = ProfileOperationsManager(profiles_dir)
         active_before = profile_mgr.get_active_profile_name()
 

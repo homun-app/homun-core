@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from homun.storage.paths import default_data_dir
-from homun.application.profile_operations import (
+from homun.application.ops.profile_operations import (
     ProfileDistributionPackage,
     ProfileError,
     ProfileMetadata,
@@ -16,11 +16,11 @@ from homun.application.profile_operations import (
     ProfileOperationsManager,
     ProfileValidationError,
 )
-from homun.application.config_lifecycle import (
+from homun.application.ops.config_lifecycle import (
     ConfigLifecycleManager,
     ConfigMigrationResult,
 )
-from homun.application.doctor_diagnostics import (
+from homun.application.ops.doctor_diagnostics import (
     DoctorDiagnostics,
     DoctorReport,
 )

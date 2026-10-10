@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.batch_eval_runner import (
+from homun.application.ops.batch_eval_runner import (
     BatchEvalRunner,
     BatchItem,
     create_canonical_batch_executor,

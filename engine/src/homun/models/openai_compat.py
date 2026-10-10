@@ -69,7 +69,7 @@ class OpenAICompatibleProvider:
         if key:
             return key
         try:
-            from homun.application.credential_pool import get_credential_pool
+            from homun.application.ops.credential_pool import get_credential_pool
             pool = get_credential_pool()
             cred = pool.acquire_credential(self.provider_id)
             if cred and cred.secret_value:

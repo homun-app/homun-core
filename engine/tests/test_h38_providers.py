@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from homun.app import create_app
 from homun.application.auxiliary_router import AuxiliaryRouter, get_auxiliary_router, reset_auxiliary_router
-from homun.application.credential_pool import (
+from homun.application.ops.credential_pool import (
     CredentialPool,
     STATUS_COOLDOWN,
     STATUS_DEAD,

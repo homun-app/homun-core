@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.batch_eval_runner import BatchEvalRunner, BatchItem
+from homun.application.ops.batch_eval_runner import BatchEvalRunner, BatchItem
 
 
 def fake_executor(results=None, fail_ids=(), raise_ids=()):
@@ -15,7 +15,7 @@ def fake_executor(results=None, fail_ids=(), raise_ids=()):
     def _execute(item: BatchItem):
         if item.id in raise_ids:
             raise RuntimeError('backend esploso')
-        return results.get(item.id) or __import__('homun.application.batch_eval_runner',
+        return results.get(item.id) or __import__('homun.application.ops.batch_eval_runner',
                                                    fromlist=['BatchItemResult']).BatchItemResult(
             id=item.id,
             success=item.id not in fail_ids,
