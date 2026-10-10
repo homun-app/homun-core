@@ -1,12 +1,12 @@
 name: Build installers
 
-# Builds the macOS arm64 installer for Homun 2 (engine bundle + web app).
-# - Tag push (v*) -> build + SIGN + NOTARIZE and PUBLISH the installer and
-#   electron-updater metadata to a DRAFT release in the public `homun-releases`
-#   repo (that same release is the auto-update feed). Review the draft there
-#   and publish it.
-# - Manual dispatch / PR -> UNSIGNED, non-publishing artifact: pipeline
-#   validation without cutting a version.
+# Builds Homun desktop installers (engine bundle + web app).
+# - Tag push (v*) -> macOS arm64 SIGN + NOTARIZE and Linux x64 AppImage/.deb,
+#   PUBLISH installers and electron-updater metadata (latest-mac.yml,
+#   latest-linux.yml) to a DRAFT release in public `homun-releases` (the
+#   auto-update feed). Review the draft there and publish it.
+# - Manual dispatch / PR -> UNSIGNED macOS artifact only: pipeline validation
+#   without cutting a version. Linux PR validation stays in build-multi.yml.
 #
 # Security note: no untrusted github.event.* input is interpolated into run:
 # steps. The only ${{ }} expressions inside commands are secrets and static
@@ -176,6 +176,102 @@ jobs:
           path: |
             apps/desktop/dist-installers/*.dmg
             apps/desktop/dist-installers/*.zip
+            apps/desktop/dist-installers/*.yml
+            apps/desktop/dist-installers/SHA256SUMS-*.txt
+          if-no-files-found: error
+
+  # Linux AppImage feeds auto-update (latest-linux.yml). Runs after macOS so the
+  # draft release + CHANGELOG notes already exist; electron-builder then attaches
+  # Linux assets to the same tag. .deb is published for manual install only.
+  linux:
+    name: Publish (Linux x64)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node (root web build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.12"
+
+      - name: Install uv
+        run: python -m pip install uv==0.10.0
+
+      - name: Linux build deps
+        timeout-minutes: 8
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends binutils
+
+      - name: Build web app
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build isolated standalone engine
+        run: python tools/build_engine_bundle.py
+
+      - name: Frozen runtime smoke
+        run: python engine/packaging/smoke.py dist/engine/homun-engine
+
+      - name: Setup Node (desktop builder)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install desktop deps
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Set version from tag
+        working-directory: apps/desktop
+        shell: bash
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+
+      - name: Stage verified release resources
+        working-directory: apps/desktop
+        run: npm run release:prepare
+
+      - name: Build and publish Linux installers
+        working-directory: apps/desktop
+        run: npx electron-builder --linux AppImage deb --publish always
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+
+      - name: Create Linux checksums
+        working-directory: apps/desktop
+        run: npm run release:checksums -- --directory dist-installers --output "dist-installers/SHA256SUMS-linux.txt"
+
+      - name: Upload Linux checksums to draft release
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "dist-installers/SHA256SUMS-linux.txt" \
+            --repo homun-app/homun-releases \
+            --clobber
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: homun-linux-x64
+          path: |
+            apps/desktop/dist-installers/*.AppImage
+            apps/desktop/dist-installers/*.deb
             apps/desktop/dist-installers/*.yml
             apps/desktop/dist-installers/SHA256SUMS-*.txt
           if-no-files-found: error

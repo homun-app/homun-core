@@ -37,6 +37,9 @@ Pilot-ready Spaces: sealed object transfers between machines, honest peer delega
 - **Adaptive work over approved materials.** Homun can read, search, consult selected AI teammates, request clarification and deliver a reviewable result with persisted progress.
 - **Scoped human contributions.** Named recipients can answer one request through an expiring, revocable link; an adaptive run can resume from that answer. Reachable hosting remains a prerequisite.
 
+## Improvements
+- **Linux AppImage auto-update.** Packaged AppImage builds check `homun-releases` (`latest-linux.yml`) the same way macOS does; nothing installs without consent. `.deb` installs still update from the release page.
+
 ## Fixes
 - **Model retries remain bounded after a crash.** Corrections interrupt stale waits immediately, and malformed usage counters cannot reduce recorded spending.
 - **Materials and Plugins use the engine from the sidebar.** Files, previews, archival and capability settings share the persisted engine state; denied access clears stale previews.
