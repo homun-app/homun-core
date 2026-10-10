@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from homun.application.codex_runtime import CodexAppServerAdapter
 from homun.application.copilot_acp_client import CopilotAcpClient
 from homun.application.managed_tool_gateway import ManagedToolGateway
-from homun.application.relay_runtime import RelayRuntime
+from homun.application.channels.relay_runtime import RelayRuntime
 
 logger = logging.getLogger(__name__)
 

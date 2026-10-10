@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from homun.application.channel_conversation_bridge import channel_reply
-from homun.application.gateway_contracts import ChannelMessage
+from homun.application.channels.conversation_bridge import channel_reply
+from homun.application.channels.gateway_contracts import ChannelMessage
 from homun.context import create_context, reset_context_for_tests
 
 
@@ -71,7 +71,7 @@ def test_redelivered_update_returns_committed_reply(ctx):
 
 def test_command_in_progress_maps_to_typed_notice(ctx, monkeypatch):
     from homun.domain.errors import CommandInProgressError
-    import homun.application.channel_conversation_bridge as bridge
+    import homun.application.channels.conversation_bridge as bridge
 
     def busy(*args, **kwargs):
         raise CommandInProgressError("another turn is running")

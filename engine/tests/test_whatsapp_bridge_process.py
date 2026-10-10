@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from homun.application import whatsapp_bridge_process as supervisor
+from homun.application.channels import whatsapp_bridge_process as supervisor
 from homun.application.ops.engine_listening import set_listening_port
 from homun.context import create_context, reset_context_for_tests
 

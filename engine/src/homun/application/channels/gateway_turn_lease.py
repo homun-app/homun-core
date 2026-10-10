@@ -10,7 +10,7 @@ import threading
 import time
 from typing import Dict, Optional
 
-from homun.application.gateway_contracts import TurnLeaseToken
+from homun.application.channels.gateway_contracts import TurnLeaseToken
 
 logger = logging.getLogger(__name__)
 

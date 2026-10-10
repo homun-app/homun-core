@@ -147,7 +147,7 @@ dispatch_deliverables_for_turn("session", "test", "room", "Report /tmp/report.pd
 
 
 def test_base_adapter_is_known_refusal_not_unknown(tmp_path):
-    from homun.application.channel_contracts import ChannelAdapter
+    from homun.application.channels.contracts import ChannelAdapter
     ledger = DeliverableLedger(tmp_path / "ledger.db")
     result = dispatch(ledger, ChannelAdapter())
     assert result.receipts[0].status == "failed"

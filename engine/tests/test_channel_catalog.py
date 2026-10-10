@@ -1,8 +1,8 @@
 """Tests for extended Hermes channel and messaging adapters (H33)."""
 import pytest
 
-from homun.application.channel_contracts import ChannelAdapter
-from homun.application.channel_adapters_protocols import (
+from homun.application.channels.contracts import ChannelAdapter
+from homun.application.channels.adapters_protocols import (
     BlueBubblesAdapter,
     EmailAdapter,
     IrcAdapter,
@@ -11,7 +11,7 @@ from homun.application.channel_adapters_protocols import (
     SimplexAdapter,
     SmsAdapter,
 )
-from homun.application.channel_adapters_catalog import (
+from homun.application.channels.adapters_catalog import (
     DingTalkAdapter,
     FeishuChannelAdapter,
     GoogleChatAdapter,
@@ -21,7 +21,7 @@ from homun.application.channel_adapters_catalog import (
     WeComAdapter,
     WeixinAdapter,
 )
-from homun.application.channel_adapters_extended import (
+from homun.application.channels.adapters_extended import (
     A2AAdapter,
     BuzzAdapter,
     HomeAssistantAdapter,
@@ -30,7 +30,7 @@ from homun.application.channel_adapters_extended import (
     PhotonAdapter,
     RaftAdapter,
 )
-from homun.application.channel_adapters_relay import (
+from homun.application.channels.adapters_relay import (
     TeamsMeetingsAdapter,
     WeComCallbackAdapter,
     WhatsAppCloudAdapter,
@@ -65,7 +65,7 @@ def test_signal_send_posts_when_rest_configured(monkeypatch):
             calls.append({"url": url, "json": json})
             return _Resp()
 
-    monkeypatch.setattr("homun.application.channel_adapters_protocols.httpx.Client", _Client)
+    monkeypatch.setattr("homun.application.channels.adapters_protocols.httpx.Client", _Client)
     out = SignalAdapter(config={"rest_url": "http://127.0.0.1:8080", "number": "+100"}).send(
         "+1555", "ping"
     )
@@ -100,7 +100,7 @@ def test_irc_send_uses_socket_when_configured(monkeypatch):
             return False
 
     monkeypatch.setattr(
-        "homun.application.channel_adapters_protocols.socket.create_connection",
+        "homun.application.channels.adapters_protocols.socket.create_connection",
         lambda *a, **k: FakeSock(),
     )
     out = IrcAdapter(config={"host": "irc.example", "nick": "bot"}).send("#homun", "hello")
@@ -141,7 +141,7 @@ def test_mattermost_and_webhook_adapters_post(monkeypatch):
             posted.append((url, json, headers))
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.channel_adapters_catalog.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.channels.adapters_catalog.httpx.Client", FakeClient)
     adapter = MattermostAdapter(config={"base_url": "https://mm.example", "token": "tok"})
     res = adapter.send("c1", "hello mm", reply_to_id="root_9")
     assert res["delivered"] is True
@@ -180,8 +180,8 @@ def test_line_teams_sms_http_send(monkeypatch):
             calls.append((url, json, data))
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.channel_adapters_catalog.httpx.Client", FakeClient)
-    monkeypatch.setattr("homun.application.channel_adapters_protocols.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.channels.adapters_catalog.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.channels.adapters_protocols.httpx.Client", FakeClient)
 
     line = LineAdapter(config={"token": "t"})
     assert line.send("u1", "hello line")["delivered"] is True
@@ -221,7 +221,7 @@ def test_bluebubbles_http_send(monkeypatch):
             FakeClient.last = (url, json, params)
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.channel_adapters_protocols.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.channels.adapters_protocols.httpx.Client", FakeClient)
     adapter = BlueBubblesAdapter(config={"base_url": "http://127.0.0.1:1234", "password": "pass"})
     out = adapter.send("chat-guid-1", "hi imessage")
     assert out["delivered"] is True
@@ -257,7 +257,7 @@ def test_weixin_qqbot_http_send(monkeypatch):
             FakeClient.last = (url, json, headers)
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.channel_adapters_catalog.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.channels.adapters_catalog.httpx.Client", FakeClient)
     assert WeixinAdapter(config={"token": "t"}).send("o1", "hi")["delivered"] is True
     assert "api.weixin.qq.com" in FakeClient.last[0]
     assert QqBotAdapter(config={"token": "t", "app_id": "a"}).send("c1", "hi")["delivered"] is True
@@ -290,8 +290,8 @@ def test_simplex_photon_http_send(monkeypatch):
             FakeClient.last = (url, json, headers)
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.channel_adapters_protocols.httpx.Client", FakeClient)
-    monkeypatch.setattr("homun.application.channel_adapters_extended.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.channels.adapters_protocols.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.channels.adapters_extended.httpx.Client", FakeClient)
     assert SimplexAdapter(config={"base_url": "http://127.0.0.1:5225"}).send("c", "hi")["delivered"] is True
     assert FakeClient.last[0].endswith("/send")
     assert PhotonAdapter(config={"webhook_url": "https://photon.example/hook"}).send("r", "hi")["delivered"] is True
@@ -322,7 +322,7 @@ def test_a2a_http_send(monkeypatch):
             FakeClient.last = url
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.channel_adapters_extended.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.channels.adapters_extended.httpx.Client", FakeClient)
     out = A2AAdapter(config={"base_url": "https://a2a.example"}).send("ignored", "hi")
     assert out["delivered"] is True
     assert FakeClient.last.endswith("/message:send")
@@ -354,7 +354,7 @@ def test_buzz_raft_http_send(monkeypatch):
             FakeClient.last = url
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.channel_adapters_extended.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.channels.adapters_extended.httpx.Client", FakeClient)
     assert BuzzAdapter(config={"webhook_url": "https://buzz.example/h"}).send("c", "hi")["delivered"] is True
     assert RaftAdapter(config={"base_url": "https://raft.example"}).send("t1", "hi")["delivered"] is True
     assert "/topics/t1/publish" in FakeClient.last
@@ -390,7 +390,7 @@ def test_homeassistant_msgraph_openwebui_http_send(monkeypatch):
             calls.append((url, json, headers))
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.channel_adapters_extended.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.channels.adapters_extended.httpx.Client", FakeClient)
 
     hass = HomeAssistantAdapter(config={"base_url": "http://hass.local:8123", "token": "tok"})
     assert hass.send("notify.telegram", "test hass")["delivered"] is True
@@ -436,7 +436,7 @@ def test_relay_adapters_http_send(monkeypatch):
             calls.append((url, json, headers))
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.channel_adapters_relay.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.channels.adapters_relay.httpx.Client", FakeClient)
 
     teams_meet = TeamsMeetingsAdapter(config={"webhook_url": "https://teams.example/meet"})
     assert teams_meet.send("m1", "meeting starting")["delivered"] is True

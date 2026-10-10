@@ -18,12 +18,12 @@ import uuid
 
 import httpx
 
-from homun.application.channel_contracts import (
+from homun.application.channels.contracts import (
     ChannelAdapter,
     _http_delivery_result,
     _token_from,
 )
-from homun.application.channel_adapters_protocols import (
+from homun.application.channels.adapters_protocols import (
     BlueBubblesAdapter,
     EmailAdapter,
     IrcAdapter,
@@ -34,12 +34,12 @@ from homun.application.channel_adapters_protocols import (
 )
 # WhatsApp cloud + bridge adapters live in whatsapp_bridge_adapter; the
 # WhatsAppAdapter name stays importable from here for existing callers.
-from homun.application.whatsapp_bridge_adapter import (
+from homun.application.channels.whatsapp_bridge_adapter import (
     WhatsAppAdapter,
     WhatsAppBridgeAdapter,
     WhatsAppCloudApiAdapter,
 )  # noqa: F401 -- WhatsAppAdapter re-exported for backward compatibility
-from homun.application.channel_adapters_catalog import (
+from homun.application.channels.adapters_catalog import (
     DingTalkAdapter,
     FeishuChannelAdapter,
     GoogleChatAdapter,
@@ -49,7 +49,7 @@ from homun.application.channel_adapters_catalog import (
     WeComAdapter,
     WeixinAdapter,
 )
-from homun.application.channel_adapters_extended import (
+from homun.application.channels.adapters_extended import (
     A2AAdapter,
     BuzzAdapter,
     HomeAssistantAdapter,
@@ -62,13 +62,13 @@ from homun.application.channel_adapters_extended import (
     WhatsAppCloudAdapter,
     YuanbaoAdapter,
 )
-from homun.application.gateway_contracts import (
+from homun.application.channels.gateway_contracts import (
     ChannelMedia,
     ChannelMessage,
     PlatformKind,
 )
-from homun.application.gateway_pairing import GatewayPairingManager
-from homun.application.gateway_turn_lease import TurnLeaseManager
+from homun.application.channels.gateway_pairing import GatewayPairingManager
+from homun.application.channels.gateway_turn_lease import TurnLeaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ class TelegramAdapter(ChannelAdapter):
                 channel_id, text, thread_id=thread_id, reply_to_id=reply_to_id, media=media
             )
         if media:
-            from homun.application.channel_delivery_recovery import send_with_media_dispatch
+            from homun.application.channels.delivery_recovery import send_with_media_dispatch
             return send_with_media_dispatch(
                 self, channel_id, text, media=media, thread_id=thread_id, reply_to_id=reply_to_id
             )
@@ -677,7 +677,7 @@ class ChannelRegistry:
                 response_text = handler(message)
 
             # 4. Deliver response
-            from homun.application.channel_delivery_recovery import send_with_media_dispatch
+            from homun.application.channels.delivery_recovery import send_with_media_dispatch
             delivery_res = send_with_media_dispatch(
                 adapter,
                 message.channel_id,

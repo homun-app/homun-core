@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 import pytest
 
-from homun.application.channel_adapters import (
+from homun.application.channels.adapters import (
     ChannelRegistry,
     DiscordAdapter,
     SlackAdapter,
@@ -23,17 +23,17 @@ from homun.application.channel_adapters import (
     WhatsAppAdapter,
     WhatsAppCloudApiAdapter,
 )
-from homun.application.gateway_contracts import (
+from homun.application.channels.gateway_contracts import (
     ChannelMedia,
     ChannelMessage,
     HostedRoom,
     HostedRoomMember,
     PairingRequest,
 )
-from homun.application.gateway_hosted_rooms import HostedRoomManager
-from homun.application.gateway_pairing import GatewayPairingManager
-from homun.application.gateway_tools import execute as gateway_execute, reset_gateway_state
-from homun.application.gateway_turn_lease import TurnLeaseManager, TurnLeaseTimeout
+from homun.application.channels.gateway_hosted_rooms import HostedRoomManager
+from homun.application.channels.gateway_pairing import GatewayPairingManager
+from homun.application.channels.gateway_tools import execute as gateway_execute, reset_gateway_state
+from homun.application.channels.gateway_turn_lease import TurnLeaseManager, TurnLeaseTimeout
 from homun.domain.errors import ValidationError
 
 
@@ -564,7 +564,7 @@ def test_telegram_send_posts_when_token_configured(monkeypatch):
             calls.append({"url": url, "json": json, "headers": headers})
             return _Resp()
 
-    monkeypatch.setattr("homun.application.whatsapp_bridge_adapter.httpx.Client", _Client)
+    monkeypatch.setattr("homun.application.channels.whatsapp_bridge_adapter.httpx.Client", _Client)
     adapter = TelegramAdapter(config={"bot_token": "tg-test-token"})
     out = adapter.send("888123", "hello tg", reply_to_id="10")
     assert out["delivered"] is True
@@ -596,7 +596,7 @@ def test_discord_send_posts_when_token_configured(monkeypatch):
             calls.append({"url": url, "json": json, "headers": headers})
             return _Resp()
 
-    monkeypatch.setattr("homun.application.whatsapp_bridge_adapter.httpx.Client", _Client)
+    monkeypatch.setattr("homun.application.channels.whatsapp_bridge_adapter.httpx.Client", _Client)
     adapter = DiscordAdapter(config={"bot_token": "dsc-test-token"})
     out = adapter.send("chan_444", "hello dsc", reply_to_id="msg_1")
     assert out["delivered"] is True
@@ -629,7 +629,7 @@ def test_slack_send_posts_when_token_configured(monkeypatch):
             calls.append({"url": url, "json": json, "headers": headers})
             return _Resp()
 
-    monkeypatch.setattr("homun.application.whatsapp_bridge_adapter.httpx.Client", _Client)
+    monkeypatch.setattr("homun.application.channels.whatsapp_bridge_adapter.httpx.Client", _Client)
     adapter = SlackAdapter(config={"bot_token": "xoxb-test"})
     out = adapter.send("C123", "hello slack", thread_id="1.0")
     assert out["delivered"] is True
@@ -660,8 +660,8 @@ def test_ntfy_send_posts_when_configured(monkeypatch):
             calls.append({"url": url, "content": content, "headers": headers})
             return _Resp()
 
-    monkeypatch.setattr("homun.application.whatsapp_bridge_adapter.httpx.Client", _Client)
-    from homun.application.channel_adapters import NtfyAdapter
+    monkeypatch.setattr("homun.application.channels.whatsapp_bridge_adapter.httpx.Client", _Client)
+    from homun.application.channels.adapters import NtfyAdapter
 
     out = NtfyAdapter(config={"server": "https://ntfy.example"}).send("homun-test", "ping")
     assert out["delivered"] is True
@@ -669,7 +669,7 @@ def test_ntfy_send_posts_when_configured(monkeypatch):
 
 
 def test_matrix_send_requires_homeserver_and_token():
-    from homun.application.channel_adapters import MatrixAdapter
+    from homun.application.channels.adapters import MatrixAdapter
 
     out = MatrixAdapter().send("!room:example.org", "hi")
     assert out["delivered"] is False
@@ -700,7 +700,7 @@ def test_whatsapp_send_posts_when_token_configured(monkeypatch):
             calls.append({"url": url, "json": json, "headers": headers})
             return _Resp()
 
-    monkeypatch.setattr("homun.application.whatsapp_bridge_adapter.httpx.Client", _Client)
+    monkeypatch.setattr("homun.application.channels.whatsapp_bridge_adapter.httpx.Client", _Client)
     adapter = WhatsAppCloudApiAdapter(
         config={"bot_token": "wa-token", "phone_number_id": "pnid_1"}
     )
@@ -713,7 +713,7 @@ def test_whatsapp_send_posts_when_token_configured(monkeypatch):
 
 
 def test_email_send_without_smtp_is_unavailable():
-    from homun.application.channel_adapters import EmailAdapter
+    from homun.application.channels.adapters import EmailAdapter
 
     out = EmailAdapter().send("user@example.com", "hello")
     assert out["delivered"] is False
@@ -721,7 +721,7 @@ def test_email_send_without_smtp_is_unavailable():
 
 
 def test_email_send_uses_smtp_when_configured(monkeypatch):
-    from homun.application.channel_adapters import EmailAdapter
+    from homun.application.channels.adapters import EmailAdapter
 
     calls = []
 
@@ -747,7 +747,7 @@ def test_email_send_uses_smtp_when_configured(monkeypatch):
         def send_message(self, msg):
             calls.append({"to": msg["To"], "body": msg.get_content()})
 
-    monkeypatch.setattr("homun.application.channel_adapters.smtplib.SMTP", FakeSMTP)
+    monkeypatch.setattr("homun.application.channels.adapters.smtplib.SMTP", FakeSMTP)
     adapter = EmailAdapter(
         config={
             "smtp_host": "smtp.example",

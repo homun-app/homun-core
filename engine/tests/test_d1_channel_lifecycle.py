@@ -8,22 +8,22 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.channel_adapters import (
+from homun.application.channels.adapters import (
     ChannelRegistry,
     TelegramAdapter,
 )
-from homun.application.channel_delivery_recovery import (
+from homun.application.channels.delivery_recovery import (
     ChannelDeliverySupervisor,
     ChannelPoller,
     send_with_media_dispatch,
 )
-from homun.application.channel_inbound_queue import (
+from homun.application.channels.inbound_queue import (
     InboundChannelQueue,
     InboundQueueItem,
 )
-from homun.application.gateway_contracts import ChannelMedia, ChannelMessage
-from homun.application.gateway_pairing import GatewayPairingManager
-from homun.application.gateway_turn_lease import TurnLeaseManager
+from homun.application.channels.gateway_contracts import ChannelMedia, ChannelMessage
+from homun.application.channels.gateway_pairing import GatewayPairingManager
+from homun.application.channels.gateway_turn_lease import TurnLeaseManager
 
 
 @pytest.fixture
@@ -208,7 +208,7 @@ def test_telegram_send_photo_and_document_protocol(clean_delivery_supervisor, mo
             calls.append({"url": url, "json": json})
             return MockResp()
 
-    monkeypatch.setattr("homun.application.channel_delivery_recovery.httpx.Client", MockClient)
+    monkeypatch.setattr("homun.application.channels.delivery_recovery.httpx.Client", MockClient)
 
     adapter = TelegramAdapter(config={"bot_token": "tg_token_test"})
 

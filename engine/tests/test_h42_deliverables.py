@@ -205,8 +205,8 @@ def test_deliverables_api_routes():
 
 # 5. Deliverable Dispatcher & At-most-once Media packaging
 def test_deliverable_dispatcher():
-    from homun.application.channel_contracts import ChannelAdapter
-    from homun.application.gateway_contracts import ChannelMedia
+    from homun.application.channels.contracts import ChannelAdapter
+    from homun.application.channels.gateway_contracts import ChannelMedia
 
     sent_calls = []
 
@@ -273,7 +273,7 @@ def test_deliverable_dispatcher():
 
 # 6. Gateway Manage Adapter Send with Deliverable Mode
 def test_gateway_manage_adapter_send_deliverables():
-    from homun.application.gateway_tools import execute, reset_gateway_state
+    from homun.application.channels.gateway_tools import execute, reset_gateway_state
 
     reset_gateway_state()
 

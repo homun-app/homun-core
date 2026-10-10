@@ -106,8 +106,8 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             registry.register(s_entry)
     gateway = run.get('gateway')
     if isinstance(gateway, dict) and gateway.get('policy') == 'core-gateway-v1' and gateway.get('version') == 1:
-        from homun.application.gateway_contracts import entries as gateway_entries
-        from homun.application.gateway_tools import execute as gateway_execute
+        from homun.application.channels.gateway_contracts import entries as gateway_entries
+        from homun.application.channels.gateway_tools import execute as gateway_execute
         for gw_entry in gateway_entries(gateway_execute, gateway.get('version', 1)):
             registry.register(gw_entry)
     code_exec = run.get('code_execution')

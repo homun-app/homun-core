@@ -148,7 +148,7 @@ def list_delivery_receipts(session_id: Optional[str] = None) -> List[DeliveryRec
 @router.post("/dispatch", response_model=DispatchDeliverablesResponse)
 def dispatch_deliverables(req: DispatchDeliverablesRequest) -> DispatchDeliverablesResponse:
     """Scan message text, protect code blocks, deduplicate against ledger, and dispatch to channel."""
-    from homun.application.channel_adapters import ChannelRegistry
+    from homun.application.channels.adapters import ChannelRegistry
     from homun.application.deliverable_dispatcher import dispatch_deliverables_for_turn
 
     reg = ChannelRegistry()

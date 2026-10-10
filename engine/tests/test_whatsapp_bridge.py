@@ -3,7 +3,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from homun.application.whatsapp_bridge_adapter import WhatsAppBridgeAdapter
+from homun.application.channels.whatsapp_bridge_adapter import WhatsAppBridgeAdapter
 from homun.context import create_context, reset_context_for_tests
 from homun.routes.channel_ingress_api import reset_channel_registry, router
 
@@ -161,7 +161,7 @@ def test_apply_before_ready_is_typed_400(api, monkeypatch):
 
 
 def test_stale_qr_recycles_the_bridge(api, monkeypatch):
-    from homun.application import whatsapp_bridge_process as supervisor
+    from homun.application.channels import whatsapp_bridge_process as supervisor
 
     def stale_status(timeout=5.0):
         return {

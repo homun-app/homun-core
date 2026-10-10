@@ -111,7 +111,7 @@ async def runtime_lifespan(ctx):
 
 
     async def channel_poller_loop():
-        from homun.application.whatsapp_bridge_process import ensure_whatsapp_bridge
+        from homun.application.channels.whatsapp_bridge_process import ensure_whatsapp_bridge
         from homun.routes.channel_ingress_api import poll_enabled_channels
         while not stop.is_set():
             try:
@@ -138,7 +138,7 @@ async def runtime_lifespan(ctx):
         await worker
         await poller_worker
         try:
-            from homun.application.whatsapp_bridge_process import stop_whatsapp_bridge
+            from homun.application.channels.whatsapp_bridge_process import stop_whatsapp_bridge
             await asyncio.to_thread(stop_whatsapp_bridge)
         finally:
             try:

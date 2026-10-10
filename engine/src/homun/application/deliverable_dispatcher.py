@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from homun.application.channel_contracts import ChannelAdapter
+from homun.application.channels.contracts import ChannelAdapter
 from homun.application.delivery_outcomes import delivery_status
 from homun.application.deliverable_extractor import (
     DeliverableAttachment,
@@ -23,7 +23,7 @@ from homun.application.deliverable_ledger import (
     DeliveryReceipt,
     get_deliverable_ledger,
 )
-from homun.application.gateway_contracts import ChannelMedia
+from homun.application.channels.gateway_contracts import ChannelMedia
 
 logger = logging.getLogger(__name__)
 

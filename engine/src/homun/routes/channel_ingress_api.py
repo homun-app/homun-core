@@ -12,10 +12,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from homun.application.channel_adapters import ChannelRegistry
-from homun.application.channel_conversation_bridge import channel_reply
-from homun.application.channel_delivery_recovery import ChannelPoller, get_channel_delivery_supervisor
-from homun.application.channel_inbound_queue import InboundChannelQueue, get_inbound_channel_queue
+from homun.application.channels.adapters import ChannelRegistry
+from homun.application.channels.conversation_bridge import channel_reply
+from homun.application.channels.delivery_recovery import ChannelPoller, get_channel_delivery_supervisor
+from homun.application.channels.inbound_queue import InboundChannelQueue, get_inbound_channel_queue
 
 router = APIRouter(prefix="/v1/gateway/channels", tags=["gateway_channels"])
 
@@ -514,7 +514,7 @@ _WHATSAPP_PAIRING_WINDOW_SECONDS = 1800.0
 
 
 def _whatsapp_bridge_adapter():
-    from homun.application.whatsapp_bridge_adapter import WhatsAppBridgeAdapter
+    from homun.application.channels.whatsapp_bridge_adapter import WhatsAppBridgeAdapter
 
     adapter = get_channel_registry().get_adapter("whatsapp")
     return adapter if adapter is not None and hasattr(adapter, "bridge_status") else WhatsAppBridgeAdapter()
@@ -534,7 +534,7 @@ async def _fresh_whatsapp_bridge_status(adapter):
     expires = _parse_iso_timestamp(qr.get("expires_at"))
     if expires and expires > datetime.now(timezone.utc).timestamp() + 5:
         return status
-    from homun.application.whatsapp_bridge_process import restart_whatsapp_bridge
+    from homun.application.channels.whatsapp_bridge_process import restart_whatsapp_bridge
 
     await asyncio.to_thread(restart_whatsapp_bridge)
     for _ in range(8):
@@ -556,7 +556,7 @@ def _parse_iso_timestamp(value) -> Optional[float]:
 
 @router.post("/whatsapp/onboarding/start", response_model=Dict[str, Any])
 async def start_whatsapp_onboarding() -> Dict[str, Any]:
-    from homun.application.whatsapp_bridge_process import ensure_whatsapp_bridge
+    from homun.application.channels.whatsapp_bridge_process import ensure_whatsapp_bridge
 
     # Pairing precedes configuration: make sure the sidecar is up even when
     # the channel is not enabled yet, with a fresh, non-expired QR.

@@ -8,14 +8,14 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from homun.application.channel_adapters import ChannelRegistry
-from homun.application.gateway_hosted_rooms import HostedRoomManager
-from homun.application.gateway_pairing import (
+from homun.application.channels.adapters import ChannelRegistry
+from homun.application.channels.gateway_hosted_rooms import HostedRoomManager
+from homun.application.channels.gateway_pairing import (
     GatewayPairingManager,
     get_gateway_pairing_manager,
     set_gateway_pairing_manager,
 )
-from homun.application.gateway_turn_lease import TurnLeaseManager
+from homun.application.channels.gateway_turn_lease import TurnLeaseManager
 from homun.domain.errors import ValidationError
 
 _GLOBAL_PAIRING_MGR = GatewayPairingManager(db_path=":memory:")
