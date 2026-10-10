@@ -10,8 +10,8 @@ Only the failed model request is retried — committed tool rounds are never
 re-executed and partial replies are never published.
 """
 from datetime import datetime, timedelta
-from homun.application.agent_run_failures import fail, interrupted
-from homun.application.agent_runs import authority, lookup
+from homun.application.agent.run_failures import fail, interrupted
+from homun.application.agent.runs import authority, lookup
 from homun.domain.models import utc_now
 from homun.domain.errors import DomainError
 from homun.models.native_errors import NativeModelError, retry_delay
@@ -32,7 +32,7 @@ def migrate_inflight(run):
     """
     if '_model_phase_attempts' in run or not run.get('_lease_token') or run.get('_decision'):
         return
-    from homun.application.agent_native import pending
+    from homun.application.agent.native import pending
     if pending(run):
         return
     previous = run.get('recovery') or {}
@@ -83,7 +83,7 @@ def accept(run, phase):
         recovery.pop('retry_after_seconds', None)
 
 
-from homun.application.agent_recovery_state import interrupt
+from homun.application.agent.recovery_state import interrupt
 
 
 def schedule(ctx, actor, run, error: NativeModelError, *, phase, expected_steering):

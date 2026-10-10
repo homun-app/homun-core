@@ -6,7 +6,7 @@ from __future__ import annotations
 import inspect
 import json
 from typing import Any, Callable, Dict, List, Optional
-from homun.application.clarify_contracts import (
+from homun.application.agent.clarify_contracts import (
     MAX_CHOICES,
     MAX_QUESTIONS,
     RECOMMENDED_LABEL,

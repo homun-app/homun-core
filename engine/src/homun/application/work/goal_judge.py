@@ -1,10 +1,10 @@
-from homun.application.runtime_calls import complete
+from homun.application.agent.runtime_calls import complete
 """Accounted model-backed goal verdicts, without tool access or hidden retries."""
 import json
 from typing import Literal
 from pydantic import BaseModel, ConfigDict
 from homun.application.work import budgets
-from homun.application.agent_usage import charge, reserve as reserve_usage
+from homun.application.agent.usage import charge, reserve as reserve_usage
 from homun.domain.errors import ValidationError
 from homun.domain.models import Actor, BudgetCounters
 from homun.models.types import ChatMessage
@@ -19,7 +19,7 @@ class Verdict(BaseModel):
 
 
 def judge(ctx, run, **inputs):
-    from homun.application.agent_runs import lookup, authority
+    from homun.application.agent.runs import lookup, authority
     actor = Actor.model_validate(run['_actor'])
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:

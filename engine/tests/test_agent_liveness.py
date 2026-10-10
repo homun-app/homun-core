@@ -2,7 +2,7 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_native_agent import native_start
-from homun.application.agent_run_execution import advance
+from homun.application.agent.run_execution import advance
 from homun.models.native_turn import NativeMessage
 
 
@@ -55,7 +55,7 @@ def test_legacy_run_keeps_existing_final_behavior(setup):
 
 
 def test_human_correction_during_generation_precedes_nudge(setup):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     ctx,actor,work,material=setup;p=native_start(ctx,actor,work,material)
     def respond(*a,**k):
         control(ctx,actor,work,p['id'],{'command_id':'steer','action':'steer','text':'New direction',
@@ -107,7 +107,7 @@ def test_quoted_translation_or_excerpt_is_a_valid_deliverable(setup,text):
 
 
 def test_genuine_human_correction_resets_nudge_counter(setup):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     ctx,actor,work,material=setup;p=native_start(ctx,actor,work,material)
     ctx.models.complete_tools=lambda *a,**k:reply("I'll now check the files.")
     assert advance(ctx,p['id'])=='running' and advance(ctx,p['id'])=='running'

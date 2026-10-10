@@ -1,8 +1,8 @@
-from homun.application.runtime_calls import complete
+from homun.application.agent.runtime_calls import complete
 """Execute a bounded model consultation for an approved teammate."""
 import json
 from pydantic import ValidationError as SchemaError
-from homun.application.agent_team import Consultation
+from homun.application.agent.team import Consultation
 from homun.application.work import budgets
 from homun.domain.errors import ConflictError, PermissionDeniedError, ValidationError
 from homun.domain.models import BudgetCounters
@@ -11,8 +11,8 @@ from homun.models.prompt_store import prompts_for
 
 
 def consult(ctx, actor, run, arguments):
-    from homun.application.agent_runs import authority, lookup
-    from homun.application.agent_usage import charge, reserve as reserve_usage
+    from homun.application.agent.runs import authority, lookup
+    from homun.application.agent.usage import charge, reserve as reserve_usage
     try:
         args = Consultation.model_validate(arguments)
     except SchemaError as exc:

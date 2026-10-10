@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from homun.runtime import dbos_app
 from homun.application.automation.cron_dispatcher import fire_due_jobs
 from homun.application.automation.cron_reconciliation import reconcile_cron_runs
-from homun.application.agent_automation import wake_due_automation
+from homun.application.agent.agent_automation import wake_due_automation
 
 @asynccontextmanager
 async def runtime_lifespan(ctx):
@@ -89,12 +89,12 @@ async def runtime_lifespan(ctx):
             except Exception:
                 logging.getLogger(__name__).exception("Skill curation pass failed")
             try:
-                from homun.application.chat_agent import deliver_chat_answers
+                from homun.application.agent.chat_agent import deliver_chat_answers
                 await asyncio.to_thread(deliver_chat_answers, ctx)
             except Exception:
                 logging.getLogger(__name__).exception("Chat answer delivery pass failed")
             try:
-                from homun.application.approval_relay import notify_pending
+                from homun.application.agent.approval_relay import notify_pending
                 await asyncio.to_thread(notify_pending, ctx)
             except Exception:
                 logging.getLogger(__name__).exception("Approval relay notify pass failed")
@@ -127,7 +127,7 @@ async def runtime_lifespan(ctx):
             except TimeoutError:
                 pass
 
-    from homun.application.followup_recovery import followup_recovery_lifespan
+    from homun.application.agent.followup_recovery import followup_recovery_lifespan
     worker = asyncio.create_task(pump())
     poller_worker = asyncio.create_task(channel_poller_loop())
     try:

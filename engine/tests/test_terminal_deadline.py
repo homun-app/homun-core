@@ -85,7 +85,7 @@ def test_failed_stop_is_uncertain_then_reconciles(setup,monkeypatch):
 
 
 def test_old_terminal_manifest_keeps_original_schema():
-    from homun.application.agent_terminal_contracts import entry
+    from homun.application.agent.terminal_contracts import entry
     old=entry({'image':'sha256:'+'a'*64})
     new=entry({'image':'sha256:'+'a'*64,'version':2})
     assert old.version=='1' and 'timeout_seconds' not in old.definition.input_schema['properties']

@@ -1,8 +1,8 @@
 """Run-authorized file observations and durable delivery of immutable snapshots."""
 from copy import deepcopy
 import hashlib
-from homun.application import agent_native
-from homun.application.agent_runs import authority,lookup
+from homun.application.agent import native as agent_native
+from homun.application.agent.runs import authority,lookup
 from homun.domain.errors import ConflictError,PermissionDeniedError
 from homun.domain.models import CommandRecord,utc_now
 from homun.execution.contracts import JobSpec, LocalJobSpec, digest
@@ -67,7 +67,7 @@ def execute(ctx,actor,run,tool,args):
                                          'representation':'utf-8','total_lines':0 if complete and text=='' else None})
     _authorized(ctx,ctx.repository.load(),actor,run)
     try:
-        from homun.application.subdirectory_hints import track_and_attach_hints
+        from homun.application.agent.subdirectory_hints import track_and_attach_hints
         wd = root_for(ctx, run)
         result, _ = track_and_attach_hints(run, tool, args, result, working_dir=wd)
     except Exception:

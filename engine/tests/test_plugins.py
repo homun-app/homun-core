@@ -285,7 +285,7 @@ def test_uninstall_honors_retained_data_contract(tmp_path):
 
 # 4. Agent tool registry integration test
 def test_agent_tool_registry_with_plugin_tool(tmp_path):
-    from homun.application import agent_tool_registry
+    from homun.application.agent import tool_registry as agent_tool_registry
     from homun.application.integrations.plugin_manager import get_plugin_manager
     from homun.tools.registry import ToolEntry
     from homun.models.agent_turn import ToolDefinition

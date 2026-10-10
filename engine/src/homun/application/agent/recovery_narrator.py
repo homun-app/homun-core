@@ -107,7 +107,7 @@ def seed_recovery_conversation(ctx, report: dict[str, Any]) -> str | None:
         return None
 
     try:
-        from homun.application.chat_agent import start_chat_turn
+        from homun.application.agent.chat_agent import start_chat_turn
         requester = Actor(id='person_fabio', workspace_id=ctx.workspace_id,
                           display_name='Fabio', kind='person')
         start_chat_turn(ctx, requester, conversation_id, prompt)

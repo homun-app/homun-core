@@ -90,10 +90,10 @@ def test_ssh_command_hides_parent_environment_and_does_not_restart(server, monke
 
 def test_approved_ssh_run_executes_once(setup, server, monkeypatch):
     from types import SimpleNamespace
-    from homun.application import agent_runs
+    from homun.application.agent import runs as agent_runs
     from homun.application.computer import terminal_jobs
-    from homun.application.agent_run_execution import advance
-    from homun.application.agent_terminal import resume
+    from homun.application.agent.run_execution import advance
+    from homun.application.agent.terminal import resume
     from homun.execution.contracts import digest
     from homun.models.native_turn import NativeMessage, ToolCall
     monkeypatch.setenv('SENTINEL', 'hidden-value')

@@ -14,8 +14,8 @@ from pathlib import Path
 import shlex
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from homun.application.path_security import is_sensitive_system_path, validate_within_dir
-from homun.application.prompt_assembler import (
+from homun.application.agent.path_security import is_sensitive_system_path, validate_within_dir
+from homun.application.agent.prompt_assembler import (
     EXCLUDED_SUBDIR_NAMES,
     MAX_CONTEXT_FILE_CHARS,
     SUBDIR_INSTRUCTION_FILENAMES,

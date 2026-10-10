@@ -2,9 +2,9 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_terminal_jobs import Backend
-from homun.application import agent_runs
+from homun.application.agent import runs as agent_runs
 from homun.application.computer import terminal_jobs
-from homun.application.agent_run_execution import advance
+from homun.application.agent.run_execution import advance
 from homun.models.native_turn import NativeMessage,ToolCall
 
 IMAGE='sha256:'+'a'*64
@@ -26,7 +26,7 @@ def choose(s):
 
 
 def test_native_terminal_separate_approval_and_single_receipt(setup,monkeypatch):
-    from homun.application.agent_terminal import resume
+    from homun.application.agent.terminal import resume
     s=start(setup,monkeypatch);ctx,actor,work,p,backend=s;job=choose(s)
     assert not backend.calls
     assert not resume(ctx,p['id'])
@@ -44,7 +44,7 @@ def test_native_terminal_separate_approval_and_single_receipt(setup,monkeypatch)
 
 
 def test_cancel_before_command_approval_prevents_io(setup,monkeypatch):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     from homun.domain.errors import ConflictError
     s=start(setup,monkeypatch);ctx,actor,work,p,backend=s;job=choose(s)
     control(ctx,actor,work,p['id'],{'command_id':'cancel','action':'cancel','expected_version':ctx.repository.load().works[work].version})
@@ -53,7 +53,7 @@ def test_cancel_before_command_approval_prevents_io(setup,monkeypatch):
 
 
 def test_restart_consumes_receipt_once(setup,monkeypatch):
-    from homun.application.agent_terminal import resume
+    from homun.application.agent.terminal import resume
     from homun.context import create_context
     s=start(setup,monkeypatch);ctx,actor,work,p,backend=s;job=choose(s)
     terminal_jobs.approve(ctx,actor,work,job['id'],{'digest':job['digest']})
@@ -68,8 +68,8 @@ def test_restart_consumes_receipt_once(setup,monkeypatch):
 
 
 def test_cancel_during_start_keeps_effect_uncertain_without_resuming(setup,monkeypatch):
-    from homun.application.agent_terminal import resume
-    from homun.application.agent_control import control
+    from homun.application.agent.terminal import resume
+    from homun.application.agent.control import control
     s=start(setup,monkeypatch);ctx,actor,work,p,backend=s;job=choose(s)
     original=backend.start
     def cancel(spec):
@@ -102,7 +102,7 @@ def test_runtime_reconciles_terminal_without_mcp_dispatch(setup,monkeypatch):
 
 
 def test_log_transport_failure_waits_without_losing_tool_output(setup,monkeypatch):
-    from homun.application.agent_terminal import resume
+    from homun.application.agent.terminal import resume
     from homun.execution.contracts import ExecutionUnavailable
     s=start(setup,monkeypatch);ctx,actor,work,p,backend=s;job=choose(s)
     terminal_jobs.approve(ctx,actor,work,job['id'],{'digest':job['digest']})
@@ -121,7 +121,7 @@ def test_deadline_reason_reaches_model_even_if_process_exits_zero(setup,monkeypa
     from datetime import timedelta
     from homun.domain.models import utc_now
     from homun.application.computer.terminal_watchdog import reconcile
-    from homun.application.agent_terminal import resume
+    from homun.application.agent.terminal import resume
     s=start(setup,monkeypatch);ctx,actor,work,p,backend=s;job=choose(s)
     terminal_jobs.approve(ctx,actor,work,job['id'],{'digest':job['digest']})
     def graceful(spec):
@@ -135,7 +135,7 @@ def test_deadline_reason_reaches_model_even_if_process_exits_zero(setup,monkeypa
 
 
 def test_cancel_run_stops_active_terminal_process(setup, monkeypatch):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     s = start(setup, monkeypatch); ctx, actor, work, p, backend = s; job = choose(s)
     terminal_jobs.approve(ctx, actor, work, job['id'], {'digest': job['digest']})
     assert any(c[0] == 'start' for c in backend.calls)

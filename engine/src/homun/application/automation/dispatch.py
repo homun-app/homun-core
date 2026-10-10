@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from homun.application import agent_native
+from homun.application.agent import native as agent_native
 from homun.application.work.goal_manager import GoalManager
 from homun.application.automation.heartbeat_manager import HeartbeatManager
 from homun.application.automation.loop_manager import LoopManager

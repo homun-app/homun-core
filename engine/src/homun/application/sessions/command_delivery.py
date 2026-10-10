@@ -88,7 +88,7 @@ def admit(ctx: EngineContext, actor: Actor, body: CommandRequest) -> Delivery:
             record = store.commands[body.command_id]
             token = None
             if body.type == 'conversation.post_message' and record.followup_status == 'none':
-                from homun.application.agent_chat_control import route_message
+                from homun.application.agent.chat_control import route_message
                 route_message(ctx,store,actor,body,result)
             if body.type == 'conversation.post_message' and record.followup_status == 'completed':
                 # Cached replies carry the same source authority as fresh replies.
@@ -115,7 +115,7 @@ def complete(ctx: EngineContext, delivery: Delivery) -> dict:
     # dell'agente e la risposta torna in chat — la chat singola è con l'agente.
     if (delivery.token is not None and delivery.body.type == "conversation.post_message"
             and getattr(delivery.actor, "kind", "person") == "person"):
-        from homun.application import chat_agent
+        from homun.application.agent import chat_agent
         store_now = ctx.repository.snapshot()
         if chat_agent.handles(ctx, store_now, delivery.body):
             from homun.domain.errors import DomainError as _DE

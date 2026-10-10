@@ -2,9 +2,9 @@ import hashlib
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application import agent_runs, workspace_files
+from homun.application.agent import runs as agent_runs, workspace_files
 from homun.application.work import outputs as work_outputs
-from homun.application.agent_run_execution import advance
+from homun.application.agent.run_execution import advance
 from homun.models.native_turn import NativeMessage,ToolCall
 
 
@@ -72,7 +72,7 @@ def test_authenticated_download_is_attachment_and_integrity_checked(setup,monkey
 
 
 def test_crash_after_blob_receipt_replays_same_snapshot(setup,monkeypatch):
-    from homun.application import agent_native
+    from homun.application.agent import native as agent_native
     ctx,actor,work,_=setup;p,root,data=start(setup)
     model(ctx,'deliver_workspace_file',{'path':'result.txt','sha256':hashlib.sha256(data).hexdigest()})
     original=agent_native.append_result

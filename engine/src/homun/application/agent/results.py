@@ -5,7 +5,7 @@ Tool result storage and scoped output paging.
 import hashlib
 import json
 from pydantic import Field
-from homun.application.agent_tools import NoArguments
+from homun.application.agent.tools import NoArguments
 from homun.domain.errors import ConflictError, ValidationError
 from homun.models.agent_turn import ToolDefinition
 from homun.tools.registry import ToolEntry

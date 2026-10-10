@@ -1,6 +1,6 @@
 from homun.tools.registry import ToolRegistry, ToolEntry
 from homun.models.agent_turn import ToolDefinition
-from homun.application.agent_tools import NoArguments
+from homun.application.agent.tools import NoArguments
 
 
 def catalog(rows):

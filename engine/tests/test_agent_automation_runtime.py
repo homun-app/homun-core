@@ -3,8 +3,8 @@ import json
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application.agent_runs import propose, approve
-from homun.application.agent_run_execution import advance
+from homun.application.agent.runs import propose, approve
+from homun.application.agent.run_execution import advance
 from homun.application.work.goal_manager import GoalManager
 from homun.application.work.goal_store import GoalStore, set_goal_store
 from homun.application.automation.store import AutomationStore, set_automation_store
@@ -60,7 +60,7 @@ def test_goal_blocked_does_not_publish_success(setup):
     assert advance(ctx, p['id']) == 'waiting_automation'
     assert not ctx.repository.load().artifacts
     assert GoalManager(work).state.status == 'paused'
-    from homun.application.agent_automation import wake_due_automation
+    from homun.application.agent.agent_automation import wake_due_automation
     assert wake_due_automation(ctx, now=10**12) == []
 
 
@@ -71,7 +71,7 @@ def test_loop_wakes_idle_run_once_after_store_reopen(setup, tmp_path):
     assert ctx.repository.load().works[work].status == 'running'
     assert not ctx.repository.load().artifacts
     set_automation_store(AutomationStore(tmp_path / 'automation.db'))
-    from homun.application.agent_automation import wake_due_automation
+    from homun.application.agent.agent_automation import wake_due_automation
     assert wake_due_automation(ctx, now=state.next_due_at + 1) == [p['id']]
     assert wake_due_automation(ctx, now=state.next_due_at + 1) == []
     run = ctx.repository.load().commands[p['id']].result
@@ -84,20 +84,20 @@ def test_loop_wakes_idle_run_once_after_store_reopen(setup, tmp_path):
 
 
 def test_heartbeat_respects_human_pause(setup):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     ctx, actor, work, p = start(setup)
     state = HeartbeatManager(work, min_seconds=1).set('Watch', 1)
     assert advance(ctx, p['id']) == 'waiting_automation'
     control(ctx, actor, work, p['id'], {'command_id':'pause','action':'pause',
         'expected_version':ctx.repository.load().works[work].version})
-    from homun.application.agent_automation import wake_due_automation
+    from homun.application.agent.agent_automation import wake_due_automation
     assert wake_due_automation(ctx, now=state.created_at + 100) == []
     assert HeartbeatManager(work).state.fire_count == 0
 
 
 def test_wake_crash_before_engine_commit_recovers_after_restart(setup, tmp_path, monkeypatch):
     from homun.application.automation import wakes as automation_wakes
-    from homun.application.agent_automation import wake_due_automation
+    from homun.application.agent.agent_automation import wake_due_automation
     from homun.context import create_context
     ctx, actor, work, p = start(setup)
     state = HeartbeatManager(work, min_seconds=1).set('Watch', 1)
@@ -123,7 +123,7 @@ def test_wake_crash_before_engine_commit_recovers_after_restart(setup, tmp_path,
 
 
 def test_goal_evaluation_receipt_survives_projection_crash(setup, monkeypatch):
-    from homun.application import agent_automation
+    from homun.application.agent import agent_automation
     ctx, actor, work, p = start(setup)
     GoalManager(work).set('Verify')
     calls = []
@@ -144,7 +144,7 @@ def test_goal_evaluation_receipt_survives_projection_crash(setup, monkeypatch):
 
 
 def test_loop_budget_pause_is_not_artifact_success(setup):
-    from homun.application.agent_automation import wake_due_automation
+    from homun.application.agent.agent_automation import wake_due_automation
     ctx, actor, work, p = start(setup)
     state = LoopManager(work, min_interval=1).set('Check', interval_seconds=1, max_ticks=1)
     assert advance(ctx, p['id']) == 'waiting_automation'
@@ -155,7 +155,7 @@ def test_loop_budget_pause_is_not_artifact_success(setup):
 
 
 def test_goal_barrier_wakes_when_time_elapses(setup):
-    from homun.application.agent_automation import wake_due_automation
+    from homun.application.agent.agent_automation import wake_due_automation
     ctx, actor, work, p = start(setup)
     manager = GoalManager(work)
     manager.set('Wait for evidence')
@@ -183,19 +183,19 @@ def test_legacy_heartbeat_migrates_to_work_without_overwriting_existing(setup):
     HeartbeatManager(p['id'], min_seconds=1).set('Legacy watch', 1)
     assert advance(ctx, p['id']) == 'waiting_automation'
     assert HeartbeatManager(work).state.prompt == 'Legacy watch'
-    from homun.application.agent_automation import wake_due_automation
+    from homun.application.agent.agent_automation import wake_due_automation
     assert wake_due_automation(ctx, now=10**12) == [p['id']]
     assert HeartbeatManager(work).state.fire_count == 1
 
 
 def test_human_steer_wakes_idle_without_consuming_heartbeat(setup):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     ctx, actor, work, p = start(setup)
     HeartbeatManager(work, min_seconds=1).set('Watch', 1)
     assert advance(ctx, p['id']) == 'waiting_automation'
     control(ctx, actor, work, p['id'], {'command_id':'steer','action':'steer','text':'Human priority',
         'expected_version':ctx.repository.load().works[work].version})
-    from homun.application.agent_automation import wake_due_automation
+    from homun.application.agent.agent_automation import wake_due_automation
     assert wake_due_automation(ctx, now=10**12) == []
     run = ctx.repository.load().commands[p['id']].result
     assert run['status'] == 'queued'
@@ -204,7 +204,7 @@ def test_human_steer_wakes_idle_without_consuming_heartbeat(setup):
 
 
 def test_cleared_automation_wakes_once_to_finalize_approved_work(setup):
-    from homun.application.agent_automation import wake_due_automation
+    from homun.application.agent.agent_automation import wake_due_automation
     ctx, actor, work, p = start(setup)
     HeartbeatManager(work, min_seconds=1).set('Watch', 1)
     assert advance(ctx, p['id']) == 'waiting_automation'
@@ -215,7 +215,7 @@ def test_cleared_automation_wakes_once_to_finalize_approved_work(setup):
 
 
 def test_unknown_session_barrier_does_not_nest_repository_transactions(setup):
-    from homun.application.agent_automation import wake_due_automation
+    from homun.application.agent.agent_automation import wake_due_automation
     ctx, actor, work, p = start(setup)
     goal = GoalManager(work)
     goal.set('Check')
@@ -225,8 +225,8 @@ def test_unknown_session_barrier_does_not_nest_repository_transactions(setup):
 
 
 def test_human_steering_invalidates_finish_judge_before_projection(setup, monkeypatch):
-    from homun.application import agent_automation
-    from homun.application.agent_control import control
+    from homun.application.agent import agent_automation
+    from homun.application.agent.control import control
     ctx, actor, work, p = start(setup)
     GoalManager(work).set('Check')
     calls = []

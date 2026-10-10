@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_agent_automation_runtime import stores
-from homun.application import agent_runs
+from homun.application.agent import runs as agent_runs
 from homun.application.computer import terminal_jobs
-from homun.application.agent_run_execution import advance
+from homun.application.agent.run_execution import advance
 from homun.application.work.goal_manager import GoalManager
 from homun.models.native_turn import NativeMessage
 
@@ -71,7 +71,7 @@ def test_gate_real_process_approval_restart_no_replay(setup, monkeypatch):
 
 @pytest.mark.parametrize('action', ['pause','steer','cancel'])
 def test_controls_fence_gate_approval(setup, action):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     from homun.domain.errors import ConflictError
     s = start(setup)
     ctx, actor, work, p = s
@@ -159,7 +159,7 @@ def test_goal_configuration_fences_old_approval(setup, change):
 
 
 def test_gate_wait_scheduler_does_not_wake_before_approval(setup, monkeypatch):
-    from homun.application.agent_automation import wake_due_automation
+    from homun.application.agent.agent_automation import wake_due_automation
     from homun.runtime.workflows import agent_run
     s = start(setup)
     ctx, actor, work, p = s

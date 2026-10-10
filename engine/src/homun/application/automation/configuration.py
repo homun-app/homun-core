@@ -4,8 +4,8 @@ import json
 import time
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
-from homun.application.agent_control import _owner
-from homun.application.agent_runs import authority, lookup
+from homun.application.agent.control import _owner
+from homun.application.agent.runs import authority, lookup
 from homun.application.automation.store import get_automation_store
 from homun.application.automation.wakes import TransientLoopManager
 from homun.application.automation.heartbeat_manager import HeartbeatState

@@ -1,13 +1,13 @@
 """Reserve an additional provider attempt within an already claimed turn."""
-from homun.application import agent_native, agent_recovery
+from homun.application.agent import native as agent_native, recovery as agent_recovery
 from homun.application.work import budgets
-from homun.application.agent_runs import authority, lookup
+from homun.application.agent.runs import authority, lookup
 from homun.domain.errors import ValidationError
 from homun.domain.models import BudgetCounters
 
 
 def reserve_extra(ctx, actor, snapshot, *, connection_id):
-    from homun.application.agent_usage import reserve
+    from homun.application.agent.usage import reserve
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             current=lookup(store,snapshot['id'])
@@ -21,7 +21,7 @@ def reserve_extra(ctx, actor, snapshot, *, connection_id):
             reservation = reserve(ctx, actor, current, purpose='agent_run.fallback',
                                   connection_id=connection_id, store=store)
             current['model_attempts']+=1
-            from homun.application.runtime_selection import for_call
+            from homun.application.agent.runtime_selection import for_call
             current['runtime_selection'] = for_call(ctx.models, current, connection_id=connection_id)
             current['connection_id'] = connection_id
         ctx.service.store=store
@@ -30,7 +30,7 @@ def reserve_extra(ctx, actor, snapshot, *, connection_id):
 
 def reserve_auxiliary(ctx, actor, snapshot, *, purpose, connection_id=None, model_id=None, detached=False):
     """Admit each physical auxiliary call and its run/work counters atomically."""
-    from homun.application.agent_usage import reserve
+    from homun.application.agent.usage import reserve
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             current = lookup(store, snapshot['id'], snapshot['work_id'])

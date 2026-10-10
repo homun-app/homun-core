@@ -2,10 +2,10 @@
 import json
 from datetime import datetime, timedelta
 
-from homun.application import agent_native
-from homun.application.agent_clarification import questions
-from homun.application.agent_runs import authority, lookup
-from homun.application.agent_tool_registry import registry_for
+from homun.application.agent import native as agent_native
+from homun.application.agent.clarification import questions
+from homun.application.agent.runs import authority, lookup
+from homun.application.agent.tool_registry import registry_for
 from homun.domain.clarification import parse_answers
 from homun.domain.contribution_resolution import resolve_contribution
 from homun.domain.errors import ConflictError

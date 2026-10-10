@@ -7,8 +7,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from homun.application.context_references import expand_references
-from homun.application.prompt_assembler import PromptAssembler
+from homun.application.agent.context_references import expand_references
+from homun.application.agent.prompt_assembler import PromptAssembler
 from homun.models.native_turn import NativeMessage
 
 GUIDANCE = '''You are Homun, an operational assistant working within an approved task.

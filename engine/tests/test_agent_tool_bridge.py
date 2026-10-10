@@ -3,11 +3,11 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_agent_mcp import start
-from homun.application import agent_runs
+from homun.application.agent import runs as agent_runs
 from homun.application.work import external_tools
-from homun.application.agent_run_execution import advance
-from homun.application.agent_external import resume_external
-from homun.application.agent_tool_registry import registry_for
+from homun.application.agent.run_execution import advance
+from homun.application.agent.external import resume_external
+from homun.application.agent.tool_registry import registry_for
 from homun.models.native_turn import NativeMessage, ToolCall
 
 
@@ -98,7 +98,7 @@ def test_target_schema_validation_precedes_external_staging(setup,monkeypatch,ar
 
 
 def test_cancel_pending_bridge_action_fences_external_approval(setup,monkeypatch):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     from homun.domain.errors import ConflictError
     ctx,actor,work,p,calls=start(setup,monkeypatch)
     target=p['external_tools'][0]['name']
@@ -128,7 +128,7 @@ def test_changed_wrapper_arguments_cannot_approve_old_proposal(setup,monkeypatch
 
 
 def test_legacy_catalog_keeps_direct_schema(setup,monkeypatch):
-    from homun.application.agent_tool_bridge import visible_definitions
+    from homun.application.agent.tool_bridge import visible_definitions
     ctx,actor,work,p,calls=start(setup,monkeypatch)
     run=ctx.repository.load().commands[p['id']].result
     run.pop('_tool_bridge_version');run.pop('tools')
@@ -192,17 +192,17 @@ def test_search_indexes_human_server_label(setup,monkeypatch):
 
 
 def test_catalog_hint_allows_missing_optional_description():
-    from homun.application.agent_tool_bridge import search_description
+    from homun.application.agent.tool_bridge import search_description
     run={'_mcp_bindings':[{'name':'mcp_read','server_name':'Records','tool':'read','descriptor':{'description':None}}]}
     assert 'Records · read' in search_description(run)
 
 
 def test_visible_definitions_filters_by_surface_and_toolset():
-    from homun.application.agent_tool_bridge import visible_definitions
+    from homun.application.agent.tool_bridge import visible_definitions
     from homun.models.agent_turn import ToolDefinition
     from homun.tools.registry import ToolRegistry, ToolEntry
 
-    from homun.application.agent_tools import NoArguments
+    from homun.application.agent.tools import NoArguments
 
     registry = ToolRegistry()
     registry.register(ToolEntry(ToolDefinition(name='read_file', description='', input_schema={}), 'files', '1', NoArguments, None))
@@ -236,7 +236,7 @@ def test_visible_definitions_filters_by_surface_and_toolset():
 
 
 def test_denied_deferred_tool_is_not_advertised_or_described(setup, monkeypatch):
-    from homun.application.agent_tool_bridge import describe
+    from homun.application.agent.tool_bridge import describe
     from homun.domain.errors import ValidationError
     ctx, actor, work, proposal, calls = start(setup, monkeypatch)
     run = dict(ctx.repository.load().commands[proposal['id']].result)

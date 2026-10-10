@@ -7,7 +7,7 @@ from homun.execution.contracts import digest
 WAIT_REASON = 'goal_gate_pending'
 
 def available(run):
-    from homun.application.agent_tool_registry import registry_for
+    from homun.application.agent.tool_registry import registry_for
     return bool(run.get('terminal')) and any(
         tool['name'] == 'terminal_execute' for tool in registry_for(run).manifest())
 
@@ -33,8 +33,8 @@ def passed(receipt):
 
 
 def validate_link(ctx, store, actor, proposal, *, staging=False):
-    from homun.application.agent_runs import lookup, authority
-    from homun.application.agent_terminal_request import proposal_body
+    from homun.application.agent.runs import lookup, authority
+    from homun.application.agent.terminal_request import proposal_body
     link = proposal['_agent_binding']
     run = lookup(store, link['run_id'], proposal['work_id'])
     authority(ctx, store, actor, run, running=True)

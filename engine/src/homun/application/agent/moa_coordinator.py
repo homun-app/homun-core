@@ -14,8 +14,8 @@ import logging
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from homun.application.moa_alternation import merge_same_role_messages
-from homun.application.moa_contracts import (
+from homun.application.agent.moa_alternation import merge_same_role_messages
+from homun.application.agent.moa_contracts import (
     CADENCE_EVERY_N,
     CADENCE_PER_ITERATION,
     CADENCE_USER_TURN,
@@ -25,8 +25,8 @@ from homun.application.moa_contracts import (
     parse_fanout_cadence,
     should_run_advisors,
 )
-from homun.application.moa_filter import apply_privacy_filter
-from homun.application.moa_trace import save_moa_turn_trace
+from homun.application.agent.moa_filter import apply_privacy_filter
+from homun.application.agent.moa_trace import save_moa_turn_trace
 from homun.domain.errors import DomainError
 from homun.models.native_turn import NativeMessage
 from homun.models.types import UsageEntry

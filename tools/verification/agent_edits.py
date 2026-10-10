@@ -10,9 +10,9 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from homun.application import agent_runs, workspace_file_edits, workspace_files
+from homun.application.agent import runs as agent_runs, workspace_file_edits, workspace_files
 from homun.application.work import outputs as work_outputs
-from homun.application.agent_run_execution import advance
+from homun.application.agent.run_execution import advance
 from homun.context import create_context
 from homun.domain.models import Actor
 

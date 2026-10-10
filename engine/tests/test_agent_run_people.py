@@ -1,8 +1,8 @@
 """Adaptive questions use the approved human recipient and scoped invitation."""
 import pytest
 from test_agent_runs import setup, scripted
-from homun.application.agent_runs import propose, approve, resume_waiting
-from homun.application.agent_run_execution import advance
+from homun.application.agent.runs import propose, approve, resume_waiting
+from homun.application.agent.run_execution import advance
 from homun.application.work.contribution_people import create_person
 from homun.domain.errors import ValidationError, ConflictError
 from homun.domain.models import Actor

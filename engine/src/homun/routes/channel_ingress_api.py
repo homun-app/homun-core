@@ -712,7 +712,7 @@ async def ingest_channel_inbound(
     # bridges the message into a supervised engine conversation. Approval-relay
     # replies (COLLEGA/A/R + code) are claimed before the conversation turn.
     try:
-        from homun.application.approval_relay import pre_handler as _relay_pre
+        from homun.application.agent.approval_relay import pre_handler as _relay_pre
         result = registry.dispatch_inbound(platform, raw_payload, channel_reply,
                                            pre_handler=_relay_pre())
         return result
@@ -765,7 +765,7 @@ def poll_channel_once(
 
     def _ingest_update(upd: Dict[str, Any]) -> None:
         try:
-            from homun.application.approval_relay import pre_handler as _relay_pre
+            from homun.application.agent.approval_relay import pre_handler as _relay_pre
             registry.dispatch_inbound(plat, upd, channel_reply, pre_handler=_relay_pre())
         except Exception:
             try:

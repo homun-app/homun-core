@@ -5,8 +5,8 @@ from test_agent_runs import setup
 from test_agent_context import pressured, summary
 from test_agent_recovery import final
 from test_native_agent import native_start
-from homun.application.agent_run_execution import advance
-from homun.application.agent_control import control
+from homun.application.agent.run_execution import advance
+from homun.application.agent.control import control
 from homun.context import create_context
 from homun.models.native_errors import NativeModelError
 

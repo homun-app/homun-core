@@ -4,8 +4,8 @@ import subprocess
 import time
 from types import SimpleNamespace
 
-from homun.application import agent_runs
-from homun.application.agent_run_execution import advance
+from homun.application.agent import runs as agent_runs
+from homun.application.agent.run_execution import advance
 from homun.application.computer.browser_form_pages import execute
 from homun.execution.browser_forms import click, fill, open_page, snapshot
 from homun.execution.browser_sessions import close_browser, open_browser

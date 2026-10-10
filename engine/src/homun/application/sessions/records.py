@@ -2,7 +2,7 @@
 import hashlib
 import json
 from copy import deepcopy
-from homun.application.agent_run_policy import history_is_readable
+from homun.application.agent.run_policy import history_is_readable
 from homun.domain.errors import NotFoundError, PermissionDeniedError, ValidationError
 from homun.policy.work import require_work_access
 

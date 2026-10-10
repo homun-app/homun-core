@@ -102,8 +102,8 @@ def test_skill_propose_creates_staged_quarantine(setup):
 
 
 def test_agent_run_advances_with_skill_tools(setup):
-    from homun.application import agent_runs
-    from homun.application.agent_run_execution import advance
+    from homun.application.agent import runs as agent_runs
+    from homun.application.agent.run_execution import advance
 
     ctx, actor, work, _ = setup
     ctx.models.set_active("openai_compatible")

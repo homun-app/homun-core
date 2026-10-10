@@ -1,9 +1,9 @@
-from homun.application.runtime_calls import complete_summary
+from homun.application.agent.runtime_calls import complete_summary
 """Detached side questions with per-invocation accounting and current source authority."""
-from homun.application.agent_runs import authority, lookup
-from homun.application.agent_model_attempts import reserve_auxiliary
-from homun.application.agent_usage import charge
-from homun.application.side_question import SideQuestionRunner
+from homun.application.agent.runs import authority, lookup
+from homun.application.agent.model_attempts import reserve_auxiliary
+from homun.application.agent.usage import charge
+from homun.application.agent.side_question import SideQuestionRunner
 from homun.domain.errors import DomainError, ValidationError
 from homun.models.native_turn import NativeMessage
 

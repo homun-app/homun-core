@@ -2,9 +2,9 @@
 import pytest
 from test_agent_runs_api import api_setup
 from homun.application.automation.store import AutomationStore, set_automation_store
-from homun.application.agent_runs import approve
-from homun.application.agent_run_execution import advance
-from homun.application.agent_automation import wake_due_automation
+from homun.application.agent.runs import approve
+from homun.application.agent.run_execution import advance
+from homun.application.agent.agent_automation import wake_due_automation
 from homun.models.native_turn import NativeMessage
 from types import SimpleNamespace
 
@@ -54,7 +54,7 @@ def test_configuration_requires_approved_capability_and_human_auth(api_setup):
 
 
 def test_configuration_arriving_during_finish_prevents_publication(api_setup, monkeypatch):
-    from homun.application import agent_automation
+    from homun.application.agent import agent_automation
     from homun.application.automation.configuration import configure, AutomationCommand
     ctx, actor, work, client, headers = api_setup
     base = f'/v1/workspaces/{ctx.workspace_id}/works/{work}/agent-runs'

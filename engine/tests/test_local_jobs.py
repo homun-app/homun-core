@@ -78,11 +78,11 @@ def test_local_symlink_root_is_refused(tmp_path):
 
 def test_approved_local_run_executes_once(setup, monkeypatch):
     from types import SimpleNamespace
-    from homun.application import agent_runs
+    from homun.application.agent import runs as agent_runs
     from homun.application.computer import terminal_jobs
-    from homun.application.agent_run_execution import advance
-    from homun.application.agent_terminal import resume
-    from homun.application.workspace_files import root_for
+    from homun.application.agent.run_execution import advance
+    from homun.application.agent.terminal import resume
+    from homun.application.agent.workspace_files import root_for
     from homun.models.native_turn import NativeMessage, ToolCall
     monkeypatch.setenv('SENTINEL', 'hidden-value')
     ctx, actor, work, _ = setup

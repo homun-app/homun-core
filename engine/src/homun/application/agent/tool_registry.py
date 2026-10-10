@@ -1,7 +1,7 @@
 """Construct the exact tool surface pinned to an adaptive run."""
-from homun.application import agent_tools
-from homun.application.agent_tool_contracts import PROTOCOL, QUESTION, QuestionArguments, DiscoveryArguments
-from homun.application.agent_team import Consultation, tool_definition
+from homun.application.agent import tools as agent_tools
+from homun.application.agent.tool_contracts import PROTOCOL, QUESTION, QuestionArguments, DiscoveryArguments
+from homun.application.agent.team import Consultation, tool_definition
 from homun.models.agent_turn import ToolDefinition
 from homun.tools.registry import ToolEntry, ToolRegistry
 
@@ -18,14 +18,14 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
     for definition in tool_definition(run.get('team'), run['assignee_id']):
         registry.register(ToolEntry(definition, 'team', '1', Consultation,
             collaborator_executor, replay='model'))
-    from homun.application.agent_mcp import entries
+    from homun.application.agent.mcp import entries
     for entry in entries(run.get('_mcp_bindings', []), include_source=run.get('_tool_bridge_version') == 1):
         registry.register(entry)
     if run.get('terminal'):
-        from homun.application.agent_terminal_contracts import entries as terminal_entries
+        from homun.application.agent.terminal_contracts import entries as terminal_entries
         for terminal_entry in terminal_entries(run['terminal']):registry.register(terminal_entry)
     if run.get('_workspace_files_version') in {1, 2}:
-        from homun.application.workspace_file_contracts import entries as file_entries
+        from homun.application.agent.workspace_file_contracts import entries as file_entries
         for file_entry in file_entries(file_executor, run['_workspace_files_version']):registry.register(file_entry)
     pages = run.get('web_pages')
     if isinstance(pages, dict) and pages.get('policy') == 'public-http-v1' and pages.get('version') in {1, 2, 3}:
@@ -52,8 +52,8 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             registry.register(d_entry)
     cps = run.get('checkpoints')
     if isinstance(cps, dict) and cps.get('policy') == 'workspace-checkpoints-v1' and cps.get('version') == 1:
-        from homun.application.checkpoint_contracts import entries as checkpoint_entries
-        from homun.application.checkpoint_tools import execute as checkpoint_execute
+        from homun.application.agent.checkpoint_contracts import entries as checkpoint_entries
+        from homun.application.agent.checkpoint_tools import execute as checkpoint_execute
         for cp_entry in checkpoint_entries(checkpoint_execute, cps.get('version', 1)):
             registry.register(cp_entry)
     mem = run.get('memory')
@@ -82,8 +82,8 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             registry.register(del_entry)
     clarify = run.get('clarify')
     if isinstance(clarify, dict) and clarify.get('policy') == 'structured-clarify-v1' and clarify.get('version') == 1:
-        from homun.application.clarify_contracts import entries as clarify_entries
-        from homun.application.clarify_tools import execute as clarify_execute
+        from homun.application.agent.clarify_contracts import entries as clarify_entries
+        from homun.application.agent.clarify_tools import execute as clarify_execute
         for c_entry in clarify_entries(clarify_execute, clarify.get('version', 1)):
             registry.register(c_entry)
     goals = run.get('goals')
@@ -122,13 +122,13 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         for p_entry in get_plugin_manager().get_active_tools():
             registry.register(p_entry)
     if run.get('_result_storage_version') == 1:
-        from homun.application.agent_results import entry
+        from homun.application.agent.results import entry
         registry.register(entry())
     if run.get('_protocol') == PROTOCOL:
         registry.register(ToolEntry(QUESTION, 'human', '1',
             QuestionArguments, kind='ask', replay='never'))
     if run.get('_tool_bridge_version') == 1 and run.get('_mcp_bindings'):
-        from homun.application.agent_tool_bridge import entries as bridge_entries
+        from homun.application.agent.tool_bridge import entries as bridge_entries
         for bridge_entry in bridge_entries(run, registry):
             registry.register(bridge_entry)
     if run.get('_registry_version') == 1:
@@ -138,7 +138,7 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         version = '1'
         excluded = ()
         if run.get('_tool_bridge_version') == 1 and run.get('_mcp_bindings'):
-            from homun.application.agent_tool_bridge import search_description
+            from homun.application.agent.tool_bridge import search_description
             definition.description = search_description(run)
             version = '2'
             excluded = ('tool_search', 'tool_describe', 'tool_call')

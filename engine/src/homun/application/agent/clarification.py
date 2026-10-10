@@ -1,6 +1,6 @@
 """Durable clarification projection through canonical human contributions."""
 import json
-from homun.application.clarify_tools import _normalize_questions, _batch_result
+from homun.application.agent.clarify_tools import _normalize_questions, _batch_result
 from homun.domain.errors import ValidationError
 from homun.domain.clarification import parse_answers
 from pydantic import BaseModel, ConfigDict, Field, ValidationError as SchemaError

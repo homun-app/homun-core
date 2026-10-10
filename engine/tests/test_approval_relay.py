@@ -3,7 +3,7 @@ import re
 
 import pytest
 
-from homun.application import approval_relay
+from homun.application.agent import approval_relay
 from homun.application.channels.gateway_contracts import ChannelMessage
 from homun.context import create_context
 from homun.domain.models import Actor
@@ -58,7 +58,7 @@ def new_work(ctx, actor, title: str) -> str:
 
 def propose_run(ctx, actor, work) -> str:
     global _propose_count
-    from homun.application.agent_runs import propose
+    from homun.application.agent.runs import propose
     _propose_count += 1
     store = ctx.repository.load()
     return propose(ctx, actor, work, {

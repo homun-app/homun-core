@@ -1,5 +1,5 @@
 """Canonical future-run preferences; retention pinning and reported aliases are separate."""
-from homun.application import runtime_selection
+from homun.application.agent import runtime_selection
 from homun.domain.errors import ValidationError
 
 

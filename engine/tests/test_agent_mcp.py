@@ -2,10 +2,10 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from homun.domain.models import ExternalServer
-from homun.application import agent_runs
+from homun.application.agent import runs as agent_runs
 from homun.application.work import external_tools
 from homun.application.integrations import mcp_client
-from homun.application.agent_run_execution import advance
+from homun.application.agent.run_execution import advance
 from homun.models.native_turn import NativeMessage, ToolCall
 
 
@@ -32,7 +32,7 @@ def choose(ctx,p):
 
 
 def test_model_external_approval_resume_and_final(setup,monkeypatch):
-    from homun.application.agent_external import resume_external
+    from homun.application.agent.external import resume_external
     ctx,actor,work,p,calls=start(setup,monkeypatch)
     proposal_id=choose(ctx,p)
     assert calls==[] and not ctx.repository.load().artifacts
@@ -51,7 +51,7 @@ def test_model_external_approval_resume_and_final(setup,monkeypatch):
 
 
 def test_cancel_while_awaiting_approval_fences_external_io(setup,monkeypatch):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     from homun.domain.errors import ConflictError
     ctx,actor,work,p,calls=start(setup,monkeypatch)
     proposal_id=choose(ctx,p)
@@ -62,7 +62,7 @@ def test_cancel_while_awaiting_approval_fences_external_io(setup,monkeypatch):
 
 def test_receipt_resume_survives_context_restart(setup,monkeypatch):
     from homun.context import create_context
-    from homun.application.agent_external import resume_external
+    from homun.application.agent.external import resume_external
     ctx,actor,work,p,calls=start(setup,monkeypatch)
     pid=choose(ctx,p);proposal=ctx.repository.load().commands[pid].result
     external_tools.approve(ctx,actor,pid,{'digest':proposal['digest']})
@@ -84,7 +84,7 @@ def test_bad_mcp_arguments_are_an_observation_without_external_io(setup,monkeypa
 
 
 def test_cancel_during_external_io_keeps_receipt_and_reports_uncertainty(setup,monkeypatch):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     ctx,actor,work,p,calls=start(setup,monkeypatch)
     pid=choose(ctx,p);proposal=ctx.repository.load().commands[pid].result
     def cancel(*a):
@@ -121,7 +121,7 @@ def test_expired_external_intent_blocks_runtime_without_redispatch(setup,monkeyp
     assert calls==[]
 
 def test_two_external_calls_keep_order_and_each_require_approval(setup,monkeypatch):
-    from homun.application.agent_external import resume_external
+    from homun.application.agent.external import resume_external
     ctx,actor,work,p,calls=start(setup,monkeypatch)
     name=p['external_tools'][0]['name']
     ctx.models.complete_tools=lambda *a,**k:SimpleNamespace(message=NativeMessage(role='assistant',tool_calls=[

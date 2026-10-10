@@ -5,8 +5,8 @@ import zipfile
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application import agent_runs, workspace_file_edits, workspace_files
-from homun.application.agent_run_execution import advance
+from homun.application.agent import runs as agent_runs, workspace_file_edits, workspace_files
+from homun.application.agent.run_execution import advance
 from homun.domain.errors import ConflictError
 from homun.execution.file_match import replace
 from homun.execution.file_syntax import delta
@@ -150,7 +150,7 @@ def test_changed_file_conflicts_without_a_second_write(setup, monkeypatch):
 
 
 def test_cancel_before_approval_prevents_the_write(setup):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     ctx, actor, work, proposal, root = _start(setup)
     _call(ctx, 'read_workspace_lines', {'path': 'note.py'}, 'read1')
     advance(ctx, proposal['id'])

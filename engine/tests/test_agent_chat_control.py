@@ -8,8 +8,8 @@ import secrets
 
 import pytest
 
-from homun.application import chat_agent
-from homun.application.agent_chat_control import route_message
+from homun.application.agent import chat_agent
+from homun.application.agent.chat_control import route_message
 from homun.context import create_context
 from homun.domain.models import Actor, AgentProfile
 
@@ -29,7 +29,7 @@ def setup(tmp_path):
 
 
 def _orphan_run(store, actor_id: str, workspace_id: str) -> None:
-    from homun.application.agent_runs import PROPOSAL_TYPE
+    from homun.application.agent.runs import PROPOSAL_TYPE
     from homun.domain.models import CommandRecord
     run_id = f"chat-run:{secrets.token_hex(6)}"
     store.commands[run_id] = CommandRecord(

@@ -1,7 +1,7 @@
 """Route ordinary messages to a unique owned active native run, atomically."""
-from homun.application.agent_runs import PROPOSAL_TYPE
-from homun.application.agent_control import control_in_store
-from homun.application import agent_native
+from homun.application.agent.runs import PROPOSAL_TYPE
+from homun.application.agent.control import control_in_store
+from homun.application.agent import native as agent_native
 from homun.domain.errors import ConflictError
 
 

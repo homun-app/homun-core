@@ -34,7 +34,7 @@ def test_admission_persists_recoverable_input(context):
 
 
 def test_restart_recovers_without_caller_retry(context):
-    from homun.application.followup_recovery import recover_pending
+    from homun.application.agent.followup_recovery import recover_pending
     pending(context)
     root = context.data_dir
     context.close()
@@ -52,7 +52,7 @@ def test_restart_recovers_without_caller_retry(context):
 
 def test_competing_recovery_claims_and_superseded_token(context):
     from concurrent.futures import ThreadPoolExecutor
-    from homun.application.followup_recovery import claim_next
+    from homun.application.agent.followup_recovery import claim_next
     from homun.domain.errors import ConflictError
     old = pending(context)
     with ThreadPoolExecutor(max_workers=2) as workers:
@@ -68,7 +68,7 @@ def test_competing_recovery_claims_and_superseded_token(context):
 
 
 def test_exhaustion_backoff_and_explicit_same_command_retry(context, monkeypatch):
-    from homun.application.followup_recovery import recover_pending
+    from homun.application.agent.followup_recovery import recover_pending
     from homun.application.sessions.command_delivery import MAX_FOLLOWUP_ATTEMPTS
     original = context.models.interpret
     delivery = pending(context)
@@ -96,7 +96,7 @@ def test_exhaustion_backoff_and_explicit_same_command_retry(context, monkeypatch
 
 
 def test_authority_revocation_during_model_generation_blocks_finalization(context, monkeypatch):
-    from homun.application.followup_recovery import recover_pending
+    from homun.application.agent.followup_recovery import recover_pending
     delivery = pending(context)
     with context.repository.transaction() as store:
         service = context.service.for_store(store)
@@ -117,7 +117,7 @@ def test_authority_revocation_during_model_generation_blocks_finalization(contex
 
 
 def test_missing_or_tampered_legacy_context_fails_explicitly(context):
-    from homun.application.followup_recovery import recover_pending
+    from homun.application.agent.followup_recovery import recover_pending
     pending(context)
     with context.repository.transaction() as store:
         store.commands['message'].followup_actor = None
@@ -130,7 +130,7 @@ def test_missing_or_tampered_legacy_context_fails_explicitly(context):
 
 def test_lifecycle_pump_runs_without_http_retry_and_stops(context):
     import asyncio
-    from homun.application.followup_recovery import followup_recovery_lifespan
+    from homun.application.agent.followup_recovery import followup_recovery_lifespan
     pending(context)
     async def run():
         async with followup_recovery_lifespan(context, interval=0.01):
@@ -146,7 +146,7 @@ def test_lifecycle_pump_runs_without_http_retry_and_stops(context):
 
 
 def test_tampered_recovery_context_never_reaches_provider(context, monkeypatch):
-    from homun.application.followup_recovery import recover_pending
+    from homun.application.agent.followup_recovery import recover_pending
     pending(context)
     with context.repository.transaction() as store:
         store.commands['message'].followup_body['payload']['text'] = 'changed'
@@ -174,7 +174,7 @@ def test_active_conversation_claim_blocks_second_message_atomically(context):
 
 def test_crashed_final_attempt_becomes_terminal_without_provider(context):
     from homun.application.sessions.command_delivery import MAX_FOLLOWUP_ATTEMPTS
-    from homun.application.followup_recovery import claim_next
+    from homun.application.agent.followup_recovery import claim_next
     pending(context)
     with context.repository.transaction() as store:
         store.commands['message'].followup_attempts = MAX_FOLLOWUP_ATTEMPTS
@@ -187,7 +187,7 @@ def test_crashed_final_attempt_becomes_terminal_without_provider(context):
 
 def test_expired_and_backoff_followups_keep_conversation_ownership(context):
     from homun.application.sessions.command_delivery import fail
-    from homun.application.followup_recovery import claim_next
+    from homun.application.agent.followup_recovery import claim_next
     from homun.domain.errors import CommandInProgressError
     expired = pending(context)
     newer = expired.body.model_copy(update={'command_id': 'newer'})
@@ -202,7 +202,7 @@ def test_expired_and_backoff_followups_keep_conversation_ownership(context):
 
 
 def test_expired_current_attempt_schedules_recovery_instead_of_terminal_conflict(context):
-    from homun.application.followup_recovery import recover_pending
+    from homun.application.agent.followup_recovery import recover_pending
     from homun.domain.errors import DomainError
     expired = pending(context)
     with pytest.raises(DomainError) as raised:

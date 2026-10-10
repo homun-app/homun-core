@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 from homun.models.native_turn import NativeMessage, ToolCall, project_messages, parse_response
 from test_agent_runs import setup
-from homun.application.agent_run_execution import advance
-from homun.application.agent_runs import resume_waiting, propose, approve
+from homun.application.agent.run_execution import advance
+from homun.application.agent.runs import resume_waiting, propose, approve
 from homun.context import create_context
 
 
@@ -130,7 +130,7 @@ def test_native_provider_failure_does_not_downgrade(setup):
 
 
 def test_tool_call_is_persisted_before_execution(setup, monkeypatch):
-    from homun.application import agent_run_execution
+    from homun.application.agent import run_execution as agent_run_execution
     ctx,actor,work,material=setup
     p=native_start(ctx,actor,work,material)
     ctx.models.complete_tools=lambda *a,**k:SimpleNamespace(message=NativeMessage(role='assistant',tool_calls=[
@@ -164,7 +164,7 @@ def test_malformed_provider_envelope_is_validation_error(response):
 
 
 def test_restart_after_round_persisted_does_not_repeat_model(setup, monkeypatch):
-    from homun.application import agent_run_execution
+    from homun.application.agent import run_execution as agent_run_execution
     ctx,actor,work,material=setup
     p=native_start(ctx,actor,work,material)
     ctx.models.complete_tools=lambda *a,**k:SimpleNamespace(message=NativeMessage(role='assistant',tool_calls=[
