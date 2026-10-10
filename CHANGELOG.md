@@ -7,28 +7,16 @@ truth: the released version's section is written into the GitHub Release body
 Section headers are `## Highlights` / `## Improvements` / `## Fixes` (H2), and
 each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 
-## [0.2.1003] — 2026-10-09
+## [0.2.1004] — 2026-10-10
 
-Pilot-ready Spaces: sealed object transfers between machines, honest peer delegation under budget, and installable Linux packages (.deb / AppImage).
+Linux AppImage can update itself from `homun-releases`, and the chat composer matches common stop/send patterns.
 
 ## Highlights
-- **Sealed object transfers between host and peer.** Chunked, resumable HTTP transfers with per-object wraps; credentials and secret stores never enter the transfer payload.
-- **Transfers announced on the remote event cursor**, so a peer learns about new sealed versions while reading the shared project — without a second polling channel.
-- **Revoked devices cannot receive new wraps.** Publishing a version whose wrap targets a revoked fingerprint is rejected; already-downloaded plaintext stays a local concern (declared in Settings → Persone).
-- **Peer delegation tied to the work budget**, with hold/release on offer, return, revoke and expiry; after a timeout the peer can reconcile the previous attempt instead of blind reassignment.
-- **Linux installers in the multi-OS pipeline** (.deb and AppImage) alongside the notarized macOS build path.
+- **Linux AppImage auto-update.** Packaged AppImage builds check `homun-releases` (`latest-linux.yml`) the same way macOS does; nothing installs without consent. `.deb` installs still update from the release page.
 
 ## Improvements
-- **UX quick wins for first-run and navigation**: Squadra and Altro in the nav, clearer settings levels, and a tighter first-run path.
-- **Hermes streaming P0 gaps closed** so live battery scenarios stay green under interruption and partial usage.
-- **Engine recovery when the data directory is busy**, with a clear path instead of a silent startup failure.
-- **Recipient names for all work readers** and safer parity-command defaults.
-
-## Fixes
-- **Linux: the bundled engine no longer requests an executable stack.** Some python-build-standalone interpreters ship libpython with a RWE GNU_STACK that recent glibc refuses to load; the build now clears and verifies that flag on every ELF in the bundle, so .deb/AppImage installs start the engine on first run without manual patchelf.
-- **Live battery hygiene** for T2/T6 scripts and cron→chat leftovers.
-- **Copilot leftovers**: diagnostics auth, routine templates gated on real engine data, and the ddgs lock aligned with the engine env.
-- **Desktop packaging metadata** (homepage and author) required by electron-builder for `.deb`.
+- **While Homun is working, the send control becomes Cancel** (square) in the prompt — no separate “Homun sta lavorando…” / Annulla line above the composer.
+- **User messages render without a muted bubble background** — you on the right, Homun on the left.
 
 ## [Unreleased]
 
@@ -36,9 +24,6 @@ Pilot-ready Spaces: sealed object transfers between machines, honest peer delega
 - **Work directly with Homun without creating a specialist bot.** Optional company onboarding proposes a small team for recurring responsibilities.
 - **Adaptive work over approved materials.** Homun can read, search, consult selected AI teammates, request clarification and deliver a reviewable result with persisted progress.
 - **Scoped human contributions.** Named recipients can answer one request through an expiring, revocable link; an adaptive run can resume from that answer. Reachable hosting remains a prerequisite.
-
-## Improvements
-- **Linux AppImage auto-update.** Packaged AppImage builds check `homun-releases` (`latest-linux.yml`) the same way macOS does; nothing installs without consent. `.deb` installs still update from the release page.
 
 ## Fixes
 - **Model retries remain bounded after a crash.** Corrections interrupt stale waits immediately, and malformed usage counters cannot reduce recorded spending.
