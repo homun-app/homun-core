@@ -185,6 +185,8 @@ def check(entries: dict[str, str]) -> int:
                 # agent/runs/ esiste come directory: solo il riferimento NUDO al
                 # vecchio modulo (o a un suo attributo inesistente) è residuo.
                 tail = content[match.end():]
+                if tail.startswith(" import "):
+                    continue  # prefisso di from-import: validato sotto con i simboli
                 if tail.startswith("."):
                     member = re.match(r"\w+", tail[1:])
                     if member and ((APPLICATION_DIR / old / member.group(0)).with_suffix(".py").is_file()
@@ -194,6 +196,15 @@ def check(entries: dict[str, str]) -> int:
         for match in from_import.finditer(content):
             prefix_path = match.group(1).removeprefix("homun.application").lstrip(".").replace(".", "/")
             names = [part.partition(" as ")[0].strip() for part in match.group(2).split(",")]
+            if prefix_path in entries:
+                # il prefisso era un modulo spostato: valido solo se ora è un
+                # pacchetto e ogni simbolo è un modulo figlio (agent.runs.runs)
+                package = APPLICATION_DIR / prefix_path
+                if not (package.is_dir() and all(
+                        (package / n).with_suffix(".py").is_file() or (package / n).is_dir()
+                        for n in names)):
+                    leftovers.append(f"{path.relative_to(ROOT)}: {match.group(0).strip()} (prefisso vecchio: {prefix_path})")
+                continue
             keys = {f"{prefix_path}/{n}" if prefix_path else n for n in names}
             stale = sorted(keys & set(entries))
             if stale:
