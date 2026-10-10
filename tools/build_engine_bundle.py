@@ -157,10 +157,24 @@ def main():
         build = Path(directory)
         venv = build / 'venv'
         python = venv / ('Scripts/python.exe' if target['os'] == 'win' else 'bin/python')
-        run(uv, 'venv', '--python', args.python, venv)
+        # Prefer uv-managed python-build-standalone only. On Ubuntu 22.04 CI,
+        # actions/setup-python 3.13.12 matches the pin and links system
+        # libsqlite3 3.37, which lacks unixepoch() required by DBOS migrations.
+        # Managed CPython ships SQLite >= 3.38 and must be the freeze interpreter.
+        run(uv, 'venv', '--python', args.python, '--python-preference', 'only-managed', venv)
         python_version = subprocess.check_output([str(python), '-c', 'import platform; print(platform.python_version())'], text=True).strip()
         if python_version != '3.13.12':
             raise SystemExit('The validated build interpreter is CPython 3.13.12')
+        sqlite_version = subprocess.check_output(
+            [str(python), '-c', 'import sqlite3; print(sqlite3.sqlite_version)'],
+            text=True,
+        ).strip()
+        sqlite_major_minor = tuple(int(part) for part in sqlite_version.split('.')[:2])
+        if sqlite_major_minor < (3, 38):
+            raise SystemExit(
+                f'Build interpreter SQLite {sqlite_version} is too old for DBOS '
+                f'(need >= 3.38 for unixepoch). Refusing to freeze.'
+            )
         run(uv, 'pip', 'install', '--python', python, '--require-hashes',
             '-r', ROOT / 'engine/requirements.lock', '-r', ROOT / 'engine/requirements-packaging.lock')
         run(uv, 'pip', 'install', '--python', python, '--no-deps', '--no-build-isolation', ROOT / 'engine')
