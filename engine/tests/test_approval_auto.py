@@ -39,7 +39,7 @@ def _setup(ctx, actor, *, autonomy):
 
 
 def _propose(ctx, actor, work):
-    from homun.application.agent.runs import propose
+    from homun.application.agent.runs.runs import propose
     version = ctx.repository.load().works[work].version
     return propose(ctx, actor, work, {'command_id': 'run:auto', 'expected_version': version,
                                       'material_ids': []})
@@ -184,7 +184,7 @@ def test_delivery_sweep_hook_auto_approves_autonomous_run(ctx):
 
 def test_public_view_exposes_approval_channel_officially(ctx):
     """The API never leaked the underscore stamp; clients read approval_channel."""
-    from homun.application.agent.runs import list_runs, public
+    from homun.application.agent.runs.runs import list_runs, public
     from homun.application.agent.approval_auto import sweep
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     agent, work = _setup(ctx, actor, autonomy='autonomous')

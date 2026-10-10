@@ -164,7 +164,7 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
     # Resolve allowed tools from current run manifest
     import importlib
-    registry_module = importlib.import_module("homun.application.agent.tool_registry")
+    registry_module = importlib.import_module("homun.application.agent.tools.tool_registry")
     run_copy = dict(run)
     run_copy.setdefault("assignee_id", "default")
     reg = registry_module.registry_for(run_copy)

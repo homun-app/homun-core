@@ -47,7 +47,7 @@ from test_agent_runs import setup
 
 def test_run_rejects_repetition_without_tool_io_or_replay_after_restart(setup,monkeypatch):
     from test_native_agent import native_start
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.run_execution import advance
     from homun.context import create_context
     ctx,actor,work,material=setup
     p=native_start(ctx,actor,work,material)

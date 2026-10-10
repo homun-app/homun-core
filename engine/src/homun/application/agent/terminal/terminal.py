@@ -2,12 +2,12 @@
 from copy import deepcopy
 from homun.application.agent import native as agent_native
 from homun.application.computer import terminal_jobs
-from homun.application.agent.terminal_sessions import start_receipt
+from homun.application.agent.terminal.terminal_sessions import start_receipt
 from homun.domain.errors import ValidationError
 from homun.domain.models import Actor
 from homun.execution.contracts import digest
-from homun.application.agent.terminal_link import validate_link
-from homun.application.agent.terminal_request import proposal_body
+from homun.application.agent.terminal.terminal_link import validate_link
+from homun.application.agent.terminal.terminal_request import proposal_body
 
 
 def stage(ctx,actor,run,decision):
@@ -21,7 +21,7 @@ def stage(ctx,actor,run,decision):
 
 
 def resume(ctx,run_id):
-    from homun.application.agent.runs import lookup,authority
+    from homun.application.agent.runs.runs import lookup, authority
     store=ctx.repository.load();run=lookup(store,run_id)
     if run['status']!='waiting_external' or not run.get('terminal_request_id'):return False
     actor=Actor.model_validate(run['_actor'])

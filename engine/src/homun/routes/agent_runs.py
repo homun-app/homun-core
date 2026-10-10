@@ -2,10 +2,10 @@
 from typing import Literal
 from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
-from homun.application.agent.runs import approve, list_runs, propose
+from homun.application.agent.runs.runs import approve, list_runs, propose
 from homun.application.computer.surface_toolset_policy import RunToolPolicy
 from homun.application.agent.control import control
-from homun.application.agent.side_questions import answer_side_question
+from homun.application.agent.clarify.side_questions import answer_side_question
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _http_error
 from homun.routes.price_comparisons import request_context

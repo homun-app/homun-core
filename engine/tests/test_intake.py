@@ -81,7 +81,7 @@ def test_manual_rename_survives_proposal_confirmation(setup):
 
 @pytest.mark.parametrize('change', ['unknown_agent','unknown_capability','new_profile'])
 def test_catalog_and_profile_limits(setup,change):
-    from homun.application.work.intake import propose,confirm
+    from homun.application.work.intake import propose, confirm
     from homun.domain.errors import ValidationError
     ctx,actor,wid,brief=setup
     if change=='unknown_agent': brief['suggested_agent_id']='invented'
@@ -104,7 +104,7 @@ def test_catalog_and_profile_limits(setup,change):
 
 
 def test_superseding_clarification_and_restart(setup):
-    from homun.application.work.intake import propose,confirm,list_proposals
+    from homun.application.work.intake import propose, confirm, list_proposals
     from homun.domain.errors import ConflictError
     from homun.storage.sqlite import SqliteWorkspaceRepository
     ctx,actor,wid,brief=setup
@@ -120,7 +120,7 @@ def test_superseding_clarification_and_restart(setup):
 
 
 def test_read_write_and_replay_after_revocation(setup):
-    from homun.application.work.intake import propose,confirm,list_proposals
+    from homun.application.work.intake import propose, confirm, list_proposals
     from homun.domain.errors import PermissionDeniedError
     ctx,actor,wid,brief=setup
     project=ctx.service.apply(actor,'proj','project.create',{'name':'Private'})['project_id']
@@ -139,7 +139,7 @@ def test_read_write_and_replay_after_revocation(setup):
 
 
 def test_pending_intake_blocks_comparison_and_manual_rename_stales_confirmation(setup):
-    from homun.application.work.intake import propose,confirm
+    from homun.application.work.intake import propose, confirm
     from homun.application.work.price_comparisons import propose as comparison
     from homun.domain.errors import ConflictError
     ctx,actor,wid,brief=setup
@@ -150,7 +150,7 @@ def test_pending_intake_blocks_comparison_and_manual_rename_stales_confirmation(
 
 
 def test_staffing_confirmation_preserves_missing_materials_without_execution(setup):
-    from homun.application.work.intake import propose,confirm
+    from homun.application.work.intake import propose, confirm
     ctx,actor,wid,brief=setup
     brief['missing_information']=['I file CSV non sono ancora caricati']
     p=propose(ctx,actor,wid,{'command_id':'i','text':'Analizza prezzi','expected_version':1})
@@ -291,7 +291,7 @@ def test_clarification_model_receives_prior_task_context(setup):
 
 
 def test_confirmed_idle_intake_can_be_revised_without_early_reassignment(setup):
-    from homun.application.work.intake import propose,confirm
+    from homun.application.work.intake import propose, confirm
     from homun.policy.intake import require_confirmed_intake
     from homun.domain.errors import ConflictError
     ctx,actor,wid,brief=setup
@@ -308,7 +308,7 @@ def test_confirmed_idle_intake_can_be_revised_without_early_reassignment(setup):
 
 
 def test_staffing_only_refinement_preserves_brief_structurally(setup):
-    from homun.application.work.intake import propose,confirm
+    from homun.application.work.intake import propose, confirm
     ctx,actor,wid,brief=setup
     brief['constraints']=['Nessuna conversione valutaria']
     first=propose(ctx,actor,wid,{'command_id':'i','text':'Confronta i listini senza conversioni','expected_version':1})
@@ -376,7 +376,7 @@ def test_first_proposal_reports_no_changes(setup):
 
 
 def test_refinement_without_collaborator_keeps_anchor_staffing_actionable(setup):
-    from homun.application.work.intake import propose,confirm
+    from homun.application.work.intake import propose, confirm
     ctx,actor,wid,brief=setup
     first=propose(ctx,actor,wid,{'command_id':'i','text':'Confronta i listini','expected_version':1})
     ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
@@ -392,7 +392,7 @@ def test_refinement_without_collaborator_keeps_anchor_staffing_actionable(setup)
 
 
 def test_undeclared_staffing_swap_keeps_standing_collaborator(setup):
-    from homun.application.work.intake import propose,confirm
+    from homun.application.work.intake import propose, confirm
     ctx,actor,wid,brief=setup
     # Guided path: the first proposal creates a new collaborator (Elena) and the
     # person confirms; a later refinement that provides materials must not let
@@ -419,7 +419,7 @@ def test_undeclared_staffing_swap_keeps_standing_collaborator(setup):
 
 
 def test_declared_staffing_swap_is_honored_after_new_agent_confirmation(setup):
-    from homun.application.work.intake import propose,confirm
+    from homun.application.work.intake import propose, confirm
     ctx,actor,wid,brief=setup
     elena={'name':'Elena','role':'Coordinatore Preventivi','instructions':'Segue le richieste di preventivo'}
     ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
@@ -437,7 +437,7 @@ def test_declared_staffing_swap_is_honored_after_new_agent_confirmation(setup):
 
 
 def test_same_name_new_agent_reproposal_is_reanchored_not_duplicated(setup):
-    from homun.application.work.intake import propose,confirm
+    from homun.application.work.intake import propose, confirm
     ctx,actor,wid,brief=setup
     # The model re-proposes the standing collaborator as a "new" profile with
     # the same name and declares staffing changed: confirming would duplicate
@@ -462,7 +462,7 @@ def test_same_name_new_agent_reproposal_is_reanchored_not_duplicated(setup):
 
 
 def test_confirm_with_plan_steps_creates_accepted_chained_plan(setup):
-    from homun.application.work.intake import propose,confirm
+    from homun.application.work.intake import propose, confirm
     ctx,actor,wid,brief=setup
     ctx.models.complete=lambda *_a,**_k: SimpleNamespace(text=json.dumps({**brief,
         'plan_steps':[
@@ -495,7 +495,7 @@ def test_plan_step_with_unknown_assignee_fails_honestly(setup):
 
 
 def test_clarification_can_add_plan_steps_to_a_phaseless_brief(setup):
-    from homun.application.work.intake import propose,confirm
+    from homun.application.work.intake import propose, confirm
     ctx,actor,wid,brief=setup
     first=propose(ctx,actor,wid,{'command_id':'i','text':'Confronta i listini','expected_version':1})
     assert first['plan_steps']==[]

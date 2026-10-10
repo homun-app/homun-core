@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from unittest.mock import patch
 
-from homun.application.agent.subdirectory_hints import (
+from homun.application.agent.workspace.subdirectory_hints import (
     MAX_HINT_CHARS,
     SubdirectoryHintTracker,
     track_and_attach_hints,

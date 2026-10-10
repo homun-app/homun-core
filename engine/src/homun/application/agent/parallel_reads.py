@@ -2,9 +2,9 @@
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from homun.application.agent import native as agent_native
-from homun.application.agent.runs import authority, lookup
-from homun.application.agent.tool_registry import registry_for
-from homun.application.agent.workspace_files import execute as file_executor
+from homun.application.agent.runs.runs import authority, lookup
+from homun.application.agent.tools.tool_registry import registry_for
+from homun.application.agent.workspace.workspace_files import execute as file_executor
 from homun.domain.errors import ValidationError
 
 # Read-only metadata is necessary but insufficient: plugins and remote tools may
@@ -72,7 +72,7 @@ def execute(ctx, actor, snapshot, calls, *, material_executor):
                 pending = agent_native.pending(current)
                 if pending is None or pending.id != call.id:
                     raise ValidationError('Read batch changed before result admission')
-                from homun.application.agent.subdirectory_hints import track_and_attach_hints
+                from homun.application.agent.workspace.subdirectory_hints import track_and_attach_hints
                 wd = current.get('_workspace_root') or current.get('_cwd')
                 result, _ = track_and_attach_hints(current, call.name, call.arguments or {}, result, working_dir=wd)
                 projected = agent_native.append_result(current,result)

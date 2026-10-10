@@ -55,7 +55,7 @@ def _approve_terminal(ctx, actor, work, run) -> bool:
 
 
 def _approve_file_edit(ctx, actor, work, run) -> bool:
-    from homun.application.agent import workspace_file_edits
+    from homun.application.agent.workspace import workspace_file_edits
     proposal_id = run.get("file_edit_request_id")
     if not proposal_id:
         return False
@@ -76,7 +76,7 @@ def sweep(ctx, run_id: str) -> bool:
     Returns True when any gate transitioned. Failures leave the human gate
     in place; they never raise into the delivery loop.
     """
-    from homun.application.agent import runs as agent_runs
+    from homun.application.agent.runs import runs as agent_runs
     store = ctx.repository.snapshot()
     record = store.commands.get(run_id)
     if record is None or record.type != agent_runs.PROPOSAL_TYPE:

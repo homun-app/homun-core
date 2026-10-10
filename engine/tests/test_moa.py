@@ -19,8 +19,8 @@ from typing import List, Optional
 
 import pytest
 
-from homun.application.agent.moa_alternation import merge_same_role_messages
-from homun.application.agent.moa_contracts import (
+from homun.application.agent.moa.moa_alternation import merge_same_role_messages
+from homun.application.agent.moa.moa_contracts import (
     CADENCE_EVERY_N,
     CADENCE_PER_ITERATION,
     CADENCE_USER_TURN,
@@ -35,9 +35,9 @@ from homun.application.agent.moa_contracts import (
     parse_fanout_cadence,
     should_run_advisors,
 )
-from homun.application.agent.moa_coordinator import MoACoordinator
-from homun.application.agent.moa_filter import apply_privacy_filter, redact_sensitive_text
-from homun.application.agent.moa_trace import save_moa_turn_trace
+from homun.application.agent.moa.moa_coordinator import MoACoordinator
+from homun.application.agent.moa.moa_filter import apply_privacy_filter, redact_sensitive_text
+from homun.application.agent.moa.moa_trace import save_moa_turn_trace
 from homun.models.native_turn import NativeMessage, ToolCall
 from homun.models.types import UsageEntry
 
@@ -285,8 +285,8 @@ def test_moa_trace_persistence(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def test_agent_run_proposal_and_advance_with_moa():
-    from homun.application.agent import runs as agent_runs
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs import runs as agent_runs
+    from homun.application.agent.runs.run_execution import advance
     from test_agent_runs import setup
 
     # Create dummy setup

@@ -4,8 +4,8 @@ import pytest
 from test_agent_runs import setup, start
 from test_native_agent import native_start
 from test_agent_context import pressured, summary
-from homun.application.agent.run_execution import advance
-from homun.application.agent.runs import propose, approve
+from homun.application.agent.runs.run_execution import advance
+from homun.application.agent.runs.runs import propose, approve
 from homun.models.native_turn import NativeMessage
 from homun.models.native_errors import NativeModelError, TIMEOUT
 from homun.models.types import UsageEntry
@@ -73,7 +73,7 @@ def test_legacy_invalid_decision_preserves_reported_usage(setup):
 
 
 def test_side_question_settles_measured_usage_without_overwriting_main_progress(setup):
-    from homun.application.agent.side_questions import answer_side_question
+    from homun.application.agent.clarify.side_questions import answer_side_question
     ctx, actor, work, material = setup
     native_start(ctx, actor, work, material)
     original = list(ctx.repository.load().commands['run'].result['_messages'])
@@ -91,7 +91,7 @@ def test_side_question_settles_measured_usage_without_overwriting_main_progress(
 
 
 def test_side_question_source_revocation_retains_receipt_but_denies_response(setup):
-    from homun.application.agent.side_questions import answer_side_question
+    from homun.application.agent.clarify.side_questions import answer_side_question
     from homun.domain.errors import PermissionDeniedError
     ctx, actor, work, material = setup
     from homun.domain.models import Actor
@@ -171,7 +171,7 @@ def test_moa_advisor_failure_retains_partial_usage_then_aggregator_runs(setup):
 
 @pytest.mark.parametrize('failure', ['parse', 'transport'])
 def test_goal_judge_parse_and_transport_failures_retain_usage(setup, failure):
-    from homun.application.agent.run_execution import _claim
+    from homun.application.agent.runs.run_execution import _claim
     from homun.application.work.goal_judge import judge
     ctx, actor, work, material = setup
     native_start(ctx, actor, work, material)
@@ -189,7 +189,7 @@ def test_goal_judge_parse_and_transport_failures_retain_usage(setup, failure):
 
 @pytest.mark.parametrize('denied', [False, True])
 def test_consultation_uses_selected_teammate_connection_and_accounting_actor(setup, denied):
-    from homun.application.agent.run_execution import _claim
+    from homun.application.agent.runs.run_execution import _claim
     from homun.application.agent.consultation import consult
     ctx, actor, work, material = setup
     with ctx.repository.transaction() as store:
@@ -263,7 +263,7 @@ def test_auxiliary_denied_reservation_rolls_back_attempt_and_recovery(setup, mon
     from copy import deepcopy
     from homun.application.work import budgets
     from homun.application.agent.agent_context import prepare
-    from homun.application.agent.run_execution import _claim
+    from homun.application.agent.runs.run_execution import _claim
     from homun.application.work.goal_judge import judge
     from homun.domain.errors import DomainError, ValidationError
     ctx, actor, work, material = setup
@@ -307,7 +307,7 @@ def test_legacy_receipt_queries_authorize_without_native_transcript(setup):
 
 
 def test_side_question_connection_is_pinned_across_concurrent_main_fallback(setup, monkeypatch):
-    from homun.application.agent import side_questions as agent_side_questions
+    from homun.application.agent.clarify import side_questions as agent_side_questions
     ctx, actor, work, material = setup
     native_start(ctx, actor, work, material)
     original_connection = ctx.models.get_connection

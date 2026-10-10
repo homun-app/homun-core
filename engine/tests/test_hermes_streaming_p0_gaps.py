@@ -135,8 +135,8 @@ def test_p0_stream_partial_keeps_commentary_tail_when_tools_arrive(setup, monkey
     deltas immediately before tool_calls can leave stream_partial stuck on an
     earlier prefix, so the UI loses the tail when the tool round starts.
     """
-    from homun.application.agent.runs import propose, approve
-    from homun.application.agent import streaming as agent_streaming
+    from homun.application.agent.runs.runs import propose, approve
+    from homun.application.agent.runs import streaming as agent_streaming
     from homun.models.native_turn import NativeMessage
     from types import SimpleNamespace
 

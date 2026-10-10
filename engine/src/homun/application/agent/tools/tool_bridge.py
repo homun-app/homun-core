@@ -5,7 +5,7 @@ canonical history keeps the wrapper and its original call ID.
 """
 from typing import Any
 from pydantic import Field, ValidationError as PydanticValidationError
-from homun.application.agent.tools import NoArguments
+from homun.application.agent.tools.tools import NoArguments
 from homun.domain.errors import ValidationError
 from homun.models.agent_turn import ToolDefinition
 from homun.tools.registry import ToolEntry

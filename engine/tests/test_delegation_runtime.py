@@ -3,8 +3,8 @@ import json
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application.agent.runs import propose, approve
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.runs import propose, approve
+from homun.application.agent.runs.run_execution import advance
 from homun.models.native_turn import NativeMessage, ToolCall
 
 
@@ -243,7 +243,7 @@ def test_idle_automation_does_not_wake_waiting_parent_before_receipt(setup):
 
 
 def test_children_do_not_replace_parent_surface_or_accept_direct_work_controls(setup):
-    from homun.application.agent.runs import list_runs
+    from homun.application.agent.runs.runs import list_runs
     from homun.application.agent.control import control
     from homun.domain.errors import ValidationError
     ctx, actor, work, material, p = start(setup)

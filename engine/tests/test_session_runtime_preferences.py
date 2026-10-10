@@ -2,9 +2,9 @@
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application.agent import runs as agent_runs
+from homun.application.agent.runs import runs as agent_runs
 from homun.application.sessions import runtime as session_runtime
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.run_execution import advance
 from homun.models.native_turn import NativeMessage
 from homun.models.types import UsageEntry
 
@@ -115,7 +115,7 @@ def test_fork_chain_freezes_preferences_at_each_branch(setup):
 
 @pytest.mark.parametrize('operation', ['side', 'judge', 'compact', 'legacy'])
 def test_auxiliary_and_legacy_calls_use_the_pinned_requested_model(setup, operation):
-    from homun.application.agent.run_execution import _claim
+    from homun.application.agent.runs.run_execution import _claim
     ctx, actor, work, material = begin(setup, model_id='pinned-call', **({'connection_id': 'fake', 'session_management': False} if operation == 'legacy' else {}))
     called = []
     if operation == 'legacy':
@@ -125,7 +125,7 @@ def test_auxiliary_and_legacy_calls_use_the_pinned_requested_model(setup, operat
         ctx.models.complete = lambda *a, **k: (called.append(k) or SimpleNamespace(text=json.dumps({'kind': 'finish', 'message': 'Done'}), usage=None))
         advance(ctx, 'run')
     elif operation == 'side':
-        from homun.application.agent.side_questions import answer_side_question
+        from homun.application.agent.clarify.side_questions import answer_side_question
         ctx.models.complete_summary = lambda *a, **k: (called.append(k) or SimpleNamespace(message=NativeMessage(role='assistant', content='Side'), usage=None))
         answer_side_question(ctx, actor, work, 'run', 'Question')
     elif operation == 'judge':

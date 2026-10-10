@@ -135,7 +135,7 @@ def _gate_label(kind: str, gate: Dict[str, Any], work_title: str) -> str:
 
 def _pending_gates(store) -> list[tuple[str, str, Dict[str, Any], str]]:
     """(kind, gate_id, gate, work_id) for every gate still awaiting a human."""
-    from homun.application.agent.runs import PROPOSAL_TYPE
+    from homun.application.agent.runs.runs import PROPOSAL_TYPE
     gates: list[tuple[str, str, Dict[str, Any], str]] = []
     for record in store.commands.values():
         result = getattr(record, "result", None)
@@ -248,7 +248,8 @@ def notify_pending(ctx) -> int:
 # ── inbound decisions ────────────────────────────────────────────────────────
 
 def _approve_gate(ctx, entry: Dict[str, Any], channel: str) -> str:
-    from homun.application.agent import runs as agent_runs, workspace_file_edits
+    from homun.application.agent.runs import runs as agent_runs
+    from homun.application.agent.workspace import workspace_file_edits
     from homun.application.computer import terminal_jobs
     from homun.application.agent.approval_auto import owner_actor
     from homun.domain.models import Actor

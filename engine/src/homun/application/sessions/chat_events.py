@@ -26,7 +26,7 @@ HEARTBEAT_SECONDS = 15.0
 
 def _chat_runs_for(store, conversation_id: str):
     """I run chat di questa conversazione (marcati _chat_conversation_id)."""
-    from homun.application.agent.runs import PROPOSAL_TYPE
+    from homun.application.agent.runs.runs import PROPOSAL_TYPE
     runs = []
     for record in store.commands.values():
         if record.type != PROPOSAL_TYPE or not isinstance(record.result, dict):

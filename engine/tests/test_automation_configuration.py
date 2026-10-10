@@ -2,8 +2,8 @@
 import pytest
 from test_agent_runs_api import api_setup
 from homun.application.automation.store import AutomationStore, set_automation_store
-from homun.application.agent.runs import approve
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.runs import approve
+from homun.application.agent.runs.run_execution import advance
 from homun.application.agent.agent_automation import wake_due_automation
 from homun.models.native_turn import NativeMessage
 from types import SimpleNamespace

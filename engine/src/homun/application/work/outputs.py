@@ -1,6 +1,6 @@
 """Authorized listing/download of immutable, run-originated file snapshots."""
 import hashlib
-from homun.application.agent.workspace_files import OUTPUT_TYPE,public
+from homun.application.agent.workspace.workspace_files import OUTPUT_TYPE, public
 from homun.domain.errors import ConflictError,NotFoundError
 from homun.execution.files import MAX_BYTES
 from homun.materials.blob import read_material_blob

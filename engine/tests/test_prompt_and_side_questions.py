@@ -34,7 +34,7 @@ from homun.application.agent.prompt_assembler import (
     list_context_file_sources,
     scan_for_threats,
 )
-from homun.application.agent.side_question import (
+from homun.application.agent.clarify.side_question import (
     SideQuestionRunner,
     render_history_for_side_question,
     trim_snapshot_for_fork,

@@ -3,10 +3,10 @@ from copy import deepcopy
 import difflib
 import hashlib
 from homun.application.agent import native as agent_native
-from homun.application.agent.runs import authority, lookup
-from homun.application.agent.workspace_checkpoints import note_agent_write, snapshot_before_write
-from homun.application.agent.workspace_file_baseline import full_baseline, seen_current
-from homun.application.agent.workspace_file_contracts import root_for
+from homun.application.agent.runs.runs import authority, lookup
+from homun.application.agent.workspace.workspace_checkpoints import note_agent_write, snapshot_before_write
+from homun.application.agent.workspace.workspace_file_baseline import full_baseline, seen_current
+from homun.application.agent.workspace.workspace_file_contracts import root_for
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from homun.domain.models import CommandRecord, utc_now
 from homun.execution.contracts import digest

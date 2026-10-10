@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 from test_agent_runs import setup
-from homun.application.agent.runs import propose, approve
-from homun.application.agent.run_execution import advance
-from homun.application.agent.tool_registry import registry_for
+from homun.application.agent.runs.runs import propose, approve
+from homun.application.agent.runs.run_execution import advance
+from homun.application.agent.tools.tool_registry import registry_for
 from homun.models.native_turn import NativeMessage, ToolCall
 
 

@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_native_agent import native_start
-from homun.application.agent import runs as agent_runs
+from homun.application.agent.runs import runs as agent_runs
 from homun.application.sessions import tools as session_tools
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.run_execution import advance
 from homun.context import create_context
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from homun.models.native_turn import NativeMessage, ToolCall
@@ -247,7 +247,7 @@ def test_native_session_mutation_dispatch_gets_stable_server_key(setup):
 
 
 def test_historical_write_receipt_is_context_and_never_dispatched(setup, monkeypatch):
-    from homun.application.agent import run_execution as agent_run_execution
+    from homun.application.agent.runs import run_execution as agent_run_execution
     ctx, actor, work, material = setup
     ctx.models.set_active('openai_compatible')
     p = agent_runs.propose(ctx, actor, work, {'command_id': 'run', 'expected_version': 1, 'material_ids': [material], 'memory': True})
@@ -329,7 +329,7 @@ def test_metadata_archive_search_and_exact_snapshot_replay(setup):
 
 def test_copied_session_tool_history_retains_revocation_dependency(setup):
     from homun.domain.models import Actor
-    from homun.application.agent.tool_registry import registry_for
+    from homun.application.agent.tools.tool_registry import registry_for
     ctx, actor, work, material = completed(setup)
     # A consumer in the same work need not select the source material itself.
     with ctx.repository.transaction() as store:

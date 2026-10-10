@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from homun.application.agent.workspace_checkpoints import (
+from homun.application.agent.workspace.workspace_checkpoints import (
     get_checkpoint_manager,
     get_workspace_working_diff,
     list_workspace_checkpoints,

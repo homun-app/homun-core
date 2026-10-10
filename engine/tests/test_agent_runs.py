@@ -24,7 +24,7 @@ def setup(tmp_path):
 
 
 def start(ctx,actor,work,material):
-    from homun.application.agent.runs import propose, approve
+    from homun.application.agent.runs.runs import propose, approve
     p=propose(ctx,actor,work,{'command_id':'run','expected_version':1,'material_ids':[material],'memory':False,'skills':False})
     approve(ctx,actor,work,p['id'],{'command_id':'approve','digest':p['digest'],'expected_version':p['expected_version']})
     return p
@@ -38,7 +38,7 @@ def scripted(ctx,decisions,seen):
 
 
 def test_adapts_to_read_result_and_survives_reload(setup):
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.run_execution import advance
     ctx,actor,work,material=setup
     p=start(ctx,actor,work,material)
     seen=[]
@@ -61,8 +61,8 @@ def test_adapts_to_read_result_and_survives_reload(setup):
 
 
 def test_ask_waits_for_authorized_contribution_then_resumes(setup):
-    from homun.application.agent.run_execution import advance
-    from homun.application.agent.runs import resume_waiting
+    from homun.application.agent.runs.run_execution import advance
+    from homun.application.agent.runs.runs import resume_waiting
     ctx,actor,work,material=setup
     p=start(ctx,actor,work,material);seen=[]
     scripted(ctx,[{'kind':'ask','message':'A chi è destinata la nota?'},
@@ -80,7 +80,7 @@ def test_ask_waits_for_authorized_contribution_then_resumes(setup):
 
 
 def test_changed_source_blocks_and_no_artifact(setup):
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.run_execution import advance
     ctx,actor,work,material=setup
     p=start(ctx,actor,work,material)
     with ctx.repository.transaction() as store:store.materials[material].version+=1
@@ -89,7 +89,7 @@ def test_changed_source_blocks_and_no_artifact(setup):
 
 
 def test_pause_fences_inflight_model_result(setup):
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.run_execution import advance
     ctx,actor,work,material=setup
     p=start(ctx,actor,work,material)
     def complete(*a,**k):
@@ -104,7 +104,7 @@ def test_pause_fences_inflight_model_result(setup):
 
 
 def test_budget_and_max_steps_stop_loop(setup):
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.run_execution import advance
     ctx,actor,work,material=setup
     p=start(ctx,actor,work,material);seen=[]
     scripted(ctx,[{'kind':'tool','tool':'list_materials','arguments':{},'message':'Elenco'}]*12,seen)
@@ -115,7 +115,7 @@ def test_budget_and_max_steps_stop_loop(setup):
 
 
 def test_resume_after_process_context_restart_uses_saved_observation(setup):
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.run_execution import advance
     ctx,actor,work,material=setup
     p=start(ctx,actor,work,material);seen=[]
     scripted(ctx,[{'kind':'tool','tool':'read_material','arguments':{'material_id':material},'message':'Leggo'}],seen)
@@ -131,8 +131,8 @@ def test_resume_after_process_context_restart_uses_saved_observation(setup):
 
 
 def test_wrong_approval_and_concurrent_turn_are_rejected(setup):
-    from homun.application.agent.runs import propose,approve
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.runs import propose, approve
+    from homun.application.agent.runs.run_execution import advance
     ctx,actor,work,material=setup
     p=propose(ctx,actor,work,{'command_id':'run','expected_version':1,'material_ids':[material],'memory':False,'skills':False})
     with pytest.raises(ConflictError):
@@ -178,7 +178,7 @@ def test_http_runtime_delivers_adaptive_run(setup):
 
 
 def test_stale_pending_scope_can_be_replaced_and_history_read(setup):
-    from homun.application.agent.runs import propose,list_runs
+    from homun.application.agent.runs.runs import propose, list_runs
     ctx,actor,work,material=setup
     p=propose(ctx,actor,work,{'command_id':'old','expected_version':1,'material_ids':[material]})
     with ctx.repository.transaction() as store:store.materials[material].version+=1
@@ -190,7 +190,7 @@ def test_stale_pending_scope_can_be_replaced_and_history_read(setup):
 
 
 def test_adaptive_phase_honors_assignee_and_order(setup):
-    from homun.application.agent.runs import propose
+    from homun.application.agent.runs.runs import propose
     ctx,actor,work,material=setup
     store=ctx.repository.load();ctx.service=ctx.service.for_store(store)
     agent=ctx.service.apply(actor,'ada','agent.create',{'name':'Ada','role':'Analista','instructions':'Verifica le fonti','preferred_connection_id':'fake'})['agent_id']
@@ -205,7 +205,7 @@ def test_adaptive_phase_honors_assignee_and_order(setup):
 
 
 def test_cannot_start_adaptive_phase_ahead_of_pending_human_phase(setup):
-    from homun.application.agent.runs import propose
+    from homun.application.agent.runs.runs import propose
     ctx,actor,work,material=setup
     store=ctx.repository.load();ctx.service=ctx.service.for_store(store)
     plan=ctx.service.apply(actor,'plan','plan.propose',{'work_id':work,'expected_version':1,'steps':[
@@ -218,8 +218,8 @@ def test_cannot_start_adaptive_phase_ahead_of_pending_human_phase(setup):
 
 
 def test_request_changes_allows_new_scoped_delivery(setup):
-    from homun.application.agent.runs import propose,approve
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.runs import propose, approve
+    from homun.application.agent.runs.run_execution import advance
     ctx,actor,work,material=setup
     p=start(ctx,actor,work,material);seen=[]
     scripted(ctx,[{'kind':'finish','message':'Prima bozza'}, {'kind':'finish','message':'Bozza corretta'}],seen)
@@ -239,8 +239,8 @@ def test_request_changes_allows_new_scoped_delivery(setup):
 
 
 def test_clarification_does_not_start_or_complete_the_following_phase(setup):
-    from homun.application.agent.runs import propose,approve,resume_waiting
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.runs import propose, approve, resume_waiting
+    from homun.application.agent.runs.run_execution import advance
     ctx,actor,work,material=setup
     store=ctx.repository.load();ctx.service=ctx.service.for_store(store)
     plan=ctx.service.apply(actor,'plan','plan.propose',{'work_id':work,'expected_version':1,'steps':[
@@ -264,8 +264,8 @@ def test_clarification_does_not_start_or_complete_the_following_phase(setup):
 
 
 def test_provider_failure_can_be_retried_with_fresh_approval(setup):
-    from homun.application.agent.runs import propose,approve
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.runs import propose, approve
+    from homun.application.agent.runs.run_execution import advance
     ctx,actor,work,material=setup
     p=start(ctx,actor,work,material)
     def broken(*a,**k):raise RuntimeError('down')
@@ -279,8 +279,8 @@ def test_provider_failure_can_be_retried_with_fresh_approval(setup):
 
 
 def test_selected_team_coordinates_a_real_model_contribution(setup):
-    from homun.application.agent.runs import propose,approve
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.runs import propose, approve
+    from homun.application.agent.runs.run_execution import advance
     ctx,actor,work,material=setup
     store=ctx.repository.load();ctx.service=ctx.service.for_store(store)
     coordinator=ctx.service.apply(actor,'lead','agent.create',{'name':'Marta','role':'Coordinatrice','instructions':'Coordina le verifiche'})['agent_id']
@@ -308,8 +308,8 @@ def test_selected_team_coordinates_a_real_model_contribution(setup):
 
 
 def test_modified_teammate_invalidates_approved_scope(setup):
-    from homun.application.agent.runs import propose,approve
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.runs import propose, approve
+    from homun.application.agent.runs.run_execution import advance
     ctx,actor,work,material=setup
     store=ctx.repository.load();ctx.service=ctx.service.for_store(store)
     member=ctx.service.apply(actor,'m','agent.create',{'name':'Ada','role':'Analista','instructions':'Verifica'})['agent_id']

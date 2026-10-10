@@ -3,8 +3,8 @@ from threading import Barrier
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application.agent.runs import propose, approve
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.runs import propose, approve
+from homun.application.agent.runs.run_execution import advance
 from homun.models.native_turn import NativeMessage, ToolCall
 
 
@@ -22,7 +22,7 @@ def two_reads(material):
 
 
 def test_reads_execute_concurrently_but_commit_in_model_order(setup,monkeypatch):
-    from homun.application.agent import run_execution as agent_run_execution
+    from homun.application.agent.runs import run_execution as agent_run_execution
     ctx,actor,work,material,run = start(setup,parallel_read_tools=True)
     barrier = Barrier(2,timeout=2)
     original = agent_run_execution.run_tool
@@ -50,7 +50,7 @@ def test_batch_stops_at_human_question(setup):
 
 
 def test_pause_during_parallel_reads_discards_uncommitted_results(setup,monkeypatch):
-    from homun.application.agent import run_execution as agent_run_execution
+    from homun.application.agent.runs import run_execution as agent_run_execution
     from homun.application.agent.control import control
     ctx,actor,work,material,run = start(setup,parallel_read_tools=True)
     barrier = Barrier(2,timeout=2)
@@ -94,7 +94,7 @@ def test_crash_during_batch_commit_replays_reads_without_duplicate_results(setup
 
 
 def test_batch_is_bounded_to_four_reads_per_advance(setup,monkeypatch):
-    from homun.application.agent import run_execution as agent_run_execution
+    from homun.application.agent.runs import run_execution as agent_run_execution
     ctx,actor,work,material,run=start(setup,parallel_read_tools=True)
     barrier=Barrier(4,timeout=2)
     original=agent_run_execution.run_tool

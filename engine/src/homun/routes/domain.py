@@ -9,7 +9,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from homun.application.sessions.command_types import CommandRequest, CommandResponse
 from homun.application.sessions.command_delivery import admit, complete
-from homun.application.agent.followup_views import conversation_followups
+from homun.application.agent.runs.followup_views import conversation_followups
 
 from homun.context import get_context
 from homun.domain.errors import (

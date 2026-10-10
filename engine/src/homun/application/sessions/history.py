@@ -190,7 +190,7 @@ def bind_to_run(ctx, store, actor, run, body):
     binding = context_binding(store, actor, selection['work_id'], selection['session_id'],
                               expected_revision=selection['revision'])
     # Current material contents/revisions must still match, not just project membership.
-    from homun.application.agent.tools import validate_sources
+    from homun.application.agent.tools.tools import validate_sources
     validate_sources(ctx, store, actor, binding['materials'])
     run['_session_context'] = binding
     run['session_context'] = {key: binding[key] for key in ('session_id', 'work_id', 'revision', 'provenance')}
@@ -210,5 +210,5 @@ def authorize_run_context(ctx, store, actor, run):
     binding = run.get('_session_context')
     if binding:
         validate_context(store, actor, binding)
-        from homun.application.agent.tools import validate_sources
+        from homun.application.agent.tools.tools import validate_sources
         validate_sources(ctx, store, actor, binding['materials'])

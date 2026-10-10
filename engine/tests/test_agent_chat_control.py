@@ -29,7 +29,7 @@ def setup(tmp_path):
 
 
 def _orphan_run(store, actor_id: str, workspace_id: str) -> None:
-    from homun.application.agent.runs import PROPOSAL_TYPE
+    from homun.application.agent.runs.runs import PROPOSAL_TYPE
     from homun.domain.models import CommandRecord
     run_id = f"chat-run:{secrets.token_hex(6)}"
     store.commands[run_id] = CommandRecord(

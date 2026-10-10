@@ -1,8 +1,8 @@
 """Transient native stream callbacks fenced by the durable run lease."""
 from time import monotonic
 from datetime import timedelta
-from homun.application.agent.runs import lookup, authority
-from homun.application.agent.run_fencing import LEASE_SECONDS
+from homun.application.agent.runs.runs import lookup, authority
+from homun.application.agent.runs.run_fencing import LEASE_SECONDS
 from homun.domain.errors import DomainError
 from homun.domain.models import Actor, utc_now
 

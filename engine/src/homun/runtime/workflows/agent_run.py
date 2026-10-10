@@ -1,8 +1,8 @@
 """DBOS delivers adaptive turns with stable identity and journal order."""
 from dbos import DBOS, SetWorkflowID
 import logging
-from homun.application.agent.run_execution import advance, fail
-from homun.application.agent.runs import PROPOSAL_TYPE, resume_waiting
+from homun.application.agent.runs.run_execution import advance, fail
+from homun.application.agent.runs.runs import PROPOSAL_TYPE, resume_waiting
 from homun.domain.errors import DomainError
 
 _context = None
@@ -80,13 +80,13 @@ def deliver_agent_runs(ctx):
             from homun.application.agent.external import resume_external
             try:
                 if run.get('terminal_request_id'):
-                    from homun.application.agent.terminal import resume as resume_terminal
+                    from homun.application.agent.terminal.terminal import resume as resume_terminal
                     resume_terminal(ctx,run['id'])
                 elif run.get('terminal_wait_id'):
-                    from homun.application.agent.terminal_sessions import resume_wait
+                    from homun.application.agent.terminal.terminal_sessions import resume_wait
                     resume_wait(ctx,run['id'])
                 elif run.get('file_edit_request_id'):
-                    from homun.application.agent.workspace_file_edits import resume as resume_edit
+                    from homun.application.agent.workspace.workspace_file_edits import resume as resume_edit
                     resume_edit(ctx,run['id'])
                 else:
                     resume_external(ctx, run['id'])
@@ -97,7 +97,7 @@ def deliver_agent_runs(ctx):
             run = ctx.repository.snapshot().commands[run['id']].result
         if run['status'] == 'waiting_input':
             try:
-                from homun.application.agent.clarification_deadlines import expire_waiting
+                from homun.application.agent.clarify.clarification_deadlines import expire_waiting
                 expire_waiting(ctx, run['id'])
                 resume_waiting(ctx, run['id'])
             except DomainError as exc:

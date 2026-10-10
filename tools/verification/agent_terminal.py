@@ -3,9 +3,10 @@ import argparse,json,tempfile,time,uuid
 from pathlib import Path
 from homun.context import create_context
 from homun.domain.models import Actor
-from homun.application.agent import runs as agent_runs, terminal as agent_terminal
+from homun.application.agent.runs import runs as agent_runs
+from homun.application.agent.terminal import terminal as agent_terminal
 from homun.application.computer import terminal_jobs
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.run_execution import advance
 from homun.application.computer.terminal_contracts import job_spec
 
 

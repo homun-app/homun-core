@@ -36,7 +36,7 @@ def _completed_run(ctx, actor, *, skills=True, messages=None, agent_id=None):
     work = _apply(ctx, actor, f'w-{unique}', 'work.create', {
         'conversation_id': conversation, 'title': 'L',
         'objective': 'Prepara il listino.'})['work_id']
-    from homun.application.agent.runs import propose
+    from homun.application.agent.runs.runs import propose
     proposal = propose(ctx, actor, work,
                        {'command_id': f'run-{unique}', 'expected_version': 1, 'material_ids': []})
     with ctx.repository.locked():

@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict
 
-from homun.application.agent.workspace_checkpoints import (
+from homun.application.agent.workspace.workspace_checkpoints import (
     get_workspace_working_diff,
     list_workspace_checkpoints,
     plan_workspace_restore,
