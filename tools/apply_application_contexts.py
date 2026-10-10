@@ -79,7 +79,6 @@ def rewrite_from_imports(content: str, entries: dict[str, str]) -> tuple[str, li
             context, stem = entries[name].split("/", 1)
             binding = alias or name
             grouped.setdefault(context, []).append(stem if stem == binding else f"{stem} as {binding}")
-        touched.append(match.group(0).strip())
         lines = []
         if unmapped:
             lines.append(f"{indent}from homun.application import {', '.join(unmapped)}")
