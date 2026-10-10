@@ -18,9 +18,9 @@ annotated-types==0.8.0 \
     # via
     #   -c engine/requirements.lock
     #   pydantic
-anthropic==1.6.0 \
-    --hash=sha256:049434f013d3a874acdfee696ec626e19166d58f4277e8fa34e5d0a5ec250ad0 \
-    --hash=sha256:ce3c032f940984f67c516db896375bff36959f8dc589973e386f8e6ea81bbec3
+anthropic==1.13.0 \
+    --hash=sha256:157bd74dbf6a595cf9e5fcac557c791fd297924dc48261f57470c2ed6f4e6671 \
+    --hash=sha256:ad11d9bb9adafdfea26113943bcde9973e2a439ebeeda6c89ff3e3d85bb2f5c1
     # via
     #   -c engine/requirements.lock
     #   pydantic-ai-slim
@@ -533,9 +533,9 @@ fastmcp-slim==4.0.5 \
     # via
     #   -c engine/requirements.lock
     #   pydantic-ai-slim
-genai-prices==0.1.7 \
-    --hash=sha256:090ba285549e0d2ea3187d05f091a5f0ae722e652143fa844ac809205aecd023 \
-    --hash=sha256:4305395c5891796860c697cc3a49ab50b751ed62c8ff1911e291ea8da77f3a91
+genai-prices==0.1.10 \
+    --hash=sha256:1f0eb9ff0b02f3a40b3aa590098fbc3bfc9e08ef124fa0bd132e9d899a6fec88 \
+    --hash=sha256:889ba486497f8a85e9dd0e9228a27f2e135e31a850e96924b880f22c132092ac
     # via
     #   -c engine/requirements.lock
     #   pydantic-ai-slim
@@ -545,9 +545,9 @@ google-auth==2.58.0 \
     # via
     #   -c engine/requirements.lock
     #   google-genai
-google-genai==2.24.0 \
-    --hash=sha256:59e5f2d88bc2d6ed04aa1aa14cb5629090cfe9458401745e620b24d1fe9893d7 \
-    --hash=sha256:814b63d05dca4776c5a322699eb30c565040cf8d5fd77c38714076535fb2e019
+google-genai==2.29.0 \
+    --hash=sha256:124d3eef9ff6b9e4ea548f95ff5b7721683e7990c0a936b006d9e2ab61ea897d \
+    --hash=sha256:7adda55cb6746fb46d38ad3202c3372840b96eede964b5fb3df1469cd4998570
     # via
     #   -c engine/requirements.lock
     #   pydantic-ai-slim
@@ -1167,9 +1167,9 @@ more-itertools==11.1.0 \
     #   -c engine/requirements.lock
     #   jaraco-classes
     #   jaraco-functools
-openai==3.14.1 \
-    --hash=sha256:2f3423a71af767d9071b059cf6df1e97a721c3a8d19417375ad7993d4df0d346 \
-    --hash=sha256:a6758739282f3b1cafe8df1204f7a2f7b1e9edbbcfa41c0efba687448fbc51cf
+openai==3.28.0 \
+    --hash=sha256:1ea40a084ffe2f9f16fd3bea6e870f757853b536b18d8e737c518ef849a2920c \
+    --hash=sha256:cf0509d32d7bd8eb6a3db02417957cb455212b6629d071826b9ea1f61659e2a4
     # via
     #   -c engine/requirements.lock
     #   pydantic-ai-slim
@@ -1440,15 +1440,15 @@ pydantic==2.13.5 \
     #   pydantic-evals
     #   pydantic-graph
     #   pydantic-settings
-pydantic-ai==2.44.0 \
-    --hash=sha256:98786ae0e57a28caac446553e4ac840308fb37ad13d954fe3982d471485919ff \
-    --hash=sha256:b8402d7f265b9acf626b8c2c998f7a88a5e4e5d5dac4a0b9cdf81aa8621c624b
+pydantic-ai==2.53.0 \
+    --hash=sha256:361cdbf803eedc077d95ebbf695865576a8e0555f527970532301aa95bdf2f35 \
+    --hash=sha256:a9aa50daebcb6266c04eafd56de5341b845a1105ee509fa32e576a92ffbf90d1
     # via
     #   -c engine/requirements.lock
     #   homun-engine (engine/pyproject.toml)
-pydantic-ai-slim==2.44.0 \
-    --hash=sha256:67063d1b2900e92dc558079fa3854e0141ed6f81ec5fb7d9c4d1b3b86bd0c9b6 \
-    --hash=sha256:88be3150dc6c89383e4dd596414dda3479c2773ee6e9e40789596d82fc34a783
+pydantic-ai-slim==2.53.0 \
+    --hash=sha256:37539693ff944dca2ee1ad30ad3c2b5c8adfdb9f54808767098dbc5410130a9b \
+    --hash=sha256:979fb5553cc32baf9f3aaeff7a83c19d6ce6d19c0284f5cd54087bc9870b2522
     # via
     #   -c engine/requirements.lock
     #   pydantic-ai
@@ -1577,15 +1577,15 @@ pydantic-core==2.46.5 \
     # via
     #   -c engine/requirements.lock
     #   pydantic
-pydantic-evals==2.44.0 \
-    --hash=sha256:4b80eddf9230f320307609d616b26eef1da8e712fd4c3c681b6d02fc52e195ac \
-    --hash=sha256:f3adf1b9de1596b9b770b5dd9252e2f88bcec7fed0d7e41463bc48bcd7ce9956
+pydantic-evals==2.53.0 \
+    --hash=sha256:915588b4451862c805e0188dfcdf43aa4370047e8e9c1c06faaffcf28860e185 \
+    --hash=sha256:f098d1e70f5d00f609c29f125aee85d7fa1eba642c6f3571f03b2a0bb6c0532c
     # via
     #   -c engine/requirements.lock
     #   pydantic-ai-slim
-pydantic-graph==2.44.0 \
-    --hash=sha256:7a7aec1399d8dfc09f0485c4f9749c568bc451ed517ee1f3e903c3d216ea17e5 \
-    --hash=sha256:e6d62aa8579b83815b9adcb3dbff210647951ef4fa5f6526b24ee9d168d385bb
+pydantic-graph==2.53.0 \
+    --hash=sha256:28f05d5f66f5f6b11ef8f1c263f93781271b3af77ef3b313cc51b88a2e33445a \
+    --hash=sha256:48d70fd7affe15f33773a74b9657ab9442569725d9e67263ac3a3b95de89f714
     # via
     #   -c engine/requirements.lock
     #   pydantic-ai-slim
@@ -1602,9 +1602,9 @@ pygments==2.21.0 \
     #   -c engine/requirements.lock
     #   pytest
     #   rich
-pyjwt==2.14.0 \
-    --hash=sha256:77283c83fb56ecf566a886c757a714bc83668e38156de2cce8263302f42e0b86 \
-    --hash=sha256:ad0cef71c756a56e74863c2919cf0985f72decbcfcb550ee2f422e7c62b5eedc
+pyjwt==2.15.0 \
+    --hash=sha256:7a3742debf6b879e912dbb9819ceec1594be812452b78c5f2e2dfc56564954f8 \
+    --hash=sha256:b11c5f9791d7bf51c2b39a81ed669f6b2dbbd669df2942f6c60167e9e3d1abe4
     # via
     #   -c engine/requirements.lock
     #   mcp
@@ -1634,7 +1634,9 @@ pynacl==1.6.2 \
     --hash=sha256:d071c6a9a4c94d79eb665db4ce5cedc537faf74f2355e4d502591d850d3913c0 \
     --hash=sha256:d29bfe37e20e015a7d8b23cfc8bd6aa7909c92a1b8f41ee416bbb3e79ef182b2 \
     --hash=sha256:fe9847ca47d287af41e82be1dd5e23023d3c31a951da134121ab02e42ac218c9
-    # via homun-engine (engine/pyproject.toml)
+    # via
+    #   -c engine/requirements.lock
+    #   homun-engine (engine/pyproject.toml)
 pypdf==6.19.0 \
     --hash=sha256:7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14 \
     --hash=sha256:bbc43aca292369ccc6cbc8a921991ecf2538a3587ab5a116eff06c321d647155
