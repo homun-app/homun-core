@@ -120,6 +120,30 @@ gh api -X PATCH "repos/homun-app/homun-core/dependabot/alerts/130" \
   -f dismissed_comment="Dipendenza solo-build (electron-builder -> @electron/get -> global-agent -> roarr -> sprintf-js): non compare nell'app distribuita, verificata dall'allowlist di packaging (apps/desktop/tests/packaging.test.cjs). Nessuna versione patchata di sprintf-js esiste; il fix richiede @electron/get >= 4 (major) che tocca il download di Electron."
 ```
 
+## Nota — copertura parziale dell'override `katex` (alert 151)
+
+L'override `katex: ^0.18.11` in `package.json` chiude l'alert 151 e porta a
+0.18.11 la copia di KaTeX risolta da npm, usata dalla strada principale:
+formule nei messaggi della chat (`@streamdown/math` → `rehype-katex`), cioè
+dove arriva testo esterno (output del modello, messaggi dei collaboratori).
+
+La correzione **non copre** le formule dentro i diagrammi mermaid: `mermaid`
+11.17.2 incorpora nella propria distribuzione una copia di **KaTeX 0.16.47**
+(`node_modules/mermaid/dist/chunks/mermaid.esm/katex-*.mjs`), che nessun
+override può sostituire e che `npm audit`/Dependabot non vedono, perché
+leggono il lockfile e non il bundle. Il codice vulnerabile resta quindi
+nell'app per quella strada, anche se l'alert risulterà chiuso.
+
+Rischio residuo basso: l'advisory (GHSA-238p-pmpm-9mq7, severità low) è
+sfruttabile solo in presenza di una prototype pollution già esistente
+nell'applicazione. Effetto collaterale possibile: il CSS caricato è quello di
+KaTeX 0.18 (`@streamdown/math` → `katex/dist/katex.min.css`), mentre mermaid
+produce markup 0.16; poiché la 0.18 ha rinominato alcune classi interne, le
+formule *dentro* i diagrammi mermaid possono avere difetti di stile.
+
+Da rivedere quando `mermaid` passerà a KaTeX ≥ 0.18.2: a quel punto l'override
+diventa superfluo e va rimosso.
+
 ## Riepilogo
 
 | Gruppo | Avvisi | Azione |
