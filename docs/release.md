@@ -41,7 +41,10 @@ Linux x64 (AppImage + `.deb`) è in pipeline sul **tag** (`build.yml` job
 `Publish (Linux x64)`): pubblica gli installer e `latest-linux.yml` sulla
 stessa draft di `homun-releases`. L’auto-update in-app vale per **AppImage**;
 il `.deb` resta installazione manuale. Windows e la validazione PR Linux
-restano in `build-multi.yml` (artifact non pubblicanti).
+restano in `build-multi.yml` (artifact non pubblicanti). Il freeze Linux usa
+solo CPython gestito da `uv` (`--python-preference only-managed`): l’interprete
+di `actions/setup-python` su Ubuntu 22.04 collega SQLite 3.37 e fa fallire le
+migrazioni DBOS che richiedono `unixepoch()` (SQLite ≥ 3.38).
 
 ## Taggare una release
 
