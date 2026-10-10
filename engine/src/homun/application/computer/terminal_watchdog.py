@@ -5,9 +5,9 @@ are checked while the engine runs, including after restart, not by Docker itself
 """
 from copy import deepcopy
 from datetime import datetime
-from homun.application import terminal_jobs
-from homun.application.terminal_contracts import consent, job_spec
-from homun.application.terminal_state import record
+from homun.application.computer import terminal_jobs
+from homun.application.computer.terminal_contracts import consent, job_spec
+from homun.application.computer.terminal_state import record
 from homun.domain.errors import DomainError, ConflictError
 from homun.domain.models import utc_now
 

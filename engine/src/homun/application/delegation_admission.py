@@ -46,7 +46,7 @@ def admit(ctx, actor, run, args):
                     raise DelegationError('delegation_agent_not_approved', 'Delegate must belong to the approved team')
                 agent = resolve_executor(store, assignee, human_owner_id=store.works[parent['work_id']].owner_id)
                 manifest = parent['tools']
-                from homun.application.surface_toolset_policy import WRITE_TOOL_NAMES
+                from homun.application.computer.surface_toolset_policy import WRITE_TOOL_NAMES
                 safe = {item['name'] for item in manifest if item.get('replay') == 'read_only'
                         and item['name'] not in WRITE_TOOL_NAMES
                         and item.get('toolset') not in {'delegation','goals','cron','sessions','session_management',

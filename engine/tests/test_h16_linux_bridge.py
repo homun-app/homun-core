@@ -1,8 +1,8 @@
 """Tests for Linux computer-use bridge (H16)."""
 from __future__ import annotations
 
-from homun.application.computer_use_driver import ComputerUseDriver
-from homun.application.computer_use_linux_bridge import (
+from homun.application.computer.driver import ComputerUseDriver
+from homun.application.computer.linux_bridge import (
     capture_linux,
     list_linux_apps,
     perform_linux_action,
@@ -20,7 +20,7 @@ def test_probe_reports_unavailable_without_display(monkeypatch):
 
 def test_capture_refuses_without_tools(monkeypatch):
     monkeypatch.setattr(
-        "homun.application.computer_use_linux_bridge.probe_linux_computer_use",
+        "homun.application.computer.linux_bridge.probe_linux_computer_use",
         lambda: {"screen_recording": False, "error": "no tools"},
     )
     cap = capture_linux(None, "som")
@@ -30,19 +30,19 @@ def test_capture_refuses_without_tools(monkeypatch):
 
 def test_action_refuses_without_xdotool(monkeypatch):
     monkeypatch.setattr(
-        "homun.application.computer_use_linux_bridge.probe_linux_computer_use",
+        "homun.application.computer.linux_bridge.probe_linux_computer_use",
         lambda: {"accessibility": True},
     )
-    monkeypatch.setattr("homun.application.computer_use_linux_bridge._XDOTOOL", None)
+    monkeypatch.setattr("homun.application.computer.linux_bridge._XDOTOOL", None)
     out = perform_linux_action("click", {"x": 1, "y": 1})
     assert out.ok is False
     assert out.code == "backend_unavailable"
 
 
 def test_driver_auto_wires_linux_bridge(monkeypatch):
-    monkeypatch.setattr("homun.application.computer_use_driver.sys.platform", "linux")
+    monkeypatch.setattr("homun.application.computer.driver.sys.platform", "linux")
     monkeypatch.setattr(
-        "homun.application.computer_use_linux_bridge.probe_linux_computer_use",
+        "homun.application.computer.linux_bridge.probe_linux_computer_use",
         lambda: {
             "platform": "linux",
             "platform_supported": True,
@@ -56,7 +56,7 @@ def test_driver_auto_wires_linux_bridge(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "homun.application.computer_use_linux_bridge.list_linux_apps",
+        "homun.application.computer.linux_bridge.list_linux_apps",
         lambda: [{"app": "xterm", "pid": None, "bundle_id": None, "is_active": False}],
     )
     driver = ComputerUseDriver(auto_probe=True)

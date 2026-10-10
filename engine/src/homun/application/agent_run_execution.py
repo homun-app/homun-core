@@ -83,7 +83,7 @@ def _claim(ctx, run_id, epoch=None):
                 agent_recovery.migrate_inflight(run)
                 # Import surface steering into the canonical run queue before consume.
                 try:
-                    from homun.application.surface_gateway_manager import get_surface_gateway_manager
+                    from homun.application.computer.surface_gateway_manager import get_surface_gateway_manager
 
                     surface_items = get_surface_gateway_manager().drain_steering_guidance(run_id)
                     for item in surface_items:
@@ -362,7 +362,7 @@ def advance(ctx, run_id, *, epoch=None):
                         return registry_for(run, material_executor=run_tool, collaborator_executor=consult, file_executor=file_executor).dispatch(
                             decision.tool, decision.arguments, ctx=ctx, actor=actor, run=run)
                     if decision.tool == "execute_code":
-                        from homun.application.code_execution_receipts import run_once
+                        from homun.application.computer.code_execution_receipts import run_once
                         observation = run_once(ctx, actor, run, dispatch)
                     else:
                         observation = dispatch()

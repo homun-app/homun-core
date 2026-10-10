@@ -15,7 +15,7 @@ from homun.application.ops.batch_eval_runner import (
     create_canonical_batch_executor,
 )
 from homun.application.automation.daemon_lifecycle import DaemonManager
-from homun.application.surface_catalog_packs import (
+from homun.application.computer.surface_catalog_packs import (
     BUILTIN_PACKS,
     CatalogPacksManager,
     SkillPack,

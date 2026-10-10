@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from homun.application.surface_gateway_manager import SurfaceGatewayManager, get_surface_gateway_manager
+from homun.application.computer.surface_gateway_manager import SurfaceGatewayManager, get_surface_gateway_manager
 from homun.domain.models import Actor
 
 

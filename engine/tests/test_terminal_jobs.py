@@ -24,7 +24,7 @@ class Backend:
 
 @pytest.fixture
 def setup(tmp_path,monkeypatch):
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     ctx=create_context(db_path=tmp_path/'ws.db',data_dir=tmp_path,for_tests=True)
     actor=Actor(id='person_a',workspace_id=ctx.workspace_id,display_name='A')
     c=ctx.service.apply(actor,'c','conversation.create',{'title':'T'})
@@ -37,12 +37,12 @@ def setup(tmp_path,monkeypatch):
 
 
 def propose(s):
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     return terminal_jobs.propose(*s[:3],s[3])
 
 
 def approve(s,p):
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     return terminal_jobs.approve(*s[:3],p['id'],{'digest':p['digest']})
 
 
@@ -54,7 +54,7 @@ def test_proposal_is_inert_and_repeated_approval_never_restarts(setup):
 
 
 def test_digest_and_work_version_are_checked_before_start(setup):
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     p=propose(setup)
     with pytest.raises(ValidationError):terminal_jobs.approve(*setup[:3],p['id'],{'digest':'wrong'})
     with setup[0].repository.transaction() as store:store.works[setup[2]].version+=1
@@ -63,7 +63,7 @@ def test_digest_and_work_version_are_checked_before_start(setup):
 
 
 def test_only_owner_or_reviewer_person_can_approve(setup):
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     p=propose(setup)
     other=setup[1].model_copy(update={'id':'other'})
     with pytest.raises(PermissionDeniedError):terminal_jobs.approve(setup[0],other,setup[2],p['id'],{'digest':p['digest']})
@@ -73,7 +73,7 @@ def test_only_owner_or_reviewer_person_can_approve(setup):
 
 
 def test_crash_after_start_recovers_by_inspection(setup,monkeypatch):
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     p=propose(setup);backend=setup[-1];original=backend.start
     def crash(spec):original(spec);raise SystemExit('crash')
     monkeypatch.setattr(backend,'start',crash)
@@ -86,14 +86,14 @@ def test_crash_after_start_recovers_by_inspection(setup,monkeypatch):
 
 
 def test_command_id_is_bound_to_exact_request(setup):
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     propose(setup)
     with pytest.raises(ConflictError):terminal_jobs.propose(*setup[:3],{**setup[3],'command':'other'})
     with pytest.raises(ConflictError):terminal_jobs.propose(*setup[:3],{**setup[3],'command_id':'w'})
 
 
 def test_refresh_records_nonzero_and_stop_is_owned(setup):
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     p=propose(setup);approve(setup,p)
     assert terminal_jobs.stop(*setup[:3],p['id'])['status']=='exited'
     result=terminal_jobs.refresh(*setup[:3],p['id'])
@@ -101,7 +101,7 @@ def test_refresh_records_nonzero_and_stop_is_owned(setup):
 
 
 def test_unknown_status_is_not_a_success_or_permission_to_retry(setup,monkeypatch):
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     from homun.execution.contracts import ExecutionTimeout
     p=propose(setup);backend=setup[-1]
     def failure(spec):backend.calls.append(('start',spec));raise ExecutionTimeout('secret path')
@@ -114,7 +114,7 @@ def test_unknown_status_is_not_a_success_or_permission_to_retry(setup,monkeypatc
 
 
 def test_logs_failure_keeps_process_state_but_reports_missing_logs(setup,monkeypatch):
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     from homun.execution.contracts import ExecutionUnavailable
     p=propose(setup);approve(setup,p)
     def fail(spec):raise ExecutionUnavailable('secret')
@@ -125,7 +125,7 @@ def test_logs_failure_keeps_process_state_but_reports_missing_logs(setup,monkeyp
 
 
 def test_revocation_during_io_keeps_receipt_without_returning_it(setup,monkeypatch):
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     p=propose(setup);original=setup[-1].start
     def revoke(spec):
         result=original(spec)

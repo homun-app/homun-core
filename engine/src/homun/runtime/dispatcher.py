@@ -19,7 +19,7 @@ def deliver_pending(ctx, command_id: str | None = None, wait_seconds: float = 0)
     persisted workflow ID and DBOS message idempotency key. Claims serialize delivery per run so a contribution cannot overtake creation.
     Cancellation after the claim boundary is explicitly uncertain.
     """
-    from homun.application.terminal_watchdog import reconcile as reconcile_terminal_deadlines
+    from homun.application.computer.terminal_watchdog import reconcile as reconcile_terminal_deadlines
     reconcile_terminal_deadlines(ctx)
     snapshot = ctx.repository.snapshot()
     intents = sorted((i for i in snapshot.outbox.values() if not i.delivered and not i.cancelled),

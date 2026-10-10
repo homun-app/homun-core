@@ -2,9 +2,9 @@
 import argparse,json,tempfile,time,uuid
 from datetime import datetime
 from pathlib import Path
-from homun.application import terminal_jobs
-from homun.application.terminal_contracts import job_spec
-from homun.application.terminal_watchdog import reconcile
+from homun.application.computer import terminal_jobs
+from homun.application.computer.terminal_contracts import job_spec
+from homun.application.computer.terminal_watchdog import reconcile
 from homun.context import create_context
 from homun.domain.models import Actor,utc_now
 

@@ -7,7 +7,7 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 
-from homun.application.computer_use_driver import ComputerUseDriver
+from homun.application.computer.driver import ComputerUseDriver
 from homun.application.providers.media_backends import (
     macos_say_available,
     macos_say_tts_dispatcher,

@@ -1,18 +1,18 @@
 """Tests for macOS computer-use bridge (H16)."""
 from __future__ import annotations
 
-from homun.application.computer_use_driver import ComputerUseDriver
-from homun.application.computer_use_macos_bridge import (
+from homun.application.computer.driver import ComputerUseDriver
+from homun.application.computer.macos_bridge import (
     capture_macos,
     list_macos_apps,
     perform_macos_action,
 )
-from homun.application.desktop_contracts import DesktopCaptureResult
+from homun.application.computer.desktop_contracts import DesktopCaptureResult
 
 
 def test_capture_refuses_without_screen_recording(monkeypatch):
     monkeypatch.setattr(
-        "homun.application.computer_use_macos_bridge.probe_macos_computer_use",
+        "homun.application.computer.macos_bridge.probe_macos_computer_use",
         lambda: {
             "accessibility": True,
             "screen_recording": False,
@@ -28,7 +28,7 @@ def test_capture_refuses_without_screen_recording(monkeypatch):
 
 def test_action_refuses_without_accessibility(monkeypatch):
     monkeypatch.setattr(
-        "homun.application.computer_use_macos_bridge.probe_macos_computer_use",
+        "homun.application.computer.macos_bridge.probe_macos_computer_use",
         lambda: {
             "accessibility": False,
             "screen_recording": True,
@@ -42,7 +42,7 @@ def test_action_refuses_without_accessibility(monkeypatch):
 
 def test_list_apps_empty_without_accessibility(monkeypatch):
     monkeypatch.setattr(
-        "homun.application.computer_use_macos_bridge.probe_macos_computer_use",
+        "homun.application.computer.macos_bridge.probe_macos_computer_use",
         lambda: {"accessibility": False, "screen_recording": False},
     )
     assert list_macos_apps() == []
@@ -50,7 +50,7 @@ def test_list_apps_empty_without_accessibility(monkeypatch):
 
 def test_driver_auto_wires_macos_bridge(monkeypatch):
     monkeypatch.setattr(
-        "homun.application.computer_use_driver.sys.platform",
+        "homun.application.computer.driver.sys.platform",
         "darwin",
     )
     fake_probe = lambda: {
@@ -66,15 +66,15 @@ def test_driver_auto_wires_macos_bridge(monkeypatch):
         "code": None,
     }
     monkeypatch.setattr(
-        "homun.application.computer_use_driver.probe_macos_computer_use",
+        "homun.application.computer.driver.probe_macos_computer_use",
         fake_probe,
     )
     monkeypatch.setattr(
-        "homun.application.computer_use_macos_bridge.probe_macos_computer_use",
+        "homun.application.computer.macos_bridge.probe_macos_computer_use",
         fake_probe,
     )
     monkeypatch.setattr(
-        "homun.application.computer_use_macos_bridge.list_macos_apps",
+        "homun.application.computer.macos_bridge.list_macos_apps",
         lambda: [{"app": "TextEdit", "pid": 1, "bundle_id": None, "is_active": False}],
     )
     driver = ComputerUseDriver(auto_probe=True)
@@ -85,7 +85,7 @@ def test_driver_auto_wires_macos_bridge(monkeypatch):
 
 
 def test_ax_elements_parsed_from_osascript(monkeypatch):
-    from homun.application import computer_use_macos_bridge as bridge
+    from homun.application.computer import macos_bridge as bridge
 
     monkeypatch.setattr(
         bridge,

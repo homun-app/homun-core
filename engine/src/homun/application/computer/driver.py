@@ -10,12 +10,12 @@ import logging
 import sys
 from typing import Any, Callable, Dict, List, Optional
 
-from homun.application.desktop_contracts import (
+from homun.application.computer.desktop_contracts import (
     DesktopActionResult,
     DesktopCaptureResult,
     check_action_safety,
 )
-from homun.application.computer_use_macos import probe_macos_computer_use
+from homun.application.computer.macos import probe_macos_computer_use
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +62,11 @@ class ComputerUseDriver:
             and action_provider is None
         ):
             if sys.platform == "darwin":
-                from homun.application.computer_use_macos_bridge import attach_macos_providers
+                from homun.application.computer.macos_bridge import attach_macos_providers
 
                 attach_macos_providers(self)
             elif sys.platform.startswith("linux"):
-                from homun.application.computer_use_linux_bridge import (
+                from homun.application.computer.linux_bridge import (
                     attach_linux_providers,
                     probe_linux_computer_use,
                 )
@@ -75,7 +75,7 @@ class ComputerUseDriver:
                     self._status_probe = probe_linux_computer_use
                 attach_linux_providers(self)
             elif sys.platform == "win32":
-                from homun.application.computer_use_windows_bridge import (
+                from homun.application.computer.windows_bridge import (
                     attach_windows_providers,
                     probe_windows_computer_use,
                 )

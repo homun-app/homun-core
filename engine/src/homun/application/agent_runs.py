@@ -249,7 +249,7 @@ def propose(ctx, actor, work_id, body):
                                              'constraints': (brief or {}).get('constraints', []),
                                              'revision': revision_context(store, work),
                                              'organization_context': organization_background(store, actor)}, ensure_ascii=False), '_epoch': 0}
-            from homun.application.surface_toolset_policy import pin_policy
+            from homun.application.computer.surface_toolset_policy import pin_policy
             run.update(pin_policy(body))
             fallback_conn_id = body.get('fallback_connection_id')
             if not fallback_conn_id and agent and getattr(agent, 'fallback_connection_id', None):

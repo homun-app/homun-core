@@ -3,7 +3,7 @@ from copy import deepcopy
 from datetime import timedelta
 import re
 from pydantic import ValidationError as SchemaError
-from homun.application.terminal_contracts import TerminalProposalRequest, consent, job_spec, public
+from homun.application.computer.terminal_contracts import TerminalProposalRequest, consent, job_spec, public
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from homun.domain.models import CommandRecord, utc_now
 from homun.execution.contracts import ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain
@@ -196,7 +196,7 @@ def _unknown(exc):
 
 
 def _record(ctx, actor, work_id, proposal_id, snapshot, state):
-    from homun.application.terminal_state import record
+    from homun.application.computer.terminal_state import record
     response=record(ctx,proposal_id,snapshot,state)
     # Revocation during IO must not leak newly obtained logs or execution state.
     require_work_access(ctx.repository.load(),actor,work_id,'read')

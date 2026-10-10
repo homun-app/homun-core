@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from homun.application.agent_tool_registry import registry_for
 from homun.application.checkpoint_tools import execute as checkpoint_execute
-from homun.application.surface_toolset_policy import is_tool_allowed_for_surface
+from homun.application.computer.surface_toolset_policy import is_tool_allowed_for_surface
 from homun.application.workspace_checkpoints import (
     get_checkpoint_manager,
     set_checkpoint_manager,

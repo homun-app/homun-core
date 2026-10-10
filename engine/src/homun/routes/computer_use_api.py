@@ -3,7 +3,7 @@ import platform
 
 from fastapi import APIRouter, Header
 
-from homun.application import computer_use_backend
+from homun.application.computer import backend as computer_use_backend
 from homun.routes.domain_support import _http_error
 from homun.routes.price_comparisons import request_context
 

@@ -222,7 +222,7 @@ def expand_url_reference(url_str: str) -> Tuple[str, Optional[str]]:
         return "", f"URL blocked by security policy: {clean_url}"
 
     try:
-        from homun.application.web_pages import fetch_url
+        from homun.application.computer.web_pages import fetch_url
         res = fetch_url(clean_url)
         content = res.get("text") or res.get("body") or ""
         return truncate_text(f"Content from {clean_url}:\n\n{content}"), None

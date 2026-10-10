@@ -14,8 +14,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from homun.application.computer_use_macos import probe_macos_computer_use
-from homun.application.desktop_contracts import DesktopActionResult, DesktopCaptureResult, DesktopUIElement
+from homun.application.computer.macos import probe_macos_computer_use
+from homun.application.computer.desktop_contracts import DesktopActionResult, DesktopCaptureResult, DesktopUIElement
 
 logger = logging.getLogger(__name__)
 

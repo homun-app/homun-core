@@ -3,7 +3,7 @@ from typing import Literal
 from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
 from homun.application.agent_runs import approve, list_runs, propose
-from homun.application.surface_toolset_policy import RunToolPolicy
+from homun.application.computer.surface_toolset_policy import RunToolPolicy
 from homun.application.agent_control import control
 from homun.application.agent_side_questions import answer_side_question
 from homun.domain.errors import DomainError
@@ -124,7 +124,7 @@ def list_computer_use(workspace_id: str, work_id: str,
                       x_homun_actor_name: str | None = Header(default=None)):
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
     try:
-        from homun.application.computer_use_jobs import list_for_work
+        from homun.application.computer.jobs import list_for_work
         return list_for_work(ctx, actor, work_id)
     except DomainError as exc:
         raise _http_error(exc) from exc
@@ -137,7 +137,7 @@ def approve_computer_use(workspace_id: str, work_id: str, proposal_id: str,
                          x_homun_actor_name: str | None = Header(default=None)):
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
     try:
-        from homun.application.computer_use_jobs import approve
+        from homun.application.computer.jobs import approve
         return approve(ctx, actor, work_id, proposal_id, body.model_dump())
     except DomainError as exc:
         raise _http_error(exc) from exc
@@ -150,7 +150,7 @@ def reject_computer_use(workspace_id: str, work_id: str, proposal_id: str,
                         x_homun_actor_name: str | None = Header(default=None)):
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
     try:
-        from homun.application.computer_use_jobs import reject
+        from homun.application.computer.jobs import reject
         return reject(ctx, actor, work_id, proposal_id, body.model_dump())
     except DomainError as exc:
         raise _http_error(exc) from exc

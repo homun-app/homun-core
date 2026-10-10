@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from homun.application.desktop_contracts import DesktopActionResult, DesktopCaptureResult
+from homun.application.computer.desktop_contracts import DesktopActionResult, DesktopCaptureResult
 
 logger = logging.getLogger(__name__)
 

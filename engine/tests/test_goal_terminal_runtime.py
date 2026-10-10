@@ -5,7 +5,8 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_agent_automation_runtime import stores
-from homun.application import agent_runs, terminal_jobs
+from homun.application import agent_runs
+from homun.application.computer import terminal_jobs
 from homun.application.agent_run_execution import advance
 from homun.application.goal_manager import GoalManager
 from homun.models.native_turn import NativeMessage

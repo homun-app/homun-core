@@ -7,10 +7,10 @@ import pytest
 
 from homun.application import agent_runs
 from homun.application.agent_run_execution import advance
-from homun.application.browser_form_contracts import entries as browser_entries
-from homun.application.browser_form_pages import execute as browser_execute
-from homun.application.computer_use_driver import ComputerUseDriver
-from homun.application.desktop_contracts import DesktopCaptureResult, DesktopActionResult
+from homun.application.computer.browser_form_contracts import entries as browser_entries
+from homun.application.computer.browser_form_pages import execute as browser_execute
+from homun.application.computer.driver import ComputerUseDriver
+from homun.application.computer.desktop_contracts import DesktopCaptureResult, DesktopActionResult
 from homun.context import create_context
 from homun.domain.models import Actor
 from homun.execution.browser_forms import open_page, snapshot
@@ -129,7 +129,7 @@ def test_browser_extended_form_pages_dispatch(agent_env, monkeypatch):
         clear_profile_data=lambda **kw: {"cleared_cookies": kw.get("clear_cookies", True), "cleared_cache": kw.get("clear_cache", True)},
     )
 
-    monkeypatch.setattr("homun.application.browser_form_pages.require_browser", lambda r_id: fake_browser)
+    monkeypatch.setattr("homun.application.computer.browser_form_pages.require_browser", lambda r_id: fake_browser)
 
     run = {
         "id": run_id,
@@ -202,7 +202,7 @@ def test_desktop_tools_registered_in_approved_run(agent_env):
 
 def test_desktop_tools_unready_backend_reports_typed_error(agent_env):
     """When computer use driver is not ready, desktop tools report typed backend_unavailable error."""
-    from homun.application.desktop_tools import execute as desktop_execute
+    from homun.application.computer.desktop_tools import execute as desktop_execute
 
     ctx, actor, work_id = agent_env["ctx"], agent_env["actor"], agent_env["work_id"]
 
@@ -222,7 +222,7 @@ def test_desktop_tools_unready_backend_reports_typed_error(agent_env):
 
 def test_desktop_tools_safety_check_blocks_dangerous_actions(agent_env):
     """Desktop act tool rejects destructive shell commands and blocked system key combinations."""
-    from homun.application.desktop_tools import execute as desktop_execute
+    from homun.application.computer.desktop_tools import execute as desktop_execute
 
     ctx, actor, work_id = agent_env["ctx"], agent_env["actor"], agent_env["work_id"]
 
@@ -374,7 +374,7 @@ def test_supervised_agent_executes_browser_v6_dialog_and_vision(agent_env, monke
         capture_vision=lambda **kw: {"mime_type": "image/jpeg", "data": "dummy_b64", "bytes_length": 50},
     )
 
-    monkeypatch.setattr("homun.application.browser_form_pages.require_browser", lambda r_id: fake_browser)
+    monkeypatch.setattr("homun.application.computer.browser_form_pages.require_browser", lambda r_id: fake_browser)
 
     ctx.models.complete_tools = lambda *a, **k: SimpleNamespace(
         message=NativeMessage(

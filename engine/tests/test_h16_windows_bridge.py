@@ -1,8 +1,8 @@
 """Tests for Windows computer-use honesty bridge (H16)."""
 from __future__ import annotations
 
-from homun.application.computer_use_driver import ComputerUseDriver
-from homun.application.computer_use_windows_bridge import (
+from homun.application.computer.driver import ComputerUseDriver
+from homun.application.computer.windows_bridge import (
     capture_windows,
     perform_windows_action,
     probe_windows_computer_use,
@@ -24,7 +24,7 @@ def test_windows_actions_refuse():
 
 
 def test_driver_wires_windows_honesty(monkeypatch):
-    monkeypatch.setattr("homun.application.computer_use_driver.sys.platform", "win32")
+    monkeypatch.setattr("homun.application.computer.driver.sys.platform", "win32")
     driver = ComputerUseDriver(auto_probe=True)
     status = driver.get_status()
     assert status["ready"] is False

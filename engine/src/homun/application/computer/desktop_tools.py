@@ -8,8 +8,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
-from homun.application.computer_use_driver import ComputerUseDriver
-from homun.application.desktop_contracts import (
+from homun.application.computer.driver import ComputerUseDriver
+from homun.application.computer.desktop_contracts import (
     DesktopActionResult,
     DesktopCaptureResult,
     check_action_safety,

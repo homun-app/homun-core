@@ -7,7 +7,7 @@ import pytest
 
 from homun.application.ops.batch_eval_runner import BatchEvalRunner, BatchItem
 from homun.application.channels.adapters import TelegramAdapter
-from homun.application.computer_use_driver import ComputerUseDriver
+from homun.application.computer.driver import ComputerUseDriver
 from homun.application.integrations.copilot_acp_client import CopilotAcpClient
 from homun.application.integrations.hosted_mcp_agent import HostedMcpAgentServer
 from homun.application.integrations.meetings import MeetingManager

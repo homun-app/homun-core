@@ -72,7 +72,7 @@ class HostedMcpEngineRunner:
         act = self._actor(engine, actor)
         from homun.application.agent_runs import propose
         from homun.application.price_comparisons import cached, save
-        from homun.application.surface_toolset_policy import pin_policy
+        from homun.application.computer.surface_toolset_policy import pin_policy
         from homun.policy.work import require_work_access
         from homun.policy import require_workspace_actor
 

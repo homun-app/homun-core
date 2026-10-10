@@ -2,8 +2,8 @@
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.surface_contracts import ConnectionTransportKind, SurfaceKind
-from homun.application.surface_gateway_manager import SurfaceGatewayManager
+from homun.application.computer.surface_contracts import ConnectionTransportKind, SurfaceKind
+from homun.application.computer.surface_gateway_manager import SurfaceGatewayManager
 import pytest
 
 
@@ -161,7 +161,7 @@ def test_surface_gateway_api_endpoints():
 def test_surface_gateway_survives_reopen(tmp_path):
     db = tmp_path / "gateway.sqlite"
     mgr = SurfaceGatewayManager(db_path=db)
-    from homun.application.surface_contracts import SurfaceKind
+    from homun.application.computer.surface_contracts import SurfaceKind
     mgr.sync_session_state("s1", "default", SurfaceKind.CLI, "working", title="T")
     appr = mgr.request_approval("s1", "shell", "rm -rf /", "dangerous")
     del mgr
@@ -173,8 +173,8 @@ def test_surface_gateway_survives_reopen(tmp_path):
 
 
 def test_surface_steering_imports_into_agent_run_queue(tmp_path):
-    from homun.application.surface_agent_bridge import import_surface_steering_into_run
-    from homun.application.surface_gateway_manager import (
+    from homun.application.computer.surface_agent_bridge import import_surface_steering_into_run
+    from homun.application.computer.surface_gateway_manager import (
         SurfaceGatewayManager,
         set_surface_gateway_manager,
     )

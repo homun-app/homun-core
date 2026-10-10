@@ -132,15 +132,15 @@ def test_deadline_expired_before_dispatch_does_not_run_command(tmp_path):
 
 def test_legacy_approved_local_contract_does_not_gain_deadline():
     from types import SimpleNamespace
-    from homun.application.terminal_contracts import job_spec
+    from homun.application.computer.terminal_contracts import job_spec
     proposal = dict(policy='local-private-v1',work_id='work',id='job',command='true',deadline_at=deadline())
     spec = job_spec(SimpleNamespace(workspace_id='ws'),proposal)
     assert spec.deadline_at is None
 
 
 def test_new_local_approval_passes_deadline_to_supervisor(setup, monkeypatch):
-    from homun.application import terminal_jobs
-    from homun.application.terminal_contracts import job_spec
+    from homun.application.computer import terminal_jobs
+    from homun.application.computer.terminal_contracts import job_spec
     ctx, actor, work, body, _ = setup
     backend = LocalJobs(ctx.data_dir/'execution')
     monkeypatch.setattr(terminal_jobs,'backend_for',lambda *a: backend)
@@ -183,10 +183,11 @@ from test_agent_runs import setup as agent_setup
 
 def test_approved_local_timeout_after_engine_exit_resumes_as_error(agent_setup):
     from types import SimpleNamespace
-    from homun.application import agent_runs, terminal_jobs
+    from homun.application import agent_runs
+    from homun.application.computer import terminal_jobs
     from homun.application.agent_run_execution import advance
     from homun.application.agent_terminal import resume
-    from homun.application.terminal_contracts import job_spec
+    from homun.application.computer.terminal_contracts import job_spec
     from homun.context import create_context
     from homun.models.native_turn import NativeMessage, ToolCall
     ctx, actor, work, _ = agent_setup
@@ -205,7 +206,7 @@ def test_approved_local_timeout_after_engine_exit_resumes_as_error(agent_setup):
 from pathlib import Path
 from homun.context import create_context
 from homun.domain.models import Actor
-from homun.application import terminal_jobs
+from homun.application.computer import terminal_jobs
 ctx=create_context(db_path=Path(sys.argv[1])/'ws.db',data_dir=Path(sys.argv[1]),for_tests=True)
 try:
     terminal_jobs.approve(ctx,Actor.model_validate_json(sys.argv[2]),sys.argv[3],sys.argv[4],{'digest':sys.argv[5]})

@@ -7,29 +7,29 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from homun.storage.paths import default_data_dir
-from homun.application.surface_companion import (
+from homun.application.computer.surface_companion import (
     CompanionManager,
     PetState,
 )
-from homun.application.surface_achievements import (
+from homun.application.computer.surface_achievements import (
     Achievement,
     AchievementTracker,
 )
-from homun.application.surface_tours_tips import (
+from homun.application.computer.surface_tours_tips import (
     Tip,
     TourAndTipManager,
     TourStep,
 )
-from homun.application.surface_cleanup import (
+from homun.application.computer.surface_cleanup import (
     CleanupExecutionReport,
     CleanupScanReport,
     DiskCleanupEngine,
 )
-from homun.application.surface_security_guidance import (
+from homun.application.computer.surface_security_guidance import (
     SecurityAdvisory,
     SecurityGuidanceScanner,
 )
-from homun.application.surface_catalog_packs import (
+from homun.application.computer.surface_catalog_packs import (
     CatalogPacksManager,
     SkillPack,
 )

@@ -2,7 +2,8 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_terminal_jobs import Backend
-from homun.application import agent_runs, terminal_jobs
+from homun.application import agent_runs
+from homun.application.computer import terminal_jobs
 from homun.application.agent_run_execution import advance
 from homun.models.native_turn import NativeMessage,ToolCall
 
@@ -119,7 +120,7 @@ def test_log_transport_failure_waits_without_losing_tool_output(setup,monkeypatc
 def test_deadline_reason_reaches_model_even_if_process_exits_zero(setup,monkeypatch):
     from datetime import timedelta
     from homun.domain.models import utc_now
-    from homun.application.terminal_watchdog import reconcile
+    from homun.application.computer.terminal_watchdog import reconcile
     from homun.application.agent_terminal import resume
     s=start(setup,monkeypatch);ctx,actor,work,p,backend=s;job=choose(s)
     terminal_jobs.approve(ctx,actor,work,job['id'],{'digest':job['digest']})

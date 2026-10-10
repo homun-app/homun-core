@@ -1,6 +1,6 @@
 """Approved terminal receipts for one fenced goal finish cycle; no shell runner."""
 from copy import deepcopy
-from homun.application import terminal_jobs
+from homun.application.computer import terminal_jobs
 from homun.domain.models import Actor
 from homun.execution.contracts import digest
 

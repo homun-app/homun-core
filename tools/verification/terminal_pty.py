@@ -5,10 +5,11 @@ import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from homun.application import agent_runs, terminal_jobs
+from homun.application import agent_runs
+from homun.application.computer import terminal_jobs
 from homun.application.agent_run_execution import advance
 from homun.application.agent_terminal import resume
-from homun.application.terminal_contracts import job_spec
+from homun.application.computer.terminal_contracts import job_spec
 from homun.context import create_context
 from homun.domain.models import Actor
 from homun.models.native_turn import NativeMessage, ToolCall

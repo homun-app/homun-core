@@ -82,7 +82,7 @@ def control_in_store(ctx,store,actor,work_id,run_id,body,*,echo=True):
         service.apply(actor,body['command_id']+':cancel','work.cancel',{'work_id':work.id,'expected_version':work.version})
         if run.get('request_id') and store.contributions[run['request_id']].status=='pending':
             store.contributions[run['request_id']].status='rejected'
-        from homun.application import terminal_jobs
+        from homun.application.computer import terminal_jobs
         to_stop = []
         if run.get('terminal_wait_id'):
             to_stop.append(run['terminal_wait_id'])
@@ -112,7 +112,7 @@ def control_in_store(ctx,store,actor,work_id,run_id,body,*,echo=True):
 
 
 def control(ctx,actor,work_id,run_id,body):
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             result=control_in_store(ctx,store,actor,work_id,run_id,body)

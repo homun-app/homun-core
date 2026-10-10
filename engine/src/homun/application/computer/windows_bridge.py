@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from homun.application.desktop_contracts import DesktopActionResult, DesktopCaptureResult
+from homun.application.computer.desktop_contracts import DesktopActionResult, DesktopCaptureResult
 
 
 def probe_windows_computer_use() -> Dict[str, Any]:

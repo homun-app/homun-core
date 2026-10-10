@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from homun.application.surface_contracts import ConnectionTransportKind, SurfaceKind
-from homun.application.surface_gateway_manager import SurfaceGatewayManager, get_surface_gateway_manager, get_surface_gateway_manager
+from homun.application.computer.surface_contracts import ConnectionTransportKind, SurfaceKind
+from homun.application.computer.surface_gateway_manager import SurfaceGatewayManager, get_surface_gateway_manager, get_surface_gateway_manager
 
 router = APIRouter(prefix="/v1/surfaces", tags=["surfaces"])
 

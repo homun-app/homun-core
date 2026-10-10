@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from homun.application.path_security import check_path_safety
 from homun.application.ops.secret_redaction import redact_secrets
-from homun.application.url_safety import is_safe_url, normalize_url_for_request
+from homun.application.computer.url_safety import is_safe_url, normalize_url_for_request
 from homun.application.ops.vault_store import VaultItemMetadata, VaultStore
 from homun.application.ops.write_approval_gate import get_write_approval_gate
 

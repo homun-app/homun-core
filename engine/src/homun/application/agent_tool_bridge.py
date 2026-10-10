@@ -25,14 +25,14 @@ def deferred_names(run):
 
 
 def visible_definitions(run, registry):
-    from homun.application.surface_toolset_policy import filter_definitions_for_surface
+    from homun.application.computer.surface_toolset_policy import filter_definitions_for_surface
     hidden = deferred_names(run)
     active = [d for d in registry.definitions() if d.name not in hidden]
     return filter_definitions_for_surface(active, run)
 
 
 def resolve_call(run, call):
-    from homun.application.surface_toolset_policy import is_tool_allowed_for_surface
+    from homun.application.computer.surface_toolset_policy import is_tool_allowed_for_surface
     if not is_tool_allowed_for_surface(call.name, run):
         raise ValidationError(f"Tool '{call.name}' is not permitted by current surface/toolset policy")
     if call.name != 'tool_call' or run.get('_tool_bridge_version') != 1:
@@ -69,7 +69,7 @@ def entries(run, registry):
 
 
 def search_description(run):
-    from homun.application.surface_toolset_policy import is_tool_allowed_for_surface
+    from homun.application.computer.surface_toolset_policy import is_tool_allowed_for_surface
     # Names and bounded hints make external capabilities discoverable without schemas.
     lines = [f"{b['name']}: {b['server_name'][:80]} · {(b['descriptor'].get('description') or b['tool'])[:160]}"
              for b in run.get('_mcp_bindings', [])

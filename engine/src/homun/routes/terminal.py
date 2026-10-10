@@ -1,7 +1,7 @@
 """Authenticated native terminal proposals and explicit process control."""
 from fastapi import APIRouter, Header
-from homun.application import terminal_jobs
-from homun.application.terminal_contracts import (
+from homun.application.computer import terminal_jobs
+from homun.application.computer.terminal_contracts import (
     TerminalApprovalRequest, TerminalList, TerminalProposal, TerminalProposalRequest,
 )
 from homun.domain.errors import DomainError
