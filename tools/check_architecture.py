@@ -80,6 +80,15 @@ def matches(module, prefix):
     return module == prefix or module.startswith(prefix + ".")
 
 
+def application_context(module):
+    """Contesto di appartenenza per homun.application.<contesto>.<modulo>, altrimenti None."""
+    if module.startswith("homun.application."):
+        parts = module.split(".")
+        if len(parts) > 3:
+            return parts[2]
+    return None
+
+
 def cycles(graph):
     """Return deterministic cycle paths from a directed explicit-import graph."""
     done, active, stack, found = set(), set(), [], []
@@ -127,6 +136,10 @@ def check(root: Path, baseline: dict):
     python_root = root / "engine/src"
     modules = {module_name(path, python_root): path for path in files
                if path.suffix == ".py" and path.is_relative_to(python_root)}
+    application_root = python_root / "homun" / "application"
+    for module, path in modules.items():
+        if path.parent == application_root and path.name != "__init__.py":
+            errors.append(f"flat file in homun/application: {module}: belongs in homun/application/<context>/")
     graph = {name: set() for name in modules}
     exceptions = {(item["source"], item["target"]): item for item in baseline.get("import_exceptions", [])}
     used_exceptions = set()
@@ -157,6 +170,15 @@ def check(root: Path, baseline: dict):
         errors.append(f"stale import exception: {key[0]} -> {key[1]}")
     for cycle in cycles(graph):
         errors.append("import cycle: " + " -> ".join(cycle))
+    # Confine fra contesti di homun.application: avviso, base per le future porte pubbliche.
+    cross_context = sorted({(source, target) for source, dependencies in graph.items()
+                            for target in dependencies
+                            if application_context(source) and application_context(target)
+                            and application_context(source) != application_context(target)})
+    for source, target in cross_context:
+        reports.append(f"cross-context import: {source} -> {target}")
+    if cross_context:
+        reports.append(f"Cross-context imports in homun.application: {len(cross_context)}")
     return errors, reports
 
 
