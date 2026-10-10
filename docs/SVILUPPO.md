@@ -179,6 +179,7 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
 | Anomalia: conversazione scomparsa dopo riavvio (2026-10-07) | indagata 2026-10-08: zero eventi anche per la creazione → coerente con WAL perso durante kill -9 con checkpoint interrotto. Mitigazione: checkpoint WAL periodico (5 min) nel lifespan. Da osservare se si ripete | engine/storage |
 | ~~post_message senza controllo authority~~ | ✅ corretto 2026-10-08 (revisione F5): buco pre-mutation critico con i peer | policy/commands.py |
 | ConflictError transitorio in `expire_waiting` | osservato, non bloccante | sessione 2026-10-02 |
+| Confine contesti in `homun/application` | ✅ 2026-10-10: pacchetto piatto (285 moduli) riorganizzato in 10 contesti (`agent` 71, `work` 48, `computer` 37, `integrations` 32, `sessions` 28, `automation` 23, `channels` 17, `ops` 14, `providers` 10, `memory` 5) con solo spostamenti e riscrittura import (`tools/application_contexts.json`, `tools/apply_application_contexts.py`). Debito residuo: **158 import fra contesti diversi** (avviso in `check_architecture.py`, che ora rifiuta anche nuovi file piatti in `homun/application/`) — base per la fase successiva di porte pubbliche: un facade per contesto per collassare le coppie modulo→modulo in pochi import | engine/src/homun/application |
 
 ---
 
