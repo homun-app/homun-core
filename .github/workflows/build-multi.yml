@@ -111,8 +111,8 @@ jobs:
             cp "$archive" dist-installers/
             if [ -f "$archive.sha256" ]; then cp "$archive.sha256" dist-installers/; fi
           done
-          # .deb e AppImage escono da electron-builder in apps/desktop/dist-installers
-          find apps/desktop/dist-installers -type f \( -name '*.deb' -o -name '*.AppImage' \) 2>/dev/null | while read -r pkg; do
+          # .deb / AppImage / updater yml escono da electron-builder in apps/desktop/dist-installers
+          find apps/desktop/dist-installers -type f \( -name '*.deb' -o -name '*.AppImage' -o -name '*.yml' \) 2>/dev/null | while read -r pkg; do
             cp "$pkg" dist-installers/
           done || true
 

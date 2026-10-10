@@ -119,3 +119,11 @@ test("manual check during download does not trigger a second download or duplica
   assert.equal(ctx.dialogs.length, 1);
   assert.equal(ctx.dialogs[0].message, "Download già in corso");
 });
+
+test("auto-update is supported on macOS and Linux AppImage only", () => {
+  const { isAutoUpdateSupported } = setup().sandbox.module.exports;
+  assert.equal(isAutoUpdateSupported("darwin", {}), true);
+  assert.equal(isAutoUpdateSupported("linux", { APPIMAGE: "/tmp/Homun.AppImage" }), true);
+  assert.equal(isAutoUpdateSupported("linux", {}), false);
+  assert.equal(isAutoUpdateSupported("win32", {}), false);
+});

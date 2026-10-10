@@ -3,8 +3,8 @@
 // Policy inherited from the previous Homun generation: nothing is ever installed
 // silently — the person chooses when to download, watches the download progress,
 // and chooses whether to restart immediately or install on quit.
-// macOS only for now: releases are signed + notarized there, which is what
-// electron-updater's signature anchor requires.
+// Supported: macOS (signed + notarized) and Linux AppImage (latest-linux.yml).
+// .deb installs stay manual — electron-updater cannot replace a dpkg package.
 const { app, dialog, ipcMain, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { createUpdateProgressWindow } = require("./update-progress-window.cjs");
@@ -12,6 +12,13 @@ const { createUpdateProgressWindow } = require("./update-progress-window.cjs");
 const RELEASES_URL = "https://github.com/homun-app/homun-releases/releases";
 let progressWindow = null;
 let downloading = false;
+
+/** Platforms where the packaged app can check the public update feed. */
+function isAutoUpdateSupported(platform = process.platform, env = process.env) {
+  if (platform === "darwin") return true;
+  if (platform === "linux" && Boolean(env.APPIMAGE)) return true;
+  return false;
+}
 
 function dockProgress(ratio) {
   // The Dock API is optional: in some launch contexts the object exists
@@ -125,6 +132,14 @@ function initUpdater() {
 /** Manual check from Settings: same dialog when found, a status when current. */
 async function checkNow() {
   const current = app.getVersion();
+  if (!isAutoUpdateSupported()) {
+    return {
+      current,
+      available: false,
+      version: null,
+      error: "Auto-update is available for the AppImage on Linux; .deb installs update from the release page.",
+    };
+  }
   try {
     const result = await autoUpdater.checkForUpdates();
     const version = result?.updateInfo?.version ?? null;
@@ -141,4 +156,9 @@ function registerUpdaterIpc() {
   ipcMain.handle("homun:update-check", () => checkNow());
 }
 
-module.exports = { initUpdater, registerUpdaterIpc, CAN_AUTO_INSTALL: process.platform === "darwin" };
+module.exports = {
+  initUpdater,
+  registerUpdaterIpc,
+  isAutoUpdateSupported,
+  CAN_AUTO_INSTALL: isAutoUpdateSupported(),
+};

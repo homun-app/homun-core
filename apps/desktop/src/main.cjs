@@ -51,12 +51,13 @@ else app.whenReady().then(async () => {
   engine.child.once('exit', () => { if (!stopping) window.setTitle('Homun — motore arrestato'); });
   await window.loadURL('homun://app/');
   const smoke = process.argv.includes('--smoke');
-  if (app.isPackaged && process.platform === 'darwin') {
+  if (app.isPackaged) {
     try {
       const updater = require('./updater.cjs');
+      // IPC stays available on every packaged OS so Settings can explain .deb.
       updater.registerUpdaterIpc();
-      // The smoke skips the feed check (offline reproducibility), not the API.
-      if (!smoke) updater.initUpdater();
+      // Auto-check only where the feed can install (macOS + Linux AppImage).
+      if (!smoke && updater.isAutoUpdateSupported()) updater.initUpdater();
     } catch (error) { console.error('updater init failed:', error.message); }
   }
   if (process.argv.includes('--smoke')) {

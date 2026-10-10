@@ -37,8 +37,11 @@ minimi, firmati in `after-pack` prima della firma dell'app).
 | `APPLE_TEAM_ID` | `APPLE_TEAM_ID` | Notarizzazione |
 | `RELEASES_TOKEN` | `GH_TOKEN` (solo passo di publish) | Pubblicazione su `homun-app/homun-releases` |
 
-Windows/Linux non sono ancora in pipeline: il motore è verificato solo su
-macOS arm64 (vedi `docs/research/` per il piano piattaforme).
+Linux x64 (AppImage + `.deb`) è in pipeline sul **tag** (`build.yml` job
+`Publish (Linux x64)`): pubblica gli installer e `latest-linux.yml` sulla
+stessa draft di `homun-releases`. L’auto-update in-app vale per **AppImage**;
+il `.deb` resta installazione manuale. Windows e la validazione PR Linux
+restano in `build-multi.yml` (artifact non pubblicanti).
 
 ## Taggare una release
 

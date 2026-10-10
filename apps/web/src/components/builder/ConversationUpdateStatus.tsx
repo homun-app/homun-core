@@ -37,8 +37,15 @@ export function ConversationUpdateStatus() {
     setResult(null);
     try {
       const outcome = await desktop!.updateCheck!();
-      if (outcome.error) setError("Controllo non riuscito: riprova più tardi.");
-      else setResult(outcome);
+      if (outcome.error?.includes("AppImage")) {
+        setError(
+          "Su Linux gli aggiornamenti automatici richiedono l'AppImage; il .deb si aggiorna dalla pagina delle release.",
+        );
+      } else if (outcome.error) {
+        setError("Controllo non riuscito: riprova più tardi.");
+      } else {
+        setResult(outcome);
+      }
     } catch {
       setError("Controllo non riuscito: riprova più tardi.");
     } finally {
