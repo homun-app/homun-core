@@ -7,12 +7,12 @@ from urllib.parse import unquote, urlparse
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.media_image_gen import ImageGenerator
-from homun.application.media_stt import SpeechToTextTranscriber
-from homun.application.media_tts import TextToSpeechSynthesizer
-from homun.application.media_video_gen import VideoGenerator
-from homun.application.media_vision import VisionAnalyzer
-from homun.application.media_voice_mode import VoiceSession, WakeWordDetector
+from homun.application.providers.media_image_gen import ImageGenerator
+from homun.application.providers.media_stt import SpeechToTextTranscriber
+from homun.application.providers.media_tts import TextToSpeechSynthesizer
+from homun.application.providers.media_video_gen import VideoGenerator
+from homun.application.providers.media_vision import VisionAnalyzer
+from homun.application.providers.media_voice_mode import VoiceSession, WakeWordDetector
 
 
 def test_vision_analysis(tmp_path: Path):

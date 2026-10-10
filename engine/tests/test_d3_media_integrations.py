@@ -13,17 +13,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.media_backends import (
+from homun.application.providers.media_backends import (
     resolve_image_dispatcher,
     resolve_stt_dispatcher,
     resolve_tts_dispatcher,
     resolve_video_dispatcher,
     resolve_vision_dispatcher,
 )
-from homun.application.media_image_gen import ImageGenerator
-from homun.application.media_stt import SpeechToTextTranscriber
-from homun.application.media_video_gen import VideoGenerator
-from homun.application.media_voice_mode import VoiceSession, WakeWordDetector
+from homun.application.providers.media_image_gen import ImageGenerator
+from homun.application.providers.media_stt import SpeechToTextTranscriber
+from homun.application.providers.media_video_gen import VideoGenerator
+from homun.application.providers.media_voice_mode import VoiceSession, WakeWordDetector
 
 
 class MockMediaHTTPServer:

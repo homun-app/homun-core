@@ -297,7 +297,7 @@ def apply_ollama_preset(body: OllamaPresetRequest) -> dict[str, Any]:
 @router.get("/recommendations")
 def model_recommendations() -> dict[str, Any]:
     """Suggested models per task, from the real local catalog (heuristic, honest)."""
-    from homun.application.model_recommendations import OLLAMA_BASE, recommendations_from_tags
+    from homun.application.providers.model_recommendations import OLLAMA_BASE, recommendations_from_tags
 
     request = Request(
         f"{OLLAMA_BASE}/api/tags",

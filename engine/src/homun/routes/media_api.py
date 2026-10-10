@@ -6,19 +6,19 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from homun.application.media_backends import (
+from homun.application.providers.media_backends import (
     resolve_image_dispatcher,
     resolve_stt_dispatcher,
     resolve_tts_dispatcher,
     resolve_video_dispatcher,
     resolve_vision_dispatcher,
 )
-from homun.application.media_image_gen import ImageGenerator
-from homun.application.media_stt import SpeechToTextTranscriber
-from homun.application.media_tts import TextToSpeechSynthesizer
-from homun.application.media_video_gen import VideoGenerator
-from homun.application.media_vision import VisionAnalyzer
-from homun.application.media_voice_mode import VoiceSession, WakeWordDetector
+from homun.application.providers.media_image_gen import ImageGenerator
+from homun.application.providers.media_stt import SpeechToTextTranscriber
+from homun.application.providers.media_tts import TextToSpeechSynthesizer
+from homun.application.providers.media_video_gen import VideoGenerator
+from homun.application.providers.media_vision import VisionAnalyzer
+from homun.application.providers.media_voice_mode import VoiceSession, WakeWordDetector
 
 logger = logging.getLogger(__name__)
 

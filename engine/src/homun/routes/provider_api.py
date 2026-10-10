@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from homun.application.credential_pool import get_credential_pool
-from homun.application.provider_registry import get_provider_registry
+from homun.application.providers.registry import get_provider_registry
 
 logger = logging.getLogger(__name__)
 

@@ -8,12 +8,12 @@ from urllib.parse import unquote, urlparse
 import pytest
 
 from homun.application.computer_use_driver import ComputerUseDriver
-from homun.application.media_backends import (
+from homun.application.providers.media_backends import (
     macos_say_available,
     macos_say_tts_dispatcher,
     resolve_ollama_vision_model,
 )
-from homun.application.media_tts import TextToSpeechSynthesizer
+from homun.application.providers.media_tts import TextToSpeechSynthesizer
 from homun.application.session_manager import SessionManager, get_default_storage, set_default_storage
 from homun.application.session_storage import SessionStorage
 

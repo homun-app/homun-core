@@ -77,7 +77,7 @@ class OpenAICompatibleProvider:
         except Exception:
             pass
         try:
-            from homun.application.provider_registry import get_provider_registry
+            from homun.application.providers.registry import get_provider_registry
             prof = get_provider_registry().get_profile(self.provider_id)
             if prof and prof.env_vars:
                 for ev in prof.env_vars:

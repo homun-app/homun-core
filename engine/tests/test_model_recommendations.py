@@ -1,5 +1,5 @@
 """Model suggestions per task: honest heuristics on the real local catalog."""
-from homun.application.model_recommendations import (
+from homun.application.providers.model_recommendations import (
     parse_params_b,
     recommendations_from_tags,
 )

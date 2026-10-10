@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from typing import Dict, List, Optional
-from homun.application.provider_contracts import ProviderProfile
+from homun.application.providers.contracts import ProviderProfile
 
 logger = logging.getLogger(__name__)
 
