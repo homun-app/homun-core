@@ -141,7 +141,7 @@ def test_moa_denied_aggregator_never_calls_provider(cap_axis, setup):
     approve(ctx, actor, work, 'run', {'command_id': 'approve', 'digest': p['digest'], 'expected_version': p['expected_version']})
     with ctx.repository.transaction() as store:
         if cap_axis == 'work':
-            from homun.application.budgets import ensure
+            from homun.application.work.budgets import ensure
             ensure(store, work).caps.model_attempts = 1
         else:
             store.commands['run'].result['limits']['max_model_attempts'] = 1
@@ -172,7 +172,7 @@ def test_moa_advisor_failure_retains_partial_usage_then_aggregator_runs(setup):
 @pytest.mark.parametrize('failure', ['parse', 'transport'])
 def test_goal_judge_parse_and_transport_failures_retain_usage(setup, failure):
     from homun.application.agent_run_execution import _claim
-    from homun.application.goal_judge import judge
+    from homun.application.work.goal_judge import judge
     ctx, actor, work, material = setup
     native_start(ctx, actor, work, material)
     _, run = _claim(ctx, 'run')
@@ -203,7 +203,7 @@ def test_consultation_uses_selected_teammate_connection_and_accounting_actor(set
     _, run = _claim(ctx, 'run')
     ctx.models.complete = lambda *a, **k: SimpleNamespace(text='Consulted', usage=usage())
     if denied:
-        from homun.application.budgets import ensure
+        from homun.application.work.budgets import ensure
         from homun.domain.models import BudgetAllocation
         from homun.domain.errors import DomainError, ValidationError
         with ctx.repository.transaction() as store:
@@ -237,7 +237,7 @@ def test_delegated_child_receipts_are_own_spend_and_not_copied_to_parent(setup):
 
 @pytest.mark.parametrize('fallback', [False, True])
 def test_refused_work_admission_does_not_increment_run_attempts(setup, monkeypatch, fallback):
-    from homun.application.budgets import ensure
+    from homun.application.work.budgets import ensure
     ctx, actor, work, _ = setup
     ctx.models.set_active('openai_compatible')
     original = ctx.models.get_connection
@@ -261,10 +261,10 @@ def test_refused_work_admission_does_not_increment_run_attempts(setup, monkeypat
 @pytest.mark.parametrize('operation', ['compact', 'judge'])
 def test_auxiliary_denied_reservation_rolls_back_attempt_and_recovery(setup, monkeypatch, operation):
     from copy import deepcopy
-    from homun.application import budgets
+    from homun.application.work import budgets
     from homun.application.agent_context import prepare
     from homun.application.agent_run_execution import _claim
-    from homun.application.goal_judge import judge
+    from homun.application.work.goal_judge import judge
     from homun.domain.errors import DomainError, ValidationError
     ctx, actor, work, material = setup
     if operation == 'compact':

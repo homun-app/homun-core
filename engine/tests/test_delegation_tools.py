@@ -1,5 +1,5 @@
 """Structured child output keeps raw work when validation fails."""
-from homun.application.delegation_schema import _validate_schema
+from homun.application.work.delegation_schema import _validate_schema
 
 
 def test_output_schema_and_bounded_fence_repair():

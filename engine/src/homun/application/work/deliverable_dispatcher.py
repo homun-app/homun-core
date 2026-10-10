@@ -13,12 +13,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from homun.application.channels.contracts import ChannelAdapter
-from homun.application.delivery_outcomes import delivery_status
-from homun.application.deliverable_extractor import (
+from homun.application.work.delivery_outcomes import delivery_status
+from homun.application.work.deliverable_extractor import (
     DeliverableAttachment,
     extract_deliverables_from_text,
 )
-from homun.application.deliverable_ledger import (
+from homun.application.work.deliverable_ledger import (
     DeliverableLedger,
     DeliveryReceipt,
     get_deliverable_ledger,

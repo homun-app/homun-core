@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from homun.storage.paths import default_data_dir
-from homun.application.delivery_outcomes import delivery_status
+from homun.application.work.delivery_outcomes import delivery_status
 
 
 @dataclass

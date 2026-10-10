@@ -8,9 +8,9 @@ import hashlib
 import json
 from copy import deepcopy
 
-from homun.application.material_reads import PROPOSAL_TYPE as READ_TYPE
-from homun.application.price_comparisons import PROPOSAL_TYPE as COMPARE_TYPE
-from homun.application.price_comparisons import cached, save
+from homun.application.work.material_reads import PROPOSAL_TYPE as READ_TYPE
+from homun.application.work.price_comparisons import PROPOSAL_TYPE as COMPARE_TYPE
+from homun.application.work.price_comparisons import cached, save
 from homun.domain.capabilities import READ_MATERIAL, COMPARE_CSV, require_capability
 from homun.domain.errors import (ConflictError, NotFoundError, PermissionDeniedError,
                                  ValidationError)
@@ -181,8 +181,8 @@ def _create_step_proposals(store, actor, chain, work):
     The records are created with placeholder runtime fields; _stamp_step_proposals
     fills actor/run/workflow once the chain itself carries them.
     """
-    from homun.application.material_reads import digest as read_digest
-    from homun.application.price_comparison_policy import digest as compare_digest
+    from homun.application.work.material_reads import digest as read_digest
+    from homun.application.work.price_comparison_policy import digest as compare_digest
     for index, step in enumerate(chain['steps']):
         if step['capability'] == 'read_material':
             proposal = {

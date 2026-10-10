@@ -6,8 +6,8 @@ from threading import Barrier, Event
 
 import pytest
 
-from homun.application.deliverable_dispatcher import dispatch_deliverables_for_turn
-from homun.application.deliverable_ledger import DeliverableLedger
+from homun.application.work.deliverable_dispatcher import dispatch_deliverables_for_turn
+from homun.application.work.deliverable_ledger import DeliverableLedger
 
 
 class Stub:
@@ -127,8 +127,8 @@ def test_abandoned_claim_is_not_retried_after_restart(tmp_path):
     path = tmp_path / "ledger.db"
     script = '''
 import os, sys
-from homun.application.deliverable_dispatcher import dispatch_deliverables_for_turn
-from homun.application.deliverable_ledger import DeliverableLedger
+from homun.application.work.deliverable_dispatcher import dispatch_deliverables_for_turn
+from homun.application.work.deliverable_ledger import DeliverableLedger
 class Crash:
     def send(self, *args, **kwargs):
         os._exit(17)
@@ -196,7 +196,7 @@ def test_compatibility_receipt_does_not_promote_negative_response(tmp_path):
 
 @pytest.mark.parametrize('extra', [{'delivery_state': 'failed'}, {'status': 'failed'}, {'status_code': 500}])
 def test_conflicting_ack_is_unknown(extra):
-    from homun.application.delivery_outcomes import delivery_status
+    from homun.application.work.delivery_outcomes import delivery_status
     assert delivery_status({'delivered': True, 'media_delivered': True, **extra}, has_media=True) == 'unknown'
 
 

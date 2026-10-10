@@ -2,7 +2,7 @@
 from homun.application import agent_native, agent_recovery
 from homun.application.agent_control_history import close_pending, redirect_history
 from homun.application.agent_runs import authority, lookup, public, public_for
-from homun.application.price_comparisons import cached, save
+from homun.application.work.price_comparisons import cached, save
 from homun.domain.errors import ConflictError, PermissionDeniedError, ValidationError
 from homun.policy.work import require_work_access
 

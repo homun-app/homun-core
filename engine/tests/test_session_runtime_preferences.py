@@ -129,7 +129,7 @@ def test_auxiliary_and_legacy_calls_use_the_pinned_requested_model(setup, operat
         ctx.models.complete_summary = lambda *a, **k: (called.append(k) or SimpleNamespace(message=NativeMessage(role='assistant', content='Side'), usage=None))
         answer_side_question(ctx, actor, work, 'run', 'Question')
     elif operation == 'judge':
-        from homun.application.goal_judge import judge
+        from homun.application.work.goal_judge import judge
         _, run = _claim(ctx, 'run')
         ctx.models.complete = lambda *a, **k: (called.append(k) or SimpleNamespace(text='{"verdict":"done","reason":"Done"}', usage=None))
         judge(ctx, run)

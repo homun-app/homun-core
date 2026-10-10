@@ -2,7 +2,8 @@ import hashlib
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application import agent_runs, work_outputs, workspace_files
+from homun.application import agent_runs, workspace_files
+from homun.application.work import outputs as work_outputs
 from homun.application.agent_run_execution import advance
 from homun.models.native_turn import NativeMessage,ToolCall
 
@@ -21,7 +22,7 @@ def model(ctx,name,args,call_id='file1'):
 
 
 def test_delivered_file_survives_workspace_change_and_recovery(setup):
-    from homun.application.material_ingest import recover_materials
+    from homun.application.work.material_ingest import recover_materials
     ctx,actor,work,_=setup;p,root,data=start(setup)
     model(ctx,'deliver_workspace_file',{'path':'result.txt','sha256':hashlib.sha256(data).hexdigest()})
     assert advance(ctx,p['id'])=='running'

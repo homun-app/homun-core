@@ -46,7 +46,7 @@ def test_capabilities_update_selectively(setup):
 def test_intake_recommends_agent_with_matching_capability_link(setup):
     """When two agents exist and only one has the capability link, the engine
     corrects the model's recommendation to the linked one."""
-    from homun.application.intake import propose as intake_propose
+    from homun.application.work.intake import propose as intake_propose
     ctx, actor = setup
     linked = ctx.service.apply(actor, 'linked', 'agent.create', {
         'name': 'Chiara', 'role': 'Analista di listini CSV',
@@ -74,8 +74,8 @@ def test_intake_recommends_agent_with_matching_capability_link(setup):
 
 
 def test_intake_new_agent_carries_capabilities(setup):
-    from homun.application.intake import confirm as intake_confirm
-    from homun.application.intake import propose as intake_propose
+    from homun.application.work.intake import confirm as intake_confirm
+    from homun.application.work.intake import propose as intake_propose
     ctx, actor = setup
     conv = ctx.service.apply(actor, 'c', 'conversation.create', {'title': 'Nuova richiesta'})
     wid = ctx.service.apply(actor, 'w', 'work.create', {
@@ -99,7 +99,7 @@ def test_intake_new_agent_carries_capabilities(setup):
 
 
 def test_roster_sent_to_model_includes_capabilities(setup):
-    from homun.application.intake import propose as intake_propose
+    from homun.application.work.intake import propose as intake_propose
     ctx, actor = setup
     ctx.service.apply(actor, 'a', 'agent.create', {
         'name': 'Chiara', 'role': 'Analista', 'instructions': 'I.', 'capabilities': ['compare_csv']})

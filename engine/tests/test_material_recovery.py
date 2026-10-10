@@ -36,7 +36,7 @@ def test_commit_failure_leaves_no_new_original(client, monkeypatch):
 
 
 def test_recovery_preserves_shared_references_and_legacy_files(client):
-    from homun.application.material_ingest import recover_materials
+    from homun.application.work.material_ingest import recover_materials
     tc, root = client
     project = _project(tc)
     first = upload(tc, project).json()
@@ -151,7 +151,7 @@ def test_symlinked_managed_namespace_cannot_escape_data_directory(client, tmp_pa
 
 
 def test_retry_identity_does_not_depend_on_extractor_version(client, monkeypatch):
-    from homun.application import material_ingest
+    from homun.application.work import material_ingest
     from homun.materials.extract import ExtractResult
     tc, root = client
     project = _project(tc)
@@ -163,7 +163,7 @@ def test_retry_identity_does_not_depend_on_extractor_version(client, monkeypatch
 
 
 def test_disk_failure_is_typed_and_does_not_leak_path(client, monkeypatch):
-    from homun.application import material_ingest
+    from homun.application.work import material_ingest
     tc, _ = client
     project = _project(tc)
     def unavailable(*args):

@@ -76,8 +76,8 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             registry.register(skill_entry)
     delegation = run.get('delegation')
     if isinstance(delegation, dict) and delegation.get('policy') == 'isolated-subagent-v1' and delegation.get('version') == 1:
-        from homun.application.delegation_contracts import entries as delegation_entries
-        from homun.application.delegation_tools import execute as delegation_execute
+        from homun.application.work.delegation_contracts import entries as delegation_entries
+        from homun.application.work.delegation_tools import execute as delegation_execute
         for del_entry in delegation_entries(delegation_execute, delegation.get('version', 1)):
             registry.register(del_entry)
     clarify = run.get('clarify')
@@ -88,8 +88,8 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             registry.register(c_entry)
     goals = run.get('goals')
     if isinstance(goals, dict) and goals.get('policy') == 'persistent-goals-v1' and goals.get('version') == 1:
-        from homun.application.goal_contracts import entries as goal_entries
-        from homun.application.goal_tools import execute as goal_execute
+        from homun.application.work.goal_contracts import entries as goal_entries
+        from homun.application.work.goal_tools import execute as goal_execute
         for g_entry in goal_entries(goal_execute, goals.get('version', 1)):
             registry.register(g_entry)
     cron = run.get('cron')

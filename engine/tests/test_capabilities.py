@@ -6,7 +6,7 @@ from typing import get_args
 import pytest
 from fastapi.testclient import TestClient
 
-from homun.application.material_ingest import ingest_file
+from homun.application.work.material_ingest import ingest_file
 from homun.context import create_context, reset_context_for_tests
 from homun.domain.capabilities import REGISTRY, TRANSPORT_IDS, require_capability
 from homun.domain.errors import ValidationError
@@ -35,7 +35,7 @@ def test_registry_rejects_unknown_and_stays_in_sync_with_transport():
 
 
 def test_comparison_tool_identity_comes_from_the_registry():
-    from homun.application.price_comparison_policy import TOOL_VERSION
+    from homun.application.work.price_comparison_policy import TOOL_VERSION
     assert TOOL_VERSION == REGISTRY['compare_csv'].tool_version == 'price-comparison-v1'
     assert REGISTRY['compare_csv'].limits['max_rows'] == 10000
     assert REGISTRY['compare_csv'].limits['max_attempts'] == 3

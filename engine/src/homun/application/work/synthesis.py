@@ -10,8 +10,8 @@ import hashlib
 import json
 from copy import deepcopy
 
-from homun.application.price_comparisons import cached, save
-from homun.application.executor import resolve_executor
+from homun.application.work.price_comparisons import cached, save
+from homun.application.work.executor import resolve_executor
 from homun.domain.capabilities import SYNTHESIZE
 from homun.domain.errors import (ConflictError, DomainError, NotFoundError,
                                  PermissionDeniedError, ValidationError)
@@ -88,7 +88,7 @@ def validate_bindings(ctx, store, actor, proposal):
 
 def synthesis_assignee(store, work):
     """Who writes: the synthesize phase's assignee, else the work owner."""
-    from homun.application.phase_execution import phase_plan_step
+    from homun.application.work.phase_execution import phase_plan_step
     step = phase_plan_step(store, work, 'synthesize')
     assignee_id = step.assignee_id if step is not None else work.owner_id
     return resolve_executor(store, assignee_id, human_owner_id=work.owner_id), step
@@ -105,7 +105,7 @@ def propose(ctx, actor, work_id, body):
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             work = require_work_access(store, actor, work_id)
-            from homun.application.phase_execution import (
+            from homun.application.work.phase_execution import (
                 propose_pin_version, require_confirmed_intake_for_tool,
             )
             require_confirmed_intake_for_tool(store, work_id, capability='synthesize')
@@ -179,7 +179,7 @@ def approve(ctx, actor, work_id, proposal_id, body):
             if work.version != proposal['expected_version']:
                 raise ConflictError('Work changed; create a new proposal')
             service = ctx.service.for_store(store)
-            from homun.application.phase_execution import approve_starts_phase
+            from homun.application.work.phase_execution import approve_starts_phase
             approve_starts_phase(service, store, actor, work, 'synthesize', body['command_id'])
             proposal.update(status='queued', _actor=actor.model_dump(mode='json'),
                             _run_version=work.version, _workflow_id=f"synth:{actor.workspace_id}:{proposal_id}")

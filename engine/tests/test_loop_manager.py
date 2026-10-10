@@ -14,7 +14,7 @@ def _isolated_automation_store(tmp_path):
     set_automation_store(None)
 
 
-from homun.application.goal_manager import GoalManager
+from homun.application.work.goal_manager import GoalManager
 from homun.application.automation.loop_manager import (
     DEFAULT_SELF_PACED_CEILING_SECONDS,
     DEFAULT_SELF_PACED_FLOOR_SECONDS,

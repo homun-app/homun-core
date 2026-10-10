@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from homun.application.goal_store import get_goal_store
-from homun.application.goal_contracts import GoalContract, GoalGate
+from homun.application.work.goal_store import get_goal_store
+from homun.application.work.goal_contracts import GoalContract, GoalGate
 
 router = APIRouter(prefix="/v1/goals", tags=["goals"])
 

@@ -4,7 +4,7 @@ from homun.application.computer import terminal_jobs
 from homun.domain.models import Actor
 from homun.execution.contracts import digest
 
-from homun.application.goal_terminal_link import available, _cycle, passed, validate_link, configuration
+from homun.application.work.goal_terminal_link import available, _cycle, passed, validate_link, configuration
 
 
 class GatePending(Exception):
@@ -57,7 +57,7 @@ def _queue(run, actor):
 def _supersede_configuration(ctx, run_id):
     """A changed configuration needs a fresh approval, never a stranded wait."""
     from homun.application.agent_runs import lookup, authority
-    from homun.application.goal_manager import GoalManager
+    from homun.application.work.goal_manager import GoalManager
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             run = lookup(store, run_id)

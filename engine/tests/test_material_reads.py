@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from homun.application.material_read_execution import execute
-from homun.application.material_reads import approve, list_proposals, propose
-from homun.application.material_ingest import ingest_file
+from homun.application.work.material_read_execution import execute
+from homun.application.work.material_reads import approve, list_proposals, propose
+from homun.application.work.material_ingest import ingest_file
 from homun.context import create_context
 from homun.domain.errors import ConflictError, PermissionDeniedError, ValidationError
 from homun.domain.models import Actor
@@ -33,7 +33,7 @@ def confirmation(p):
 
 
 def confirm_intake(ctx, actor, work, *, capability='read_material', create_agent=True):
-    from homun.application.intake import propose as intake_propose, confirm as intake_confirm
+    from homun.application.work.intake import propose as intake_propose, confirm as intake_confirm
     ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps({
         'title': 'Lettura documento', 'objective': 'Leggere il materiale caricato.', 'output': 'Artifact di lettura',
         'constraints': [], 'missing_information': [], 'suggested_agent_id': None,

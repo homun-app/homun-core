@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from homun.application.material_reads import approve, list_proposals, propose
+from homun.application.work.material_reads import approve, list_proposals, propose
 from homun.context import get_context
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _actor_from_headers, _http_error

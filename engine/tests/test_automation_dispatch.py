@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homun.application.automation.dispatch import inject_due_automation
 from homun.application.automation.store import AutomationStore, set_automation_store
-from homun.application.goal_manager import GoalManager
+from homun.application.work.goal_manager import GoalManager
 from homun.application.automation.heartbeat_manager import HeartbeatManager
 from homun.application.automation.loop_manager import LoopManager
 
@@ -45,7 +45,7 @@ def test_pending_user_input_blocks_heartbeat(tmp_path):
 
 def test_active_goal_blocks_loop_but_not_after_clear(tmp_path):
     set_automation_store(AutomationStore(tmp_path / "auto.sqlite"))
-    from homun.application.goal_store import GoalStore, set_goal_store
+    from homun.application.work.goal_store import GoalStore, set_goal_store
 
     set_goal_store(GoalStore(tmp_path / "goals.sqlite"))
     run = {"id": "run-loop-1", "_messages": []}

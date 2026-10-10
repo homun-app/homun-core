@@ -1,6 +1,7 @@
 """Pause native calls for approval, then consume a durable external receipt."""
 import hashlib
-from homun.application import agent_native, external_tools
+from homun.application import agent_native
+from homun.application.work import external_tools
 from homun.application.agent_runs import authority, lookup
 from homun.domain.errors import ConflictError
 from homun.domain.models import Actor

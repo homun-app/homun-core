@@ -3,13 +3,13 @@ import pytest
 from test_agent_runs import setup, scripted
 from homun.application.agent_runs import propose, approve, resume_waiting
 from homun.application.agent_run_execution import advance
-from homun.application.contribution_people import create_person
+from homun.application.work.contribution_people import create_person
 from homun.domain.errors import ValidationError, ConflictError
 from homun.domain.models import Actor
 
 
 def test_question_invitation_response_resumes_selected_person_run(setup, monkeypatch):
-    from homun.application.contribution_invitations import issue_invitation, read_invitation, respond
+    from homun.application.work.contribution_invitations import issue_invitation, read_invitation, respond
     ctx, actor, work, material = setup
     person = create_person(ctx, actor, {'command_id':'person', 'name':'Marta'})
     p = propose(ctx, actor, work, {'command_id':'run', 'expected_version':1,

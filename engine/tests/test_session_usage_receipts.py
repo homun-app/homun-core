@@ -4,7 +4,7 @@ import pytest
 from test_agent_runs import setup
 from test_native_agent import native_start
 from test_run_usage_receipts import usage
-from homun.application import budgets
+from homun.application.work import budgets
 from homun.application.sessions import runtime as session_runtime
 from homun.application.agent_run_execution import advance
 from homun.domain.models import BudgetCounters

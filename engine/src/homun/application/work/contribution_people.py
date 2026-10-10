@@ -1,11 +1,11 @@
 """Named local recipients, not accounts, invites, or access grants."""
 from copy import deepcopy
-from homun.application.price_comparisons import cached, save
-from homun.application.contribution_invitations import _owner
+from homun.application.work.price_comparisons import cached, save
+from homun.application.work.contribution_invitations import _owner
 from homun.domain.errors import PermissionDeniedError, ValidationError, ConflictError
 from homun.domain.ids import new_id
 from homun.policy import require_workspace_actor
-from homun.application.work_execution_state import has_active_execution
+from homun.application.work.execution_state import has_active_execution
 
 KIND = 'person.define'
 

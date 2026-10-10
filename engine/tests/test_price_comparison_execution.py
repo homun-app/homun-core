@@ -1,8 +1,8 @@
 """Approval, authority, integrity and replay invariants for real local execution."""
 import pytest
-from homun.application.material_ingest import ingest_file
-from homun.application.price_comparisons import approve, list_proposals, propose
-from homun.application.price_comparison_execution import execute
+from homun.application.work.material_ingest import ingest_file
+from homun.application.work.price_comparisons import approve, list_proposals, propose
+from homun.application.work.price_comparison_execution import execute
 from homun.context import create_context
 from homun.domain.errors import ConflictError, PermissionDeniedError
 from homun.domain.models import Actor
@@ -31,7 +31,7 @@ def confirmation(p):
 def test_supervised_intake_keeps_human_reviewer_through_execution(setup):
     import json
     from types import SimpleNamespace
-    from homun.application.intake import propose as intake_propose, confirm as intake_confirm
+    from homun.application.work.intake import propose as intake_propose, confirm as intake_confirm
     ctx, actor, work, body = setup
     ctx.models.complete = lambda *_args, **_kwargs: SimpleNamespace(text=json.dumps({
         'title': 'Confronto prezzi', 'objective': 'Verificare variazioni', 'output': 'Report e CSV',
@@ -108,7 +108,7 @@ def test_revalidation_after_compute_and_bounded_attempts(setup, monkeypatch):
     ctx, actor, work, body = setup
     p = propose(ctx, actor, work, body)
     approve(ctx, actor, work, p['id'], confirmation(p))
-    import homun.application.price_comparison_execution as execution
+    import homun.application.work.price_comparison_execution as execution
     original = execution.compare_csv
     def revoke(*args, **kwargs):
         report = original(*args, **kwargs)
@@ -126,7 +126,7 @@ def test_attempt_budget_survives_reopen(setup, monkeypatch):
     ctx, actor, work, body = setup
     p = propose(ctx, actor, work, body)
     approve(ctx, actor, work, p['id'], confirmation(p))
-    import homun.application.price_comparison_execution as execution
+    import homun.application.work.price_comparison_execution as execution
     calls = []
     def unavailable(*args, **kwargs):
         calls.append(1)
@@ -194,7 +194,7 @@ def test_failed_comparison_projects_failure_and_accepts_corrected_proposal(setup
     approve(ctx, actor, work, p['id'], confirmation(p))
     def invalid(*args, **kwargs):
         raise ValidationError('Invalid CSV')
-    monkeypatch.setattr('homun.application.price_comparison_execution.compare_csv', invalid)
+    monkeypatch.setattr('homun.application.work.price_comparison_execution.compare_csv', invalid)
     execute(ctx, p['id'])
     store = ctx.repository.load()
     assert store.works[work].status == 'failed'

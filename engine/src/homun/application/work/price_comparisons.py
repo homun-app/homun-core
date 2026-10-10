@@ -1,6 +1,6 @@
 """Transactional proposal admission and explicit approval; no execution here."""
 from copy import deepcopy
-from homun.application.price_comparison_policy import (
+from homun.application.work.price_comparison_policy import (
     ACTIVE, PROPOSAL_TYPE, authority, digest, lookup, public, source, validate_sources,
 )
 from homun.domain.capabilities import COMPARE_CSV
@@ -31,7 +31,7 @@ def propose(ctx, actor, work_id, body):
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             work = require_work_access(store, actor, work_id)
-            from homun.application.phase_execution import (
+            from homun.application.work.phase_execution import (
                 propose_pin_version, require_confirmed_intake_for_tool,
             )
             require_confirmed_intake_for_tool(store, work_id, capability="compare_csv")
@@ -107,7 +107,7 @@ def approve(ctx, actor, work_id, proposal_id, body):
             if work.version != proposal['expected_version']:
                 raise ConflictError('Work changed; create a new proposal')
             service = ctx.service.for_store(store)
-            from homun.application.phase_execution import approve_starts_phase
+            from homun.application.work.phase_execution import approve_starts_phase
             approve_starts_phase(service, store, actor, work, 'compare_csv', body['command_id'])
             proposal.update(status='queued', _actor=actor.model_dump(mode='json'),
                             _run_version=work.version, _workflow_id=f"price:{actor.workspace_id}:{proposal_id}")

@@ -83,7 +83,7 @@ def test_write_approval_gate_survives_reopen(tmp_path, monkeypatch):
 
 
 def test_deliverable_ledger_survives_reopen(tmp_path):
-    from homun.application.deliverable_ledger import DeliverableLedger
+    from homun.application.work.deliverable_ledger import DeliverableLedger
 
     db = tmp_path / "ledger.sqlite"
     led = DeliverableLedger(db)

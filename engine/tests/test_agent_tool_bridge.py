@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_agent_mcp import start
-from homun.application import agent_runs, external_tools
+from homun.application import agent_runs
+from homun.application.work import external_tools
 from homun.application.agent_run_execution import advance
 from homun.application.agent_external import resume_external
 from homun.application.agent_tool_registry import registry_for

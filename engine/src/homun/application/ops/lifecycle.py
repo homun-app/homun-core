@@ -35,7 +35,7 @@ async def runtime_lifespan(ctx):
         raise
 
     from homun.runtime.dispatcher import deliver_pending
-    from homun.application.budgets import recover_pending
+    from homun.application.work.budgets import recover_pending
     recovered = recover_pending(ctx)
     try:
         import os
@@ -99,7 +99,7 @@ async def runtime_lifespan(ctx):
             except Exception:
                 logging.getLogger(__name__).exception("Approval relay notify pass failed")
             try:
-                from homun.application.delegation_runtime import reconcile_delegations
+                from homun.application.work.delegation_runtime import reconcile_delegations
                 await asyncio.to_thread(reconcile_delegations, ctx, limit=20)
                 await asyncio.to_thread(wake_due_automation, ctx, limit=20)
             except Exception:

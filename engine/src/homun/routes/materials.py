@@ -5,7 +5,7 @@ from uuid import uuid4
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from homun.context import get_context
-from homun.application.material_ingest import ingest_file, MAX_UPLOAD_BYTES
+from homun.application.work.material_ingest import ingest_file, MAX_UPLOAD_BYTES
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from homun.materials.blob import read_material_blob
 from homun.policy import require_project_capability

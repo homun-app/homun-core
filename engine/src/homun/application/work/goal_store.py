@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from homun.application.goal_contracts import GoalState
+from homun.application.work.goal_contracts import GoalState
 from homun.storage.paths import default_data_dir
 
 logger = logging.getLogger(__name__)

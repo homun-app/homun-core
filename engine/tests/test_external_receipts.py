@@ -3,7 +3,7 @@ import pytest
 from homun.context import create_context
 from homun.domain.models import Actor, ExternalServer
 from homun.domain.errors import ConflictError
-from homun.application import external_tools
+from homun.application.work import external_tools
 from homun.application.integrations import mcp_client
 
 @pytest.fixture
@@ -56,7 +56,7 @@ def test_transport_failure_is_unknown_and_not_retried(setup,monkeypatch):
     assert approve(setup)['status']=='outcome_unknown'
 
 def test_receipt_survives_publication_failure(setup,monkeypatch):
-    from homun.application import external_publication
+    from homun.application.work import external_publication
     original=external_publication.publish
     monkeypatch.setattr(external_publication,'publish',lambda *a:(_ for _ in ()).throw(RuntimeError('publication unavailable')))
     result=approve(setup)
@@ -103,7 +103,7 @@ def test_tool_error_receipt_is_not_redispatched(setup,monkeypatch):
 def test_real_stdio_receipt_survives_context_restart(tmp_path,monkeypatch,changed_work):
     import json
     import sys
-    from homun.application import external_publication
+    from homun.application.work import external_publication
     counter=tmp_path/'effects.json'
     script=tmp_path/'server.py'
     script.write_text('''import json,sys
@@ -141,7 +141,7 @@ for line in sys.stdin:
     restarted=create_context(db_path=path,data_dir=tmp_path,for_tests=True)
     monkeypatch.setattr(external_publication,'publish',original)
     if changed_work:
-        from homun.application import external_delivery
+        from homun.application.work import external_delivery
         with restarted.repository.transaction() as store:
             store.works[work['work_id']].version+=1
             store.external_servers.pop('srv')

@@ -3,7 +3,7 @@ from urllib.parse import quote
 from fastapi import APIRouter,Header
 from fastapi.responses import Response
 from pydantic import BaseModel
-from homun.application import work_outputs
+from homun.application.work import outputs as work_outputs
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _http_error
 from homun.routes.price_comparisons import request_context

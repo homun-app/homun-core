@@ -1,9 +1,9 @@
 """Durable conversational brief, with model work outside transactions."""
 from copy import deepcopy
-from homun.application.price_comparisons import cached, save
-from homun.application.intake_policy import PROPOSAL_TYPE, authority, digest, idle, lookup, permission_snapshot, public
-from homun.application.organization_context import organization_background
-from homun.application.intake_brief import brief_changes, preserve_staffing, stabilize
+from homun.application.work.price_comparisons import cached, save
+from homun.application.work.intake_policy import PROPOSAL_TYPE, authority, digest, idle, lookup, permission_snapshot, public
+from homun.application.work.organization_context import organization_background
+from homun.application.work.intake_brief import brief_changes, preserve_staffing, stabilize
 from homun.domain.capabilities import require_capability
 from homun.domain.errors import BudgetExhaustedError, ConflictError, ValidationError
 from homun.domain.models import utc_now
@@ -41,7 +41,7 @@ def classify_message(ctx, actor, work_id, text):
                     and r.result['status'] == 'pending_confirmation'), None)
     pending_brief = ({'title': pending['title'], 'objective': pending['objective']}
                      if pending and pending.get('objective') else None)
-    from homun.application import budgets as work_budgets
+    from homun.application.work import budgets as work_budgets
     from homun.domain.models import BudgetCounters
     reservation = work_budgets.reserve(ctx, actor, work_id, BudgetCounters(attempts=1),
                                        purpose='intake.classify')
@@ -123,7 +123,7 @@ def propose(ctx, actor, work_id, body):
     requested_language = body.get('language')
     language = (requested_language.strip().lower()[:8] or None
                 if isinstance(requested_language, str) else None)
-    from homun.application import budgets as work_budgets
+    from homun.application.work import budgets as work_budgets
     from homun.domain.models import BudgetCounters
     # Reserve before the provider call: exhaustion is durable and typed, and a
     # crash between reserve and reconcile leaves a recoverable trace.

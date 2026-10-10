@@ -49,7 +49,8 @@ def test_small_and_legacy_results_are_unchanged():
 def test_large_external_error_is_readable_after_restart(setup, monkeypatch):
     from types import SimpleNamespace
     from test_agent_mcp import start, choose
-    from homun.application import external_tools, agent_runs
+    from homun.application import agent_runs
+    from homun.application.work import external_tools
     from homun.application.integrations import mcp_client
     from homun.application.agent_external import resume_external
     from homun.application.agent_run_execution import advance

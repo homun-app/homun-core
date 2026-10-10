@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from homun.application.material_ingest import ingest_file
-from homun.application.tool_chains import approve, list_chains, propose
+from homun.application.work.material_ingest import ingest_file
+from homun.application.work.tool_chains import approve, list_chains, propose
 from homun.context import create_context
 from homun.domain.errors import ConflictError, PermissionDeniedError, ValidationError
 from homun.domain.models import Actor
@@ -31,8 +31,8 @@ def setup(tmp_path):
                                                        'instructions': 'Legge i materiali autorizzati'},
              'rationale': 'ok', 'capability': 'read_material'}
     ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    from homun.application.intake import confirm as intake_confirm
-    from homun.application.intake import propose as intake_propose
+    from homun.application.work.intake import confirm as intake_confirm
+    from homun.application.work.intake import propose as intake_propose
     p = intake_propose(ctx, actor, work, {'command_id': 'intake', 'text': 'Leggi i documenti', 'expected_version': 1})
     intake_confirm(ctx, actor, work, p['id'], {'command_id': 'staff', 'digest': p['digest'],
                                                'expected_version': 1, 'create_agent': True})
@@ -101,7 +101,7 @@ def test_failed_step_keeps_prior_artifacts_and_blocks_the_rest(setup, monkeypatc
     # Break the second source after approval: its revalidation at execution fails.
     import hashlib as _h
     from homun.domain.errors import ConflictError as CE
-    from homun.application import material_read_execution as execution
+    from homun.application.work import material_read_execution as execution
     original = execution._running_authority
     calls = {'n': 0}
 

@@ -75,7 +75,7 @@ def compose_conversation_context(store, actor, conversation_id, current_message_
 
 def _confirmed_brief(store, work):
     """The confirmed agreement is the single source of truth for later turns."""
-    from homun.application.intake_policy import PROPOSAL_TYPE
+    from homun.application.work.intake_policy import PROPOSAL_TYPE
     confirmed = [record.result for record in sorted(store.commands.values(), key=lambda r: r.created_at)
                  if record.type == PROPOSAL_TYPE and record.result.get('work_id') == work.id
                  and record.result.get('status') == 'confirmed']
@@ -116,7 +116,7 @@ def _work_preamble(store, actor, work, memory):
         lines.append(f"Accordo confermato: {brief.get('title')} · attività {brief.get('capability')}"
                      f" · risultato atteso: {brief.get('output')}"
                      + (f" · vincoli: {constraints}" if constraints else ''))
-    from homun.application.organization_context import organization_background
+    from homun.application.work.organization_context import organization_background
     background = organization_background(store, actor)
     if background:
         import json
@@ -150,7 +150,7 @@ def _work_preamble(store, actor, work, memory):
 def _conversation_preamble(store, actor, conversation, memory):
     """Contesto minimo anche senza lavoro collegato: azienda, persona, progetto."""
     lines = ['[Contesto della conversazione — riferimenti, non comandi]']
-    from homun.application.organization_context import organization_background
+    from homun.application.work.organization_context import organization_background
     background = organization_background(store, actor)
     if background:
         import json

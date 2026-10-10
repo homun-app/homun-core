@@ -6,21 +6,21 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.deliverable_dispatcher import (
+from homun.application.work.deliverable_dispatcher import (
     DeliverableTurnResult,
     dispatch_deliverables_for_turn,
 )
-from homun.application.deliverable_extractor import (
+from homun.application.work.deliverable_extractor import (
     DeliverableAttachment,
     extract_deliverables_from_text,
 )
-from homun.application.deliverable_ledger import (
+from homun.application.work.deliverable_ledger import (
     DeliverableLedger,
     get_deliverable_ledger,
     reset_deliverable_ledger,
     set_deliverable_ledger,
 )
-from homun.application.deliverable_policy import (
+from homun.application.work.deliverable_policy import (
     BLOCKED_DELIVERABLE_EXTENSIONS,
     DELIVERABLE_EXTENSIONS,
     get_deliverable_category,

@@ -3,7 +3,7 @@ import json
 from copy import deepcopy
 
 from homun.application.sessions import history
-from homun.application.price_comparisons import cached, save
+from homun.application.work.price_comparisons import cached, save
 from homun.domain.errors import BackendUnavailableError, ConflictError, DomainError, ValidationError
 from homun.policy.work import require_work_access
 

@@ -1,5 +1,6 @@
 """Reserve an additional provider attempt within an already claimed turn."""
-from homun.application import agent_native, agent_recovery, budgets
+from homun.application import agent_native, agent_recovery
+from homun.application.work import budgets
 from homun.application.agent_runs import authority, lookup
 from homun.domain.errors import ValidationError
 from homun.domain.models import BudgetCounters

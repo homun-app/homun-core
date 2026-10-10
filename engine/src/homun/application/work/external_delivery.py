@@ -2,9 +2,9 @@
 from copy import deepcopy
 import hashlib
 import json
-from homun.application.external_tools import _lookup, _record_public
-from homun.application.external_publication import publish_in_store
-from homun.application.price_comparisons import cached, save
+from homun.application.work.external_tools import _lookup, _record_public
+from homun.application.work.external_publication import publish_in_store
+from homun.application.work.price_comparisons import cached, save
 from homun.domain.errors import ConflictError, PermissionDeniedError
 from homun.domain.models import utc_now
 from homun.policy.work import require_work_access

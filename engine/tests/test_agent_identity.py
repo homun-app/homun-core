@@ -82,8 +82,8 @@ def test_intake_created_agent_carries_identity(setup):
     """The intake confirm passes the brief's identity fields into agent.create."""
     import json
     from types import SimpleNamespace
-    from homun.application.intake import confirm as intake_confirm
-    from homun.application.intake import propose as intake_propose
+    from homun.application.work.intake import confirm as intake_confirm
+    from homun.application.work.intake import propose as intake_propose
     ctx, actor = setup
     conv = ctx.service.apply(actor, 'c', 'conversation.create', {'title': 'Nuova richiesta'})
     wid = ctx.service.apply(actor, 'w', 'work.create', {

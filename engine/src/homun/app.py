@@ -28,7 +28,7 @@ DEFAULT_PORT = 8765
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from homun.storage.lease import EngineBusyError, engine_lease
     from homun.application.ops.lifecycle import runtime_lifespan
-    from homun.application.material_ingest import recover_materials
+    from homun.application.work.material_ingest import recover_materials
     from homun.storage.paths import default_data_dir
     owns_context = context_mod._CONTEXT is None
     root = default_data_dir() if owns_context else context_mod._CONTEXT.data_dir

@@ -170,7 +170,7 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         deliverable_mode = bool(args.get("deliverable_mode", True))
 
         if deliverable_mode:
-            from homun.application.deliverable_dispatcher import dispatch_deliverables_for_turn
+            from homun.application.work.deliverable_dispatcher import dispatch_deliverables_for_turn
 
             turn_result = dispatch_deliverables_for_turn(
                 session_id=session_id,

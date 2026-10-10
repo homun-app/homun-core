@@ -7,13 +7,13 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from homun.storage.paths import default_data_dir
-from homun.application.kanban_contracts import (
+from homun.application.work.kanban_contracts import (
     KanbanBoard,
     KanbanCard,
     PRContract,
 )
-from homun.application.kanban_store import KanbanStore
-from homun.application.kanban_workflow import (
+from homun.application.work.kanban_store import KanbanStore
+from homun.application.work.kanban_workflow import (
     KanbanWorkflow,
     KanbanWorkflowError,
 )

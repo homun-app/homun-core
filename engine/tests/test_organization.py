@@ -15,18 +15,18 @@ def setup(tmp_path):
     ctx.close()
 
 def draft(ctx, actor, revision=0, command='draft'):
-    from homun.application.organization import update_context
+    from homun.application.work.organization import update_context
     return update_context(ctx, actor, dict(command_id=command,expected_revision=revision,company='Azienda servizi',people='Fabio coordina',tools='Email',goals='Ridurre lavoro manuale'))
 
 def test_draft_persists_and_is_actor_scoped(setup):
-    from homun.application.organization import get_state
+    from homun.application.work.organization import get_state
     ctx, actor, _ = setup
     draft(ctx, actor)
     assert get_state(ctx.snapshot(), actor)['context']['company'] == 'Azienda servizi'
     assert get_state(ctx, Actor(id='other',workspace_id='ws_local',display_name='Other'))['revision'] == 0
 
 def test_confirm_atomic_idempotent_no_creation_before_confirmation(setup):
-    from homun.application.organization import propose, confirm
+    from homun.application.work.organization import propose, confirm
     ctx, actor, _ = setup
     draft(ctx,actor)
     p = propose(ctx, actor, dict(command_id='proposal',expected_revision=1))
@@ -39,7 +39,7 @@ def test_confirm_atomic_idempotent_no_creation_before_confirmation(setup):
     assert next(iter(store.teams.values())).member_ids == result['agent_ids']
 
 def test_stale_context_rejects_proposal(setup):
-    from homun.application.organization import propose, confirm
+    from homun.application.work.organization import propose, confirm
     ctx, actor, _ = setup
     draft(ctx,actor)
     p = propose(ctx,actor,dict(command_id='proposal',expected_revision=1))
@@ -50,7 +50,7 @@ def test_stale_context_rejects_proposal(setup):
 
 @pytest.mark.parametrize('invalid', [True, False])
 def test_model_errors_are_durable_without_creation(setup, invalid):
-    from homun.application.organization import propose, get_state
+    from homun.application.work.organization import propose, get_state
     ctx, actor, proposal = setup
     draft(ctx,actor)
     if invalid:
@@ -64,7 +64,7 @@ def test_model_errors_are_durable_without_creation(setup, invalid):
     assert not ctx.repository.load().agents
 
 def test_rejects_foreign_confirmation_and_command_reuse(setup):
-    from homun.application.organization import propose, confirm
+    from homun.application.work.organization import propose, confirm
     ctx, actor, _ = setup
     draft(ctx,actor)
     p = propose(ctx,actor,dict(command_id='proposal',expected_revision=1))
@@ -76,7 +76,7 @@ def test_rejects_foreign_confirmation_and_command_reuse(setup):
     assert not ctx.repository.load().agents
 
 def test_confirmation_rolls_back_partial_agent_creation(setup, monkeypatch):
-    from homun.application.organization import propose, confirm
+    from homun.application.work.organization import propose, confirm
     from homun.domain.service import DomainService
     ctx, actor, _ = setup
     draft(ctx,actor)
@@ -94,7 +94,7 @@ def test_confirmation_rolls_back_partial_agent_creation(setup, monkeypatch):
     assert store.commands[p['id']].result['status'] == 'pending_confirmation'
 
 def test_context_change_during_provider_call_invalidates_result(setup):
-    from homun.application.organization import propose
+    from homun.application.work.organization import propose
     ctx,actor,proposal = setup
     draft(ctx,actor)
     def model(*args,**kwargs):
@@ -131,7 +131,7 @@ def test_proposal_text_items_are_bounded(setup, field):
         TeamProposal.model_validate(proposal)
 
 def test_explicit_team_size_persists_and_wrong_model_count_is_rejected(setup):
-    from homun.application.organization import update_context, propose, get_state
+    from homun.application.work.organization import update_context, propose, get_state
     ctx,actor,_ = setup
     update_context(ctx,actor,dict(command_id='context',expected_revision=0,company='Services',team_size=2))
     assert get_state(ctx,actor)['context']['team_size'] == 2

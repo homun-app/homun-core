@@ -9,16 +9,16 @@ from homun.domain.models import CommandRecord
 from homun.models.native_prompt import initial_messages
 
 
-from homun.application.delegation_authority import DelegationError, admitted_parent
+from homun.application.work.delegation_authority import DelegationError, admitted_parent
 
 
 def admit(ctx, actor, run, args):
     PROPOSAL_TYPE = "agent_run.propose"
-    from homun.application.executor import resolve_executor
+    from homun.application.work.executor import resolve_executor
     schema = args.get('output_schema')
     if schema is not None:
         try:
-            from homun.application.delegation_schema import validate_output_schema
+            from homun.application.work.delegation_schema import validate_output_schema
             validate_output_schema(schema)
         except (jsonschema.SchemaError, ValueError, RecursionError) as exc:
             raise DelegationError('delegation_schema_invalid', 'Invalid output schema') from exc

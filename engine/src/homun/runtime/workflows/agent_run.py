@@ -69,7 +69,7 @@ def deliver_agent_runs(ctx):
                 # A policy approval must never block delivery; the human gate stays.
                 logging.getLogger(__name__).warning('Policy auto-approve failed for %s', record.command_id, exc_info=True)
         if run['status'] == 'waiting_automation' and run.get('automation_wait', {}).get('reason') == 'goal_gate_pending':
-            from homun.application.goal_terminal import resume as resume_goal_gate
+            from homun.application.work.goal_terminal import resume as resume_goal_gate
             try:
                 resume_goal_gate(ctx, run['id'])
             except DomainError as exc:

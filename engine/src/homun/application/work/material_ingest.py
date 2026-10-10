@@ -58,7 +58,7 @@ def ingest_file(ctx, actor, *, command_id, project_id, filename, data,
             raise
         # The material is durably stored; a failed announcement must not turn the
         # honest success into a lie. The panel keeps live readiness either way.
-        from homun.application.plan_readiness import announce_ready_steps
+        from homun.application.work.plan_readiness import announce_ready_steps
         try:
             announce_ready_steps(ctx, actor, project_id=project_id, command_id=command_id)
         except Exception:

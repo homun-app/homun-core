@@ -42,7 +42,7 @@ def _budgeted_interpret(ctx, actor, work, body, conversation_id, text, roster, c
             provider_id=target_prov,
             context=AttemptContext(command_id=body.command_id, conversation_id=conversation_id,
                                    work_id=None, actor_id=actor.id, purpose="interpret"))
-    from homun.application import budgets as work_budgets
+    from homun.application.work import budgets as work_budgets
     from homun.domain.models import BudgetCounters
     reservation = work_budgets.reserve(ctx, actor, work.id, BudgetCounters(attempts=1),
                                        purpose='interpret')
@@ -80,7 +80,7 @@ def _budgeted_plan_draft(ctx, actor, work, body, text, roster, conversation_cont
     if work is None:
         return extract_plan_draft(ctx.models, text, roster=roster,
                                   conversation_context=conversation_context)
-    from homun.application import budgets as work_budgets
+    from homun.application.work import budgets as work_budgets
     from homun.domain.models import BudgetCounters
     reservation = work_budgets.reserve(ctx, actor, work.id, BudgetCounters(attempts=1),
                                        purpose='plan_draft')

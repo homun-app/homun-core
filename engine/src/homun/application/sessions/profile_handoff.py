@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, Optional
 
 from homun.application.sessions import history as session_history
 from homun.application.sessions.run_request import RunRequest
-from homun.application.price_comparisons import cached, save
+from homun.application.work.price_comparisons import cached, save
 from homun.domain.errors import (
     ConflictError,
     DomainError,

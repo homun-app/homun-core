@@ -1,6 +1,7 @@
 from homun.application.runtime_calls import complete_summary
 """Budgeted context checkpoint preparation; canonical run history is never replaced."""
-from homun.application import agent_native, agent_recovery, budgets
+from homun.application import agent_native, agent_recovery
+from homun.application.work import budgets
 from homun.application.agent_runs import authority, lookup
 from homun.application.agent_usage import charge, reserve as reserve_usage
 import logging

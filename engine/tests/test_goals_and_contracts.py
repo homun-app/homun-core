@@ -4,21 +4,21 @@ import subprocess
 import time
 import pytest
 
-from homun.application.goal_contracts import (
+from homun.application.work.goal_contracts import (
     GoalContract,
     GoalGate,
     parse_contract,
     run_gate,
 )
-from homun.application.goal_manager import (
+from homun.application.work.goal_manager import (
     GoalManager,
     extract_json_object,
     migrate_goal_to_session,
     parse_judge_response,
 )
-from homun.application.goal_tools import execute as execute_goal_tools
+from homun.application.work.goal_tools import execute as execute_goal_tools
 from homun.domain.errors import ValidationError
-from homun.application.goal_store import GoalStore, set_goal_store
+from homun.application.work.goal_store import GoalStore, set_goal_store
 
 
 @pytest.fixture(autouse=True)
@@ -210,7 +210,7 @@ def test_goal_tools_execution():
 
 
 def test_goal_session_migration():
-    from homun.application.goal_manager import load_goal
+    from homun.application.work.goal_manager import load_goal
 
     mgr1 = GoalManager("session-old")
     mgr1.set("Persistent migration goal")
@@ -227,7 +227,7 @@ def test_goal_session_migration():
 
 def test_goal_survives_store_reopen(tmp_path, monkeypatch):
     """Goals must reload from SQLite after a new GoalStore instance (restart)."""
-    from homun.application.goal_store import GoalStore, set_goal_store
+    from homun.application.work.goal_store import GoalStore, set_goal_store
 
     db = tmp_path / "goals.sqlite"
     store1 = GoalStore(db)

@@ -2,7 +2,7 @@
 from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Query
 from homun.context import get_context
-from homun.application.contribution_invitations import _recipient_name
+from homun.application.work.contribution_invitations import _recipient_name
 from homun.application.sessions.conversation_messages import conversation_message_page
 from homun.domain.errors import NotFoundError, PermissionDeniedError
 from homun.policy.work import require_work_access
@@ -52,7 +52,7 @@ def list_works(
             payload["plan"] = plan.model_dump(mode="json")
         budget = ctx.service.store.work_budgets.get(work.id)
         if budget is not None:
-            from homun.application.budgets import public as budget_public
+            from homun.application.work.budgets import public as budget_public
             payload["budget"] = budget_public(budget)
         if work.current_artifact_version:
             artifact = next((a for a in ctx.service.store.artifacts.values()
@@ -111,7 +111,7 @@ def get_work(
         raise _http_error(exc) from exc
     plan = ctx.service.current_plan(work)
     budget = ctx.service.store.work_budgets.get(work_id)
-    from homun.application.budgets import public as budget_public
+    from homun.application.work.budgets import public as budget_public
     work_payload = work.model_dump(mode="json")
     work_payload["intake_confirmed"] = has_confirmed_intake(ctx.service.store, work.id)
     return {
