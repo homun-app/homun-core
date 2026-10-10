@@ -186,11 +186,17 @@ def main():
     root = Path(__file__).resolve().parents[1]
     baseline = json.loads((root / "tools/architecture-baseline.json").read_text())
     errors, reports = check(root, baseline)
+    cross = [report for report in reports if report.startswith("cross-context import:")]
+    size = [report for report in reports if not report.startswith("cross-context import:")
+            and not report.startswith("Cross-context imports in homun.application:")]
     for report in reports:
         print(report)
     for error in errors:
         print(f"ERROR: {error}")
-    print(f"Architecture: {len(errors)} error(s), {len(reports)} size review notice(s)")
+    summary = f"Architecture: {len(errors)} error(s), {len(size)} size review notice(s)"
+    if cross:
+        summary += f", {len(cross)} cross-context import(s)"
+    print(summary)
     return bool(errors)
 
 
