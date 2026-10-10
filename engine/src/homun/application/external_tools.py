@@ -25,7 +25,7 @@ PROPOSAL_TYPE = "external_tool.call"
 ACTIVE = {"pending_approval", "queued", "running", "publication_pending"}
 
 
-from homun.application.mcp_contracts import server_hash
+from homun.application.integrations.mcp_contracts import server_hash
 
 
 def _record_public(record: CommandRecord) -> dict[str, Any]:
@@ -56,8 +56,8 @@ def propose(ctx, actor, body, *, agent_binding=None) -> dict[str, Any]:
     if not isinstance(raw_args, dict):
         raise ValidationError("arguments must be a JSON object")
     arguments = {str(k): v for k, v in raw_args.items()}
-    from homun.application import mcp_client
-    from homun.application.mcp_contracts import select_descriptor, validate_arguments
+    from homun.application.integrations import mcp_client
+    from homun.application.integrations.mcp_contracts import select_descriptor, validate_arguments
     initial = ctx.repository.load()
     require_work_access(initial, actor, work_id)
     prior = initial.commands.get(body['command_id'])
@@ -90,7 +90,7 @@ def propose(ctx, actor, body, *, agent_binding=None) -> dict[str, Any]:
                 raise ConflictError("Server changed during discovery; create a new proposal")
             if server.status != "enabled":
                 raise ValidationError("Server is disabled")
-            from homun.application.mcp_client import filtered_tools
+            from homun.application.integrations.mcp_client import filtered_tools
             if not filtered_tools(server, [{'name': tool}]):
                 raise PermissionDeniedError('Tool is outside the declared server surface')
             prior_command = store.commands.get(body['command_id'])
@@ -148,7 +148,8 @@ def propose(ctx, actor, body, *, agent_binding=None) -> dict[str, Any]:
 def approve(ctx, actor, proposal_id: str, body) -> dict[str, Any]:
     """Authorize one dispatch or resume publication from its durable receipt."""
     from datetime import datetime, timedelta
-    from homun.application import external_publication, mcp_client
+    from homun.application import external_publication
+    from homun.application.integrations import mcp_client
     if str(actor.kind) != "person":
         raise PermissionDeniedError("Only a person may approve an external tool call")
     dispatch = False

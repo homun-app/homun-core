@@ -70,8 +70,8 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             registry.register(cu_entry)
     skills = run.get('skills')
     if isinstance(skills, dict) and skills.get('policy') == 'workspace-catalog-v1' and skills.get('version') == 1:
-        from homun.application.skill_contracts import entries as skill_entries
-        from homun.application.skill_tools import execute as skill_execute
+        from homun.application.integrations.skill_contracts import entries as skill_entries
+        from homun.application.integrations.skill_tools import execute as skill_execute
         for skill_entry in skill_entries(skill_execute, skills.get('version', 1)):
             registry.register(skill_entry)
     delegation = run.get('delegation')
@@ -118,7 +118,7 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             registry.register(ce_entry)
     plugins = run.get('plugins')
     if isinstance(plugins, dict) and plugins.get('policy') == 'extensible-plugins-v1' and plugins.get('version') == 1:
-        from homun.application.plugin_manager import get_plugin_manager
+        from homun.application.integrations.plugin_manager import get_plugin_manager
         for p_entry in get_plugin_manager().get_active_tools():
             registry.register(p_entry)
     if run.get('_result_storage_version') == 1:

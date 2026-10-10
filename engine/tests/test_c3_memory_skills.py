@@ -8,7 +8,7 @@ from test_agent_runs import setup
 
 
 def test_progressive_skill_resources(setup):
-    from homun.application.skill_tools import execute
+    from homun.application.integrations.skill_tools import execute
 
     ctx, actor, work, _ = setup
     with ctx.repository.locked():
@@ -100,7 +100,7 @@ def test_progressive_skill_resources(setup):
 
 
 def test_skill_trust_and_human_approval(setup):
-    from homun.application.skill_tools import execute
+    from homun.application.integrations.skill_tools import execute
 
     ctx, human_actor, work, _ = setup
     agent_actor = Actor(id="agent_worker_1", workspace_id=human_actor.workspace_id, display_name="Agent", kind="agent")
@@ -167,7 +167,7 @@ def test_skill_trust_and_human_approval(setup):
 
 
 def test_hub_curation_and_bundle_lifecycle(setup):
-    from homun.application.skill_bundle import (
+    from homun.application.integrations.skill_bundle import (
         curate_skill_bundle,
         validate_skill_bundle,
         install_skill_bundle,

@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 from typing import Any, List, Optional
 
-from homun.application.plugin_contracts import LoadedPlugin, PluginContext, PluginManifest
+from homun.application.integrations.plugin_contracts import LoadedPlugin, PluginContext, PluginManifest
 
 _log = logging.getLogger(__name__)
 

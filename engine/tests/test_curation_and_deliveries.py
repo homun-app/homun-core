@@ -43,13 +43,13 @@ def _skill(ctx, actor, name, *, author="agent", status="staged", age_days=0.0, u
                 target.updated_at = backdated
             ctx.service.store = s2
     if use:
-        from homun.application.skill_tools import _record_usage
+        from homun.application.integrations.skill_tools import _record_usage
         _record_usage(ctx, skill)
     return skill.id
 
 
 def test_curator_archives_stale_staged_and_unused(ctx):
-    from homun.application.skill_curator import curate
+    from homun.application.integrations.skill_curator import curate
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     stale_staged = _skill(ctx, actor, 'vecchia-staged', status='staged', age_days=10)
     fresh_staged = _skill(ctx, actor, 'nuova-staged', status='staged', age_days=1)
@@ -70,7 +70,7 @@ def test_curator_archives_stale_staged_and_unused(ctx):
 
 
 def test_curator_interval_gate_and_state(ctx):
-    from homun.application.skill_curator import maybe_curate
+    from homun.application.integrations.skill_curator import maybe_curate
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     _skill(ctx, actor, 'una', status='staged', age_days=10)
     first = maybe_curate(ctx, now=1_700_000_000.0, force=False)

@@ -41,10 +41,10 @@ async def runtime_lifespan(ctx):
         import os
         catalog_dir = os.environ.get("HOMUN_SKILL_CATALOG_DIR")
         if catalog_dir:
-            from homun.application.skill_catalog_sync import sync_skill_catalog
+            from homun.application.integrations.skill_catalog_sync import sync_skill_catalog
             sync_skill_catalog(ctx, catalog_dir)
         else:
-            from homun.application.skill_seeding import seed_builtin_skills
+            from homun.application.integrations.skill_seeding import seed_builtin_skills
             seed_builtin_skills(ctx)
     except Exception:
         logging.getLogger(__name__).exception("Skill catalog bootstrap failed")
@@ -84,7 +84,7 @@ async def runtime_lifespan(ctx):
             except Exception:
                 logging.getLogger(__name__).exception("Cron delivery pass failed")
             try:
-                from homun.application.skill_curator import maybe_curate
+                from homun.application.integrations.skill_curator import maybe_curate
                 await asyncio.to_thread(maybe_curate, ctx)
             except Exception:
                 logging.getLogger(__name__).exception("Skill curation pass failed")

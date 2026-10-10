@@ -19,7 +19,7 @@ BUILTIN_AUTHOR = "homun:builtin"
 
 
 def seed_builtin_skills(ctx) -> Dict[str, Any]:
-    from homun.application.builtin_skills import CATALOG
+    from homun.application.integrations.builtin_skills import CATALOG
     actor = Actor(id="person_local", workspace_id=ctx.workspace_id, display_name="Homun builtin catalog")
     created, skipped, retagged = [], [], []
     store = ctx.repository.load()

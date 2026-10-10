@@ -66,7 +66,7 @@ def _fake_model(payload: dict):
 
 
 def test_reflection_patches_and_proposes_staged(ctx):
-    from homun.application.skill_reflection import maybe_reflect
+    from homun.application.integrations.skill_reflection import maybe_reflect
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     run_id, work, agent_id = _completed_run(ctx, actor)
     skill = _apply(ctx, actor, 'sk', 'skill.create', {
@@ -101,7 +101,7 @@ def test_reflection_patches_and_proposes_staged(ctx):
 
 
 def test_reflection_requires_skills_capability_and_transcript(ctx):
-    from homun.application.skill_reflection import maybe_reflect
+    from homun.application.integrations.skill_reflection import maybe_reflect
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     plain_id, _, _ = _completed_run(ctx, actor, skills=False)
     assert maybe_reflect(ctx, plain_id) is False
@@ -111,7 +111,7 @@ def test_reflection_requires_skills_capability_and_transcript(ctx):
 
 
 def test_reflection_survives_bad_payload(ctx):
-    from homun.application.skill_reflection import maybe_reflect
+    from homun.application.integrations.skill_reflection import maybe_reflect
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     run_id, work, agent_id = _completed_run(ctx, actor)
 
@@ -125,7 +125,7 @@ def test_reflection_survives_bad_payload(ctx):
 
 
 def test_skill_patch_tool_guards_and_usage_tracking(ctx):
-    from homun.application.skill_tools import execute
+    from homun.application.integrations.skill_tools import execute
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     run = {'skills': {'policy': 'workspace-catalog-v1'}, 'work_id': None, 'assignee_id': None}
     agent_skill = _apply(ctx, actor, 'sk1', 'skill.create', {

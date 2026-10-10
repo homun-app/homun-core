@@ -6,12 +6,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from homun.application.mcp_client import (
+from homun.application.integrations.mcp_client import (
     install_product_elicitation,
     set_elicitation_callback,
 )
-from homun.application.mcp_oauth import MCPOAuthBroker, OAuthToken
-from homun.application.plugin_manager import PluginManager, reset_plugin_manager
+from homun.application.integrations.mcp_oauth import MCPOAuthBroker, OAuthToken
+from homun.application.integrations.plugin_manager import PluginManager, reset_plugin_manager
 from homun.domain.models import ExternalServer
 from homun.models.registry import ModelRegistry
 
@@ -175,7 +175,7 @@ def test_mcp_elicitation_callback_wiring(monkeypatch):
     try:
         install_product_elicitation(custom_elicit)
         import anyio
-        from homun.application import mcp_client
+        from homun.application.integrations import mcp_client
 
         async def run_probe():
             cb = mcp_client._elicitation_callback
@@ -206,7 +206,7 @@ def test_pre_tool_call_hook_blocks_and_allows_tool(tmp_path):
         return {"action": "allow"}
 
     # Register hook manually
-    from homun.application.plugin_contracts import PluginManifest
+    from homun.application.integrations.plugin_contracts import PluginManifest
     fake_manifest = PluginManifest(name="sec_plugin", version="1.0.0", description="Security")
     pm._plugins["sec_plugin"] = type("Loaded", (), {"manifest": fake_manifest, "enabled": True})()
     pm._register_hook(fake_manifest, "pre_tool_call", sample_hook)

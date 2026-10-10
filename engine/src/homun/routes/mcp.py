@@ -9,7 +9,7 @@ from homun.domain.errors import DomainError
 from homun.routes.domain_support import _actor_from_headers, _http_error
 from homun.routes.price_comparisons import request_context
 from homun.application import external_tools, external_delivery
-from homun.application.mcp_catalog import catalog_public
+from homun.application.integrations.mcp_catalog import catalog_public
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["mcp", "skills"])
 
@@ -117,7 +117,7 @@ def test_server(workspace_id: str, server_id: str,
     server = store.external_servers.get(server_id)
     if server is None:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Server not found"})
-    from homun.application.mcp_client import probe_server
+    from homun.application.integrations.mcp_client import probe_server
     try:
         return probe_server(server)
     except Exception as exc:
@@ -279,7 +279,7 @@ def sync_skill_catalog_route(workspace_id: str, body: dict,
                              x_homun_actor_id: str | None = Header(default=None),
                              x_homun_actor_name: str | None = Header(default=None)):
     """Sync skills from a catalog repository checkout (see homun-skills)."""
-    from homun.application.skill_catalog_sync import sync_skill_catalog
+    from homun.application.integrations.skill_catalog_sync import sync_skill_catalog
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
     if actor.kind != "person":
         raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Persons only"})
@@ -297,7 +297,7 @@ def seed_skills(workspace_id: str,
                 x_homun_actor_id: str | None = Header(default=None),
                 x_homun_actor_name: str | None = Header(default=None)):
     """(Re)apply the builtin skill catalog; existing skills are never touched."""
-    from homun.application.skill_seeding import seed_builtin_skills
+    from homun.application.integrations.skill_seeding import seed_builtin_skills
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
     if actor.kind != "person":
         raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Persons only"})
@@ -310,7 +310,7 @@ def curate_skills(workspace_id: str,
                   x_homun_actor_name: str | None = Header(default=None)):
     """Force one skill-curation pass (stale staged and never-used archives)."""
     from fastapi import HTTPException
-    from homun.application.skill_curator import maybe_curate
+    from homun.application.integrations.skill_curator import maybe_curate
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
     if actor.kind != "person":
         raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Persons only"})

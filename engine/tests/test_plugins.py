@@ -6,18 +6,18 @@ import sqlite3
 import pytest
 from pydantic import BaseModel, Field
 
-from homun.application.plugin_contracts import PluginManifest
-from homun.application.plugin_loader import (
+from homun.application.integrations.plugin_contracts import PluginManifest
+from homun.application.integrations.plugin_loader import (
     iter_plugin_dirs,
     load_plugin_module,
     read_plugin_manifest,
 )
-from homun.application.plugin_manager import (
+from homun.application.integrations.plugin_manager import (
     PluginManager,
     get_plugin_manager,
     reset_plugin_manager,
 )
-from homun.application.plugin_storage import (
+from homun.application.integrations.plugin_storage import (
     plugin_data_dir,
     plugin_db,
     reset_homun_home_override,
@@ -286,7 +286,7 @@ def test_uninstall_honors_retained_data_contract(tmp_path):
 # 4. Agent tool registry integration test
 def test_agent_tool_registry_with_plugin_tool(tmp_path):
     from homun.application import agent_tool_registry
-    from homun.application.plugin_manager import get_plugin_manager
+    from homun.application.integrations.plugin_manager import get_plugin_manager
     from homun.tools.registry import ToolEntry
     from homun.models.agent_turn import ToolDefinition
 
@@ -328,7 +328,7 @@ def test_agent_tool_registry_with_plugin_tool(tmp_path):
 def test_plugin_routes_api(tmp_path):
     from fastapi.testclient import TestClient
     from homun.app import create_app
-    from homun.application.plugin_manager import get_plugin_manager
+    from homun.application.integrations.plugin_manager import get_plugin_manager
     from homun.tools.registry import ToolEntry
     from homun.models.agent_turn import ToolDefinition
 
@@ -355,7 +355,7 @@ def test_plugin_routes_api(tmp_path):
         description="API Plugin",
         provides_tools=["api_tool"],
     )
-    from homun.application.plugin_contracts import LoadedPlugin
+    from homun.application.integrations.plugin_contracts import LoadedPlugin
     pdir = tmp_path / "plugins" / "api_plugin"
     pdir.mkdir(parents=True)
     loaded = LoadedPlugin(manifest=manifest, install_dir=pdir, enabled=True)
@@ -411,8 +411,8 @@ def test_plugin_routes_api(tmp_path):
 def test_startup_discovery_loads_bundled_plugins():
     """app.py discovers <home>/plugins plus the engine's bundled tree."""
     import importlib
-    from homun.application import plugin_manager as pm_mod
-    from homun.application.plugin_storage import set_homun_home_override, reset_homun_home_override
+    from homun.application.integrations import plugin_manager as pm_mod
+    from homun.application.integrations.plugin_storage import set_homun_home_override, reset_homun_home_override
     import tempfile, pathlib
 
     pm_mod.reset_plugin_manager()
@@ -420,8 +420,8 @@ def test_startup_discovery_loads_bundled_plugins():
     token = set_homun_home_override(home)
     try:
         # il bundled text-stats esiste nel pacchetto: simula la discovery di app.py
-        from homun.application.plugin_loader import iter_plugin_dirs
-        bundled = pathlib.Path(pm_mod.__file__).parents[1] / "plugins_bundled"
+        from homun.application.integrations.plugin_loader import iter_plugin_dirs
+        bundled = pathlib.Path(pm_mod.__file__).parents[2] / "plugins_bundled"
         found = list(iter_plugin_dirs(bundled))
         assert any(p.name == "text-stats" for p in found)
         for plugin_dir in found:
@@ -462,8 +462,8 @@ def test_install_from_local_git_repo(tmp_path):
     from fastapi.testclient import TestClient
     from homun.app import create_app
     from homun.context import create_context, reset_context_for_tests
-    from homun.application import plugin_manager as pm_mod
-    from homun.application.plugin_storage import set_homun_home_override, reset_homun_home_override
+    from homun.application.integrations import plugin_manager as pm_mod
+    from homun.application.integrations.plugin_storage import set_homun_home_override, reset_homun_home_override
 
     src = tmp_path / "src-repo"
     src.mkdir()

@@ -23,7 +23,7 @@ def _apply(ctx, actor, command_id, kind, payload):
 
 
 def test_seeding_is_idempotent_and_respects_user_changes(ctx):
-    from homun.application.skill_seeding import seed_builtin_skills
+    from homun.application.integrations.skill_seeding import seed_builtin_skills
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     first = seed_builtin_skills(ctx)
     assert len(first['created']) >= 50

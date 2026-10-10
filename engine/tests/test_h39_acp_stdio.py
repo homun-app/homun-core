@@ -5,8 +5,8 @@ import json
 import stat
 from pathlib import Path
 
-from homun.application.acp_stdio_transport import StdioAcpTransport
-from homun.application.copilot_acp_client import CopilotAcpClient
+from homun.application.integrations.acp_stdio_transport import StdioAcpTransport
+from homun.application.integrations.copilot_acp_client import CopilotAcpClient
 
 
 def _fake_acp_cli(tmp_path: Path) -> Path:

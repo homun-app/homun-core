@@ -20,9 +20,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.acp_adapter import AcpApprovalStatus, AcpServerAdapter
+from homun.application.integrations.acp_adapter import AcpApprovalStatus, AcpServerAdapter
 from homun.application.ops.api_server_contracts import GLOBAL_IDEMPOTENCY_STORE, IdempotencyStore
-from homun.application.hosted_mcp_agent import HostedMcpAgentServer
+from homun.application.integrations.hosted_mcp_agent import HostedMcpAgentServer
 from homun.context import create_context, reset_context_for_tests
 from homun.models.native_turn import NativeMessage, ToolCall
 from homun.models.types import UsageEntry
@@ -340,8 +340,8 @@ async def test_acp_adapter_lifecycle_and_edit_approval():
 
 
 def test_hosted_mcp_engine_runner_stages_real_agent_run(tmp_path):
-    from homun.application.hosted_mcp_agent import HostedMcpAgentServer
-    from homun.application.hosted_mcp_runner import HostedMcpEngineRunner
+    from homun.application.integrations.hosted_mcp_agent import HostedMcpAgentServer
+    from homun.application.integrations.hosted_mcp_runner import HostedMcpEngineRunner
     from homun.context import create_context
     from homun.domain.models import Actor
 

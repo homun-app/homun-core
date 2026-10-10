@@ -3,7 +3,7 @@ import time
 import pytest
 
 from homun.domain.models import ExternalServer
-from homun.application.mcp_oauth import MCPOAuthBroker, OAuthToken, get_mcp_oauth_broker
+from homun.application.integrations.mcp_oauth import MCPOAuthBroker, OAuthToken, get_mcp_oauth_broker
 
 
 def test_mcp_oauth_refuses_without_credentials():
@@ -50,7 +50,7 @@ def test_mcp_oauth_client_credentials_flow(monkeypatch):
             calls.append((url, data))
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.mcp_oauth.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.integrations.mcp_oauth.httpx.Client", FakeClient)
 
     broker = MCPOAuthBroker()
     server = ExternalServer(
@@ -107,7 +107,7 @@ def test_mcp_oauth_expired_token_refetches(monkeypatch):
             calls.append((url, data))
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.mcp_oauth.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.integrations.mcp_oauth.httpx.Client", FakeClient)
 
     broker = MCPOAuthBroker()
     server = ExternalServer(
@@ -158,7 +158,7 @@ def test_mcp_oauth_refresh_token_grant(monkeypatch):
             calls.append((url, data))
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.mcp_oauth.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.integrations.mcp_oauth.httpx.Client", FakeClient)
 
     broker = MCPOAuthBroker()
     server = ExternalServer(
@@ -197,7 +197,7 @@ def test_mcp_oauth_endpoint_http_error(monkeypatch):
         def post(self, url, data=None):
             return FakeResp()
 
-    monkeypatch.setattr("homun.application.mcp_oauth.httpx.Client", FakeClient)
+    monkeypatch.setattr("homun.application.integrations.mcp_oauth.httpx.Client", FakeClient)
 
     broker = MCPOAuthBroker()
     server = ExternalServer(

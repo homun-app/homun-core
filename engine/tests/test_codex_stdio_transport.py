@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from homun.application.codex_runtime import CodexAppServerAdapter
+from homun.application.integrations.codex_runtime import CodexAppServerAdapter
 
 FIXTURE = r'''
 import json, sys, time, os

@@ -6,8 +6,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from homun.application.plugin_manager import get_plugin_manager
-from homun.application.plugin_storage import plugin_data_dir
+from homun.application.integrations.plugin_manager import get_plugin_manager
+from homun.application.integrations.plugin_storage import plugin_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def get_plugin_detail(name: str) -> Dict[str, Any]:
 
 
 def _persist_enabled(name: str, enabled: bool) -> None:
-    from homun.application.plugin_storage import load_plugins_config, save_plugins_config
+    from homun.application.integrations.plugin_storage import load_plugins_config, save_plugins_config
     config = load_plugins_config()
     plugins = config.setdefault("plugins", {})
     disabled = set(plugins.get("disabled", []))
@@ -167,9 +167,9 @@ def install_plugin(body: PluginInstallRequest) -> Dict[str, Any]:
     import tempfile
     from pathlib import Path
 
-    from homun.application.plugin_loader import read_plugin_manifest
-    from homun.application.plugin_manager import get_plugin_manager, logger as pm_logger
-    from homun.application.plugin_storage import plugins_root, save_plugins_config, load_plugins_config
+    from homun.application.integrations.plugin_loader import read_plugin_manifest
+    from homun.application.integrations.plugin_manager import get_plugin_manager, logger as pm_logger
+    from homun.application.integrations.plugin_storage import plugins_root, save_plugins_config, load_plugins_config
 
     if not re.fullmatch(r"[0-9a-f]{40}", body.sha):
         raise HTTPException(status_code=400, detail={

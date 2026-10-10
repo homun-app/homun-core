@@ -41,7 +41,7 @@ def _repo(tmp_path, bodies, resources=None) -> str:
 
 
 def test_sync_creates_updates_and_respects_human_edits(ctx, tmp_path):
-    from homun.application.skill_catalog_sync import sync_skill_catalog
+    from homun.application.integrations.skill_catalog_sync import sync_skill_catalog
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
 
     repo_v1 = _repo(tmp_path, ["Regola uno."], resources=["Tabella A|B"])
@@ -78,7 +78,7 @@ def test_sync_creates_updates_and_respects_human_edits(ctx, tmp_path):
 
 
 def test_sync_skips_oversized_and_binary_resources(ctx, tmp_path):
-    from homun.application.skill_catalog_sync import sync_skill_catalog
+    from homun.application.integrations.skill_catalog_sync import sync_skill_catalog
     root = tmp_path / "catalog-big"
     skill = root / "internal" / "beta"
     (skill / "scripts").mkdir(parents=True)
@@ -97,7 +97,7 @@ def test_sync_skips_oversized_and_binary_resources(ctx, tmp_path):
 
 
 def test_sync_skips_external_only_and_archives_absent_pristine(ctx, tmp_path):
-    from homun.application.skill_catalog_sync import sync_skill_catalog
+    from homun.application.integrations.skill_catalog_sync import sync_skill_catalog
     root = tmp_path / "catalog-h"
     for name in ("gamma", "delta"):
         skill = root / "internal" / name
@@ -137,7 +137,7 @@ def test_sync_skips_external_only_and_archives_absent_pristine(ctx, tmp_path):
 
 
 def test_rebase_recovers_machine_drift_but_never_human_edits(ctx, tmp_path):
-    from homun.application.skill_catalog_sync import sync_skill_catalog
+    from homun.application.integrations.skill_catalog_sync import sync_skill_catalog
     from homun.domain.models import Actor
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
 

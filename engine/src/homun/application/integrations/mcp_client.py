@@ -100,7 +100,7 @@ def _require_transport_auth(server: ExternalServer) -> Optional[str]:
     if str(getattr(server, "oauth_client_id", "") or "").strip() or str(
         getattr(server, "oauth_token_url", "") or ""
     ).strip():
-        from homun.application.mcp_oauth import get_mcp_oauth_broker
+        from homun.application.integrations.mcp_oauth import get_mcp_oauth_broker
 
         broker = get_mcp_oauth_broker()
         return broker.get_access_token(server)
@@ -210,7 +210,7 @@ async def _operation(
                 initialized = await session.initialize()
                 if tool_name is not None:
                     if expected_descriptor is not None:
-                        from homun.application.mcp_contracts import select_descriptor, validate_arguments, require_same_descriptor
+                        from homun.application.integrations.mcp_contracts import select_descriptor, validate_arguments, require_same_descriptor
                         try:
                             descriptors = await _discover_tools(session)
                             actual = select_descriptor(descriptors, tool_name)

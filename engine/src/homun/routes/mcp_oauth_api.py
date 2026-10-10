@@ -18,7 +18,7 @@ def start_oauth(workspace_id: str, server_id: str, request: Request,
     base = str(request.base_url).rstrip("/")
     redirect_uri = f"{base}/v1/workspaces/{workspace_id}/mcp/oauth/callback"
     try:
-        from homun.application.mcp_oauth import start_hosted_flow
+        from homun.application.integrations.mcp_oauth import start_hosted_flow
         return start_hosted_flow(ctx, actor, server_id, redirect_uri)
     except RuntimeError as exc:
         raise _http_error(DomainError(str(exc))) from exc
@@ -39,7 +39,7 @@ def oauth_callback(workspace_id: str, request: Request,
     if not state or not code:
         return HTMLResponse(_page("❌ Callback incompleta", "Mancano state o code."))
     try:
-        from homun.application.mcp_oauth import complete_hosted_flow
+        from homun.application.integrations.mcp_oauth import complete_hosted_flow
         result = complete_hosted_flow(ctx, state, code)
         return HTMLResponse(_page(
             "✅ Connettore collegato",
@@ -54,7 +54,7 @@ def oauth_status(workspace_id: str, server_id: str,
                  x_homun_actor_id: str | None = Header(default=None),
                  x_homun_actor_name: str | None = Header(default=None)):
     ctx, _actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
-    from homun.application.mcp_oauth import hosted_connection_status
+    from homun.application.integrations.mcp_oauth import hosted_connection_status
     return hosted_connection_status(ctx, server_id)
 
 
@@ -75,8 +75,8 @@ def list_connectors(workspace_id: str,
                     x_homun_actor_name: str | None = Header(default=None)):
     """Catalogo dei connettori hosted + stato di collegamento nel workspace."""
     ctx, _actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
-    from homun.application.mcp_connectors_catalog import HOSTED_CONNECTORS
-    from homun.application.mcp_oauth import hosted_connection_status
+    from homun.application.integrations.mcp_connectors_catalog import HOSTED_CONNECTORS
+    from homun.application.integrations.mcp_oauth import hosted_connection_status
     store = ctx.repository.load()
     by_name = {s.name.lower(): s for s in store.external_servers.values()}
     items = []
@@ -99,7 +99,7 @@ def install_connector(workspace_id: str, name: str,
                       x_homun_actor_name: str | None = Header(default=None)):
     """Dichiara il server del connettore nel workspace (http + url del catalogo)."""
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
-    from homun.application.mcp_connectors_catalog import HOSTED_CONNECTORS
+    from homun.application.integrations.mcp_connectors_catalog import HOSTED_CONNECTORS
     entry = next((c for c in HOSTED_CONNECTORS if c["name"] == name), None)
     if entry is None:
         raise _http_error(DomainError(f"Connettore sconosciuto: {name}"))

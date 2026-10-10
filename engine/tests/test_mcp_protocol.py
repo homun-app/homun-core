@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from homun.application import mcp_client
+from homun.application.integrations import mcp_client
 from homun.domain.models import ExternalServer
 
 
@@ -199,7 +199,7 @@ def test_probe_reconnects_once_on_transient_failure(tmp_path, monkeypatch):
 
 def test_oauth_declared_refuses_without_token_broker(tmp_path):
     from homun.domain.models import ExternalServer
-    from homun.application import mcp_client
+    from homun.application.integrations import mcp_client
 
     server = ExternalServer(
         id="mcp_x",
@@ -220,7 +220,7 @@ def test_oauth_declared_refuses_without_token_broker(tmp_path):
 
 def test_mtls_cert_tuple_helper():
     from homun.domain.models import ExternalServer
-    from homun.application.mcp_client import _httpx_mtls_cert
+    from homun.application.integrations.mcp_client import _httpx_mtls_cert
 
     server = ExternalServer(
         id="mcp_y",

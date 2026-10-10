@@ -139,7 +139,7 @@ class AcpServerAdapter:
             raise BackendUnavailableError("ACP requires an EngineContext")
         runner = self._runner
         if runner is None:
-            from homun.application.hosted_mcp_runner import HostedMcpEngineRunner
+            from homun.application.integrations.hosted_mcp_runner import HostedMcpEngineRunner
             runner = HostedMcpEngineRunner()
         result = await asyncio.to_thread(runner.run_task, text, ctx=self._ctx,
                                          actor=self._actor, command_id=command_id,

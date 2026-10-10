@@ -4,8 +4,8 @@ import hashlib
 import re
 from typing import Any
 from pydantic import RootModel, model_validator
-from homun.application import mcp_client
-from homun.application.mcp_contracts import select_descriptor, validate_arguments, server_hash
+from homun.application.integrations import mcp_client
+from homun.application.integrations.mcp_contracts import select_descriptor, validate_arguments, server_hash
 from homun.domain.errors import ConflictError, ValidationError
 from homun.models.agent_turn import ToolDefinition
 from homun.policy.work import require_work_access

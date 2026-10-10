@@ -7,18 +7,18 @@ from pathlib import Path
 import shutil
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from homun.application.plugin_contracts import (
+from homun.application.integrations.plugin_contracts import (
     LoadedPlugin,
     PluginContext,
     PluginManifest,
     PluginRegistration,
 )
-from homun.application.plugin_loader import (
+from homun.application.integrations.plugin_loader import (
     iter_plugin_dirs,
     load_plugin_module,
     read_plugin_manifest,
 )
-from homun.application.plugin_storage import plugin_data_dir
+from homun.application.integrations.plugin_storage import plugin_data_dir
 from homun.tools.registry import ToolEntry
 
 logger = logging.getLogger(__name__)

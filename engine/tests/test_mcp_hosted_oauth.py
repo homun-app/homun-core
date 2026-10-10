@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from homun.application import mcp_oauth
-from homun.application.mcp_oauth import (
+from homun.application.integrations import mcp_oauth
+from homun.application.integrations.mcp_oauth import (
     MCPOAuthBroker, OAuthToken, discover_oauth_metadata, dynamic_client_register,
     start_hosted_flow, complete_hosted_flow, hosted_connection_status)
 from homun.context import create_context

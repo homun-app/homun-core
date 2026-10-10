@@ -8,10 +8,10 @@ import pytest
 from homun.application.ops.batch_eval_runner import BatchEvalRunner, BatchItem
 from homun.application.channels.adapters import TelegramAdapter
 from homun.application.computer_use_driver import ComputerUseDriver
-from homun.application.copilot_acp_client import CopilotAcpClient
-from homun.application.hosted_mcp_agent import HostedMcpAgentServer
-from homun.application.integration_meetings import MeetingManager
-from homun.application.integration_yuanbao import YuanbaoAdapter, YuanbaoNotConnectedError
+from homun.application.integrations.copilot_acp_client import CopilotAcpClient
+from homun.application.integrations.hosted_mcp_agent import HostedMcpAgentServer
+from homun.application.integrations.meetings import MeetingManager
+from homun.application.integrations.yuanbao import YuanbaoAdapter, YuanbaoNotConnectedError
 from homun.application.providers.media_image_gen import ImageGenerator
 from homun.application.providers.media_stt import SpeechToTextTranscriber
 from homun.application.providers.media_tts import TextToSpeechSynthesizer
