@@ -1,6 +1,6 @@
 """DBOS owns synthesis recovery; command IDs give stable workflow identity."""
 from dbos import DBOS, SetWorkflowID
-from homun.application.synthesis_execution import execute, fail
+from homun.application.work.synthesis_execution import execute, fail
 
 _context = None
 
@@ -31,7 +31,7 @@ def start(workflow_id, proposal_id):
 
 
 def deliver_syntheses(ctx):
-    from homun.application.synthesis import PROPOSAL_TYPE
+    from homun.application.work.synthesis import PROPOSAL_TYPE
     for record in ctx.repository.snapshot().commands.values():
         if record.type != PROPOSAL_TYPE or record.result['status'] not in {'queued', 'running'}:
             continue

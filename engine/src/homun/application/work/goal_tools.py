@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from homun.application.goal_contracts import GoalContract
-from homun.application.goal_manager import GoalManager
+from homun.application.work.goal_contracts import GoalContract
+from homun.application.work.goal_manager import GoalManager
 from homun.domain.errors import ValidationError
 
 

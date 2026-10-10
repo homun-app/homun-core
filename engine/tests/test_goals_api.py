@@ -1,8 +1,8 @@
 """Tests for the persistent goals HTTP API (H25)."""
 from fastapi.testclient import TestClient
 from homun.app import create_app
-from homun.application.goal_contracts import GoalContract, GoalState
-from homun.application.goal_store import GoalStore, set_goal_store
+from homun.application.work.goal_contracts import GoalContract, GoalState
+from homun.application.work.goal_store import GoalStore, set_goal_store
 
 
 def test_goals_api_crud(tmp_path):

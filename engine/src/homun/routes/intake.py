@@ -2,7 +2,7 @@
 from typing import Literal
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
-from homun.application.intake import classify_message, confirm, list_proposals, propose
+from homun.application.work.intake import classify_message, confirm, list_proposals, propose
 from homun.domain.errors import DomainError
 from homun.models.intake import NewAgent
 from homun.routes.domain_support import _http_error

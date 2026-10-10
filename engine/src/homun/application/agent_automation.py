@@ -4,9 +4,9 @@ import time
 
 from homun.application import agent_native
 from homun.application.automation import wakes as automation_wakes
-from homun.application.delegation_runtime import live_count
+from homun.application.work.delegation_runtime import live_count
 from homun.application.automation.store import get_automation_store
-from homun.application.goal_manager import GoalManager
+from homun.application.work.goal_manager import GoalManager
 from homun.application.automation.heartbeat_manager import HeartbeatManager
 from homun.application.automation.loop_manager import LoopManager
 from homun.domain.models import Actor
@@ -28,7 +28,7 @@ from homun.application.automation.projection import _project
 def evaluate_finish(ctx, run, response):
     """Judge outside engine transactions; journal before cross-store projection."""
     from homun.application.agent_runs import lookup, authority
-    from homun.application.goal_judge import judge
+    from homun.application.work.goal_judge import judge
     key = f'{run["_epoch"]}:{run["turns"]}'
     prior = run.get('_automation_finish')
     if prior and prior['key'] == key:
@@ -42,7 +42,7 @@ def evaluate_finish(ctx, run, response):
     evaluation = {'key':key, 'action':'finish', 'reason':'automation_complete'}
     if goal.has_goal():
         evaluation['goal_before'] = goal.state.to_dict()
-        from homun.application.goal_terminal import runner, available, GatePending
+        from homun.application.work.goal_terminal import runner, available, GatePending
         # Always inject a receipt adapter: a changing wait barrier must never
         # fall through to the legacy standalone manager's shell runner.
         gate_runner = runner(ctx, run, goal)

@@ -1,7 +1,7 @@
 """Prepare fresh consent from historical context without dispatching historical actions."""
 from copy import deepcopy
 from homun.application.sessions import history as session_history
-from homun.application.price_comparisons import cached, save
+from homun.application.work.price_comparisons import cached, save
 from homun.domain.errors import ConflictError, PermissionDeniedError, ValidationError
 from homun.policy.work import require_work_access
 

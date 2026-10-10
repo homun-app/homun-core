@@ -1,6 +1,6 @@
 """DBOS owns read recovery; command IDs give stable workflow identity."""
 from dbos import DBOS, SetWorkflowID
-from homun.application.material_read_execution import execute, fail
+from homun.application.work.material_read_execution import execute, fail
 
 _context = None
 
@@ -31,7 +31,7 @@ def start(workflow_id, proposal_id):
 
 
 def deliver_reads(ctx):
-    from homun.application.material_reads import PROPOSAL_TYPE
+    from homun.application.work.material_reads import PROPOSAL_TYPE
     for record in ctx.repository.snapshot().commands.values():
         if record.type != PROPOSAL_TYPE or record.result['status'] not in {'queued', 'running'}:
             continue

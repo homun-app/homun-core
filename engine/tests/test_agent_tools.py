@@ -2,7 +2,7 @@
 import pytest
 from homun.context import create_context
 from homun.domain.models import Actor
-from homun.application.material_ingest import ingest_file
+from homun.application.work.material_ingest import ingest_file
 from homun.materials.source import verify_material
 from homun.domain.errors import PermissionDeniedError, ConflictError, ValidationError
 

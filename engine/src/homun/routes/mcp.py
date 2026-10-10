@@ -8,7 +8,7 @@ from homun.context import get_context
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _actor_from_headers, _http_error
 from homun.routes.price_comparisons import request_context
-from homun.application import external_tools, external_delivery
+from homun.application.work import external_tools, external_delivery
 from homun.application.integrations.mcp_catalog import catalog_public
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["mcp", "skills"])

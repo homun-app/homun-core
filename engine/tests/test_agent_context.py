@@ -76,7 +76,7 @@ def test_summary_requires_attempt_room_for_acting_request(setup):
 
 
 def test_work_budget_must_cover_summary_and_next_request(setup):
-    from homun.application import budgets
+    from homun.application.work import budgets
     ctx,actor,work,material=setup;p,run=pressured(ctx,actor,work,material)
     with ctx.repository.transaction() as store:
         budgets.ensure(store,work).caps.model_attempts=1

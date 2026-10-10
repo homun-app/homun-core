@@ -12,7 +12,7 @@ from copy import deepcopy
 from typing import Any, Dict, Optional
 
 from homun.application.sessions import history
-from homun.application.price_comparisons import cached, save
+from homun.application.work.price_comparisons import cached, save
 from homun.application.sessions.history import normalize_imported_message, closed_prefix
 from homun.application.sessions.manager import redact_secrets, get_default_storage
 from homun.application.sessions.storage import SessionStorage

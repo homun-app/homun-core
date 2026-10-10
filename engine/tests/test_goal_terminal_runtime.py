@@ -8,7 +8,7 @@ from test_agent_automation_runtime import stores
 from homun.application import agent_runs
 from homun.application.computer import terminal_jobs
 from homun.application.agent_run_execution import advance
-from homun.application.goal_manager import GoalManager
+from homun.application.work.goal_manager import GoalManager
 from homun.models.native_turn import NativeMessage
 
 
@@ -40,7 +40,7 @@ def stage(s):
 
 
 def reconcile(ctx, run_id):
-    from homun.application.goal_terminal import resume
+    from homun.application.work.goal_terminal import resume
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         if resume(ctx, run_id):
@@ -118,7 +118,7 @@ def test_sequential_gates_use_separate_approval_and_canonical_run_files(setup):
 ])
 def test_non_success_receipts_never_finish_or_replay(setup, monkeypatch, state):
     from test_terminal_jobs import Backend
-    from homun.application.goal_terminal import resume
+    from homun.application.work.goal_terminal import resume
     backend = Backend()
     monkeypatch.setattr(terminal_jobs, 'backend_for', lambda *a: backend)
     s = start(setup)
@@ -188,7 +188,7 @@ def test_pinned_policy_denies_goal_terminal(setup, policy):
 
 def test_configuration_change_during_refresh_rejects_receipt(setup, monkeypatch):
     from test_terminal_jobs import Backend
-    from homun.application.goal_terminal import resume
+    from homun.application.work.goal_terminal import resume
     from homun.domain.errors import ConflictError
     backend = Backend()
     monkeypatch.setattr(terminal_jobs, 'backend_for', lambda *a: backend)
@@ -216,7 +216,7 @@ def test_crash_after_receipt_commit_reopens_without_replay(setup):
     reconcile(ctx, p['id'])
     second = create_context(db_path=ctx.data_dir/'ws.db', data_dir=ctx.data_dir, for_tests=True)
     try:
-        from homun.application.goal_terminal import resume
+        from homun.application.work.goal_terminal import resume
         assert not resume(second, p['id'])
         second.models.complete = ctx.models.complete
         second.models.complete_tools = lambda *a, **k: pytest.fail('Unexpected model replay')
@@ -228,7 +228,7 @@ def test_crash_after_receipt_commit_reopens_without_replay(setup):
 
 def test_missing_logs_wait_without_starting_again(setup, monkeypatch):
     from test_terminal_jobs import Backend
-    from homun.application.goal_terminal import resume
+    from homun.application.work.goal_terminal import resume
     from homun.execution.contracts import ExecutionUnavailable
     backend = Backend()
     monkeypatch.setattr(terminal_jobs, 'backend_for', lambda *a: backend)
@@ -247,7 +247,7 @@ def test_missing_logs_wait_without_starting_again(setup, monkeypatch):
 
 
 def test_wait_transition_never_reaches_legacy_shell(setup, monkeypatch):
-    import homun.application.goal_manager as module
+    import homun.application.work.goal_manager as module
     s = start(setup)
     ctx, actor, work, p = s
     checks = iter([True, False, False])
@@ -302,7 +302,7 @@ def test_authority_change_blocks_goal_wait_with_typed_error(setup):
 
 
 def test_legacy_goal_without_revision_can_project_finish(setup):
-    from homun.application.goal_store import get_goal_store
+    from homun.application.work.goal_store import get_goal_store
     s = start(setup)
     ctx, actor, work, p = s
     database = get_goal_store()
@@ -340,7 +340,7 @@ def test_zero_gate_retries_survive_reload_and_pause_on_first_failure(setup):
     {'max_retries':-1}, {'timeout_seconds':0}, {'timeout_seconds':-1}, {'timeout_seconds':3601},
 ])
 def test_gate_limits_validated_by_contract_and_manager(setup, arguments):
-    from homun.application.goal_contracts import GoalGateAddArguments
+    from homun.application.work.goal_contracts import GoalGateAddArguments
     ctx, actor, work, p = start(setup)
     with pytest.raises(ValueError):
         GoalGateAddArguments(command='true', **arguments)
@@ -350,7 +350,7 @@ def test_gate_limits_validated_by_contract_and_manager(setup, arguments):
 
 
 def test_gate_none_limits_keep_defaults(setup):
-    from homun.application.goal_contracts import DEFAULT_GATE_MAX_RETRIES, DEFAULT_GATE_TIMEOUT_SECONDS
+    from homun.application.work.goal_contracts import DEFAULT_GATE_MAX_RETRIES, DEFAULT_GATE_TIMEOUT_SECONDS
     ctx, actor, work, p = start(setup)
     gate = GoalManager(work).add_gate('true', timeout_seconds=None, max_retries=None)
     assert gate.timeout_seconds == DEFAULT_GATE_TIMEOUT_SECONDS

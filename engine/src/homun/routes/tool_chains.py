@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
 
-from homun.application.tool_chains import approve, list_chains, propose
+from homun.application.work.tool_chains import approve, list_chains, propose
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _http_error
 from homun.routes.price_comparisons import request_context

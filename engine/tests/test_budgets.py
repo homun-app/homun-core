@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from homun.application import budgets
-from homun.application.intake import classify_message, propose
+from homun.application.work import budgets
+from homun.application.work.intake import classify_message, propose
 from homun.context import create_context
 from homun.domain.errors import BudgetExhaustedError, ConflictError, PermissionDeniedError
 from homun.domain.models import Actor, BudgetCounters, utc_now
@@ -313,16 +313,16 @@ def test_delegate_allocation_is_its_own_cap(setup):
 
 def test_agent_owner_cannot_approve_concrete_actions_person_gate(setup):
     import hashlib
-    from homun.application.material_ingest import ingest_file
-    from homun.application.material_reads import approve as read_approve
-    from homun.application.material_reads import propose as read_propose
-    from homun.application.price_comparisons import approve as compare_approve
-    from homun.application.price_comparisons import propose as compare_propose
+    from homun.application.work.material_ingest import ingest_file
+    from homun.application.work.material_reads import approve as read_approve
+    from homun.application.work.material_reads import propose as read_propose
+    from homun.application.work.price_comparisons import approve as compare_approve
+    from homun.application.work.price_comparisons import propose as compare_propose
     ctx, actor, wid, brief = setup
     brief['capability'] = 'compare_csv'
     ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    from homun.application.intake import confirm as intake_confirm
-    from homun.application.intake import propose as intake_propose
+    from homun.application.work.intake import confirm as intake_confirm
+    from homun.application.work.intake import propose as intake_propose
     p = intake_propose(ctx, actor, wid, {'command_id': 'i1', 'text': 'Confronta i listini', 'expected_version': 1})
     # Delegate to a fresh agent: it becomes the owner, Fabio stays reviewer.
     brief['new_agent'] = {'name': 'Analista', 'role': 'Analisi', 'instructions': 'Confronta'}

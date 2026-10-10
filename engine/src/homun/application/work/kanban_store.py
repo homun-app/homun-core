@@ -7,7 +7,7 @@ import sqlite3
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from homun.application.kanban_contracts import (
+from homun.application.work.kanban_contracts import (
     DEFAULT_LANES,
     KanbanBoard,
     KanbanCard,

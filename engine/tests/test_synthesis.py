@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from homun.application.synthesis import approve, list_proposals, propose
-from homun.application.synthesis_execution import compose, execute
-from homun.application.material_ingest import ingest_file
+from homun.application.work.synthesis import approve, list_proposals, propose
+from homun.application.work.synthesis_execution import compose, execute
+from homun.application.work.material_ingest import ingest_file
 from homun.context import create_context
 from homun.domain.errors import ConflictError
 from homun.domain.models import Actor
@@ -56,7 +56,7 @@ def test_direct_synthesis_plan_declares_capability_and_approval_starts_it(setup)
 
 
 def confirm_intake(ctx, actor, work, *, capability='synthesize', plan_steps=None, agent_name='Redattrice'):
-    from homun.application.intake import propose as intake_propose, confirm as intake_confirm
+    from homun.application.work.intake import propose as intake_propose, confirm as intake_confirm
     ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps({
         'title': 'Catalogo prodotti Acme', 'objective': 'Preparare il catalogo per Acme dai listini.',
         'output': 'Bozza di catalogo in Markdown', 'constraints': ['prezzi dai listini caricati'],
@@ -383,7 +383,7 @@ def test_exhausted_token_cap_stops_call_without_token_estimate(setup, monkeypatc
 @pytest.mark.parametrize('known_axis', ['input_tokens', 'output_tokens'])
 @pytest.mark.parametrize('scope', ['global', 'assignee'])
 def test_partial_usage_preserves_known_tokens_and_unknown_attempt(setup, known_axis, scope):
-    from homun.application import budgets
+    from homun.application.work import budgets
     from homun.domain.errors import BudgetExhaustedError
     from homun.domain.models import BudgetAllocation, BudgetCounters
     from homun.models.types import UsageEntry

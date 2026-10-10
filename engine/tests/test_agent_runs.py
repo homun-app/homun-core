@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from homun.context import create_context
 from homun.domain.models import Actor
-from homun.application.material_ingest import ingest_file
+from homun.application.work.material_ingest import ingest_file
 from homun.domain.errors import ConflictError
 
 

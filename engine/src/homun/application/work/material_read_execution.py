@@ -1,5 +1,5 @@
 """Fenced, bounded deterministic read execution and atomic artifact publication."""
-from homun.application.material_reads import PROPOSAL_TYPE, authority
+from homun.application.work.material_reads import PROPOSAL_TYPE, authority
 from homun.domain.errors import ConflictError, DomainError
 from homun.domain.ids import new_id
 from homun.domain.models import Actor, DomainEvent, utc_now

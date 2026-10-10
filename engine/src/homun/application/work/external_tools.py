@@ -148,7 +148,7 @@ def propose(ctx, actor, body, *, agent_binding=None) -> dict[str, Any]:
 def approve(ctx, actor, proposal_id: str, body) -> dict[str, Any]:
     """Authorize one dispatch or resume publication from its durable receipt."""
     from datetime import datetime, timedelta
-    from homun.application import external_publication
+    from homun.application.work import external_publication
     from homun.application.integrations import mcp_client
     if str(actor.kind) != "person":
         raise PermissionDeniedError("Only a person may approve an external tool call")

@@ -39,7 +39,7 @@ def reserve(ctx, actor, work_id, estimate: BudgetCounters, *, purpose='', accoun
 
 
 def _settle(ctx, actor, work_id, reservation_id, **kwargs):
-    from homun.application import budget_settlement
+    from homun.application.work import budget_settlement
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             require_work_access(store, actor, work_id)
@@ -54,7 +54,7 @@ def settle_admitted(ctx, actor, work_id, reservation_id, **kwargs):
     Only the original reservation caller may use this internal completion path;
     it confers no read permission and does not admit another model invocation.
     """
-    from homun.application import budget_settlement
+    from homun.application.work import budget_settlement
     from homun.domain.errors import PermissionDeniedError
     from homun.policy import require_workspace_actor
     with ctx.repository.locked():
@@ -92,7 +92,7 @@ def release(ctx, actor, work_id, reservation_id):
 
 
 def recover_pending(ctx, *, now=None) -> int:
-    from homun.application import budget_settlement
+    from homun.application.work import budget_settlement
     moment = now or utc_now()
     recovered = 0
     with ctx.repository.locked():

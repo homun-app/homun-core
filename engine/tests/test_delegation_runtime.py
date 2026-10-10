@@ -44,7 +44,7 @@ def test_background_returns_before_child_model_and_child_is_admitted(setup):
 
 
 def test_child_real_tool_turn_finish_and_parent_receipt_once(setup):
-    from homun.application.delegation_runtime import reconcile_delegations
+    from homun.application.work.delegation_runtime import reconcile_delegations
     ctx, actor, work, material, p = start(setup)
     result = delegate(ctx, p)
     child_id = result['child_run_id']
@@ -70,7 +70,7 @@ def test_child_scope_cannot_escape_parent_tools(setup):
 
 
 def test_unknown_parent_cannot_spawn_child(setup):
-    from homun.application.delegation_tools import execute
+    from homun.application.work.delegation_tools import execute
     from homun.domain.errors import ValidationError
     ctx, actor, work, material, p = start(setup)
     with pytest.raises(ValidationError):
@@ -79,7 +79,7 @@ def test_unknown_parent_cannot_spawn_child(setup):
 
 
 def test_foreground_waits_then_durable_child_result_wakes_parent(setup):
-    from homun.application.delegation_runtime import reconcile_delegations
+    from homun.application.work.delegation_runtime import reconcile_delegations
     ctx, actor, work, material, p = start(setup)
     result = delegate(ctx, p, {'task':'Summarize', 'tools_include':[], 'max_turns':1})
     assert result['wait_for_child']
@@ -122,7 +122,7 @@ def test_restart_after_admission_before_parent_receipt_deduplicates(setup, monke
 
 
 def test_child_failure_does_not_fail_parent_work(setup):
-    from homun.application.delegation_runtime import reconcile_delegations
+    from homun.application.work.delegation_runtime import reconcile_delegations
     ctx, actor, work, material, p = start(setup)
     result = delegate(ctx, p, {'task':'Return structured data', 'tools_include':[], 'max_turns':1,
         'run_in_background':True, 'output_schema':{'type':'object','required':['answer']}})
@@ -139,7 +139,7 @@ def test_child_failure_does_not_fail_parent_work(setup):
 
 def test_parent_cancel_fences_unstarted_child_without_model_call(setup):
     from homun.application.agent_control import control
-    from homun.application.delegation_runtime import reconcile_delegations
+    from homun.application.work.delegation_runtime import reconcile_delegations
     ctx, actor, work, material, p = start(setup)
     result = delegate(ctx, p)
     control(ctx, actor, work, p['id'], {'command_id':'cancel','action':'cancel',
@@ -151,7 +151,7 @@ def test_parent_cancel_fences_unstarted_child_without_model_call(setup):
 
 
 def test_parent_limit_allocation_cannot_be_multiplied_and_returns_unused(setup):
-    from homun.application.delegation_runtime import reconcile_delegations
+    from homun.application.work.delegation_runtime import reconcile_delegations
     ctx, actor, work, material, p = start(setup)
     before = dict(ctx.repository.load().commands[p['id']].result['limits'])
     result = delegate(ctx, p)
@@ -222,7 +222,7 @@ def test_parent_cancel_during_child_model_discards_child_finish(setup):
 
 
 def test_idle_automation_does_not_wake_waiting_parent_before_receipt(setup):
-    from homun.application.delegation_runtime import reconcile_delegations, has_pending, live_count
+    from homun.application.work.delegation_runtime import reconcile_delegations, has_pending, live_count
     from homun.application.agent_automation import wake_due_automation
     ctx, actor, work, material, p = start(setup)
     result = delegate(ctx, p, {'task':'Evidence', 'tools_include':[], 'max_turns':1})
@@ -257,8 +257,8 @@ def test_children_do_not_replace_parent_surface_or_accept_direct_work_controls(s
 
 
 def test_child_receipt_before_parent_tool_commit_does_not_park_forever(setup, monkeypatch):
-    from homun.application import delegation_admission
-    from homun.application.delegation_runtime import reconcile_delegations
+    from homun.application.work import delegation_admission
+    from homun.application.work.delegation_runtime import reconcile_delegations
     ctx, actor, work, material, p = start(setup)
     admit = delegation_admission.admit
     def complete_before_parent_receipt(*args):
@@ -277,7 +277,7 @@ def test_child_receipt_before_parent_tool_commit_does_not_park_forever(setup, mo
 
 
 def test_unresolved_schema_reference_is_a_durable_child_failure(setup):
-    from homun.application.delegation_runtime import reconcile_delegations
+    from homun.application.work.delegation_runtime import reconcile_delegations
     ctx, actor, work, material, p = start(setup)
     result = delegate(ctx,p,{'task':'Produce JSON','max_turns':2,'output_schema':{'$ref':'#/$defs/missing'}})
     ctx.models.complete_tools = lambda *a, **kw: SimpleNamespace(

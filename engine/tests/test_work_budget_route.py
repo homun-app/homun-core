@@ -43,7 +43,7 @@ def test_works_list_reports_budget_and_set_budget_updates_caps(client):
     brief = {"title": "T", "objective": "O", "output": "R", "constraints": [], "missing_information": [],
              "suggested_agent_id": None, "new_agent": None, "rationale": "r", "capability": "general"}
     ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    from homun.application.intake import propose, confirm
+    from homun.application.work.intake import propose, confirm
     p = propose(ctx, actor, wid, {"command_id": "i", "text": "un lavoro", "expected_version": 1})
     confirm(ctx, actor, wid, "i", {"command_id": "ok", "digest": p["digest"], "expected_version": 1,
                                    "create_agent": False})

@@ -2,7 +2,7 @@
 from datetime import timedelta
 import pytest
 from test_budgets import setup, budget
-from homun.application import budgets
+from homun.application.work import budgets
 from homun.context import create_context
 from homun.domain.errors import ConflictError
 from homun.domain.models import BudgetCounters, utc_now
@@ -77,7 +77,7 @@ def test_recovery_settles_once_and_conflicts_with_late_known_usage(setup):
 def test_failed_transaction_commits_neither_receipt_nor_counters(setup, monkeypatch):
     ctx, actor, work, _ = setup
     reservation = budgets.reserve(ctx, actor, work, BudgetCounters(attempts=1))
-    from homun.application import budget_settlement
+    from homun.application.work import budget_settlement
     original = budget_settlement.settle_in_store
     def fail_after_settlement(*args, **kwargs):
         original(*args, **kwargs)

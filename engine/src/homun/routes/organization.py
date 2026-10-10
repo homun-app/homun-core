@@ -1,7 +1,7 @@
 """Optional company onboarding transport, bound to the authenticated local actor."""
 from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
-from homun.application import organization
+from homun.application.work import organization
 from homun.models.organization import OrganizationContext
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _http_error

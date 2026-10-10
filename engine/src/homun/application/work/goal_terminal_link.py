@@ -1,6 +1,6 @@
 """Pure goal-cycle binding checks shared by staging, approval and receipts."""
 from copy import deepcopy
-from homun.application.goal_manager import GoalManager
+from homun.application.work.goal_manager import GoalManager
 from homun.domain.errors import ConflictError
 from homun.execution.contracts import digest
 

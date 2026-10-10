@@ -5,13 +5,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.kanban_contracts import (
+from homun.application.work.kanban_contracts import (
     KanbanBoard,
     KanbanCard,
     PRContract,
 )
-from homun.application.kanban_store import KanbanStore
-from homun.application.kanban_workflow import KanbanWorkflow
+from homun.application.work.kanban_store import KanbanStore
+from homun.application.work.kanban_workflow import KanbanWorkflow
 
 
 def test_kanban_dependencies_workflow_and_crash_recovery(tmp_path: Path):

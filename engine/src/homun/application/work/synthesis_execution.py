@@ -1,5 +1,5 @@
 """Model-driven phase execution: compose the artifact, publish exactly once."""
-from homun.application.synthesis import PROPOSAL_TYPE, authority, validate_bindings
+from homun.application.work.synthesis import PROPOSAL_TYPE, authority, validate_bindings
 from homun.domain.errors import DomainError, ValidationError
 from homun.domain.ids import new_id
 from homun.domain.models import Actor, DomainEvent, utc_now
@@ -128,23 +128,23 @@ def _materials_block(ctx, store, actor, proposal):
 
 def compose(ctx, proposal):
     """One supervised model call on the assignee's connection; provenance travels with the artifact."""
-    from homun.application import budgets as work_budgets
+    from homun.application.work import budgets as work_budgets
     from homun.domain.capabilities import SYNTHESIZE
     from homun.domain.models import BudgetCounters
     from homun.models.types import ChatMessage
 
     store = ctx.repository.load()
     actor, work = _running_authority(ctx, store, proposal)
-    from homun.application.executor import resolve_executor
+    from homun.application.work.executor import resolve_executor
     agent = resolve_executor(store, proposal['assignee_id'], human_owner_id=work.owner_id)
     executor_name = agent.name if agent else 'Homun'
     brief = latest_intake(store, work.id) or {}
-    from homun.application.phase_execution import phase_plan_step
+    from homun.application.work.phase_execution import phase_plan_step
     step = phase_plan_step(store, work, 'synthesize')
-    from homun.application.organization_context import organization_background
+    from homun.application.work.organization_context import organization_background
     import json
     background = organization_background(store, actor)
-    from homun.application.work_request_context import request_history
+    from homun.application.work.request_context import request_history
     objective = work.objective
     requested = request_history(store, work.id)
     if requested:

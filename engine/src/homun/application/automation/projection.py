@@ -4,7 +4,7 @@ from homun.application.automation.store import get_automation_store
 
 
 def _project(run, evaluation):
-    from homun.application.goal_store import get_goal_store
+    from homun.application.work.goal_store import get_goal_store
     import json
     work_id = run['work_id']
     for kind in ('goal', 'loop'):

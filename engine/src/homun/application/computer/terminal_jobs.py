@@ -148,7 +148,7 @@ def propose(ctx, actor, work_id, body, *, agent_binding=None, ssh_key_path=None)
                 from homun.application.agent_terminal_link import validate_link
                 run=validate_link(ctx,store,actor,result,staging=True)
                 if agent_binding.get('kind') == 'goal_gate':
-                    from homun.application.goal_terminal_link import bind_wait
+                    from homun.application.work.goal_terminal_link import bind_wait
                     bind_wait(run, result)
                 else:
                     run.update(status='waiting_external',terminal_request_id=result['id'])

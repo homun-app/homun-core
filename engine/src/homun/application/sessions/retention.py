@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from homun.application.sessions import history
 from homun.application.sessions.records import SNAPSHOT
-from homun.application.price_comparisons import cached, save
+from homun.application.work.price_comparisons import cached, save
 from homun.domain.errors import ConflictError, ValidationError
 from homun.policy.work import require_work_access
 

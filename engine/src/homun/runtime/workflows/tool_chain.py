@@ -1,8 +1,8 @@
 """DBOS owns chain recovery; steps reuse the per-tool executions unchanged."""
 from dbos import DBOS, SetWorkflowID
 
-from homun.application.price_comparison_execution import execute as compare_execute
-from homun.application.material_read_execution import execute as read_execute
+from homun.application.work.price_comparison_execution import execute as compare_execute
+from homun.application.work.material_read_execution import execute as read_execute
 
 _context = None
 
@@ -169,7 +169,7 @@ def start(workflow_id, steps):
 
 
 def deliver_chains(ctx):
-    from homun.application.tool_chains import PROPOSAL_TYPE
+    from homun.application.work.tool_chains import PROPOSAL_TYPE
     for record in ctx.repository.snapshot().commands.values():
         if record.type != PROPOSAL_TYPE or record.result['status'] not in {'queued', 'running'}:
             continue

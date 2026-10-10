@@ -1,6 +1,6 @@
 """Actor-owned onboarding draft and atomic, explicitly confirmed team creation."""
 from copy import deepcopy
-from homun.application.price_comparisons import cached, save
+from homun.application.work.price_comparisons import cached, save
 from homun.domain.errors import ConflictError, ValidationError
 from homun.models.organization import OrganizationContext, generate
 from homun.policy import require_workspace_actor

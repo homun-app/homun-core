@@ -1,7 +1,7 @@
 """Session-owned invitation management and exactly two guest-authenticated routes."""
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from homun.application import contribution_invitations as invites
+from homun.application.work import contribution_invitations as invites
 from homun.context import get_context
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _http_error
@@ -52,7 +52,7 @@ def read(authorization:str|None=Header(default=None)):
 def respond(body:ResponseRequest,authorization:str|None=Header(default=None)):
     return _call(invites.respond,get_context(),_token(authorization),body.text)
 
-from homun.application import contribution_people
+from homun.application.work import contribution_people
 
 class PersonRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')

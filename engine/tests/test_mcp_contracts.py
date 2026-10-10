@@ -33,7 +33,7 @@ def test_descriptor_comparison_includes_description_and_schema():
     with pytest.raises(ConflictError):require_same_descriptor(descriptor(),changed)
 
 from test_external_receipts import setup, approve
-from homun.application import external_tools
+from homun.application.work import external_tools
 from homun.application.integrations import mcp_client
 
 

@@ -2,7 +2,7 @@
 from copy import deepcopy
 import json
 
-from homun.application.delegation_authority import admitted_parent, parent_for, validate_parent_work
+from homun.application.work.delegation_authority import admitted_parent, parent_for, validate_parent_work
 from homun.domain.errors import DomainError
 from homun.domain.models import Actor
 
@@ -31,7 +31,7 @@ def claim_status(store, run):
 
 def finish_child(current, response):
     """Called within canonical finish transaction; never modifies parent work."""
-    from homun.application.delegation_schema import _validate_schema
+    from homun.application.work.delegation_schema import _validate_schema
     schema = current['_delegation_parent'].get('output_schema')
     data, error = _validate_schema(response, schema) if schema is not None else (None, None)
     current['_delegation_result'] = {'result':response, 'structured_output':data, 'schema_error':error}

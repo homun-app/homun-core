@@ -18,7 +18,7 @@ def setup(tmp_path):
 
 def _planned_ready_work(ctx, actor, project_id):
     """Confirmed intake with one executable phase: work READY with the accepted plan."""
-    from homun.application.intake import propose, confirm
+    from homun.application.work.intake import propose, confirm
     conv = ctx.service.apply(actor, 'c', 'conversation.create', {'title': 'Lavoro listini', 'project_id': project_id})
     work = ctx.service.apply(actor, 'w', 'work.create', {'conversation_id': conv['conversation_id'], 'title': 'Lavoro listini', 'objective': 'Confrontare i listini.'})
     agent = ctx.service.apply(actor, 'a', 'agent.create', {'name': 'Ada', 'role': 'Analisi CSV', 'instructions': 'Confronta dati'})
@@ -35,14 +35,14 @@ def _planned_ready_work(ctx, actor, project_id):
 
 
 def _ingest(ctx, actor, project_id, name, command_id):
-    from homun.application.material_ingest import ingest_file
+    from homun.application.work.material_ingest import ingest_file
     return ingest_file(ctx, actor, command_id=command_id, project_id=project_id,
                        filename=name, data=f'sku,prezzo\n{name},10\n'.encode(), mime_type='text/csv')
 
 
 def test_ingest_announces_ready_step_once(setup):
     ctx, actor = setup
-    from homun.application.plan_readiness import ANNOUNCE_PREFIX
+    from homun.application.work.plan_readiness import ANNOUNCE_PREFIX
     project = ctx.service.apply(actor, 'pa', 'project.create', {'name': 'Acme'})['project_id']
     wid, conv_id = _planned_ready_work(ctx, actor, project)
 
@@ -62,7 +62,7 @@ def test_ingest_announces_ready_step_once(setup):
 
 def test_first_ready_step_requires_work_project_materials(setup):
     ctx, actor = setup
-    from homun.application.plan_readiness import first_ready_step
+    from homun.application.work.plan_readiness import first_ready_step
     project_a = ctx.service.apply(actor, 'pa', 'project.create', {'name': 'Acme'})['project_id']
     project_b = ctx.service.apply(actor, 'pb', 'project.create', {'name': 'Beta'})['project_id']
     wid, conv_id = _planned_ready_work(ctx, actor, project_a)
@@ -79,7 +79,7 @@ def test_first_ready_step_requires_work_project_materials(setup):
 
 def test_approving_intermediate_phase_advances_instead_of_completing(setup):
     ctx, actor = setup
-    from homun.application.intake import propose, confirm
+    from homun.application.work.intake import propose, confirm
     conv = ctx.service.apply(actor, 'c', 'conversation.create', {'title': 'L'})
     work = ctx.service.apply(actor, 'w', 'work.create', {'conversation_id': conv['conversation_id'], 'title': 'L', 'objective': 'Confrontare.'})
     agent = ctx.service.apply(actor, 'a', 'agent.create', {'name': 'Ada', 'role': 'X', 'instructions': 'Y'})
@@ -112,7 +112,7 @@ def test_approving_intermediate_phase_advances_instead_of_completing(setup):
 
 def test_contribution_resolves_its_phase_and_announces_next(setup):
     ctx, actor = setup
-    from homun.application.intake import propose, confirm
+    from homun.application.work.intake import propose, confirm
     conv = ctx.service.apply(actor, 'c', 'conversation.create', {'title': 'L'})
     work = ctx.service.apply(actor, 'w', 'work.create', {'conversation_id': conv['conversation_id'], 'title': 'L', 'objective': 'Raccogliere.'})
     agent = ctx.service.apply(actor, 'a', 'agent.create', {'name': 'Ada', 'role': 'X', 'instructions': 'Y'})
@@ -148,10 +148,10 @@ def test_phased_general_work_admits_comparison_on_its_phase(setup):
     comparison on that phase: no second plan, the approval is the phase's go."""
     import json
     from types import SimpleNamespace
-    from homun.application.material_ingest import ingest_file
-    from homun.application.intake import propose as intake_propose, confirm as intake_confirm
-    from homun.application.price_comparisons import propose as cmp_propose, approve as cmp_approve
-    from homun.application.price_comparison_execution import execute as cmp_execute
+    from homun.application.work.material_ingest import ingest_file
+    from homun.application.work.intake import propose as intake_propose, confirm as intake_confirm
+    from homun.application.work.price_comparisons import propose as cmp_propose, approve as cmp_approve
+    from homun.application.work.price_comparison_execution import execute as cmp_execute
     ctx, actor = setup
     project = ctx.service.apply(actor, 'pp', 'project.create', {'name': 'P'})['project_id']
     ctx.persist()

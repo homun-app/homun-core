@@ -1,5 +1,5 @@
 """Bounded, actor-owned background shared by intake, chat and execution."""
-from homun.application.organization import _state
+from homun.application.work.organization import _state
 
 
 def organization_background(store, actor):

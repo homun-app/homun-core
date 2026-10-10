@@ -1,13 +1,13 @@
 """A separate consent publishes a saved receipt; original effect stays fixed."""
 import pytest
 from test_external_receipts import setup, approve
-from homun.application import external_tools
+from homun.application.work import external_tools
 from homun.domain.errors import ConflictError, PermissionDeniedError
 from homun.domain.models import Actor
 
 
 def prepared(setup,monkeypatch):
-    from homun.application import external_publication
+    from homun.application.work import external_publication
     original=external_publication.publish
     monkeypatch.setattr(external_publication,'publish',lambda *a:(_ for _ in ()).throw(RuntimeError('paused delivery')))
     assert approve(setup)['status']=='publication_pending'
@@ -18,7 +18,7 @@ def prepared(setup,monkeypatch):
 
 
 def test_reapprove_delivery_does_not_reexecute_or_mutate_original_consent(setup,monkeypatch):
-    from homun.application import external_delivery
+    from homun.application.work import external_delivery
     ctx,actor,p,calls=prepared(setup,monkeypatch)
     preview=external_delivery.preview(ctx,actor,p['id'])
     assert preview['text']=='done'
@@ -34,7 +34,7 @@ def test_reapprove_delivery_does_not_reexecute_or_mutate_original_consent(setup,
 
 @pytest.mark.parametrize('change',['work','receipt'])
 def test_stale_delivery_preview_is_rejected(setup,monkeypatch,change):
-    from homun.application import external_delivery
+    from homun.application.work import external_delivery
     ctx,actor,p,calls=prepared(setup,monkeypatch)
     preview=external_delivery.preview(ctx,actor,p['id'])
     with ctx.repository.transaction() as store:
@@ -46,7 +46,7 @@ def test_stale_delivery_preview_is_rejected(setup,monkeypatch,change):
 
 
 def test_delivery_requires_owner_or_reviewer_and_receipt(setup,monkeypatch):
-    from homun.application import external_delivery
+    from homun.application.work import external_delivery
     ctx,actor,p,calls=prepared(setup,monkeypatch)
     other=Actor(id='person_other',workspace_id=ctx.workspace_id,display_name='Other')
     with pytest.raises(PermissionDeniedError):external_delivery.preview(ctx,other,p['id'])
@@ -54,7 +54,7 @@ def test_delivery_requires_owner_or_reviewer_and_receipt(setup,monkeypatch):
     with pytest.raises(ConflictError):external_delivery.preview(ctx,actor,p['id'])
 
 def test_replay_rechecks_authority_and_rejects_command_collision(setup,monkeypatch):
-    from homun.application import external_delivery
+    from homun.application.work import external_delivery
     ctx,actor,p,calls=prepared(setup,monkeypatch)
     preview=external_delivery.preview(ctx,actor,p['id'])
     body={'command_id':'deliver','digest':preview['digest'],'expected_version':preview['expected_version']}

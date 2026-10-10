@@ -3,7 +3,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import secrets
-from homun.application.price_comparisons import save
+from homun.application.work.price_comparisons import save
 from homun.domain.command_identity import request_fingerprint
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from homun.domain.ids import new_id

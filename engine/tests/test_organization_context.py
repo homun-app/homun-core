@@ -3,11 +3,11 @@ import json
 from types import SimpleNamespace
 from homun.context import create_context
 from homun.domain.models import Actor
-from homun.application.organization import update_context
+from homun.application.work.organization import update_context
 
 
 def test_intake_receives_only_current_actors_saved_context(tmp_path):
-    from homun.application.intake import propose
+    from homun.application.work.intake import propose
     ctx=create_context(db_path=tmp_path/'ws.db',data_dir=tmp_path,for_tests=True)
     actor=Actor(id='person_a',workspace_id=ctx.workspace_id,display_name='A')
     other=Actor(id='person_b',workspace_id=ctx.workspace_id,display_name='B')

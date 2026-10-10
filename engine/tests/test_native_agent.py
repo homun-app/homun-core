@@ -39,7 +39,7 @@ def native_start(ctx, actor, work, material, extra=None):
 
 
 def test_pending_reads_survive_human_answer_and_restart(setup):
-    from homun.application.material_ingest import ingest_file
+    from homun.application.work.material_ingest import ingest_file
     ctx,actor,work,material=setup
     project=ctx.repository.load().materials[material].project_id
     notes=ingest_file(ctx,actor,command_id='notes',project_id=project,

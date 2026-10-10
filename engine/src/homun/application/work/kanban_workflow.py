@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
-from homun.application.kanban_contracts import (
+from homun.application.work.kanban_contracts import (
     KanbanCard,
     PRContract,
 )
-from homun.application.kanban_store import KanbanStore
+from homun.application.work.kanban_store import KanbanStore
 
 
 class KanbanWorkflowError(Exception):

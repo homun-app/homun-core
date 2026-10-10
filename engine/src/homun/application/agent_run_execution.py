@@ -4,7 +4,8 @@ import logging
 from copy import deepcopy
 from datetime import datetime, timedelta
 from uuid import uuid4
-from homun.application import budgets, agent_native, agent_recovery, agent_overflow
+from homun.application import agent_native, agent_recovery, agent_overflow
+from homun.application.work import budgets
 from homun.application.agent_run_failures import fail  # re-exported for callers
 from homun.application.agent_runs import authority, lookup
 from homun.application.agent_control_history import consume_steering
@@ -62,7 +63,7 @@ def _claim(ctx, run_id, epoch=None):
             until = run.get('_lease_until')
             if until and datetime.fromisoformat(until) > utc_now():
                 return 'busy', None
-            from homun.application.delegation_runtime import claim_status
+            from homun.application.work.delegation_runtime import claim_status
             child_status = claim_status(store, run)
             if child_status:
                 return child_status, None
@@ -391,7 +392,7 @@ def advance(ctx, run_id, *, epoch=None):
             return 'running'
         if decision.kind == 'finish' and not run.get('_delegation_parent'):
             from homun.application.agent_automation import evaluate_finish
-            from homun.application.delegation_runtime import has_pending
+            from homun.application.work.delegation_runtime import has_pending
             automation_evaluation = ({'action':'wait','reason':'delegation_children'} if has_pending(ctx, run)
                                      else evaluate_finish(ctx, run, decision.message))
         with ctx.repository.locked():
@@ -418,7 +419,7 @@ def advance(ctx, run_id, *, epoch=None):
                     pass
                 elif decision.kind == 'tool':
                     if '_delegations' in run:
-                        from homun.application.delegation_runtime import merge_snapshot
+                        from homun.application.work.delegation_runtime import merge_snapshot
                         merge_snapshot(current, run)
                     if '_goals' in run:
                         current['_goals'] = run['_goals']
@@ -458,7 +459,7 @@ def advance(ctx, run_id, *, epoch=None):
                                                              'request_id': result['request_id'],
                                                              'questions': current.get('clarify_request')})
                 elif current.get('_delegation_parent'):
-                    from homun.application.delegation_runtime import finish_child
+                    from homun.application.work.delegation_runtime import finish_child
                     finish_child(current, decision.message)
                 elif automation_evaluation and automation_evaluation['action'] != 'finish':
                     from homun.application.agent_automation import apply_finish

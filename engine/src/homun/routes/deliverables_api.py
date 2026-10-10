@@ -6,11 +6,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from homun.application.deliverable_extractor import (
+from homun.application.work.deliverable_extractor import (
     DeliverableAttachment,
     extract_deliverables_from_text,
 )
-from homun.application.deliverable_ledger import (
+from homun.application.work.deliverable_ledger import (
     DeliveryReceipt,
     get_deliverable_ledger,
 )
@@ -149,7 +149,7 @@ def list_delivery_receipts(session_id: Optional[str] = None) -> List[DeliveryRec
 def dispatch_deliverables(req: DispatchDeliverablesRequest) -> DispatchDeliverablesResponse:
     """Scan message text, protect code blocks, deduplicate against ledger, and dispatch to channel."""
     from homun.application.channels.adapters import ChannelRegistry
-    from homun.application.deliverable_dispatcher import dispatch_deliverables_for_turn
+    from homun.application.work.deliverable_dispatcher import dispatch_deliverables_for_turn
 
     reg = ChannelRegistry()
     adapter = reg.get_adapter(req.channel)

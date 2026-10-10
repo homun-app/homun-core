@@ -1,7 +1,7 @@
 """Typed transport for approved local CSV comparisons."""
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
-from homun.application.price_comparisons import approve, list_proposals, propose
+from homun.application.work.price_comparisons import approve, list_proposals, propose
 from homun.context import get_context
 from homun.domain.errors import DomainError
 from homun.routes.price_comparison_models import ComparisonProposal, ComparisonList

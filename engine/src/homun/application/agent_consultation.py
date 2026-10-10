@@ -3,7 +3,7 @@ from homun.application.runtime_calls import complete
 import json
 from pydantic import ValidationError as SchemaError
 from homun.application.agent_team import Consultation
-from homun.application import budgets
+from homun.application.work import budgets
 from homun.domain.errors import ConflictError, PermissionDeniedError, ValidationError
 from homun.domain.models import BudgetCounters
 from homun.models.types import ChatMessage

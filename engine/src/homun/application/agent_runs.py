@@ -5,14 +5,14 @@ from copy import deepcopy
 from homun.application import agent_native
 from homun.models.native_prompt import initial_messages
 from homun.application.agent_prompt_roots import roots_from_propose_body
-from homun.application.work_request_context import request_history
+from homun.application.work.request_context import request_history
 from homun.application.agent_team import bind_team, validate_team
-from homun.application.contribution_people import _people
+from homun.application.work.contribution_people import _people
 from homun.application.agent_tools import MAX_BYTES, validate_sources
-from homun.application.organization_context import organization_background
-from homun.application.executor import resolve_executor
+from homun.application.work.organization_context import organization_background
+from homun.application.work.executor import resolve_executor
 from homun.application.agent_run_policy import current_step, history_is_readable, revision_context
-from homun.application.price_comparisons import cached, save
+from homun.application.work.price_comparisons import cached, save
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError, DomainError
 from homun.domain.models import Actor
 from homun.materials.source import verify_material
@@ -80,7 +80,7 @@ def _bind_person(store, actor, person_id):
 
 def authority(ctx, store, actor, run, *, approve=False, running=False):
     if running and run.get('_delegation_parent'):
-        from homun.application.delegation_authority import validate_child
+        from homun.application.work.delegation_authority import validate_child
         validate_child(store, run)
     work = require_work_access(store, actor, run['work_id'], 'write' if approve or running else 'read')
     if approve or running:
@@ -211,7 +211,7 @@ def propose(ctx, actor, work_id, body):
                     raise ConflictError('Only the failed adaptive execution may be retried here')
                 ctx.service.for_store(store).apply(actor, f'{body["command_id"]}:retry', 'plan.accept',
                     {'work_id': work_id, 'expected_version': work.version})
-            from homun.application.phase_execution import propose_pin_version
+            from homun.application.work.phase_execution import propose_pin_version
             pinned = propose_pin_version(ctx.service.for_store(store), store, actor, work,
                 'agent_run', body['command_id'], work.version,
                 {'title': 'Svolgi la richiesta con gli strumenti disponibili',
@@ -475,7 +475,7 @@ def approve(ctx, actor, work_id, run_id, body):
                 return public(run)
             if run['status'] != 'pending_approval' or work.version != run['expected_version']:
                 raise ConflictError('Run or work changed')
-            from homun.application.phase_execution import approve_starts_phase
+            from homun.application.work.phase_execution import approve_starts_phase
             service = ctx.service.for_store(store)
             step = current_step(store, work)
             if step is None or step.assignee_id != run['assignee_id']:

@@ -18,12 +18,12 @@ def setup(tmp_path):
     ctx.close()
 
 def issue(setup):
-    from homun.application.contribution_invitations import issue_invitation
+    from homun.application.work.contribution_invitations import issue_invitation
     ctx,owner,rid,_ = setup
     return issue_invitation(ctx,owner,rid,{'recipient_name':'Anna'})
 
 def test_two_identities_scoped_response_and_idempotent_replay(setup):
-    from homun.application.contribution_invitations import read_invitation, respond
+    from homun.application.work.contribution_invitations import read_invitation, respond
     ctx,owner,rid,wid = setup
     invitation = issue(setup)
     view = read_invitation(ctx,invitation['token'])
@@ -41,7 +41,7 @@ def test_two_identities_scoped_response_and_idempotent_replay(setup):
     assert invitation['token'] not in str([r.model_dump() for r in store.commands.values()])
 
 def test_revoked_expired_foreign_and_stale_invites_denied(setup):
-    from homun.application.contribution_invitations import read_invitation, revoke_invitation, issue_invitation
+    from homun.application.work.contribution_invitations import read_invitation, revoke_invitation, issue_invitation
     ctx,owner,rid,wid = setup
     foreign = Actor(id='stranger',display_name='Other',workspace_id='ws_local')
     with pytest.raises(PermissionDeniedError):
@@ -84,7 +84,7 @@ def test_guest_http_auth_is_narrow_and_actor_is_fixed(setup):
     assert record.actor_id == 'person_anna'
 
 def test_issuer_access_revocation_disables_invitation(setup):
-    from homun.application.contribution_invitations import read_invitation
+    from homun.application.work.contribution_invitations import read_invitation
     ctx,owner,rid,wid = setup
     invitation = issue(setup)
     with ctx.repository.transaction() as store:
@@ -93,7 +93,7 @@ def test_issuer_access_revocation_disables_invitation(setup):
         read_invitation(ctx,invitation['token'])
 
 def test_scoped_authority_never_leaks_after_response(setup):
-    from homun.application.contribution_invitations import respond
+    from homun.application.work.contribution_invitations import respond
     ctx,owner,rid,wid = setup
     invitation = issue(setup)
     respond(ctx,invitation['token'],'30')
@@ -102,7 +102,7 @@ def test_scoped_authority_never_leaks_after_response(setup):
         ctx.service.apply(recipient,'outside','work.provide_contribution',{'request_id':rid,'text':'30','expected_version':3})
 
 def test_named_recipient_persists_and_owner_requests_real_contribution(setup):
-    from homun.application.contribution_people import create_person, list_people, request_contribution
+    from homun.application.work.contribution_people import create_person, list_people, request_contribution
     ctx,owner,rid,wid = setup
     person = create_person(ctx,owner,{'command_id':'person','name':'Anna Verdi'})
     assert list_people(ctx.snapshot(),owner)['items'] == [person]
@@ -116,7 +116,7 @@ def test_named_recipient_persists_and_owner_requests_real_contribution(setup):
 @pytest.mark.parametrize('kind', ['agent_run.propose', 'synthesis.propose', 'material_read.propose', 'price_comparison.propose', 'tool_chain.propose'])
 @pytest.mark.parametrize('status', ['queued','running'])
 def test_manual_request_cannot_interrupt_command_execution(setup,kind,status):
-    from homun.application.contribution_people import create_person, request_contribution
+    from homun.application.work.contribution_people import create_person, request_contribution
     from homun.domain.models import CommandRecord
     ctx,owner,rid,wid = setup
     person = create_person(ctx,owner,{'command_id':'person','name':'Anna'})
@@ -129,8 +129,8 @@ def test_manual_request_cannot_interrupt_command_execution(setup,kind,status):
     assert len(ctx.repository.load().contributions) == 1
 
 def test_registered_recipient_cannot_be_relabelled_in_invitation(setup):
-    from homun.application.contribution_people import create_person
-    from homun.application.contribution_invitations import issue_invitation, read_invitation, list_invitations
+    from homun.application.work.contribution_people import create_person
+    from homun.application.work.contribution_invitations import issue_invitation, read_invitation, list_invitations
     ctx,owner,rid,wid = setup
     person = create_person(ctx,owner,{'command_id':'person','name':'Anna'})
     with ctx.repository.transaction() as store:

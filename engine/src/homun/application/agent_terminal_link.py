@@ -7,7 +7,7 @@ def validate_link(ctx,store,actor,proposal,*,staging=False):
     link=proposal.get('_agent_binding')
     if not link:return None
     if link.get('kind') == 'goal_gate':
-        from homun.application.goal_terminal_link import validate_link as validate_goal_link
+        from homun.application.work.goal_terminal_link import validate_link as validate_goal_link
         return validate_goal_link(ctx, store, actor, proposal, staging=staging)
     from homun.application.agent_runs import lookup,authority
     from homun.application.agent_tool_bridge import resolve_call

@@ -79,8 +79,8 @@ def test_confirmed_agreement_is_in_the_preamble(setup):
              'new_agent': {'name': 'Analista', 'role': 'Analisi', 'instructions': 'Confronta i listini autorizzati'},
              'rationale': 'ok', 'capability': 'compare_csv', 'changed_fields': []}
     ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    from homun.application.intake import confirm as intake_confirm
-    from homun.application.intake import propose as intake_propose
+    from homun.application.work.intake import confirm as intake_confirm
+    from homun.application.work.intake import propose as intake_propose
     p = intake_propose(ctx, actor, 'work_1', {'command_id': 'i1', 'text': 'Confronta i listini', 'expected_version': 1})
     intake_confirm(ctx, actor, 'work_1', p['id'], {'command_id': 'ok', 'digest': p['digest'],
                                                    'expected_version': 1, 'create_agent': True})

@@ -12,7 +12,7 @@ import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from homun.application.goal_contracts import (
+from homun.application.work.goal_contracts import (
     CONTINUATION_PROMPT_GATE_FAILED_TEMPLATE,
     CONTINUATION_PROMPT_TEMPLATE,
     CONTINUATION_PROMPT_WITH_CONTRACT_TEMPLATE,
@@ -26,7 +26,7 @@ from homun.application.goal_contracts import (
     _MAX_BARRIER_WAIT_S,
     run_gate,
 )
-from homun.application.goal_store import get_goal_store
+from homun.application.work.goal_store import get_goal_store
 
 logger = logging.getLogger(__name__)
 

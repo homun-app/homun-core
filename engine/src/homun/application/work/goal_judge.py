@@ -3,7 +3,7 @@ from homun.application.runtime_calls import complete
 import json
 from typing import Literal
 from pydantic import BaseModel, ConfigDict
-from homun.application import budgets
+from homun.application.work import budgets
 from homun.application.agent_usage import charge, reserve as reserve_usage
 from homun.domain.errors import ValidationError
 from homun.domain.models import Actor, BudgetCounters

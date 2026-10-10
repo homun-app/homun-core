@@ -1,5 +1,5 @@
 """Fenced, bounded deterministic execution and atomic artifact publication."""
-from homun.application.price_comparison_policy import PROPOSAL_TYPE, authority, validate_sources
+from homun.application.work.price_comparison_policy import PROPOSAL_TYPE, authority, validate_sources
 from homun.domain.errors import ConflictError, DomainError
 from homun.domain.models import Actor, DomainEvent, utc_now
 from homun.domain.ids import new_id

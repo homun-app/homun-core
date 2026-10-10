@@ -5,8 +5,8 @@ import pytest
 from test_agent_runs import setup
 from homun.application.agent_runs import propose, approve
 from homun.application.agent_run_execution import advance
-from homun.application.goal_manager import GoalManager
-from homun.application.goal_store import GoalStore, set_goal_store
+from homun.application.work.goal_manager import GoalManager
+from homun.application.work.goal_store import GoalStore, set_goal_store
 from homun.application.automation.store import AutomationStore, set_automation_store
 from homun.application.automation.loop_manager import LoopManager
 from homun.application.automation.heartbeat_manager import HeartbeatManager
