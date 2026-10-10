@@ -2,7 +2,7 @@
 import time
 import pytest
 
-from homun.application.automation_store import AutomationStore, set_automation_store
+from homun.application.automation.store import AutomationStore, set_automation_store
 
 
 @pytest.fixture(autouse=True)
@@ -14,7 +14,7 @@ def _isolated_automation_store(tmp_path):
     set_automation_store(None)
 
 
-from homun.application.heartbeat_manager import (
+from homun.application.automation.heartbeat_manager import (
     HeartbeatManager,
     HeartbeatState,
     clear_heartbeat,
@@ -148,7 +148,7 @@ def test_heartbeat_session_boundaries_and_reset():
 
 
 def test_find_due_heartbeats_across_sessions():
-    from homun.application.heartbeat_manager import find_due_heartbeats
+    from homun.application.automation.heartbeat_manager import find_due_heartbeats
 
     t0 = 5000.0
     mgr1 = HeartbeatManager("session-1", min_seconds=10)

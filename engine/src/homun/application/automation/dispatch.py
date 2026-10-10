@@ -10,8 +10,8 @@ from uuid import uuid4
 
 from homun.application import agent_native
 from homun.application.goal_manager import GoalManager
-from homun.application.heartbeat_manager import HeartbeatManager
-from homun.application.loop_manager import LoopManager
+from homun.application.automation.heartbeat_manager import HeartbeatManager
+from homun.application.automation.loop_manager import LoopManager
 
 
 def automation_session_id(run: Dict[str, Any]) -> str:

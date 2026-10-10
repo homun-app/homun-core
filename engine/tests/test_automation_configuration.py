@@ -1,7 +1,7 @@
 """Human automation setup enters the same persisted runtime as idle wakes."""
 import pytest
 from test_agent_runs_api import api_setup
-from homun.application.automation_store import AutomationStore, set_automation_store
+from homun.application.automation.store import AutomationStore, set_automation_store
 from homun.application.agent_runs import approve
 from homun.application.agent_run_execution import advance
 from homun.application.agent_automation import wake_due_automation
@@ -55,7 +55,7 @@ def test_configuration_requires_approved_capability_and_human_auth(api_setup):
 
 def test_configuration_arriving_during_finish_prevents_publication(api_setup, monkeypatch):
     from homun.application import agent_automation
-    from homun.application.automation_configuration import configure, AutomationCommand
+    from homun.application.automation.configuration import configure, AutomationCommand
     ctx, actor, work, client, headers = api_setup
     base = f'/v1/workspaces/{ctx.workspace_id}/works/{work}/agent-runs'
     run = client.post(base,headers=headers,json={'command_id':'run','expected_version':1,'goals':True}).json()

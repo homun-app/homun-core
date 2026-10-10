@@ -24,7 +24,7 @@ from homun.application.ops.doctor_diagnostics import (
     DoctorDiagnostics,
     DoctorReport,
 )
-from homun.application.daemon_lifecycle import (
+from homun.application.automation.daemon_lifecycle import (
     DaemonManager,
     DaemonStatus,
 )

@@ -2,8 +2,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
-from homun.application.cron_manager import CronManager
-from homun.application.cron_store import CronStore
+from homun.application.automation.cron_manager import CronManager
+from homun.application.automation.cron_store import CronStore
 
 
 def manager(path):
@@ -51,7 +51,7 @@ def test_claim_expiry_before_io_is_recoverable_but_after_io_unknown(tmp_path):
     renewed = manager(path).claim_job_for_fire(job.id, now=claim.lease_until + 1)
     assert renewed.occurrence_id == claim.occurrence_id
     assert renewed.claim_token != claim.claim_token
-    from homun.application.cron_occurrences import begin_execution
+    from homun.application.automation.cron_occurrences import begin_execution
     assert not begin_execution(mgr._store, 'w', claim, recovery_safe=False)
     assert begin_execution(mgr._store, 'w', renewed, recovery_safe=False)
     assert manager(path).claim_job_for_fire(job.id, now=renewed.lease_until + 1) is None
@@ -61,7 +61,7 @@ def test_claim_expiry_before_io_is_recoverable_but_after_io_unknown(tmp_path):
 
 
 def test_awaiting_approval_does_not_consume_repeat_or_deliver(tmp_path):
-    from homun.application.cron_contracts import CronExecutionResult
+    from homun.application.automation.cron_contracts import CronExecutionResult
     path = tmp_path / 'cron.db'
     mgr = manager(path)
     job = due_job(mgr, repeat=1, deliver='chat')
@@ -77,8 +77,8 @@ def test_awaiting_approval_does_not_consume_repeat_or_deliver(tmp_path):
 
 def test_real_staging_replay_and_terminal_reconciliation(tmp_path):
     from homun.context import create_context
-    from homun.application.cron_agent_runner import make_cron_runner
-    from homun.application.cron_reconciliation import reconcile_cron_runs
+    from homun.application.automation.cron_agent_runner import make_cron_runner
+    from homun.application.automation.cron_reconciliation import reconcile_cron_runs
     from homun.application.agent_runs import approve
     from homun.application.agent_run_execution import advance
     from types import SimpleNamespace
@@ -118,8 +118,8 @@ def test_real_staging_replay_and_terminal_reconciliation(tmp_path):
 
 
 def test_due_listing_does_not_reserve(tmp_path):
-    from homun.application.cron_dispatcher import list_due_job_ids
-    from homun.application.cron_store import set_cron_store
+    from homun.application.automation.cron_dispatcher import list_due_job_ids
+    from homun.application.automation.cron_store import set_cron_store
     mgr = manager(tmp_path / 'cron.db')
     job = due_job(mgr)
     set_cron_store(mgr._store)
@@ -135,8 +135,8 @@ def test_due_listing_does_not_reserve(tmp_path):
 def test_staging_crash_before_receipt_recovers_same_proposal(tmp_path, monkeypatch):
     import pytest
     from homun.context import create_context
-    from homun.application import cron_occurrences
-    from homun.application.cron_agent_runner import make_cron_runner
+    from homun.application.automation import cron_occurrences
+    from homun.application.automation.cron_agent_runner import make_cron_runner
     ctx = create_context(db_path=tmp_path / 'engine.db', data_dir=tmp_path, for_tests=True)
     try:
         path = tmp_path / 'cron.db'
@@ -166,8 +166,8 @@ def test_staging_crash_before_receipt_recovers_same_proposal(tmp_path, monkeypat
 
 def test_stale_completion_cannot_settle_or_enqueue_twice(tmp_path):
     import pytest
-    from homun.application.cron_contracts import CronExecutionResult
-    from homun.application.cron_occurrences import begin_execution, settle
+    from homun.application.automation.cron_contracts import CronExecutionResult
+    from homun.application.automation.cron_occurrences import begin_execution, settle
     mgr = manager(tmp_path / 'cron.db')
     job = due_job(mgr, deliver='chat')
     claim = mgr.claim_job_for_fire(job.id, now=20)
@@ -182,7 +182,7 @@ def test_stale_completion_cannot_settle_or_enqueue_twice(tmp_path):
 
 def test_pin_or_capability_failure_is_explicit_before_staging(tmp_path):
     from homun.context import create_context
-    from homun.application.cron_agent_runner import make_cron_runner
+    from homun.application.automation.cron_agent_runner import make_cron_runner
     ctx = create_context(db_path=tmp_path / 'engine.db', data_dir=tmp_path, for_tests=True)
     try:
         from homun.domain.models import Actor
@@ -196,7 +196,7 @@ def test_pin_or_capability_failure_is_explicit_before_staging(tmp_path):
 
 def test_staging_recovery_cannot_be_settled_without_its_backend(tmp_path):
     import pytest
-    from homun.application.cron_occurrences import begin_execution
+    from homun.application.automation.cron_occurrences import begin_execution
     mgr = manager(tmp_path / 'cron.db')
     job = due_job(mgr)
     original = mgr.claim_job_for_fire(job.id, now=20)
@@ -209,7 +209,7 @@ def test_staging_recovery_cannot_be_settled_without_its_backend(tmp_path):
 
 def test_timer_requires_bound_actor_and_checks_workspace(tmp_path):
     from homun.context import create_context
-    from homun.application.cron_agent_runner import make_cron_runner
+    from homun.application.automation.cron_agent_runner import make_cron_runner
     from homun.domain.models import Actor
     ctx = create_context(db_path=tmp_path / 'engine.db', data_dir=tmp_path, for_tests=True)
     try:
@@ -225,7 +225,7 @@ def test_timer_requires_bound_actor_and_checks_workspace(tmp_path):
 
 def test_timer_revalidates_source_work_access_before_creating_work(tmp_path):
     from homun.context import create_context
-    from homun.application.cron_agent_runner import make_cron_runner
+    from homun.application.automation.cron_agent_runner import make_cron_runner
     from homun.domain.models import Actor
     ctx = create_context(db_path=tmp_path / 'engine.db', data_dir=tmp_path, for_tests=True)
     try:
@@ -242,8 +242,8 @@ def test_timer_revalidates_source_work_access_before_creating_work(tmp_path):
 def test_job_edit_cannot_overwrite_concurrent_settlement(tmp_path, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
-    from homun.application.cron_occurrences import begin_execution, settle
-    from homun.application.cron_contracts import CronExecutionResult
+    from homun.application.automation.cron_occurrences import begin_execution, settle
+    from homun.application.automation.cron_contracts import CronExecutionResult
     path=tmp_path/'race.db'
     first, second=manager(path), manager(path)
     job=due_job(first,repeat=1)
@@ -270,8 +270,8 @@ def test_job_edit_cannot_overwrite_concurrent_settlement(tmp_path, monkeypatch):
 def test_timer_script_rechecks_source_authority(tmp_path):
     from homun.context import create_context
     from homun.domain.models import Actor
-    from homun.application.cron_dispatcher import fire_due_jobs
-    from homun.application.cron_store import set_cron_store
+    from homun.application.automation.cron_dispatcher import fire_due_jobs
+    from homun.application.automation.cron_store import set_cron_store
     ctx=create_context(db_path=tmp_path/'engine.db',data_dir=tmp_path,for_tests=True)
     store=CronStore(tmp_path/'cron-auth.db')
     set_cron_store(store)

@@ -2,7 +2,7 @@
 import time
 import pytest
 
-from homun.application.automation_store import AutomationStore, set_automation_store
+from homun.application.automation.store import AutomationStore, set_automation_store
 
 
 @pytest.fixture(autouse=True)
@@ -15,7 +15,7 @@ def _isolated_automation_store(tmp_path):
 
 
 from homun.application.goal_manager import GoalManager
-from homun.application.loop_manager import (
+from homun.application.automation.loop_manager import (
     DEFAULT_SELF_PACED_CEILING_SECONDS,
     DEFAULT_SELF_PACED_FLOOR_SECONDS,
     LOOP_COMPLETE_MARKER,

@@ -10,9 +10,9 @@ import logging
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from homun.application.cron_agent_runner import make_cron_runner
-from homun.application.cron_manager import CronManager
-from homun.application.cron_store import get_cron_store
+from homun.application.automation.cron_agent_runner import make_cron_runner
+from homun.application.automation.cron_manager import CronManager
+from homun.application.automation.cron_store import get_cron_store
 from homun.domain.models import Actor
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ def fire_due_jobs(
         if len(results) >= limit:
             break
         if ctx is not None and actor is not None:
-            from homun.application.cron_authority import require_owner
+            from homun.application.automation.cron_authority import require_owner
             from homun.domain.errors import DomainError
             try:
                 require_owner(ctx, job, actor)

@@ -352,8 +352,8 @@ def advance(ctx, run_id, *, epoch=None):
                         from homun.application.agent_external import stage
                         return stage(ctx, actor, run, decision)
                     if decision.tool == 'cronjob_manage':
-                        from homun.application.cron_tools import execute as cron_execute
-                        from homun.application.cron_agent_runner import make_cron_runner
+                        from homun.application.automation.cron_tools import execute as cron_execute
+                        from homun.application.automation.cron_agent_runner import make_cron_runner
                         registry_for(run).validate(decision.tool, decision.arguments)
                         observation = cron_execute(ctx, actor, run, decision.tool, decision.arguments, runner_factory=make_cron_runner)
                 if observation is None:

@@ -1,6 +1,6 @@
 """Compare-and-project finish journals; callers serialize with human controls."""
 import time
-from homun.application.automation_store import get_automation_store
+from homun.application.automation.store import get_automation_store
 
 
 def _project(run, evaluation):

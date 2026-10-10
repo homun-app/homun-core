@@ -23,8 +23,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from homun.application.cron_contracts import CronIncident, CronJob, CronOccurrence
-from homun.application.cron_manager import (
+from homun.application.automation.cron_contracts import CronIncident, CronJob, CronOccurrence
+from homun.application.automation.cron_manager import (
     AGENT_RUNNER_UNAVAILABLE,
     CronManager,
     compute_next_cron,
@@ -32,8 +32,8 @@ from homun.application.cron_manager import (
     parse_schedule,
     reset_store,
 )
-from homun.application.cron_store import CronStore, set_cron_store
-from homun.application.cron_tools import execute as cron_execute
+from homun.application.automation.cron_store import CronStore, set_cron_store
+from homun.application.automation.cron_tools import execute as cron_execute
 from homun.domain.errors import ValidationError
 
 

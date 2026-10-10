@@ -5,7 +5,7 @@ import json
 import time
 from uuid import uuid4
 
-from homun.application.cron_contracts import CronOccurrence, CronJob
+from homun.application.automation.cron_contracts import CronOccurrence, CronJob
 
 LEASE_SECONDS = 660  # Longer than the bounded script timeout (600 seconds).
 UNRESOLVED = {'claimed', 'executing', 'awaiting_approval', 'running', 'unknown'}
@@ -116,7 +116,7 @@ def begin_execution(store, workspace_id, claim, *, recovery_safe):
 
 def settle(store, workspace_id, claim, result, *, now):
     """Fence completion and commit history, counters, schedule and delivery together."""
-    from homun.application.cron_schedule import compute_next_run
+    from homun.application.automation.cron_schedule import compute_next_run
     if result.status not in TERMINAL | {'awaiting_approval', 'running', 'unknown'}:
         raise ValueError('Invalid cron execution outcome')
     with transaction(store) as conn:

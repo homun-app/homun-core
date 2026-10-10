@@ -94,10 +94,10 @@ def test_terminal_local_policy_never_auto_approved(ctx):
 
 
 def test_cron_job_auto_approve_starts_run(ctx, tmp_path):
-    from homun.application.cron_agent_runner import make_cron_runner
-    from homun.application.cron_manager import CronManager
-    from homun.application.cron_manager import reset_store
-    from homun.application.cron_store import CronStore, set_cron_store
+    from homun.application.automation.cron_agent_runner import make_cron_runner
+    from homun.application.automation.cron_manager import CronManager
+    from homun.application.automation.cron_manager import reset_store
+    from homun.application.automation.cron_store import CronStore, set_cron_store
     actor = Actor(id='person_cron', workspace_id=ctx.workspace_id, display_name='Owner')
     store = CronStore(tmp_path / 'cron.db')
     set_cron_store(store)
@@ -118,10 +118,10 @@ def test_cron_job_auto_approve_starts_run(ctx, tmp_path):
 
 def test_cron_agent_runner_reuses_shared_project(ctx, tmp_path):
     """Second prompt job must not die on project name uniqueness (live battery gap)."""
-    from homun.application.cron_agent_runner import CRON_PROJECT_NAME, make_cron_runner
-    from homun.application.cron_manager import CronManager
-    from homun.application.cron_manager import reset_store
-    from homun.application.cron_store import CronStore, set_cron_store
+    from homun.application.automation.cron_agent_runner import CRON_PROJECT_NAME, make_cron_runner
+    from homun.application.automation.cron_manager import CronManager
+    from homun.application.automation.cron_manager import reset_store
+    from homun.application.automation.cron_store import CronStore, set_cron_store
     actor = Actor(id='person_cron', workspace_id=ctx.workspace_id, display_name='Owner')
     store = CronStore(tmp_path / 'cron.db')
     set_cron_store(store)
@@ -148,10 +148,10 @@ def test_cron_agent_runner_reuses_shared_project(ctx, tmp_path):
 
 
 def test_cron_job_without_auto_approve_keeps_gate(ctx, tmp_path):
-    from homun.application.cron_agent_runner import make_cron_runner
-    from homun.application.cron_manager import CronManager
-    from homun.application.cron_manager import reset_store
-    from homun.application.cron_store import CronStore, set_cron_store
+    from homun.application.automation.cron_agent_runner import make_cron_runner
+    from homun.application.automation.cron_manager import CronManager
+    from homun.application.automation.cron_manager import reset_store
+    from homun.application.automation.cron_store import CronStore, set_cron_store
     actor = Actor(id='person_cron', workspace_id=ctx.workspace_id, display_name='Owner')
     store = CronStore(tmp_path / 'cron.db')
     set_cron_store(store)

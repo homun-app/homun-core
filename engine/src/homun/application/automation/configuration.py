@@ -6,10 +6,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from homun.application.agent_control import _owner
 from homun.application.agent_runs import authority, lookup
-from homun.application.automation_store import get_automation_store
-from homun.application.automation_wakes import TransientLoopManager
-from homun.application.heartbeat_manager import HeartbeatState
-from homun.application.loop_manager import LoopState
+from homun.application.automation.store import get_automation_store
+from homun.application.automation.wakes import TransientLoopManager
+from homun.application.automation.heartbeat_manager import HeartbeatState
+from homun.application.automation.loop_manager import LoopState
 from homun.domain.errors import ConflictError, ValidationError
 
 
@@ -98,7 +98,7 @@ def configure(ctx, actor, work_id, run_id, kind, command):
                     if json.loads(pending['payload'])['source'] == kind:
                         database._conn.execute('UPDATE automation_wakes SET acknowledged=1 WHERE wake_id=?', (pending['wake_id'],))
         if key not in run.setdefault('_automation_configuration_ids', []):
-            from homun.application.automation_projection import invalidate_evaluation
+            from homun.application.automation.projection import invalidate_evaluation
             invalidate_evaluation(run)
             run['_automation_configuration_ids'].append(key)
             run['_automation_revision'] = run.get('_automation_revision', 0) + 1

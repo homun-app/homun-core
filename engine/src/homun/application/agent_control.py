@@ -51,7 +51,7 @@ def control_in_store(ctx,store,actor,work_id,run_id,body,*,echo=True):
             raise ConflictError('Paused work changed')
         if run['status']!='paused' and (work.status!='running' or work.version!=run['_run_version']):
             raise ConflictError('Approved work changed')
-        from homun.application.automation_projection import invalidate_evaluation
+        from homun.application.automation.projection import invalidate_evaluation
         invalidate_evaluation(run)
         if action=='steer':
             if len(run.get('_steering',[]))>=20:

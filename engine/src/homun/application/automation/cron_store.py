@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from homun.application.cron_contracts import CronIncident, CronJob, CronOccurrence
+from homun.application.automation.cron_contracts import CronIncident, CronJob, CronOccurrence
 from homun.storage.paths import default_data_dir
 
 logger = logging.getLogger(__name__)

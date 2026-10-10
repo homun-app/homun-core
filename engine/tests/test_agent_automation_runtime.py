@@ -7,9 +7,9 @@ from homun.application.agent_runs import propose, approve
 from homun.application.agent_run_execution import advance
 from homun.application.goal_manager import GoalManager
 from homun.application.goal_store import GoalStore, set_goal_store
-from homun.application.automation_store import AutomationStore, set_automation_store
-from homun.application.loop_manager import LoopManager
-from homun.application.heartbeat_manager import HeartbeatManager
+from homun.application.automation.store import AutomationStore, set_automation_store
+from homun.application.automation.loop_manager import LoopManager
+from homun.application.automation.heartbeat_manager import HeartbeatManager
 from homun.models.native_turn import NativeMessage
 
 
@@ -96,7 +96,7 @@ def test_heartbeat_respects_human_pause(setup):
 
 
 def test_wake_crash_before_engine_commit_recovers_after_restart(setup, tmp_path, monkeypatch):
-    from homun.application import automation_wakes
+    from homun.application.automation import wakes as automation_wakes
     from homun.application.agent_automation import wake_due_automation
     from homun.context import create_context
     ctx, actor, work, p = start(setup)

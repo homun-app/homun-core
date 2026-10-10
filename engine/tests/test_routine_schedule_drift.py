@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 import pytest
-from homun.application.routines import reconcile_routine_schedules
+from homun.application.automation.routines import reconcile_routine_schedules
 
 
 @pytest.mark.parametrize('status', ['active', 'paused'])

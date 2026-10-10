@@ -1,7 +1,7 @@
 """Event jobs activate only through authenticated, scoped, idempotent requests."""
 from test_agent_runs_api import api_setup
-from homun.application.cron_store import CronStore, set_cron_store
-from homun.application.cron_manager import CronManager
+from homun.application.automation.cron_store import CronStore, set_cron_store
+from homun.application.automation.cron_manager import CronManager
 
 
 def test_activation_requires_auth_and_preserves_identity(api_setup, tmp_path):

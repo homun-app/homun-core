@@ -7,9 +7,9 @@ import pytest
 
 from homun.application.agent_prompt_roots import resolve_prompt_roots
 from homun.application.agent_side_questions import answer_side_question
-from homun.application.automation_store import AutomationStore, set_automation_store
-from homun.application.heartbeat_manager import HeartbeatManager
-from homun.application.loop_manager import LoopManager
+from homun.application.automation.store import AutomationStore, set_automation_store
+from homun.application.automation.heartbeat_manager import HeartbeatManager
+from homun.application.automation.loop_manager import LoopManager
 from homun.domain.errors import ValidationError
 from homun.models.native_prompt import initial_messages
 

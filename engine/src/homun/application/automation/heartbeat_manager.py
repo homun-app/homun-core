@@ -14,7 +14,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional, Tuple
 
-from homun.application.automation_store import load_typed, save_typed
+from homun.application.automation.store import load_typed, save_typed
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +257,7 @@ class HeartbeatManager:
 
 def find_due_heartbeats(now: Optional[float] = None) -> list[tuple[str, HeartbeatState]]:
     """Scan all stored heartbeats and return active sessions whose heartbeat is due."""
-    from homun.application.automation_store import get_automation_store
+    from homun.application.automation.store import get_automation_store
     items = get_automation_store().list_all(_KIND)
     due: list[tuple[str, HeartbeatState]] = []
     curr = time.time() if now is None else now
