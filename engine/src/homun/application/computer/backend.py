@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import subprocess
+import sysconfig
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -31,9 +32,11 @@ _conn: Optional[Dict[str, Any]] = None
 
 
 def resolve_binary() -> Optional[str]:
+    # The active interpreter's scripts dir (engine/.venv/bin in dev) does not
+    # depend on where this module lives, unlike counting __file__ parents.
     candidates = [
         os.environ.get("HOMUN_CUA_DRIVER_BIN"),
-        str(Path(__file__).resolve().parents[3] / ".venv" / "bin" / "cua-driver"),
+        str(Path(sysconfig.get_path("scripts")) / "cua-driver"),
         shutil.which("cua-driver"),
     ]
     for candidate in candidates:
