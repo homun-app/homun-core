@@ -5,7 +5,7 @@ import asyncio
 
 import pytest
 
-from homun.application.backup_schedule import _backup_once, _prune, run_backup_loop
+from homun.application.ops.backup_schedule import _backup_once, _prune, run_backup_loop
 from homun.context import create_context
 
 

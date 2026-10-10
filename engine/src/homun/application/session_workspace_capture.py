@@ -79,7 +79,7 @@ def _secret_path(path):
 
 
 def _secret_bytes(data):
-    from homun.application.secret_redaction import redact_secrets
+    from homun.application.ops.secret_redaction import redact_secrets
     try:
         text = data.decode('utf-8')
     except UnicodeDecodeError:

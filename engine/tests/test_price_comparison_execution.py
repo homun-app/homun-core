@@ -147,7 +147,7 @@ def test_attempt_budget_survives_reopen(setup, monkeypatch):
 
 def test_dbos_recovers_approved_intent_after_context_restart(setup):
     import asyncio
-    from homun.application.lifecycle import runtime_lifespan
+    from homun.application.ops.lifecycle import runtime_lifespan
     ctx, actor, work, body = setup
     p = propose(ctx, actor, work, body)
     approve(ctx, actor, work, p['id'], confirmation(p))

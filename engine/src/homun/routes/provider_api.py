@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from homun.application.credential_pool import get_credential_pool
+from homun.application.ops.credential_pool import get_credential_pool
 from homun.application.providers.registry import get_provider_registry
 
 logger = logging.getLogger(__name__)

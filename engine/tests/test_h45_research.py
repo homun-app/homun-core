@@ -16,12 +16,12 @@ from homun.application.trajectory_compression import (
     estimate_tokens,
     estimate_trajectory_tokens,
 )
-from homun.application.batch_eval_runner import (
+from homun.application.ops.batch_eval_runner import (
     BatchEvalRunner,
     BatchItem,
     BatchItemResult,
 )
-from homun.application.observability_exporter import (
+from homun.application.ops.observability_exporter import (
     ObservabilityCollector,
 )
 

@@ -5,7 +5,7 @@ import pytest
 
 from homun.application import agent_runs, session_runtime, session_usage
 from homun.application.agent_run_execution import advance
-from homun.application.profile_operations import ProfileOperationsManager, ProfileNotFoundError
+from homun.application.ops.profile_operations import ProfileOperationsManager, ProfileNotFoundError
 from homun.context import create_context
 from homun.domain.errors import ConflictError, PermissionDeniedError, ValidationError
 from homun.domain.models import Actor

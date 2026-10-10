@@ -17,7 +17,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from homun.application.api_server_contracts import (
+from homun.application.ops.api_server_contracts import (
     GLOBAL_IDEMPOTENCY_STORE,
     ChatCompletionChunk,
     ChatCompletionChunkChoice,

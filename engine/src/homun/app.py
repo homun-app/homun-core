@@ -27,7 +27,7 @@ DEFAULT_PORT = 8765
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from homun.storage.lease import EngineBusyError, engine_lease
-    from homun.application.lifecycle import runtime_lifespan
+    from homun.application.ops.lifecycle import runtime_lifespan
     from homun.application.material_ingest import recover_materials
     from homun.storage.paths import default_data_dir
     owns_context = context_mod._CONTEXT is None
@@ -105,9 +105,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 pass
             async with runtime_lifespan(ctx):
                 # prevenzione dati: backup consistente giornaliero con retention
-                from homun.application.backup_schedule import start_backup_scheduler
+                from homun.application.ops.backup_schedule import start_backup_scheduler
                 backup_task = start_backup_scheduler(ctx)
-                from homun.application.backup_schedule import start_wal_checkpoint_scheduler
+                from homun.application.ops.backup_schedule import start_wal_checkpoint_scheduler
                 wal_task = start_wal_checkpoint_scheduler(ctx)
                 try:
                     yield

@@ -163,7 +163,7 @@ class ModelRegistry:
         ]
         try:
             from homun.application.providers.registry import create_builtin_profiles
-            from homun.application.credential_pool import get_credential_pool
+            from homun.application.ops.credential_pool import get_credential_pool
             pool = get_credential_pool()
             builtin_profiles = create_builtin_profiles()
             for pid, prof in builtin_profiles.items():
@@ -311,7 +311,7 @@ class ModelRegistry:
                 if cid == "openai_compatible":
                     self.secrets.put(SECRET_KEY, clean_key)
                 try:
-                    from homun.application.credential_pool import get_credential_pool
+                    from homun.application.ops.credential_pool import get_credential_pool
                     get_credential_pool().add_credential(cid, clean_key)
                 except Exception:
                     pass

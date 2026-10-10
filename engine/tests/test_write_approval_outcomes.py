@@ -1,6 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
-from homun.application.write_approval_gate import WriteApprovalGate
+from homun.application.ops.write_approval_gate import WriteApprovalGate
 
 
 def stage(gate):

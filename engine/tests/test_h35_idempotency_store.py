@@ -1,7 +1,7 @@
 """H35 durable API idempotency store."""
 from __future__ import annotations
 
-from homun.application.api_server_contracts import IdempotencyStore
+from homun.application.ops.api_server_contracts import IdempotencyStore
 
 
 def test_idempotency_survives_reopen(tmp_path):

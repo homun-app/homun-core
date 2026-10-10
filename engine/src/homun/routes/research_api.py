@@ -15,14 +15,14 @@ from homun.application.trajectory_compression import (
     CompressionStats,
     TrajectoryCompressor,
 )
-from homun.application.batch_eval_runner import (
+from homun.application.ops.batch_eval_runner import (
     BatchEvalRunner,
     BatchItem,
     BatchItemResult,
     BatchSummary,
     create_canonical_batch_executor,
 )
-from homun.application.observability_exporter import (
+from homun.application.ops.observability_exporter import (
     ObservabilityCollector,
     ObservabilitySpan,
     ObservabilityTrace,

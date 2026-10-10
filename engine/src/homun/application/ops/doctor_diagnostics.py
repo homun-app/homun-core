@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
-from homun.application.config_lifecycle import ConfigLifecycleManager, CURRENT_CONFIG_SCHEMA_VERSION
+from homun.application.ops.config_lifecycle import ConfigLifecycleManager, CURRENT_CONFIG_SCHEMA_VERSION
 
 
 class DoctorFinding(BaseModel):
