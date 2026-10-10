@@ -58,8 +58,8 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             registry.register(cp_entry)
     mem = run.get('memory')
     if isinstance(mem, dict) and mem.get('policy') == 'scoped-workspace-v1' and mem.get('version') == 1:
-        from homun.application.memory_contracts import entries as memory_entries
-        from homun.application.memory_tools import execute as memory_execute
+        from homun.application.memory.contracts import entries as memory_entries
+        from homun.application.memory.tools import execute as memory_execute
         for mem_entry in memory_entries(memory_execute, mem.get('version', 1)):
             registry.register(mem_entry)
     cu = run.get('computer_use')

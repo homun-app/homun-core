@@ -147,7 +147,7 @@ def promote_memory(
     """Promote a project lesson into an agent's transferable craft memory."""
     _require_workspace(workspace_id)
     ctx = get_context()
-    from homun.application.memory_promote import promote_to_agent
+    from homun.application.memory.promote import promote_to_agent
     from homun.domain.models import Actor
     actor = Actor(id=_actor_id(x_homun_actor_id), workspace_id=ctx.workspace_id,
                   display_name="Promoter")
@@ -195,7 +195,7 @@ def export_agent_pack(workspace_id: str, agent_id: str) -> dict:
     """Export a trained agent's dossier (identity + craft memory + skills)."""
     _require_workspace(workspace_id)
     ctx = get_context()
-    from homun.application.memory_packs import export_pack
+    from homun.application.memory.packs import export_pack
     try:
         return export_pack(ctx, agent_id)
     except (ValidationError, NotFoundError) as exc:
@@ -211,7 +211,7 @@ def import_agent_pack(
     """Import an agent dossier; skills land in staging quarantine."""
     _require_workspace(workspace_id)
     ctx = get_context()
-    from homun.application.memory_packs import import_pack
+    from homun.application.memory.packs import import_pack
     from homun.domain.models import Actor
     actor = Actor(id=_actor_id(x_homun_actor_id), workspace_id=ctx.workspace_id,
                   display_name="Importer")
@@ -232,7 +232,7 @@ def review_memories(
     if not hasattr(ctx, "memory") or ctx.memory is None:
         raise HTTPException(status_code=503, detail={"code": "memory_unavailable", "message": "Memory store is not available"})
 
-    from homun.application.memory_review_core import perform_memory_review
+    from homun.application.memory.review_core import perform_memory_review
 
     try:
         return perform_memory_review(
