@@ -23,7 +23,9 @@ PACKAGE = "homun.application"
 
 
 def module_paths() -> dict[str, Path]:
-    return {path.stem: path for path in sorted(APPLICATION_DIR.glob("*.py"))}
+    """Nome modulo relativo al pacchetto (contesto incluso, es. agent/turn) -> percorso."""
+    return {path.relative_to(APPLICATION_DIR).with_suffix("").as_posix(): path
+            for path in sorted(APPLICATION_DIR.rglob("*.py")) if path.name != "__init__.py"}
 
 
 def imports(tree: ast.AST) -> set[str]:
@@ -44,7 +46,8 @@ def imports(tree: ast.AST) -> set[str]:
 def graph() -> dict[str, list[str]]:
     """Edges between application modules, resolved to the longest known module prefix."""
     paths = module_paths()
-    modules = {f"{PACKAGE}.{name}" for name in paths}
+    dotted = {name: name.replace("/", ".") for name in paths}
+    modules = {f"{PACKAGE}.{module}" for module in dotted.values()}
     edges: dict[str, set[str]] = {name: set() for name in paths}
     for name, path in paths.items():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -52,8 +55,9 @@ def graph() -> dict[str, list[str]]:
             resolved = imported
             while resolved not in modules and resolved.startswith(PACKAGE + "."):
                 resolved = resolved.rpartition(".")[0]
-            if resolved in modules and resolved != f"{PACKAGE}.{name}":
-                edges[name].add(resolved.removeprefix(f"{PACKAGE}."))
+            if resolved in modules and resolved != f"{PACKAGE}.{dotted[name]}":
+                target = resolved.removeprefix(f"{PACKAGE}.")
+                edges[name].add(target.replace(".", "/", 1))
     return {name: sorted(targets) for name, targets in edges.items()}
 
 

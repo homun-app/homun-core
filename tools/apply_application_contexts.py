@@ -63,11 +63,11 @@ def rewrite_dotted(content: str, entries: dict[str, str]) -> tuple[str, list[str
 
 def rewrite_from_imports(content: str, entries: dict[str, str]) -> tuple[str, list[str]]:
     """Riscrive `from homun.application import X[, Y] [as ...]` una riga per contesto."""
-    statement = re.compile(r"^([ \t]*)from homun\.application import ([\w., ]+)$", re.M)
+    statement = re.compile(r"^([ \t]*)from homun\.application import ([\w., ]+?)(\s*#.*)?$", re.M)
     changed: list[str] = []
 
     def replace(match: re.Match) -> str:
-        indent, symbols_text = match.group(1), match.group(2)
+        indent, symbols_text, comment = match.group(1), match.group(2), match.group(3) or ""
         symbols = [part.strip() for part in symbols_text.split(",")]
         grouped: dict[str, list[str]] = {}
         unmapped: list[str] = []
@@ -85,6 +85,8 @@ def rewrite_from_imports(content: str, entries: dict[str, str]) -> tuple[str, li
         lines.extend(f"{indent}from homun.application.{context} import {', '.join(names)}"
                      for context, names in grouped.items())
         rebuilt = "\n".join(lines)
+        if comment:  # il commento resta sulla prima riga emessa
+            rebuilt = rebuilt.replace("\n", f"{comment}\n", 1) if "\n" in rebuilt else rebuilt + comment
         if rebuilt != match.group(0):
             changed.append(match.group(0).strip())
         return rebuilt
@@ -151,7 +153,7 @@ def run(args: argparse.Namespace) -> int:
 
 def check(entries: dict[str, str]) -> int:
     """Fallisce se resta un riferimento ai vecchi percorsi delle voci selezionate."""
-    from_import = re.compile(r"^from homun\.application import ([\w., ]+)$", re.M)
+    from_import = re.compile(r"^from homun\.application import ([\w., ]+?)(?:\s*#.*)?$", re.M)
     leftovers = []
     for path in scope_files():
         content = path.read_text(encoding="utf-8")
