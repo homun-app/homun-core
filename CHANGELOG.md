@@ -7,6 +7,40 @@ truth: the released version's section is written into the GitHub Release body
 Section headers are `## Highlights` / `## Improvements` / `## Fixes` (H2), and
 each bullet is a single line; version delimiters are `## [x.y.z] — date`.
 
+## [0.2.1004] — 2026-10-10
+
+Linux AppImage can update itself from `homun-releases`, and the chat composer matches common stop/send patterns.
+
+## Highlights
+- **Linux AppImage auto-update.** Packaged AppImage builds check `homun-releases` (`latest-linux.yml`) the same way macOS does; nothing installs without consent. `.deb` installs still update from the release page.
+
+## Improvements
+- **While Homun is working, the send control becomes Cancel** (square) in the prompt — no separate “Homun sta lavorando…” / Annulla line above the composer.
+- **User messages render without a muted bubble background** — you on the right, Homun on the left.
+
+## [Unreleased]
+
+## Highlights
+- **Work directly with Homun without creating a specialist bot.** Optional company onboarding proposes a small team for recurring responsibilities.
+- **Adaptive work over approved materials.** Homun can read, search, consult selected AI teammates, request clarification and deliver a reviewable result with persisted progress.
+- **Scoped human contributions.** Named recipients can answer one request through an expiring, revocable link; an adaptive run can resume from that answer. Reachable hosting remains a prerequisite.
+
+## Fixes
+- **Model retries remain bounded after a crash.** Corrections interrupt stale waits immediately, and malformed usage counters cannot reduce recorded spending.
+- **Materials and Plugins use the engine from the sidebar.** Files, previews, archival and capability settings share the persisted engine state; denied access clears stale previews.
+- **Task deadlines persist from the Tasks view**, with saving feedback and typed errors.
+- **Tool chains resume after artifact publication without duplicating results**, preserving DBOS journal step order.
+- **Synthesis respects the assigned collaborator's budget and approved sources**, preserving known token counts in partial usage reports and blocking further calls at exhausted limits.
+- **Routine recovery reconciles cron and timezone drift** while preserving pause state.
+- **Manual update checks offer the available version only once.**
+
+## Improvements
+- **Recover from model context rejection through bounded compaction.** Homun preserves original history, respects output and attempt limits, and stops explicitly when protected context cannot shrink.
+- **Durable context checkpoints for native agent runs.** Automatic summaries preserve original history, recent corrections and complete tool rounds; configured model limits and separate usage accounting remain explicit.
+- **Pause, resume and redirect native agent work.** Chat corrections reach the active run; pending tools survive pause, stale responses cannot publish, and revoked source history remains hidden.
+- **Native agent tool rounds in the Homun engine**, with persisted call/result history and pending-call recovery after human input; Hermes-derived execution guidance includes MIT attribution.
+- **Current usage and developer documentation**, with verified limits and a dated Hermes usage comparison.
+
 ## [0.2.1003] — 2026-10-09
 
 Pilot-ready Spaces: sealed object transfers between machines, honest peer delegation under budget, and installable Linux packages (.deb / AppImage).
@@ -29,32 +63,6 @@ Pilot-ready Spaces: sealed object transfers between machines, honest peer delega
 - **Live battery hygiene** for T2/T6 scripts and cron→chat leftovers.
 - **Copilot leftovers**: diagnostics auth, routine templates gated on real engine data, and the ddgs lock aligned with the engine env.
 - **Desktop packaging metadata** (homepage and author) required by electron-builder for `.deb`.
-
-## [Unreleased]
-
-## Highlights
-- **Work directly with Homun without creating a specialist bot.** Optional company onboarding proposes a small team for recurring responsibilities.
-- **Adaptive work over approved materials.** Homun can read, search, consult selected AI teammates, request clarification and deliver a reviewable result with persisted progress.
-- **Scoped human contributions.** Named recipients can answer one request through an expiring, revocable link; an adaptive run can resume from that answer. Reachable hosting remains a prerequisite.
-
-## Improvements
-- **Linux AppImage auto-update.** Packaged AppImage builds check `homun-releases` (`latest-linux.yml`) the same way macOS does; nothing installs without consent. `.deb` installs still update from the release page.
-
-## Fixes
-- **Model retries remain bounded after a crash.** Corrections interrupt stale waits immediately, and malformed usage counters cannot reduce recorded spending.
-- **Materials and Plugins use the engine from the sidebar.** Files, previews, archival and capability settings share the persisted engine state; denied access clears stale previews.
-- **Task deadlines persist from the Tasks view**, with saving feedback and typed errors.
-- **Tool chains resume after artifact publication without duplicating results**, preserving DBOS journal step order.
-- **Synthesis respects the assigned collaborator's budget and approved sources**, preserving known token counts in partial usage reports and blocking further calls at exhausted limits.
-- **Routine recovery reconciles cron and timezone drift** while preserving pause state.
-- **Manual update checks offer the available version only once.**
-
-## Improvements
-- **Recover from model context rejection through bounded compaction.** Homun preserves original history, respects output and attempt limits, and stops explicitly when protected context cannot shrink.
-- **Durable context checkpoints for native agent runs.** Automatic summaries preserve original history, recent corrections and complete tool rounds; configured model limits and separate usage accounting remain explicit.
-- **Pause, resume and redirect native agent work.** Chat corrections reach the active run; pending tools survive pause, stale responses cannot publish, and revoked source history remains hidden.
-- **Native agent tool rounds in the Homun engine**, with persisted call/result history and pending-call recovery after human input; Hermes-derived execution guidance includes MIT attribution.
-- **Current usage and developer documentation**, with verified limits and a dated Hermes usage comparison.
 
 ## [0.2.1002] — 2026-10-08
 
