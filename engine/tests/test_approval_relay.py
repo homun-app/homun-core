@@ -4,7 +4,7 @@ import re
 import pytest
 
 from homun.application import approval_relay
-from homun.application.gateway_contracts import ChannelMessage
+from homun.application.channels.gateway_contracts import ChannelMessage
 from homun.context import create_context
 from homun.domain.models import Actor
 
@@ -71,7 +71,7 @@ def notify(ctx, monkeypatch, message_id: str | None = None) -> str:
     """Notifica con adapter finto: cattura il testo e restituisce il codice."""
     sent = []
     monkeypatch.setattr(
-        "homun.application.channel_delivery_recovery.send_with_media_dispatch",
+        "homun.application.channels.delivery_recovery.send_with_media_dispatch",
         lambda adapter, channel_id, text, **kw: sent.append(text) or
         {"delivered": True, "intent_id": "del_test", "provider_message_id": message_id})
     assert approval_relay.notify_pending(ctx) == 1
@@ -145,7 +145,7 @@ def test_notify_only_fires_once_per_gate(setup, monkeypatch):
     propose_run(ctx, actor, work)
     sent = []
     monkeypatch.setattr(
-        "homun.application.channel_delivery_recovery.send_with_media_dispatch",
+        "homun.application.channels.delivery_recovery.send_with_media_dispatch",
         lambda adapter, channel_id, text, **kw: sent.append(text) or
         {"delivered": True, "intent_id": "del_test"})
     assert approval_relay.notify_pending(ctx) == 1
@@ -156,7 +156,7 @@ def test_notify_only_fires_once_per_gate(setup, monkeypatch):
 def test_gates_without_binding_are_not_notified(setup, monkeypatch):
     ctx, actor, work = setup
     propose_run(ctx, actor, work)
-    monkeypatch.setattr("homun.application.channel_delivery_recovery.send_with_media_dispatch",
+    monkeypatch.setattr("homun.application.channels.delivery_recovery.send_with_media_dispatch",
                         lambda *a, **kw: {"delivered": True, "intent_id": "x"})
     assert approval_relay.notify_pending(ctx) == 0
 

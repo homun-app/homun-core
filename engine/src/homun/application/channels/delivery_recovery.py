@@ -19,7 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import httpx
 
-from homun.application.gateway_contracts import ChannelMedia, ChannelMessage
+from homun.application.channels.gateway_contracts import ChannelMedia, ChannelMessage
 from homun.storage.paths import default_data_dir
 
 logger = logging.getLogger(__name__)

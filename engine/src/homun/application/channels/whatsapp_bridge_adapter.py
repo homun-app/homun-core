@@ -15,8 +15,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from homun.application.channel_contracts import ChannelAdapter, _http_delivery_result, _token_from
-from homun.application.gateway_contracts import ChannelMedia, ChannelMessage
+from homun.application.channels.contracts import ChannelAdapter, _http_delivery_result, _token_from
+from homun.application.channels.gateway_contracts import ChannelMedia, ChannelMessage
 
 DEFAULT_BRIDGE_URL = "http://127.0.0.1:8902"
 

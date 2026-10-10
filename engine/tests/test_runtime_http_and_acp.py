@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from homun.application.relay_runtime import RelayRuntime
+from homun.application.channels.relay_runtime import RelayRuntime
 from homun.application.acp_adapter import AcpServerAdapter
 from homun.application.hosted_mcp_runner import HostedMcpEngineRunner
 from homun.context import create_context

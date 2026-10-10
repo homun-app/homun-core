@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from homun.application.ops.batch_eval_runner import BatchEvalRunner, BatchItem
-from homun.application.channel_adapters import TelegramAdapter
+from homun.application.channels.adapters import TelegramAdapter
 from homun.application.computer_use_driver import ComputerUseDriver
 from homun.application.copilot_acp_client import CopilotAcpClient
 from homun.application.hosted_mcp_agent import HostedMcpAgentServer

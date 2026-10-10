@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from homun.application.gateway_pairing import (
+from homun.application.channels.gateway_pairing import (
     get_gateway_pairing_manager,
 )
 

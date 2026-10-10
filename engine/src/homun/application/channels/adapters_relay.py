@@ -13,12 +13,12 @@ import uuid
 
 import httpx
 
-from homun.application.channel_contracts import (
+from homun.application.channels.contracts import (
     ChannelAdapter,
     _http_delivery_result,
     _token_from,
 )
-from homun.application.gateway_contracts import ChannelMedia, ChannelMessage
+from homun.application.channels.gateway_contracts import ChannelMedia, ChannelMessage
 
 
 class TeamsMeetingsAdapter(ChannelAdapter):

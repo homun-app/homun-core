@@ -18,7 +18,7 @@ from typing import Any, Dict
 
 from homun.application.command_delivery import admit, complete
 from homun.application.command_types import CommandRequest
-from homun.application.gateway_contracts import ChannelMessage
+from homun.application.channels.gateway_contracts import ChannelMessage
 from homun.domain.errors import CommandInProgressError, DomainError
 from homun.domain.models import Actor
 

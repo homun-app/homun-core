@@ -9,7 +9,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from homun.application.gateway_contracts import ChannelMedia, ChannelMessage
+from homun.application.channels.gateway_contracts import ChannelMedia, ChannelMessage
 
 logger = logging.getLogger(__name__)
 

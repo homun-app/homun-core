@@ -8,7 +8,7 @@ from homun.app import create_app
 from homun.application.codex_runtime import CodexAppServerAdapter, CodexTurnResult
 from homun.application.copilot_acp_client import CopilotAcpClient, CopilotAcpResult
 from homun.application.managed_tool_gateway import ManagedToolGateway, ManagedToolGatewayConfig
-from homun.application.relay_runtime import RelayRuntime, RelayTurnContext
+from homun.application.channels.relay_runtime import RelayRuntime, RelayTurnContext
 
 
 # 1. Codex App-Server Adapter

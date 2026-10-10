@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from homun.application.gateway_contracts import ChannelMedia, ChannelMessage
+from homun.application.channels.gateway_contracts import ChannelMedia, ChannelMessage
 from homun.storage.paths import default_data_dir
 
 

@@ -183,7 +183,7 @@ def pre_handler():
 
 def notify_pending(ctx) -> int:
     """Pump pass: notify every pending gate owned by a bound person. Idempotent."""
-    from homun.application.channel_delivery_recovery import send_with_media_dispatch
+    from homun.application.channels.delivery_recovery import send_with_media_dispatch
 
     store = ctx.repository.snapshot()
     notified = 0
@@ -346,7 +346,7 @@ def _reject_gate(ctx, entry: Dict[str, Any], channel: str = "relay") -> str:
 
 def handle_inbound(ctx, message) -> Optional[str]:
     """Pre-handler on the inbound channel path. None → normal conversation."""
-    from homun.application.gateway_contracts import ChannelMessage
+    from homun.application.channels.gateway_contracts import ChannelMessage
     if not isinstance(message, ChannelMessage):
         return None
     text = (message.text or "").strip().upper()

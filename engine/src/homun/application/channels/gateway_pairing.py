@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from homun.application.gateway_contracts import PairingRequest
+from homun.application.channels.gateway_contracts import PairingRequest
 from homun.storage.paths import default_data_dir
 
 logger = logging.getLogger(__name__)

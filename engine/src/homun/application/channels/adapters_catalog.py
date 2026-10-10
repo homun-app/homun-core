@@ -13,12 +13,12 @@ import uuid
 
 import httpx
 
-from homun.application.channel_contracts import (
+from homun.application.channels.contracts import (
     ChannelAdapter,
     _http_delivery_result,
     _token_from,
 )
-from homun.application.channel_adapters_protocols import (
+from homun.application.channels.adapters_protocols import (
     BlueBubblesAdapter,
     EmailAdapter,
     IrcAdapter,
@@ -27,7 +27,7 @@ from homun.application.channel_adapters_protocols import (
     SimplexAdapter,
     SmsAdapter,
 )
-from homun.application.channel_adapters_extended import (
+from homun.application.channels.adapters_extended import (
     A2AAdapter,
     BuzzAdapter,
     HomeAssistantAdapter,
@@ -40,7 +40,7 @@ from homun.application.channel_adapters_extended import (
     WhatsAppCloudAdapter,
     YuanbaoAdapter,
 )
-from homun.application.gateway_contracts import ChannelMedia, ChannelMessage
+from homun.application.channels.gateway_contracts import ChannelMedia, ChannelMessage
 
 
 class FeishuChannelAdapter(ChannelAdapter):

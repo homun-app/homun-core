@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from homun.application.gateway_contracts import (
+from homun.application.channels.gateway_contracts import (
     HostedRoom,
     HostedRoomEvent,
     HostedRoomMember,

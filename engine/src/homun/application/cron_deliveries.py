@@ -101,7 +101,7 @@ def _deliver_to_conversation(ctx, payload: Dict[str, Any], output: str) -> Dict[
 
 def _deliver_to_channel(platform: str, chat_id: str, output: str) -> Dict[str, Any]:
     try:
-        from homun.application.channel_delivery_recovery import send_with_media_dispatch
+        from homun.application.channels.delivery_recovery import send_with_media_dispatch
         from homun.routes.channel_ingress_api import get_channel_registry
         registry = get_channel_registry()
         adapter = registry.get_adapter(platform)
