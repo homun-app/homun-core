@@ -15,8 +15,8 @@ from homun.application.credential_pool import (
     get_credential_pool,
     reset_credential_pool,
 )
-from homun.application.provider_contracts import ProviderProfile
-from homun.application.provider_registry import (
+from homun.application.providers.contracts import ProviderProfile
+from homun.application.providers.registry import (
     ProviderRegistry,
     get_provider_registry,
     reset_provider_registry,

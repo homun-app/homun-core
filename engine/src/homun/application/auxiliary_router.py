@@ -12,8 +12,8 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from homun.application.credential_pool import get_credential_pool
-from homun.application.provider_contracts import ProviderProfile
-from homun.application.provider_registry import get_provider_registry
+from homun.application.providers.contracts import ProviderProfile
+from homun.application.providers.registry import get_provider_registry
 
 logger = logging.getLogger(__name__)
 

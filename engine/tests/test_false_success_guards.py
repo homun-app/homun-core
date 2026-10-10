@@ -12,11 +12,11 @@ from homun.application.copilot_acp_client import CopilotAcpClient
 from homun.application.hosted_mcp_agent import HostedMcpAgentServer
 from homun.application.integration_meetings import MeetingManager
 from homun.application.integration_yuanbao import YuanbaoAdapter, YuanbaoNotConnectedError
-from homun.application.media_image_gen import ImageGenerator
-from homun.application.media_stt import SpeechToTextTranscriber
-from homun.application.media_tts import TextToSpeechSynthesizer
-from homun.application.media_video_gen import VideoGenerator
-from homun.application.media_vision import VisionAnalyzer
+from homun.application.providers.media_image_gen import ImageGenerator
+from homun.application.providers.media_stt import SpeechToTextTranscriber
+from homun.application.providers.media_tts import TextToSpeechSynthesizer
+from homun.application.providers.media_video_gen import VideoGenerator
+from homun.application.providers.media_vision import VisionAnalyzer
 
 
 def test_vision_missing_file_is_error_not_success():

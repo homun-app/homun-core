@@ -90,7 +90,7 @@ class ModelRegistry:
             self._openai.provider_id: self._openai,
         }
         try:
-            from homun.application.provider_registry import create_builtin_profiles
+            from homun.application.providers.registry import create_builtin_profiles
             builtin_profiles = create_builtin_profiles()
             for pid, prof in builtin_profiles.items():
                 if pid in self._providers:
@@ -162,7 +162,7 @@ class ModelRegistry:
             ),
         ]
         try:
-            from homun.application.provider_registry import create_builtin_profiles
+            from homun.application.providers.registry import create_builtin_profiles
             from homun.application.credential_pool import get_credential_pool
             pool = get_credential_pool()
             builtin_profiles = create_builtin_profiles()
