@@ -2,7 +2,7 @@ import hashlib
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application import agent_runs,work_outputs,workspace_files
+from homun.application import agent_runs, work_outputs, workspace_files
 from homun.application.agent_run_execution import advance
 from homun.models.native_turn import NativeMessage,ToolCall
 

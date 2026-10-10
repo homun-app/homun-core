@@ -15,7 +15,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from homun.application.automation_store import load_typed, save_typed
+from homun.application.automation.store import load_typed, save_typed
 
 logger = logging.getLogger(__name__)
 

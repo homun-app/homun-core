@@ -17,12 +17,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from homun.application.cron_contracts import CronIncident, CronJob, CronOccurrence
-from homun.application.cron_store import CronStore, get_cron_store
+from homun.application.automation.cron_contracts import CronIncident, CronJob, CronOccurrence
+from homun.application.automation.cron_store import CronStore, get_cron_store
 
 logger = logging.getLogger(__name__)
 
-from homun.application.cron_schedule import parse_schedule, compute_next_cron, compute_next_run, AGENT_RUNNER_UNAVAILABLE
+from homun.application.automation.cron_schedule import parse_schedule, compute_next_cron, compute_next_run, AGENT_RUNNER_UNAVAILABLE
 
 
 def reset_store(workspace_id: Optional[str] = None) -> None:
@@ -39,7 +39,7 @@ def atomic_job_mutation(method):
     from functools import wraps
     @wraps(method)
     def mutate(self, *args, **kwargs):
-        from homun.application.cron_occurrences import transaction
+        from homun.application.automation.cron_occurrences import transaction
         with transaction(self._store):
             return method(self, *args, **kwargs)
     return mutate
@@ -315,18 +315,18 @@ class CronManager:
         return self._store.list_deliveries(self.workspace_id)
 
     def is_due(self, job_id: str, now: Optional[float] = None) -> bool:
-        from homun.application.cron_occurrences import is_due
+        from homun.application.automation.cron_occurrences import is_due
         return is_due(self._store, self.workspace_id, job_id, now=time.time() if now is None else float(now))
 
     def activate_event(self, job_id: str, *, activation_id: str, now: Optional[float] = None):
-        from homun.application.cron_occurrences import activate_event
+        from homun.application.automation.cron_occurrences import activate_event
         return activate_event(self._store, self.workspace_id, job_id, activation_id=activation_id,
                               now=time.time() if now is None else float(now))
 
     def claim_job_for_fire(self, job_id: str, now: Optional[float] = None):
-        from homun.application.cron_occurrences import claim
+        from homun.application.automation.cron_occurrences import claim
         return claim(self._store, self.workspace_id, job_id, now=time.time() if now is None else float(now))
 
     def run_job(self, job_id: str, *, now: Optional[float] = None, custom_runner=None, claim=None, cancelled=None, ctx=None, actor=None) -> CronOccurrence:
-        from homun.application.cron_execution import execute
+        from homun.application.automation.cron_execution import execute
         return execute(self, job_id, now=now, custom_runner=custom_runner, claimed=claim, cancelled=cancelled, ctx=ctx, actor=actor)

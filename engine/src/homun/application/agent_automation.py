@@ -2,12 +2,13 @@
 from copy import deepcopy
 import time
 
-from homun.application import agent_native, automation_wakes
+from homun.application import agent_native
+from homun.application.automation import wakes as automation_wakes
 from homun.application.delegation_runtime import live_count
-from homun.application.automation_store import get_automation_store
+from homun.application.automation.store import get_automation_store
 from homun.application.goal_manager import GoalManager
-from homun.application.heartbeat_manager import HeartbeatManager
-from homun.application.loop_manager import LoopManager
+from homun.application.automation.heartbeat_manager import HeartbeatManager
+from homun.application.automation.loop_manager import LoopManager
 from homun.domain.models import Actor
 from homun.domain.errors import DomainError
 
@@ -21,7 +22,7 @@ def _session_waiting(ctx, session_id, snapshot=None):
     return not candidates or any(r.get('status') not in {'completed', 'failed', 'cancelled', 'blocked'} for r in candidates)
 
 
-from homun.application.automation_projection import _project
+from homun.application.automation.projection import _project
 
 
 def evaluate_finish(ctx, run, response):

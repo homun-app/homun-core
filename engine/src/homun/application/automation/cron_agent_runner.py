@@ -1,7 +1,7 @@
 """Idempotently stage supervised canonical agent proposals for cron occurrences."""
 from __future__ import annotations
 
-from homun.application.cron_contracts import CronExecutionResult
+from homun.application.automation.cron_contracts import CronExecutionResult
 from homun.domain.errors import DomainError
 from homun.domain.models import Actor
 

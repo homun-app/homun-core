@@ -2,7 +2,7 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_terminal_jobs import Backend
-from homun.application import agent_runs,terminal_jobs
+from homun.application import agent_runs, terminal_jobs
 from homun.application.agent_run_execution import advance
 from homun.models.native_turn import NativeMessage,ToolCall
 

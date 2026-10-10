@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from homun.application.cron_manager import CronManager
+from homun.application.automation.cron_manager import CronManager
 from homun.domain.errors import ValidationError
 
 

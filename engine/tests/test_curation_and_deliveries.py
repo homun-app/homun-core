@@ -83,10 +83,10 @@ def test_curator_interval_gate_and_state(ctx):
 
 
 def test_cron_delivery_chat_target_lands_in_conversation(ctx, tmp_path):
-    from homun.application.cron_manager import CronManager
-    from homun.application.cron_manager import reset_store
-    from homun.application.cron_store import CronStore, set_cron_store
-    from homun.application.cron_deliveries import deliver_pending
+    from homun.application.automation.cron_manager import CronManager
+    from homun.application.automation.cron_manager import reset_store
+    from homun.application.automation.cron_store import CronStore, set_cron_store
+    from homun.application.automation.cron_deliveries import deliver_pending
     actor = Actor(id='person_cron', workspace_id=ctx.workspace_id, display_name='Owner')
     project = _apply(ctx, actor, 'p', 'project.create', {'name': 'Cron'})['project_id']
     conversation = _apply(ctx, actor, 'c', 'conversation.create',
@@ -102,7 +102,7 @@ def test_cron_delivery_chat_target_lands_in_conversation(ctx, tmp_path):
                              owner_actor=actor.model_dump(mode='json'),
                              source_work_id=work)
         # Settle a successful occurrence with output → enqueue delivery.
-        from homun.application.cron_contracts import CronExecutionResult
+        from homun.application.automation.cron_contracts import CronExecutionResult
         claim = mgr.claim_job_for_fire(job.id, now=10)
         occurrence = mgr.run_job(job.id, now=10, claim=claim,
                                  custom_runner=lambda payload: CronExecutionResult('success', output='CRON-DELIK-OK'))
@@ -123,11 +123,11 @@ def test_cron_delivery_chat_target_lands_in_conversation(ctx, tmp_path):
 
 
 def test_cron_delivery_unconfigured_channel_defers_then_fails(ctx, tmp_path):
-    from homun.application.cron_manager import CronManager
-    from homun.application.cron_manager import reset_store
-    from homun.application.cron_store import CronStore, set_cron_store
-    from homun.application.cron_contracts import CronExecutionResult
-    from homun.application.cron_deliveries import deliver_pending
+    from homun.application.automation.cron_manager import CronManager
+    from homun.application.automation.cron_manager import reset_store
+    from homun.application.automation.cron_store import CronStore, set_cron_store
+    from homun.application.automation.cron_contracts import CronExecutionResult
+    from homun.application.automation.cron_deliveries import deliver_pending
     actor = Actor(id='person_cron', workspace_id=ctx.workspace_id, display_name='Owner')
     store = CronStore(tmp_path / 'cron.db')
     set_cron_store(store)

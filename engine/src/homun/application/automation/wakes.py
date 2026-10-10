@@ -2,9 +2,9 @@
 from hashlib import sha256
 import json
 
-from homun.application.automation_store import get_automation_store
-from homun.application.heartbeat_manager import HeartbeatState
-from homun.application.loop_manager import LoopManager, LoopState
+from homun.application.automation.store import get_automation_store
+from homun.application.automation.heartbeat_manager import HeartbeatState
+from homun.application.automation.loop_manager import LoopManager, LoopState
 
 
 class TransientLoopManager(LoopManager):

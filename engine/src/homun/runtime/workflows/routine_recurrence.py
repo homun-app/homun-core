@@ -10,7 +10,7 @@ def routine_recurrence_workflow(scheduled_at, context):
     from datetime import datetime, timezone
 
     from homun.context import get_context
-    from homun.application.routine_runs import run_recurrence
+    from homun.application.automation.routine_runs import run_recurrence
 
     routine_id = str((context or {}).get("routine_id") or "")
     if not routine_id:

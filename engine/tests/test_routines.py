@@ -65,7 +65,7 @@ def test_run_recurrence_creates_supervised_work_and_is_idempotent(client):
     actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
     conv_id, agent_id = _seed_routine_base(actor)
     from homun.context import get_context
-    from homun.application import routine_runs
+    from homun.application.automation import routine_runs
     ctx = get_context()
     with ctx.repository.transaction() as store:
         ctx.service.for_store(store).apply(actor, "cr", "routine.create", {
@@ -95,7 +95,7 @@ def test_pause_blocks_recurrence_and_stop_is_terminal(client):
     actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
     conv_id, agent_id = _seed_routine_base(actor)
     from homun.context import get_context
-    from homun.application import routine_runs
+    from homun.application.automation import routine_runs
     ctx = get_context()
     with ctx.repository.transaction() as store:
         service = ctx.service.for_store(store)
@@ -135,7 +135,7 @@ def test_routine_update_revises_template_and_cron_versioned(client):
     actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
     conv_id, agent_id = _seed_routine_base(actor)
     from homun.context import get_context
-    from homun.application import routine_runs
+    from homun.application.automation import routine_runs
     ctx = get_context()
     with ctx.repository.transaction() as store:
         ctx.service.for_store(store).apply(actor, "cr", "routine.create", {
@@ -163,7 +163,7 @@ def test_skip_next_consumes_occurrence_without_running(client):
     actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
     conv_id, agent_id = _seed_routine_base(actor)
     from homun.context import get_context
-    from homun.application import routine_runs
+    from homun.application.automation import routine_runs
     ctx = get_context()
     with ctx.repository.transaction() as store:
         ctx.service.for_store(store).apply(actor, "cr", "routine.create", {
@@ -171,9 +171,9 @@ def test_skip_next_consumes_occurrence_without_running(client):
             "template": _template(agent_id),
         })
     routine_id = next(iter(ctx.repository.load().routines))
-    from homun.application.routines import next_occurrence as app_next
+    from homun.application.automation.routines import next_occurrence as app_next
     skip_until = app_next("0 9 * * 1", "Europe/Rome")
-    from homun.application import routines as app_routines
+    from homun.application.automation import routines as app_routines
     app_routines.routine_action(ctx, actor, "skip_next", {
         "command_id": "sk", "routine_id": routine_id, "expected_version": 1})
     store = ctx.repository.load()

@@ -16,7 +16,7 @@ from homun.application.ops.config_lifecycle import (
     CURRENT_CONFIG_SCHEMA_VERSION,
 )
 from homun.application.ops.doctor_diagnostics import DoctorDiagnostics
-from homun.application.daemon_lifecycle import DaemonManager
+from homun.application.automation.daemon_lifecycle import DaemonManager
 
 
 def test_profile_operations_lifecycle_and_distribution(tmp_path: Path):

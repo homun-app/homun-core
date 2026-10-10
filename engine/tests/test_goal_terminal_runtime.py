@@ -267,7 +267,7 @@ def test_expired_barrier_stages_gate_against_persisted_configuration(setup):
 
 
 def test_reconfiguration_supersedes_gate_wait_and_proposes_fresh_approval(setup, monkeypatch):
-    from homun.application.automation_configuration import configure, AutomationCommand
+    from homun.application.automation.configuration import configure, AutomationCommand
     from homun.runtime.workflows import agent_run
     s = start(setup)
     ctx, actor, work, p = s

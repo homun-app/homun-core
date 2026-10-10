@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from homun.application.chronos_provider import ChronosProvider
-from homun.application.cron_dispatcher import fire_due_jobs, list_due_job_ids
-from homun.application.cron_manager import CronManager
-from homun.application.cron_store import CronStore, set_cron_store
+from homun.application.automation.chronos_provider import ChronosProvider
+from homun.application.automation.cron_dispatcher import fire_due_jobs, list_due_job_ids
+from homun.application.automation.cron_manager import CronManager
+from homun.application.automation.cron_store import CronStore, set_cron_store
 
 
 def test_fire_due_interval_job_with_runner(tmp_path):

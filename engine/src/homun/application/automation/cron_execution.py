@@ -2,8 +2,8 @@
 import subprocess
 import time
 
-from homun.application.cron_contracts import CronExecutionResult
-from homun.application import cron_occurrences
+from homun.application.automation.cron_contracts import CronExecutionResult
+from homun.application.automation import cron_occurrences
 
 
 def execute(manager, job_id, *, now=None, custom_runner=None, claimed=None, cancelled=None, ctx=None, actor=None):
@@ -31,7 +31,7 @@ def execute(manager, job_id, *, now=None, custom_runner=None, claimed=None, canc
     start = time.monotonic()
     refused = None
     if ctx is not None:
-        from homun.application.cron_authority import require_owner
+        from homun.application.automation.cron_authority import require_owner
         from homun.domain.errors import DomainError
         try:
             require_owner(ctx, job, actor)
@@ -63,7 +63,7 @@ def execute(manager, job_id, *, now=None, custom_runner=None, claimed=None, canc
         except OSError as exc:
             result = CronExecutionResult('failed', error=str(exc), exit_code=-1)
     else:
-        from homun.application.cron_schedule import AGENT_RUNNER_UNAVAILABLE
+        from homun.application.automation.cron_schedule import AGENT_RUNNER_UNAVAILABLE
         result = CronExecutionResult('failed', AGENT_RUNNER_UNAVAILABLE, 'backend_unavailable', -1)
     occurrence = cron_occurrences.settle(manager._store, manager.workspace_id, claimed, result,
                                         now=curr + time.monotonic() - start)

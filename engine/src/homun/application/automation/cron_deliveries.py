@@ -22,7 +22,7 @@ OUTPUT_CHAR_LIMIT = 3500
 
 def deliver_pending(ctx, *, store=None, limit: int = 10) -> Dict[str, Any]:
     """Dispatch pending deliveries once; safe to call from the pump loop."""
-    from homun.application.cron_manager import CronManager
+    from homun.application.automation.cron_manager import CronManager
     manager = CronManager(workspace_id=ctx.workspace_id, store=store) if store is not None \
         else CronManager(workspace_id=ctx.workspace_id)
     sent, failed, deferred = [], [], []
@@ -68,7 +68,7 @@ def _deliver_one(ctx, payload: Dict[str, Any]) -> Dict[str, Any]:
 def _deliver_to_conversation(ctx, payload: Dict[str, Any], output: str) -> Dict[str, Any]:
     from homun.domain.commands.conversations import append_engine_message
     from homun.domain.models import Actor
-    from homun.application.cron_manager import CronManager
+    from homun.application.automation.cron_manager import CronManager
     store = ctx.repository.snapshot()
     manager = CronManager(workspace_id=ctx.workspace_id)
     job = manager.get_job(str(payload.get("job_id") or ""))

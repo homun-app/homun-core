@@ -3,8 +3,8 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from homun.runtime import dbos_app
-from homun.application.cron_dispatcher import fire_due_jobs
-from homun.application.cron_reconciliation import reconcile_cron_runs
+from homun.application.automation.cron_dispatcher import fire_due_jobs
+from homun.application.automation.cron_reconciliation import reconcile_cron_runs
 from homun.application.agent_automation import wake_due_automation
 
 @asynccontextmanager
@@ -20,7 +20,7 @@ async def runtime_lifespan(ctx):
         tool_chain.bind_context(ctx)
         agent_run.bind_context(ctx)
         dbos_app.launch_dbos()
-        from homun.application.routines import reconcile_routine_schedules
+        from homun.application.automation.routines import reconcile_routine_schedules
         repaired = reconcile_routine_schedules(ctx)
         if repaired:
             logging.getLogger(__name__).info("Routine schedules repaired: %d", len(repaired))
@@ -52,7 +52,7 @@ async def runtime_lifespan(ctx):
         logging.getLogger(__name__).info("Budget recovery charged %d stale reservations as unknown", recovered)
     stop = asyncio.Event()
 
-    from homun.application.routines import reconcile_routine_schedules, take_schedule_sync_request
+    from homun.application.automation.routines import reconcile_routine_schedules, take_schedule_sync_request
 
     cron_worker = None
 
@@ -79,7 +79,7 @@ async def runtime_lifespan(ctx):
             except Exception:
                 logging.getLogger(__name__).exception("Cron due-fire pass failed")
             try:
-                from homun.application import cron_deliveries as _cron_delivery_pass
+                from homun.application.automation import cron_deliveries as _cron_delivery_pass
                 await asyncio.to_thread(_cron_delivery_pass.deliver_pending, ctx)
             except Exception:
                 logging.getLogger(__name__).exception("Cron delivery pass failed")

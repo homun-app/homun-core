@@ -4,7 +4,7 @@ import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Set
-from homun.application.cron_contracts import CronJob
+from homun.application.automation.cron_contracts import CronJob
 
 _INTERVAL_RE = re.compile(
     r"^\s*(?:every\s+)?(\d+(?:\.\d+)?)\s*(s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?|d|days?)\s*$",

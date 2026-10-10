@@ -6,12 +6,12 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
 
-from homun.application.chronos_provider import ChronosProvider
+from homun.application.automation.chronos_provider import ChronosProvider
 from homun.routes.price_comparisons import request_context
-from homun.application.cron_authority import require_owner
-from homun.application.cron_manager import CronManager
+from homun.application.automation.cron_authority import require_owner
+from homun.application.automation.cron_manager import CronManager
 from homun.domain.errors import DomainError
-from homun.application.cron_dispatcher import fire_due_jobs, list_due_job_ids
+from homun.application.automation.cron_dispatcher import fire_due_jobs, list_due_job_ids
 
 router = APIRouter(prefix="/v1/cron", tags=["cron"])
 
@@ -109,7 +109,7 @@ def dispatch_deliveries(body: FireDueRequest,
     ctx, actor = request_context(body.workspace_id, x_homun_actor_id, x_homun_actor_name)
     if actor.kind != 'person':
         raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Persons only"})
-    from homun.application.cron_deliveries import deliver_pending
+    from homun.application.automation.cron_deliveries import deliver_pending
     return deliver_pending(ctx, limit=max(1, min(body.limit, 100)))
 
 

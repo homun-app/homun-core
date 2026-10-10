@@ -1,7 +1,7 @@
 """Human configuration of work-scoped heartbeat and loop execution."""
 from typing import Literal
 from fastapi import APIRouter, Header
-from homun.application.automation_configuration import AutomationCommand, configure
+from homun.application.automation.configuration import AutomationCommand, configure
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _http_error
 from homun.routes.price_comparisons import request_context

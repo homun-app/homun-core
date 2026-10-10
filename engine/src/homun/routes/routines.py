@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from homun.application import routines
+from homun.application.automation import routines
 from homun.context import get_context
 from homun.routes.domain_support import _actor_from_headers, _http_error
 from homun.routes.price_comparisons import request_context

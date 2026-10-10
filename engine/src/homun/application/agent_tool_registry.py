@@ -94,8 +94,8 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             registry.register(g_entry)
     cron = run.get('cron')
     if isinstance(cron, dict) and cron.get('policy') == 'durable-cron-v1' and cron.get('version') == 1:
-        from homun.application.cron_contracts import entries as cron_entries
-        from homun.application.cron_tools import execute as cron_execute
+        from homun.application.automation.cron_contracts import entries as cron_entries
+        from homun.application.automation.cron_tools import execute as cron_execute
         for cr_entry in cron_entries(cron_execute, cron.get('version', 1)):
             registry.register(cr_entry)
     session_mgmt = run.get('session_management')

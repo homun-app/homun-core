@@ -1,11 +1,11 @@
 """H26/H27: due heartbeat/loop prompts enter the agent_run steering queue."""
 from __future__ import annotations
 
-from homun.application.automation_dispatch import inject_due_automation
-from homun.application.automation_store import AutomationStore, set_automation_store
+from homun.application.automation.dispatch import inject_due_automation
+from homun.application.automation.store import AutomationStore, set_automation_store
 from homun.application.goal_manager import GoalManager
-from homun.application.heartbeat_manager import HeartbeatManager
-from homun.application.loop_manager import LoopManager
+from homun.application.automation.heartbeat_manager import HeartbeatManager
+from homun.application.automation.loop_manager import LoopManager
 
 
 def test_due_heartbeat_injects_steering(tmp_path):
@@ -17,7 +17,7 @@ def test_due_heartbeat_injects_steering(tmp_path):
     assert mgr.state is not None
     mgr.state.created_at = 100.0
     mgr.state.last_fired_at = 100.0
-    from homun.application.heartbeat_manager import save_heartbeat
+    from homun.application.automation.heartbeat_manager import save_heartbeat
 
     save_heartbeat("run-hb-1", mgr.state)
 
@@ -36,7 +36,7 @@ def test_pending_user_input_blocks_heartbeat(tmp_path):
     mgr = HeartbeatManager("run-hb-2", min_seconds=1)
     mgr.state.created_at = 1.0
     mgr.state.last_fired_at = 1.0
-    from homun.application.heartbeat_manager import save_heartbeat
+    from homun.application.automation.heartbeat_manager import save_heartbeat
 
     save_heartbeat("run-hb-2", mgr.state)
     assert inject_due_automation(run, actor_id="a", now=100.0) == []
@@ -52,7 +52,7 @@ def test_active_goal_blocks_loop_but_not_after_clear(tmp_path):
     LoopManager("run-loop-1", min_interval=1).set("watch metrics", interval_seconds=10)
     loop = LoopManager("run-loop-1", min_interval=1)
     loop.state.next_due_at = 50.0
-    from homun.application.loop_manager import save_loop
+    from homun.application.automation.loop_manager import save_loop
 
     save_loop("run-loop-1", loop.state)
 
