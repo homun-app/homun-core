@@ -3,9 +3,9 @@ from pathlib import Path
 from types import SimpleNamespace
 import pytest
 
-from homun.application.agent import runs as agent_runs
+from homun.application.agent.runs import runs as agent_runs
 from homun.application.sessions import runtime as session_runtime, usage as session_usage
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.run_execution import advance
 from homun.application.ops.profile_operations import ProfileOperationsManager, ProfileNotFoundError
 from homun.context import create_context
 from homun.domain.errors import ConflictError, PermissionDeniedError, ValidationError

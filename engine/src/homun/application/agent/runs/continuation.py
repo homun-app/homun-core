@@ -2,11 +2,11 @@
 
 canonical transcript, epoch/lease fencing and durable retry phase accounting.
 """
-from homun.application.agent.runs import lookup, authority
-from homun.application.agent import recovery as agent_recovery
+from homun.application.agent.runs.runs import lookup, authority
+from homun.application.agent.runs import recovery as agent_recovery
 from homun.domain.models import Actor
 from homun.domain.errors import DomainError
-from homun.application.agent.run_failures import fail
+from homun.application.agent.runs.run_failures import fail
 from homun.models.native_turn import NativeMessage
 from homun.models.truncation import CONTINUE_PROMPT, MAX_TEXT_CHARACTERS
 

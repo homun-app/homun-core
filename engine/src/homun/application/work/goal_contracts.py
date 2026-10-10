@@ -313,7 +313,7 @@ class GoalWaitArguments(BaseModel):
 
 def entries(executor: Callable, version: int) -> list:
     """Return ToolEntry list for registration in agent tool registry."""
-    from homun.application.agent.tool_contracts import ToolDefinition, ToolEntry
+    from homun.application.agent.tools.tool_contracts import ToolDefinition, ToolEntry
 
     return [
         ToolEntry(

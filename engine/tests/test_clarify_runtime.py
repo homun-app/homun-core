@@ -3,8 +3,8 @@ import pytest
 from homun.domain.errors import ValidationError
 from types import SimpleNamespace
 from test_agent_runs import setup
-from homun.application.agent.runs import propose, approve, resume_waiting
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.runs import propose, approve, resume_waiting
+from homun.application.agent.runs.run_execution import advance
 from homun.models.native_turn import NativeMessage, ToolCall
 from homun.context import create_context
 
@@ -48,7 +48,7 @@ def test_structured_clarify_waits_and_resumes_same_call_after_restart(setup):
 
 
 def test_response_keys_cannot_alias_another_question():
-    from homun.application.agent.clarification import answer, questions
+    from homun.application.agent.clarify.clarification import answer, questions
     pending = questions({'questions':[{'id':'q1','question':'First?'},{'id':'other','question':'Second?'}]})
     with pytest.raises(ValidationError): answer(pending, json.dumps({'answers':{'q1':'PDF'}}))
     result = answer(pending, json.dumps({'answers':{'q1':'PDF'},'partial':True}))
@@ -58,5 +58,5 @@ def test_response_keys_cannot_alias_another_question():
 
 @pytest.mark.parametrize('item',[{'question':{'invalid':'shape'}},{'question':'Test','multi_select':'false'}])
 def test_malformed_questions_are_not_coerced(item):
-    from homun.application.agent.clarification import questions
+    from homun.application.agent.clarify.clarification import questions
     with pytest.raises(ValidationError): questions({'questions':[item]})

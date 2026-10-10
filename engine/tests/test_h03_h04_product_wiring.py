@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from homun.application.agent.prompt_roots import resolve_prompt_roots
-from homun.application.agent.side_questions import answer_side_question
+from homun.application.agent.workspace.prompt_roots import resolve_prompt_roots
+from homun.application.agent.clarify.side_questions import answer_side_question
 from homun.application.automation.store import AutomationStore, set_automation_store
 from homun.application.automation.heartbeat_manager import HeartbeatManager
 from homun.application.automation.loop_manager import LoopManager

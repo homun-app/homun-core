@@ -9,10 +9,10 @@ from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, patch
 
-from homun.application.agent.tool_registry import registry_for
-from homun.application.agent.checkpoint_tools import execute as checkpoint_execute
+from homun.application.agent.tools.tool_registry import registry_for
+from homun.application.agent.workspace.checkpoint_tools import execute as checkpoint_execute
 from homun.application.computer.surface_toolset_policy import is_tool_allowed_for_surface
-from homun.application.agent.workspace_checkpoints import (
+from homun.application.agent.workspace.workspace_checkpoints import (
     get_checkpoint_manager,
     set_checkpoint_manager,
     snapshot_before_write,
@@ -103,7 +103,7 @@ def test_checkpoint_list_and_diff_execution(workspace_fixture):
         "_workspace_root": str(work_dir),
     }
 
-    with patch("homun.application.agent.checkpoint_tools.require_work_access"):
+    with patch("homun.application.agent.workspace.checkpoint_tools.require_work_access"):
         # 1. List
         list_res = checkpoint_execute(ctx, actor, run, "checkpoint_list", {"limit": 10})
         assert list_res["count"] >= 1
@@ -133,7 +133,7 @@ def test_checkpoint_restore_requires_approval(workspace_fixture):
         "_checkpoint_restore_approved": False,
     }
 
-    with patch("homun.application.agent.checkpoint_tools.require_work_access"):
+    with patch("homun.application.agent.workspace.checkpoint_tools.require_work_access"):
         with pytest.raises(ConflictError) as exc:
             checkpoint_execute(ctx, actor, run, "checkpoint_restore", {"commit_hash": "head_hash"})
         assert "requires exact human approval" in str(exc.value)
@@ -159,7 +159,7 @@ def test_checkpoint_restore_succeeds_when_approved(workspace_fixture):
         "_checkpoint_restore_approved": True,
     }
 
-    with patch("homun.application.agent.checkpoint_tools.require_work_access"):
+    with patch("homun.application.agent.workspace.checkpoint_tools.require_work_access"):
         res = checkpoint_execute(ctx, actor, run, "checkpoint_restore", {"commit_hash": target_hash, "safe": False})
         assert res["status"] == "restored"
         assert res["checkpoint"] == target_hash

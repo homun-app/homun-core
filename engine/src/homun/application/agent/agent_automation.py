@@ -27,7 +27,7 @@ from homun.application.automation.projection import _project
 
 def evaluate_finish(ctx, run, response):
     """Judge outside engine transactions; journal before cross-store projection."""
-    from homun.application.agent.runs import lookup, authority
+    from homun.application.agent.runs.runs import lookup, authority
     from homun.application.work.goal_judge import judge
     key = f'{run["_epoch"]}:{run["turns"]}'
     prior = run.get('_automation_finish')
@@ -109,8 +109,8 @@ def apply_finish(service, actor, work, current, evaluation, response):
 
 def wake_due_automation(ctx, *, now=None, limit=20):
     """Queue durable epochs; normal deliver_agent_runs owns DBOS dispatch."""
-    from homun.application.agent.runs import PROPOSAL_TYPE, lookup, authority
-    from homun.application.agent.run_fencing import _fence
+    from homun.application.agent.runs.runs import PROPOSAL_TYPE, lookup, authority
+    from homun.application.agent.runs.run_fencing import _fence
     now = time.time() if now is None else float(now)
     woke = []
     for record in ctx.repository.snapshot().commands.values():

@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 from test_agent_runs import setup
-from homun.application.agent import runs as agent_runs
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs import runs as agent_runs
+from homun.application.agent.runs.run_execution import advance
 from homun.context import create_context
 from homun.domain.models import utc_now
 from homun.models.native_turn import NativeMessage, ToolCall
@@ -43,7 +43,7 @@ def test_deadline_reopens_expires_and_resumes_same_call_once(setup, monkeypatch)
     assert 55 <= (deadline - utc_now()).total_seconds() <= 60
     second = create_context(db_path=ctx.data_dir/'ws.db', data_dir=ctx.data_dir, for_tests=True)
     try:
-        from homun.application.agent import clarification_deadlines
+        from homun.application.agent.clarify import clarification_deadlines
         from homun.runtime.workflows import agent_run
         monkeypatch.setattr(clarification_deadlines, 'utc_now', lambda: deadline + timedelta(seconds=1))
         monkeypatch.setattr(agent_run, 'start', lambda *a: None)
@@ -70,7 +70,7 @@ def test_deadline_reopens_expires_and_resumes_same_call_once(setup, monkeypatch)
 
 @pytest.mark.parametrize('timeout', [None, 60])
 def test_no_deadline_or_not_due_stays_pending(setup, timeout):
-    from homun.application.agent.clarification_deadlines import expire_waiting
+    from homun.application.agent.clarify.clarification_deadlines import expire_waiting
     ctx, actor, work = start(setup, timeout)
     assert not expire_waiting(ctx, 'run', now=utc_now())
     if timeout is None:
@@ -81,7 +81,7 @@ def test_no_deadline_or_not_due_stays_pending(setup, timeout):
 
 
 def test_saved_partial_draft_survives_expiry(setup):
-    from homun.application.agent.clarification_deadlines import expire_waiting
+    from homun.application.agent.clarify.clarification_deadlines import expire_waiting
     ctx, actor, work = start(setup)
     contribute(ctx, actor, work, {'answers':{'fields':['Price']}, 'partial':True}, draft=True)
     second = create_context(db_path=ctx.data_dir/'ws.db', data_dir=ctx.data_dir, for_tests=True)
@@ -98,7 +98,7 @@ def test_saved_partial_draft_survives_expiry(setup):
 
 @pytest.mark.parametrize('first', ['answer', 'expiry'])
 def test_first_resolution_wins(setup, first):
-    from homun.application.agent.clarification_deadlines import expire_waiting
+    from homun.application.agent.clarify.clarification_deadlines import expire_waiting
     from homun.domain.errors import ValidationError
     ctx, actor, work = start(setup)
     answer = {'answers':{'format':'CSV', 'fields':['Name']}}
@@ -115,7 +115,7 @@ def test_first_resolution_wins(setup, first):
 
 @pytest.mark.parametrize('timeout', [0, -1, 604801, True, '60', 1.5])
 def test_timeout_is_strict_optional_bounded(timeout):
-    from homun.application.agent.clarify_contracts import ClarifyArguments
+    from homun.application.agent.clarify.clarify_contracts import ClarifyArguments
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
         ClarifyArguments.model_validate({'questions':[{'question':'Input?'}], 'timeout_seconds':timeout})
@@ -123,7 +123,7 @@ def test_timeout_is_strict_optional_bounded(timeout):
 
 @pytest.mark.parametrize('change', ['cancel', 'revoke', 'version', 'epoch', 'call', 'questions'])
 def test_expiry_fenced_by_current_run_and_authority(setup, change):
-    from homun.application.agent.clarification_deadlines import expire_waiting
+    from homun.application.agent.clarify.clarification_deadlines import expire_waiting
     from homun.domain.errors import DomainError
     from homun.application.agent.control import control
     ctx, actor, work = start(setup)
@@ -156,12 +156,12 @@ def test_expiry_fenced_by_current_run_and_authority(setup, change):
 
 def test_ordinary_contribution_never_autoexpires(setup, monkeypatch):
     from homun.runtime.workflows import agent_run
-    from homun.application.agent import clarification_deadlines
+    from homun.application.agent.clarify import clarification_deadlines
     ctx, actor, work, _ = setup
     ctx.models.set_active('openai_compatible')
     proposal = agent_runs.propose(ctx, actor, work, {'command_id':'run','expected_version':1})
     agent_runs.approve(ctx, actor, work, 'run', {'command_id':'approve', 'digest':proposal['digest'], 'expected_version':proposal['expected_version']})
-    from homun.application.agent.tool_contracts import QUESTION
+    from homun.application.agent.tools.tool_contracts import QUESTION
     ctx.models.complete_tools = lambda *a, **k: SimpleNamespace(message=NativeMessage(role='assistant',
         tool_calls=[ToolCall(id='ordinary', name=QUESTION.name, arguments={'question':'Approve input?'})]), usage=None)
     assert advance(ctx, 'run') == 'waiting_input'
@@ -205,7 +205,7 @@ def test_draft_http_uses_requested_recipient_and_project_access(setup, monkeypat
 def test_answer_and_expiry_compete_atomically(setup):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
-    from homun.application.agent.clarification_deadlines import expire_waiting
+    from homun.application.agent.clarify.clarification_deadlines import expire_waiting
     from homun.domain.errors import ValidationError
     ctx, actor, work = start(setup)
     barrier = Barrier(2)
@@ -229,7 +229,7 @@ def test_answer_and_expiry_compete_atomically(setup):
 
 
 def test_crash_after_expiry_before_resume_preserves_exact_receipt(setup):
-    from homun.application.agent.clarification_deadlines import expire_waiting
+    from homun.application.agent.clarify.clarification_deadlines import expire_waiting
     ctx, actor, work = start(setup)
     assert expire_waiting(ctx, 'run', now=utc_now()+timedelta(days=1))
     second = create_context(db_path=ctx.data_dir/'ws.db', data_dir=ctx.data_dir, for_tests=True)
@@ -246,7 +246,7 @@ def test_crash_after_expiry_before_resume_preserves_exact_receipt(setup):
 
 
 def test_expired_missing_input_does_not_complete_plan_step(setup):
-    from homun.application.agent.clarification_deadlines import expire_waiting
+    from homun.application.agent.clarify.clarification_deadlines import expire_waiting
     ctx, actor, work = start(setup)
     with ctx.repository.locked(), ctx.repository.transaction() as store:
         plan = ctx.service.for_store(store).current_plan(store.works[work])
@@ -261,7 +261,7 @@ def test_expired_missing_input_does_not_complete_plan_step(setup):
 
 
 def test_deadline_requires_current_pinned_clarify_tool(setup):
-    from homun.application.agent.clarification_deadlines import expire_waiting
+    from homun.application.agent.clarify.clarification_deadlines import expire_waiting
     from homun.domain.errors import DomainError
     ctx, actor, work = start(setup)
     with ctx.repository.locked(), ctx.repository.transaction() as store:

@@ -11,8 +11,8 @@ from homun.models.prompt_store import prompts_for
 
 
 def consult(ctx, actor, run, arguments):
-    from homun.application.agent.runs import authority, lookup
-    from homun.application.agent.usage import charge, reserve as reserve_usage
+    from homun.application.agent.runs.runs import authority, lookup
+    from homun.application.agent.runs.usage import charge, reserve as reserve_usage
     try:
         args = Consultation.model_validate(arguments)
     except SchemaError as exc:

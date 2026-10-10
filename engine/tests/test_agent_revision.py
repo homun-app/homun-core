@@ -3,8 +3,8 @@ from test_agent_runs import setup, scripted
 
 
 def test_revision_preserves_history_and_precedes_next_phase(setup):
-    from homun.application.agent.runs import propose, approve
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.runs import propose, approve
+    from homun.application.agent.runs.run_execution import advance
     ctx, actor, work, material = setup
     plan = ctx.service.apply(actor, 'plan', 'plan.propose', {
         'work_id': work, 'expected_version': 1, 'steps': [

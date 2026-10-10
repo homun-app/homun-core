@@ -12,7 +12,7 @@ TERMINAL = {'completed', 'failed', 'blocked', 'cancelled'}
 def _cancel(child, reason):
     if child['status'] in TERMINAL:
         return
-    from homun.application.agent.run_fencing import _fence
+    from homun.application.agent.runs.run_fencing import _fence
     child.update(status='cancelled', error_code=reason)
     _fence(child, Actor.model_validate(child['_actor']))
 
@@ -100,7 +100,7 @@ def live_count(ctx, run, snapshot=None):
 
 def reconcile_delegations(ctx, *, limit=50):
     """Admit completed child receipts and release unused parent budget once."""
-    from homun.application.agent.run_fencing import _fence
+    from homun.application.agent.runs.run_fencing import _fence
     admitted = []
     # pre-filtro read-only sulla snapshot: la transazione (parse completo)
     # si apre solo quando c'è davvero un figlio da ammettere

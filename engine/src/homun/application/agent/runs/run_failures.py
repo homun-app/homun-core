@@ -1,12 +1,12 @@
 """Terminal agent-run failure recording; extracted so recovery paths share it
 without importing the execution module (which owns the turn loop)."""
-from homun.application.agent.runs import lookup
+from homun.application.agent.runs.runs import lookup
 from homun.domain.ids import new_id
 from homun.domain.models import DomainEvent, utc_now
 from homun.domain.states import WorkStatus
 
 
-from homun.application.agent.recovery_state import interrupted
+from homun.application.agent.runs.recovery_state import interrupted
 
 
 def fail(ctx, run_id, code, *, token=None, blocked=False, epoch=None, expected_steering=None,

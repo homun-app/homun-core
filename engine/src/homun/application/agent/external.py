@@ -2,7 +2,7 @@
 import hashlib
 from homun.application.agent import native as agent_native
 from homun.application.work import external_tools
-from homun.application.agent.runs import authority, lookup
+from homun.application.agent.runs.runs import authority, lookup
 from homun.domain.errors import ConflictError
 from homun.domain.models import Actor
 

@@ -127,7 +127,7 @@ async def runtime_lifespan(ctx):
             except TimeoutError:
                 pass
 
-    from homun.application.agent.followup_recovery import followup_recovery_lifespan
+    from homun.application.agent.runs.followup_recovery import followup_recovery_lifespan
     worker = asyncio.create_task(pump())
     poller_worker = asyncio.create_task(channel_poller_loop())
     try:

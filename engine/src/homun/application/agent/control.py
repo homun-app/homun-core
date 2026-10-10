@@ -1,7 +1,8 @@
 """Durable owner controls for native runs; no network calls inside transactions."""
-from homun.application.agent import native as agent_native, recovery as agent_recovery
+from homun.application.agent import native as agent_native
+from homun.application.agent.runs import recovery as agent_recovery
 from homun.application.agent.control_history import close_pending, redirect_history
-from homun.application.agent.runs import authority, lookup, public, public_for
+from homun.application.agent.runs.runs import authority, lookup, public, public_for
 from homun.application.work.price_comparisons import cached, save
 from homun.domain.errors import ConflictError, PermissionDeniedError, ValidationError
 from homun.policy.work import require_work_access
@@ -17,7 +18,7 @@ def _owner(store,actor,run):
     return work
 
 
-from homun.application.agent.run_fencing import _fence
+from homun.application.agent.runs.run_fencing import _fence
 
 
 def control_in_store(ctx,store,actor,work_id,run_id,body,*,echo=True):

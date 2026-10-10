@@ -1,5 +1,5 @@
 """Canonical epoch fencing shared by controls and supervised child runs."""
-from homun.application.agent.recovery_state import interrupt
+from homun.application.agent.runs.recovery_state import interrupt
 
 LEASE_SECONDS = 180
 

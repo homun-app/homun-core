@@ -49,7 +49,7 @@ class CodeExecutionArguments(BaseModel):
 
 
 def entries(executor: Callable, version: int) -> list:
-    from homun.application.agent.tool_contracts import ToolDefinition
+    from homun.application.agent.tools.tool_contracts import ToolDefinition
     from homun.tools.registry import ToolEntry
 
     def dispatch(ctx, actor, run, args):

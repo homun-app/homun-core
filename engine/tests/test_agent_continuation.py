@@ -3,7 +3,7 @@ import pytest
 from test_agent_runs import setup
 from conftest import requires_local_provider
 from test_native_agent import native_start
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.run_execution import advance
 from homun.context import create_context
 from homun.models.native_errors import NativeModelError
 from homun.models.native_turn import NativeMessage
@@ -145,7 +145,7 @@ def test_control_during_provider_call_fences_late_fragment(setup,action):
 
 
 def test_final_decision_survives_crash_before_publication(setup):
-    from homun.application.agent.run_execution import _claim, _decision
+    from homun.application.agent.runs.run_execution import _claim, _decision
     ctx,actor,work,material=setup;p=native_start(ctx,actor,work,material)
     ctx.models.complete_tools=lambda *a,**k:(_ for _ in ()).throw(truncated('First.\n'))
     assert advance(ctx,p['id'])=='running'
@@ -185,7 +185,7 @@ def test_join_preserves_mid_token_boundaries(parts,expected):
 
 @requires_local_provider
 def test_large_assembled_final_has_same_contract_after_crash(setup):
-    from homun.application.agent.run_execution import _claim, _decision
+    from homun.application.agent.runs.run_execution import _claim, _decision
     ctx,actor,work,material=setup;p=native_start(ctx,actor,work,material)
     first=''.join(f'Unique row {i:04d}.\n' for i in range(1000))
     assert len(first)>16000

@@ -248,7 +248,7 @@ def test_code_execution_can_be_cancelled(tmp_path):
 
 
 def test_execute_code_registry_handler_has_correct_runtime_signature(tmp_path):
-    from homun.application.agent.tool_registry import registry_for
+    from homun.application.agent.tools.tool_registry import registry_for
     run={'assignee_id':'a', 'materials':[], 'code_execution':{'policy':'programmatic-v1','version':1}, '_cwd':str(tmp_path)}
     result=registry_for(run).dispatch('execute_code', {'code':'print("through registry")'},ctx=None,actor=None,run=run)
     assert result['exit_code']==0 and 'through registry' in result['stdout']

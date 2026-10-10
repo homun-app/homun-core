@@ -159,7 +159,7 @@ def format_reference_guidance(
     if not advisors:
         return ""
 
-    from homun.application.agent.moa_filter import apply_privacy_filter
+    from homun.application.agent.moa.moa_filter import apply_privacy_filter
 
     sections: List[str] = []
     for adv in advisors:

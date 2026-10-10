@@ -1,11 +1,11 @@
 """Background sessions return control, then poll, wait, stop and notify once."""
 import json
 from types import SimpleNamespace
-from homun.application.agent import runs as agent_runs
+from homun.application.agent.runs import runs as agent_runs
 from homun.application.computer import terminal_jobs
-from homun.application.agent.run_execution import advance
-from homun.application.agent.terminal import resume
-from homun.application.agent.terminal_sessions import announce, resume_wait
+from homun.application.agent.runs.run_execution import advance
+from homun.application.agent.terminal.terminal import resume
+from homun.application.agent.terminal.terminal_sessions import announce, resume_wait
 from homun.models.native_turn import NativeMessage, ToolCall
 from test_agent_runs import setup
 from test_agent_terminal import IMAGE, start
@@ -57,7 +57,7 @@ def release(ctx, actor, work, run_id):
 
 
 def test_version_three_adds_session_tools_without_changing_version_two():
-    from homun.application.agent.terminal_contracts import entries
+    from homun.application.agent.terminal.terminal_contracts import entries
     old = [item.definition.name for item in entries({'image': IMAGE, 'version': 2})]
     new = [item.definition.name for item in entries({'image': IMAGE, 'version': 3})]
     assert old == ['terminal_execute']
@@ -150,7 +150,7 @@ def test_stopping_one_session_leaves_the_other_running(setup, monkeypatch):
 
 
 def test_stdin_bytes_are_sent_once(setup, monkeypatch):
-    from homun.application.agent.terminal_sessions import write_stdin
+    from homun.application.agent.terminal.terminal_sessions import write_stdin
     from homun.execution.contracts import ExecutionUncertain
     ctx, actor, work, proposal, _backend = start(setup, monkeypatch)
     sessions = Sessions()

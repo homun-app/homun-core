@@ -3,7 +3,8 @@
 The engine context injects this adapter. Session tools depend on the operations
 port on context rather than importing the run/tool orchestration back into itself.
 """
-from homun.application.agent import runs as agent_runs, control as agent_control
+from homun.application.agent import control as agent_control
+from homun.application.agent.runs import runs as agent_runs
 
 
 class SessionOperations:

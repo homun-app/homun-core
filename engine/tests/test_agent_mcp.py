@@ -2,10 +2,10 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from homun.domain.models import ExternalServer
-from homun.application.agent import runs as agent_runs
+from homun.application.agent.runs import runs as agent_runs
 from homun.application.work import external_tools
 from homun.application.integrations import mcp_client
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.run_execution import advance
 from homun.models.native_turn import NativeMessage, ToolCall
 
 

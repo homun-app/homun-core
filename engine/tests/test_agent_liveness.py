@@ -2,7 +2,7 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_native_agent import native_start
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.run_execution import advance
 from homun.models.native_turn import NativeMessage
 
 

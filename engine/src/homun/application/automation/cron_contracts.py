@@ -189,7 +189,7 @@ class CronjobManageArguments(BaseModel):
 
 
 def entries(executor: Callable, version: int) -> list:
-    from homun.application.agent.tool_contracts import ToolDefinition, ToolEntry
+    from homun.application.agent.tools.tool_contracts import ToolDefinition, ToolEntry
 
     return [
         ToolEntry(

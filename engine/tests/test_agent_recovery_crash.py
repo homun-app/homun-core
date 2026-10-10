@@ -3,7 +3,7 @@ import pytest
 from test_agent_runs import setup
 from test_native_agent import native_start
 from test_agent_recovery import final, due
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.run_execution import advance
 from homun.application.agent.control import control
 from homun.context import create_context
 from homun.models.native_errors import NativeModelError

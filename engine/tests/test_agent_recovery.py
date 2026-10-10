@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_native_agent import native_start
-from homun.application.agent.run_execution import advance
+from homun.application.agent.runs.run_execution import advance
 from homun.application.agent.control import control
 from homun.context import create_context
 from homun.domain.models import utc_now
@@ -86,7 +86,7 @@ def test_control_during_retry_wait_invalidates_old_delivery(setup,action):
 
 
 def test_recovery_does_not_repeat_a_committed_tool(setup,monkeypatch):
-    from homun.application.agent import run_execution as agent_run_execution
+    from homun.application.agent.runs import run_execution as agent_run_execution
     ctx,actor,work,material=setup;p=native_start(ctx,actor,work,material);calls=[];reads=[]
     real=agent_run_execution.run_tool
     def read(*a,**k):reads.append(True);return real(*a,**k)
@@ -247,7 +247,7 @@ def test_control_during_failing_call_fences_recovery(setup):
 
 def test_summary_phase_retries_durrably_without_touching_decide_counter(setup):
     from homun.application.agent.agent_context import prepare, ContextPreparationDeferred
-    from homun.application.agent.run_execution import _claim
+    from homun.application.agent.runs.run_execution import _claim
     from test_agent_context import pressured, summary
     ctx,actor,work,material=setup
     p,run=pressured(ctx,actor,work,material)

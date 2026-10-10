@@ -70,7 +70,7 @@ class HostedMcpEngineRunner:
         """Persist a supervised proposal, with resumable idempotent admission."""
         engine = self._require_ctx(ctx)
         act = self._actor(engine, actor)
-        from homun.application.agent.runs import propose
+        from homun.application.agent.runs.runs import propose
         from homun.application.work.price_comparisons import cached, save
         from homun.application.computer.surface_toolset_policy import pin_policy
         from homun.policy.work import require_work_access
@@ -125,7 +125,7 @@ class HostedMcpEngineRunner:
     def get_status(self, work_id: str, *, ctx=None, actor: Optional[Actor] = None) -> Dict[str, Any]:
         engine = self._require_ctx(ctx)
         act = self._actor(engine, actor)
-        from homun.application.agent.runs import list_runs
+        from homun.application.agent.runs.runs import list_runs
 
         store = engine.repository.load()
         if work_id not in store.works:

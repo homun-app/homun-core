@@ -1,8 +1,8 @@
 """Policy has to survive HTTP, pinning and registry reconstruction, not just helpers."""
 import pytest
 from test_agent_runs_api import api_setup
-from homun.application.agent.tool_registry import registry_for
-from homun.application.agent.tool_bridge import resolve_call
+from homun.application.agent.tools.tool_registry import registry_for
+from homun.application.agent.tools.tool_bridge import resolve_call
 from homun.domain.errors import ValidationError
 from homun.models.native_turn import ToolCall
 

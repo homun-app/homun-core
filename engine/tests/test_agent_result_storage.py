@@ -5,7 +5,7 @@ from homun.domain.errors import ValidationError, ConflictError
 
 
 def test_large_result_preserves_error_and_reconstructs_exact_json():
-    from homun.application.agent.results import project, read
+    from homun.application.agent.tools.results import project, read
     run={'_result_storage_version':1}
     original={'is_error':True,'error_code':'partial_failure','text':'head'+('α"\\\n'*12000)+'tail'}
     preview=project(run,'tool','call',original)
@@ -22,7 +22,7 @@ def test_large_result_preserves_error_and_reconstructs_exact_json():
 
 
 def test_literal_search_finds_middle_without_another_external_call():
-    from homun.application.agent.results import project, read
+    from homun.application.agent.tools.results import project, read
     run={'_result_storage_version':1}
     preview=project(run,'tool','call',{'text':'x'*14000+'MIDDLE: 8 ottobre 2026'+'y'*14000})
     page=read(run,{'result_ref':preview['result_ref'],'query':'MIDDLE','offset':0,'limit':1000})
@@ -31,7 +31,7 @@ def test_literal_search_finds_middle_without_another_external_call():
 
 
 def test_reference_is_run_scoped_and_corruption_fails_closed():
-    from homun.application.agent.results import project, read
+    from homun.application.agent.tools.results import project, read
     run={'_result_storage_version':1}
     preview=project(run,'tool','call',{'text':'x'*20000});ref=preview['result_ref']
     with pytest.raises(ValidationError):read({}, {'result_ref':ref,'offset':0,'limit':1000})
@@ -40,7 +40,7 @@ def test_reference_is_run_scoped_and_corruption_fails_closed():
 
 
 def test_small_and_legacy_results_are_unchanged():
-    from homun.application.agent.results import project
+    from homun.application.agent.tools.results import project
     for run,result in [({}, {'text':'x'*20000}),({'_result_storage_version':1},{'text':'small'})]:
         assert project(run,'tool','call',result)==result
         assert '_tool_results' not in run
@@ -49,11 +49,11 @@ def test_small_and_legacy_results_are_unchanged():
 def test_large_external_error_is_readable_after_restart(setup, monkeypatch):
     from types import SimpleNamespace
     from test_agent_mcp import start, choose
-    from homun.application.agent import runs as agent_runs
+    from homun.application.agent.runs import runs as agent_runs
     from homun.application.work import external_tools
     from homun.application.integrations import mcp_client
     from homun.application.agent.external import resume_external
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.run_execution import advance
     from homun.context import create_context
     from homun.models.native_turn import NativeMessage, ToolCall
 
@@ -94,8 +94,8 @@ def test_large_external_error_is_readable_after_restart(setup, monkeypatch):
 def test_source_change_fences_saved_result_retrieval(setup, monkeypatch):
     from types import SimpleNamespace
     from test_native_agent import native_start
-    from homun.application.agent import results as agent_results
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.tools import results as agent_results
+    from homun.application.agent.runs.run_execution import advance
     from homun.models.native_turn import NativeMessage, ToolCall
     ctx, actor, work, material = setup
     p = native_start(ctx, actor, work, material)
@@ -114,7 +114,7 @@ def test_source_change_fences_saved_result_retrieval(setup, monkeypatch):
 
 
 def test_legacy_registry_does_not_gain_result_reader():
-    from homun.application.agent.tool_registry import registry_for
+    from homun.application.agent.tools.tool_registry import registry_for
     run = {'assignee_id': 'agent', '_protocol': 'native-tools-v1', '_registry_version': 1}
     registry = registry_for(run)
     assert 'read_tool_result' not in [t.name for t in registry.definitions()]

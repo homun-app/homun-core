@@ -10,8 +10,8 @@ Only the failed model request is retried — committed tool rounds are never
 re-executed and partial replies are never published.
 """
 from datetime import datetime, timedelta
-from homun.application.agent.run_failures import fail, interrupted
-from homun.application.agent.runs import authority, lookup
+from homun.application.agent.runs.run_failures import fail, interrupted
+from homun.application.agent.runs.runs import authority, lookup
 from homun.domain.models import utc_now
 from homun.domain.errors import DomainError
 from homun.models.native_errors import NativeModelError, retry_delay
@@ -83,7 +83,7 @@ def accept(run, phase):
         recovery.pop('retry_after_seconds', None)
 
 
-from homun.application.agent.recovery_state import interrupt
+from homun.application.agent.runs.recovery_state import interrupt
 
 
 def schedule(ctx, actor, run, error: NativeModelError, *, phase, expected_steering):

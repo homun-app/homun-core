@@ -6,7 +6,7 @@ later appends cannot create a graph cycle or change an already read prefix.
 """
 from copy import deepcopy
 from homun.application.sessions import records
-from homun.application.agent.run_policy import history_is_readable
+from homun.application.agent.runs.run_policy import history_is_readable
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError
 from homun.policy.work import require_work_access
 
@@ -22,7 +22,7 @@ def validate(store, actor, run, *, ctx=None):
         if records.revision(records.rows(record)[:dep['count']]) != dep['revision']:
             raise ConflictError('Session tool source prefix changed')
         if ctx is not None:
-            from homun.application.agent.tools import validate_sources
+            from homun.application.agent.tools.tools import validate_sources
             validate_sources(ctx, store, actor, dep['materials'])
 
 

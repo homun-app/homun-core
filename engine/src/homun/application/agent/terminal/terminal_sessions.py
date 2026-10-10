@@ -10,7 +10,7 @@ from homun.application.agent import native as agent_native
 from homun.application.computer import terminal_jobs
 from homun.execution.contracts import ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain
 from homun.execution.docker_stdin import StdinNotSent
-from homun.application.agent.runs import authority, lookup
+from homun.application.agent.runs.runs import authority, lookup
 from homun.domain.errors import ConflictError, DomainError, NotFoundError, PermissionDeniedError, ValidationError
 from homun.domain.models import Actor
 from homun.models.native_turn import NativeMessage

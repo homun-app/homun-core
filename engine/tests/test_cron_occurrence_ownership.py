@@ -79,8 +79,8 @@ def test_real_staging_replay_and_terminal_reconciliation(tmp_path):
     from homun.context import create_context
     from homun.application.automation.cron_agent_runner import make_cron_runner
     from homun.application.automation.cron_reconciliation import reconcile_cron_runs
-    from homun.application.agent.runs import approve
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs.runs import approve
+    from homun.application.agent.runs.run_execution import advance
     from types import SimpleNamespace
     import json
     ctx = create_context(db_path=tmp_path / 'engine.db', data_dir=tmp_path, for_tests=True)

@@ -67,8 +67,8 @@ def test_public_search_returns_example_domain():
 
 def test_web_search_returns_public_results(setup):
     from types import SimpleNamespace
-    from homun.application.agent import runs as agent_runs
-    from homun.application.agent.run_execution import advance
+    from homun.application.agent.runs import runs as agent_runs
+    from homun.application.agent.runs.run_execution import advance
     from homun.models.native_turn import NativeMessage, ToolCall
     ctx, actor, work, _ = setup
     ctx.models.set_active("openai_compatible")

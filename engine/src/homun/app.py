@@ -56,7 +56,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                     _logging.getLogger(__name__).error(
                         "Avvio in recovery mode=%s — diagnosi in chat", recovery["state"])
                     try:
-                        from homun.application.agent.recovery_narrator import seed_recovery_conversation
+                        from homun.application.agent.runs.recovery_narrator import seed_recovery_conversation
                         seed_recovery_conversation(get_context(), recovery["report"])
                     except Exception:
                         _logging.getLogger(__name__).exception(

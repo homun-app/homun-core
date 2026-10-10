@@ -9,8 +9,8 @@ def validate_link(ctx,store,actor,proposal,*,staging=False):
     if link.get('kind') == 'goal_gate':
         from homun.application.work.goal_terminal_link import validate_link as validate_goal_link
         return validate_goal_link(ctx, store, actor, proposal, staging=staging)
-    from homun.application.agent.runs import lookup,authority
-    from homun.application.agent.tool_bridge import resolve_call
+    from homun.application.agent.runs.runs import lookup, authority
+    from homun.application.agent.tools.tool_bridge import resolve_call
     run=lookup(store,link['run_id'],proposal['work_id'])
     authority(ctx,store,actor,run,running=True)
     if run['_epoch']!=link['epoch'] or run['status']!=('running' if staging else 'waiting_external'):
