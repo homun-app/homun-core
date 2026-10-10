@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 import pytest
-from homun.application.session_workspace_capture import capture
+from homun.application.sessions.workspace_capture import capture
 from homun.domain.errors import DomainError
 
 
@@ -46,7 +46,7 @@ def test_capture_lists_secret_exclusions_and_binds_executable_and_empty_director
 
 
 def test_published_recovery_rejects_extra_files_and_changed_modes(tmp_path):
-    from homun.application.session_workspace import _verify
+    from homun.application.sessions.workspace import _verify
     source = tmp_path/'source'
     source.mkdir()
     (source/'note').write_text('ordinary')
@@ -62,7 +62,7 @@ def test_published_recovery_rejects_extra_files_and_changed_modes(tmp_path):
 
 @pytest.mark.parametrize('path', ['../outside', '/absolute', 'nested/../outside', 'a\\b'])
 def test_manifest_schema_rejects_escaped_paths(tmp_path, path):
-    from homun.application.session_workspace_capture import WorkspaceManifest
+    from homun.application.sessions.workspace_capture import WorkspaceManifest
     manifest = take(tmp_path)
     manifest['directories'] = [path]
     with pytest.raises((DomainError, ValueError)):
@@ -70,7 +70,7 @@ def test_manifest_schema_rejects_escaped_paths(tmp_path, path):
 
 
 def test_interrupted_blob_write_does_not_poison_retry(tmp_path, monkeypatch):
-    from homun.application import session_workspace_capture as module
+    from homun.application.sessions import workspace_capture as module
     source = tmp_path/'source'
     source.mkdir()
     (source/'note').write_bytes(b'complete content')
@@ -93,7 +93,7 @@ def test_interrupted_blob_write_does_not_poison_retry(tmp_path, monkeypatch):
 
 
 def test_capture_detects_concurrent_changes_and_limits(tmp_path, monkeypatch):
-    from homun.application import session_workspace_capture as module
+    from homun.application.sessions import workspace_capture as module
     source = tmp_path/'source'
     source.mkdir()
     (source/'note').write_text('original')
@@ -124,7 +124,7 @@ def test_process_exit_at_blob_publication_leaves_readable_immutable_blob(tmp_pat
     (source/'note').write_bytes(b'crash-safe')
     script = '''import os,sys
 from pathlib import Path
-from homun.application.session_workspace_capture import capture
+from homun.application.sessions.workspace_capture import capture
 for name in ('link','rename'):
     original=getattr(os,name)
     def crashed(src,dst,*a,_original=original,**k):

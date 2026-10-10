@@ -4,7 +4,8 @@ import pytest
 from test_agent_runs import setup
 from test_native_agent import native_start
 from test_run_usage_receipts import usage
-from homun.application import budgets, session_runtime
+from homun.application import budgets
+from homun.application.sessions import runtime as session_runtime
 from homun.application.agent_run_execution import advance
 from homun.domain.models import BudgetCounters
 from homun.domain.errors import PermissionDeniedError
@@ -86,7 +87,7 @@ def test_work_usage_excludes_pending_reservations_for_unreadable_history(setup):
 
 def test_usage_tool_retains_off_page_legacy_source_authority(setup):
     from copy import deepcopy
-    from homun.application.session_tools import execute
+    from homun.application.sessions.tools import execute
     from homun.application.agent_runs import list_runs
     ctx, actor, work, material = finish(setup)
     with ctx.repository.transaction() as store:

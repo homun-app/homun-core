@@ -12,8 +12,8 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from homun.application import session_history as history
-from homun.application.session_records import SNAPSHOT, rows as record_rows
+from homun.application.sessions import history
+from homun.application.sessions.records import SNAPSHOT, rows as record_rows
 from homun.domain.errors import DomainError, ValidationError
 from homun.policy.work import require_work_access
 

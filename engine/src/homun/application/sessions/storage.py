@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from homun.application.session_contracts import SessionMessage, SessionRecord, SessionUsage
+from homun.application.sessions.contracts import SessionMessage, SessionRecord, SessionUsage
 
 logger = logging.getLogger(__name__)
 

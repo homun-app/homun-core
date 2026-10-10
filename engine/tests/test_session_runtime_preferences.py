@@ -2,7 +2,8 @@
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application import agent_runs, session_runtime
+from homun.application import agent_runs
+from homun.application.sessions import runtime as session_runtime
 from homun.application.agent_run_execution import advance
 from homun.models.native_turn import NativeMessage
 from homun.models.types import UsageEntry

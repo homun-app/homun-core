@@ -1,13 +1,13 @@
 """Prepare fresh consent from historical context without dispatching historical actions."""
 from copy import deepcopy
-from homun.application import session_history
+from homun.application.sessions import history as session_history
 from homun.application.price_comparisons import cached, save
 from homun.domain.errors import ConflictError, PermissionDeniedError, ValidationError
 from homun.policy.work import require_work_access
 
 
 def prepare(ctx, actor, work_id, args, *, allow_run_control=True):
-    from homun.application.agent_run_request import RunRequest
+    from homun.application.sessions.run_request import RunRequest
     operations = ctx.session_operations
     from pydantic import ValidationError as SchemaError
     command_id = args.get('command_id')
@@ -48,9 +48,9 @@ def prepare(ctx, actor, work_id, args, *, allow_run_control=True):
                     options = RunRequest.model_validate({**(args.get('proposal') or {}), 'command_id': command_id + ':proposal', 'expected_version': 1}).model_dump()
                 except (SchemaError, TypeError) as exc:
                     raise ValidationError('Invalid continuation proposal options') from exc
-                from homun.application.session_workspace import prepare as prepare_workspace
+                from homun.application.sessions.workspace import prepare as prepare_workspace
                 transfer = prepare_workspace(ctx, store, actor, work_id, source, args)
-                from homun.application.session_runtime_preferences import continuation
+                from homun.application.sessions.runtime_preferences import continuation
                 options = continuation(ctx, store, source, options)
                 created = ctx.service.for_store(store).apply(actor, command_id + ':work', 'work.create', {
                     'conversation_id': source_work.primary_conversation_id,

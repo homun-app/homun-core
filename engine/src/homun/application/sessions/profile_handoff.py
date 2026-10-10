@@ -14,8 +14,8 @@ from pathlib import Path
 import time
 from typing import Any, Callable, Dict, Optional
 
-from homun.application import session_history
-from homun.application.agent_run_request import RunRequest
+from homun.application.sessions import history as session_history
+from homun.application.sessions.run_request import RunRequest
 from homun.application.price_comparisons import cached, save
 from homun.domain.errors import (
     ConflictError,
@@ -138,12 +138,12 @@ def prepare_handoff(ctx: Any, actor: Any, work_id: str, args: Dict[str, Any]) ->
 
             transfer = None
             if args.get("workspace_mode") == "current_files":
-                from homun.application.session_workspace import prepare as prepare_workspace
+                from homun.application.sessions.workspace import prepare as prepare_workspace
                 transfer = prepare_workspace(ctx, store, actor, work_id, source, args)
                 if transfer:
                     transfer["cross_profile"] = True
 
-            from homun.application.session_manager import redact_secrets
+            from homun.application.sessions.manager import redact_secrets
             sanitized_messages = []
             for row in source.get("messages", []):
                 msg_copy = deepcopy(row["message"])
@@ -261,7 +261,7 @@ def accept_handoff(
                 transfer["cross_profile"] = True
                 manifest = transfer["manifest"]
                 if live_source_ctx and live_source_ctx.data_dir != target_ctx.data_dir:
-                    from homun.application.session_workspace_capture import blob_root, _publish_blob, read_blob
+                    from homun.application.sessions.workspace_capture import blob_root, _publish_blob, read_blob
                     target_blobs = blob_root(target_ctx.data_dir)
                     for entry in manifest["files"]:
                         _publish_blob(target_blobs, entry["sha256"], read_blob(live_source_ctx.data_dir, entry))
@@ -290,7 +290,7 @@ def accept_handoff(
             except (SchemaError, TypeError) as exc:
                 raise ValidationError("Invalid continuation proposal options") from exc
 
-            from homun.application.session_records import revision as calculate_revision
+            from homun.application.sessions.records import revision as calculate_revision
             target_snapshot_revision = calculate_revision(snapshot_rec["messages"])
 
             body = {

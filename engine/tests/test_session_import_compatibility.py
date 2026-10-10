@@ -1,10 +1,10 @@
 import json
 import pytest
-from homun.application.session_contracts import SessionMessage, SessionRecord
-from homun.application.session_manager import SessionManager
-from homun.application.session_storage import SessionStorage
-from homun.application.session_import_bridge import bridge_import_snapshot
-from homun.application import session_runtime as canonical_runtime
+from homun.application.sessions.contracts import SessionMessage, SessionRecord
+from homun.application.sessions.manager import SessionManager
+from homun.application.sessions.storage import SessionStorage
+from homun.application.sessions.import_bridge import bridge_import_snapshot
+from homun.application.sessions import runtime as canonical_runtime
 from homun.domain.errors import NotFoundError, ValidationError
 from homun.storage.sqlite import SqliteWorkspaceRepository
 from homun.context import EngineContext
@@ -272,7 +272,7 @@ def test_bridge_import_idempotency_and_validation(standalone_storage, setup):
 
 def test_bridge_import_continuation_requires_fresh_proposal_and_consent(standalone_storage, setup):
     from homun.application import agent_runs
-    from homun.application.session_resume import prepare
+    from homun.application.sessions.resume import prepare
     from homun.models.native_turn import NativeMessage
     from types import SimpleNamespace
 

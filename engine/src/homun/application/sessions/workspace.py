@@ -1,13 +1,13 @@
 """Fresh-consent workspace transfer from canonical completed sessions."""
 from copy import deepcopy
 from pydantic import ValidationError as SchemaError
-from homun.application.session_workspace_contracts import WorkspaceTransferReference, WorkspaceTransferReceipt
+from homun.application.sessions.workspace_contracts import WorkspaceTransferReference, WorkspaceTransferReceipt
 import json
 import os
 import secrets
 import shutil
-from homun.application import session_history
-from homun.application.session_workspace_capture import capture, read_blob, WorkspaceManifest, _scan, sync_directory
+from homun.application.sessions import history as session_history
+from homun.application.sessions.workspace_capture import capture, read_blob, WorkspaceManifest, _scan, sync_directory
 from homun.domain.errors import ConflictError, ValidationError
 from homun.execution.identity import digest
 from homun.execution.workspace import owned_root, working_directory
@@ -23,7 +23,7 @@ def prepare(ctx, store, actor, work_id, source, args):
         return None
     if mode != 'current_files':
         raise ValidationError('Choose history_only or current_files explicitly')
-    from homun.application.session_workspace_lineage import workspace_source
+    from homun.application.sessions.workspace_lineage import workspace_source
     record = workspace_source(store, actor, work_id, source['id'])
     source_id = record.result['id']
     source_work_id = record.result['work_id']
@@ -59,7 +59,7 @@ def bind(ctx, store, actor, run, body):
     if transfer['manifest']['backend'] != run.get('terminal', {}).get('policy'):
         raise ValidationError('Source and continuation execution backends must match')
     if not transfer.get('cross_profile'):
-        from homun.application.session_dependencies import _collect
+        from homun.application.sessions.dependencies import _collect
         deps = run.setdefault('_session_dependencies', [])
         for dep in _collect(store, actor, transfer['manifest']['run_id'], transfer['manifest']['work_id'], run['id']):
             if dep not in deps:

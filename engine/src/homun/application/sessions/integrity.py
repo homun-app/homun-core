@@ -9,9 +9,9 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
 
-from homun.application import session_history as history
-from homun.application.session_records import SNAPSHOT, rows as record_rows
-from homun.application.session_search import rebuild_search_index
+from homun.application.sessions import history
+from homun.application.sessions.records import SNAPSHOT, rows as record_rows
+from homun.application.sessions.search import rebuild_search_index
 from homun.domain.errors import ValidationError
 from homun.policy.work import require_work_access
 

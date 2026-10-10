@@ -1,8 +1,8 @@
 """Interrupted model follow-ups recover from durable input, without HTTP replay."""
 from datetime import timedelta
 import pytest
-from homun.application.command_delivery import admit, complete
-from homun.application.command_types import CommandRequest
+from homun.application.sessions.command_delivery import admit, complete
+from homun.application.sessions.command_types import CommandRequest
 from homun.context import create_context
 from homun.domain.models import Actor, utc_now
 
@@ -69,7 +69,7 @@ def test_competing_recovery_claims_and_superseded_token(context):
 
 def test_exhaustion_backoff_and_explicit_same_command_retry(context, monkeypatch):
     from homun.application.followup_recovery import recover_pending
-    from homun.application.command_delivery import MAX_FOLLOWUP_ATTEMPTS
+    from homun.application.sessions.command_delivery import MAX_FOLLOWUP_ATTEMPTS
     original = context.models.interpret
     delivery = pending(context)
     calls = []
@@ -173,7 +173,7 @@ def test_active_conversation_claim_blocks_second_message_atomically(context):
 
 
 def test_crashed_final_attempt_becomes_terminal_without_provider(context):
-    from homun.application.command_delivery import MAX_FOLLOWUP_ATTEMPTS
+    from homun.application.sessions.command_delivery import MAX_FOLLOWUP_ATTEMPTS
     from homun.application.followup_recovery import claim_next
     pending(context)
     with context.repository.transaction() as store:
@@ -186,7 +186,7 @@ def test_crashed_final_attempt_becomes_terminal_without_provider(context):
 
 
 def test_expired_and_backoff_followups_keep_conversation_ownership(context):
-    from homun.application.command_delivery import fail
+    from homun.application.sessions.command_delivery import fail
     from homun.application.followup_recovery import claim_next
     from homun.domain.errors import CommandInProgressError
     expired = pending(context)

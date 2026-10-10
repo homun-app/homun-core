@@ -4,8 +4,8 @@ from test_agent_runs import setup
 from test_native_agent import native_start
 from homun.application.agent_control import control
 from homun.application.agent_run_execution import advance, fail
-from homun.application.command_delivery import admit, complete
-from homun.application.command_types import CommandRequest
+from homun.application.sessions.command_delivery import admit, complete
+from homun.application.sessions.command_types import CommandRequest
 from homun.context import create_context
 from homun.domain.errors import ConflictError, PermissionDeniedError
 from homun.domain.models import Actor

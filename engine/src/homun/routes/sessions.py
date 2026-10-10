@@ -1,7 +1,7 @@
 """Scoped HTTP entry point for repository-backed native conversation sessions."""
 from fastapi import APIRouter, Header
-from homun.application import session_runtime
-from homun.application.session_contracts import SessionManageArguments
+from homun.application.sessions import runtime as session_runtime
+from homun.application.sessions.contracts import SessionManageArguments
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _http_error
 from homun.routes.price_comparisons import request_context

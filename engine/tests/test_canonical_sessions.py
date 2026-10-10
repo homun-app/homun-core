@@ -5,7 +5,8 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_native_agent import native_start
-from homun.application import agent_runs, session_tools
+from homun.application import agent_runs
+from homun.application.sessions import tools as session_tools
 from homun.application.agent_run_execution import advance
 from homun.context import create_context
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
@@ -13,7 +14,7 @@ from homun.models.native_turn import NativeMessage, ToolCall
 
 
 def runtime():
-    from homun.application import session_runtime
+    from homun.application.sessions import runtime as session_runtime
     return session_runtime
 
 

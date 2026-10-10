@@ -49,7 +49,7 @@ def test_default_cwd_preserves_preexisting_job_contract_hash(backend, deadline):
 
 def test_approved_continuation_restores_bytes_before_first_model_call(setup):
     from types import SimpleNamespace
-    from homun.application import session_runtime
+    from homun.application.sessions import runtime as session_runtime
     from homun.application.agent_run_execution import advance
     from homun.models.native_turn import NativeMessage
     ctx, actor, work, _ = setup

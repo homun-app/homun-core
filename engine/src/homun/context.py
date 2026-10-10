@@ -7,7 +7,7 @@ from contextlib import ExitStack
 import sqlite3
 from pathlib import Path
 
-from homun.application.session_operations import SessionOperations
+from homun.application.sessions.operations import SessionOperations
 from homun.domain.service import DomainService
 from homun.memory.sqlite_port import SqliteMemoryPort
 from homun.memory.mem0_port import build_memory_port

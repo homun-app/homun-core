@@ -1,7 +1,7 @@
 import json
 import pytest
-from homun.application.session_manager import SessionManager
-from homun.application.session_storage import SessionStorage
+from homun.application.sessions.manager import SessionManager
+from homun.application.sessions.storage import SessionStorage
 
 @pytest.fixture
 def pair(tmp_path):

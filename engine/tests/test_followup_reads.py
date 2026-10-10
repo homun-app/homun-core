@@ -2,8 +2,8 @@
 from fastapi.testclient import TestClient
 from homun.app import create_app
 from homun.context import create_context, reset_context_for_tests
-from homun.application.command_delivery import admit, fail
-from homun.application.command_types import CommandRequest
+from homun.application.sessions.command_delivery import admit, fail
+from homun.application.sessions.command_types import CommandRequest
 from homun.domain.models import Actor
 
 

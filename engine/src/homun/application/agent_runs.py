@@ -43,13 +43,13 @@ def public_for(store, actor, run):
     item = public(run)
     readable = history_is_readable(store, actor, run)
     if readable:
-        from homun.application.session_dependencies import validate as validate_dependencies
+        from homun.application.sessions.dependencies import validate as validate_dependencies
         try:
             validate_dependencies(store, actor, run)
         except DomainError:
             readable = False
     if readable and run.get('_session_context'):
-        from homun.application.session_history import validate_context
+        from homun.application.sessions.history import validate_context
         try:
             validate_context(store, actor, run['_session_context'])
         except DomainError:
@@ -91,9 +91,9 @@ def authority(ctx, store, actor, run, *, approve=False, running=False):
     from homun.application.agent_mcp import validate_bindings
     validate_bindings(store, run.get("_mcp_bindings", []))
     validate_sources(ctx, store, actor, run['materials'])
-    from homun.application.session_history import authorize_run_context
+    from homun.application.sessions.history import authorize_run_context
     authorize_run_context(ctx, store, actor, run)
-    from homun.application.session_workspace import authorize as authorize_workspace
+    from homun.application.sessions.workspace import authorize as authorize_workspace
     authorize_workspace(ctx, store, actor, run)
     from homun.application.runtime_selection import validate as validate_runtime
     for selection in run.get('_runtime_routes', []):
@@ -448,13 +448,13 @@ def propose(ctx, actor, work_id, body):
                 run['_instruction_root'] = run['_workspace_root']
                 run['_cwd'] = str(root)
                 run['_workspace_root'] = str(root)
-                from homun.application.session_workspace_contracts import ExecutionContext
+                from homun.application.sessions.workspace_contracts import ExecutionContext
                 run['execution_context'] = ExecutionContext(backend=run['terminal']['policy']).model_dump()
                 run['_messages'][0]['content'] += ('\nExecution workspace: ' + str(root) +
                     '\nExecution cwd: ' + str(root) + '\nInstruction sources above are read-only context, not the execution directory.')
-            from homun.application.session_history import bind_to_run
+            from homun.application.sessions.history import bind_to_run
             bind_to_run(ctx, store, actor, run, body)
-            from homun.application.session_workspace import bind as bind_workspace
+            from homun.application.sessions.workspace import bind as bind_workspace
             bind_workspace(ctx, store, actor, run, body)
             run['digest'] = hashlib.sha256(json.dumps(run, sort_keys=True).encode()).hexdigest()
             save(store, actor, run['id'], PROPOSAL_TYPE, fingerprint, run)

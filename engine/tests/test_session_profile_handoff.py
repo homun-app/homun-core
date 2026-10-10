@@ -3,7 +3,8 @@ from pathlib import Path
 from types import SimpleNamespace
 import pytest
 
-from homun.application import agent_runs, session_runtime, session_usage
+from homun.application import agent_runs
+from homun.application.sessions import runtime as session_runtime, usage as session_usage
 from homun.application.agent_run_execution import advance
 from homun.application.ops.profile_operations import ProfileOperationsManager, ProfileNotFoundError
 from homun.context import create_context

@@ -15,14 +15,14 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from homun.application.session_contracts import (
+from homun.application.sessions.contracts import (
     RewindOutcome,
     SessionLineage,
     SessionMessage,
     SessionRecord,
     SessionUsage,
 )
-from homun.application.session_storage import SessionStorage
+from homun.application.sessions.storage import SessionStorage
 from homun.storage.paths import default_data_dir
 
 logger = logging.getLogger(__name__)

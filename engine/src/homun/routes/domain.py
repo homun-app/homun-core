@@ -7,8 +7,8 @@ from homun.storage.errors import StorageError
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from homun.application.command_types import CommandRequest, CommandResponse
-from homun.application.command_delivery import admit, complete
+from homun.application.sessions.command_types import CommandRequest, CommandResponse
+from homun.application.sessions.command_delivery import admit, complete
 from homun.application.followup_views import conversation_followups
 
 from homun.context import get_context

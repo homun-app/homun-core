@@ -33,7 +33,7 @@ def test_bind_and_handles(setup):
 
 
 def _post_body(conv):
-    from homun.application.command_types import CommandRequest
+    from homun.application.sessions.command_types import CommandRequest
     return CommandRequest(command_id="m1", type="conversation.post_message",
                           payload={"conversation_id": conv, "text": "ciao"})
 

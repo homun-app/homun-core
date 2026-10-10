@@ -221,7 +221,7 @@ def test_consultation_uses_selected_teammate_connection_and_accounting_actor(set
 
 def test_delegated_child_receipts_are_own_spend_and_not_copied_to_parent(setup):
     from test_delegation_runtime import start as delegated_start, delegate
-    from homun.application.session_usage import query
+    from homun.application.sessions.usage import query
     ctx, actor, work, material, p = delegated_start(setup)
     result = delegate(ctx, p)
     child = result['child_run_id']
@@ -291,7 +291,7 @@ def test_auxiliary_denied_reservation_rolls_back_attempt_and_recovery(setup, mon
 
 
 def test_legacy_receipt_queries_authorize_without_native_transcript(setup):
-    from homun.application.session_usage import query
+    from homun.application.sessions.usage import query
     from homun.domain.errors import PermissionDeniedError
     ctx, actor, work, material = setup
     start(ctx, actor, work, material)

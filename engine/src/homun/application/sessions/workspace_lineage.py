@@ -1,6 +1,6 @@
 """Bounded authorized resolution of current files behind historical snapshots."""
-from homun.application import session_records as records
-from homun.application.session_dependencies import validate
+from homun.application.sessions import records
+from homun.application.sessions.dependencies import validate
 from homun.domain.errors import ConflictError, ValidationError
 
 
