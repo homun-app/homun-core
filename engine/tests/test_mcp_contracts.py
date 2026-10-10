@@ -7,7 +7,7 @@ def descriptor():
 
 
 def test_descriptor_arguments_are_validated_without_coercion_or_value_leaks():
-    from homun.application.mcp_contracts import validate_arguments
+    from homun.application.integrations.mcp_contracts import validate_arguments
     validate_arguments(descriptor(),{'count':1})
     for args in [{'count':'private-value'},{'count':True},{'count':1,'extra':2},{}]:
         with pytest.raises(ValidationError) as exc:validate_arguments(descriptor(),args)
@@ -15,25 +15,26 @@ def test_descriptor_arguments_are_validated_without_coercion_or_value_leaks():
 
 
 def test_missing_duplicate_and_invalid_descriptors_fail_closed():
-    from homun.application.mcp_contracts import select_descriptor
+    from homun.application.integrations.mcp_contracts import select_descriptor
     for descriptors in [[],[descriptor(),descriptor()],[{'name':'write','inputSchema':{'type':'wrong'}}]]:
         with pytest.raises(ValidationError):select_descriptor(descriptors,'write')
 
 
 def test_remote_schema_reference_is_not_fetched():
-    from homun.application.mcp_contracts import validate_arguments
+    from homun.application.integrations.mcp_contracts import validate_arguments
     tool=descriptor();tool['inputSchema']={'$ref':'https://invalid.example/private'}
     with pytest.raises(ValidationError):validate_arguments(tool,{})
 
 
 def test_descriptor_comparison_includes_description_and_schema():
-    from homun.application.mcp_contracts import require_same_descriptor
+    from homun.application.integrations.mcp_contracts import require_same_descriptor
     require_same_descriptor(descriptor(),descriptor())
     changed=descriptor();changed['description']='Different behavior'
     with pytest.raises(ConflictError):require_same_descriptor(descriptor(),changed)
 
 from test_external_receipts import setup, approve
-from homun.application import external_tools, mcp_client
+from homun.application import external_tools
+from homun.application.integrations import mcp_client
 
 
 def test_proposal_pins_descriptor_and_replay_does_not_probe(setup,monkeypatch):

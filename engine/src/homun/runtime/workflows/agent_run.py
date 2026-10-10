@@ -104,7 +104,7 @@ def deliver_agent_runs(ctx):
                 fail(ctx, run['id'], exc.code, blocked=True, epoch=run['_epoch'])
             run = ctx.repository.snapshot().commands[run['id']].result
         if run['status'] == 'completed' and (run.get('skills') or {}).get('policy') == 'workspace-catalog-v1':
-            from homun.application.skill_reflection import maybe_reflect
+            from homun.application.integrations.skill_reflection import maybe_reflect
             try:
                 maybe_reflect(ctx, record.command_id)
             except Exception:

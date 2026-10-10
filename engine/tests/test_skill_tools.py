@@ -6,7 +6,7 @@ from test_agent_runs import setup
 
 
 def test_skill_search_and_progressive_view(setup):
-    from homun.application.skill_tools import execute
+    from homun.application.integrations.skill_tools import execute
 
     ctx, actor, work, _ = setup
     with ctx.repository.locked():
@@ -65,7 +65,7 @@ def test_skill_search_and_progressive_view(setup):
 
 
 def test_skill_propose_creates_staged_quarantine(setup):
-    from homun.application.skill_tools import execute
+    from homun.application.integrations.skill_tools import execute
 
     ctx, actor, work, _ = setup
     run = {
@@ -156,7 +156,7 @@ def test_agent_run_advances_with_skill_tools(setup):
 
 
 def test_skill_bundle_export_and_atomic_install(setup):
-    from homun.application.skill_bundle import (
+    from homun.application.integrations.skill_bundle import (
         export_skill_bundle,
         validate_skill_bundle,
         install_skill_bundle,

@@ -5,9 +5,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.codex_runtime import CodexAppServerAdapter, CodexTurnResult
-from homun.application.copilot_acp_client import CopilotAcpClient, CopilotAcpResult
-from homun.application.managed_tool_gateway import ManagedToolGateway, ManagedToolGatewayConfig
+from homun.application.integrations.codex_runtime import CodexAppServerAdapter, CodexTurnResult
+from homun.application.integrations.copilot_acp_client import CopilotAcpClient, CopilotAcpResult
+from homun.application.integrations.managed_tool_gateway import ManagedToolGateway, ManagedToolGatewayConfig
 from homun.application.channels.relay_runtime import RelayRuntime, RelayTurnContext
 
 

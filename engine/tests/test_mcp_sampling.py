@@ -5,8 +5,8 @@ import asyncio
 
 from mcp import types
 
-from homun.application import mcp_client
-from homun.application.mcp_sampling import build_sampling_callback, install_product_sampling, mcp_sampling_enabled
+from homun.application.integrations import mcp_client
+from homun.application.integrations.mcp_sampling import build_sampling_callback, install_product_sampling, mcp_sampling_enabled
 
 
 def test_sampling_disabled_by_default(monkeypatch):

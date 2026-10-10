@@ -13,7 +13,7 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from homun.application.acp_stdio_transport import StdioAcpTransport
+from homun.application.integrations.acp_stdio_transport import StdioAcpTransport
 
 logger = logging.getLogger(__name__)
 

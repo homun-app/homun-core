@@ -2,7 +2,7 @@
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from homun.routes.alternate_runtimes import router
-from homun.application.managed_tool_gateway import ManagedToolGateway, ManagedToolGatewayConfig
+from homun.application.integrations.managed_tool_gateway import ManagedToolGateway, ManagedToolGatewayConfig
 
 
 def test_configured_route_without_transport_is_unavailable(monkeypatch):

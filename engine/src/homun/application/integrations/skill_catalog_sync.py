@@ -113,7 +113,7 @@ def _machine_only_history(store, skill_id: str) -> bool:
 
 
 def sync_skill_catalog(ctx, catalog_path: str | Path, *, rebase: bool = False) -> Dict[str, Any]:
-    from homun.application.builtin_skills import CATALOG
+    from homun.application.integrations.builtin_skills import CATALOG
     root = Path(catalog_path).expanduser().resolve()
     if not root.is_dir():
         from homun.domain.errors import ValidationError

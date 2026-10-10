@@ -6,38 +6,38 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from homun.application.integration_homeassistant import (
+from homun.application.integrations.homeassistant import (
     HomeAssistantAdapter,
     HomeAssistantError,
     HomeAssistantNotFoundError,
     HomeAssistantSecurityError,
     HomeAssistantTransportError,
 )
-from homun.application.integration_discord import (
+from homun.application.integrations.discord import (
     DiscordAdapter,
     DiscordAPIError,
     DiscordNotFoundError,
     DiscordPermissionError,
 )
-from homun.application.integration_feishu import (
+from homun.application.integrations.feishu import (
     FeishuAdapter,
     FeishuAPIError,
     FeishuError,
     FeishuNotConfiguredError,
 )
-from homun.application.integration_yuanbao import (
+from homun.application.integrations.yuanbao import (
     YuanbaoAdapter,
     YuanbaoAmbiguousRecipientError,
     YuanbaoError,
     YuanbaoNotConnectedError,
 )
-from homun.application.integration_spotify import (
+from homun.application.integrations.spotify import (
     SpotifyAdapter,
     SpotifyAPIError,
     SpotifyAuthRequiredError,
     SpotifyError,
 )
-from homun.application.integration_meetings import (
+from homun.application.integrations.meetings import (
     InvalidMeetingUrlError,
     MeetingError,
     MeetingManager,

@@ -11,7 +11,7 @@ import time
 import os
 import threading
 
-from homun.application.codex_stdio_transport import CodexStdioTransport, CodexTransportError
+from homun.application.integrations.codex_stdio_transport import CodexStdioTransport, CodexTransportError
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 

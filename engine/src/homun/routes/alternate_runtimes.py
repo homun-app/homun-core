@@ -6,9 +6,9 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, ConfigDict
 
-from homun.application.codex_runtime import CodexAppServerAdapter
-from homun.application.copilot_acp_client import CopilotAcpClient
-from homun.application.managed_tool_gateway import ManagedToolGateway
+from homun.application.integrations.codex_runtime import CodexAppServerAdapter
+from homun.application.integrations.copilot_acp_client import CopilotAcpClient
+from homun.application.integrations.managed_tool_gateway import ManagedToolGateway
 from homun.application.channels.relay_runtime import RelayRuntime
 
 logger = logging.getLogger(__name__)

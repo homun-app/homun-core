@@ -3,7 +3,8 @@ import pytest
 from homun.context import create_context
 from homun.domain.models import Actor, ExternalServer
 from homun.domain.errors import ConflictError
-from homun.application import external_tools, mcp_client
+from homun.application import external_tools
+from homun.application.integrations import mcp_client
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):

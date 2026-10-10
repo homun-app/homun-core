@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from mcp import types
 
-from homun.application import mcp_client
+from homun.application.integrations import mcp_client
 
 CompleteFn = Callable[[list[dict[str, str]], Optional[str]], str]
 

@@ -5,36 +5,36 @@ import httpx
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.integration_homeassistant import (
+from homun.application.integrations.homeassistant import (
     HomeAssistantAdapter,
     HomeAssistantSecurityError,
     HomeAssistantTransportError,
     BLOCKED_DOMAINS,
 )
-from homun.application.integration_discord import (
+from homun.application.integrations.discord import (
     DiscordAdapter,
     DiscordPermissionError,
     DiscordNotFoundError,
 )
-from homun.application.integration_feishu import (
+from homun.application.integrations.feishu import (
     FeishuAdapter,
     FeishuNotConfiguredError,
 )
-from homun.application.integration_yuanbao import (
+from homun.application.integrations.yuanbao import (
     YuanbaoAdapter,
     YuanbaoAmbiguousRecipientError,
     YuanbaoError,
     YuanbaoNotConnectedError,
     format_mention,
 )
-from homun.application.integration_spotify import (
+from homun.application.integrations.spotify import (
     SpotifyAdapter,
     SpotifyAuthRequiredError,
     SpotifyError,
     normalize_spotify_id,
     normalize_spotify_uri,
 )
-from homun.application.integration_meetings import (
+from homun.application.integrations.meetings import (
     InvalidMeetingUrlError,
     MeetingError,
     MeetingManager,

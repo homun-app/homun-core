@@ -7,7 +7,7 @@ import sqlite3
 from typing import Any, Callable, Dict, List, Optional
 from pydantic import BaseModel, Field
 
-from homun.application.plugin_storage import plugin_data_dir, plugin_db
+from homun.application.integrations.plugin_storage import plugin_data_dir, plugin_db
 from homun.tools.registry import ToolEntry
 
 

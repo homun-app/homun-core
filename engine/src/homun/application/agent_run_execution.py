@@ -307,7 +307,7 @@ def advance(ctx, run_id, *, epoch=None):
                     decision = decision.model_copy(update={'tool': call.name, 'arguments': call.arguments})
                 plugins_policy = run.get('plugins') if isinstance(run, dict) else None
                 if isinstance(plugins_policy, dict) and plugins_policy.get('policy') == 'extensible-plugins-v1':
-                    from homun.application.plugin_manager import get_plugin_manager
+                    from homun.application.integrations.plugin_manager import get_plugin_manager
                     hook_res = get_plugin_manager().dispatch_hook(
                         "pre_tool_call",
                         tool_name=decision.tool,
