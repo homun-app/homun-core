@@ -1,5 +1,5 @@
 import { useState, useRef, useId, useLayoutEffect, type ReactNode } from "react";
-import { ArrowUp, Paperclip, X } from "lucide-react";
+import { ArrowUp, Paperclip, Square, X } from "lucide-react";
 import {
   PromptInput,
   PromptInputProvider,
@@ -32,6 +32,8 @@ export function StudioChatInput({
   children,
   references,
   disabled = false,
+  engineBusy = false,
+  onCancel,
   autonomyLevel,
   onAutonomyLevelChange,
   modelConnectionId,
@@ -39,6 +41,9 @@ export function StudioChatInput({
 }: {
   label: string;
   disabled?: boolean;
+  /** True while Homun is mid-turn: the send control becomes Cancel. */
+  engineBusy?: boolean;
+  onCancel?: (() => void) | undefined;
   onSend: (text: string, files: File[], references?: ChatReference[]) => void;
   references?: ChatReference[];
   children?: ReactNode;
@@ -51,6 +56,8 @@ export function StudioChatInput({
     <PromptInputProvider>
       <Composer
         disabled={disabled}
+        engineBusy={engineBusy}
+        onCancel={onCancel}
         label={label}
         onSend={onSend}
         references={references || []}
@@ -70,6 +77,8 @@ function Composer({
   children,
   references = [],
   disabled = false,
+  engineBusy = false,
+  onCancel,
   autonomyLevel,
   onAutonomyLevelChange,
   modelConnectionId,
@@ -315,10 +324,23 @@ function Composer({
             <small className="st-muted">Demo locale · nessun modello collegato</small>
           )}
           <PromptInputSubmit
-            aria-label="Invia messaggio"
-            disabled={disabled || busy || (!textInput.value.trim() && !attachments.files.length)}
+            aria-label={engineBusy && onCancel ? "Annulla" : "Invia messaggio"}
+            {...(engineBusy && onCancel
+              ? { status: "streaming" as const, onStop: onCancel }
+              : {})}
+            disabled={
+              disabled ||
+              busy ||
+              (!(engineBusy && onCancel) &&
+                !textInput.value.trim() &&
+                !attachments.files.length)
+            }
           >
-            <ArrowUp size={16} />
+            {engineBusy && onCancel ? (
+              <Square size={14} className="fill-current" />
+            ) : (
+              <ArrowUp size={16} />
+            )}
           </PromptInputSubmit>
         </div>
       </PromptInputFooter>

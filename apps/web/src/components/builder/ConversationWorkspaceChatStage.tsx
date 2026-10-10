@@ -411,6 +411,8 @@ export function ConversationWorkspaceChatStage({
             key={active || "new"}
             label="Messaggio alla squadra"
             disabled={engineMode && historyLoading}
+            engineBusy={engineMode && engineBusy}
+            onCancel={engineMode ? onCancelInFlight : undefined}
             onSend={onSend}
             references={mentionRefs}
             autonomyLevel={autonomyLevel}
@@ -420,15 +422,6 @@ export function ConversationWorkspaceChatStage({
           />
           {historyLoading && (work?.messages ?? []).length === 0 && (
             <p className="cw-hint" role="status">Caricamento conversazione…</p>
-          )}
-          {engineMode && engineBusy && onCancelInFlight && (
-            <p className="cw-hint cw-engine-busy" role="status">
-              Homun sta aspettando la risposta del modello: la conversazione mostra i passaggi
-              e il tempo trascorso.{" "}
-              <button type="button" className="cs-link" onClick={onCancelInFlight}>
-                Annulla
-              </button>
-            </p>
           )}
           {notice && (
             <p className="cw-notice" role="status">
