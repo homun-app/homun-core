@@ -148,7 +148,7 @@ def test_clear_report_marks_resolved(ctx, tmp_path):
 
 def test_narrator_seeds_diagnosis_conversation(ctx):
     """Il rapporto diventa una conversazione leggibile; il turno è best-effort."""
-    from homun.application.recovery_narrator import seed_recovery_conversation
+    from homun.application.agent.recovery_narrator import seed_recovery_conversation
     report = {
         'mode': 'repaired',
         'quarantine_dir': '/tmp/quarantine',

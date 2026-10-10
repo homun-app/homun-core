@@ -1,10 +1,10 @@
 """MoA product wiring: every advisor and aggregator is an admitted physical call."""
-from homun.application.agent_model_attempts import reserve_auxiliary
-from homun.application.agent_usage import charge
-from homun.application.agent_streaming import complete
-from homun.application.agent_context import provider_policy
-from homun.application.moa_contracts import MoAAggregator, MoAPreset, MoAReferenceModel
-from homun.application.moa_coordinator import MoACoordinator
+from homun.application.agent.model_attempts import reserve_auxiliary
+from homun.application.agent.usage import charge
+from homun.application.agent.streaming import complete
+from homun.application.agent.agent_context import provider_policy
+from homun.application.agent.moa_contracts import MoAAggregator, MoAPreset, MoAReferenceModel
+from homun.application.agent.moa_coordinator import MoACoordinator
 from homun.domain.models import Actor
 
 

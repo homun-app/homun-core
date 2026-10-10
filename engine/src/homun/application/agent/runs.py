@@ -2,16 +2,16 @@
 import hashlib
 import json
 from copy import deepcopy
-from homun.application import agent_native
+from homun.application.agent import native as agent_native
 from homun.models.native_prompt import initial_messages
-from homun.application.agent_prompt_roots import roots_from_propose_body
+from homun.application.agent.prompt_roots import roots_from_propose_body
 from homun.application.work.request_context import request_history
-from homun.application.agent_team import bind_team, validate_team
+from homun.application.agent.team import bind_team, validate_team
 from homun.application.work.contribution_people import _people
-from homun.application.agent_tools import MAX_BYTES, validate_sources
+from homun.application.agent.tools import MAX_BYTES, validate_sources
 from homun.application.work.organization_context import organization_background
 from homun.application.work.executor import resolve_executor
-from homun.application.agent_run_policy import current_step, history_is_readable, revision_context
+from homun.application.agent.run_policy import current_step, history_is_readable, revision_context
 from homun.application.work.price_comparisons import cached, save
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError, DomainError
 from homun.domain.models import Actor
@@ -86,16 +86,16 @@ def authority(ctx, store, actor, run, *, approve=False, running=False):
     if approve or running:
         if actor.kind != 'person' or actor.id not in {work.owner_id, work.reviewer_id}:
             raise PermissionDeniedError('Only the human owner or reviewer can authorize the run')
-    from homun.application.agent_tool_registry import registry_for
+    from homun.application.agent.tool_registry import registry_for
     registry_for(run)
-    from homun.application.agent_mcp import validate_bindings
+    from homun.application.agent.mcp import validate_bindings
     validate_bindings(store, run.get("_mcp_bindings", []))
     validate_sources(ctx, store, actor, run['materials'])
     from homun.application.sessions.history import authorize_run_context
     authorize_run_context(ctx, store, actor, run)
     from homun.application.sessions.workspace import authorize as authorize_workspace
     authorize_workspace(ctx, store, actor, run)
-    from homun.application.runtime_selection import validate as validate_runtime
+    from homun.application.agent.runtime_selection import validate as validate_runtime
     for selection in run.get('_runtime_routes', []):
         validate_runtime(ctx.models, selection)
     validate_team(store, run.get('team'))
@@ -150,7 +150,7 @@ def _inject_volatile(ctx, run) -> None:
             'iniezione memoria/skill nel prompt saltata per %s', run.get('id'), exc_info=True)
 
 def propose(ctx, actor, work_id, body):
-    from homun.application.agent_mcp import discover, validate_bindings
+    from homun.application.agent.mcp import discover, validate_bindings
     bindings = discover(ctx, actor, work_id, body)
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
@@ -219,7 +219,7 @@ def propose(ctx, actor, work_id, body):
                  'output_expected': 'Risultato da revisionare'})
             connection_id = body.get('connection_id')
             if body.get('provider_id'):
-                from homun.application.runtime_selection import resolve
+                from homun.application.agent.runtime_selection import resolve
                 connection_id = resolve(ctx.models, connection_id=connection_id, provider_id=body['provider_id'], model_id=body.get('model_id'))['connection_id']
             if not connection_id and work.project_id:
                 project = store.projects.get(work.project_id)
@@ -288,7 +288,7 @@ def propose(ctx, actor, work_id, body):
                     base_guidance=hermes_guidance(run.get('connection_id')),
                 )]
                 _inject_volatile(ctx, run)
-            from homun.application.agent_tool_registry import registry_for
+            from homun.application.agent.tool_registry import registry_for
             if bindings and not agent_native.enabled(run):
                 raise ValidationError('External agent tools require native model support')
             if body.get('terminal_backend') == 'local':
@@ -437,7 +437,7 @@ def propose(ctx, actor, work_id, body):
                 run['plugins'] = {'policy': 'extensible-plugins-v1', 'version': 1}
             run['_mcp_bindings'] = bindings
             run['external_tools'] = [{k: b[k] for k in ('server_id', 'server_name', 'tool', 'name')} | {'description': b['descriptor'].get('description', '')} for b in bindings]
-            from homun.application.runtime_selection import bind as bind_runtime
+            from homun.application.agent.runtime_selection import bind as bind_runtime
             bind_runtime(ctx, store, run, body)
             run['_registry_version'] = 1
             run['tools'] = registry_for(run).manifest()
@@ -523,7 +523,7 @@ def resume_waiting(ctx, run_id):
                 raise ConflictError('Work changed while awaiting input')
             result = {'question': request.need, 'text': request.response_text}
             if run.get('clarify_request'):
-                from homun.application.agent_clarification import answer
+                from homun.application.agent.clarification import answer
                 result = answer(run['clarify_request'], request.response_text, resolution=request.resolution)
             service = ctx.service.for_store(store)
             service.apply(actor, f'{run_id}:resume:{run["_epoch"]}', 'work.start',

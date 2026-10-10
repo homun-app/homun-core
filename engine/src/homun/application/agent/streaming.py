@@ -1,14 +1,14 @@
 """Transient native stream callbacks fenced by the durable run lease."""
 from time import monotonic
 from datetime import timedelta
-from homun.application.agent_runs import lookup, authority
-from homun.application.agent_run_fencing import LEASE_SECONDS
+from homun.application.agent.runs import lookup, authority
+from homun.application.agent.run_fencing import LEASE_SECONDS
 from homun.domain.errors import DomainError
 from homun.domain.models import Actor, utc_now
 
 
 def complete(ctx,run,messages,**kwargs):
-    from homun.application.runtime_selection import kwargs as runtime_kwargs
+    from homun.application.agent.runtime_selection import kwargs as runtime_kwargs
     kwargs.update(runtime_kwargs(ctx.models, run, connection_id=kwargs.get('connection_id'), model_id=kwargs.get('model_id')))
     if not run.get('native_stream'):
         return ctx.models.complete_tools(messages,**kwargs)

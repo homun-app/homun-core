@@ -1,13 +1,13 @@
 """Tests for human clarification, batched questions, multi-select, and partial timeouts (H08)."""
 import json
 from types import SimpleNamespace
-from homun.application.clarify_contracts import (
+from homun.application.agent.clarify_contracts import (
     MAX_CHOICES,
     MAX_QUESTIONS,
     RECOMMENDED_LABEL,
     TIMEOUT_RESPONSE,
 )
-from homun.application.clarify_tools import clarify_tool
+from homun.application.agent.clarify_tools import clarify_tool
 from homun.models.native_turn import NativeMessage, ToolCall
 from test_agent_runs import setup
 
@@ -151,8 +151,8 @@ def test_clarify_partial_timeout_preserves_completed_answers():
 
 
 def test_agent_run_advances_with_clarify_tool(setup):
-    from homun.application import agent_runs
-    from homun.application.agent_run_execution import advance
+    from homun.application.agent import runs as agent_runs
+    from homun.application.agent.run_execution import advance
 
     ctx, actor, work, _ = setup
     ctx.models.set_active("openai_compatible")

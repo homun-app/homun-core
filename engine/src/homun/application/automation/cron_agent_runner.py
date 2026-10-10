@@ -67,7 +67,7 @@ class CronAgentRunner:
             if not connections:
                 return CronExecutionResult('failed', error='cron_model_binding_unavailable', exit_code=-1)
             body['connection_id'] = connections[0].id
-        from homun.application.agent_runs import propose
+        from homun.application.agent.runs import propose
         try:
             # Each creation commits independently. Replay reuses the exact command
             # fingerprint, including after a crash before the proposal exists.
@@ -99,7 +99,7 @@ class CronAgentRunner:
             body['expected_version'] = ctx.repository.load().works[work_id].version
             proposal = propose(ctx, actor, work_id, body)
             if payload.get('auto_approve'):
-                from homun.application import agent_runs
+                from homun.application.agent import runs as agent_runs
                 try:
                     agent_runs.approve(ctx, actor, work_id, proposal['id'], {
                         'command_id': run_id + ':auto',

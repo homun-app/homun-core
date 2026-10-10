@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from test_agent_runs import setup
 from test_local_jobs import finished
-from homun.application import agent_runs
-from homun.application.workspace_files import root_for
+from homun.application.agent import runs as agent_runs
+from homun.application.agent.workspace_files import root_for
 from homun.execution.contracts import LocalJobSpec
 from homun.execution.local_jobs import LocalJobs
 
@@ -50,7 +50,7 @@ def test_default_cwd_preserves_preexisting_job_contract_hash(backend, deadline):
 def test_approved_continuation_restores_bytes_before_first_model_call(setup):
     from types import SimpleNamespace
     from homun.application.sessions import runtime as session_runtime
-    from homun.application.agent_run_execution import advance
+    from homun.application.agent.run_execution import advance
     from homun.models.native_turn import NativeMessage
     ctx, actor, work, _ = setup
     ctx.models.set_active('openai_compatible')

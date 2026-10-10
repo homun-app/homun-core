@@ -1,5 +1,5 @@
 """Revalidate the pinned request immediately before each model transport call."""
-from homun.application.runtime_selection import kwargs as runtime_kwargs
+from homun.application.agent.runtime_selection import kwargs as runtime_kwargs
 
 
 def complete(ctx, run, messages, *, connection_id=None, model_id=None):

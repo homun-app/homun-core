@@ -2,9 +2,9 @@
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application import agent_runs
+from homun.application.agent import runs as agent_runs
 from homun.application.sessions import runtime as session_runtime
-from homun.application.agent_run_execution import advance
+from homun.application.agent.run_execution import advance
 from homun.models.native_turn import NativeMessage
 from homun.models.types import UsageEntry
 
@@ -115,7 +115,7 @@ def test_fork_chain_freezes_preferences_at_each_branch(setup):
 
 @pytest.mark.parametrize('operation', ['side', 'judge', 'compact', 'legacy'])
 def test_auxiliary_and_legacy_calls_use_the_pinned_requested_model(setup, operation):
-    from homun.application.agent_run_execution import _claim
+    from homun.application.agent.run_execution import _claim
     ctx, actor, work, material = begin(setup, model_id='pinned-call', **({'connection_id': 'fake', 'session_management': False} if operation == 'legacy' else {}))
     called = []
     if operation == 'legacy':
@@ -125,7 +125,7 @@ def test_auxiliary_and_legacy_calls_use_the_pinned_requested_model(setup, operat
         ctx.models.complete = lambda *a, **k: (called.append(k) or SimpleNamespace(text=json.dumps({'kind': 'finish', 'message': 'Done'}), usage=None))
         advance(ctx, 'run')
     elif operation == 'side':
-        from homun.application.agent_side_questions import answer_side_question
+        from homun.application.agent.side_questions import answer_side_question
         ctx.models.complete_summary = lambda *a, **k: (called.append(k) or SimpleNamespace(message=NativeMessage(role='assistant', content='Side'), usage=None))
         answer_side_question(ctx, actor, work, 'run', 'Question')
     elif operation == 'judge':
@@ -134,7 +134,7 @@ def test_auxiliary_and_legacy_calls_use_the_pinned_requested_model(setup, operat
         ctx.models.complete = lambda *a, **k: (called.append(k) or SimpleNamespace(text='{"verdict":"done","reason":"Done"}', usage=None))
         judge(ctx, run)
     else:
-        from homun.application.agent_context import prepare
+        from homun.application.agent.agent_context import prepare
         from homun.models.native_turn import ToolCall
         from test_agent_context import summary
         with ctx.repository.transaction() as store:
@@ -280,7 +280,7 @@ def test_transport_selection_cannot_race_to_an_unapproved_endpoint(setup, local_
 
 @pytest.mark.parametrize('method', ['complete', 'complete_summary'])
 def test_aux_transport_checks_actual_endpoint(setup, local_model_http, second_local_model_http, monkeypatch, method):
-    from homun.application import runtime_calls
+    from homun.application.agent import runtime_calls
     from homun.domain.errors import ConflictError
     from homun.models.types import ChatMessage
     approved_url, approved_calls = local_model_http
@@ -302,7 +302,7 @@ def test_aux_transport_checks_actual_endpoint(setup, local_model_http, second_lo
 
 @pytest.mark.parametrize('method', ['complete', 'complete_tools', 'complete_summary'])
 def test_custom_connection_adapter_runtime_binding(local_model_http, second_local_model_http, method):
-    from homun.application.runtime_selection import resolve
+    from homun.application.agent.runtime_selection import resolve
     from homun.domain.errors import ConflictError
     from homun.models.adapters.openai_compat import OpenAICompatModelAdapter
     from homun.models.secrets import MemorySecretStore
@@ -321,7 +321,7 @@ def test_custom_connection_adapter_runtime_binding(local_model_http, second_loca
 
 
 def test_fake_adapter_custom_connection_runtime_binding():
-    from homun.application.runtime_selection import resolve
+    from homun.application.agent.runtime_selection import resolve
     from homun.models.adapters.fake import FakeModelAdapter
     from homun.models.types import ChatMessage
     adapter = FakeModelAdapter()

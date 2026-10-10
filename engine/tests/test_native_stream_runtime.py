@@ -5,9 +5,9 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Event, Thread
 from test_agent_runs import setup
-from homun.application.agent_runs import propose, approve
-from homun.application.agent_run_execution import advance
-from homun.application.agent_control import control
+from homun.application.agent.runs import propose, approve
+from homun.application.agent.run_execution import advance
+from homun.application.agent.control import control
 from homun.context import create_context
 
 

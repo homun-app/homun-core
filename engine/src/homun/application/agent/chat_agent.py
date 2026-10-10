@@ -72,7 +72,7 @@ def unbind(ctx, conversation_id: str) -> bool:
 
 def _active_chat_run(store, conversation_id: str):
     """Un run nativo attivo del lavoro chat di questa conversazione."""
-    from homun.application.agent_runs import PROPOSAL_TYPE
+    from homun.application.agent.runs import PROPOSAL_TYPE
     for record in store.commands.values():
         if record.type != PROPOSAL_TYPE or not isinstance(record.result, dict):
             continue
@@ -202,7 +202,7 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
     ``connection_id`` è il modello scelto dalla persona nel composer: il run
     della chat usa quello, non quello dell'agente d'ufficio.
     """
-    from homun.application.agent_runs import propose
+    from homun.application.agent.runs import propose
     entry = binding_for(ctx, conversation_id)
     store = ctx.repository.snapshot()
     if entry is None:
@@ -213,7 +213,7 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
     active = _active_chat_run(store, conversation_id)
     if active is not None:
         # un run è già in volo su questa chat: il messaggio lo steera
-        from homun.application.agent_control import control_in_store
+        from homun.application.agent.control import control_in_store
         work = store.works[active["work_id"]]
         control_in_store(ctx, store, actor, work.id, active["id"], {
             "command_id": f"chat-steer:{secrets.token_hex(6)}",
@@ -251,7 +251,7 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
     # continuità: i turni precedenti entrano nel contesto del run appena creato
     _bind_history(ctx, ctx.repository.snapshot(), run["id"], conversation_id)
     # Chi scrive in chat ha già deciso: il run parte subito, timbrato.
-    from homun.application.agent_runs import approve
+    from homun.application.agent.runs import approve
     owner = Actor(id=actor.id, workspace_id=ctx.workspace_id,
                   display_name="Chat", kind="person")
     approve(ctx, owner, work_id, run["id"], {
@@ -324,7 +324,7 @@ def _presentable(text: str, run: Dict[str, Any], user_message: str | None) -> st
 
 def deliver_chat_answers(ctx) -> int:
     """Pump: le risposte dei run chat completati tornano in conversazione."""
-    from homun.application.agent_runs import PROPOSAL_TYPE
+    from homun.application.agent.runs import PROPOSAL_TYPE
     delivered = 0
     store = ctx.repository.snapshot()
     for record in store.commands.values():

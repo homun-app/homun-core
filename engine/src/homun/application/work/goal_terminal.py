@@ -27,7 +27,7 @@ def runner(ctx, run, goal):
 
 def prepare(ctx, run, goal):
     """Return a receipt runner, or atomically stage the next command and wait."""
-    from homun.application.agent_terminal_request import proposal_body
+    from homun.application.agent.terminal_request import proposal_body
     cycle = _cycle(run, goal)
     receipts = cycle['receipts']
     if len(receipts) < len(goal.state.gates) and all(passed(r) for r in receipts):
@@ -56,7 +56,7 @@ def _queue(run, actor):
 
 def _supersede_configuration(ctx, run_id):
     """A changed configuration needs a fresh approval, never a stranded wait."""
-    from homun.application.agent_runs import lookup, authority
+    from homun.application.agent.runs import lookup, authority
     from homun.application.work.goal_manager import GoalManager
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
@@ -77,7 +77,7 @@ def _supersede_configuration(ctx, run_id):
 
 def resume(ctx, run_id):
     """Inspect only; commit a receipt and queue the retained finish decision once."""
-    from homun.application.agent_runs import lookup
+    from homun.application.agent.runs import lookup
     if _supersede_configuration(ctx, run_id):
         return True
     store = ctx.repository.load()

@@ -56,7 +56,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                     _logging.getLogger(__name__).error(
                         "Avvio in recovery mode=%s — diagnosi in chat", recovery["state"])
                     try:
-                        from homun.application.recovery_narrator import seed_recovery_conversation
+                        from homun.application.agent.recovery_narrator import seed_recovery_conversation
                         seed_recovery_conversation(get_context(), recovery["report"])
                     except Exception:
                         _logging.getLogger(__name__).exception(
@@ -180,7 +180,7 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(computer_use_api.router)
     app.include_router(mcp_oauth_api.router)
     app.include_router(chat_agent_api.router)
-    from homun.application import approval_relay as _relay_app
+    from homun.application.agent import approval_relay as _relay_app
     from homun.routes.channel_ingress_api import get_channel_registry
     _relay_app.set_registry_provider(get_channel_registry)
     app.include_router(routines.router)

@@ -1,7 +1,7 @@
 """Chat con l'agente: la conversazione legata a un agente esegue run e risponde in chat."""
 import pytest
 
-from homun.application import chat_agent
+from homun.application.agent import chat_agent
 from homun.context import create_context
 from homun.domain.models import Actor, AgentProfile
 
@@ -150,7 +150,7 @@ def test_chat_run_at_turn_limit_requests_summary_not_failure(setup):
     """Parity Hermes (handle_max_iterations): al limite di turni il run chat
     appende la richiesta di riassunto e prosegue senza tool; solo se ci
     ricasca (loop vero) muore con errore."""
-    from homun.application import agent_run_execution
+    from homun.application.agent import run_execution as agent_run_execution
     ctx, actor, conv = setup
     chat_agent.bind(ctx, actor, conv, "agent_chat")
     outcome = chat_agent.start_chat_turn(ctx, actor, conv, "ricerca lunga")

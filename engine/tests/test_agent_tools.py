@@ -22,7 +22,7 @@ def sources(tmp_path):
 
 
 def test_tools_read_page_and_find_text(sources):
-    from homun.application.agent_tools import run_tool
+    from homun.application.agent.tools import run_tool
     ctx, actor, bindings, _ = sources
     result = run_tool(ctx, actor, bindings, 'read_material', {'material_id': bindings[0]['id'], 'offset': 0, 'limit': 12})
     assert result['text'] == 'Consegna ent'
@@ -33,7 +33,7 @@ def test_tools_read_page_and_find_text(sources):
 
 
 def test_unselected_or_changed_source_never_read(sources):
-    from homun.application.agent_tools import run_tool
+    from homun.application.agent.tools import run_tool
     ctx, actor, bindings, other = sources
     with pytest.raises(PermissionDeniedError):
         run_tool(ctx, actor, bindings, 'read_material', {'material_id': other})
@@ -44,7 +44,7 @@ def test_unselected_or_changed_source_never_read(sources):
 
 
 def test_tool_arguments_are_strict_and_bounded(sources):
-    from homun.application.agent_tools import run_tool
+    from homun.application.agent.tools import run_tool
     ctx, actor, bindings, _ = sources
     for arguments in [{'material_id': bindings[0]['id'], 'offset': -1},
                       {'material_id': bindings[0]['id'], 'limit': 999999},

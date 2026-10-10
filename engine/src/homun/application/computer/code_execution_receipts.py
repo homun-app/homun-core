@@ -5,8 +5,8 @@ from homun.domain.errors import ValidationError
 def run_once(ctx, actor, run, execute):
     if ctx is None or not run.get('id'):
         return execute()  # Explicit standalone/test invocation.
-    from homun.application import agent_native
-    from homun.application.agent_runs import lookup, authority
+    from homun.application.agent import native as agent_native
+    from homun.application.agent.runs import lookup, authority
     call = agent_native.pending(run) if agent_native.enabled(run) else None
     key = call.id if call else f'turn:{run["turns"]}'
     with ctx.repository.locked(), ctx.repository.transaction() as store:

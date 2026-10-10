@@ -2,9 +2,9 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_native_agent import native_start
-from homun.application.agent_context import prepare, ContextPreparationDeferred
-from homun.application.agent_run_execution import _claim
-from homun.application.agent_control import control
+from homun.application.agent.agent_context import prepare, ContextPreparationDeferred
+from homun.application.agent.run_execution import _claim
+from homun.application.agent.control import control
 from homun.models.native_turn import NativeMessage, ToolCall
 from homun.domain.errors import DomainError
 
@@ -127,9 +127,9 @@ def test_control_during_summary_fences_checkpoint(setup,action):
 
 def test_checkpoint_restart_and_distinct_summary_acting_usage(setup):
     from homun.context import create_context
-    from homun.application.agent_run_execution import advance
-    from homun.application.agent_tools import catalog
-    from homun.application.agent_native import QUESTION
+    from homun.application.agent.run_execution import advance
+    from homun.application.agent.tools import catalog
+    from homun.application.agent.native import QUESTION
     ctx,actor,work,material=setup;p,run=pressured(ctx,actor,work,material)
     ctx.models.complete_summary=lambda *a,**k:SimpleNamespace(message=summary().message,
         usage=SimpleNamespace(input_tokens=2400,output_tokens=80,model_id='test-model'))
@@ -162,8 +162,8 @@ def test_checkpoint_restart_and_distinct_summary_acting_usage(setup):
 
 
 def test_steering_between_summary_fence_and_validation_failure_is_not_terminal(setup,monkeypatch):
-    from homun.application import agent_context
-    from homun.application.agent_run_execution import advance
+    from homun.application.agent import agent_context
+    from homun.application.agent.run_execution import advance
     from homun.models.context_plan import ContextPressureError
     ctx,actor,work,material=setup;p,run=pressured(ctx,actor,work,material)
     with ctx.repository.transaction() as store:

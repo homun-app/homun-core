@@ -88,7 +88,7 @@ def test_unsupported_files_fail_before_any_work_is_created(tmp_path):
 
 
 def test_admission_recovers_after_proposal_failure_without_duplicate_work(tmp_path, monkeypatch):
-    from homun.application import agent_runs
+    from homun.application.agent import runs as agent_runs
     ctx = create_context(db_path=tmp_path/'ws.db',data_dir=tmp_path,for_tests=True)
     runner = HostedMcpEngineRunner()
     real_propose = agent_runs.propose

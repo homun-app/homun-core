@@ -3,8 +3,8 @@ import json
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application.agent_runs import propose, approve
-from homun.application.agent_run_execution import advance
+from homun.application.agent.runs import propose, approve
+from homun.application.agent.run_execution import advance
 from homun.models.native_turn import NativeMessage, ToolCall
 
 
@@ -96,7 +96,7 @@ def test_foreground_waits_then_durable_child_result_wakes_parent(setup):
 
 
 def test_restart_after_admission_before_parent_receipt_deduplicates(setup, monkeypatch):
-    from homun.application import agent_native
+    from homun.application.agent import native as agent_native
     from homun.context import create_context
     ctx, actor, work, material, p = start(setup)
     append = agent_native.append_result
@@ -138,7 +138,7 @@ def test_child_failure_does_not_fail_parent_work(setup):
 
 
 def test_parent_cancel_fences_unstarted_child_without_model_call(setup):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     from homun.application.work.delegation_runtime import reconcile_delegations
     ctx, actor, work, material, p = start(setup)
     result = delegate(ctx, p)
@@ -208,7 +208,7 @@ def test_child_call_outside_subset_is_refused_by_real_dispatch(setup):
 
 
 def test_parent_cancel_during_child_model_discards_child_finish(setup):
-    from homun.application.agent_control import control
+    from homun.application.agent.control import control
     ctx, actor, work, material, p = start(setup)
     result = delegate(ctx, p)
     def model(*a, **kw):
@@ -223,7 +223,7 @@ def test_parent_cancel_during_child_model_discards_child_finish(setup):
 
 def test_idle_automation_does_not_wake_waiting_parent_before_receipt(setup):
     from homun.application.work.delegation_runtime import reconcile_delegations, has_pending, live_count
-    from homun.application.agent_automation import wake_due_automation
+    from homun.application.agent.agent_automation import wake_due_automation
     ctx, actor, work, material, p = start(setup)
     result = delegate(ctx, p, {'task':'Evidence', 'tools_include':[], 'max_turns':1})
     assert has_pending(ctx, p)
@@ -243,8 +243,8 @@ def test_idle_automation_does_not_wake_waiting_parent_before_receipt(setup):
 
 
 def test_children_do_not_replace_parent_surface_or_accept_direct_work_controls(setup):
-    from homun.application.agent_runs import list_runs
-    from homun.application.agent_control import control
+    from homun.application.agent.runs import list_runs
+    from homun.application.agent.control import control
     from homun.domain.errors import ValidationError
     ctx, actor, work, material, p = start(setup)
     result = delegate(ctx, p)

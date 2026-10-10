@@ -1,7 +1,7 @@
 """Authenticated approval of exact workspace file edits."""
 from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
-from homun.application import workspace_file_edits
+from homun.application.agent import workspace_file_edits
 from homun.domain.errors import DomainError
 from homun.routes.domain_support import _http_error
 from homun.routes.price_comparisons import request_context

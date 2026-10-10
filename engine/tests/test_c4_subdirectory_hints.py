@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from unittest.mock import patch
 
-from homun.application.subdirectory_hints import (
+from homun.application.agent.subdirectory_hints import (
     MAX_HINT_CHARS,
     SubdirectoryHintTracker,
     track_and_attach_hints,
@@ -289,7 +289,7 @@ def test_track_and_attach_hints_disabled_when_skip_context_files(project_tree: P
 def test_prompt_caching_preserved_system_prompt_never_mutated(project_tree: Path):
     """System prompt and initial prompt cache remain immutable while hints arrive via tool result."""
     from homun.models.native_turn import NativeMessage, ToolCall
-    from homun.application import agent_native
+    from homun.application.agent import native as agent_native
     import json
 
     initial_system_content = "You are Homun. Root instructions loaded at startup."

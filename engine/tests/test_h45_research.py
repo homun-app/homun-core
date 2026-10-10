@@ -6,12 +6,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.trajectory_capture import (
+from homun.application.agent.trajectory_capture import (
     TrajectoryStore,
     convert_scratchpad_to_think,
     has_incomplete_scratchpad,
 )
-from homun.application.trajectory_compression import (
+from homun.application.agent.trajectory_compression import (
     TrajectoryCompressor,
     estimate_tokens,
     estimate_trajectory_tokens,

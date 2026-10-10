@@ -1,8 +1,8 @@
 """Policy has to survive HTTP, pinning and registry reconstruction, not just helpers."""
 import pytest
 from test_agent_runs_api import api_setup
-from homun.application.agent_tool_registry import registry_for
-from homun.application.agent_tool_bridge import resolve_call
+from homun.application.agent.tool_registry import registry_for
+from homun.application.agent.tool_bridge import resolve_call
 from homun.domain.errors import ValidationError
 from homun.models.native_turn import ToolCall
 
@@ -44,7 +44,7 @@ def test_empty_allowlist_is_not_treated_as_unrestricted(api_setup):
 
 
 def test_new_runs_activate_micro_compaction_without_provider_kwargs(api_setup):
-    from homun.application.agent_context import prepare
+    from homun.application.agent.agent_context import prepare
     from homun.models.native_turn import NativeMessage
     ctx, actor, work, client, headers = api_setup
     url = f'/v1/workspaces/{ctx.workspace_id}/works/{work}/agent-runs'

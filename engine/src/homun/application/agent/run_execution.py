@@ -4,17 +4,17 @@ import logging
 from copy import deepcopy
 from datetime import datetime, timedelta
 from uuid import uuid4
-from homun.application import agent_native, agent_recovery, agent_overflow
+from homun.application.agent import native as agent_native, recovery as agent_recovery, overflow as agent_overflow
 from homun.application.work import budgets
-from homun.application.agent_run_failures import fail  # re-exported for callers
-from homun.application.agent_runs import authority, lookup
-from homun.application.agent_control_history import consume_steering
-from homun.application.agent_context import prepare as prepare_context, ContextPreparationDeferred, provider_policy
-from homun.application.agent_tools import run_tool
-from homun.application.agent_tool_registry import registry_for
-from homun.application.agent_consultation import consult
-from homun.application.agent_usage import charge, reserve as reserve_usage
-from homun.application.agent_streaming import complete as complete_native
+from homun.application.agent.run_failures import fail  # re-exported for callers
+from homun.application.agent.runs import authority, lookup
+from homun.application.agent.control_history import consume_steering
+from homun.application.agent.agent_context import prepare as prepare_context, ContextPreparationDeferred, provider_policy
+from homun.application.agent.tools import run_tool
+from homun.application.agent.tool_registry import registry_for
+from homun.application.agent.consultation import consult
+from homun.application.agent.usage import charge, reserve as reserve_usage
+from homun.application.agent.streaming import complete as complete_native
 from homun.domain.errors import DomainError, ValidationError
 from homun.domain.models import Actor, BudgetCounters, utc_now
 from homun.models.agent_turn import AgentDecision, decide
@@ -28,7 +28,7 @@ from homun.models.native_errors import (
 )
 
 
-from homun.application.agent_run_fencing import LEASE_SECONDS
+from homun.application.agent.run_fencing import LEASE_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class _ModelFailure(Exception):
 
 
 def _claim(ctx, run_id, epoch=None):
-    from homun.application.agent_terminal_sessions import announce
+    from homun.application.agent.terminal_sessions import announce
     announce(ctx, run_id)
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
@@ -113,7 +113,7 @@ def _decision(ctx, run):
     if run.get('_decision'):
         return agent_native.decision_model(run).model_validate(run['_decision'])
     actor = Actor.model_validate(run['_actor'])
-    from homun.application.agent_tool_bridge import visible_definitions
+    from homun.application.agent.tool_bridge import visible_definitions
     # riassunto di fine budget: chiamata senza tool, il modello può solo rispondere
     tools = [] if run.get('_summarize_due') else visible_definitions(run, registry_for(run))
     messages = prepare_context(ctx,run,tools) if agent_native.enabled(run) else None
@@ -134,19 +134,19 @@ def _decision(ctx, run):
                 current['model_attempts'] += 1
         ctx.service.store = store
     result = None
-    from homun.application.runtime_selection import kwargs as runtime_kwargs, for_call
+    from homun.application.agent.runtime_selection import kwargs as runtime_kwargs, for_call
 
     def reserve_fallback(error, connection_id):
         nonlocal reservation
         charge(ctx, actor, run, reservation, error.usage, reason=error.code)
         reservation = None  # Never reconcile the primary reservation twice.
-        from homun.application.agent_model_attempts import reserve_extra
+        from homun.application.agent.model_attempts import reserve_extra
         reservation = reserve_extra(ctx, actor, run, connection_id=connection_id)
 
     try:
         if agent_native.enabled(run):
             if moa_enabled:
-                from homun.application.agent_moa_runtime import execute as execute_moa
+                from homun.application.agent.moa_runtime import execute as execute_moa
                 result = execute_moa(ctx, run, messages, tools)
             else:
                 conn_id = run['connection_id']
@@ -179,7 +179,7 @@ def _decision(ctx, run):
                         raise
             agent_native.append_round(run, result.message)
             decision = agent_native.decision(run)
-            from homun.application.agent_continuation_state import complete_decision
+            from homun.application.agent.continuation_state import complete_decision
             decision = complete_decision(run, decision)
         else:
             conn_id = run['connection_id']
@@ -295,7 +295,7 @@ def advance(ctx, run_id, *, epoch=None):
         decision = _decision(ctx, run)
         observation = None
         if decision.kind == 'tool':
-            from homun.application.agent_parallel_reads import select, execute as execute_reads
+            from homun.application.agent.parallel_reads import select, execute as execute_reads
             batch = select(run)
             if batch:
                 return execute_reads(ctx, actor, run, batch, material_executor=run_tool)
@@ -303,7 +303,7 @@ def advance(ctx, run_id, *, epoch=None):
                 return 'superseded'
             try:
                 if agent_native.enabled(run):
-                    from homun.application.agent_tool_bridge import resolve_call
+                    from homun.application.agent.tool_bridge import resolve_call
                     call = resolve_call(run, agent_native.pending(run))
                     decision = decision.model_copy(update={'tool': call.name, 'arguments': call.arguments})
                 plugins_policy = run.get('plugins') if isinstance(run, dict) else None
@@ -325,15 +325,15 @@ def advance(ctx, run_id, *, epoch=None):
                 if observation is None:
                     if decision.tool == 'terminal_execute' and run.get('terminal'):
                         registry_for(run).validate(decision.tool,decision.arguments)
-                        from homun.application.agent_terminal import stage as stage_terminal
+                        from homun.application.agent.terminal import stage as stage_terminal
                         return stage_terminal(ctx,actor,run,decision)
                     if decision.tool == 'terminal_write' and run.get('terminal',{}).get('version',1) >= 4:
                         registry_for(run).validate(decision.tool,decision.arguments)
-                        from homun.application.agent_terminal_sessions import write_stdin
+                        from homun.application.agent.terminal_sessions import write_stdin
                         observation = write_stdin(ctx,actor,run,decision.arguments)
                     if decision.tool in {'terminal_poll','terminal_wait','terminal_stop'} and run.get('terminal',{}).get('version',1) >= 3:
                         registry_for(run).validate(decision.tool,decision.arguments)
-                        from homun.application import agent_terminal_sessions as terminal_sessions
+                        from homun.application.agent import terminal_sessions
                         if decision.tool == 'terminal_wait':
                             staged = terminal_sessions.stage_wait(ctx,actor,run,decision)
                             if staged == 'waiting_external':return staged
@@ -344,13 +344,13 @@ def advance(ctx, run_id, *, epoch=None):
                             observation = terminal_sessions.stop(ctx,actor,run,decision.arguments)
                     if decision.tool in {'write_workspace_file','patch_workspace_file'} and run.get('_workspace_files_version')==2:
                         registry_for(run).validate(decision.tool,decision.arguments)
-                        from homun.application.workspace_file_edits import stage as stage_edit
+                        from homun.application.agent.workspace_file_edits import stage as stage_edit
                         staged=stage_edit(ctx,actor,run,decision)
                         if staged=='waiting_external':return staged
                         observation=staged
                     if any(b['name'] == decision.tool for b in run.get('_mcp_bindings', [])):
                         registry_for(run).validate(decision.tool, decision.arguments)
-                        from homun.application.agent_external import stage
+                        from homun.application.agent.external import stage
                         return stage(ctx, actor, run, decision)
                     if decision.tool == 'cronjob_manage':
                         from homun.application.automation.cron_tools import execute as cron_execute
@@ -358,7 +358,7 @@ def advance(ctx, run_id, *, epoch=None):
                         registry_for(run).validate(decision.tool, decision.arguments)
                         observation = cron_execute(ctx, actor, run, decision.tool, decision.arguments, runner_factory=make_cron_runner)
                 if observation is None:
-                    from homun.application.workspace_files import execute as file_executor
+                    from homun.application.agent.workspace_files import execute as file_executor
                     def dispatch():
                         return registry_for(run, material_executor=run_tool, collaborator_executor=consult, file_executor=file_executor).dispatch(
                             decision.tool, decision.arguments, ctx=ctx, actor=actor, run=run)
@@ -391,7 +391,7 @@ def advance(ctx, run_id, *, epoch=None):
                 ctx.service.store = store
             return 'running'
         if decision.kind == 'finish' and not run.get('_delegation_parent'):
-            from homun.application.agent_automation import evaluate_finish
+            from homun.application.agent.agent_automation import evaluate_finish
             from homun.application.work.delegation_runtime import has_pending
             automation_evaluation = ({'action':'wait','reason':'delegation_children'} if has_pending(ctx, run)
                                      else evaluate_finish(ctx, run, decision.message))
@@ -405,11 +405,11 @@ def advance(ctx, run_id, *, epoch=None):
                 # A correction arriving during generation must precede publication.
                 config_changed = current.get('_automation_revision', 0) != run.get('_automation_revision', 0)
                 deferred = decision.kind == 'finish' and (config_changed or (current.get('_steering') and agent_native.enabled(current)))
-                from homun.application.agent_liveness import defer as defer_stall
+                from homun.application.agent.liveness import defer as defer_stall
                 stalled = decision.kind == 'finish' and not deferred and defer_stall(current, decision)
                 if not deferred and not stalled:
                     if automation_evaluation:
-                        from homun.application.agent_automation import _project
+                        from homun.application.agent.agent_automation import _project
                         if not _project(current, automation_evaluation):
                             automation_evaluation = {'action':'wait', 'reason':'automation_state_changed'}
                     current['turns'] += 1
@@ -429,7 +429,7 @@ def advance(ctx, run_id, *, epoch=None):
                         current['_sessions'] = run['_sessions']
                     if '_subdirectory_hints' in run:
                         current['_subdirectory_hints'] = run['_subdirectory_hints']
-                    from homun.application.subdirectory_hints import track_and_attach_hints
+                    from homun.application.agent.subdirectory_hints import track_and_attach_hints
                     wd = current.get('_workspace_root') or current.get('_cwd')
                     observation, _ = track_and_attach_hints(current, decision.tool, decision.arguments or {}, observation, working_dir=wd)
                     if agent_native.enabled(current):
@@ -442,7 +442,7 @@ def advance(ctx, run_id, *, epoch=None):
                 elif decision.kind == 'ask':
                     call = agent_native.pending(current) if agent_native.enabled(current) else None
                     if call and call.name == 'clarify':
-                        from homun.application.agent_clarification import questions
+                        from homun.application.agent.clarification import questions
                         current['clarify_request'] = questions(call.arguments)
                     result = service.apply(actor, f'{run_id}:ask:{current["turns"]}', 'work.request_contribution',
                         {'work_id': work.id, 'expected_version': work.version,
@@ -451,7 +451,7 @@ def advance(ctx, run_id, *, epoch=None):
                          'questions': current.get('clarify_request')})
                     current.update(status='waiting_input', request_id=result['request_id'], _wait_version=work.version)
                     if call and call.name == 'clarify':
-                        from homun.application.clarification_deadlines import bind
+                        from homun.application.agent.clarification_deadlines import bind
                         bind(current, call)
                     service.append_engine_message(actor=actor, command_id=f'{run_id}:question:{current["turns"]}',
                         conversation_id=work.primary_conversation_id, author_id='homun_engine',
@@ -462,7 +462,7 @@ def advance(ctx, run_id, *, epoch=None):
                     from homun.application.work.delegation_runtime import finish_child
                     finish_child(current, decision.message)
                 elif automation_evaluation and automation_evaluation['action'] != 'finish':
-                    from homun.application.agent_automation import apply_finish
+                    from homun.application.agent.agent_automation import apply_finish
                     apply_finish(service, actor, work, current, automation_evaluation, decision.message)
                 else:
                     sources = '\n'.join(f'- {m["title"]}, v{m["version"]}, SHA256 {m["sha256"]}'
@@ -493,7 +493,7 @@ def advance(ctx, run_id, *, epoch=None):
         return ctx.repository.load().commands[run_id].result['status']
     except _ModelFailure as held:
         if held.error.code == 'agent_model_truncated':
-            from homun.application.agent_continuation import request
+            from homun.application.agent.continuation import request
             if request(ctx, run, held.error, expected_steering=expected_steering):
                 return ctx.repository.load().commands[run_id].result['status']
         if held.error.code == 'agent_model_overflow' and agent_overflow.request_compaction(
@@ -525,7 +525,7 @@ def advance(ctx, run_id, *, epoch=None):
             current = run.result if run is not None else None
             if isinstance(current, dict) and agent_native.enabled(current) and current.get('_lease_token') == token \
                     and agent_native.pending(current):
-                from homun.application.agent_control_history import close_pending
+                from homun.application.agent.control_history import close_pending
                 close_pending(current)
                 from homun.models.native_turn import NativeMessage
                 current['_messages'].append(NativeMessage(role='user', content=(

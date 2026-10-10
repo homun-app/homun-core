@@ -145,7 +145,7 @@ def propose(ctx, actor, work_id, body, *, agent_binding=None, ssh_key_path=None)
             if work.archived or work.version != request.expected_version:
                 raise ConflictError('Work changed or is archived; create a current proposal')
             if agent_binding:
-                from homun.application.agent_terminal_link import validate_link
+                from homun.application.agent.terminal_link import validate_link
                 run=validate_link(ctx,store,actor,result,staging=True)
                 if agent_binding.get('kind') == 'goal_gate':
                     from homun.application.work.goal_terminal_link import bind_wait
@@ -172,7 +172,7 @@ def approve(ctx, actor, work_id, proposal_id, body):
                 return deepcopy(public(proposal))
             if work.archived or work.version != proposal['expected_version']:
                 raise ConflictError('Work changed or is archived; create a new proposal')
-            from homun.application.agent_terminal_link import validate_link
+            from homun.application.agent.terminal_link import validate_link
             linked=validate_link(ctx,store,actor,proposal)
             if linked is not None:linked['_active_call_id']=proposal['_agent_binding']['call_id']
             if proposal.get('timeout_seconds') is not None:

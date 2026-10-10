@@ -1,6 +1,6 @@
 """Validate a supervised external action against its live native call."""
-from homun.application.agent_runs import lookup, authority
-from homun.application import agent_native
+from homun.application.agent.runs import lookup, authority
+from homun.application.agent import native as agent_native
 from homun.domain.errors import ConflictError
 
 
@@ -19,7 +19,7 @@ def validate_link(ctx,store,actor,proposal,*,staging=False):
         raise ConflictError('External action is no longer awaited')
     call=agent_native.pending(run)
     if call is not None:
-        from homun.application.agent_tool_bridge import resolve_call
+        from homun.application.agent.tool_bridge import resolve_call
         call=resolve_call(run,call)
     binding=next((b for b in run.get('_mcp_bindings',[]) if call and b['name']==call.name),None)
     if (call is None or call.id!=link['call_id'] or binding is None

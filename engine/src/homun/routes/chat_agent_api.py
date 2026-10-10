@@ -19,7 +19,7 @@ def bind(workspace_id: str, body: BindRequest,
          x_homun_actor_id: str | None = Header(default=None),
          x_homun_actor_name: str | None = Header(default=None)):
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
-    from homun.application import chat_agent
+    from homun.application.agent import chat_agent
     try:
         return chat_agent.bind(ctx, actor, body.conversation_id, body.agent_id)
     except DomainError as exc:
@@ -31,7 +31,7 @@ def unbind(workspace_id: str, body: BindRequest,
            x_homun_actor_id: str | None = Header(default=None),
          x_homun_actor_name: str | None = Header(default=None)):
     ctx, _actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
-    from homun.application import chat_agent
+    from homun.application.agent import chat_agent
     return {"conversation_id": body.conversation_id,
             "unbound": chat_agent.unbind(ctx, body.conversation_id)}
 
@@ -41,7 +41,7 @@ def status(workspace_id: str, conversation_id: str,
            x_homun_actor_id: str | None = Header(default=None),
            x_homun_actor_name: str | None = Header(default=None)):
     ctx, _actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
-    from homun.application import chat_agent
+    from homun.application.agent import chat_agent
     binding = chat_agent.binding_for(ctx, conversation_id)
     return {"conversation_id": conversation_id,
             "agent_id": binding["agent_id"] if binding else None}
@@ -85,7 +85,7 @@ def browser_pip(workspace_id: str, conversation_id: str,
 
     ctx, _resolved = request_context(workspace_id, x_homun_actor_id or actor,
                                      x_homun_actor_name)
-    from homun.application.chat_agent import _active_chat_run
+    from homun.application.agent.chat_agent import _active_chat_run
     run = _active_chat_run(ctx.repository.load(), conversation_id)
     if run is None:
         return {"active": False}

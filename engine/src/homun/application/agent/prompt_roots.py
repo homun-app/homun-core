@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
-from homun.application.path_security import validate_within_dir
+from homun.application.agent.path_security import validate_within_dir
 from homun.domain.errors import ValidationError
 
 

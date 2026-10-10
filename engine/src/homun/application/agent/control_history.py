@@ -3,10 +3,10 @@
 interrupted calls always get explicit results, never fabricated successful ones.
 """
 import json
-from homun.application import agent_native
-from homun.application.agent_continuation_state import clear as clear_continuation
+from homun.application.agent import native as agent_native
+from homun.application.agent.continuation_state import clear as clear_continuation
 from homun.models.native_turn import NativeMessage
-from homun.application.agent_liveness import reset as reset_liveness
+from homun.application.agent.liveness import reset as reset_liveness
 
 
 def consume_steering(run):

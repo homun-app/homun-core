@@ -39,14 +39,14 @@ def _setup(ctx, actor, *, autonomy):
 
 
 def _propose(ctx, actor, work):
-    from homun.application.agent_runs import propose
+    from homun.application.agent.runs import propose
     version = ctx.repository.load().works[work].version
     return propose(ctx, actor, work, {'command_id': 'run:auto', 'expected_version': version,
                                       'material_ids': []})
 
 
 def test_sweep_auto_approves_run_for_autonomous_agent(ctx):
-    from homun.application.approval_auto import sweep, POLICY_CHANNEL
+    from homun.application.agent.approval_auto import sweep, POLICY_CHANNEL
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     agent, work = _setup(ctx, actor, autonomy='autonomous')
     proposal = _propose(ctx, actor, work)
@@ -60,7 +60,7 @@ def test_sweep_auto_approves_run_for_autonomous_agent(ctx):
 
 
 def test_sweep_leaves_supervised_agent_pending(ctx):
-    from homun.application.approval_auto import sweep
+    from homun.application.agent.approval_auto import sweep
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     agent, work = _setup(ctx, actor, autonomy='supervised')
     proposal = _propose(ctx, actor, work)
@@ -73,7 +73,7 @@ def test_sweep_leaves_supervised_agent_pending(ctx):
 def test_terminal_local_policy_never_auto_approved(ctx):
     """Host execution keeps the human gate even for autonomous agents."""
     from homun.application.computer import terminal_jobs
-    from homun.application.approval_auto import sweep
+    from homun.application.agent.approval_auto import sweep
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     agent, work = _setup(ctx, actor, autonomy='autonomous')
     proposal = _propose(ctx, actor, work)
@@ -184,8 +184,8 @@ def test_delivery_sweep_hook_auto_approves_autonomous_run(ctx):
 
 def test_public_view_exposes_approval_channel_officially(ctx):
     """The API never leaked the underscore stamp; clients read approval_channel."""
-    from homun.application.agent_runs import list_runs, public
-    from homun.application.approval_auto import sweep
+    from homun.application.agent.runs import list_runs, public
+    from homun.application.agent.approval_auto import sweep
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     agent, work = _setup(ctx, actor, autonomy='autonomous')
     proposal = _propose(ctx, actor, work)

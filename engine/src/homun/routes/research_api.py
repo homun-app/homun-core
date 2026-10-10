@@ -7,11 +7,11 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from homun.storage.paths import default_data_dir
-from homun.application.trajectory_capture import (
+from homun.application.agent.trajectory_capture import (
     TrajectorySample,
     TrajectoryStore,
 )
-from homun.application.trajectory_compression import (
+from homun.application.agent.trajectory_compression import (
     CompressionStats,
     TrajectoryCompressor,
 )

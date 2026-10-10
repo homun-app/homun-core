@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 import pytest
 
-from homun.application.context_references import (
+from homun.application.agent.context_references import (
     expand_file_reference,
     expand_folder_reference,
     expand_references,
@@ -27,14 +27,14 @@ from homun.application.context_references import (
     is_url_public,
     truncate_text,
 )
-from homun.application.prompt_assembler import (
+from homun.application.agent.prompt_assembler import (
     PromptAssembler,
     discover_nested_hints,
     discover_workspace_instructions,
     list_context_file_sources,
     scan_for_threats,
 )
-from homun.application.side_question import (
+from homun.application.agent.side_question import (
     SideQuestionRunner,
     render_history_for_side_question,
     trim_snapshot_for_fork,

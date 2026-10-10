@@ -271,7 +271,7 @@ def test_bridge_import_idempotency_and_validation(standalone_storage, setup):
 
 
 def test_bridge_import_continuation_requires_fresh_proposal_and_consent(standalone_storage, setup):
-    from homun.application import agent_runs
+    from homun.application.agent import runs as agent_runs
     from homun.application.sessions.resume import prepare
     from homun.models.native_turn import NativeMessage
     from types import SimpleNamespace

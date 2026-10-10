@@ -7,7 +7,7 @@ from test_agent_runs import setup
 
 
 def test_memory_remember_and_recall(setup):
-    from homun.application import agent_runs
+    from homun.application.agent import runs as agent_runs
     from homun.application.memory.tools import execute
 
     ctx, actor, work, _ = setup
@@ -84,8 +84,8 @@ def test_session_search_with_filters(setup):
 
 
 def test_agent_run_advances_with_memory_tool(setup):
-    from homun.application import agent_runs
-    from homun.application.agent_run_execution import advance
+    from homun.application.agent import runs as agent_runs
+    from homun.application.agent.run_execution import advance
 
     ctx, actor, work, _ = setup
     ctx.models.set_active("openai_compatible")

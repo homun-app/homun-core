@@ -1,6 +1,6 @@
 """Shared native protocol and control/discovery argument contracts."""
 from pydantic import Field, field_validator
-from homun.application import agent_tools
+from homun.application.agent import tools as agent_tools
 from homun.models.agent_turn import ToolDefinition
 from homun.tools.registry import ToolEntry
 

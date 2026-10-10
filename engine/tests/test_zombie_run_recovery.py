@@ -25,7 +25,7 @@ def _apply(ctx, actor, command_id, kind, payload):
 
 
 def _queued_run(ctx, actor):
-    from homun.application.agent_runs import propose
+    from homun.application.agent.runs import propose
     agent = _apply(ctx, actor, 'ag', 'agent.create',
                    {'name': 'Atlas', 'autonomy_mode': 'autonomous'})['agent_id']
     project = _apply(ctx, actor, 'p', 'project.create', {'name': 'Zombie'})['project_id']

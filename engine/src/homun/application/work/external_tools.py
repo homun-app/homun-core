@@ -131,7 +131,7 @@ def propose(ctx, actor, body, *, agent_binding=None) -> dict[str, Any]:
             if agent_binding:
                 result['_agent_binding'] = deepcopy(agent_binding)
                 result['agent_run_id'] = agent_binding['run_id']
-                from homun.application.agent_external_link import validate_link
+                from homun.application.agent.external_link import validate_link
                 linked_run = validate_link(ctx,store,actor,result,staging=True)
                 linked_run.update(status='waiting_external',external_request_id=result['id'])
                 for key in ('_lease_token','_lease_until','_active_call_id'):
@@ -168,7 +168,7 @@ def approve(ctx, actor, proposal_id: str, body) -> dict[str, Any]:
                 if not deadline or datetime.fromisoformat(deadline) <= utc_now():
                     proposal.update(status='outcome_unknown', error='Esito esterno incerto: verificare sul servizio prima di una nuova azione.')
             elif status in {'pending_approval', 'queued'}:
-                from homun.application.agent_external_link import validate_link
+                from homun.application.agent.external_link import validate_link
                 linked_run = validate_link(ctx,store,actor,proposal)
                 server = store.external_servers.get(proposal['server_id'])
                 if not proposal.get('_server_hash') or not proposal.get('_tool_descriptor'):

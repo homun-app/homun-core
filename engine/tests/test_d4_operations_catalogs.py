@@ -20,7 +20,7 @@ from homun.application.computer.surface_catalog_packs import (
     CatalogPacksManager,
     SkillPack,
 )
-from homun.application.trajectory_capture import TrajectoryStore
+from homun.application.agent.trajectory_capture import TrajectoryStore
 
 
 # ---------------------------------------------------------------------------

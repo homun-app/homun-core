@@ -5,7 +5,7 @@ Un modello locale senza tag <think> di apertura chiude il ragionamento con un
 quello che l'utente vedrebbe (strip), altrimenti ogni risposta con preambolo
 di ragionamento viene rifiutata all'infinito.
 """
-from homun.application.agent_run_execution import _looks_like_pure_reasoning
+from homun.application.agent.run_execution import _looks_like_pure_reasoning
 from homun.models.finish_gates import strip_think_blocks
 
 

@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.path_security import (
+from homun.application.agent.path_security import (
     check_path_safety,
     has_traversal_component,
     has_unsafe_path_chars,

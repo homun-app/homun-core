@@ -47,7 +47,7 @@ def test_seeding_is_idempotent_and_respects_user_changes(ctx):
 
 
 def test_knowledge_capabilities_default_on_native_and_off_otherwise(ctx, monkeypatch):
-    from homun.application import agent_runs, agent_native
+    from homun.application.agent import runs as agent_runs, native as agent_native
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     project = _apply(ctx, actor, 'p1', 'project.create', {'name': 'D'})['project_id']
     conversation = _apply(ctx, actor, 'c1', 'conversation.create',
@@ -88,7 +88,7 @@ def test_knowledge_capabilities_default_on_native_and_off_otherwise(ctx, monkeyp
 
 
 def test_project_agent_tool_overrides_become_run_allowlist(ctx, monkeypatch):
-    from homun.application import agent_runs, agent_native
+    from homun.application.agent import runs as agent_runs, native as agent_native
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     agent = _apply(ctx, actor, 'ag', 'agent.create', {'name': 'Vega'})['agent_id']
     project = _apply(ctx, actor, 'p1', 'project.create', {

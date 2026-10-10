@@ -8,7 +8,7 @@ def reserve(ctx, actor, run, *, purpose, connection_id=None, model_id=None, acco
     if run.get('workspace_transfer') and run['workspace_transfer'].get('status') != 'ready':
         from homun.domain.errors import ConflictError
         raise ConflictError('Workspace transfer must be ready before a model call')
-    from homun.application.runtime_selection import for_call
+    from homun.application.agent.runtime_selection import for_call
     selection = for_call(ctx.models, run, connection_id=connection_id, model_id=model_id)
     selected = selection['connection_id']
     connection = ctx.models.get_connection(selected)

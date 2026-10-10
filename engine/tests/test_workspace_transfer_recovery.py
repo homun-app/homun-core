@@ -2,10 +2,10 @@
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application import agent_runs
+from homun.application.agent import runs as agent_runs
 from homun.application.sessions import runtime as session_runtime, workspace as session_workspace
-from homun.application.agent_run_execution import advance, _claim
-from homun.application.workspace_files import root_for
+from homun.application.agent.run_execution import advance, _claim
+from homun.application.agent.workspace_files import root_for
 from homun.models.native_turn import NativeMessage
 from homun.domain.errors import DomainError
 
@@ -87,7 +87,7 @@ def test_transfer_blocks_before_model_io_when_authority_or_bytes_change(setup, f
 
 
 def test_side_question_cannot_bypass_workspace_ready_gate(setup):
-    from homun.application.agent_side_questions import answer_side_question
+    from homun.application.agent.side_questions import answer_side_question
     ctx, actor, run, _, _ = prepared(setup)
     ctx.models.complete_summary = lambda *a, **k: pytest.fail('Provider called before transfer receipt')
     with pytest.raises(DomainError):

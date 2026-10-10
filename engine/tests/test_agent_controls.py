@@ -2,8 +2,8 @@ from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
 from test_native_agent import native_start
-from homun.application.agent_control import control
-from homun.application.agent_run_execution import advance, fail
+from homun.application.agent.control import control
+from homun.application.agent.run_execution import advance, fail
 from homun.application.sessions.command_delivery import admit, complete
 from homun.application.sessions.command_types import CommandRequest
 from homun.context import create_context
@@ -149,7 +149,7 @@ def test_normal_chat_steers_without_independent_interpretation(setup):
 
 
 def test_redirect_during_tool_records_unknown_and_drops_late_result(setup, monkeypatch):
-    from homun.application import agent_run_execution
+    from homun.application.agent import run_execution as agent_run_execution
     ctx,actor,work,material=setup;p=native_start(ctx,actor,work,material)
     scripted(ctx,batch(material))
     def tool(*args):
@@ -194,7 +194,7 @@ def test_workflow_delivery_passes_epoch(setup, monkeypatch):
 
 
 def test_pause_then_redirect_keeps_inflight_outcome_unknown(setup, monkeypatch):
-    from homun.application import agent_run_execution
+    from homun.application.agent import run_execution as agent_run_execution
     ctx,actor,work,material=setup;p=native_start(ctx,actor,work,material)
     scripted(ctx,batch(material))
     def tool(*args):
@@ -244,7 +244,7 @@ def test_legacy_workflow_without_epoch_argument_recovers_its_own_generation(setu
 
 
 def test_stale_epoch_claim_returns_status_without_exception_path(setup):
-    from homun.application.agent_run_execution import _claim
+    from homun.application.agent.run_execution import _claim
     ctx,actor,work,material=setup
     p=native_start(ctx,actor,work,material)
     assert _claim(ctx,p['id'],epoch=-1)==('superseded',None)

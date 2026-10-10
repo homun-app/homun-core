@@ -156,7 +156,7 @@ def test_agent_runs_negative_and_validation(api_setup):
 
 
 def test_agent_runs_restart_survival(tmp_path, monkeypatch):
-    from homun.application.agent_runs import lookup
+    from homun.application.agent.runs import lookup
     db_file = tmp_path / "ws_restart.db"
     ctx = create_context(db_path=db_file, data_dir=tmp_path, for_tests=True)
     actor = Actor(id="person_owner", workspace_id=ctx.workspace_id, display_name="Owner")
@@ -305,7 +305,7 @@ def test_agent_runs_fallback_connection_and_failover(api_setup, monkeypatch, kno
     from homun.models.port import Connection
     from homun.models.native_errors import NativeModelError, RATE_LIMITED
     from homun.models.native_turn import NativeMessage
-    from homun.application.agent_run_execution import advance
+    from homun.application.agent.run_execution import advance
 
     ctx, actor, work_id, client, headers = api_setup
     base_url = f"/v1/workspaces/{ctx.workspace_id}/works/{work_id}/agent-runs"

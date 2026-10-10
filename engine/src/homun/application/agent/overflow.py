@@ -3,8 +3,8 @@
 No guessed context limit, blind replay, output-cap increase or recursive summary
 recovery. The existing context planner proves a safe cut and meaningful reduction.
 """
-from homun.application.agent_runs import lookup
-from homun.application.agent_recovery import can_attempt
+from homun.application.agent.runs import lookup
+from homun.application.agent.recovery import can_attempt
 
 MAX_RECOVERIES = 2
 
