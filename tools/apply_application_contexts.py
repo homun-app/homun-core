@@ -64,24 +64,33 @@ def rewrite_dotted(content: str, entries: dict[str, str]) -> tuple[str, list[str
 def rewrite_from_imports(content: str, entries: dict[str, str]) -> tuple[str, list[str]]:
     """Riscrive `from homun.application import X[, Y] [as ...]` una riga per contesto."""
     statement = re.compile(r"^([ \t]*)from homun\.application import ([\w., ]+)$", re.M)
-    touched = []
+    changed: list[str] = []
 
     def replace(match: re.Match) -> str:
         indent, symbols_text = match.group(1), match.group(2)
         symbols = [part.strip() for part in symbols_text.split(",")]
         grouped: dict[str, list[str]] = {}
+        unmapped: list[str] = []
         for symbol in symbols:
             name, _, alias = (part.strip() for part in symbol.partition(" as "))
             if name not in entries:
-                return match.group(0)  # simbolo non mappato: riga intatta, la segnala --check
+                unmapped.append(symbol)  # contesto non ancora applicato: riga residua intatta
+                continue
             context, stem = entries[name].split("/", 1)
             binding = alias or name
             grouped.setdefault(context, []).append(stem if stem == binding else f"{stem} as {binding}")
         touched.append(match.group(0).strip())
-        return "\n".join(f"{indent}from homun.application.{context} import {', '.join(names)}"
-                         for context, names in grouped.items())
+        lines = []
+        if unmapped:
+            lines.append(f"{indent}from homun.application import {', '.join(unmapped)}")
+        lines.extend(f"{indent}from homun.application.{context} import {', '.join(names)}"
+                     for context, names in grouped.items())
+        rebuilt = "\n".join(lines)
+        if rebuilt != match.group(0):
+            changed.append(match.group(0).strip())
+        return rebuilt
 
-    return statement.sub(replace, content), touched
+    return statement.sub(replace, content), changed
 
 
 def plan_moves(entries: dict[str, str]) -> list[tuple[Path, Path]]:
@@ -100,7 +109,7 @@ def plan_moves(entries: dict[str, str]) -> list[tuple[Path, Path]]:
 
 def run(args: argparse.Namespace) -> int:
     entries = load_entries(args.context)
-    moves = plan_moves(entries)
+    moves = [] if args.rewrite_only else plan_moves(entries)
     contexts = sorted({new.split("/", 1)[0] for new in entries.values()})
     print(f"contesti: {', '.join(contexts)} | spostamenti: {len(moves)} | voci mappa: {len(entries)}")
 
@@ -167,6 +176,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--context", help="applica solo le voci di un contesto")
     parser.add_argument("--dry-run", action="store_true", help="stampa le operazioni e i diff senza scrivere")
+    parser.add_argument("--rewrite-only", action="store_true",
+                        help="salta i git mv (spostamenti già applicati) e riscrive soltanto gli import")
     parser.add_argument("--check", action="store_true", help="verifica che non restino vecchi percorsi")
     args = parser.parse_args()
     entries = load_entries(args.context)
