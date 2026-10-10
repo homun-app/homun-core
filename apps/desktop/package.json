@@ -2,7 +2,7 @@
   "name": "homun-desktop",
   "productName": "Homun",
   "version": "0.2.1004",
-  "description": "Homun \u2014 il tuo spazio di lavoro con la squadra AI",
+  "description": "Homun — il tuo spazio di lavoro con la squadra AI",
   "main": "src/main.cjs",
   "private": true,
   "scripts": {
@@ -16,7 +16,7 @@
   "devDependencies": {
     "@electron/fuses": "^1.8.0",
     "electron": "44.4.3",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.17.0"
   },
   "build": {
     "appId": "app.homun.desktop",
