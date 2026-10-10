@@ -28,9 +28,9 @@ SCOPE_DIRS = (ROOT / "engine" / "src", ROOT / "engine" / "tests", ROOT / "tools"
 SKIP_PARTS = {".venv", "__pycache__", "node_modules"}
 
 
-def load_entries(context: str | None) -> dict[str, str]:
+def load_entries(map_path: Path, context: str | None) -> dict[str, str]:
     """Map vecchio modulo -> nuovo percorso relativo (senza .py), filtrato per contesto."""
-    raw = json.loads(MAP_PATH.read_text(encoding="utf-8"))
+    raw = json.loads(map_path.read_text(encoding="utf-8"))
     entries = {key.removesuffix(".py"): value.removesuffix(".py")
                for key, value in raw.items() if key != "__init__.py"}
     if context:
@@ -50,40 +50,61 @@ def scope_files() -> list[Path]:
 
 
 def rewrite_dotted(content: str, entries: dict[str, str]) -> tuple[str, list[str]]:
-    """Riscrive `homun.application.<old>` ovunque (codice e stringhe), bordo-parola."""
-    changed = []
-    for old in sorted(entries, key=len, reverse=True):
-        new = entries[old].replace("/", ".")
-        pattern = re.compile(rf"homun\.application\.{re.escape(old)}(?!\w)")
-        if pattern.search(content):
-            content = pattern.sub(f"homun.application.{new}", content)
-            changed.append(old)
-    return content, changed
+    """Riscrive `homun.application.<old>` ovunque (codice e stringhe), bordo-parola.
 
-
-def rewrite_from_imports(content: str, entries: dict[str, str]) -> tuple[str, list[str]]:
-    """Riscrive `from homun.application import X[, Y] [as ...]` una riga per contesto."""
-    statement = re.compile(r"^([ \t]*)from homun\.application import ([\w., ]+?)(\s*#.*)?$", re.M)
+    Un'unica regex in alternanza (chiavi più lunghe prima) con callback:
+    re.sub non riscansiona il testo sostituito, quindi una chiave corta
+    (agent/runs) non può mai infilarsi nel risultato di una chiave lunga
+    (agent/run_execution -> agent.runs.run_execution).
+    """
+    if not entries:
+        return content, []
+    keys = sorted(entries, key=len, reverse=True)
+    pattern = re.compile("|".join(
+        rf"homun\.application\.{re.escape(key.replace('/', '.'))}(?!\w)" for key in keys))
+    by_dotted = {key.replace("/", "."): key for key in keys}
     changed: list[str] = []
 
     def replace(match: re.Match) -> str:
-        indent, symbols_text, comment = match.group(1), match.group(2), match.group(3) or ""
+        old = by_dotted[match.group(0)[len("homun.application."):]]
+        changed.append(old)
+        return f"homun.application.{entries[old].replace('/', '.')}"
+
+    return pattern.sub(replace, content), changed
+
+
+def rewrite_from_imports(content: str, entries: dict[str, str]) -> tuple[str, list[str]]:
+    """Riscrive `from homun.application[.<pkg>] import X[, Y] [as ...]` una riga per pacchetto.
+
+    Va eseguita DOPO rewrite_dotted: se un modulo spostato dà nome a un gruppo
+    (es. agent/runs.py -> agent/runs/runs.py) la riga emessa contiene il nuovo
+    pacchetto, e un pass dotted successivo la corromperebbe.
+    """
+    statement = re.compile(
+        r"^([ \t]*)from (homun\.application(?:\.[\w.]+)?) import ([\w., ]+?)(\s*#.*)?$", re.M)
+    changed: list[str] = []
+
+    def replace(match: re.Match) -> str:
+        indent, prefix, symbols_text, comment = (match.group(1), match.group(2),
+                                                 match.group(3), match.group(4) or "")
+        prefix_path = prefix.removeprefix("homun.application").lstrip(".").replace(".", "/")
         symbols = [part.strip() for part in symbols_text.split(",")]
         grouped: dict[str, list[str]] = {}
         unmapped: list[str] = []
         for symbol in symbols:
             name, _, alias = (part.strip() for part in symbol.partition(" as "))
-            if name not in entries:
-                unmapped.append(symbol)  # contesto non ancora applicato: riga residua intatta
+            key = f"{prefix_path}/{name}" if prefix_path else name
+            if key not in entries:
+                unmapped.append(symbol)  # pacchetto non coinvolto dalla mappa: riga residua intatta
                 continue
-            context, stem = entries[name].split("/", 1)
+            package, stem = entries[key].rsplit("/", 1)
             binding = alias or name
-            grouped.setdefault(context, []).append(stem if stem == binding else f"{stem} as {binding}")
+            grouped.setdefault(package, []).append(stem if stem == binding else f"{stem} as {binding}")
         lines = []
         if unmapped:
-            lines.append(f"{indent}from homun.application import {', '.join(unmapped)}")
-        lines.extend(f"{indent}from homun.application.{context} import {', '.join(names)}"
-                     for context, names in grouped.items())
+            lines.append(f"{indent}from {prefix} import {', '.join(unmapped)}")
+        lines.extend(f"{indent}from homun.application.{package.replace('/', '.')} import {', '.join(names)}"
+                     for package, names in grouped.items())
         rebuilt = "\n".join(lines)
         if comment:  # il commento resta sulla prima riga emessa
             rebuilt = rebuilt.replace("\n", f"{comment}\n", 1) if "\n" in rebuilt else rebuilt + comment
@@ -108,8 +129,7 @@ def plan_moves(entries: dict[str, str]) -> list[tuple[Path, Path]]:
     return moves
 
 
-def run(args: argparse.Namespace) -> int:
-    entries = load_entries(args.context)
+def run(args: argparse.Namespace, entries: dict[str, str]) -> int:
     moves = [] if args.rewrite_only else plan_moves(entries)
     contexts = sorted({new.split("/", 1)[0] for new in entries.values()})
     print(f"contesti: {', '.join(contexts)} | spostamenti: {len(moves)} | voci mappa: {len(entries)}")
@@ -117,8 +137,8 @@ def run(args: argparse.Namespace) -> int:
     diffs: list[str] = []
     for path in scope_files():
         original = path.read_text(encoding="utf-8")
-        rewritten, from_imports = rewrite_from_imports(original, entries)
-        rewritten, _ = rewrite_dotted(rewritten, entries)
+        rewritten, _ = rewrite_dotted(original, entries)
+        rewritten, from_imports = rewrite_from_imports(rewritten, entries)
         if from_imports:
             print(f"  from-import riscritti in {path.relative_to(ROOT)}: {len(from_imports)}")
         if rewritten != original:
@@ -142,8 +162,8 @@ def run(args: argparse.Namespace) -> int:
     rewritten_files = 0
     for path in scope_files():
         original = path.read_text(encoding="utf-8")
-        rewritten, _ = rewrite_from_imports(original, entries)
-        rewritten, _ = rewrite_dotted(rewritten, entries)
+        rewritten, _ = rewrite_dotted(original, entries)
+        rewritten, _ = rewrite_from_imports(rewritten, entries)
         if rewritten != original:
             path.write_text(rewritten, encoding="utf-8")
             rewritten_files += 1
@@ -153,16 +173,29 @@ def run(args: argparse.Namespace) -> int:
 
 def check(entries: dict[str, str]) -> int:
     """Fallisce se resta un riferimento ai vecchi percorsi delle voci selezionate."""
-    from_import = re.compile(r"^from homun\.application import ([\w., ]+?)(?:\s*#.*)?$", re.M)
+    from_import = re.compile(
+        r"^from (homun\.application(?:\.[\w.]+)?) import ([\w., ]+?)(?:\s*#.*)?$", re.M)
     leftovers = []
     for path in scope_files():
         content = path.read_text(encoding="utf-8")
         for old in entries:
-            if re.search(rf"homun\.application\.{re.escape(old)}(?!\w)", content):
+            for match in re.finditer(
+                    rf"homun\.application\.{re.escape(old.replace('/', '.'))}(?!\w)", content):
+                # `agent.runs.<modulo>` è un prefisso di pacchetto legittimo quando
+                # agent/runs/ esiste come directory: solo il riferimento NUDO al
+                # vecchio modulo (o a un suo attributo inesistente) è residuo.
+                tail = content[match.end():]
+                if tail.startswith("."):
+                    member = re.match(r"\w+", tail[1:])
+                    if member and ((APPLICATION_DIR / old / member.group(0)).with_suffix(".py").is_file()
+                                   or (APPLICATION_DIR / old / member.group(0)).is_dir()):
+                        continue
                 leftovers.append(f"{path.relative_to(ROOT)}: homun.application.{old}")
         for match in from_import.finditer(content):
-            names = [part.partition(" as ")[0].strip() for part in match.group(1).split(",")]
-            stale = sorted(set(names) & set(entries))
+            prefix_path = match.group(1).removeprefix("homun.application").lstrip(".").replace(".", "/")
+            names = [part.partition(" as ")[0].strip() for part in match.group(2).split(",")]
+            keys = {f"{prefix_path}/{n}" if prefix_path else n for n in names}
+            stale = sorted(keys & set(entries))
             if stale:
                 leftovers.append(f"{path.relative_to(ROOT)}: {match.group(0).strip()} (simboli: {', '.join(stale)})")
     if leftovers:
@@ -175,16 +208,18 @@ def check(entries: dict[str, str]) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--map", type=Path, default=MAP_PATH,
+                        help="mappa JSON da applicare (predefinita: tools/application_contexts.json)")
     parser.add_argument("--context", help="applica solo le voci di un contesto")
     parser.add_argument("--dry-run", action="store_true", help="stampa le operazioni e i diff senza scrivere")
     parser.add_argument("--rewrite-only", action="store_true",
                         help="salta i git mv (spostamenti già applicati) e riscrive soltanto gli import")
     parser.add_argument("--check", action="store_true", help="verifica che non restino vecchi percorsi")
     args = parser.parse_args()
-    entries = load_entries(args.context)
+    entries = load_entries(args.map, args.context)
     if args.check:
         return check(entries)
-    return run(args)
+    return run(args, entries)
 
 
 if __name__ == "__main__":
