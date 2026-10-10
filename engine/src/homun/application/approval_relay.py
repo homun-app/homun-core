@@ -248,7 +248,8 @@ def notify_pending(ctx) -> int:
 # ── inbound decisions ────────────────────────────────────────────────────────
 
 def _approve_gate(ctx, entry: Dict[str, Any], channel: str) -> str:
-    from homun.application import agent_runs, terminal_jobs, workspace_file_edits
+    from homun.application import agent_runs, workspace_file_edits
+    from homun.application.computer import terminal_jobs
     from homun.application.approval_auto import owner_actor
     from homun.domain.models import Actor
 
@@ -285,7 +286,7 @@ def _approve_gate(ctx, entry: Dict[str, Any], channel: str) -> str:
             workspace_file_edits.approve(ctx, actor, work.id, entry["gate_id"],
                                          {"digest": gate["digest"]})
         elif entry["kind"] == "computer_use":
-            from homun.application import computer_use_jobs
+            from homun.application.computer import jobs as computer_use_jobs
             computer_use_jobs.approve(ctx, actor, work.id, entry["gate_id"],
                                       {"digest": gate["digest"],
                                        "channel": f"relay:{channel}"})
@@ -298,7 +299,7 @@ def _approve_gate(ctx, entry: Dict[str, Any], channel: str) -> str:
 
 
 def _reject_gate(ctx, entry: Dict[str, Any], channel: str = "relay") -> str:
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     from homun.domain.models import Actor
 
     store = ctx.repository.snapshot()
@@ -335,7 +336,7 @@ def _reject_gate(ctx, entry: Dict[str, Any], channel: str = "relay") -> str:
                 ctx.service.store = inner
             return "🛑 Modifica file rifiutata."
         if entry["kind"] == "computer_use":
-            from homun.application import computer_use_jobs
+            from homun.application.computer import jobs as computer_use_jobs
             computer_use_jobs.reject(ctx, actor, work.id, entry["gate_id"],
                                      {"digest": gate["digest"]})
             return "🛑 Azione desktop rifiutata."

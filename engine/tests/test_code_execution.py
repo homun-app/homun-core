@@ -15,15 +15,15 @@ import time
 from pathlib import Path
 import pytest
 
-from homun.application.code_execution_contracts import (
+from homun.application.computer.code_execution_contracts import (
     DEFAULT_MAX_TOOL_CALLS,
     DEFAULT_TIMEOUT,
     MAX_STDOUT_BYTES,
     CodeExecutionArguments,
     entries as code_exec_entries,
 )
-from homun.application.code_execution_rpc import CodeExecutionRpcServer
-from homun.application.code_execution_tool import (
+from homun.application.computer.code_execution_rpc import CodeExecutionRpcServer
+from homun.application.computer.code_execution_tool import (
     execute as code_exec_execute,
     run_code_with_rpc,
     truncate_output,

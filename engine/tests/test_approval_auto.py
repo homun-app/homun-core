@@ -72,7 +72,7 @@ def test_sweep_leaves_supervised_agent_pending(ctx):
 
 def test_terminal_local_policy_never_auto_approved(ctx):
     """Host execution keeps the human gate even for autonomous agents."""
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     from homun.application.approval_auto import sweep
     actor = Actor(id='person_owner', workspace_id=ctx.workspace_id, display_name='Owner')
     agent, work = _setup(ctx, actor, autonomy='autonomous')

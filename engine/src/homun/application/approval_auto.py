@@ -36,7 +36,7 @@ def _stamp(ctx, record_id: str) -> None:
 
 
 def _approve_terminal(ctx, actor, work, run) -> bool:
-    from homun.application import terminal_jobs
+    from homun.application.computer import terminal_jobs
     proposal_id = run.get("terminal_request_id")
     if not proposal_id:
         return False

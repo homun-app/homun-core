@@ -1,7 +1,7 @@
 """Persist job observations independently from viewer authorization."""
 from copy import deepcopy
 from homun.domain.models import utc_now
-from homun.application.terminal_contracts import public
+from homun.application.computer.terminal_contracts import public
 
 
 def record(ctx, proposal_id, snapshot, state):

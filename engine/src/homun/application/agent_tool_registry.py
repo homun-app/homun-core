@@ -29,25 +29,25 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
         for file_entry in file_entries(file_executor, run['_workspace_files_version']):registry.register(file_entry)
     pages = run.get('web_pages')
     if isinstance(pages, dict) and pages.get('policy') == 'public-http-v1' and pages.get('version') in {1, 2, 3}:
-        from homun.application.web_page_contracts import entries as web_entries
-        from homun.application.web_pages import execute as web_execute
+        from homun.application.computer.web_page_contracts import entries as web_entries
+        from homun.application.computer.web_pages import execute as web_execute
         for web_entry in web_entries(web_execute, pages.get('version', 1)):
             registry.register(web_entry)
     browser = run.get('browser')
     if isinstance(browser, dict) and browser.get('policy') == 'owned-headless-v1' and browser.get('version') in {1, 2}:
-        from homun.application.browser_contracts import entries as browser_entries
-        from homun.application.browser_pages import execute as browser_execute
+        from homun.application.computer.browser_contracts import entries as browser_entries
+        from homun.application.computer.browser_pages import execute as browser_execute
         for browser_entry in browser_entries(browser_execute, browser.get('version', 1)):
             registry.register(browser_entry)
     if isinstance(browser, dict) and browser.get('policy') == 'owned-headless-v1' and browser.get('version') in {3, 4, 5, 6}:
-        from homun.application.browser_form_contracts import entries as browser_form_entries
-        from homun.application.browser_form_pages import execute as browser_form_execute
+        from homun.application.computer.browser_form_contracts import entries as browser_form_entries
+        from homun.application.computer.browser_form_pages import execute as browser_form_execute
         for browser_entry in browser_form_entries(browser_form_execute, browser.get('version')):
             registry.register(browser_entry)
     desktop = run.get('desktop')
     if isinstance(desktop, dict) and desktop.get('policy') == 'native-desktop-v1' and desktop.get('version') == 1:
-        from homun.application.desktop_tools import entries as desktop_entries
-        from homun.application.desktop_tools import execute as desktop_execute
+        from homun.application.computer.desktop_tools import entries as desktop_entries
+        from homun.application.computer.desktop_tools import execute as desktop_execute
         for d_entry in desktop_entries(desktop_execute, desktop.get('version', 1)):
             registry.register(d_entry)
     cps = run.get('checkpoints')
@@ -64,8 +64,8 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             registry.register(mem_entry)
     cu = run.get('computer_use')
     if isinstance(cu, dict) and cu.get('policy') == 'cua-driver-supervised-v1' and cu.get('version') == 1:
-        from homun.application.computer_use_contracts import entries as cu_entries
-        from homun.application.computer_use_contracts import execute as cu_execute
+        from homun.application.computer.contracts import entries as cu_entries
+        from homun.application.computer.contracts import execute as cu_execute
         for cu_entry in cu_entries(cu_execute, cu.get('version', 1)):
             registry.register(cu_entry)
     skills = run.get('skills')
@@ -112,8 +112,8 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             registry.register(gw_entry)
     code_exec = run.get('code_execution')
     if isinstance(code_exec, dict) and code_exec.get('policy') == 'programmatic-v1' and code_exec.get('version') == 1:
-        from homun.application.code_execution_contracts import entries as code_exec_entries
-        from homun.application.code_execution_tool import execute as code_exec_execute
+        from homun.application.computer.code_execution_contracts import entries as code_exec_entries
+        from homun.application.computer.code_execution_tool import execute as code_exec_execute
         for ce_entry in code_exec_entries(code_exec_execute, code_exec.get('version', 1)):
             registry.register(ce_entry)
     plugins = run.get('plugins')
@@ -144,7 +144,7 @@ def registry_for(run, *, material_executor=None, collaborator_executor=None, fil
             excluded = ('tool_search', 'tool_describe', 'tool_call')
         registry.register(ToolEntry(definition, 'discovery', version, DiscoveryArguments,
             lambda ctx, actor, current, args: {'tools': registry.search(args['query'], args['limit'], exclude=excluded)}))
-    from homun.application.surface_toolset_policy import is_tool_allowed_for_surface
+    from homun.application.computer.surface_toolset_policy import is_tool_allowed_for_surface
     for item in registry.manifest():
         if not is_tool_allowed_for_surface(item['name'], run, metadata=item):
             registry.unregister(item['name'])

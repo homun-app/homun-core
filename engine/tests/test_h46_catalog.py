@@ -5,12 +5,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.surface_companion import CompanionManager
-from homun.application.surface_achievements import AchievementTracker
-from homun.application.surface_tours_tips import TourAndTipManager
-from homun.application.surface_cleanup import DiskCleanupEngine
-from homun.application.surface_security_guidance import SecurityGuidanceScanner
-from homun.application.surface_catalog_packs import CatalogPacksManager, BUILTIN_PACKS
+from homun.application.computer.surface_companion import CompanionManager
+from homun.application.computer.surface_achievements import AchievementTracker
+from homun.application.computer.surface_tours_tips import TourAndTipManager
+from homun.application.computer.surface_cleanup import DiskCleanupEngine
+from homun.application.computer.surface_security_guidance import SecurityGuidanceScanner
+from homun.application.computer.surface_catalog_packs import CatalogPacksManager, BUILTIN_PACKS
 
 
 def test_companion_lifecycle_and_skins(tmp_path: Path):

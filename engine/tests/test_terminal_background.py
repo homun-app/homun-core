@@ -1,7 +1,8 @@
 """Background sessions return control, then poll, wait, stop and notify once."""
 import json
 from types import SimpleNamespace
-from homun.application import agent_runs, terminal_jobs
+from homun.application import agent_runs
+from homun.application.computer import terminal_jobs
 from homun.application.agent_run_execution import advance
 from homun.application.agent_terminal import resume
 from homun.application.agent_terminal_sessions import announce, resume_wait

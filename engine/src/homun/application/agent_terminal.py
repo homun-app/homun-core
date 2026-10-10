@@ -1,6 +1,7 @@
 """Native terminal calls pause for consent and resume from an owned job receipt."""
 from copy import deepcopy
-from homun.application import agent_native, terminal_jobs
+from homun.application import agent_native
+from homun.application.computer import terminal_jobs
 from homun.application.agent_terminal_sessions import start_receipt
 from homun.domain.errors import ValidationError
 from homun.domain.models import Actor

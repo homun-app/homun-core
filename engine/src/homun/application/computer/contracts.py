@@ -42,7 +42,7 @@ def entries(handler, version=1) -> List[ToolEntry]:
 
 def execute(ctx, actor, run, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Handler: classify through the three tiers, gate or execute."""
-    from homun.application import computer_use_jobs
+    from homun.application.computer import jobs as computer_use_jobs
     from homun.domain.errors import ValidationError
 
     if name != "computer_use":

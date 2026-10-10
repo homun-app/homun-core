@@ -105,7 +105,7 @@ def test_sweep_does_not_close_run_waiting_on_approval(ctx, monkeypatch):
     run_id = proposal['id']
     # il run parte e poi mette un terminal job in attesa: status waiting_external
     from homun.domain.models import CommandRecord
-    from homun.application.terminal_jobs import TYPE as TERMINAL_TYPE
+    from homun.application.computer.terminal_jobs import TYPE as TERMINAL_TYPE
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             run = store.commands[run_id].result

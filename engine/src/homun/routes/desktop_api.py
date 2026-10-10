@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from homun.application.computer_use_driver import ComputerUseDriver
-from homun.application.desktop_ui_manager import DesktopUiManager
+from homun.application.computer.driver import ComputerUseDriver
+from homun.application.computer.desktop_ui_manager import DesktopUiManager
 
 router = APIRouter(prefix="/v1/desktop", tags=["desktop"])
 

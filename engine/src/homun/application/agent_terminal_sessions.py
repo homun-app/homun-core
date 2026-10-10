@@ -6,7 +6,8 @@ No PTY, stdin write, or second dispatch.
 """
 import hashlib
 from copy import deepcopy
-from homun.application import agent_native, terminal_jobs
+from homun.application import agent_native
+from homun.application.computer import terminal_jobs
 from homun.execution.contracts import ExecutionTimeout, ExecutionUnavailable, ExecutionUncertain
 from homun.execution.docker_stdin import StdinNotSent
 from homun.application.agent_runs import authority, lookup

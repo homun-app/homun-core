@@ -14,8 +14,8 @@ from typing import Any, Dict, Optional
 
 from copy import deepcopy
 
-from homun.application import computer_use_backend
-from homun.application.computer_use_policy import classify, gate_required
+from homun.application.computer import backend as computer_use_backend
+from homun.application.computer.policy import classify, gate_required
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from homun.domain.models import CommandRecord, utc_now
 from homun.execution.identity import digest

@@ -6,8 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 import pytest
 
-from homun.application import terminal_jobs
-from homun.application.terminal_jobs import _answer_pty, refresh
+from homun.application.computer import terminal_jobs
+from homun.application.computer.terminal_jobs import _answer_pty, refresh
 from homun.context import create_context
 from homun.domain.errors import PermissionDeniedError
 from homun.domain.models import Actor

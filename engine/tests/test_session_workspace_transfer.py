@@ -76,8 +76,8 @@ def test_approved_continuation_restores_bytes_before_first_model_call(setup):
         return SimpleNamespace(message=NativeMessage(role='assistant', tool_calls=[ToolCall(id='read-restored', name='terminal_execute', arguments={'command': 'cat note.txt > result.txt'})]), usage=None)
     ctx.models.complete_tools = restored_model
     assert advance(ctx, target['id']) == 'waiting_external'
-    from homun.application import terminal_jobs
-    from homun.application.terminal_contracts import job_spec
+    from homun.application.computer import terminal_jobs
+    from homun.application.computer.terminal_contracts import job_spec
     saved = ctx.repository.load().commands[target['id']].result
     terminal = ctx.repository.load().commands[saved['terminal_request_id']].result
     assert job_spec(ctx, terminal).cwd == 'nested'

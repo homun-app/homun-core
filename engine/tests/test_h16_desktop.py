@@ -2,15 +2,15 @@
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.computer_use_driver import ComputerUseDriver
-from homun.application.desktop_contracts import (
+from homun.application.computer.driver import ComputerUseDriver
+from homun.application.computer.desktop_contracts import (
     DesktopActionResult,
     DesktopCaptureResult,
     DesktopUIElement,
     canon_key_combo,
     check_action_safety,
 )
-from homun.application.desktop_ui_manager import DesktopUiManager
+from homun.application.computer.desktop_ui_manager import DesktopUiManager
 
 
 def test_desktop_safety_checks():

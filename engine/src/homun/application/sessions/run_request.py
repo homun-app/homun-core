@@ -1,7 +1,7 @@
 """Shared validation for fresh run proposal inputs."""
 from typing import Literal
 from pydantic import Field
-from homun.application.surface_toolset_policy import RunToolPolicy
+from homun.application.computer.surface_toolset_policy import RunToolPolicy
 from homun.application.sessions.workspace_contracts import WorkspaceTransferReference
 
 

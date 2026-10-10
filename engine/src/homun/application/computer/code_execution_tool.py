@@ -16,14 +16,14 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from homun.application.code_execution_contracts import (
+from homun.application.computer.code_execution_contracts import (
     DEFAULT_MAX_TOOL_CALLS,
     DEFAULT_TIMEOUT,
     MAX_STDERR_BYTES,
     MAX_STDOUT_BYTES,
     CodeExecutionResult,
 )
-from homun.application.code_execution_rpc import CodeExecutionRpcServer
+from homun.application.computer.code_execution_rpc import CodeExecutionRpcServer
 from homun.domain.errors import ValidationError
 
 logger = logging.getLogger(__name__)

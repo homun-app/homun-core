@@ -1,8 +1,8 @@
 """Computer use a tre livelli: hard-block, sensibile (sempre umano), allowlist."""
 import pytest
 
-from homun.application import computer_use_jobs
-from homun.application.computer_use_policy import classify, gate_required
+from homun.application.computer import jobs as computer_use_jobs
+from homun.application.computer.policy import classify, gate_required
 from homun.context import create_context
 from homun.domain.errors import PermissionDeniedError, ValidationError
 from homun.domain.models import Actor, AgentProfile
@@ -95,7 +95,7 @@ def setup(tmp_path, monkeypatch):
                 {"window_id": 7, "is_on_screen": True, "app_name": "Safari"}]}}
         return {"ok": True, "tool": tool}
 
-    monkeypatch.setattr("homun.application.computer_use_backend.call_tool", fake_call)
+    monkeypatch.setattr("homun.application.computer.backend.call_tool", fake_call)
     yield ctx, actor, work, executed
     ctx.close()
 

@@ -16,7 +16,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from homun.application.surface_contracts import (
+from homun.application.computer.surface_contracts import (
     ConnectionTransportKind,
     SurfaceApprovalRequest,
     SurfaceConnection,

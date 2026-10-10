@@ -33,7 +33,7 @@ _conn: Optional[Dict[str, Any]] = None
 def resolve_binary() -> Optional[str]:
     candidates = [
         os.environ.get("HOMUN_CUA_DRIVER_BIN"),
-        str(Path(__file__).resolve().parents[2] / ".venv" / "bin" / "cua-driver"),
+        str(Path(__file__).resolve().parents[3] / ".venv" / "bin" / "cua-driver"),
         shutil.which("cua-driver"),
     ]
     for candidate in candidates:

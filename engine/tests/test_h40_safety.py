@@ -20,7 +20,7 @@ from homun.application.ops.secret_redaction import (
     redact_secrets,
     register_vault_redaction_value,
 )
-from homun.application.url_safety import (
+from homun.application.computer.url_safety import (
     is_safe_url,
     normalize_url_for_request,
     sensitive_query_param_name,
