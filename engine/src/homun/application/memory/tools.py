@@ -143,7 +143,7 @@ def execute(ctx, actor, run, tool, args):
         if not hasattr(ctx, "memory") or ctx.memory is None:
             return {"error_code": "memory_unavailable", "message": "Memory store is not available"}
 
-        from homun.application.memory_review_core import perform_memory_review
+        from homun.application.memory.review_core import perform_memory_review
 
         try:
             return perform_memory_review(

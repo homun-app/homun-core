@@ -8,7 +8,7 @@ from test_agent_runs import setup
 
 def test_memory_remember_and_recall(setup):
     from homun.application import agent_runs
-    from homun.application.memory_tools import execute
+    from homun.application.memory.tools import execute
 
     ctx, actor, work, _ = setup
     run = {
@@ -35,7 +35,7 @@ def test_memory_remember_and_recall(setup):
 
 
 def test_session_search_with_filters(setup):
-    from homun.application.memory_tools import execute
+    from homun.application.memory.tools import execute
 
     ctx, actor, work_id, _ = setup
     with ctx.repository.locked():
@@ -133,8 +133,8 @@ def test_agent_run_advances_with_memory_tool(setup):
 
 
 def test_memory_validation_and_capacity(setup, monkeypatch):
-    from homun.application.memory_tools import execute
-    import homun.application.memory_tools as mem_module
+    from homun.application.memory.tools import execute
+    import homun.application.memory.tools as mem_module
 
     ctx, actor, work, _ = setup
     run = {

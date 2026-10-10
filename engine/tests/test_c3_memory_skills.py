@@ -240,7 +240,7 @@ def test_hub_curation_and_bundle_lifecycle(setup):
 
 
 def test_background_memory_review_and_prune(setup):
-    from homun.application.memory_tools import execute
+    from homun.application.memory.tools import execute
 
     ctx, actor, work, _ = setup
 

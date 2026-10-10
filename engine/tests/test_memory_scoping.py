@@ -76,7 +76,7 @@ def test_run_recall_is_project_and_craft_scoped(ctx):
 
 
 def test_memory_remember_from_run_never_lands_global(ctx):
-    from homun.application.memory_tools import execute
+    from homun.application.memory.tools import execute
     actor, agent, project_a, project_b, work_a, work_b = _world(ctx)
     # A work without a project (conversation-less project context).
     conv = _apply(ctx, actor, 'cx', 'conversation.create', {'title': 'free'})['conversation_id']
@@ -99,7 +99,7 @@ def test_memory_remember_from_run_never_lands_global(ctx):
 
 
 def test_promote_to_agent_craft(ctx):
-    from homun.application.memory_promote import promote_to_agent
+    from homun.application.memory.promote import promote_to_agent
     actor, agent, project_a, project_b, work_a, work_b = _world(ctx)
     source = ctx.memory.add_approved(
         text='Nei listini allinea sempre le colonne prima di totals', actor_id=actor.id,
@@ -121,7 +121,7 @@ def test_promote_to_agent_craft(ctx):
 
 
 def test_promote_refuses_entity_references_and_bad_targets(ctx):
-    from homun.application.memory_promote import promote_to_agent
+    from homun.application.memory.promote import promote_to_agent
     from homun.domain.errors import NotFoundError, ValidationError
     actor, agent, project_a, project_b, work_a, work_b = _world(ctx)
     leaky = ctx.memory.add_approved(
@@ -139,7 +139,7 @@ def test_promote_refuses_entity_references_and_bad_targets(ctx):
 
 
 def test_agent_pack_export_import_roundtrip(ctx, tmp_path):
-    from homun.application.memory_packs import export_pack, import_pack
+    from homun.application.memory.packs import export_pack, import_pack
     actor, agent, project_a, project_b, work_a, work_b = _world(ctx)
     ctx.memory.add_approved(text='Metodo: verifica i totali con la somma per colonna',
                             actor_id=actor.id, scope='agent', subject_id=agent)
