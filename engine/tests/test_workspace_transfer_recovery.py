@@ -2,7 +2,8 @@
 from types import SimpleNamespace
 import pytest
 from test_agent_runs import setup
-from homun.application import agent_runs, session_runtime, session_workspace
+from homun.application import agent_runs
+from homun.application.sessions import runtime as session_runtime, workspace as session_workspace
 from homun.application.agent_run_execution import advance, _claim
 from homun.application.workspace_files import root_for
 from homun.models.native_turn import NativeMessage
@@ -69,7 +70,7 @@ def test_transfer_blocks_before_model_io_when_authority_or_bytes_change(setup, f
         with ctx.repository.transaction() as store:
             del store.materials[material]
     elif failure == 'blob':
-        from homun.application.session_workspace_capture import blob_root
+        from homun.application.sessions.workspace_capture import blob_root
         entry = run['workspace_transfer']['manifest']['files'][0]
         path = blob_root(ctx.data_dir)/entry['sha256']
         path.chmod(0o600)
@@ -195,8 +196,8 @@ def test_nested_fork_workspace_source_is_resolved_and_authorized(setup, tamper):
 @pytest.mark.parametrize('tamper', ['cycle', 'ambiguous'])
 def test_workspace_lineage_rejects_cycles_and_multiple_canonical_roots(setup, tamper):
     from copy import deepcopy
-    from homun.application.session_workspace_lineage import workspace_source
-    from homun.application.session_records import revision, rows
+    from homun.application.sessions.workspace_lineage import workspace_source
+    from homun.application.sessions.records import revision, rows
     ctx, actor, run, _, _ = prepared(setup)
     work = run['workspace_transfer']['manifest']['work_id']
     session_runtime.execute(ctx, actor, work, {'action': 'fork', 'session_id': 'run', 'command_id': 'fork'})

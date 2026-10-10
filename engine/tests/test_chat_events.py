@@ -1,7 +1,8 @@
 """Eventi SSE della conversazione: parti run/tool/testo/messaggio."""
 import pytest
 
-from homun.application import chat_agent, chat_events
+from homun.application import chat_agent
+from homun.application.sessions import chat_events
 from homun.context import create_context
 from homun.domain.models import Actor, AgentProfile
 

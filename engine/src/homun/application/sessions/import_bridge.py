@@ -11,11 +11,11 @@ import json
 from copy import deepcopy
 from typing import Any, Dict, Optional
 
-from homun.application import session_history as history
+from homun.application.sessions import history
 from homun.application.price_comparisons import cached, save
-from homun.application.session_history import normalize_imported_message, closed_prefix
-from homun.application.session_manager import redact_secrets, get_default_storage
-from homun.application.session_storage import SessionStorage
+from homun.application.sessions.history import normalize_imported_message, closed_prefix
+from homun.application.sessions.manager import redact_secrets, get_default_storage
+from homun.application.sessions.storage import SessionStorage
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from homun.policy.work import require_work_access
 

@@ -1,9 +1,9 @@
 """Memoria conversazionale: la persona è riconosciuta anche senza lavoro collegato."""
 import pytest
 
-from homun.application.command_delivery import admit
-from homun.application.command_types import CommandRequest
-from homun.application.conversation_context import compose_conversation_context
+from homun.application.sessions.command_delivery import admit
+from homun.application.sessions.command_types import CommandRequest
+from homun.application.sessions.conversation_context import compose_conversation_context
 from homun.context import create_context
 from homun.domain.models import Actor, Work
 from homun.domain.states import WorkStatus

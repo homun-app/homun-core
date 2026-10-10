@@ -61,7 +61,7 @@ def conversation_events_stream(workspace_id: str, conversation_id: str,
     ctx, resolved = request_context(workspace_id, x_homun_actor_id or actor,
                                     x_homun_actor_name)
     actor = resolved
-    from homun.application.chat_events import conversation_events_threaded
+    from homun.application.sessions.chat_events import conversation_events_threaded
     return StreamingResponse(
         conversation_events_threaded(ctx, actor, conversation_id),
         media_type="text/event-stream",

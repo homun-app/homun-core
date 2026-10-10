@@ -10,9 +10,9 @@ from dataclasses import dataclass, replace
 from datetime import timedelta
 from uuid import uuid4
 
-from homun.application.command_types import CommandRequest
-from homun.application.interpretation import finalize_assistant, prepare_interpretation
-from homun.application.conversation_context import authorized_conversation_work, revalidate_context
+from homun.application.sessions.command_types import CommandRequest
+from homun.application.sessions.interpretation import finalize_assistant, prepare_interpretation
+from homun.application.sessions.conversation_context import authorized_conversation_work, revalidate_context
 from homun.models.conversation_context import ContextManifest
 from homun.context import EngineContext
 from homun.domain.errors import CommandInProgressError, ConflictError

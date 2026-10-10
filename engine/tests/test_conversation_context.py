@@ -1,8 +1,8 @@
 """Authorized, bounded model context is a projection, never a transcript edit."""
 import pytest
 
-from homun.application.command_delivery import admit, complete
-from homun.application.command_types import CommandRequest
+from homun.application.sessions.command_delivery import admit, complete
+from homun.application.sessions.command_types import CommandRequest
 from homun.context import create_context
 from homun.domain.errors import PermissionDeniedError, ValidationError
 from homun.domain.models import Actor, Work
@@ -163,7 +163,7 @@ def test_revocation_after_admission_prevents_provider_call(setup, monkeypatch):
 
 
 def test_revocation_during_interpretation_prevents_second_plan_provider(setup, monkeypatch):
-    from homun.application import interpretation as module
+    from homun.application.sessions import interpretation as module
     from homun.models.interpretation import CommandProposal
     from homun.planning.draft import PlanDraft
     linked_work(setup)
@@ -267,7 +267,7 @@ def test_source_identity_change_during_model_denies_reply(setup, monkeypatch, ta
 
 
 def test_plan_extraction_receives_same_selected_history(setup, monkeypatch):
-    from homun.application import interpretation as module
+    from homun.application.sessions import interpretation as module
     from homun.models.interpretation import CommandProposal
     from homun.planning.draft import PlanDraft
     ctx, actor, conv, _ = setup

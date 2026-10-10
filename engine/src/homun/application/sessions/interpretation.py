@@ -9,8 +9,8 @@ from homun.models.interpretation import RosterEntry
 from homun.models.types import AttemptContext
 from homun.planning.draft import format_plan_draft_for_chat
 from homun.planning.extract import extract_plan_draft
-from homun.application.command_types import CommandRequest
-from homun.application.conversation_context import (
+from homun.application.sessions.command_types import CommandRequest
+from homun.application.sessions.conversation_context import (
     authorized_conversation_work, compose_conversation_context, revalidate_context,
 )
 from homun.models.conversation_context import MAX_CURRENT_CHARACTERS, ContextManifest

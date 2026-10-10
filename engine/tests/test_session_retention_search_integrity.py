@@ -1,9 +1,9 @@
 import json
 import pytest
-from homun.application import session_runtime as canonical_runtime
-from homun.application.session_import_bridge import bridge_import_snapshot
-from homun.application.session_storage import SessionStorage
-from homun.application.session_manager import SessionManager
+from homun.application.sessions import runtime as canonical_runtime
+from homun.application.sessions.import_bridge import bridge_import_snapshot
+from homun.application.sessions.storage import SessionStorage
+from homun.application.sessions.manager import SessionManager
 from homun.context import create_context
 from homun.domain.models import Actor
 from homun.domain.errors import ConflictError, ValidationError

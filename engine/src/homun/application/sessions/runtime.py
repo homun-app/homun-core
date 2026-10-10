@@ -2,7 +2,7 @@
 import json
 from copy import deepcopy
 
-from homun.application import session_history as history
+from homun.application.sessions import history
 from homun.application.price_comparisons import cached, save
 from homun.domain.errors import BackendUnavailableError, ConflictError, DomainError, ValidationError
 from homun.policy.work import require_work_access
@@ -32,8 +32,8 @@ def _snapshot(ctx, actor, work_id, args):
         if args.get('db_path') is not None:
             raise ValidationError('Arbitrary database path is not allowed; bridge uses configured storage')
         if args.get('source_session_id'):
-            from homun.application.session_import_bridge import bridge_import_snapshot
-            from homun.application.session_manager import get_default_storage
+            from homun.application.sessions.import_bridge import bridge_import_snapshot
+            from homun.application.sessions.manager import get_default_storage
             storage = args.get('source_storage') or get_default_storage()
             return bridge_import_snapshot(
                 ctx, actor, work_id, storage, args['source_session_id'],
@@ -93,7 +93,7 @@ def _metadata(ctx, actor, work_id, args):
                 if metadata.get('archived') and source['status'] in ACTIVE:
                     raise ConflictError('Cannot archive an active canonical run')
                 if args.get('model_pin') is not None or args.get('provider_pin') is not None:
-                    from homun.application.session_runtime_preferences import update
+                    from homun.application.sessions.runtime_preferences import update
                     metadata['runtime_preferences'] = update(ctx, store, source, args)
                 if args.get('cwd') is not None:
                     raise ValidationError('Set runtime roots and model in a fresh continuation proposal')
@@ -141,10 +141,10 @@ def execute(ctx, actor, work_id, args, *, allow_run_control=True):
     if action in {'update', 'pin', 'unpin', 'archive', 'unarchive'}:
         return _metadata(ctx, actor, work_id, args)
     if action == 'resume':
-        from homun.application.session_resume import prepare
+        from homun.application.sessions.resume import prepare
         return prepare(ctx, actor, work_id, args, allow_run_control=allow_run_control)
     if action == 'handoff':
-        from homun.application.session_profile_handoff import execute_handoff
+        from homun.application.sessions.profile_handoff import execute_handoff
         return execute_handoff(ctx, actor, work_id, args)
     if action in {'get', 'export'}:
         session = get(ctx, actor, work_id, args.get('session_id', ''))
@@ -159,30 +159,30 @@ def execute(ctx, actor, work_id, args, *, allow_run_control=True):
         else:
             raise ValidationError('Export format must be jsonl or markdown')
         if args.get('redact_secrets', True):
-            from homun.application.session_manager import redact_secrets
+            from homun.application.sessions.manager import redact_secrets
             data = redact_secrets(data)
         return {'status': 'exported', 'session_id': session['id'], 'format': fmt, 'data': data,
                 'revision': session['revision'], 'message_count': len(session['messages'])}
     if action == 'usage':
-        from homun.application.session_usage import query
+        from homun.application.sessions.usage import query
         return {'usage': query(ctx, actor, work_id, session_id=args.get('session_id'), limit=args.get('limit', 50), cursor=args.get('cursor'))}
     if action == 'search':
-        from homun.application.session_search import search_canonical_sessions
+        from homun.application.sessions.search import search_canonical_sessions
         return search_canonical_sessions(ctx, actor, work_id, args.get('query', ''), limit=args.get('limit', 50), cursor=args.get('cursor'))
     if action == 'retention_preview':
-        from homun.application.session_retention import preview_retention
+        from homun.application.sessions.retention import preview_retention
         return preview_retention(ctx, actor, work_id, older_than_seconds=args.get('older_than_seconds'), include_pinned=args.get('include_pinned', False), session_id=args.get('session_id'))
     if action == 'prune':
         if args.get('preview', False):
-            from homun.application.session_retention import preview_retention
+            from homun.application.sessions.retention import preview_retention
             return preview_retention(ctx, actor, work_id, older_than_seconds=args.get('older_than_seconds'), include_pinned=args.get('include_pinned', False), session_id=args.get('session_id'))
-        from homun.application.session_retention import apply_retention
+        from homun.application.sessions.retention import apply_retention
         command_id = _command_id(args)
         return apply_retention(ctx, actor, work_id, command_id=command_id, selection_digest=args.get('selection_digest', ''), older_than_seconds=args.get('older_than_seconds'), include_pinned=args.get('include_pinned', False), session_id=args.get('session_id'))
     if action == 'check_integrity':
-        from homun.application.session_integrity import check_integrity
+        from homun.application.sessions.integrity import check_integrity
         return check_integrity(ctx, actor, work_id)
     if action == 'repair':
-        from homun.application.session_integrity import repair_sessions
+        from homun.application.sessions.integrity import repair_sessions
         return repair_sessions(ctx, actor, work_id, preview=args.get('preview', True), command_id=args.get('command_id'))
     raise ValidationError(f'Unsupported canonical session action: {action!r}')

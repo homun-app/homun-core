@@ -6,14 +6,14 @@ from pydantic import ValidationError as SchemaError
 from homun.domain.errors import ConflictError, ValidationError
 from homun.models.native_turn import NativeMessage
 
-from homun.application.session_records import SNAPSHOT, revision, read as read_record, rows as record_rows
+from homun.application.sessions.records import SNAPSHOT, revision, read as read_record, rows as record_rows
 MAX_IMPORT_BYTES = 2_000_000
 
 
 def authorize_usage(store, actor, work_id, session_id):
     """Accounting authority is independent of the run's transcript format."""
-    from homun.application.session_records import authorize_record
-    from homun.application.session_dependencies import validate as validate_dependencies
+    from homun.application.sessions.records import authorize_record
+    from homun.application.sessions.dependencies import validate as validate_dependencies
     record = authorize_record(store, actor, work_id, session_id)
     if record.type == 'agent_run.propose':
         validate_dependencies(store, actor, record.result)
@@ -31,7 +31,7 @@ def lookup(store, actor, work_id, session_id, *, seen=None):
         raise ConflictError('Session lineage is cyclic or exceeds the depth limit')
     seen.add(session_id)
     if record.type == 'agent_run.propose':
-        from homun.application.session_dependencies import validate as validate_dependencies
+        from homun.application.sessions.dependencies import validate as validate_dependencies
         validate_dependencies(store, actor, value)
         if value.get('_session_context'):
             validate_context(store, actor, value['_session_context'], seen=seen)
@@ -93,7 +93,7 @@ def closed_prefix(rows, count=None):
 
 
 def normalize_imported_message(value: dict) -> NativeMessage:
-    from homun.application.session_manager import redact_secrets
+    from homun.application.sessions.manager import redact_secrets
     raw = value.get('message', value)
     if not isinstance(raw, dict):
         raise ValueError('Message payload must be an object')
@@ -162,7 +162,7 @@ def context_binding(store, actor, work_id, session_id, *, expected_revision=None
     if expected_revision and source['revision'] != expected_revision:
         raise ConflictError('Session revision changed')
     rows = closed_prefix(source['messages'])
-    from homun.application.session_dependencies import material_bindings
+    from homun.application.sessions.dependencies import material_bindings
     materials = material_bindings(store, actor, work_id, session_id)
     return {'session_id': session_id, 'work_id': work_id, 'revision': source['revision'],
             'count': len(rows), 'messages': rows, 'materials': materials,
@@ -205,7 +205,7 @@ def bind_to_run(ctx, store, actor, run, body):
 
 
 def authorize_run_context(ctx, store, actor, run):
-    from homun.application.session_dependencies import validate as validate_dependencies
+    from homun.application.sessions.dependencies import validate as validate_dependencies
     validate_dependencies(store, actor, run, ctx=ctx)
     binding = run.get('_session_context')
     if binding:

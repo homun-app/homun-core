@@ -7,11 +7,11 @@ from copy import deepcopy
 from dataclasses import replace
 import logging
 
-from homun.application.command_delivery import (
+from homun.application.sessions.command_delivery import (
     Delivery, MAX_FOLLOWUP_ATTEMPTS, claim, complete, conversation_busy,
     require_followup_authority,
 )
-from homun.application.command_types import CommandRequest
+from homun.application.sessions.command_types import CommandRequest
 from homun.domain.command_identity import request_fingerprint
 from homun.domain.errors import DomainError
 from homun.domain.models import Actor, utc_now

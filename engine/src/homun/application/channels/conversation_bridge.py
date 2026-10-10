@@ -16,8 +16,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict
 
-from homun.application.command_delivery import admit, complete
-from homun.application.command_types import CommandRequest
+from homun.application.sessions.command_delivery import admit, complete
+from homun.application.sessions.command_types import CommandRequest
 from homun.application.channels.gateway_contracts import ChannelMessage
 from homun.domain.errors import CommandInProgressError, DomainError
 from homun.domain.models import Actor

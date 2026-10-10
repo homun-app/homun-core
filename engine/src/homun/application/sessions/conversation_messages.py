@@ -24,7 +24,7 @@ def _attach_run_context(store, item, payload):
     record = store.commands.get(run_id)
     if record is None or not isinstance(record.result, dict):
         return
-    from homun.application.chat_events import assistant_reasoning
+    from homun.application.sessions.chat_events import assistant_reasoning
     reasoning = assistant_reasoning(record.result)
     if reasoning:
         item['reasoning'] = reasoning[-4000:]

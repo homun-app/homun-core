@@ -251,7 +251,7 @@ def test_delegated_agent_chats_under_its_allocation(http_setup):
 
 
 def test_plan_draft_extraction_is_budgeted(http_setup, monkeypatch):
-    import homun.application.interpretation as interpretation_mod
+    import homun.application.sessions.interpretation as interpretation_mod
     ctx, client, headers, conv, wid, plain = http_setup
     from homun.planning.draft import PlanDraft, PlanStepDraft
     from homun.planning.extract import validate_plan_draft

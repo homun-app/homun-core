@@ -2,7 +2,7 @@
 from typing import Literal
 from pydantic import Field
 from homun.application.surface_toolset_policy import RunToolPolicy
-from homun.application.session_workspace_contracts import WorkspaceTransferReference
+from homun.application.sessions.workspace_contracts import WorkspaceTransferReference
 
 
 class RunRequest(RunToolPolicy):

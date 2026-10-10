@@ -23,20 +23,20 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from homun.application.session_contracts import (
+from homun.application.sessions.contracts import (
     RewindOutcome,
     SessionLineage,
     SessionMessage,
     SessionRecord,
     SessionUsage,
 )
-from homun.application.session_manager import (
+from homun.application.sessions.manager import (
     SessionManager,
     redact_secrets,
     set_default_storage,
 )
-from homun.application.session_storage import SessionStorage
-from homun.application.session_tools import execute_standalone as session_execute
+from homun.application.sessions.storage import SessionStorage
+from homun.application.sessions.tools import execute_standalone as session_execute
 from homun.domain.errors import ValidationError
 
 

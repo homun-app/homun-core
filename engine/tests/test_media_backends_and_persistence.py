@@ -14,8 +14,8 @@ from homun.application.providers.media_backends import (
     resolve_ollama_vision_model,
 )
 from homun.application.providers.media_tts import TextToSpeechSynthesizer
-from homun.application.session_manager import SessionManager, get_default_storage, set_default_storage
-from homun.application.session_storage import SessionStorage
+from homun.application.sessions.manager import SessionManager, get_default_storage, set_default_storage
+from homun.application.sessions.storage import SessionStorage
 
 
 def test_macos_status_probe_is_real_and_bridge_gated():

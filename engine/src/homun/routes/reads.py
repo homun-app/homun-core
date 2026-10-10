@@ -3,7 +3,7 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Query
 from homun.context import get_context
 from homun.application.contribution_invitations import _recipient_name
-from homun.application.conversation_messages import conversation_message_page
+from homun.application.sessions.conversation_messages import conversation_message_page
 from homun.domain.errors import NotFoundError, PermissionDeniedError
 from homun.policy.work import require_work_access
 from homun.policy.intake import has_confirmed_intake

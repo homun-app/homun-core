@@ -289,7 +289,7 @@ def advance(ctx, run_id, *, epoch=None):
         if agent_native.enabled(run):
             expected_steering = deepcopy(run.get('_steering',[]))
         actor = Actor.model_validate(run['_actor'])
-        from homun.application.session_workspace import materialize
+        from homun.application.sessions.workspace import materialize
         materialize(ctx, actor, run)
         decision = _decision(ctx, run)
         observation = None

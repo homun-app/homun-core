@@ -5,7 +5,7 @@ run histories. Self reads add no edge; inherited references are flattened so
 later appends cannot create a graph cycle or change an already read prefix.
 """
 from copy import deepcopy
-from homun.application import session_records as records
+from homun.application.sessions import records
 from homun.application.agent_run_policy import history_is_readable
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError
 from homun.policy.work import require_work_access

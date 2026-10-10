@@ -1,6 +1,6 @@
 """Scoped immutable usage receipts; inherited history is provenance, never new spend."""
 from collections import Counter
-from homun.application.session_history import authorize_usage
+from homun.application.sessions.history import authorize_usage
 from homun.domain.errors import DomainError, ValidationError
 from homun.policy.work import require_work_access
 
@@ -87,7 +87,7 @@ def query(ctx, actor, work_id, *, session_id=None, limit=50, cursor=None):
     totals = _totals(receipts)
     if incomplete:
         totals.update(input_tokens=None, output_tokens=None, total_cost=None, currency=None)
-    from homun.application.session_dependencies import _collect
+    from homun.application.sessions.dependencies import _collect
     source_ids = {item.run_id for item in receipts + pending if item.run_id}
     if session_id:
         source_ids.add(session_id)

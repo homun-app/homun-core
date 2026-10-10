@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from homun.application.command_delivery import admit, complete
-from homun.application.command_types import CommandRequest
-from homun.application.conversation_context import (compose_conversation_context,
+from homun.application.sessions.command_delivery import admit, complete
+from homun.application.sessions.command_types import CommandRequest
+from homun.application.sessions.conversation_context import (compose_conversation_context,
                                                     revalidate_context)
 from homun.context import create_context
 from homun.domain.errors import PermissionDeniedError, ValidationError

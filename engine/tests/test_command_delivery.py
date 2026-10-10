@@ -69,8 +69,8 @@ def test_failed_domain_command_does_not_leak_partial_mutations(setup, monkeypatc
 
 
 def test_pending_claim_blocks_duplicate_but_not_other_commands(setup, monkeypatch):
-    from homun.application.command_delivery import admit, complete
-    from homun.application.command_types import CommandRequest
+    from homun.application.sessions.command_delivery import admit, complete
+    from homun.application.sessions.command_types import CommandRequest
     from homun.domain.errors import CommandInProgressError
     from homun.domain.models import Actor
     ctx, client, headers, body = setup
@@ -98,8 +98,8 @@ def test_pending_claim_blocks_duplicate_but_not_other_commands(setup, monkeypatc
 
 def test_expired_attempt_is_fenced_after_recovery(setup):
     from datetime import timedelta
-    from homun.application.command_delivery import admit, complete
-    from homun.application.command_types import CommandRequest
+    from homun.application.sessions.command_delivery import admit, complete
+    from homun.application.sessions.command_types import CommandRequest
     from homun.domain.errors import ConflictError
     from homun.domain.models import Actor, utc_now
     ctx, _, headers, body = setup
@@ -136,7 +136,7 @@ def test_sse_persisted_is_emitted_after_actual_commit(setup, monkeypatch):
 
 def test_disconnect_at_first_persisted_event_keeps_completed_reply(setup):
     import asyncio
-    from homun.application.command_types import CommandRequest
+    from homun.application.sessions.command_types import CommandRequest
     from homun.routes.domain import post_command_stream
     ctx, _, headers, body = setup
     async def disconnect():

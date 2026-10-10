@@ -97,7 +97,8 @@ def test_p0_split_partial_promotes_untagged_provider_reasoning(setup_chat):
     entirely into visible text.
     """
     import json as _json
-    from homun.application import chat_agent, chat_events
+    from homun.application import chat_agent
+    from homun.application.sessions import chat_events
 
     ctx, actor, conv = setup_chat
     chat_agent.bind(ctx, actor, conv, "agent_chat")

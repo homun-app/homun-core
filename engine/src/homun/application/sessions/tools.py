@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from homun.application.session_manager import SessionManager
+from homun.application.sessions.manager import SessionManager
 from homun.domain.errors import ValidationError
 
 
@@ -193,7 +193,7 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Registered runtime path. Standalone SessionManager remains explicitly separate."""
     if run.get("session_management", {}).get("policy") != "durable-sessions-v1":
         raise ValidationError("Session management tools are not enabled for this run")
-    from homun.application.session_runtime import execute as canonical
+    from homun.application.sessions.runtime import execute as canonical
     args = {key: value for key, value in args.items() if value is not None}
     args['action'] = str(args.get('action') or '').strip().lower()
     from homun.models.native_turn import NativeMessage, pending_call
@@ -204,6 +204,6 @@ def execute(ctx, actor, run, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         identity = str(run['id']) + ':' + str(call_id)
         args['command_id'] = 'session-tool:' + hashlib.sha256(identity.encode()).hexdigest()
     result = canonical(ctx, actor, run['work_id'], args, allow_run_control=False)
-    from homun.application.session_dependencies import retain
+    from homun.application.sessions.dependencies import retain
     retain(ctx, actor, run, args, result)
     return result

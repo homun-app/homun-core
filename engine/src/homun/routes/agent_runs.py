@@ -13,7 +13,7 @@ from homun.routes.price_comparisons import request_context
 router = APIRouter(prefix='/v1/workspaces/{workspace_id}', tags=['agent-runs'])
 
 
-from homun.application.agent_run_request import RunRequest
+from homun.application.sessions.run_request import RunRequest
 
 class RunApproval(BaseModel):
     command_id: str = Field(min_length=1, max_length=160)
