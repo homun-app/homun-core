@@ -107,16 +107,6 @@ export function EngineAgentChat({
           )}
         </div>
         <div className="cw-composer">
-          {(isRunning || engineBusy) && (
-            <p className="cw-hint" role="status">
-              Homun sta lavorando…
-              {onCancelInFlight && (
-                <button type="button" className="cs-link ml-1" onClick={onCancelInFlight}>
-                  Annulla
-                </button>
-              )}
-            </p>
-          )}
           {assignee && (
             <p className="cw-hint">
               Nuovo incarico per <strong>{assignee}</strong> · descrivi il risultato che vuoi
@@ -127,6 +117,8 @@ export function EngineAgentChat({
             key={activeWorkId ?? "new"}
             label="Messaggio alla squadra"
             disabled={Boolean(conversationId) && historyLoading}
+            engineBusy={isRunning || engineBusy}
+            onCancel={onCancelInFlight}
             onSend={handleSend}
             references={references}
             autonomyLevel={autonomyLevel}
