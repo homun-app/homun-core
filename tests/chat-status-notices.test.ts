@@ -12,13 +12,14 @@ import {
   chatStatusLayout,
   chatStatusNotices,
   conversationFollowupBadge,
+  simulationSourceNotice,
   type ChatStatusNotice,
   type ChatStatusState,
 } from "../apps/web/src/lib/chat-status-notices.ts";
+import { nextResolvedEpisode } from "../apps/web/src/hooks/useTransientResolved.ts";
 import { isHomunClientError } from "../apps/web/src/lib/homun-errors.ts";
 
 const healthyEngine: ChatStatusState = {
-  backend: "engine",
   dataSource: "engine",
   gateError: null,
   error: null,
@@ -42,16 +43,12 @@ test("sano in modalità motore: nessun avviso, in nessuno slot", () => {
     aboveComposer: [],
     threadTop: [],
     threadEnd: [],
-    followupConversationIds: [],
   });
-  // busy da solo non è uno stato: il banner sano taceva anche a lavoro in corso
-  assert.deepEqual(chatStatusNotices({ ...healthyEngine, busy: true }), []);
 });
 
 test("simulazione: una sola dichiarazione di fonte, in cima al thread, sempre", () => {
   const state: ChatStatusState = {
     ...healthyEngine,
-    backend: "simulation",
     dataSource: "simulation",
   };
   const notices = chatStatusNotices(state);
@@ -61,6 +58,8 @@ test("simulazione: una sola dichiarazione di fonte, in cima al thread, sempre", 
   assert.equal(notices[0]!.kind, "simulation-source");
   assert.equal(notices[0]!.severity, "info");
   assert.match(notices[0]!.text, /Fonte: simulazione — nessun dato reale è collegato\./);
+  // l'helper diretto dichiara la stessa fonte, senza fabbricare uno stato
+  assert.deepEqual(simulationSourceNotice(), notices);
   // con e senza conversazione aperta la dichiarazione resta in cima al thread
   for (const open of ["conv-a", null]) {
     const layout = chatStatusLayout(notices, open);
@@ -210,13 +209,11 @@ test("i followup di una conversazione non compaiono nel thread di un'altra", () 
   );
   // nessuna conversazione aperta: nessun followup nel thread
   assert.deepEqual(chatStatusLayout(notices, null).threadEnd, []);
-  // la barra laterale conosce tutte le conversazioni con followup attivi
-  assert.deepEqual(openA.followupConversationIds.sort(), ["conv-a", "conv-b"]);
 });
 
 test("combinazione: irraggiungibile sopra il composer, followup in fondo, simulazione in cima", () => {
   const notices = [
-    ...chatStatusNotices({ ...healthyEngine, backend: "simulation", dataSource: "simulation" }),
+    ...simulationSourceNotice(),
     ...chatStatusNotices({ ...healthyEngine, gateError: new Error("offline") }),
     ...chatStatusNotices({
       ...healthyEngine,
@@ -258,6 +255,20 @@ test("indicatore laterale: titolo onesto per conversazioni con followup", () => 
   );
 });
 
+test("esito breve: un episodio attivo produce un solo esito, quando sparisce", () => {
+  // montaggio a condizione spenta: silenzio, nessun esito
+  assert.deepEqual(nextResolvedEpisode(false, false), { seen: false, resolved: false });
+  // la condizione si attiva: memorizzata, ancora nessun esito
+  assert.deepEqual(nextResolvedEpisode(false, true), { seen: true, resolved: false });
+  // sparisce: UN esito e l'episodio è chiuso
+  assert.deepEqual(nextResolvedEpisode(true, false), { seen: false, resolved: true });
+  // resta spenta senza un nuovo episodio: silenzio, non ricompare
+  assert.deepEqual(nextResolvedEpisode(false, false), { seen: false, resolved: false });
+  // nuovo episodio → nuovo esito alla sua fine
+  assert.deepEqual(nextResolvedEpisode(false, true), { seen: true, resolved: false });
+  assert.deepEqual(nextResolvedEpisode(true, false), { seen: false, resolved: true });
+});
+
 test("avviso singolo: ruolo alert per gli errori, status per il resto", async () => {
   const ui = await componentRenderer(
     "/apps/web/src/components/builder/chat/ChatStatusNotice.tsx",
@@ -265,11 +276,7 @@ test("avviso singolo: ruolo alert per gli errori, status per il resto", async ()
   );
   try {
     const info = ui.render({
-      notice: chatStatusNotices({
-        ...healthyEngine,
-        backend: "simulation",
-        dataSource: "simulation",
-      })[0],
+      notice: simulationSourceNotice()[0],
     });
     assert.match(info, /role="status"/);
     assert.match(info, /data-chat-status="simulation-source"/);

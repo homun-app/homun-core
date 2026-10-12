@@ -17,12 +17,17 @@ test("il banner operativo e il suo involucro nello shell sono stati rimossi", as
   };
   await gone("apps/web/src/components/builder/ConversationEngineBanner.tsx");
   await gone("apps/web/src/components/builder/ConversationWorkspaceEngineNotices.tsx");
+  // la barra di stato dedicata era già orfana: con il banner se ne va anche lei
+  await gone("apps/web/src/components/EngineStatusBar.tsx");
+  await gone("apps/web/src/components/engine-status-bar.css");
 
   const shell = await readFile("apps/web/src/components/builder/ConversationWorkspace.tsx", "utf8");
   assert.doesNotMatch(
     shell,
     /ConversationEngineBanner|ConversationWorkspaceEngineNotices|cw-engine-banner/,
   );
+  const reset = await readFile("apps/web/src/styles-surface-reset.css", "utf8");
+  assert.doesNotMatch(reset, /engine-status-bar/);
 });
 
 test("lo stage motore passa gli stati del client agli slot del thread, non ai messaggi", async () => {

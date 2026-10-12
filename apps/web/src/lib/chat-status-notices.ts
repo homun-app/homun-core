@@ -49,7 +49,6 @@ export type ChatStatusFollowup = {
 
 /** Il sottoinsieme di `EngineWorkspaceState` da cui derivano gli avvisi. */
 export type ChatStatusState = {
-  backend: "simulation" | "engine";
   dataSource: "simulation" | "engine";
   gateError: unknown;
   error: unknown;
@@ -62,18 +61,23 @@ export type ChatStatusState = {
 
 const SIMULATION_SOURCE_ID = "simulation-source";
 
+/** La dichiarazione di fonte della simulazione, unica e sempre uguale. */
+export function simulationSourceNotice(): ChatStatusNotice[] {
+  return [
+    {
+      id: SIMULATION_SOURCE_ID,
+      scope: "global",
+      kind: "simulation-source",
+      severity: "info",
+      text: "Fonte: simulazione — nessun dato reale è collegato.",
+    },
+  ];
+}
+
 /** Una condizione per riga, nell'ordine in cui la conversazione le legge. */
 export function chatStatusNotices(state: ChatStatusState): ChatStatusNotice[] {
   if (state.dataSource === "simulation") {
-    return [
-      {
-        id: SIMULATION_SOURCE_ID,
-        scope: "global",
-        kind: "simulation-source",
-        severity: "info",
-        text: "Fonte: simulazione — nessun dato reale è collegato.",
-      },
-    ];
+    return simulationSourceNotice();
   }
   if (state.dataSource !== "engine") {
     return [];
@@ -156,8 +160,6 @@ export type ChatStatusLayout = {
   threadTop: ChatStatusNotice[];
   /** Condizioni della conversazione aperta, in fondo al thread. */
   threadEnd: ChatStatusNotice[];
-  /** Conversazioni con almeno un followup attivo: indicatore della barra laterale. */
-  followupConversationIds: string[];
 };
 
 /** Colloca gli avvisi nei punti del thread che non passano dai messaggi. */
@@ -169,9 +171,7 @@ export function chatStatusLayout(
     aboveComposer: [],
     threadTop: [],
     threadEnd: [],
-    followupConversationIds: [],
   };
-  const followupConversations = new Set<string>();
   for (const notice of notices) {
     if (notice.kind === "simulation-source") {
       layout.threadTop.push(notice);
@@ -181,14 +181,10 @@ export function chatStatusLayout(
       layout.aboveComposer.push(notice);
       continue;
     }
-    if (notice.conversationId) {
-      followupConversations.add(notice.conversationId);
-    }
     if (openConversationId && notice.conversationId === openConversationId) {
       layout.threadEnd.push(notice);
     }
   }
-  layout.followupConversationIds = [...followupConversations];
   return layout;
 }
 
