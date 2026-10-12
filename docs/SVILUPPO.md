@@ -128,9 +128,9 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
 ### F7 — Automazioni
 - ✅ F7.3 scheduler persistente DBOS con misfire policy e deduplica (`application/cron_manager.py`, `cron_contracts.py`, `cron_dispatcher.py`)
 - ◐ F7.1 conversazione→metodo: c'è `skill_reflection.py` (lezioni apprese), manca la promozione esplicita a routine
-- ◐ F7.2 routine con schema/riepilogo (creatore UI esiste nel pannello lavoro)
+- ◐ F7.2 routine con schema/riepilogo (creatore UI nel pannello lavoro, nella vista Automazioni e via «Ripeti» su un lavoro completato)
 - ◐ F7.4 trigger esterni (webhook relay, msgraph); ◐ F7.5 pausa/modifica (rotta pause)
-- **Debito noto**: la vista "Automazioni" della sidebar gira ancora su dati simulati — le routine vere sono solo nel pannello lavoro (violazione Fonte: motore, da collegare)
+- **Vista Automazioni (Fonte: motore)**: la voce della sidebar gira sulle routine vere del motore dal 2026-10-07; la mescolanza residua con la simulazione è stata corretta il 2026-10-12 (proiezione `SpaceData` senza campi simulati in modalità motore, ricerca globale «Automazioni» da `engine.routines`, «Ripeti» su lavori del motore che apre il creatore precompilato, Impostazioni → Automazioni con conteggi veri e fonte dichiarata)
 
 ### F8 — Memoria e formazione
 - ✅ F8.1 budget di contesto e riassunti con provenienza (`models/context_summary.py`, parity Hermes)
@@ -191,8 +191,9 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
    default proposto). Prima fetta: persone/ruoli/sessioni vere + inviti
    (3-4 giorni, nessuna rete, nessuna decisione pendente) — sblocca anche
    il rifacimento di Compiti. Gate: due Mac su reti diverse.
-2. **Automazioni**: collegare la vista sidebar alle routine del motore
-   (Fonte: motore) e completare F7.1 (conversazione→routine promossa).
+2. **Automazioni**: completare F7.1 (conversazione→routine promossa); la vista
+   sidebar e la ricerca sono già su routine del motore (Fonte: motore,
+   mescolanza con la simulazione corretta il 2026-10-12).
 3. **Connettori**: unificare catalogo connettori/canali, F6.1 ToolGrant,
    primo connettore verticale (Trello o equivalente scelto da Fabio).
 4. **Gap parity Hermes** (quattro fix mirati, ~1 giorno).
