@@ -50,7 +50,6 @@ export function EngineChatStage({
   // Gli stati del motore diventano avvisi qui, dallo stato del client: la
   // collocazione nel thread è dello stage. Sano in modalità motore → vuoto.
   const statusNotices = chatStatusNotices({
-    backend: engine.backend,
     dataSource: engine.dataSource,
     gateError: engine.gateError,
     error: engine.error,

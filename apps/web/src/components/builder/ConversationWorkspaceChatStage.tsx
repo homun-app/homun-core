@@ -26,7 +26,7 @@ import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { StudioChatInput } from "./StudioChatInput";
 import { WorkPatchPreviewCard } from "./WorkPatchPreviewCard";
 import { ThreadTopStatusNotices } from "./chat/ChatStatusNotices";
-import { chatStatusNotices } from "@/lib/chat-status-notices";
+import { simulationSourceNotice } from "@/lib/chat-status-notices";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import type { AutonomyLevel } from "./conversation-preferences";
 
@@ -192,16 +192,7 @@ export function ConversationWorkspaceChatStage({
 
   // La fonte è dichiarata in cima a ogni conversazione: esplicita in
   // simulazione, mai un'etichetta in modalità motore.
-  const threadTopNotices =
-    dataSource === "simulation"
-      ? chatStatusNotices({
-          backend: "simulation",
-          dataSource: "simulation",
-          gateError: null,
-          error: null,
-          followups: [],
-        })
-      : [];
+  const threadTopNotices = dataSource === "simulation" ? simulationSourceNotice() : [];
 
   useEffect(() => {
     if (historyRef.current && (work?.messages.length || engineIntake?.proposal)) {

@@ -104,11 +104,15 @@ function WorkRow({ work, active, onOpen }: { work: Work; active: string | null; 
         <MessageSquare size={13} style={{ color: work.id === active ? "#18181b" : "#71717a", flexShrink: 0 }} />
         <span className="cw-sb-row-title">{work.title}</span>
         {badge && (
-          <span
-            className="cw-sb-dot"
-            aria-label={badge.title}
-            style={{ backgroundColor: badge.tone === "error" ? "#b4552f" : "#b08b2e", flexShrink: 0 }}
-          />
+          <>
+            {/* il punto è colore; il testo per screen reader lo dice a parole */}
+            <span
+              className="cw-sb-dot"
+              aria-hidden="true"
+              style={{ backgroundColor: badge.tone === "error" ? "#b4552f" : "#b08b2e", flexShrink: 0 }}
+            />
+            <span className="sr-only">{badge.title}</span>
+          </>
         )}
       </div>
     </button>
