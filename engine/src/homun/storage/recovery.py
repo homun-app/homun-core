@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from homun.domain.errors import DomainError
 from homun.storage.documents import ENTITY_TYPES
 from homun.storage.schema import initialize
 from homun.storage.sqlite import _open_connection
@@ -23,6 +24,123 @@ from homun.storage.sqlite import _open_connection
 RECOVERY_DIRNAME = "recovery"
 REPORT_FILENAME = "last-report.json"
 QUARANTINE_SUBDIR = "originals"
+
+# Corruzione vera, e solo quella, merita la quarantena: i verdetti sqlite che
+# descrivono un file danneggiato (incluse le varianti estese, per prefisso).
+SQLITE_CORRUPTION_PREFIXES = ("SQLITE_CORRUPT", "SQLITE_NOTADB")
+
+
+class WorkspaceUnavailableError(DomainError):
+    """Avvio fatale: il workspace non è apribile e NON è corruzione.
+
+    Nessun file è stato toccato o spostato; l'errore originale resta nella
+    `__cause__`. `db_path` e `sqlite_errorname` alimentano la riga
+    `HOMUN_STARTUP_FAILED` che il desktop mostra all'utente.
+    """
+
+    code = "workspace_unavailable"
+
+    def __init__(self, message: str, *, db_path: Path,
+                 sqlite_errorname: str | None = None) -> None:
+        super().__init__(message)
+        self.db_path = Path(db_path)
+        self.sqlite_errorname = sqlite_errorname
+
+
+def sqlite_error_name(exc: BaseException) -> str | None:
+    """Il verdetto sqlite di un'eccezione o della sua causa avvolta.
+
+    `_open_connection` con chiave configurata rilancia gli errori sqlite come
+    `EncryptionError ... from exc`: il verdetto resta nella causa.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        name = getattr(current, "sqlite_errorname", None)
+        if isinstance(name, str) and name:
+            return name
+        current = current.__cause__
+    return None
+
+
+def _name_is_corruption(name: str | None) -> bool:
+    if not name:
+        # senza un verdetto sqlite non possiamo dimostrare la corruzione:
+        # meglio un avvio fallito e spiegato che dati sani spostati
+        return False
+    return name.startswith(SQLITE_CORRUPTION_PREFIXES)
+
+
+def is_corruption(exc: BaseException, *, key_configured: bool) -> bool:
+    """Classifica un errore d'avvio del workspace: corruzione (recovery) o fatale.
+
+    Corruzione → recovery:
+    - `sqlite3.DatabaseError` con verdetto `SQLITE_CORRUPT*`/`SQLITE_NOTADB`;
+    - `pydantic.ValidationError`: righe che non validano più, il caso per cui
+      la recovery è nata;
+    - `EncryptionError` SOLO senza chiave configurata: il file non si apre
+      come SQLite e non c'è una chiave da reclamare → garbage o corruzione.
+
+    Tutto il resto → fatale (rilanciato, file intatti): `SQLITE_BUSY`,
+    `SQLITE_LOCKED`, `SQLITE_CANTOPEN`, `SQLITE_PERM`, `SQLITE_READONLY`,
+    `SQLITE_IOERR`, `SQLITE_FULL`, `EncryptionError` con chiave configurata
+    e qualunque errore senza `sqlite_errorname`.
+    """
+    from pydantic import ValidationError as PydanticValidationError
+
+    from homun.storage.encryption import EncryptionError
+
+    if isinstance(exc, PydanticValidationError):
+        return True
+    if isinstance(exc, EncryptionError):
+        # con una chiave configurata uno sblocco fallito è configurazione,
+        # anche quando avvolge un errore sqlite: fatale
+        return not key_configured
+    if isinstance(exc, sqlite3.DatabaseError):
+        return _name_is_corruption(sqlite_error_name(exc))
+    if isinstance(exc.__cause__, sqlite3.DatabaseError):
+        return _name_is_corruption(sqlite_error_name(exc.__cause__))
+    return False
+
+
+_FATAL_HINTS = {
+    "SQLITE_BUSY": "un altro processo sta usando il database: chiudi l'altro motore o client e riavvia",
+    "SQLITE_LOCKED": "una connessione attiva blocca le tabelle del database: chiudila e riavvia",
+    "SQLITE_CANTOPEN": "il database non si può aprire: controlla percorso e permessi della cartella dati",
+    "SQLITE_PERM": "permessi insufficienti sul database: controlla utente e permessi del file",
+    "SQLITE_READONLY": "il database è in sola lettura: controlla permessi e spazio su disco",
+    "SQLITE_IOERR": "errore di I/O sul disco: controlla salute e spazio del volume",
+    "SQLITE_FULL": "il disco è pieno: libera spazio e riavvia",
+}
+
+
+def _fatal_hint(name: str | None, exc: BaseException) -> str:
+    if name:
+        for prefix, hint in _FATAL_HINTS.items():
+            if name.startswith(prefix):
+                return hint
+    return f"{type(exc).__name__}: {exc}"
+
+
+def fatal_workspace_error(exc: BaseException, *, db_path: Path,
+                          key_configured: bool) -> WorkspaceUnavailableError:
+    """Avvolge l'errore non-corruzione in un fatale leggibile e tipizzato.
+
+    Il chiamante lo rilancia con `from exc`: la causa originale resta ispezionabile.
+    """
+    from homun.storage.encryption import EncryptionError
+
+    name = sqlite_error_name(exc)
+    if isinstance(exc, EncryptionError) and key_configured:
+        detail = ("la chiave configurata non apre il workspace: chiave sbagliata o "
+                  "file non più valido; verifica HOMUN_WORKSPACE_KEY_FILE o il Keychain")
+    else:
+        detail = _fatal_hint(name, exc)
+    return WorkspaceUnavailableError(
+        f"Il database del workspace non è apribile e non risulta corrotto — {detail}. "
+        "Nessun file è stato spostato o modificato: risolvi la causa e riavvia.",
+        db_path=db_path, sqlite_errorname=name)
 
 
 @dataclass
@@ -274,7 +392,18 @@ def salvage_workspace(path: Path, workspace_id: str, *,
     Se il file è del tutto illeggibile, `path` diventa un workspace nuovo
     (mode='minimal'): il motore parte comunque, i dati originali restano
     in quarantena per un intervento manuale.
+
+    Muove file: richiede il possesso esclusivo della lease della cartella
+    dati (`storage.lease.recovery_lease`). Senza — o con un altro proprietario
+    della directory — rifiuta con `RecoveryLeaseError` lasciando tutto al suo posto.
     """
+    from homun.storage.lease import recovery_lease
+    with recovery_lease(path.parent):
+        return _salvage_workspace(path, workspace_id, encryption_key=encryption_key)
+
+
+def _salvage_workspace(path: Path, workspace_id: str, *,
+                       encryption_key: bytes | None = None) -> RecoveryReport:
     report = RecoveryReport(mode="repaired", started_at=_now(), workspace_id=workspace_id)
     quarantine = _quarantine(path)
     report.quarantine_dir = str(quarantine)
