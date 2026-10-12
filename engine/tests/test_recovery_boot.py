@@ -65,8 +65,9 @@ def test_invalid_event_row_is_quarantined_and_engine_boots(ctx, tmp_path):
 
 
 def test_garbage_file_boots_minimal(tmp_path):
+    # intestazione SQLite + garbage: SQLITE_NOTADB, corruzione dimostrata
     db_path = tmp_path / 'engine.db'
-    db_path.write_bytes(b'this is not a database' * 100)
+    db_path.write_bytes(b'SQLite format 3\x00' + b'this is not a database' * 100)
     ctx = create_context_with_recovery(db_path=db_path, data_dir=tmp_path,
                                        for_tests=True)
     try:

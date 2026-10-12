@@ -71,7 +71,7 @@ IS_CORRUPTION_CASES = [
     (sqlite3.DatabaseError('senza errorname'), False, False),  # attributo assente
     (_PYDANTIC_ERROR, False, True),                        # righe che non validano più
     (_PYDANTIC_ERROR, True, True),
-    (EncryptionError('Workspace is encrypted or invalid'), False, True),   # senza chiave
+    (EncryptionError('Workspace is encrypted or invalid'), False, False),  # senza chiave: mai quarantena
     (EncryptionError('Cannot unlock workspace with the supplied key'), True, False),
     (_wrapped_encryption(_SqliteError('SQLITE_CORRUPT')), True, False),    # avvolta, con chiave
     (_wrapped_encryption(_SqliteError('SQLITE_BUSY')), True, False),
@@ -147,15 +147,37 @@ def test_corrupted_pages_still_trigger_recovery(tmp_path):
         recovered.close()
 
 
-def test_garbage_file_still_boots_via_recovery(tmp_path):
+# Intestazione SQLite seguita da dati illeggibili: SQLite stesso dichiara
+# SQLITE_NOTADB, quindi è corruzione dimostrata e la recovery scatta.
+CORRUPT_SQLITE_BYTES = b'SQLite format 3\x00' + b'this is not a database' * 100
+
+
+def test_corrupt_sqlite_file_still_boots_via_recovery(tmp_path):
     db_path = tmp_path / 'engine.db'
-    db_path.write_bytes(b'this is not a database' * 100)
+    db_path.write_bytes(CORRUPT_SQLITE_BYTES)
     ctx = create_context_with_recovery(db_path=db_path, data_dir=tmp_path, for_tests=True)
     try:
         assert db_state(tmp_path)['state'] == 'minimal'
         assert ctx.repository.load().workspace_id == ctx.workspace_id
     finally:
         ctx.close()
+
+
+def test_non_sqlite_file_without_key_is_fatal_and_untouched(tmp_path, monkeypatch):
+    """Un workspace cifrato avviato senza chiave non deve diventare un workspace vuoto.
+
+    Senza chiave, un file privo dell'intestazione SQLite (cifrato o garbage,
+    indistinguibili) è un errore fatale: nessuna quarantena, file intatto.
+    """
+    monkeypatch.delenv('HOMUN_WORKSPACE_KEY_FILE', raising=False)
+    db_path = tmp_path / 'engine.db'
+    db_path.write_bytes(os.urandom(4096))  # come appare un database SQLCipher
+    before = _hash(db_path)
+    with pytest.raises(WorkspaceUnavailableError) as info:
+        create_context_with_recovery(db_path=db_path, data_dir=tmp_path, for_tests=True)
+    assert 'HOMUN_WORKSPACE_KEY_FILE' in str(info.value)
+    assert _hash(db_path) == before
+    assert not (tmp_path / 'recovery').exists()
 
 
 # ---------------------------------------------------- errori temporanei → fatali
@@ -196,10 +218,10 @@ def test_unreadable_permissions_are_fatal(tmp_path):
 
 def test_recovery_refused_without_data_dir_lease(tmp_path):
     """Corruzione vera, ma la cartella dati è di un altro: niente file mossi."""
-    # file garbage senza chiave → recovery certa (vedi test_garbage_file_still_boots);
+    # file SQLite corrotto → recovery certa (vedi test_corrupt_sqlite_file_still_boots);
     # qui deve scattare solo il rifiuto: il lock della cartella è di un altro
     db_path = tmp_path / 'engine.db'
-    db_path.write_bytes(b'this is not a database' * 100)
+    db_path.write_bytes(CORRUPT_SQLITE_BYTES)
     before = _hash(db_path)
 
     lock_fd = os.open(tmp_path / 'engine.lock', os.O_CREAT | os.O_RDWR)
@@ -218,7 +240,7 @@ def test_recovery_reuses_engine_lease_already_held(tmp_path):
     from homun.storage.lease import engine_lease, owns_engine_lease
 
     db_path = tmp_path / 'engine.db'
-    db_path.write_bytes(b'this is not a database' * 100)
+    db_path.write_bytes(CORRUPT_SQLITE_BYTES)
     with engine_lease(tmp_path):
         assert owns_engine_lease(tmp_path)
         ctx = create_context_with_recovery(db_path=db_path, data_dir=tmp_path,
