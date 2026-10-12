@@ -2,6 +2,7 @@ const { app, BrowserWindow, protocol, session, dialog, safeStorage, shell } = re
 const path = require('node:path');
 const { startEngine } = require('./engine-process.cjs');
 const { createProtocolHandler } = require('./protocol.cjs');
+const { startupDialogDetail } = require('./startup-dialog.cjs');
 
 app.setName('Homun');
 if (process.env.HOMUN_DESKTOP_PROFILE) {
@@ -83,20 +84,3 @@ else app.whenReady().then(async () => {
   if (!process.argv.includes('--smoke')) dialog.showErrorBox('Homun non disponibile', startupDialogDetail(error.info));
   await engine?.stop(); app.exit(1);
 });
-
-function startupDialogDetail(info) {
-  const failure = info?.startupFailure, recovery = info?.recovery;
-  if (failure?.reason !== 'engine-dir-busy') {
-    return 'Il motore locale non si è avviato. Controlla che la directory non sia già in uso.';
-  }
-  if (!Number.isInteger(failure.holder_pid)) {
-    return 'La directory dati è occupata da un processo sconosciuto. Chiudi Homun e riprova.';
-  }
-  if (recovery?.reason === 'foreign-process') {
-    return `La directory dati è occupata dal processo ${failure.holder_pid}, che non è un motore Homun: non posso terminarlo automaticamente.`;
-  }
-  if (recovery && !recovery.killed) {
-    return `La directory dati è occupata dal processo ${failure.holder_pid} e non è stato possibile terminarlo. Chiudi Homun e riprova.`;
-  }
-  return `La directory dati era occupata da un motore rimasto attivo (PID ${failure.holder_pid}): l'ho terminato, ma il motore non si è avviato al secondo tentativo.`;
-}
