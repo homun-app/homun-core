@@ -8,12 +8,16 @@ import { scenarioForWork, type ConversationScenario } from "./conversation-scena
 import type { SearchEntry } from "./ConversationSearch";
 import { spacePeople, type SpaceData, type SpaceView } from "./ConversationSpace";
 import type { Work } from "./conversation-types.ts";
+import { describeCron } from "@/lib/cadence-language.ts";
+import type { EngineRoutine } from "@/lib/engine-routines-client.ts";
 
 type Args = {
   library: ConversationMaterial[];
   visibleWorks: Work[];
   scenarios: ConversationScenario[];
   spaceData: SpaceData;
+  /** Engine routines: when provided, Automazioni entries come only from here (Fonte: motore). */
+  engineRoutines?: EngineRoutine[] | undefined;
   workStatus: (w: Work) => string;
   openSpace: (view: SpaceView, initial?: string, selected?: string) => void;
   openWork: (id: string, selector?: string) => void;
@@ -25,6 +29,7 @@ export function buildConversationSearchEntries({
   visibleWorks,
   scenarios,
   spaceData,
+  engineRoutines,
   workStatus,
   openSpace,
   openWork,
@@ -85,14 +90,23 @@ export function buildConversationSearchEntries({
       text: [p.brief, ...(p.notes || [])].join(" "),
       open: () => openSpace("Progetti", "", p.id),
     })),
-    ...spaceData.routines.map((r) => ({
-      id: r.id,
-      title: r.name,
-      kind: "Automazioni",
-      context: r.schedule,
-      text: [r.active ? "attiva" : "pausa", ...(r.notes || [])].join(" "),
-      open: () => openSpace("Automazioni", "", r.id),
-    })),
+    ...(engineRoutines
+      ? engineRoutines.map((r) => ({
+          id: r.id,
+          title: r.name,
+          kind: "Automazioni",
+          context: `${describeCron(r.cron)} · ${r.status === "active" ? "attiva" : r.status === "paused" ? "in pausa" : "terminata"}`,
+          text: [r.template.title, r.template.objective].join(" "),
+          open: () => openSpace("Automazioni", "", r.id),
+        }))
+      : spaceData.routines.map((r) => ({
+          id: r.id,
+          title: r.name,
+          kind: "Automazioni",
+          context: r.schedule,
+          text: [r.active ? "attiva" : "pausa", ...(r.notes || [])].join(" "),
+          open: () => openSpace("Automazioni", "", r.id),
+        }))),
     ...[...new Set([...spacePeople, ...Object.keys(spaceData.profiles || {})])]
       .filter((n) => !spaceData.removedPeople?.includes(n))
       .map((n) => ({

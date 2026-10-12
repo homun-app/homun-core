@@ -10,3 +10,4 @@
 .cw-routine-creator { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid currentColor; }
 .cw-routine-creator label { display: grid; gap: 4px; font-size: 13px; }
 .cw-engine-summary__routine-create { display: grid; gap: 6px; }
+.cw-routine[data-selected] { outline: 2px solid var(--color-ring, #579481); outline-offset: 2px; }

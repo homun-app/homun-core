@@ -33,3 +33,14 @@ export function cadenceToCron(phrase: string): string | null {
   if (fields.length === 5 && fields.every((f) => /^[\d*,/-]+$/.test(f))) return text;
   return null;
 }
+
+const WEEKDAY_NAMES = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
+
+/** Cron → human cadence, mirroring the phrases cadenceToCron accepts. */
+export function describeCron(cron: string): string {
+  const [m = "0", h = "0", , , dow] = cron.split(" ");
+  if (dow === "*") return `ogni giorno alle ${h}:${m.padStart(2, "0")}`;
+  if (dow === "1-5") return `nei giorni feriali alle ${h}:${m.padStart(2, "0")}`;
+  const day = WEEKDAY_NAMES[Number(dow)];
+  return day ? `ogni ${day} alle ${h}:${m.padStart(2, "0")}` : cron;
+}
