@@ -10,9 +10,12 @@ export type SearchEntry = {
 };
 export function ConversationSearch({
   entries,
+  backend,
   onClose,
 }: {
   entries: SearchEntry[];
+  /** Data source of the index — stated in the footer (Fonte: …). */
+  backend: "engine" | "simulation";
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -114,8 +117,8 @@ export function ConversationSearch({
           )}
         </div>
         <footer>
-          {results.length} risultati · ↑ ↓ per scegliere · Invio per aprire · ricerca testuale nei
-          dati della demo
+          {results.length} risultati · ↑ ↓ per scegliere · Invio per aprire · Fonte:{" "}
+          {backend === "engine" ? "motore" : "simulazione"}
         </footer>
       </section>
     </dialog>

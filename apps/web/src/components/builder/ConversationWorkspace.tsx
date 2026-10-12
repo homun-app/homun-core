@@ -47,7 +47,6 @@ import {
 import { projectWorkspaceData } from "@/lib/engine-project-projection";
 import { repeatEngineWork } from "@/lib/engine-work-repeat";
 import { pausedRoutines } from "@/lib/conversation-routines";
-export type { Work } from "./conversation-types";
 const { storageKey, bootstrap: demoBootstrap } = demoWorkspaceBootstrap();
 
 export function ConversationWorkspace() {
@@ -107,6 +106,7 @@ export function ConversationWorkspace() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+  const closeSearch = () => setSearchOpen(false);
   function openSpace(view: SpaceView, initial = "", selected = "") {
     if (window.innerWidth <= 800) setSidebarOpen(false);
     if (selected || initial) setPanel(true);
@@ -1024,8 +1024,6 @@ export function ConversationWorkspace() {
     visibleWorks,
     scenarios,
     displaySpaceData,
-    spaceData,
-    workStatus,
     openSpace,
     openWork: open,
     setPreview,
@@ -1060,7 +1058,9 @@ export function ConversationWorkspace() {
         storageKey={storageKey}
         resetting={resetting}
       />
-      {searchOpen && <ConversationSearch entries={entries} onClose={() => setSearchOpen(false)} />}
+      {searchOpen && (
+        <ConversationSearch entries={entries} backend={engine.backend} onClose={closeSearch} />
+      )}
       {sidebarOpen && (
         <button
           className="cw-mobile-backdrop"
