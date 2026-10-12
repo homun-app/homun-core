@@ -30,7 +30,7 @@ type Args = {
   setPreview: (value: boolean) => void;
 };
 
-/** Health of the engine sources behind the search index, stated in its footer. */
+/** Health of the engine sources behind the search index, stated in its results area. */
 export type ConversationSearchSources = {
   /**
    * Independently fetched material source; null in simulation, where no
@@ -42,7 +42,7 @@ export type ConversationSearchSources = {
   materials: { status: EngineMaterialsStatus; error: unknown } | null;
 };
 
-/** One rule for the footer status, pure so it stays testable without React. */
+/** One rule for the search source status, pure so it stays testable without React. */
 export function searchMaterialsSource(
   backend: "engine" | "simulation",
   engineOnline: boolean,

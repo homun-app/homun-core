@@ -1703,14 +1703,16 @@ dialog.cw-overlay:not([open]) {
   font-size: 11px;
   margin-top: 5px;
 }
-.cw-super-search footer {
-  padding: 16px 25px;
-  font-size: 10px;
-  color: #8b967f;
-}
-.cw-super-search footer .homun-error-notice {
-  margin: 6px 0 0;
+.cs-search-source-note {
+  margin: 0;
+  padding: 10px 13px 0;
   font-size: 11px;
+  font-weight: 500;
+  color: oklch(0.5 0.09 60);
+}
+.cs-search-empty .cs-search-source-note {
+  padding: 0;
+  margin-top: 4px;
 }
 .cw-message[data-message] {
   scroll-margin: 25px;
