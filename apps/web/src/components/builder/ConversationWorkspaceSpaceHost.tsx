@@ -141,6 +141,7 @@ export function ConversationWorkspaceSpaceHost({
           onChanged={onRefreshEngine}
           onCreateMember={() => onOpenSpace("Nuovo collaboratore")}
           initialFilter={spaceInitial}
+          selectedAgentId={spaceSelected}
         />
         <EngineWorkspaceTeams
           teams={engineTeams ?? []}

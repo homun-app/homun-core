@@ -19,6 +19,8 @@ type Props = {
   onChanged?: (() => Promise<void>) | undefined;
   onCreateMember?: (() => void) | undefined;
   initialFilter?: string | undefined;
+  /** Engine agent id to open directly (e.g. from global search). */
+  selectedAgentId?: string | undefined;
 };
 
 export function EngineWorkspaceAgents({
@@ -28,6 +30,7 @@ export function EngineWorkspaceAgents({
   onChanged,
   onCreateMember,
   initialFilter,
+  selectedAgentId,
 }: Props) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "agents" | "humans">(() => {
@@ -38,7 +41,10 @@ export function EngineWorkspaceAgents({
   if (initialFilter && (initialFilter === "agents" || initialFilter === "humans" || initialFilter === "all") && filter !== initialFilter && !search) {
     setFilter(initialFilter);
   }
-  const [selectedTarget, setSelectedTarget] = useState<DetailTarget | null>(null);
+  const [selectedTarget, setSelectedTarget] = useState<DetailTarget | null>(() => {
+    const agent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) : undefined;
+    return agent ? { kind: "agent", agent } : null;
+  });
 
   // Active engine agents
   const agentItems: DetailTarget[] = agents
