@@ -20,3 +20,32 @@ test("operational notices are quiet when healthy but preserve errors, recovery a
     assert.match(ui.render({ ...props, backend: "simulation", dataSourceSelected: "simulation" }), /Fonte: simulazione/);
   } finally { await ui.close(); }
 });
+
+test("the workspace shell declares simulation in exactly one stable point, and says nothing in engine mode", async () => {
+  const ui = await componentRenderer("/apps/web/src/components/builder/ConversationWorkspaceEngineNotices.tsx", "ConversationWorkspaceEngineNotices");
+  const engineState = (over: Record<string, unknown>) => ({
+    dataSource: "engine",
+    backend: "engine",
+    gateError: null,
+    error: null,
+    busy: false,
+    works: [],
+    followups: [],
+    refresh: () => {},
+    ...over,
+  });
+  try {
+    // Simulation: the one visible label, rendered on every space of the shell.
+    const simulation = ui.render({ engine: engineState({ dataSource: "simulation", backend: "simulation" }), onOpenModels: () => {} });
+    assert.match(simulation, /Fonte: simulazione/);
+    // Engine mode healthy: no label at all — the engine is the non-simulation default.
+    assert.equal(ui.render({ engine: engineState(), onOpenModels: () => {} }), "");
+    // Engine mode offline keeps the operational banner, never the simulation label.
+    const offline = ui.render({
+      engine: engineState({ gateError: new Error("Engine data source selected, but the engine is not connected.") }),
+      onOpenModels: () => {},
+    });
+    assert.match(offline, /Homun \(motore\) non è raggiungibile/);
+    assert.doesNotMatch(offline, /Fonte: simulazione/);
+  } finally { await ui.close(); }
+});

@@ -1059,7 +1059,7 @@ export function ConversationWorkspace() {
         resetting={resetting}
       />
       {searchOpen && (
-        <ConversationSearch search={search} backend={engine.backend} onClose={closeSearch} />
+        <ConversationSearch search={search} onClose={closeSearch} />
       )}
       {sidebarOpen && (
         <button

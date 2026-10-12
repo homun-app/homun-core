@@ -10,15 +10,19 @@ export type SearchEntry = {
   text: string;
   open: () => void;
 };
+/**
+ * Global ⌘K dialog. No footer: the global engine state is the workspace
+ * banner's job, and the data-source mode is declared once in the main
+ * interface — never here. A source that did not answer is stated where the
+ * user is looking: the empty state when nothing came back, one discreet
+ * line on top when only part of the index did.
+ */
 export function ConversationSearch({
   search,
-  backend,
   onClose,
 }: {
   /** What ⌘K reads: index entries plus the health of its engine sources. */
   search: { entries: SearchEntry[]; sources?: ConversationSearchSources };
-  /** Data source of the index — stated in the footer (Fonte: …). */
-  backend: "engine" | "simulation";
   onClose: () => void;
 }) {
   const { entries, sources } = search;
@@ -40,6 +44,7 @@ export function ConversationSearch({
       (kind === "Tutto" || e.kind === kind) &&
       terms.every((t) => normalize(`${e.title} ${e.text} ${e.context}`).includes(t)),
   );
+  const materialsMissing = sources?.materials?.status === "unavailable";
   return (
     <dialog
       ref={ref}
@@ -97,6 +102,13 @@ export function ConversationSearch({
           ))}
         </nav>
         <div className="cs-search-results">
+          {results.length > 0 && materialsMissing && (
+            <HomunErrorNotice
+              error={sources?.materials?.error}
+              label="Alcuni materiali mancano:"
+              className="cs-search-source-note"
+            />
+          )}
           {results.map((r, i) => (
             <button
               key={r.id}
@@ -116,17 +128,19 @@ export function ConversationSearch({
               <ArrowUpRight size={17} />
             </button>
           ))}
-          {!results.length && (
-            <p>Nessun risultato. Prova un nome o una parola presente nel contenuto.</p>
-          )}
+          {!results.length &&
+            (materialsMissing ? (
+              <div className="cs-search-empty">
+                <p>Nessun risultato. I materiali non sono raggiungibili in questo momento.</p>
+                <HomunErrorNotice
+                  error={sources?.materials?.error}
+                  className="cs-search-source-note"
+                />
+              </div>
+            ) : (
+              <p>Nessun risultato. Prova un nome o una parola presente nel contenuto.</p>
+            ))}
         </div>
-        <footer>
-          {results.length} risultati · ↑ ↓ per scegliere · Invio per aprire · Fonte:{" "}
-          {backend === "engine" ? "motore" : "simulazione"}
-          {sources?.materials?.status === "unavailable" && (
-            <HomunErrorNotice error={sources.materials.error} label="Materiali non disponibili:" />
-          )}
-        </footer>
       </section>
     </dialog>
   );

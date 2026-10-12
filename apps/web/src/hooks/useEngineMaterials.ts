@@ -1,8 +1,8 @@
 /**
  * Engine material source of the global search index (Fonte: motore).
  * A failed load surfaces as status "unavailable" with the client's typed
- * error, which the search states in its footer — never a silent empty,
- * never simulated data.
+ * error, which the search states in its results area — never a silent
+ * empty, never simulated data.
  */
 
 import { useEffect, useRef, useState } from "react";
