@@ -2,10 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   loadEngineMaterialLibrary,
+  probeEngineMaterials,
   uploadEngineMaterialFiles,
   archiveLibraryMaterial,
 } from "../apps/web/src/lib/engine-material-library.ts";
 import { subscribeMaterialChanges } from "../apps/web/src/lib/project-materials-lifecycle.ts";
+import { HomunClientError } from "../apps/web/src/lib/homun-errors.ts";
 
 test("library reads the engine projects and never creates data during a read", async () => {
   const original = globalThis.fetch;
@@ -38,6 +40,54 @@ test("library read rejects revoked project access instead of reporting an empty 
     Response.json({ error: { code: "permission_denied", message: "revoked" } }, { status: 403 });
   try {
     await assert.rejects(loadEngineMaterialLibrary(["p1"]), { code: "permission_denied" });
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("search source probe keeps the engine's typed http error instead of a silent empty", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json({ detail: { code: "permission_denied", message: "revoked" } }, { status: 403 });
+  try {
+    const state = await probeEngineMaterials(["p1"]);
+    assert.equal(state.status, "unavailable");
+    assert.deepEqual(state.items, []);
+    assert.ok(state.error instanceof HomunClientError);
+    assert.equal(state.error?.code, "permission_denied");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("search source probe reports an unreachable engine with the typed engine_unavailable code", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new TypeError("fetch failed");
+  };
+  try {
+    const state = await probeEngineMaterials(["p1"]);
+    assert.equal(state.status, "unavailable");
+    assert.ok(state.error instanceof HomunClientError);
+    assert.equal(state.error?.code, "engine_unavailable");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("search source probe resolves ok with items when the engine answers", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json({ items: [{ id: "m-p1", project_id: "p1", status: "active" }] });
+  try {
+    const state = await probeEngineMaterials(["p1"]);
+    assert.equal(state.status, "ok");
+    assert.equal(state.error, undefined);
+    assert.deepEqual(
+      state.items.map((m) => m.id),
+      ["m-p1"],
+    );
+    assert.deepEqual((await probeEngineMaterials([])).items, []);
   } finally {
     globalThis.fetch = original;
   }

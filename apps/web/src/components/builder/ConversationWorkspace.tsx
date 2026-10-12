@@ -1018,7 +1018,7 @@ export function ConversationWorkspace() {
       onOpen={open}
     />
   ) : null;
-  const entries = useConversationSearchEntries({
+  const search = useConversationSearchEntries({
     engine,
     library,
     visibleWorks,
@@ -1059,7 +1059,7 @@ export function ConversationWorkspace() {
         resetting={resetting}
       />
       {searchOpen && (
-        <ConversationSearch entries={entries} backend={engine.backend} onClose={closeSearch} />
+        <ConversationSearch search={search} backend={engine.backend} onClose={closeSearch} />
       )}
       {sidebarOpen && (
         <button
