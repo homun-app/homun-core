@@ -31,7 +31,14 @@ def health() -> HealthResponse:
         "status": "ok",
         "version": __version__,
         "uptime_seconds": get_uptime_seconds(),
-        "db": db_health_summary(ctx.repository.path.parent),
+        "db": {
+            **db_health_summary(ctx.repository.path.parent),
+            # Il percorso assoluto rende visibile QUALE database è in uso:
+            # l'anomalia del 2026-10-07 era una conversazione cercata nel
+            # database sbagliato (due installazioni sulla stessa macchina).
+            "path": str(ctx.repository.path.resolve()),
+            "data_dir": str(ctx.data_dir.resolve()),
+        },
     }
 
 
