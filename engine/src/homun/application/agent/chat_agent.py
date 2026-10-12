@@ -268,17 +268,16 @@ def start_chat_turn(ctx, actor: Actor, conversation_id: str, text: str,
 
 
 def _final_answer(run: Dict[str, Any]) -> str:
-    import re as _re
     user_message = next((m.get("content") for m in reversed(run.get("_messages") or [])
                          if isinstance(m, dict) and m.get("role") == "user"), None)
     messages = run.get("_messages") or []
     for message in reversed(messages):
         if isinstance(message, dict) and message.get("role") == "assistant" \
                 and str(message.get("content") or "").strip():
-            text = str(message["content"]).strip()
-            # il blocco di ragionamento non è la risposta: via dal testo consegnato
-            text = _re.sub(r"<think>.*?</think>", "", text, flags=_re.DOTALL).strip()
-            text = text or str(message["content"]).strip()
+            raw = str(message["content"])
+            # il blocco di ragionamento non è la risposta: via dal testo
+            # consegnato (coppie, orfani e blocchi mai chiusi — 572446308e)
+            text = strip_think_blocks(raw) or raw.strip()
             return _presentable(text, run, user_message)
     for observation in reversed(run.get("observations") or []):
         text = str((observation or {}).get("message") or "").strip()

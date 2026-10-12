@@ -16,7 +16,7 @@ import time
 from typing import Any, Dict, Iterator, Optional
 
 from homun.domain.errors import DomainError
-from homun.models.finish_gates import THINK_BLOCK_RE, THINK_CONTENT_RE, strip_think_blocks
+from homun.models.finish_gates import split_think
 from homun.policy.work import require_conversation_access
 
 POLL_SECONDS = 0.25
@@ -39,50 +39,44 @@ def _chat_runs_for(store, conversation_id: str):
 
 def _assistant_text(run: Dict[str, Any]) -> str:
     """Il testo visibile dell'ultimo messaggio assistente: il ragionamento
-    (blocchi think, anche orfani) non si streamma in chat — come la risposta
-    consegnata, che passa dagli stessi gate."""
+    (blocchi think, anche orfani o mai chiusi) non si streamma in chat —
+    come la risposta consegnata, che passa dagli stessi gate."""
     messages = run.get("_messages") or []
     for message in reversed(messages):
         if isinstance(message, dict) and message.get("role") == "assistant":
-            return strip_think_blocks(str(message.get("content") or ""))
+            return split_think(str(message.get("content") or ""))[1].strip()
     return ""
 
 
 def assistant_reasoning(run: Dict[str, Any]) -> str:
     """Il ragionamento dell'ultimo messaggio assistente, come testo: i blocchi
-    think (chiusi o orfani) restano leggibili anche dopo la consegna, così la
-    transcript li può mostrare collassati come in live."""
+    think (chiusi, orfani o ancora aperti) restano leggibili anche dopo la
+    consegna, così la transcript li può mostrare collassati come in live."""
     messages = run.get("_messages") or []
     for message in reversed(messages):
         if isinstance(message, dict) and message.get("role") == "assistant":
-            blocks = THINK_CONTENT_RE.findall(str(message.get("content") or ""))
-            return "\n".join(block.strip() for block in blocks if block.strip())
+            return split_think(str(message.get("content") or ""))[0]
     return ""
 
 
 def _split_partial(text: str, run: Dict[str, Any]) -> tuple[str, str]:
     """Il parziale in-flight diviso in (ragionamento, visibile).
 
-    Il tag di chiusura decide: prima di </think> è ragionamento, dopo è
-    risposta. Finché il tag non arriva si usa la storia del run: se questo
-    modello ha già chiuso pensieri con </think>, tutto il parziale è
-    ragionamento (ChatGPT-style: pensa, poi risponde); altrimenti è già
-    risposta che si streamma viva.
+    Con tag think il split dello scrubber decide (572446308e): il testo dei
+    blocchi — ovunque stiano, anche non ancora chiusi — è ragionamento.
+    Senza alcun tag decide la storia del run: se questo modello ha già chiuso
+    pensieri con </think>, tutto il parziale è ragionamento (ChatGPT-style:
+    pensa, poi risponde); altrimenti è già risposta che si streamma viva.
     """
-    head, sep, tail = text.partition("</think>")
-    if sep:
-        reasoning = THINK_BLOCK_RE.sub("", head)
-        return reasoning, tail
-    uses_think = any(
-        isinstance(m, dict) and m.get("role") == "assistant"
-        and "</think>" in str(m.get("content") or "")
-        for m in run.get("_messages") or [])
-    if uses_think:
-        return THINK_BLOCK_RE.sub("", text), ""
-    stripped = text.lstrip()
-    if stripped.startswith("<think>"):
-        return stripped[len("<think>"):], ""
-    return "", text
+    if "<think>" not in text and "</think>" not in text:
+        uses_think = any(
+            isinstance(m, dict) and m.get("role") == "assistant"
+            and "</think>" in str(m.get("content") or "")
+            for m in run.get("_messages") or [])
+        if uses_think:
+            return text, ""
+        return "", text
+    return split_think(text)
 
 
 def _yield_stream_state(run_id: str, streamed: Dict[str, tuple], run: Dict[str, Any]):
