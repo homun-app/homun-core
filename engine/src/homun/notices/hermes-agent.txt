@@ -371,3 +371,23 @@ tui_gateway/server.py, tui_gateway/session_lifecycle.py, cli.py, and ui-tui/ at 
 
 
 
+Streaming parity ports beyond the pinned commit (2026-10-12, behavior only, adapted
+to the engine's models/ and SSE abstractions — no upstream code copied):
+- b6aae42c3b (runaway repetition cut while streaming): models/repetition.py
+  RunawayStreamWatch applies the stop-path floor (16k chars) live on the raw
+  content and reasoning channels, first at 16k and then at every doubling on a
+  bounded 64k tail; a hit raises the typed non-retryable agent_model_repetition
+  failure that ends the turn visibly.
+- 572446308e (inline <think> text in the live reasoning pane): the stateless
+  models/finish_gates.split_think scrubber routes think-block text (pairs
+  anywhere, unclosed tail, orphan close) to the reasoning side and keeps the
+  visible answer clean, feeding sessions/chat_events stream_state and the
+  delivered answer; native reasoning-channel forwarding and its suppression
+  follow the same commit.
+- 167f0ef5fa (commentary tail truncated at a tool-call boundary): verified NOT
+  applicable — the engine has no prefix-based already-streamed skip; the live
+  partial flush and the full-text delivery are pinned by tests.
+- a2a19bcc77 (clean EOF without finish_reason distinct from a transport drop):
+  native_errors/native_stream typed codes agent_model_clean_eof vs
+  agent_model_truncated vs transport-classified network failures, with the
+  finish_reason_seen diagnostic; a clean EOF is never retried.

@@ -175,7 +175,7 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
 | Vista Compiti/filtri incomprensibile | da rifare contro F5 (persona≠device) | idem |
 | Connettori duplicati con i canali | da unificare/etichettare | idem |
 | Errori connettore visibili | ✅ corretto 2026-10-07 | commit feedback |
-| Gap parity Hermes: anti-loop in streaming, think inline nel pane, clean-EOF, coda al confine tool-call | da portare | `research/evidence/2026-10-07-parity-rc35/RIASSUNTO-TEST.md` |
+| Gap parity Hermes: anti-loop in streaming, think inline nel pane, clean-EOF, coda al confine tool-call | ✅ portati 2026-10-12 (`fix/hermes-streaming-parity`): runaway live con soglia Hermes 16k/raddoppio su contenuto e ragionamento; scrubber think stateless (`split_think`) che alimenta il pane e tiene pulita la risposta; clean-EOF tipizzato e mai ritentato; coda al confine tool-call verificata non applicabile (nessun salto basato su prefisso) | `research/evidence/2026-10-07-parity-rc35/RIASSUNTO-TEST.md`, `engine/tests/test_hermes_streaming_p0_gaps.py` |
 | Anomalia: conversazione scomparsa dopo riavvio (2026-10-07) | RIDIAGNOSTICATA 2026-10-12: l'ipotesi "WAL perso durante kill -9" era errata — con `synchronous=FULL` in WAL ogni transazione confermata è durabile e sopravvive al kill del processo. Sulla stessa macchina esistono due database sani e distinti (app desktop: `~/Library/Application Support/Homun/engine/ws_local.sqlite3`, motore di sviluppo: `~/Library/Application Support/Homun2/engine/ws_local.sqlite3`), entrambi con conversazioni del 7 ottobre: l'ipotesi più probabile è che la conversazione sia stata cercata nel database sbagliato. Non è confermata: serve il titolo della conversazione per cercarla in entrambi. Causa aggravante corretta in questa PR: la recovery scattava anche su errori non di corruzione (SQLITE_BUSY/CANTOPEN/PERM/FULL...) mettendo in quarantena database sani; ora solo `SQLITE_CORRUPT*`/`SQLITE_NOTADB` e ValidationError; ogni EncryptionError è fatale, perché un workspace cifrato avviato senza chiave non è distinguibile da un file danneggiato e la quarantena lo sostituirebbe con uno vuoto. Diagnosi: `/v1/health` espone percorso del db e cartella dati, più riga `Workspace:` nel log di avvio | engine/storage |
 | ~~post_message senza controllo authority~~ | ✅ corretto 2026-10-08 (revisione F5): buco pre-mutation critico con i peer | policy/commands.py |
 | ConflictError transitorio in `expire_waiting` | osservato, non bloccante | sessione 2026-10-02 |
@@ -196,7 +196,7 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
    mescolanza con la simulazione corretta il 2026-10-12).
 3. **Connettori**: unificare catalogo connettori/canali, F6.1 ToolGrant,
    primo connettore verticale (Trello o equivalente scelto da Fabio).
-4. **Gap parity Hermes** (quattro fix mirati, ~1 giorno).
+4. ~~**Gap parity Hermes**~~ (✅ 2026-10-12, quattro fix portati con batteria rossa→verde).
 5. **F10.2/F10.3** stress e accessibilità prima del pilot.
 6. **F9.5** routing automatico (dopo dati di usage reali dal pilot).
 
