@@ -46,6 +46,7 @@ import {
 } from "@/lib/conversation-plan-commands";
 import { projectWorkspaceData } from "@/lib/engine-project-projection";
 import { repeatEngineWork } from "@/lib/engine-work-repeat";
+import { pausedRoutines } from "@/lib/conversation-routines";
 export type { Work } from "./conversation-types";
 const { storageKey, bootstrap: demoBootstrap } = demoWorkspaceBootstrap();
 
@@ -68,6 +69,7 @@ export function ConversationWorkspace() {
   const [squadListOpen, setSquadListOpen] = useState(true);
   const [panel, setPanel] = useState(false);
   const searchShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K";
+  const closeSidebar = () => setSidebarOpen(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 800);
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = localStorage.getItem("homun:sidebar-width");
@@ -84,7 +86,7 @@ export function ConversationWorkspace() {
   const [spaceSelected, setSpaceSelected] = useState("");
   const [spaceVersion, setSpaceVersion] = useState(0);
   const [spaceData, setSpaceData] = useState<SpaceData>(() => demoBootstrap.spaceData);
-  const displaySpaceData = projectWorkspaceData(engine.backend, spaceData, engine.projects, engine.backend === "engine" ? engine.teams : []);
+  const displaySpaceData = projectWorkspaceData(engine.backend, spaceData, engine);
   const [searchOpen, setSearchOpen] = useState(false);
   const { resetting } = useConversationPrototypeStorage({
     storageKey, loaded, setLoaded, storageEnabled, setStorageEnabled, setStorageStatus,
@@ -128,23 +130,23 @@ export function ConversationWorkspace() {
     if (preview) element?.showModal();
     return () => element?.close();
   }, [preview]);
-  const work = (engine.backend === "engine" ? engine.works : works).find((w) => w.id === active);
-  const visibleWorks = (engine.backend === "engine" ? engine.works : works).filter((w) => !w.archived);
+  const workCatalog = engine.backend === "engine" ? engine.works : works;
+  const work = workCatalog.find((w) => w.id === active);
+  const visibleWorks = workCatalog.filter((w) => !w.archived);
   const scenario = work ? scenarioForWork(work, scenarios) : null;
 
   useEffect(() => {
     if (!active || (engine.backend === "engine" && !engine.loaded)) return;
-    const catalog = engine.backend === "engine" ? engine.works : works;
-    if (!catalog.some((w) => w.id === active)) setActive(null);
+    if (!workCatalog.some((w) => w.id === active)) setActive(null);
   }, [engine.backend, engine.loaded, engine.works, works, active]);
 
   function workStatus(w: Work) {
     return workspaceWorkStatus(w, scenarios, spaceData.profiles);
   }
-  const pending = (engine.backend === "engine" ? engine.works : works).filter((w) =>
+  const pending = workCatalog.filter((w) =>
     isPendingForViewer(w, viewer, scenarios, spaceData.profiles),
   );
-  const completedNotices = (engine.backend === "engine" ? engine.works : works).filter((w) =>
+  const completedNotices = workCatalog.filter((w) =>
     isCompletedNoticeForViewer(w, viewer, preferences.resultNotifications, seenResults),
   );
   const notificationCount = pending.length + completedNotices.length;
@@ -481,7 +483,7 @@ export function ConversationWorkspace() {
       return (
         <ConversationActions
           title={w.title}
-          projects={spaceData.projects}
+          projects={displaySpaceData.projects}
           current={w.projectId || ""}
           onRename={() => setNotice("Rinomina non ancora disponibile.")}
           onMove={(projId) => moveConversation(w.id, projId)}
@@ -512,9 +514,7 @@ export function ConversationWorkspace() {
                 );
                 setSpaceData((current) => ({
                   ...current,
-                  routines: current.routines.map((r) =>
-                    r.workId === w.id ? { ...r, active: false } : r,
-                  ),
+                  routines: pausedRoutines(current.routines, (r) => r.workId === w.id),
                 }));
                 if (active === w.id) {
                   open(null);
@@ -550,9 +550,7 @@ export function ConversationWorkspace() {
                 );
                 setSpaceData((current) => ({
                   ...current,
-                  routines: current.routines.map((r) =>
-                    removed.has(r.workId) ? { ...r, active: false } : r,
-                  ),
+                  routines: pausedRoutines(current.routines, (r) => removed.has(r.workId)),
                 }));
                 if (active && removed.has(active)) {
                   open(null);
@@ -1064,13 +1062,17 @@ export function ConversationWorkspace() {
       />
       {searchOpen && <ConversationSearch entries={entries} onClose={() => setSearchOpen(false)} />}
       {sidebarOpen && (
-        <button className="cw-mobile-backdrop" aria-label="Chiudi navigazione" onClick={() => setSidebarOpen(false)} />
+        <button
+          className="cw-mobile-backdrop"
+          aria-label="Chiudi navigazione"
+          onClick={closeSidebar}
+        />
       )}
       <ConversationWorkspaceSidebar engineAgents={engine.backend === "engine" ? engine.agents : undefined}
         sidebarOpen={sidebarOpen}
         searchShortcut={searchShortcut}
         onSearchOpen={() => setSearchOpen(true)}
-        onCloseSidebar={() => setSidebarOpen(false)}
+        onCloseSidebar={closeSidebar}
         onNewConversation={() => {
           const inProjects = (space as string | null) === "Progetti";
           setNewChatProjectId(inProjects && spaceSelected ? spaceSelected : null);

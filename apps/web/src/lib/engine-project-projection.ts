@@ -2,11 +2,16 @@
 import type { SpaceData } from '../components/builder/ConversationSpace.ts';
 import type { EngineProject, EngineTeam } from './engine-projects-client.ts';
 
+/** The engine inventory the projection draws from (subset of the workspace state). */
+export type EngineProjectionSource = {
+  projects: EngineProject[];
+  teams?: EngineTeam[] | undefined;
+};
+
 export function projectWorkspaceData(
   backend: 'engine' | 'simulation',
   simulation: SpaceData,
-  projects: EngineProject[],
-  teams: EngineTeam[] = [],
+  engine: EngineProjectionSource,
 ): SpaceData {
   if (backend === 'simulation') return simulation;
   // Engine mode keeps nothing of the simulated workspace: every field is engine
@@ -16,14 +21,14 @@ export function projectWorkspaceData(
     installedPlugins: [],
     removedPeople: [],
     profiles: {},
-    teams: teams.map((team) => ({
+    teams: (engine.teams ?? []).map((team) => ({
       id: team.id,
       name: team.name,
       members: [...team.member_ids],
       leader: team.coordinator_id ?? '',
       brief: team.description,
     })),
-    projects: projects.map((project) => ({
+    projects: engine.projects.map((project) => ({
       id: project.id, name: project.name, brief: project.description,
       teamId: project.team_ids[0] ?? '',
     })),
