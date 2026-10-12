@@ -374,9 +374,14 @@ tui_gateway/server.py, tui_gateway/session_lifecycle.py, cli.py, and ui-tui/ at 
 Streaming parity ports beyond the pinned commit (2026-10-12, behavior only, adapted
 to the engine's models/ and SSE abstractions — no upstream code copied):
 - b6aae42c3b (runaway repetition cut while streaming): models/repetition.py
-  RunawayStreamWatch applies the stop-path floor (16k chars) live on the raw
-  content and reasoning channels, first at 16k and then at every doubling on a
-  bounded 64k tail; a hit raises the typed non-retryable agent_model_repetition
+  RunawayStreamWatch runs the SAME criterion as the engine's turn-end check
+  (is_runaway_repetition at the MIN_FRAGMENT_LENGTH floor) live on the raw
+  content and reasoning channels; what the port takes from Hermes is the
+  CADENCE — first check at the floor, then at every doubling on a bounded
+  64k tail — not Hermes's 16k stop-path floor (the engine stop path judges
+  at 400 to stop local-model loops early, and a live floor higher than the
+  turn-end floor would only let rejected text stream 40x longer before the
+  same verdict). A hit raises the typed non-retryable agent_model_repetition
   failure that ends the turn visibly.
 - 572446308e (inline <think> text in the live reasoning pane): the stateless
   models/finish_gates.split_think scrubber routes think-block text (pairs

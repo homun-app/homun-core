@@ -24,7 +24,8 @@ from test_native_stream_transport import server as _server
 from homun.models.native_errors import NativeModelError, REPETITION
 from homun.models.native_stream import NativeStream
 from homun.models.repetition import (
-    STOP_PATH_MIN_CHARS, is_runaway_repetition,
+    MIN_FRAGMENT_LENGTH, STREAM_TAIL_CHARS, RunawayStreamWatch,
+    is_runaway_repetition,
 )
 
 
@@ -43,7 +44,7 @@ _RUNAWAY_LINE = (
 
 
 def runaway_text(total_chars):
-    """One degenerate repetition loop long enough to pass the Hermes floor."""
+    """One degenerate repetition loop of ``total_chars`` (whole repeated lines)."""
     text = _RUNAWAY_LINE * (total_chars // len(_RUNAWAY_LINE) + 1)
     return text[:total_chars]
 
@@ -52,14 +53,20 @@ def runaway_text(total_chars):
 # Gap 1 — live runaway guard during stream (not only after finish)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.parametrize("total_chars", [
+    pytest.param(len(_RUNAWAY_LINE) * 30, id="short-2.6k"),
+    pytest.param(len(_RUNAWAY_LINE) * 280, id="long-24k"),
+])
 @pytest.mark.parametrize("field", ["content", "reasoning"])
-def test_p0_runaway_aborts_during_stream_before_finish(field):
+def test_p0_runaway_aborts_during_stream_before_finish(field, total_chars):
     """Hermes checks is_runaway_repetition on raw content AND reasoning while
-    streaming, first at the stop-path floor (16k chars) and then at every
-    doubling. A hit closes the stream immediately with a typed, non-retryable
-    REPETITION failure — never silently.
+    streaming, first at the turn-end floor (MIN_FRAGMENT_LENGTH) and then at
+    every doubling. A short local-model loop (~2.6k chars) is cut mid-stream,
+    long before the reply could grow to stop-path scale. A hit closes the
+    stream immediately with a typed, non-retryable REPETITION failure —
+    never silently.
     """
-    runaway = runaway_text(STOP_PATH_MIN_CHARS + 8192)
+    runaway = runaway_text(total_chars)
     assert is_runaway_repetition(runaway)
 
     stream = NativeStream()
@@ -76,12 +83,55 @@ def test_p0_runaway_aborts_during_stream_before_finish(field):
     assert caught.value.retryable is False
 
 
-def test_p0_live_watch_first_checks_at_hermes_floor_then_doubles(monkeypatch):
-    """Hermes b6aae42c3b cadence: first evaluation at STOP_PATH_MIN_CHARS,
-    the next each time the channel doubles (bounded 64k tail).
+def _live_verdict(text, *, chunk_chars=64):
+    """Replay ``text`` through the live watch the way NativeStream feeds it."""
+    watch = RunawayStreamWatch()
+    for offset in range(0, len(text), chunk_chars):
+        if watch.feed(text[offset:offset + chunk_chars]):
+            return True
+    return False
 
-    A lower floor would cut repetition the user asked for (#121600); a denser
-    cadence would re-scan the whole partial on every delta.
+
+_SIMILAR_ROWS_TABLE = "\n".join(
+    f"| Same heading and long shared explanatory prefix for each data row | {i} |"
+    for i in range(60)
+)
+_NORMAL_LONG_TEXT = "\n".join(
+    f"| {i:06d} | distinct status line kept for the live parity check |"
+    for i in range(500)
+)
+
+
+@pytest.mark.parametrize("text", [
+    pytest.param(_RUNAWAY_LINE * 30, id="short-loop-2.6k"),
+    pytest.param(_RUNAWAY_LINE * 280, id="long-loop-24k"),
+    pytest.param("Ciao mondo!\n" * 200, id="asked-repetition-2.4k"),
+    pytest.param(_NORMAL_LONG_TEXT, id="normal-long-32k"),
+    pytest.param(_SIMILAR_ROWS_TABLE, id="similar-rows-table"),
+])
+def test_p0_live_watch_verdict_at_end_of_stream_matches_turn_end(text):
+    """INVARIANT — the live watch and the turn-end check are ONE criterion.
+
+    Whatever ``is_runaway_repetition`` says about the complete message, the
+    live watch must say the same by the time the stream ends: a reply the
+    turn end would reject is cut as soon as the live cadence can prove it,
+    and a reply the turn end would accept (long distinct text, tables with
+    similar rows) is never cut live.
+    """
+    live = _live_verdict(text)
+    turn_end = is_runaway_repetition(text)
+    assert live == turn_end, (
+        f"live verdict {live} != turn-end verdict {turn_end} "
+        f"({len(text)} chars)"
+    )
+
+
+def test_p0_live_watch_first_checks_at_turn_end_floor_then_doubles(monkeypatch):
+    """Hermes b6aae42c3b CADENCE on the engine's own floor: the first
+    evaluation runs at MIN_FRAGMENT_LENGTH — the same floor as the turn-end
+    check, so the two guards are one criterion — the next each time the
+    channel doubles, and the judged text never exceeds the bounded 64k tail
+    (total work stays linear however long the reply grows).
     """
     import homun.models.repetition as repetition
 
@@ -97,48 +147,28 @@ def test_p0_live_watch_first_checks_at_hermes_floor_then_doubles(monkeypatch):
     watch = repetition.RunawayStreamWatch()
     distinct = "\n".join(
         f"| {i:06d} | distinct status line kept for the live parity check |"
-        for i in range(1_000)
+        for i in range(2_000)
     )
-    fed = 0
-    for character in distinct[:STOP_PATH_MIN_CHARS * 2 + 1]:
-        fed += 1
-        if watch.feed(character):
-            break
+    # Feed past the doubling that exceeds the tail: the check observed at
+    # 102,400 chars must judge only the last STREAM_TAIL_CHARS of them.
+    for character in distinct[:102_400 + 1]:
+        assert watch.feed(character) is False, "live watch cut distinct text"
 
-    assert evaluated[0] == STOP_PATH_MIN_CHARS, (
-        f"first live check at {evaluated[0]} chars, Hermes floor is "
-        f"{STOP_PATH_MIN_CHARS}"
+    doublings = [MIN_FRAGMENT_LENGTH * 2 ** k for k in range(8)]  # 400 … 51,200
+    assert evaluated[0] == MIN_FRAGMENT_LENGTH, (
+        f"first live check at {evaluated[0]} chars, turn-end floor is "
+        f"{MIN_FRAGMENT_LENGTH}"
     )
-    assert evaluated == [STOP_PATH_MIN_CHARS, 2 * STOP_PATH_MIN_CHARS], (
-        f"live checks are not at every doubling: {evaluated}"
+    assert evaluated == doublings + [STREAM_TAIL_CHARS], (
+        f"live checks are not floor-then-doubling with a bounded tail: {evaluated}"
     )
-    assert fed >= 2 * STOP_PATH_MIN_CHARS
 
 
-def test_p0_asked_for_repetition_below_floor_streams_to_completion():
-    """Repetition the user asked for stays below the stop-path scale floor and
-    must stream to completion (Hermes #121600 repeat-on-request guard)."""
-    asked = (
-        "Hello world, this is a sentence the user asked me to repeat many "
-        "times.\n" * 50
-    )
-    assert len(asked) < STOP_PATH_MIN_CHARS
-
-    stream = NativeStream()
-    for offset in range(0, len(asked), 64):
-        stream.feed(sse(chunk({"content": asked[offset:offset + 64]})))
-    stream.feed(sse(chunk({}, "stop")))
-    stream.feed(sse("[DONE]"))
-
-    finished = stream.finish()
-    assert finished["choices"][0]["message"]["content"] == asked
-
-
-def test_p0_runaway_cut_ends_turn_typed_and_visible(setup_chat):
-    """The interrupted turn ends with a typed, visible outcome — never silent.
-
-    The live REPETITION cut must fail the run with ``agent_model_repetition``
-    and deliver an engine notice to the conversation.
+def _streamed_repetition_fails_turn_typed_and_visible(setup_chat, text, *, chunk_chars=256):
+    """Drive a chat turn whose model streams ``text`` through the real
+    NativeStream parser: the live REPETITION cut must fail the run with the
+    typed ``agent_model_repetition`` and deliver an engine notice to the
+    conversation — never a silent cut.
     """
     from homun.application.agent import chat_agent
     from homun.application.agent.runs.run_execution import advance
@@ -148,15 +178,13 @@ def test_p0_runaway_cut_ends_turn_typed_and_visible(setup_chat):
     chat_agent.bind(ctx, actor, conv, "agent_chat")
     run_id = chat_agent.start_chat_turn(ctx, actor, conv, "chi sei")["agent_run_id"]
 
-    runaway = runaway_text(STOP_PATH_MIN_CHARS + 8192)
-
     def model(messages, *, stream=None, on_delta=None, **kwargs):
         assert stream is True
         # The real parser: the live watch fires inside feed().
         parser = NativeStream(on_delta=on_delta)
-        for offset in range(0, len(runaway), 256):
-            parser.feed(sse(chunk({"content": runaway[offset:offset + 256]})))
-        raise AssertionError("runaway stream was not cut live")
+        for offset in range(0, len(text), chunk_chars):
+            parser.feed(sse(chunk({"content": text[offset:offset + chunk_chars]})))
+        raise AssertionError("repetition stream was not cut live")
 
     ctx.models.complete_tools = model
     assert advance(ctx, run_id) == "failed"
@@ -171,6 +199,37 @@ def test_p0_runaway_cut_ends_turn_typed_and_visible(setup_chat):
                if m.conversation_id == conv
                and "agent_model_repetition" in (m.text or "")]
     assert notices, "no visible typed outcome in the conversation"
+
+
+def test_p0_asked_for_repetition_is_rejected_typed_and_visible(setup_chat):
+    """Repetition the user ASKED for (Hermes #121600, ~3.6k chars) is
+    rejected under the single live+turn-end criterion: the run fails with
+    the typed ``agent_model_repetition`` and a visible notice. Today the
+    turn-end check alone would reject it just the same — the live guard
+    only stops it sooner, it does not change the verdict.
+
+    Open decision (NOT taken here — it would require changing both guards
+    together): whether user-requested repetition should be delivered
+    instead. See the PR body.
+    """
+    asked = (
+        "Hello world, this is a sentence the user asked me to repeat many "
+        "times.\n" * 50
+    )
+    assert len(asked) < 16_000  # far below Hermes's rejected stop-path floor
+    assert is_runaway_repetition(asked)  # what the turn end says about it
+
+    _streamed_repetition_fails_turn_typed_and_visible(setup_chat, asked, chunk_chars=64)
+
+
+def test_p0_runaway_cut_ends_turn_typed_and_visible(setup_chat):
+    """The interrupted turn ends with a typed, visible outcome — never silent.
+
+    The live REPETITION cut must fail the run with ``agent_model_repetition``
+    and deliver an engine notice to the conversation.
+    """
+    _streamed_repetition_fails_turn_typed_and_visible(
+        setup_chat, runaway_text(len(_RUNAWAY_LINE) * 280))
 
 
 # ---------------------------------------------------------------------------

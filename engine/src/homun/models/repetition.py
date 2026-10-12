@@ -7,8 +7,6 @@ from collections import Counter
 import math
 
 MIN_FRAGMENT_LENGTH = 400
-# Hermes stop-path / first live-check floor (Homun stop path still uses MIN_FRAGMENT_LENGTH).
-STOP_PATH_MIN_CHARS = 16_000
 STREAM_TAIL_CHARS = 64_000
 REPEAT_WINDOW = 60
 MIN_REPEAT_COUNT = 5
@@ -48,15 +46,20 @@ def is_runaway_repetition(text):
 class RunawayStreamWatch:
     """Live repetition guard for streaming channels (content / reasoning).
 
-    Hermes b6aae42c3b: the stop-path criterion runs WHILE the channel streams.
-    The first evaluation waits for ``min_chars`` — the stop-path floor
-    (STOP_PATH_MIN_CHARS), because repetition the user asked for stays below it
-    and must be delivered; the next runs each time the channel doubles, and
-    only the bounded tail (STREAM_TAIL_CHARS) is judged, so total work stays
-    linear in the output however long the reply grows.
+    The live check and the end-of-turn check (``is_runaway_repetition`` in
+    ``native_turn.parse_response``) apply ONE criterion: the first live
+    evaluation runs at the same ``MIN_FRAGMENT_LENGTH`` floor the turn end
+    uses, so a reply the turn end would reject is cut as soon as the live
+    cadence can prove it, and a reply the turn end would accept is never
+    cut live. From Hermes b6aae42c3b comes the CADENCE, not the threshold:
+    the next evaluation runs each time the channel doubles and only the
+    bounded tail (``STREAM_TAIL_CHARS``) is judged, so total work stays
+    linear in the output however long the reply grows. Hermes's 16k
+    stop-path floor was deliberately not ported — the Homun stop path
+    judges at 400 to stop local-model loops early.
     """
 
-    def __init__(self, *, min_chars: int = STOP_PATH_MIN_CHARS):
+    def __init__(self, *, min_chars: int = MIN_FRAGMENT_LENGTH):
         self._min_chars = max(1, int(min_chars))
         self._chars = 0
         self._parts: list[str] = []
