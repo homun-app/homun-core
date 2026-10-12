@@ -107,11 +107,15 @@ def create_context_with_recovery(
 ) -> EngineContext:
     """Avvia il contesto anche davanti a un workspace corrotto.
 
-    Un DB con pagine danneggiate o righe che non validano più non deve fermare
-    il motore: si mette l'originale in quarantena, si ricostruisce il salvabile
-    e si riparte, con un rapporto persistente che salute e chat mostrano.
-    Gli errori di configurazione (chiave, permessi) restano fatali: non sono
-    corruzione e mascherarli peggiorerebbe la diagnosi.
+    Solo la corruzione vera (verdetto sqlite SQLITE_CORRUPT*/NOTADB, righe che
+    non validano più, file non-SQLite senza chiave configurata) attiva la
+    recovery: quarantena dell'originale, ricostruzione del salvabile e un
+    rapporto persistente che salute e chat mostrano.
+    Gli errori temporanei o di configurazione (database bloccato, permessi,
+    disco pieno, chiave sbagliata) restano fatali: si rilanciano avvolti in
+    `WorkspaceUnavailableError`, senza toccare nessun file.
+    La recovery richiede inoltre il possesso della lease della cartella dati
+    (`storage.lease`): senza, rifiuta con `RecoveryLeaseError`.
     """
     import logging
     import sqlite3
@@ -119,36 +123,41 @@ def create_context_with_recovery(
     from pydantic import ValidationError
 
     from homun.storage.encryption import EncryptionError
-    from homun.storage.recovery import salvage_workspace, write_report
+    from homun.storage.lease import recovery_lease
+    from homun.storage.recovery import (
+        fatal_workspace_error,
+        is_corruption,
+        salvage_workspace,
+        write_report,
+    )
 
     path = Path(db_path) if db_path is not None else default_db_path(workspace_id)
     root = Path(data_dir) if data_dir is not None else path.parent
     resolved_key = configured_workspace_key(encryption_key)
     logger = logging.getLogger(__name__)
 
-    def _is_corruption(exc: Exception) -> bool:
-        # senza chiave configurata, un file non-SQLite è garbage o corruzione;
-        # con chiave configurata uno sblocco fallito è configurazione, fatale
-        return not (isinstance(exc, EncryptionError) and resolved_key is not None)
-
     try:
-        return create_context(workspace_id=workspace_id, db_path=db_path,
-                              data_dir=data_dir, for_tests=for_tests,
-                              encryption_key=encryption_key)
+        ctx = create_context(workspace_id=workspace_id, db_path=db_path,
+                             data_dir=data_dir, for_tests=for_tests,
+                             encryption_key=encryption_key)
     except (sqlite3.DatabaseError, ValidationError, EncryptionError) as exc:
-        if not _is_corruption(exc):
-            raise
+        if not is_corruption(exc, key_configured=resolved_key is not None):
+            raise fatal_workspace_error(exc, db_path=path,
+                                        key_configured=resolved_key is not None) from exc
         logger.error("Workspace corrotto (%s): %s — avvio in recovery",
                      type(exc).__name__, exc)
-        report = salvage_workspace(path, workspace_id, encryption_key=resolved_key)
-        write_report(root, report)
+        with recovery_lease(root):
+            report = salvage_workspace(path, workspace_id, encryption_key=resolved_key)
+            write_report(root, report)
         logger.error("Recovery mode=%s tabelle=%s problemi=%d — originali in %s",
                      report.mode, report.tables, len(report.issues),
                      report.quarantine_dir)
-        return create_context(workspace_id=workspace_id, db_path=db_path,
-                              data_dir=data_dir, for_tests=for_tests,
-                              encryption_key=encryption_key)
-
+        ctx = create_context(workspace_id=workspace_id, db_path=db_path,
+                             data_dir=data_dir, for_tests=for_tests,
+                             encryption_key=encryption_key)
+    # Diagnosi "quale database sto usando?": il percorso in uso va nel log di avvio.
+    logger.info("Workspace: %s", path.resolve())
+    return ctx
 
 
 def reset_context_for_tests(ctx: EngineContext | None = None) -> None:

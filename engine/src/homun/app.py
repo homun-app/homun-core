@@ -40,16 +40,33 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         print('HOMUN_STARTUP_FAILED ' + json.dumps(
             {'reason': 'engine-dir-busy', 'holder_pid': error.holder_pid}), flush=True)
 
+    def _announce_workspace_unavailable(error) -> None:
+        # Stesso contratto stdout di engine-dir-busy: il desktop trasforma la
+        # riga nel messaggio all'utente invece di un traceback su stderr.
+        import json
+        print('HOMUN_STARTUP_FAILED ' + json.dumps({
+            'reason': 'workspace-unavailable',
+            'db_path': str(error.db_path),
+            'sqlite_error': error.sqlite_errorname,
+            'detail': error.message,
+        }), flush=True)
+
     with engine_lease(root, on_busy=_announce_busy):
         backup_task = None
         wal_task = None
         try:
             if owns_context:
                 # un workspace corrotto non ferma il motore: quarantena,
-                # ricostruzione del salvabile e rapporto persistente
+                # ricostruzione del salvabile e rapporto persistente.
+                # Un errore NON di corruzione (lock, permessi, disco) è fatale
+                # e va detto chiaramente: annunciato su stdout, poi rilanciato.
                 from homun.context import create_context_with_recovery
-                from homun.storage.recovery import db_state
-                reset_context_for_tests(create_context_with_recovery())
+                from homun.storage.recovery import WorkspaceUnavailableError, db_state
+                try:
+                    reset_context_for_tests(create_context_with_recovery())
+                except WorkspaceUnavailableError as error:
+                    _announce_workspace_unavailable(error)
+                    raise
                 recovery = db_state(root)
                 if recovery["state"] != "ok":
                     import logging as _logging
