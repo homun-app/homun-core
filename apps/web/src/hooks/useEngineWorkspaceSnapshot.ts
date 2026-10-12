@@ -17,7 +17,7 @@ export function useEngineWorkspaceSnapshot(
   const [projects, setProjects] = useState<EngineProject[]>([]);
   const [rawWorks, setRawWorks] = useState<Array<Record<string, unknown>>>([]);
   const [followups, setFollowups] = useState<
-    Array<EngineFollowupNotice & { conversationTitle: string }>
+    Array<EngineFollowupNotice & { conversationId: string; conversationTitle: string }>
   >([]);
   const [teams, setTeams] = useState<EngineTeam[]>([]);
   const [routines, setRoutines] = useState<EngineRoutine[]>([]);
@@ -63,6 +63,7 @@ export function useEngineWorkspaceSnapshot(
         conversations.flatMap((conversation) =>
           conversation.followups.map((notice) => ({
             ...notice,
+            conversationId: conversation.id,
             conversationTitle: conversation.title,
           })),
         ),

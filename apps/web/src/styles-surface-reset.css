@@ -1253,13 +1253,6 @@ aside.cw-workspace,
   padding: 12px 16px !important;
 }
 
-.cw-engine-banner {
-  background: transparent !important;
-  border: 1px solid var(--color-border) !important;
-  border-radius: 8px !important;
-  color: var(--foreground) !important;
-}
-
 /* Floating composer box styling */
 .cw .st-sdk-composer {
   background: #ffffff !important;
@@ -1278,7 +1271,6 @@ aside.cw-workspace,
 
 .engine-status-bar,
 .engine-domain-panel,
-.cw-engine-banner,
 .organization-role,
 .cw-sidebar-foot,
 .cv-settings-sidebar__top,

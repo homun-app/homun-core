@@ -8,6 +8,7 @@ import type { SpaceData } from "../ConversationSpace";
 import type { Work } from "../conversation-types";
 import type { EngineWorkspaceState } from "@/hooks/useEngineWorkspace";
 import { buildMentionRefs } from "../conversation-mentions";
+import { chatStatusNotices } from "@/lib/chat-status-notices";
 
 import { EngineAgentChat } from "./EngineAgentChat";
 
@@ -46,10 +47,22 @@ export function EngineChatStage({
   onSend: (text: string, attachments: File[]) => void;
   newChatProject?: { id: string; name: string } | null | undefined;
 }) {
+  // Gli stati del motore diventano avvisi qui, dallo stato del client: la
+  // collocazione nel thread è dello stage. Sano in modalità motore → vuoto.
+  const statusNotices = chatStatusNotices({
+    backend: engine.backend,
+    dataSource: engine.dataSource,
+    gateError: engine.gateError,
+    error: engine.error,
+    followups: engine.followups,
+    canOpenModels: Boolean(onOpenModels),
+    workCount: engine.works.length,
+  });
   return (
     <EngineAgentChat
       conversationId={work?.engineConversationId ?? undefined}
       activeWorkId={activeWorkId}
+      statusNotices={statusNotices}
       onSend={onSend}
       notice={notice}
       onClearNotice={() => setNotice("")}

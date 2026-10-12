@@ -125,18 +125,3 @@
 .engine-status-bar > .engine-status-bar__error {
   flex-basis: 100%;
 }
-.cw-engine-banner.cw-engine-banner--quiet {
-  padding: 3px 12px;
-  margin-bottom: 3px;
-  border: 0;
-  background: transparent;
-}
-.cw-engine-banner__details summary {
-  cursor: pointer;
-  color: #687a59;
-  font-size: 10px;
-}
-.cw-engine-banner__details[open] .cw-engine-banner__row {
-  padding-block: 8px;
-  font-size: 12px;
-}

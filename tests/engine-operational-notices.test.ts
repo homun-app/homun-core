@@ -1,51 +1,45 @@
+/**
+ * Il banner operativo non esiste più: ogni stato del motore vive nel thread.
+ * Questo file aggancia l'invariante allo shell — la logica di «cosa mostrare»
+ * è testata in chat-status-notices.test.ts.
+ */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { componentRenderer } from "./helpers/render-component.ts";
+import { readFile } from "node:fs/promises";
+import { access, constants } from "node:fs/promises";
 
-test("operational notices are quiet when healthy but preserve errors, recovery and simulation identity", async () => {
-  const ui = await componentRenderer("/apps/web/src/components/builder/ConversationEngineBanner.tsx", "ConversationEngineBanner");
-  const props = { backend: "engine", dataSourceSelected: "engine", gateError: null, error: null, busy: false, workCount: 1, followups: [], onRefresh: () => {} };
-  try {
-    assert.equal(ui.render(props), "");
-    const failure = ui.render({ ...props, error: new Error("Provider non disponibile") });
-    assert.match(failure, /role="alert"/);
-    const offline = ui.render({ ...props, gateError: new Error("Connessione interrotta") });
-    assert.match(offline, /Homun \(motore\) non è raggiungibile/);
-    assert.match(offline, /non passiamo alla simulazione/);
-    assert.doesNotMatch(offline, /disabled=""/);
-    assert.doesNotMatch(offline, /passa alla simulazione/i);
-    const recovery = ui.render({ ...props, followups: [{ commandId: "c1", conversationTitle: "Listini", status: "failed", attempts: 3, errorCode: "provider_unavailable" }] });
-    assert.match(recovery, /Listini/);
-    assert.match(recovery, /recupero automatico è terminato/);
-    assert.match(ui.render({ ...props, backend: "simulation", dataSourceSelected: "simulation" }), /Fonte: simulazione/);
-  } finally { await ui.close(); }
+test("il banner operativo e il suo involucro nello shell sono stati rimossi", async () => {
+  const gone = async (path: string) => {
+    await access(path, constants.F_OK).then(
+      () => assert.fail(`${path} deve essere stato rimosso`),
+      () => undefined,
+    );
+  };
+  await gone("apps/web/src/components/builder/ConversationEngineBanner.tsx");
+  await gone("apps/web/src/components/builder/ConversationWorkspaceEngineNotices.tsx");
+
+  const shell = await readFile("apps/web/src/components/builder/ConversationWorkspace.tsx", "utf8");
+  assert.doesNotMatch(
+    shell,
+    /ConversationEngineBanner|ConversationWorkspaceEngineNotices|cw-engine-banner/,
+  );
 });
 
-test("the workspace shell declares simulation in exactly one stable point, and says nothing in engine mode", async () => {
-  const ui = await componentRenderer("/apps/web/src/components/builder/ConversationWorkspaceEngineNotices.tsx", "ConversationWorkspaceEngineNotices");
-  const engineState = (over: Record<string, unknown>) => ({
-    dataSource: "engine",
-    backend: "engine",
-    gateError: null,
-    error: null,
-    busy: false,
-    works: [],
-    followups: [],
-    refresh: () => {},
-    ...over,
-  });
-  try {
-    // Simulation: the one visible label, rendered on every space of the shell.
-    const simulation = ui.render({ engine: engineState({ dataSource: "simulation", backend: "simulation" }), onOpenModels: () => {} });
-    assert.match(simulation, /Fonte: simulazione/);
-    // Engine mode healthy: no label at all — the engine is the non-simulation default.
-    assert.equal(ui.render({ engine: engineState(), onOpenModels: () => {} }), "");
-    // Engine mode offline keeps the operational banner, never the simulation label.
-    const offline = ui.render({
-      engine: engineState({ gateError: new Error("Engine data source selected, but the engine is not connected.") }),
-      onOpenModels: () => {},
-    });
-    assert.match(offline, /Homun \(motore\) non è raggiungibile/);
-    assert.doesNotMatch(offline, /Fonte: simulazione/);
-  } finally { await ui.close(); }
+test("lo stage motore passa gli stati del client agli slot del thread, non ai messaggi", async () => {
+  const stage = await readFile("apps/web/src/components/builder/chat/EngineChatStage.tsx", "utf8");
+  assert.match(stage, /chatStatusNotices/);
+  const chat = await readFile("apps/web/src/components/builder/chat/EngineAgentChat.tsx", "utf8");
+  assert.match(chat, /chatStatusLayout/);
+  assert.match(chat, /ComposerStatusNotices/);
+  assert.match(chat, /ThreadEndStatusNotices/);
+  // il canale messaggi del runtime riceve solo lo stream: mai gli avvisi
+  const agentChatTag = chat.match(/<AgentChat[\s\S]*?\/>/);
+  assert.ok(agentChatTag, "EngineAgentChat rende il thread tramite <AgentChat/>");
+  assert.match(agentChatTag[0], /messages=\{messages\}/);
+  assert.doesNotMatch(agentChatTag[0], /statusNotices|chatStatus/);
+  const slots = await readFile(
+    "apps/web/src/components/builder/chat/ChatStatusNotices.tsx",
+    "utf8",
+  );
+  assert.match(slots, /data-chat-status-slot/);
 });

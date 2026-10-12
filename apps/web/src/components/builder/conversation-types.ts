@@ -85,6 +85,13 @@ export type Work = {
   engineConversationId?: string;
   engineStatus?: string;
   engineOwnerName?: string;
+  /** Followup attivi della conversazione del motore (indicatore laterale). */
+  engineFollowups?: Array<{
+    commandId: string;
+    status: "processing" | "retry_scheduled" | "failed";
+    errorCode: string | null;
+    attempts: number;
+  }>;
   /** Engine plan/artifact revision counters (Fonte=motore); 0 = none yet. */
   enginePlanRevision?: number;
   engineRevisionRequested?: boolean;

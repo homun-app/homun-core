@@ -25,6 +25,8 @@ import type { Work } from "./conversation-types";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { StudioChatInput } from "./StudioChatInput";
 import { WorkPatchPreviewCard } from "./WorkPatchPreviewCard";
+import { ThreadTopStatusNotices } from "./chat/ChatStatusNotices";
+import { chatStatusNotices } from "@/lib/chat-status-notices";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import type { AutonomyLevel } from "./conversation-preferences";
 
@@ -39,6 +41,8 @@ type Props = {
   viewer: string;
   notice: string;
   storageStatus: string;
+  /** Fonte dati dichiarata in cima al thread: solo la simulazione etichetta. */
+  dataSource?: "simulation" | "engine";
   planEdit: { workId: string; plan: CatalogPlan } | null;
   contributionPanel: ReactNode;
   conversationActions: (w: Work) => ReactNode;
@@ -83,6 +87,7 @@ export function ConversationWorkspaceChatStage({
   viewer,
   notice,
   storageStatus,
+  dataSource,
   planEdit,
   contributionPanel,
   conversationActions,
@@ -185,6 +190,19 @@ export function ConversationWorkspaceChatStage({
     { onNewMessage: onRefreshEngine },
   );
 
+  // La fonte è dichiarata in cima a ogni conversazione: esplicita in
+  // simulazione, mai un'etichetta in modalità motore.
+  const threadTopNotices =
+    dataSource === "simulation"
+      ? chatStatusNotices({
+          backend: "simulation",
+          dataSource: "simulation",
+          gateError: null,
+          error: null,
+          followups: [],
+        })
+      : [];
+
   useEffect(() => {
     if (historyRef.current && (work?.messages.length || engineIntake?.proposal)) {
       historyRef.current.scrollTo({
@@ -205,6 +223,7 @@ export function ConversationWorkspaceChatStage({
         )}
 
         <div className="cw-history" ref={historyRef}>
+          <ThreadTopStatusNotices notices={threadTopNotices} />
           {!work ? (
             <ConversationWorkspaceWelcome
               assignee={assignee}
