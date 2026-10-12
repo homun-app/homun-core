@@ -23,6 +23,7 @@ export function EngineRoutines({
   onUpdate,
   onSkipNext,
   selectedRoutineId,
+  creatorWorkId,
 }: {
   routines: EngineRoutine[];
   /** Lavori che possono diventare il modello di una nuova routine. */
@@ -39,6 +40,8 @@ export function EngineRoutines({
   onSkipNext?: ((routine: EngineRoutine) => Promise<void>) | undefined;
   /** Routine evidenziata (es. cliccata dalla ricerca globale). */
   selectedRoutineId?: string | undefined;
+  /** Apre il creatore con questo lavoro già scelto (es. «Ripeti» su un lavoro). */
+  creatorWorkId?: string | undefined;
 }) {
   const refresh = onChanged ?? (async () => {});
   const [actionError, setActionError] = useState<unknown>(null);
@@ -84,7 +87,9 @@ export function EngineRoutines({
         <EngineGoalDashboard />
       ) : (
         <>
-          {onCreateFromWork && <EngineRoutineFreeCreator works={works} onCreate={onCreateFromWork} />}
+          {onCreateFromWork && (
+            <EngineRoutineFreeCreator works={works} onCreate={onCreateFromWork} initialWorkId={creatorWorkId} />
+          )}
           {routines.length === 0 && (
             <div className="homun-empty-state">
               <div className="homun-empty-state__icon">
@@ -150,6 +155,7 @@ export function EngineRoutines({
 function EngineRoutineFreeCreator({
   works,
   onCreate,
+  initialWorkId,
 }: {
   works: Array<{
     id: string; title: string; status?: string | undefined; engineStatus?: string | undefined;
@@ -157,13 +163,16 @@ function EngineRoutineFreeCreator({
     enginePlan?: Array<{ title: string; assignee_id?: string; capability?: string; output_expected?: string }> | undefined;
   }>;
   onCreate: (workId: string, input: { name: string; cron: string }) => Promise<void>;
+  /** Lavoro scelto da chi arriva qui con «Ripeti»: apre il creatore precompilato. */
+  initialWorkId?: string | undefined;
 }) {
-  const [open, setOpen] = useState(false);
   // Only works whose plan matches routine.create: titled steps on roster agents.
   const candidates = works.filter((w) =>
     (w.engineStatus === "completed" || w.engineStatus === "ready") &&
     workSupportsRoutineTemplate(w));
-  const [workId, setWorkId] = useState(candidates[0]?.id ?? "");
+  const preselected = candidates.find((w) => w.id === initialWorkId);
+  const [open, setOpen] = useState(Boolean(preselected));
+  const [workId, setWorkId] = useState(preselected?.id ?? candidates[0]?.id ?? "");
   const selected = candidates.find((w) => w.id === workId) ?? candidates[0];
   const [name, setName] = useState("");
   const [phrase, setPhrase] = useState("ogni lunedì alle 9");
