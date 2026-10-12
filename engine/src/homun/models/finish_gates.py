@@ -36,14 +36,54 @@ _PROMOTED_REASONING_PLAN_TAIL_RE = re.compile(
     re.IGNORECASE,
 )
 
-THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
-# il contenuto dei blocchi think (chiusi o orfani), come testo: serve alla
-# transcript per mostrare il ragionamento anche dopo la consegna
-THINK_CONTENT_RE = re.compile(r"<think>(.*?)(?:</think>|$)", re.DOTALL)
-# il modello locale spesso apre senza <think> e chiude con </think> orfano:
-# tutto ciò che precede la chiusura è ragionamento, non risposta
-ORPHAN_THINK_RE = re.compile(r"^.*?</think>", re.DOTALL)
-_OPENING_THINK_RE = re.compile(r"^\s*<think>(.*?)</think>", re.DOTALL)
+_THINK_OPEN_TAG = "<think>"
+_THINK_CLOSE_TAG = "</think>"
+
+
+def split_think(text: str) -> tuple[str, str]:
+    """(ragionamento, visibile) di un parziale in streaming o di una risposta.
+
+    Semantica dello scrubber di streaming di Hermes (572446308e), senza stato:
+    il testo dentro i blocchi ``<think>…</think>`` — in qualunque posizione —
+    è ragionamento e non arriva mai al testo visibile; un blocco aperto e non
+    ancora chiuso trattiene la coda come ragionamento (flush); una chiusura
+    orfana prima di ogni blocco rende ragionamento il prefisso (modello locale
+    che apre senza tag). Il markup dei tag non finisce da nessuna delle due
+    parti; i blocchi di ragionamento si ricongiungono a capo.
+    """
+    reasoning: list[str] = []
+    visible: list[str] = []
+    buffer = text or ""
+    in_block = False
+    saw_block = False
+    while buffer:
+        open_at = buffer.find(_THINK_OPEN_TAG)
+        close_at = buffer.find(_THINK_CLOSE_TAG)
+        if in_block:
+            if close_at == -1:
+                reasoning.append(buffer)
+                break
+            reasoning.append(buffer[:close_at])
+            buffer = buffer[close_at + len(_THINK_CLOSE_TAG):]
+            in_block = False
+            saw_block = True
+        elif open_at != -1 and (close_at == -1 or open_at < close_at):
+            visible.append(buffer[:open_at])
+            buffer = buffer[open_at + len(_THINK_OPEN_TAG):]
+            in_block = True
+        elif close_at != -1:
+            if saw_block:
+                # chiusura dispersa dopo un blocco reale: declassata a markup
+                visible.append(buffer[:close_at])
+                buffer = buffer[close_at + len(_THINK_CLOSE_TAG):]
+            else:
+                reasoning.append(buffer[:close_at])
+                buffer = buffer[close_at + len(_THINK_CLOSE_TAG):]
+        else:
+            visible.append(buffer)
+            break
+    joined = "\n".join(part.strip() for part in reasoning if part.strip())
+    return joined, "".join(visible)
 
 
 def looks_like_degenerate_final(text: str, user_message: str | None = None) -> bool:
@@ -73,10 +113,12 @@ def promoted_reasoning_announces_action(text: str) -> bool:
 
 
 def strip_think_blocks(text: str) -> str:
-    """Il testo visibile senza i blocchi di ragionamento (coppie e orfani)."""
-    result = THINK_BLOCK_RE.sub("", text or "")
-    result = ORPHAN_THINK_RE.sub("", result)
-    return result.strip()
+    """Il testo visibile senza i blocchi di ragionamento.
+
+    Come ``split_think`` (coppie ovunque, orfani in testa, coda di un blocco
+    mai chiuso), ripulito degli spazi estremi.
+    """
+    return split_think(text)[1].strip()
 
 
 @dataclass

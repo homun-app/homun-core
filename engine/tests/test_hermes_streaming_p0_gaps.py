@@ -198,6 +198,79 @@ def test_p0_reasoning_channel_deltas_surface_for_reasoning_pane(field):
     assert "Plan: inspect the material first." in surfaced
 
 
+def test_p0_inline_think_text_streams_to_reasoning_pane_not_answer(setup_chat):
+    """Hermes 572446308e: il testo strippato dai blocchi <think> in content
+    alimenta il pane del ragionamento live e non compare MAI nella risposta.
+
+    I modelli che ragionano senza il canale nativo inline-ano <think>…</think>
+    nel contenuto: lo split deve mandare il testo interno (senza markup) nel
+    pane e tenere pulito il testo visibile, anche a metà risposta e con più
+    blocchi.
+    """
+    import json as _json
+    from homun.application.agent import chat_agent
+    from homun.application.sessions import chat_events
+
+    ctx, actor, conv = setup_chat
+    chat_agent.bind(ctx, actor, conv, "agent_chat")
+    run_id = chat_agent.start_chat_turn(ctx, actor, conv, "chi sei")["agent_run_id"]
+
+    def collect_states_and_deltas():
+        states, deltas = [], []
+        for chunk_sse in chat_events.conversation_events(ctx, actor, conv, max_idle_cycles=2):
+            for line in chunk_sse.strip().split("\n"):
+                if not line.startswith("data: "):
+                    continue
+                payload = _json.loads(line[len("data: "):])
+                if "reasoning" in payload:
+                    states.append(payload)
+                if "delta" in payload:
+                    deltas.append(payload)
+        return states, deltas
+
+    def set_partial(text):
+        with ctx.repository.transaction() as store:
+            store.commands[run_id].result["stream_partial"] = {"text": text}
+
+    # 1. blocco aperto a inizio: il pane ragiona, la risposta è vuota
+    set_partial("<think>Let me check the config first. ")
+    states, deltas = collect_states_and_deltas()
+    assert states, "nessuno stream_state per il blocco think aperto"
+    assert "check the config" in states[-1]["reasoning"]
+    assert "<think>" not in states[-1]["reasoning"]
+    assert states[-1]["text"] == ""
+    assert not deltas
+
+    # 2. blocco chiuso + risposta che cresce
+    set_partial("<think>Let me check the config first.</think>Sono Homun, ")
+    states, deltas = collect_states_and_deltas()
+    assert states[-1]["reasoning"] == "Let me check the config first."
+    assert states[-1]["text"] == "Sono Homun, "
+
+    # 3. secondo blocco a metà risposta, ancora aperto: mai nella risposta
+    set_partial("<think>plan one</think>Sono Homun, un assistente<think>second thought")
+    states, _ = collect_states_and_deltas()
+    assert states[-1]["reasoning"].splitlines() == ["plan one", "second thought"]
+    assert states[-1]["text"] == "Sono Homun, un assistente"
+
+    # 4. risposta consegnata: il testo think non è mai nell'answer finale
+    with ctx.repository.transaction() as store:
+        run = store.commands[run_id].result
+        run["stream_partial"] = {}
+        run["_messages"] = [
+            {"role": "user", "content": "chi sei"},
+            {"role": "assistant",
+             "content": "<think>plan one</think>Sono Homun."
+                        "<think>trailing thought never closed"},
+        ]
+        run["status"] = "completed"
+    _, deltas = collect_states_and_deltas()
+    streamed_answer = "".join(d["delta"] for d in deltas)
+    assert streamed_answer == "Sono Homun."
+    assert "think" not in streamed_answer
+    assert "trailing" not in streamed_answer
+
+
 def test_p0_split_partial_promotes_untagged_provider_reasoning(setup_chat):
     """Models that think without <think> tags still fill the reasoning pane.
 
