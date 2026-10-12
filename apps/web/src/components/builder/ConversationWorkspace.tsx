@@ -45,6 +45,7 @@ import {
   stripTrailingMention,
 } from "@/lib/conversation-plan-commands";
 import { projectWorkspaceData } from "@/lib/engine-project-projection";
+import { repeatEngineWork } from "@/lib/engine-work-repeat";
 export type { Work } from "./conversation-types";
 const { storageKey, bootstrap: demoBootstrap } = demoWorkspaceBootstrap();
 
@@ -485,7 +486,7 @@ export function ConversationWorkspace() {
           onRename={() => setNotice("Rinomina non ancora disponibile.")}
           onMove={(projId) => moveConversation(w.id, projId)}
           onCreate={() => setNotice("Promozione a progetto non ancora collegata al motore.")}
-          onRepeat={() => setNotice("Automazioni motore: non in questo slice.")}
+          onRepeat={() => repeatEngineWork(w, openSpace, setNotice)}
         />
       );
     }
@@ -1062,11 +1063,7 @@ export function ConversationWorkspace() {
       />
       {searchOpen && <ConversationSearch entries={entries} onClose={() => setSearchOpen(false)} />}
       {sidebarOpen && (
-        <button
-          className="cw-mobile-backdrop"
-          aria-label="Chiudi navigazione"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <button className="cw-mobile-backdrop" aria-label="Chiudi navigazione" onClick={() => setSidebarOpen(false)} />
       )}
       <ConversationWorkspaceSidebar engineAgents={engine.backend === "engine" ? engine.agents : undefined}
         sidebarOpen={sidebarOpen}
