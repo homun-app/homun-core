@@ -9,9 +9,11 @@ import "./homun-notices.css";
 type Props = {
   error: unknown;
   className?: string;
+  /** Lead-in naming what failed («Materiali non disponibili:»), before the mapped reason. */
+  label?: string;
 };
 
-export function HomunErrorNotice({ error, className }: Props) {
+export function HomunErrorNotice({ error, className, label }: Props) {
   if (error == null) {
     return null;
   }
@@ -22,6 +24,7 @@ export function HomunErrorNotice({ error, className }: Props) {
       role="alert"
       data-error-code={code ?? undefined}
     >
+      {label ? `${label} ` : ""}
       {homunErrorUserMessage(error)}
     </p>
   );

@@ -1,28 +1,32 @@
 /**
- * Engine material library for the global search index (Fonte: motore).
- * Same source as the Materiali view; a failed load leaves the index empty —
- * the Materiali view remains the error surface, nothing simulated is shown.
+ * Engine material source of the global search index (Fonte: motore).
+ * A failed load surfaces as status "unavailable" with the client's typed
+ * error, which the search states in its footer — never a silent empty,
+ * never simulated data.
  */
 
-import { useEffect, useState } from "react";
-import { loadEngineMaterialLibrary } from "@/lib/engine-material-library";
-import { type EngineMaterial } from "@/lib/engine-projects-client";
+import { useEffect, useRef, useState } from "react";
+import { type EngineMaterialsState, probeEngineMaterials } from "@/lib/engine-material-library";
 import { subscribeMaterialChanges } from "@/lib/project-materials-lifecycle";
 
-export function useEngineMaterials(projects: Array<{ id: string }>): EngineMaterial[] {
-  const [materials, setMaterials] = useState<EngineMaterial[]>([]);
+export function useEngineMaterials(
+  projects: Array<{ id: string }>,
+  /** Engine connectivity; every transition re-probes (drop, restart). */
+  engineOnline: boolean,
+): EngineMaterialsState {
+  const [state, setState] = useState<EngineMaterialsState>({ items: [], status: "loading" });
   const projectKey = JSON.stringify([...new Set(projects.map((p) => p.id))].sort());
+  const scopeRef = useRef(projectKey);
   useEffect(() => {
+    const scopeChanged = scopeRef.current !== projectKey;
+    scopeRef.current = projectKey;
     let active = true;
     const reload = () => {
-      loadEngineMaterialLibrary(JSON.parse(projectKey) as string[]).then(
-        (items) => {
-          if (active) setMaterials(items);
-        },
-        () => {
-          if (active) setMaterials([]);
-        },
-      );
+      // A same-scope refresh keeps the current items; a new scope starts clean.
+      if (active && scopeChanged) setState({ items: [], status: "loading" });
+      probeEngineMaterials(JSON.parse(projectKey) as string[]).then((next) => {
+        if (active) setState(next);
+      });
     };
     const stop = subscribeMaterialChanges(reload);
     reload();
@@ -30,6 +34,6 @@ export function useEngineMaterials(projects: Array<{ id: string }>): EngineMater
       active = false;
       stop();
     };
-  }, [projectKey]);
-  return materials;
+  }, [projectKey, engineOnline]);
+  return state;
 }

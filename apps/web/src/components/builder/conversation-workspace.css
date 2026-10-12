@@ -1708,6 +1708,10 @@ dialog.cw-overlay:not([open]) {
   font-size: 10px;
   color: #8b967f;
 }
+.cw-super-search footer .homun-error-notice {
+  margin: 6px 0 0;
+  font-size: 11px;
+}
 .cw-message[data-message] {
   scroll-margin: 25px;
 }

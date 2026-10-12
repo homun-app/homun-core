@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, X, ArrowUpRight } from "lucide-react";
+import { HomunErrorNotice } from "@/components/HomunErrorNotice";
+import type { ConversationSearchSources } from "@/hooks/useConversationSearchEntries";
 export type SearchEntry = {
   id: string;
   title: string;
@@ -9,15 +11,17 @@ export type SearchEntry = {
   open: () => void;
 };
 export function ConversationSearch({
-  entries,
+  search,
   backend,
   onClose,
 }: {
-  entries: SearchEntry[];
+  /** What ⌘K reads: index entries plus the health of its engine sources. */
+  search: { entries: SearchEntry[]; sources?: ConversationSearchSources };
   /** Data source of the index — stated in the footer (Fonte: …). */
   backend: "engine" | "simulation";
   onClose: () => void;
 }) {
+  const { entries, sources } = search;
   const ref = useRef<HTMLDialogElement>(null);
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState("Tutto");
@@ -119,6 +123,9 @@ export function ConversationSearch({
         <footer>
           {results.length} risultati · ↑ ↓ per scegliere · Invio per aprire · Fonte:{" "}
           {backend === "engine" ? "motore" : "simulazione"}
+          {sources?.materials?.status === "unavailable" && (
+            <HomunErrorNotice error={sources.materials.error} label="Materiali non disponibili:" />
+          )}
         </footer>
       </section>
     </dialog>

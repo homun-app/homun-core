@@ -5,6 +5,7 @@ import {
   listEngineMaterials,
   type EngineMaterial,
 } from "./engine-projects-client.ts";
+import { HomunClientError, isHomunClientError } from "./homun-errors.ts";
 import { ingestMaterialFiles, notifyMaterialChange } from "./project-materials-lifecycle.ts";
 
 export async function loadEngineMaterialLibrary(projectIds: string[]): Promise<EngineMaterial[]> {
@@ -12,6 +13,35 @@ export async function loadEngineMaterialLibrary(projectIds: string[]): Promise<E
     [...new Set(projectIds)].map((projectId) => listEngineMaterials({ projectId })),
   );
   return groups.flat();
+}
+
+/** Load-state contract for consumers that index engine materials (⌘K). */
+export type EngineMaterialsStatus = "ok" | "loading" | "unavailable";
+
+export type EngineMaterialsState = {
+  items: EngineMaterial[];
+  status: EngineMaterialsStatus;
+  /** Typed client error, present only when status is "unavailable". */
+  error?: HomunClientError;
+};
+
+/** One probe of the source: ok with items, or unavailable with the client's
+ * typed error — never a silent empty. */
+export async function probeEngineMaterials(projectIds: string[]): Promise<EngineMaterialsState> {
+  try {
+    return { items: await loadEngineMaterialLibrary(projectIds), status: "ok" };
+  } catch (cause) {
+    return {
+      items: [],
+      status: "unavailable",
+      error: isHomunClientError(cause)
+        ? cause
+        : new HomunClientError(
+            "unknown",
+            cause instanceof Error ? cause.message : "Errore imprevisto.",
+          ),
+    };
+  }
 }
 
 export async function uploadEngineMaterialFiles(projectId: string, files: File[]) {

@@ -24,6 +24,8 @@ export async function componentRenderer(path: string, name: string) {
     const module = await server.ssrLoadModule(path);
     return {
       render: (props: Record<string, unknown>) => renderToStaticMarkup(createElement(module[name], props)),
+      /** Load another module from the same graph, so instanceof checks keep working across the boundary. */
+      loadModule: (other: string) => server.ssrLoadModule(other),
       close: async () => {
         await server.close();
         await rm(cacheDir, { recursive: true, force: true });
