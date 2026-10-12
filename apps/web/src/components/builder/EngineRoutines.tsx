@@ -7,22 +7,13 @@ import {
   routineEngineAction,
   workSupportsRoutineTemplate,
 } from "@/lib/engine-routines-client";
-import { cadenceToCron } from "@/lib/cadence-language";
+import { cadenceToCron, describeCron } from "@/lib/cadence-language";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { ConversationSelectField } from "./ConversationSelect";
 import { EngineGoalDashboard } from "./EngineGoalDashboard";
 import { Clock, Target } from "lucide-react";
 import { t } from "@/lib/i18n";
 import "./engine-routines.css";
-
-function describeCron(cron: string): string {
-  const [m = "0", h = "0", , , dow] = cron.split(" ");
-  if (dow === "*") return `ogni giorno alle ${h}:${m.padStart(2, "0")}`;
-  if (dow === "1-5") return `nei giorni feriali alle ${h}:${m.padStart(2, "0")}`;
-  const days = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
-  const day = days[Number(dow)];
-  return day ? `ogni ${day} alle ${h}:${m.padStart(2, "0")}` : cron;
-}
 
 export function EngineRoutines({
   routines,
@@ -31,6 +22,7 @@ export function EngineRoutines({
   onChanged,
   onUpdate,
   onSkipNext,
+  selectedRoutineId,
 }: {
   routines: EngineRoutine[];
   /** Lavori che possono diventare il modello di una nuova routine. */
@@ -45,6 +37,8 @@ export function EngineRoutines({
   onChanged?: (() => Promise<void>) | undefined;
   onUpdate?: ((routine: EngineRoutine, changes: { name: string; cron: string }) => Promise<void>) | undefined;
   onSkipNext?: ((routine: EngineRoutine) => Promise<void>) | undefined;
+  /** Routine evidenziata (es. cliccata dalla ricerca globale). */
+  selectedRoutineId?: string | undefined;
 }) {
   const refresh = onChanged ?? (async () => {});
   const [actionError, setActionError] = useState<unknown>(null);
@@ -104,11 +98,12 @@ export function EngineRoutines({
           )}
           <div className="cw-routines__list">
         {routines.map((routine) => (
-          <article key={routine.id} className="cw-routine" data-status={routine.status}>
-            <header>
-              <strong>{routine.name}</strong>
-              <small>{describeCron(routine.cron)} · {routine.template.title}</small>
-            </header>
+            <article key={routine.id} className="cw-routine" data-status={routine.status}
+              data-selected={routine.id === selectedRoutineId ? "" : undefined}>
+              <header>
+                <strong>{routine.name}</strong>
+                <small>{describeCron(routine.cron)} · {routine.template.title}</small>
+              </header>
             <p className="cw-hint">
               {routine.status === "active" && "Attiva: ogni ricorrenza crea il lavoro e ti avvisa in chat."}
               {routine.status === "paused" && "In pausa: niente nuove ricorrenze finché non riprendi."}

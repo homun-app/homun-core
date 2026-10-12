@@ -128,9 +128,7 @@ export function ConversationWorkspace() {
     return () => element?.close();
   }, [preview]);
   const work = (engine.backend === "engine" ? engine.works : works).find((w) => w.id === active);
-  const visibleWorks = (engine.backend === "engine" ? engine.works : works).filter(
-    (w) => !w.archived,
-  );
+  const visibleWorks = (engine.backend === "engine" ? engine.works : works).filter((w) => !w.archived);
   const scenario = work ? scenarioForWork(work, scenarios) : null;
 
   useEffect(() => {
@@ -1026,6 +1024,7 @@ export function ConversationWorkspace() {
     visibleWorks,
     scenarios,
     spaceData: displaySpaceData,
+    engineRoutines: engine.backend === "engine" ? engine.routines : undefined,
     workStatus,
     openSpace,
     openWork: open,

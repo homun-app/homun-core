@@ -245,6 +245,7 @@ export function ConversationWorkspaceSpaceHost({
         onChanged={onRefreshEngine}
         onUpdate={onUpdateRoutine}
         onSkipNext={onSkipNextRoutine}
+        selectedRoutineId={spaceSelected}
       />
     );
   if (engineMode && space === "Materiali") return <EngineMaterials projects={spaceData.projects} />;
