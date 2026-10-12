@@ -6,6 +6,7 @@ import json
 from typing import Any, Literal
 from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from homun.models.repetition import MIN_FRAGMENT_LENGTH
 from homun.models.types import UsageEntry
 
 
@@ -59,17 +60,17 @@ def project_messages(messages, *, ollama=False):
     return rows
 
 
-def parse_response(response, *, ollama=False):
+def parse_response(response, *, ollama=False, runaway_floor=MIN_FRAGMENT_LENGTH):
     try:
-        return _parse_response(response, ollama=ollama)
+        return _parse_response(response, ollama=ollama, runaway_floor=runaway_floor)
     except (KeyError, IndexError, AttributeError, TypeError) as exc:
         raise ValueError('Malformed native agent response') from exc
 
 
-def _parse_response(response, *, ollama=False):
+def _parse_response(response, *, ollama=False, runaway_floor=MIN_FRAGMENT_LENGTH):
     choice = response if ollama else response['choices'][0]
     from homun.models.repetition import is_runaway_repetition, RepetitionError
-    if is_runaway_repetition(choice['message'].get('content')):
+    if is_runaway_repetition(choice['message'].get('content'), min_chars=runaway_floor):
         raise RepetitionError()
     reason = choice.get('done_reason' if ollama else 'finish_reason')
     if reason == 'length':

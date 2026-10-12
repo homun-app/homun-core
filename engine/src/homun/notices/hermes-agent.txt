@@ -85,7 +85,17 @@ agent/repetition_guard.py at the pinned commit. Homun retains the minimum
 length/repeat/dominance thresholds and distinct-line safeguard, but counts only
 nonoverlapping windows to avoid false positives on a single long separator.
 Native responses fail with a typed nonretryable code before history/tool dispatch,
-while provider-reported usage remains charged.
+while provider-reported usage remains charged. From Hermes's STOP_PATH_MIN_CHARS
+comes the asked-repetition principle: real stop-path loops run 80k-350k chars
+while asked-for repeats ("say X 50 times") stay in the low KB and must be
+delivered — so a turn whose USER MESSAGE asks for repetition
+(repetition_requested, deterministic IT/EN with negation/meta-question/
+hypothetical guards) judges the single criterion at 16_000 instead of 400,
+live and at turn end alike; 16_000 is a hard ceiling, never higher. The mode
+is decided once from the ask (application/agent/runs/turn_floor.py:
+continuations keep the original turn's floor, engine [SYSTEM] nudges and
+CONTINUE_PROMPT are not the person's words, delegation children have none),
+never from generated text.
 
 Text continuation: models/truncation.py and application/agent_continuation*.py
 adapt visible-fragment nudges and bounded continuation from agent/turn_truncation.py
@@ -375,14 +385,16 @@ Streaming parity ports beyond the pinned commit (2026-10-12, behavior only, adap
 to the engine's models/ and SSE abstractions — no upstream code copied):
 - b6aae42c3b (runaway repetition cut while streaming): models/repetition.py
   RunawayStreamWatch runs the SAME criterion as the engine's turn-end check
-  (is_runaway_repetition at the MIN_FRAGMENT_LENGTH floor) live on the raw
+  (is_runaway_repetition at the TURN's floor — MIN_FRAGMENT_LENGTH normally,
+  STOP_PATH_MIN_CHARS when the person asked for repetition) live on the raw
   content and reasoning channels; what the port takes from Hermes is the
   CADENCE — first check at the floor, then at every doubling on a bounded
-  64k tail — not Hermes's 16k stop-path floor (the engine stop path judges
-  at 400 to stop local-model loops early, and a live floor higher than the
-  turn-end floor would only let rejected text stream 40x longer before the
-  same verdict). A hit raises the typed non-retryable agent_model_repetition
-  failure that ends the turn visibly.
+  64k tail — not Hermes's unconditional 16k stop-path floor (the engine stop
+  path judges at 400 to stop local-model loops early, and a live floor
+  higher than the turn-end floor would only let rejected text stream 40x
+  longer before the same verdict; the 16k floor enters only through the
+  user's ask, as the same criterion in both guards). A hit raises the typed
+  non-retryable agent_model_repetition failure that ends the turn visibly.
 - 572446308e (inline <think> text in the live reasoning pane): the stateless
   models/finish_gates.split_think scrubber routes think-block text (pairs
   anywhere, unclosed tail, orphan close) to the reasoning side and keeps the
