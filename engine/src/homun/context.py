@@ -108,11 +108,10 @@ def create_context_with_recovery(
     """Avvia il contesto anche davanti a un workspace corrotto.
 
     Solo la corruzione vera (verdetto sqlite SQLITE_CORRUPT*/NOTADB, righe che
-    non validano più, file non-SQLite senza chiave configurata) attiva la
-    recovery: quarantena dell'originale, ricostruzione del salvabile e un
+    non validano più) attiva la recovery: quarantena dell'originale, ricostruzione del salvabile e un
     rapporto persistente che salute e chat mostrano.
     Gli errori temporanei o di configurazione (database bloccato, permessi,
-    disco pieno, chiave sbagliata) restano fatali: si rilanciano avvolti in
+    disco pieno, chiave sbagliata o mancante su un workspace cifrato) restano fatali: si rilanciano avvolti in
     `WorkspaceUnavailableError`, senza toccare nessun file.
     La recovery richiede inoltre il possesso della lease della cartella dati
     (`storage.lease`): senza, rifiuta con `RecoveryLeaseError`.

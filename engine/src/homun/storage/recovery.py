@@ -79,13 +79,15 @@ def is_corruption(exc: BaseException, *, key_configured: bool) -> bool:
     - `sqlite3.DatabaseError` con verdetto `SQLITE_CORRUPT*`/`SQLITE_NOTADB`;
     - `pydantic.ValidationError`: righe che non validano più, il caso per cui
       la recovery è nata;
-    - `EncryptionError` SOLO senza chiave configurata: il file non si apre
-      come SQLite e non c'è una chiave da reclamare → garbage o corruzione.
 
     Tutto il resto → fatale (rilanciato, file intatti): `SQLITE_BUSY`,
     `SQLITE_LOCKED`, `SQLITE_CANTOPEN`, `SQLITE_PERM`, `SQLITE_READONLY`,
-    `SQLITE_IOERR`, `SQLITE_FULL`, `EncryptionError` con chiave configurata
-    e qualunque errore senza `sqlite_errorname`.
+    `SQLITE_IOERR`, `SQLITE_FULL`, qualunque errore senza `sqlite_errorname`
+    e ogni `EncryptionError`, con o senza chiave configurata. Senza chiave,
+    un file privo dell'intestazione SQLite può essere un workspace cifrato
+    avviato senza `HOMUN_WORKSPACE_KEY_FILE`: la quarantena lo sostituirebbe
+    con un workspace vuoto. Un file con intestazione SQLite ma danneggiato
+    resta coperto dal verdetto `SQLITE_NOTADB`/`SQLITE_CORRUPT*`.
     """
     from pydantic import ValidationError as PydanticValidationError
 
@@ -94,9 +96,9 @@ def is_corruption(exc: BaseException, *, key_configured: bool) -> bool:
     if isinstance(exc, PydanticValidationError):
         return True
     if isinstance(exc, EncryptionError):
-        # con una chiave configurata uno sblocco fallito è configurazione,
-        # anche quando avvolge un errore sqlite: fatale
-        return not key_configured
+        # cifrato senza chiave e garbage non si distinguono: mai in quarantena.
+        # Con chiave, uno sblocco fallito è configurazione anche se avvolge sqlite.
+        return False
     if isinstance(exc, sqlite3.DatabaseError):
         return _name_is_corruption(sqlite_error_name(exc))
     if isinstance(exc.__cause__, sqlite3.DatabaseError):
@@ -135,6 +137,10 @@ def fatal_workspace_error(exc: BaseException, *, db_path: Path,
     if isinstance(exc, EncryptionError) and key_configured:
         detail = ("la chiave configurata non apre il workspace: chiave sbagliata o "
                   "file non più valido; verifica HOMUN_WORKSPACE_KEY_FILE o il Keychain")
+    elif isinstance(exc, EncryptionError):
+        detail = ("il file non è un database SQLite in chiaro: se il workspace è "
+                  "cifrato configura HOMUN_WORKSPACE_KEY_FILE o il Keychain, "
+                  "altrimenti sposta il file e riavvia")
     else:
         detail = _fatal_hint(name, exc)
     return WorkspaceUnavailableError(
