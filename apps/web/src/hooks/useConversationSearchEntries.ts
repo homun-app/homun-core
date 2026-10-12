@@ -36,8 +36,8 @@ export type ConversationSearchSources = {
    * Independently fetched material source; null in simulation, where no
    * engine source exists. The other engine entries (works, messages,
    * routines, agents, projects, teams) all come from the workspace
-   * snapshot, whose failure already surfaces through the engine banner
-   * (ConversationWorkspaceEngineNotices) — no second notice here.
+   * snapshot, whose failure already surfaces in the chat status notices
+   * — no second notice here.
    */
   materials: { status: EngineMaterialsStatus; error: unknown } | null;
 };

@@ -4006,25 +4006,38 @@ dialog.cw-overlay:not([open]) {
   font-size: 20px;
 }
 
-.cw-engine-banner {
-  margin: 0 16px 8px;
-  padding: 10px 12px;
-  border: 1px solid #d7e0d9;
-  background: #f3f7f4;
-  color: #263832;
-}
-.cw-engine-banner__row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-.cw-engine-banner__hint {
-  margin: 6px 0 0;
-  color: #66816e;
+/* Avvisi di stato del motore nel thread: messaggi di sistema centrati,
+   discreti — né bolla di Homun né della persona. Mai tra i messaggi. */
+.cw-chat-status {
+  margin: 10px auto;
+  max-width: 460px;
+  padding: 6px 12px;
+  text-align: center;
   font-size: 12px;
+  line-height: 1.5;
+  color: #66816e;
 }
-.cw-engine-banner__error {
-  margin: 8px 0 0;
+.cw-chat-status p {
+  margin: 0;
+}
+.cw-chat-status__hint {
+  margin-top: 4px;
+}
+.cw-chat-status__error {
+  margin-top: 6px;
   color: #8a3b2d;
 }
+.cw-chat-status__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.cw-chat-status--error {
+  color: #6d4a42;
+}
+.cw-chat-status--resolved {
+  color: #3c6b4a;
+}
+

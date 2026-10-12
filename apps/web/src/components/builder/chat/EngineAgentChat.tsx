@@ -2,24 +2,39 @@
 
     Il composer è `StudioChatInput` (modello, autonomia, menzioni, allegati) e
     l'invio passa dalla pipeline engine esistente (`handleEngineSend`), non da
-    una strada parallela. Il thread renderizza trascrizione e streaming SSE. */
+    una strada parallela. Il thread renderizza trascrizione e streaming SSE.
+    Gli stati del motore vivono qui, nel thread e sopra il campo di scrittura:
+    mai tra i messaggi del runtime. */
 import { X } from "lucide-react";
 
 import { useConversationEventStream } from "@/hooks/useConversationEventStream";
+import { useTransientResolved } from "@/hooks/useTransientResolved";
 import type { AutonomyLevel } from "../conversation-preferences";
 import { ConversationBrowserPip } from "../ConversationBrowserPip";
 import type { ConversationScenario } from "../conversation-scenarios";
 import type { SpaceData } from "../ConversationSpace";
 import { ConversationWorkspaceWelcome } from "../ConversationWorkspaceWelcome";
 import { StudioChatInput, type ChatReference } from "../StudioChatInput";
+import {
+  chatStatusLayout,
+  type ChatStatusActionId,
+  type ChatStatusNotice,
+} from "@/lib/chat-status-notices";
 
 import { AgentChat } from "./AgentChat";
+import {
+  ComposerStatusNotices,
+  ThreadEndStatusNotices,
+  ThreadTopStatusNotices,
+} from "./ChatStatusNotices";
 import { useChatStream } from "./useChatStream";
 
 type Props = {
   newChatProject?: { id: string; name: string } | null | undefined;
   conversationId: string | undefined;
   activeWorkId: string | null;
+  /** Stati del client già tradotti in avvisi dal modulo puro; il thread li colloca. */
+  statusNotices: ChatStatusNotice[];
   onSend: (text: string, attachments: File[]) => void;
   notice: string;
   onClearNotice: () => void;
@@ -46,6 +61,7 @@ export function EngineAgentChat({
   newChatProject,
   conversationId,
   activeWorkId,
+  statusNotices,
   onSend,
   notice,
   onClearNotice,
@@ -65,8 +81,12 @@ export function EngineAgentChat({
   spaceData,
   onCreateExample,
 }: Props) {
-  const { messages, isRunning, historyLoading: streamLoading, noteUserSent } =
-    useChatStream(conversationId);
+  const {
+    messages,
+    isRunning,
+    historyLoading: streamLoading,
+    noteUserSent,
+  } = useChatStream(conversationId);
   // i dati del motore (lavori, pannelli) si rinfrescano quando la chat scrive
   const agentStream = useConversationEventStream(conversationId ?? null, {
     ...(onRefreshEngine ? { onNewMessage: () => void onRefreshEngine() } : {}),
@@ -74,6 +94,15 @@ export function EngineAgentChat({
 
   const showThread = Boolean(conversationId) || messages.length > 0;
   const loading = conversationId ? streamLoading || historyLoading : false;
+
+  const status = chatStatusLayout(statusNotices, conversationId ?? null);
+  const unreachable = status.aboveComposer.some((item) => item.kind === "engine-unreachable");
+  // alla risoluzione un esito breve, poi più nulla: senza tracce nello storico
+  const connectionRestored = useTransientResolved(unreachable);
+  function handleStatusAction(action: ChatStatusActionId) {
+    if (action === "refresh") void onRefreshEngine?.();
+    else if (action === "open-models") onOpenModels?.();
+  }
 
   function handleSend(text: string, files: File[]) {
     noteUserSent(text);
@@ -84,6 +113,7 @@ export function EngineAgentChat({
     <div className="cw-stage">
       <section className="cw-conversation">
         <div className="cw-history">
+          <ThreadTopStatusNotices notices={status.threadTop} />
           {showThread ? (
             <>
               <ConversationBrowserPip
@@ -105,8 +135,15 @@ export function EngineAgentChat({
               newChatProject={newChatProject}
             />
           )}
+          <ThreadEndStatusNotices notices={status.threadEnd} />
         </div>
         <div className="cw-composer">
+          <ComposerStatusNotices
+            notices={status.aboveComposer}
+            resolved={connectionRestored}
+            busy={engineBusy}
+            onAction={handleStatusAction}
+          />
           {assignee && (
             <p className="cw-hint">
               Nuovo incarico per <strong>{assignee}</strong> · descrivi il risultato che vuoi
@@ -116,7 +153,7 @@ export function EngineAgentChat({
           <StudioChatInput
             key={activeWorkId ?? "new"}
             label="Messaggio alla squadra"
-            disabled={Boolean(conversationId) && historyLoading}
+            disabled={unreachable || (Boolean(conversationId) && historyLoading)}
             engineBusy={isRunning || engineBusy}
             onCancel={onCancelInFlight}
             onSend={handleSend}

@@ -10,7 +10,6 @@ import { type SpaceData, type SpaceView, spacePeople } from "./ConversationSpace
 import { ConversationSearch } from "./ConversationSearch";
 import { ConversationWorkspaceChatStage } from "./ConversationWorkspaceChatStage";
 import { EngineChatStage } from "./chat/EngineChatStage";
-import { ConversationWorkspaceEngineNotices } from "./ConversationWorkspaceEngineNotices";
 import { ConversationWorkspaceSettingsMount } from "./ConversationWorkspaceSettingsMount";
 import { ConversationWorkspacePreview } from "./ConversationWorkspacePreview";
 import { ConversationWorkspaceSidebar } from "./ConversationWorkspaceSidebar";
@@ -1124,10 +1123,6 @@ export function ConversationWorkspace() {
           pending={pending} completedNotices={completedNotices}
           scenarios={scenarios} spaceData={displaySpaceData} onOpenWork={open}
         />
-        <ConversationWorkspaceEngineNotices
-          engine={engine}
-          onOpenModels={() => openSettings("models")}
-        />
         {space ? (
           <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined} engineTeams={engine.backend === "engine" ? engine.teams : undefined} engineRoutines={engine.backend === "engine" ? engine.routines : undefined} onUpdateRoutine={engine.backend === "engine" ? (r, ch) => engine.updateRoutine(r.id, r.revision, ch) : undefined} onSkipNextRoutine={engine.backend === "engine" ? (r) => engine.routineAction(r.id, "skip_next", r.revision) : undefined} onCreateRoutineFromWork={engine.backend === "engine" ? (workId, input) => engine.createRoutineFromWork(workId, input) : undefined}
             onSetEngineDue={engine.backend === "engine" ? engine.setDue : undefined}
@@ -1231,6 +1226,7 @@ export function ConversationWorkspace() {
             viewer={viewer}
             notice={notice}
             storageStatus={storageStatus}
+            dataSource={engine.dataSource}
             planEdit={planEdit}
             contributionPanel={contributionPanel}
             conversationActions={conversationActions}

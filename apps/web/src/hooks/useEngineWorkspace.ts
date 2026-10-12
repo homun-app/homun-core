@@ -68,7 +68,7 @@ export type EngineWorkspaceState = {
   agents: EngineAgentProfile[];
   teams: EngineTeam[];
   routines: EngineRoutine[];
-  followups: Array<EngineFollowupNotice & { conversationTitle: string }>;
+  followups: Array<EngineFollowupNotice & { conversationId: string; conversationTitle: string }>;
   refresh: () => Promise<void>;
   renameWork: (work: Work, title: string) => Promise<void>;
   closeWork: (work: Work) => Promise<void>;
@@ -137,9 +137,21 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
           : []), record.version));
         const owner = agents.find(agent => agent.id === raw["owner_id"]);
         if (owner) mapped.engineOwnerName = owner.name;
+        // i followup viaggiano con il lavoro: la barra laterale li indica
+        // senza una nuova catena di prop dallo shell
+        if (mapped.engineConversationId) {
+          mapped.engineFollowups = followups
+            .filter((f) => f.conversationId === mapped.engineConversationId)
+            .map((f) => ({
+              commandId: f.commandId,
+              status: f.status,
+              errorCode: f.errorCode,
+              attempts: f.attempts,
+            }));
+        }
         return mapped;
       }),
-    [rawWorks, agents, messageOverlay, transcript, activeWorkId],
+    [rawWorks, agents, messageOverlay, transcript, activeWorkId, followups],
   );
 
   // Single owner of the active work's brief: the chat card, the right panel

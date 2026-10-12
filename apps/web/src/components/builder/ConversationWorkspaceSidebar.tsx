@@ -26,6 +26,7 @@ import type { Work } from "./conversation-types";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import { ConversationHelpPopover } from "./ConversationHelpPopover";
 import { ConversationSidebarMoreNav as SidebarMoreNav } from "./ConversationSidebarMoreNav";
+import { conversationFollowupBadge } from "@/lib/chat-status-notices";
 import "./sidebar-refined.css";
 
 type Props = {
@@ -88,6 +89,30 @@ function groupWorksByDate(items: Work[]) {
   });
 
   return { today, yesterday, older };
+}
+
+/** Riga conversazione: punto discreto quando una sua risposta è in gioco. */
+function WorkRow({ work, active, onOpen }: { work: Work; active: string | null; onOpen: (id: string | null) => void }) {
+  const badge = conversationFollowupBadge(work.engineFollowups ?? []);
+  return (
+    <button
+      className={`cw-sb-row ${work.id === active ? "active" : ""}`}
+      onClick={() => onOpen(work.id)}
+      {...(badge ? { title: badge.title } : {})}
+    >
+      <div className="cw-sb-item-left">
+        <MessageSquare size={13} style={{ color: work.id === active ? "#18181b" : "#71717a", flexShrink: 0 }} />
+        <span className="cw-sb-row-title">{work.title}</span>
+        {badge && (
+          <span
+            className="cw-sb-dot"
+            aria-label={badge.title}
+            style={{ backgroundColor: badge.tone === "error" ? "#b4552f" : "#b08b2e", flexShrink: 0 }}
+          />
+        )}
+      </div>
+    </button>
+  );
 }
 
 export function ConversationWorkspaceSidebar({
@@ -322,16 +347,7 @@ export function ConversationWorkspaceSidebar({
               <>
                 <div className="cw-sb-date-label">Oggi</div>
                 {today.map((w) => (
-                  <button
-                    key={w.id}
-                    className={`cw-sb-row ${w.id === active ? "active" : ""}`}
-                    onClick={() => onOpenWork(w.id)}
-                  >
-                    <div className="cw-sb-item-left">
-                      <MessageSquare size={13} style={{ color: w.id === active ? "#18181b" : "#71717a", flexShrink: 0 }} />
-                      <span className="cw-sb-row-title">{w.title}</span>
-                    </div>
-                  </button>
+                  <WorkRow key={w.id} work={w} active={active} onOpen={onOpenWork} />
                 ))}
               </>
             )}
@@ -340,16 +356,7 @@ export function ConversationWorkspaceSidebar({
               <>
                 <div className="cw-sb-date-label">Ieri</div>
                 {yesterday.map((w) => (
-                  <button
-                    key={w.id}
-                    className={`cw-sb-row ${w.id === active ? "active" : ""}`}
-                    onClick={() => onOpenWork(w.id)}
-                  >
-                    <div className="cw-sb-item-left">
-                      <MessageSquare size={13} style={{ color: w.id === active ? "#18181b" : "#71717a", flexShrink: 0 }} />
-                      <span className="cw-sb-row-title">{w.title}</span>
-                    </div>
-                  </button>
+                  <WorkRow key={w.id} work={w} active={active} onOpen={onOpenWork} />
                 ))}
               </>
             )}
@@ -358,16 +365,7 @@ export function ConversationWorkspaceSidebar({
               <>
                 <div className="cw-sb-date-label">Precedenti</div>
                 {older.map((w) => (
-                  <button
-                    key={w.id}
-                    className={`cw-sb-row ${w.id === active ? "active" : ""}`}
-                    onClick={() => onOpenWork(w.id)}
-                  >
-                    <div className="cw-sb-item-left">
-                      <MessageSquare size={13} style={{ color: w.id === active ? "#18181b" : "#71717a", flexShrink: 0 }} />
-                      <span className="cw-sb-row-title">{w.title}</span>
-                    </div>
-                  </button>
+                  <WorkRow key={w.id} work={w} active={active} onOpen={onOpenWork} />
                 ))}
               </>
             )}
