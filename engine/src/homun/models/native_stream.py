@@ -9,7 +9,7 @@ import json
 from homun.models.native_errors import (
     NativeModelError, MALFORMED, TRUNCATED, CLEAN_EOF, REPETITION,
 )
-from homun.models.repetition import RunawayStreamWatch
+from homun.models.repetition import MIN_FRAGMENT_LENGTH, RunawayStreamWatch
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_FRAME_BYTES = 256 * 1024
@@ -21,7 +21,7 @@ _REASONING_DELTA_KEYS = ('reasoning', 'reasoning_content', 'thinking')
 
 
 class NativeStream:
-    def __init__(self, *, ollama=False, on_delta=None):
+    def __init__(self, *, ollama=False, on_delta=None, runaway_floor=MIN_FRAGMENT_LENGTH):
         self.ollama, self.on_delta = ollama, on_delta
         self.buffer = b''
         self.event = []
@@ -33,8 +33,10 @@ class NativeStream:
         self.terminal = False
         self.finish_reason_seen = False
         self.usage = {}
-        self.content_watch = RunawayStreamWatch()
-        self.reasoning_watch = RunawayStreamWatch()
+        # The turn's floor (400 normally, 16k when the ask requested
+        # repetition) is one criterion for BOTH channels and the turn end.
+        self.content_watch = RunawayStreamWatch(min_chars=runaway_floor)
+        self.reasoning_watch = RunawayStreamWatch(min_chars=runaway_floor)
 
     def fail(self, text='Malformed native stream'):
         raise NativeModelError(MALFORMED, text, retryable=False)

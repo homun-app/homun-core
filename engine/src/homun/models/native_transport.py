@@ -9,14 +9,17 @@ NativeModelError instead of a raw provider body.
 from homun.domain.ids import new_id
 from homun.models.native_errors import NativeModelError, classify_response, classify_transport
 from homun.models.native_turn import NativeResult, parse_response, project_messages
+from homun.models.repetition import MIN_FRAGMENT_LENGTH
 from homun.models.types import UsageEntry
 from homun.models.port import ContextLimits
 
 
-def complete_tools(provider, messages, *, tools, model_id=None, context_window=None, max_output_tokens=8192, stream=False, cancel_check=None, on_delta=None):
+def complete_tools(provider, messages, *, tools, model_id=None, context_window=None, max_output_tokens=8192, stream=False,
+                   cancel_check=None, on_delta=None, runaway_floor=MIN_FRAGMENT_LENGTH):
     return _complete(provider, messages, tools=tools, model_id=model_id,
                      context_window=context_window, max_output_tokens=max_output_tokens,
-                     stream=stream, cancel_check=cancel_check, on_delta=on_delta)
+                     stream=stream, cancel_check=cancel_check, on_delta=on_delta,
+                     runaway_floor=runaway_floor)
 
 
 def complete_summary(provider, messages, *, model_id=None, context_window=None, max_output_tokens=8192):
@@ -52,7 +55,7 @@ def usage_from_response(response, *, provider_id, model_id, ollama) -> UsageEntr
 
 
 def _complete(provider, messages, *, tools, model_id, context_window, max_output_tokens,
-              stream=False, cancel_check=None, on_delta=None):
+              stream=False, cancel_check=None, on_delta=None, runaway_floor=MIN_FRAGMENT_LENGTH):
     limits = ContextLimits(context_window=context_window, max_output_tokens=max_output_tokens)
     key = provider._api_key()
     if not key:
@@ -79,12 +82,12 @@ def _complete(provider, messages, *, tools, model_id, context_window, max_output
         if not ollama:
             payload['stream_options'] = {'include_usage': True}
         response = stream_response(provider, payload, api_key=key, ollama=ollama,
-            cancel_check=cancel_check, on_delta=on_delta,
+            cancel_check=cancel_check, on_delta=on_delta, runaway_floor=runaway_floor,
             usage_factory=lambda body: usage_from_response(body, provider_id=provider.provider_id,
                                                            model_id=model, ollama=ollama))
     usage = usage_from_response(response, provider_id=provider.provider_id, model_id=model, ollama=ollama)
     try:
-        message = parse_response(response, ollama=ollama)
+        message = parse_response(response, ollama=ollama, runaway_floor=runaway_floor)
     except ValueError as exc:
         error = classify_response(exc, usage=usage)
         if stream:

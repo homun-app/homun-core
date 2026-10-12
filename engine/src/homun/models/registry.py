@@ -416,7 +416,7 @@ class ModelRegistry:
         return result
 
     def complete_tools(self, messages, *, tools=None, connection_id=None, model_id=None, expected_runtime=None, context_window=None, max_output_tokens=8192,
-                       stream=False, cancel_check=None, on_delta=None):
+                       stream=False, cancel_check=None, on_delta=None, runaway_floor=None):
         from homun.domain.errors import ValidationError
         from homun.models.native_errors import NativeModelError
         from homun.models.native_transport import complete_tools
@@ -425,10 +425,11 @@ class ModelRegistry:
         if not isinstance(provider, OpenAICompatibleProvider):
             raise ValidationError('Native tools require an OpenAI-compatible connection')
         provider = bound_provider(provider, pid, expected_runtime)
+        kwargs = {} if runaway_floor is None else {'runaway_floor': runaway_floor}
         try:
             result = complete_tools(provider, messages, tools=tools, model_id=model_id, context_window=context_window,
                                     max_output_tokens=max_output_tokens, stream=stream,
-                                    cancel_check=cancel_check, on_delta=on_delta)
+                                    cancel_check=cancel_check, on_delta=on_delta, **kwargs)
         except NativeModelError as exc:
             if isinstance(exc.usage, UsageEntry):
                 self.usage.append(exc.usage)

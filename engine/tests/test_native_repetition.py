@@ -42,6 +42,22 @@ def test_runaway_single_line_and_repeated_line_patterns():
     assert not is_runaway_repetition(None)
 
 
+def test_asked_repetition_below_16k_is_delivered_when_the_turn_raised_the_floor():
+    from homun.models.repetition import STOP_PATH_MIN_CHARS, is_runaway_repetition
+    text='Ciao mondo!\n'*200
+    assert len(text)<STOP_PATH_MIN_CHARS
+    assert is_runaway_repetition(text)  # the normal floor still rejects it
+    result=complete_tools(provider(text),[],tools=[],runaway_floor=STOP_PATH_MIN_CHARS)
+    assert result.message.content==text
+
+
+def test_asked_repetition_without_the_ask_is_still_rejected():
+    text='Ciao mondo!\n'*200
+    with pytest.raises(NativeModelError) as caught:
+        complete_tools(provider(text),[],tools=[])
+    assert caught.value.code=='agent_model_repetition'
+
+
 from test_agent_runs import setup
 
 

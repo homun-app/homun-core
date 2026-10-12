@@ -129,13 +129,20 @@ async def chat_completions(
 
     native_messages = _convert_messages(req.messages)
     native_tools = _convert_tools(req.tools)
+    # The request's user messages ARE the person's turn: the runaway floor
+    # (16k iff the ask requests repetition) is decided from them, once.
+    from homun.models.repetition import turn_runaway_floor
+    runaway_floor = turn_runaway_floor(next(
+        (m.content for m in reversed(native_messages) if m.role == 'user'), None))
 
     # 2. Execution via Models Port
     try:
         if native_tools:
-            res = ctx.models.complete_tools(native_messages, tools=native_tools, model_id=req.model)
+            res = ctx.models.complete_tools(native_messages, tools=native_tools, model_id=req.model,
+                                            runaway_floor=runaway_floor)
         else:
-            res = ctx.models.complete_tools(native_messages, tools=None, model_id=req.model)
+            res = ctx.models.complete_tools(native_messages, tools=None, model_id=req.model,
+                                            runaway_floor=runaway_floor)
     except Exception as exc:
         logger.error("Chat completion error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
