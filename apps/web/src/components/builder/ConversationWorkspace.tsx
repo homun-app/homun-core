@@ -1053,6 +1053,7 @@ export function ConversationWorkspace() {
         visibleWorks={visibleWorks}
         displaySpaceData={displaySpaceData}
         engineBackend={engine.backend}
+        engineRoutines={engine.backend === "engine" ? engine.routines : undefined}
         library={library}
         works={works}
         setWorks={setWorks}

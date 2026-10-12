@@ -9,6 +9,7 @@ import type { SpaceData } from "./ConversationSpace";
 import type { Work } from "./conversation-types";
 import { downloadPrototypeExport } from "./conversation-export";
 import { resetPrototype } from "./conversation-storage";
+import type { EngineRoutine } from "@/lib/engine-routines-client";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 type Props = {
@@ -21,10 +22,12 @@ type Props = {
   visibleWorks: Work[];
   displaySpaceData: SpaceData;
   engineBackend: "simulation" | "engine";
+  /** Routine del motore: alimentano i conteggi Automazioni in modalità motore. */
+  engineRoutines?: EngineRoutine[] | undefined;
   library: ConversationMaterial[];
   works: Work[];
   setWorks: Dispatch<SetStateAction<Work[]>>;
-  onNavigate: (page: "Squadra" | "Plugin" | "Materiali" | "Progetti") => void;
+  onNavigate: (page: "Squadra" | "Plugin" | "Materiali" | "Progetti" | "Automazioni") => void;
   spaceData: SpaceData;
   storageKey: string;
   resetting: MutableRefObject<boolean>;
@@ -40,6 +43,7 @@ export function ConversationWorkspaceSettingsMount({
   visibleWorks,
   displaySpaceData,
   engineBackend,
+  engineRoutines,
   library,
   works,
   setWorks,
@@ -61,6 +65,15 @@ export function ConversationWorkspaceSettingsMount({
         projects: displaySpaceData.projects.length,
         materials: engineBackend === "engine" ? null : library.length,
       }}
+      automations={
+        engineBackend === "engine"
+          ? {
+              source: "engine",
+              activeCount: (engineRoutines ?? []).filter((r) => r.status === "active").length,
+              pausedCount: (engineRoutines ?? []).filter((r) => r.status === "paused").length,
+            }
+          : { source: "simulation", activeCount: 0, pausedCount: 0 }
+      }
       archived={works.filter((w) => w.archived && !w.coordinatedBy)}
       onRestore={(id) =>
         setWorks((current) =>

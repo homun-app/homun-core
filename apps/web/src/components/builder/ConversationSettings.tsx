@@ -30,18 +30,25 @@ export function ConversationSettings({
   archived,
   storageStatus,
   counts,
+  automations,
   initialSection = "space",
 }: {
   value: ConversationPreferences;
   onSave: (p: ConversationPreferences) => void;
   onClose: () => void;
-  onNavigate: (page: "Squadra" | "Plugin" | "Materiali" | "Progetti") => void;
+  onNavigate: (page: "Squadra" | "Plugin" | "Materiali" | "Progetti" | "Automazioni") => void;
   onExport: () => void;
   onReset: () => Promise<void>;
   onRestore: (id: string) => void;
   archived: { id: string; title: string }[];
   storageStatus: string;
   counts: { works: number; projects: number; materials: number | null };
+  /** Automazioni: fonte e conteggi veri, calcolati dal genitore. */
+  automations: {
+    source: "engine" | "simulation";
+    activeCount: number;
+    pausedCount: number;
+  };
   /** Open a specific settings section (e.g. models from first-run CTA). */
   initialSection?: string;
 }) {
@@ -251,7 +258,17 @@ export function ConversationSettings({
           {section === "people" && <EnginePeopleSection />}
           {section === "remote-spaces" && <EngineRemoteSpacesSection />}
           {(section === "plugins" || section === "skills") && <CapabilitiesView />}
-          {section === "automations" && <ConversationAutomationsSettingsSection />}
+          {section === "automations" && (
+            <ConversationAutomationsSettingsSection
+              source={automations.source}
+              activeCount={automations.activeCount}
+              pausedCount={automations.pausedCount}
+              onOpenRoutines={() => {
+                onClose();
+                onNavigate("Automazioni");
+              }}
+            />
+          )}
           {section === "review" && <ConversationReviewQueuesSection actorId="person_fabio" />}
           {section === "agents" && <ConversationAgentsSettingsSection actorId="person_fabio" />}
           {section === "skills" && <ConversationSkillsSettingsSection actorId="person_fabio" />}
