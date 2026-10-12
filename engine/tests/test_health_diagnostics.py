@@ -42,7 +42,11 @@ def test_health_exposes_coarse_db_state_only(client):
     response = tc.get("/v1/health")
     assert response.status_code == 200
     body = response.json()
-    assert body["db"] == {"state": "repaired"}
+    assert body["db"]["state"] == "repaired"
+    # il percorso del database in uso è diagnostica pubblica: rende visibile
+    # QUALE file è aperto (l'anomalia 2026-10-07 era il db sbagliato)
+    assert body["db"]["path"] == str((data_dir / "ws_local.sqlite3").resolve())
+    assert body["db"]["data_dir"] == str(data_dir.resolve())
     assert "report" not in body["db"]
     assert "quarantine" not in response.text
     assert "entity_cmd_secret" not in response.text
