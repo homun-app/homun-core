@@ -1,17 +1,34 @@
 /** Source-explicit projection for shared navigation; never persist engine data as simulation. */
 import type { SpaceData } from '../components/builder/ConversationSpace.ts';
-import type { EngineProject } from './engine-projects-client.ts';
+import type { EngineProject, EngineTeam } from './engine-projects-client.ts';
 
 export function projectWorkspaceData(
   backend: 'engine' | 'simulation',
   simulation: SpaceData,
   projects: EngineProject[],
+  teams: EngineTeam[] = [],
 ): SpaceData {
   if (backend === 'simulation') return simulation;
-  return { ...simulation, projects: projects.map((project) => ({
-    id: project.id, name: project.name, brief: project.description,
-    teamId: project.team_ids[0] ?? '',
-  })) };
+  // Engine mode keeps nothing of the simulated workspace: every field is engine
+  // data or honestly empty. Real routines live in engine.routines where needed.
+  return {
+    detachedChats: [],
+    installedPlugins: [],
+    removedPeople: [],
+    profiles: {},
+    teams: teams.map((team) => ({
+      id: team.id,
+      name: team.name,
+      members: [...team.member_ids],
+      leader: team.coordinator_id ?? '',
+      brief: team.description,
+    })),
+    projects: projects.map((project) => ({
+      id: project.id, name: project.name, brief: project.description,
+      teamId: project.team_ids[0] ?? '',
+    })),
+    routines: [],
+  };
 }
 
 /** What the panel tells the person to do next, in product language. */

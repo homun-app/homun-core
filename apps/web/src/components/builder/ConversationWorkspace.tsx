@@ -83,7 +83,7 @@ export function ConversationWorkspace() {
   const [spaceSelected, setSpaceSelected] = useState("");
   const [spaceVersion, setSpaceVersion] = useState(0);
   const [spaceData, setSpaceData] = useState<SpaceData>(() => demoBootstrap.spaceData);
-  const displaySpaceData = projectWorkspaceData(engine.backend, spaceData, engine.projects);
+  const displaySpaceData = projectWorkspaceData(engine.backend, spaceData, engine.projects, engine.backend === "engine" ? engine.teams : []);
   const [searchOpen, setSearchOpen] = useState(false);
   const { resetting } = useConversationPrototypeStorage({
     storageKey, loaded, setLoaded, storageEnabled, setStorageEnabled, setStorageStatus,

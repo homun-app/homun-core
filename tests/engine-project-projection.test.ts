@@ -12,6 +12,32 @@ test('engine project navigation uses only authoritative inventory, including aft
   assert.deepEqual(projectWorkspaceData('engine', simulated, JSON.parse(JSON.stringify(projects))), actual);
 });
 
+test('engine projection carries no simulation field: routines, teams, people stay out', () => {
+  const simulated = {
+    detachedChats: [{ id: 'chat_sim', title: 'Chat demo', messages: [] }],
+    installedPlugins: ['Trello'],
+    removedPeople: ['Marta'],
+    profiles: { Gianni: { role: 'Collaboratore', bio: '', skills: [], tone: '', plugins: [] } },
+    teams: [{ id: 'team_sim', name: 'Team demo', members: ['Marta'], leader: 'Marta', brief: 'demo' }],
+    routines: [{ id: 'routine_sim', name: 'Controllo demo', workId: 'work_sim', schedule: 'Ogni lunedì', active: true }],
+    projects: [{ id: 'fake', name: 'Demo', teamId: '', brief: '' }],
+  };
+  const projects = [{ id: 'project_real', workspace_id: 'ws_local', name: 'Prezzi settembre', description: 'Confronto', version: 2, team_ids: [], member_ids: [], conversation_ids: [], status: 'active' }];
+  const teams = [{ id: 'team_real', workspace_id: 'ws_local', name: 'Commerciale', description: 'Offerte', revision: 1, member_ids: ['agent_ada'], coordinator_id: 'agent_ada', status: 'active' }];
+  const actual = projectWorkspaceData('engine', simulated, projects, teams);
+  assert.deepEqual(actual.routines, []);
+  assert.deepEqual(actual.profiles, {});
+  assert.deepEqual(actual.removedPeople, []);
+  assert.deepEqual(actual.detachedChats, []);
+  assert.deepEqual(actual.installedPlugins, []);
+  assert.deepEqual(actual.teams, [
+    { id: 'team_real', name: 'Commerciale', members: ['agent_ada'], leader: 'agent_ada', brief: 'Offerte' },
+  ]);
+  const flat = JSON.stringify(actual);
+  for (const leaked of ['routine_sim', 'team_sim', 'Gianni', 'chat_sim', 'Trello', 'Marta', 'Demo'])
+    assert.ok(!flat.includes(leaked), `engine projection must not carry "${leaked}"`);
+});
+
 test('real work states never offer simulated delivery or approval', () => {
   assert.match(engineWorkPanelMessage('running'), /esecuzione/i);
   assert.match(engineWorkPanelMessage('review'), /risultato.*conversazione/i);
