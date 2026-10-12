@@ -25,7 +25,7 @@ import { applyBoardMove, boardMoveSuccessMessage, validateBoardMove } from "./co
 import { demoWorkspaceBootstrap } from "./conversation-demo-mode";
 import { downloadWorkResult } from "./conversation-export";
 import { buildMaterialLibrary } from "./conversation-material-library";
-import { buildConversationSearchEntries, openWorkResultPreview } from "./conversation-search-entries";
+import { useConversationSearchEntries } from "@/hooks/useConversationSearchEntries";
 import { isCompletedNoticeForViewer, isPendingForViewer, workspaceWorkStatus } from "./conversation-work-status";
 import { useConversationPrototypeStorage } from "./useConversationPrototypeStorage";
 import { type Phase, type Work } from "./conversation-types";
@@ -1018,17 +1018,17 @@ export function ConversationWorkspace() {
       onOpen={open}
     />
   ) : null;
-  const entries = buildConversationSearchEntries({
+  const entries = useConversationSearchEntries({
+    engine,
     library,
     visibleWorks,
     scenarios,
-    spaceData: displaySpaceData,
-    engineRoutines: engine.backend === "engine" ? engine.routines : undefined,
+    displaySpaceData,
+    spaceData,
     workStatus,
     openSpace,
     openWork: open,
-    openResultPreview: (w) =>
-      openWorkResultPreview(w, scenarios, spaceData.profiles, open, setPreview),
+    setPreview,
   });
   if (!loaded)
     return (

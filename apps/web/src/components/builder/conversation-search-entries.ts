@@ -1,5 +1,8 @@
 /**
- * Build the global search index for the simulated workspace.
+ * Build the global search index. In simulation it reads the simulated
+ * workspace; in engine mode (backend: "engine") every entry comes from the
+ * engine — routines, agents and materials as explicit parameters — and
+ * simulated works, materials and demo people never surface.
  */
 
 import { isHumanMember, memberProfile } from "./conversation-members.ts";
@@ -9,15 +12,22 @@ import type { SearchEntry } from "./ConversationSearch";
 import { spacePeople, type SpaceData, type SpaceView } from "./ConversationSpace";
 import type { Work } from "./conversation-types.ts";
 import { describeCron } from "@/lib/cadence-language.ts";
+import type { EngineAgentProfile } from "@/lib/engine-agents-client.ts";
+import type { EngineMaterial } from "@/lib/engine-projects-client.ts";
 import type { EngineRoutine } from "@/lib/engine-routines-client.ts";
 
 type Args = {
+  backend: "engine" | "simulation";
   library: ConversationMaterial[];
   visibleWorks: Work[];
   scenarios: ConversationScenario[];
   spaceData: SpaceData;
-  /** Engine routines: when provided, Automazioni entries come only from here (Fonte: motore). */
+  /** Engine routines: Automazioni entries in engine mode come only from here. */
   engineRoutines?: EngineRoutine[] | undefined;
+  /** Engine agents: Collaboratori entries in engine mode come only from here. */
+  engineAgents?: EngineAgentProfile[] | undefined;
+  /** Engine project materials: Materiali entries in engine mode come only from here. */
+  engineMaterials?: EngineMaterial[] | undefined;
   workStatus: (w: Work) => string;
   openSpace: (view: SpaceView, initial?: string, selected?: string) => void;
   openWork: (id: string, selector?: string) => void;
@@ -25,26 +35,46 @@ type Args = {
 };
 
 export function buildConversationSearchEntries({
+  backend,
   library,
   visibleWorks,
   scenarios,
   spaceData,
   engineRoutines,
+  engineAgents,
+  engineMaterials,
   workStatus,
   openSpace,
   openWork,
   openResultPreview,
 }: Args): SearchEntry[] {
+  const engineMode = backend === "engine";
+  // Fonte: motore — a simulated work must not surface even if passed by mistake.
+  const works = engineMode ? visibleWorks.filter((w) => w.source === "engine") : visibleWorks;
+  const agentName = (id: string) => engineAgents?.find((a) => a.id === id)?.name ?? id;
   return [
-    ...library.map((m) => ({
-      id: m.id,
-      title: m.name,
-      kind: "Materiali",
-      context: m.path || "Nota",
-      text: m.body || "",
-      open: () => openSpace("Materiali", "", m.id),
-    })),
-    ...visibleWorks.map((w) => ({
+    ...(engineMode
+      ? (engineMaterials ?? []).map((m) => ({
+          id: m.id,
+          title: m.title,
+          kind: "Materiali",
+          context:
+            spaceData.projects.find((p) => p.id === m.project_id)?.name ||
+            m.relative_path ||
+            m.origin_name ||
+            "Materiale del motore",
+          text: m.text || "",
+          open: () => openSpace("Materiali", "", m.id),
+        }))
+      : library.map((m) => ({
+          id: m.id,
+          title: m.name,
+          kind: "Materiali",
+          context: m.path || "Nota",
+          text: m.body || "",
+          open: () => openSpace("Materiali", "", m.id),
+        }))),
+    ...works.map((w) => ({
       id: w.id,
       title: w.title,
       kind: "Lavori",
@@ -52,7 +82,7 @@ export function buildConversationSearchEntries({
       text: w.contribution,
       open: () => openWork(w.id),
     })),
-    ...visibleWorks.flatMap((w) =>
+    ...works.flatMap((w) =>
       w.messages.map((m, i) => ({
         id: `${w.id}:message:${i}`,
         title: m.who === "you" ? "Tu" : m.sender || scenarioForWork(w, scenarios).agent,
@@ -64,21 +94,40 @@ export function buildConversationSearchEntries({
         },
       })),
     ),
-    ...visibleWorks
-      .filter((w) => w.phase === "review" || w.phase === "approved")
-      .map((w) => ({
-        id: `${w.id}:result`,
-        title: w.humanResult ? "Risultato consegnato" : scenarioForWork(w, scenarios).result || w.title,
-        kind: "Materiali",
-        context: w.title,
-        text: w.humanResult || scenarioForWork(w, scenarios).body,
-        open: () => openResultPreview(w),
-      })),
+    ...(engineMode
+      ? // The engine's own latest artifact is the honest «result»; the simulated
+        // preview modal is demo-only, so the entry opens the work conversation.
+        works.flatMap((w) => {
+          const artifact = w.engineLatestArtifact;
+          if (!artifact || (w.phase !== "review" && w.phase !== "approved")) return [];
+          return [
+            {
+              id: `${w.id}:result`,
+              title: artifact.title,
+              kind: "Materiali",
+              context: w.title,
+              text: artifact.content,
+              open: () => openWork(w.id),
+            },
+          ];
+        })
+      : visibleWorks
+          .filter((w) => w.phase === "review" || w.phase === "approved")
+          .map((w) => ({
+            id: `${w.id}:result`,
+            title: w.humanResult
+              ? "Risultato consegnato"
+              : scenarioForWork(w, scenarios).result || w.title,
+            kind: "Materiali",
+            context: w.title,
+            text: w.humanResult || scenarioForWork(w, scenarios).body,
+            open: () => openResultPreview(w),
+          }))),
     ...spaceData.teams.map((t) => ({
       id: t.id,
       title: t.name,
       kind: "Team",
-      context: t.members.join(", "),
+      context: t.members.map((m) => (engineMode ? agentName(m) : m)).join(", "),
       text: [t.brief, ...(t.notes || [])].join(" "),
       open: () => openSpace("Squadra", "", t.id),
     })),
@@ -90,8 +139,8 @@ export function buildConversationSearchEntries({
       text: [p.brief, ...(p.notes || [])].join(" "),
       open: () => openSpace("Progetti", "", p.id),
     })),
-    ...(engineRoutines
-      ? engineRoutines.map((r) => ({
+    ...(engineMode
+      ? (engineRoutines ?? []).map((r) => ({
           id: r.id,
           title: r.name,
           kind: "Automazioni",
@@ -107,18 +156,27 @@ export function buildConversationSearchEntries({
           text: [r.active ? "attiva" : "pausa", ...(r.notes || [])].join(" "),
           open: () => openSpace("Automazioni", "", r.id),
         }))),
-    ...[...new Set([...spacePeople, ...Object.keys(spaceData.profiles || {})])]
-      .filter((n) => !spaceData.removedPeople?.includes(n))
-      .map((n) => ({
-        id: `person:${n}`,
-        title: n,
-        kind: "Collaboratori",
-        context: memberProfile(n, spaceData.profiles).role,
-        text: JSON.stringify(memberProfile(n, spaceData.profiles)),
-        open: () => {
-          openSpace("Squadra", "", `person:${n}`);
-        },
-      })),
+    ...(engineMode
+      ? (engineAgents ?? []).map((a) => ({
+          id: a.id,
+          title: a.name,
+          kind: "Collaboratori",
+          context: a.role,
+          text: [a.name, a.role, a.responsibility ?? "", ...(a.specializations ?? [])].join(" "),
+          open: () => openSpace("Squadra", "agents", a.id),
+        }))
+      : Array.from(new Set([...spacePeople, ...Object.keys(spaceData.profiles || {})]))
+          .filter((n) => !spaceData.removedPeople?.includes(n))
+          .map((n) => ({
+            id: `person:${n}`,
+            title: n,
+            kind: "Collaboratori",
+            context: memberProfile(n, spaceData.profiles).role,
+            text: JSON.stringify(memberProfile(n, spaceData.profiles)),
+            open: () => {
+              openSpace("Squadra", "", `person:${n}`);
+            },
+          }))),
   ];
 }
 
