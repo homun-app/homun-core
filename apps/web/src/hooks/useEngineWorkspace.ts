@@ -44,9 +44,9 @@ import {
   routineEngineAction,
   routineTemplateFromWork,
   updateEngineRoutine,
-  workSupportsRoutineTemplate,
   type EngineRoutine,
 } from "@/lib/engine-routines-client";
+import { routineCreatorFor } from "@/lib/engine-work-repeat";
 import { createEngineSkill } from "@/lib/engine-mcp-client";
 import { createIntakeConversation } from "@/lib/engine-intake-creation";
 import { confirmWorkIntake, proposeWorkIntake } from "@/lib/engine-intake-client";
@@ -667,19 +667,15 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
       });
       await refresh();
     },
-    routineCreatorFor: (work) => {
-      if (work.source !== "engine" || work.engineStatus !== "completed" || !workSupportsRoutineTemplate(work)) {
-        return undefined;
-      }
-      return async (input) => {
+    routineCreatorFor: (work) =>
+      routineCreatorFor(work, async (input) => {
         await createEngineRoutine({
           ...input,
           conversationId: work.engineConversationId ?? "",
           template: routineTemplateFromWork(work),
         });
         await refresh();
-      };
-    },
+      }),
     routineAction: async (routineId, action, expectedVersion) => {
       await routineEngineAction({ routineId, action, expectedVersion });
       await refresh();
