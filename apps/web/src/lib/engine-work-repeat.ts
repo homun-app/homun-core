@@ -10,7 +10,7 @@ export type EngineRepeatWork = RoutineWorkSource & {
 
 export type EngineRepeatDecision = { kind: "creator" } | { kind: "unsupported"; reason: string };
 
-/** Mirrors engine.routineCreatorFor eligibility, with reasons a person can act on. */
+/** One eligibility rule for repeating an engine work, with reasons a person can act on. */
 export function engineRepeatDecision(work: EngineRepeatWork): EngineRepeatDecision {
   if (work.source !== "engine") {
     return {
@@ -33,6 +33,15 @@ export function engineRepeatDecision(work: EngineRepeatWork): EngineRepeatDecisi
     };
   }
   return { kind: "creator" };
+}
+
+/** The create-routine callback the workspace hands to work panels:
+ * the same engineRepeatDecision rule decides, undefined when ineligible. */
+export function routineCreatorFor(
+  work: EngineRepeatWork,
+  create: (input: { name: string; cron: string }) => Promise<void>,
+): ((input: { name: string; cron: string }) => Promise<void>) | undefined {
+  return engineRepeatDecision(work).kind === "creator" ? create : undefined;
 }
 
 /** The «Ripeti» action on an engine work: open Automazioni with the creator
