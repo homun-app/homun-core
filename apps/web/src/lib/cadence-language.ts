@@ -1,7 +1,12 @@
 /** Italian cadence phrases → 5-field cron; honest null when unrecognized. */
 const WEEKDAYS: Record<string, number> = {
-  "lunedì": 1, "martedì": 2, "mercoledì": 3, "giovedì": 4,
-  "venerdì": 5, "sabato": 6, "domenica": 0,
+  lunedì: 1,
+  martedì: 2,
+  mercoledì: 3,
+  giovedì: 4,
+  venerdì: 5,
+  sabato: 6,
+  domenica: 0,
 };
 
 function parseTime(text: string): { h: number; m: number } | null {
@@ -34,7 +39,15 @@ export function cadenceToCron(phrase: string): string | null {
   return null;
 }
 
-const WEEKDAY_NAMES = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
+const WEEKDAY_NAMES = [
+  "domenica",
+  "lunedì",
+  "martedì",
+  "mercoledì",
+  "giovedì",
+  "venerdì",
+  "sabato",
+];
 
 /** Cron → human cadence, mirroring the phrases cadenceToCron accepts. */
 export function describeCron(cron: string): string {
