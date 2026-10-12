@@ -48,13 +48,15 @@ def is_runaway_repetition(text):
 class RunawayStreamWatch:
     """Live repetition guard for streaming channels (content / reasoning).
 
-    First evaluation once the channel reaches ``min_chars`` (Homun's fragment
-    floor so short runaway loops are cut without waiting for Hermes' 16k stop
-    path). Later checks advance by ``min(chars, STREAM_TAIL_CHARS)`` and judge
-    only the bounded tail.
+    Hermes b6aae42c3b: the stop-path criterion runs WHILE the channel streams.
+    The first evaluation waits for ``min_chars`` — the stop-path floor
+    (STOP_PATH_MIN_CHARS), because repetition the user asked for stays below it
+    and must be delivered; the next runs each time the channel doubles, and
+    only the bounded tail (STREAM_TAIL_CHARS) is judged, so total work stays
+    linear in the output however long the reply grows.
     """
 
-    def __init__(self, *, min_chars: int = MIN_FRAGMENT_LENGTH):
+    def __init__(self, *, min_chars: int = STOP_PATH_MIN_CHARS):
         self._min_chars = max(1, int(min_chars))
         self._chars = 0
         self._parts: list[str] = []
@@ -67,11 +69,9 @@ class RunawayStreamWatch:
         self._chars += len(chunk)
         if self._chars < self._next_check:
             return False
+        self._next_check = 2 * self._chars
         text = ''.join(self._parts)
         if len(text) > STREAM_TAIL_CHARS:
             text = text[-STREAM_TAIL_CHARS:]
-            self._parts = [text]
-        else:
-            self._parts = [text]
-        self._next_check = self._chars + min(max(self._chars, 1), STREAM_TAIL_CHARS)
+        self._parts = [text]
         return is_runaway_repetition(text)

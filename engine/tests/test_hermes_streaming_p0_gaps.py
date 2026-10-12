@@ -21,7 +21,9 @@ from test_agent_runs import setup  # noqa: F401 — pytest fixture re-export
 
 from homun.models.native_errors import NativeModelError, REPETITION
 from homun.models.native_stream import NativeStream
-from homun.models.repetition import is_runaway_repetition
+from homun.models.repetition import (
+    STOP_PATH_MIN_CHARS, is_runaway_repetition,
+)
 
 
 def sse(value):
@@ -32,26 +34,36 @@ def chunk(delta=None, reason=None):
     return {"choices": [{"index": 0, "delta": delta or {}, "finish_reason": reason}]}
 
 
+_RUNAWAY_LINE = (
+    "The model repeats this exact lengthy explanation without making any "
+    "further progress.\n"
+)
+
+
+def runaway_text(total_chars):
+    """One degenerate repetition loop long enough to pass the Hermes floor."""
+    text = _RUNAWAY_LINE * (total_chars // len(_RUNAWAY_LINE) + 1)
+    return text[:total_chars]
+
+
 # ---------------------------------------------------------------------------
 # Gap 1 — live runaway guard during stream (not only after finish)
 # ---------------------------------------------------------------------------
 
-def test_p0_runaway_aborts_during_stream_before_finish():
-    """Hermes checks is_runaway_repetition on raw content while streaming.
-
-    Homun today only runs the guard in native_turn.parse_response after the
-    provider stream has already finished assembling a complete message.
+@pytest.mark.parametrize("field", ["content", "reasoning"])
+def test_p0_runaway_aborts_during_stream_before_finish(field):
+    """Hermes checks is_runaway_repetition on raw content AND reasoning while
+    streaming, first at the stop-path floor (16k chars) and then at every
+    doubling. A hit closes the stream immediately with a typed, non-retryable
+    REPETITION failure — never silently.
     """
-    runaway = (
-        "The model repeats this exact lengthy explanation without making any "
-        "further progress.\n" * 30
-    )
+    runaway = runaway_text(STOP_PATH_MIN_CHARS + 8192)
     assert is_runaway_repetition(runaway)
 
     stream = NativeStream()
     with pytest.raises(NativeModelError) as caught:
-        for offset in range(0, len(runaway), 64):
-            stream.feed(sse(chunk({"content": runaway[offset:offset + 64]})))
+        for offset in range(0, len(runaway), 256):
+            stream.feed(sse(chunk({field: runaway[offset:offset + 256]})))
         # Desired: raised mid-feed. If feed silently accepts everything, the
         # gap is still open — force a failure rather than a false pass.
         raise AssertionError(
@@ -60,6 +72,103 @@ def test_p0_runaway_aborts_during_stream_before_finish():
 
     assert caught.value.code == REPETITION
     assert caught.value.retryable is False
+
+
+def test_p0_live_watch_first_checks_at_hermes_floor_then_doubles(monkeypatch):
+    """Hermes b6aae42c3b cadence: first evaluation at STOP_PATH_MIN_CHARS,
+    the next each time the channel doubles (bounded 64k tail).
+
+    A lower floor would cut repetition the user asked for (#121600); a denser
+    cadence would re-scan the whole partial on every delta.
+    """
+    import homun.models.repetition as repetition
+
+    evaluated = []
+    real = repetition.is_runaway_repetition
+
+    def spy(text):
+        evaluated.append(len(text))
+        return real(text)
+
+    monkeypatch.setattr(repetition, "is_runaway_repetition", spy)
+
+    watch = repetition.RunawayStreamWatch()
+    distinct = "\n".join(
+        f"| {i:06d} | distinct status line kept for the live parity check |"
+        for i in range(1_000)
+    )
+    fed = 0
+    for character in distinct[:STOP_PATH_MIN_CHARS * 2 + 1]:
+        fed += 1
+        if watch.feed(character):
+            break
+
+    assert evaluated[0] == STOP_PATH_MIN_CHARS, (
+        f"first live check at {evaluated[0]} chars, Hermes floor is "
+        f"{STOP_PATH_MIN_CHARS}"
+    )
+    assert evaluated == [STOP_PATH_MIN_CHARS, 2 * STOP_PATH_MIN_CHARS], (
+        f"live checks are not at every doubling: {evaluated}"
+    )
+    assert fed >= 2 * STOP_PATH_MIN_CHARS
+
+
+def test_p0_asked_for_repetition_below_floor_streams_to_completion():
+    """Repetition the user asked for stays below the stop-path scale floor and
+    must stream to completion (Hermes #121600 repeat-on-request guard)."""
+    asked = (
+        "Hello world, this is a sentence the user asked me to repeat many "
+        "times.\n" * 50
+    )
+    assert len(asked) < STOP_PATH_MIN_CHARS
+
+    stream = NativeStream()
+    for offset in range(0, len(asked), 64):
+        stream.feed(sse(chunk({"content": asked[offset:offset + 64]})))
+    stream.feed(sse(chunk({}, "stop")))
+    stream.feed(sse("[DONE]"))
+
+    finished = stream.finish()
+    assert finished["choices"][0]["message"]["content"] == asked
+
+
+def test_p0_runaway_cut_ends_turn_typed_and_visible(setup_chat):
+    """The interrupted turn ends with a typed, visible outcome — never silent.
+
+    The live REPETITION cut must fail the run with ``agent_model_repetition``
+    and deliver an engine notice to the conversation.
+    """
+    from homun.application.agent import chat_agent
+    from homun.application.agent.runs.run_execution import advance
+
+    ctx, actor, conv = setup_chat
+    ctx.models.set_active("openai_compatible")
+    chat_agent.bind(ctx, actor, conv, "agent_chat")
+    run_id = chat_agent.start_chat_turn(ctx, actor, conv, "chi sei")["agent_run_id"]
+
+    runaway = runaway_text(STOP_PATH_MIN_CHARS + 8192)
+
+    def model(messages, *, stream=None, on_delta=None, **kwargs):
+        assert stream is True
+        # The real parser: the live watch fires inside feed().
+        parser = NativeStream(on_delta=on_delta)
+        for offset in range(0, len(runaway), 256):
+            parser.feed(sse(chunk({"content": runaway[offset:offset + 256]})))
+        raise AssertionError("runaway stream was not cut live")
+
+    ctx.models.complete_tools = model
+    assert advance(ctx, run_id) == "failed"
+
+    run = ctx.repository.load().commands[run_id].result
+    assert run["error_code"] == "agent_model_repetition"
+    assert run.get("recovery") is None or run["recovery"].get("status") != "waiting"
+
+    assert chat_agent.deliver_chat_answers(ctx) >= 1
+    store = ctx.repository.load()
+    notices = [m for m in store.messages.values()
+               if m.conversation_id == conv
+               and "agent_model_repetition" in (m.text or "")]
+    assert notices, "no visible typed outcome in the conversation"
 
 
 # ---------------------------------------------------------------------------
