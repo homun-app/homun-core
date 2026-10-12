@@ -1,27 +1,44 @@
-/** Automations: honest "not yet" — the recurring loop lands with the engine scheduler. */
-export function ConversationAutomationsSettingsSection() {
+/** Impostazioni → Automazioni: source-aware summary. Counts come as props; the section stays presentational. */
+export function ConversationAutomationsSettingsSection({
+  source,
+  activeCount = 0,
+  pausedCount = 0,
+  onOpenRoutines,
+}: {
+  source: "engine" | "simulation";
+  activeCount?: number;
+  pausedCount?: number;
+  onOpenRoutines?: () => void;
+}) {
+  if (source === "simulation") {
+    return (
+      <>
+        <h3>Automazioni</h3>
+        <p>
+          <strong>Fonte: simulazione.</strong> Le routine di questa prova vivono solo in questo
+          browser: le esecuzioni partono con «Simula esecuzione» e nessun timer è reale.
+        </p>
+      </>
+    );
+  }
   return (
     <>
       <h3>Automazioni</h3>
       <p>
-        Lavori ripetibili e routine ricorrenti: la struttura a fasi del motore è pronta, ma lo
-        scheduler che li fa ripartire da solo non è ancora attivo. Non ti promettiamo
-        automazioni che poi restano ferme.
+        <strong>Fonte: motore.</strong> Lo scheduler persistente crea un lavoro nuovo a ogni
+        ricorrenza e ti avvisa in chat: l’approvazione resta tua.
       </p>
       <div className="cv-settings-card">
-        <strong>Cosa funziona già</strong>
-        <p>
-          Puoi rifidare lo stesso lavoro quando vuoi: la chat conserva accordo, fasi e
-          risultati, e i materiali restano nel progetto.
-        </p>
+        <strong>
+          {activeCount} attiv{activeCount === 1 ? "a" : "e"} · {pausedCount} in pausa
+        </strong>
+        <p>Routine ricorrenti presenti in questo spazio di lavoro.</p>
       </div>
-      <div className="cv-settings-card">
-        <strong>Cosa arriva</strong>
-        <p>
-          Routine con cadenza («ogni lunedì alle 9»), verifica dei risultati prima della
-          consegna e arresto con un tocco. Compariranno qui.
-        </p>
-      </div>
+      {onOpenRoutines && (
+        <button type="button" className="cw-secondary" onClick={onOpenRoutines}>
+          Apri Automazioni
+        </button>
+      )}
     </>
   );
 }
