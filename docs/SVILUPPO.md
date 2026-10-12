@@ -130,7 +130,7 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
 - ◐ F7.1 conversazione→metodo: c'è `skill_reflection.py` (lezioni apprese), manca la promozione esplicita a routine
 - ◐ F7.2 routine con schema/riepilogo (creatore UI nel pannello lavoro, nella vista Automazioni e via «Ripeti» su un lavoro completato)
 - ◐ F7.4 trigger esterni (webhook relay, msgraph); ◐ F7.5 pausa/modifica (rotta pause)
-- **Vista Automazioni (Fonte: motore)**: la voce della sidebar gira sulle routine vere del motore dal 2026-10-07; la mescolanza residua con la simulazione è stata corretta il 2026-10-12 (proiezione `SpaceData` senza campi simulati in modalità motore, ricerca globale «Automazioni» da `engine.routines`, «Ripeti» su lavori del motore che apre il creatore precompilato, Impostazioni → Automazioni con conteggi veri e fonte dichiarata)
+- **Vista Automazioni (Fonte: motore)**: la voce della sidebar gira sulle routine vere del motore dal 2026-10-07; la mescolanza residua con la simulazione è stata corretta il 2026-10-12 (proiezione `SpaceData` senza campi simulati in modalità motore, «Ripeti» su lavori del motore che apre il creatore precompilato, Impostazioni → Automazioni con conteggi veri e fonte dichiarata). Stesso giorno: la ricerca globale (⌘K) in modalità motore indicizza solo dati del motore (lavori, messaggi, risultati dagli artefatti, team, progetti, materiali dei progetti, automazioni, collaboratori = `engine.agents`) e dichiara la fonte nel piè di pagina («Fonte: motore» / «Fonte: simulazione»); una sola regola di idoneità per «Ripeti»/creatore routine (`engineRepeatDecision`).
 
 ### F8 — Memoria e formazione
 - ✅ F8.1 budget di contesto e riassunti con provenienza (`models/context_summary.py`, parity Hermes)
