@@ -310,6 +310,68 @@ def test_p0_split_partial_promotes_untagged_provider_reasoning(setup_chat):
 # Gap 3 — commentary tail retained at tool-call boundary
 # ---------------------------------------------------------------------------
 
+def test_p0_commentary_tail_reaches_the_sse_stream_at_tool_boundary(setup_chat):
+    """Verifica 167f0ef5fa sul nostro percorso: NON riproducibile, e il test
+    lo dimostra.
+
+    Il difetto di Hermes viveva nel verdetto ``already_streamed`` basato su
+    prefisso del gateway interim (il prefisso parziale veniva scambiato per
+    completo e il resend del testo pieno saltato). Il motore non ha alcun
+    punto decisionale equivalente: ``stream_partial`` è solo la vista live e
+    la risposta consegnata deriva sempre dal messaggio completo. Qui il
+    prefisso troncato al confine tool-call viene esteso fino alla coda
+    completa via text_delta — la coda arriva sempre al client.
+    """
+    import json as _json
+    from homun.application.agent import chat_agent
+    from homun.application.sessions import chat_events
+
+    ctx, actor, conv = setup_chat
+    chat_agent.bind(ctx, actor, conv, "agent_chat")
+    run_id = chat_agent.start_chat_turn(ctx, actor, conv, "cerca")["agent_run_id"]
+
+    full = "Checking the queue to pick it up."
+
+    def collect_visible():
+        """(ultimo stream_state.text, testo cumulato dai text_delta)."""
+        live_text, delta_text = None, ""
+        for chunk_sse in chat_events.conversation_events(ctx, actor, conv, max_idle_cycles=2):
+            for line in chunk_sse.strip().split("\n"):
+                if not line.startswith("data: "):
+                    continue
+                payload = _json.loads(line[len("data: "):])
+                if "reasoning" in payload and "delta" not in payload:
+                    live_text = payload.get("text")
+                if "delta" in payload:
+                    delta_text = payload["delta"] if payload.get("reset") \
+                        else delta_text + payload["delta"]
+        return live_text, delta_text
+
+    # il confine tool-call congela il parziale su un prefisso troncato:
+    # in live la vista arriva come stream_state.text
+    with ctx.repository.transaction() as store:
+        run = store.commands[run_id].result
+        run["status"] = "running"
+        run["stream_partial"] = {"text": full[:22]}  # "Checking the queue to "
+    live_prefix, _ = collect_visible()
+
+    # il turno completa: la risposta consegnata porta la coda per intero
+    with ctx.repository.transaction() as store:
+        run = store.commands[run_id].result
+        run["stream_partial"] = {}
+        run["_messages"] = [
+            {"role": "user", "content": "cerca"},
+            {"role": "assistant", "content": full},
+        ]
+        run["status"] = "completed"
+    _, final_delta = collect_visible()
+
+    assert live_prefix == full[:22]
+    assert final_delta == full, (
+        f"commentary tail lost at the tool-call boundary: {final_delta!r}"
+    )
+
+
 def test_p0_stream_partial_keeps_commentary_tail_when_tools_arrive(setup, monkeypatch):
     """Hermes 167f0ef5fa: do not drop the last commentary tokens at tool-calls.
 
