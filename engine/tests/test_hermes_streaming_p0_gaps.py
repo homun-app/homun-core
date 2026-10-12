@@ -14,10 +14,12 @@ open; green means the corresponding P0 gap is closed.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 
 import pytest
 
 from test_agent_runs import setup  # noqa: F401 — pytest fixture re-export
+from test_native_stream_transport import server as _server
 
 from homun.models.native_errors import NativeModelError, REPETITION
 from homun.models.native_stream import NativeStream
@@ -471,6 +473,119 @@ def test_p0_clean_eof_without_finish_reason_differs_from_transport_drop():
     assert clean_err.value.code != drop_err.value.code, (
         f"clean-EOF and transport drop share code {clean_err.value.code!r}; "
         "Hermes distinguishes them"
+    )
+
+
+def test_p0_clean_eof_never_enters_the_network_retry_ladder():
+    """La fine pulita è una classe a sé: codice proprio, mai ritentata, con
+    un'etichetta che esclude esplicitamente l'errore di rete (#102766), e il
+    marcatore diagnostico finish_reason_seen che resta falso."""
+    from homun.models.native_errors import CLEAN_EOF, RETRYABLE_CODES, _LABELS
+
+    assert CLEAN_EOF not in RETRYABLE_CODES
+    assert "not a network error" in _LABELS[CLEAN_EOF]
+
+    clean = NativeStream()
+    with pytest.raises(NativeModelError) as caught:
+        clean.feed(sse(chunk({"content": "partial answer"})))
+        clean.feed(sse("[DONE]"))
+    assert caught.value.code == CLEAN_EOF
+    assert caught.value.retryable is False
+    assert clean.finish_reason_seen is False
+
+    completed = NativeStream()
+    completed.feed(sse(chunk({"content": "answer"})))
+    completed.feed(sse(chunk({}, "stop")))
+    completed.feed(sse("[DONE]"))
+    completed.finish()
+    assert completed.finish_reason_seen is True
+
+
+@contextmanager
+def _dropping_server(parts):
+    """Endpoint che promette più byte di quanti ne scrive: la connessione
+    cade A METÀ corpo, senza chiusura pulita e senza [DONE]."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    body = b"".join(parts)
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(body) + 1024))
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+
+    http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=http.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{http.server_port}", requests
+    finally:
+        http.shutdown()
+        http.server_close()
+        thread.join()
+
+
+def test_p0_transport_drop_mid_stream_stays_typed_network(tmp_path, monkeypatch):
+    """Una caduta di trasporto vera (corpo incompleto, eccezione) resta un
+    errore tipizzato di rete secondo le regole attuali del motore: mai
+    confusa con la fine pulita, mai replayata come se niente fosse (uno
+    stream che ha consumato output non si ripete)."""
+    from homun.models.registry import ModelRegistry
+    from homun.models.secrets import MemorySecretStore
+    from homun.models.native_turn import NativeMessage
+    from homun.models.native_errors import NETWORK
+
+    with _dropping_server([sse(chunk({"content": "partial"}))]) as (url, requests):
+        registry = ModelRegistry(data_dir=tmp_path, secrets=MemorySecretStore())
+        registry.upsert_connection(
+            connection_id="openai_compatible", kind="openai_compatible",
+            display_name="Fixture", model_id="fixture", base_url=url + "/v1")
+        with pytest.raises(NativeModelError) as caught:
+            registry.complete_tools([NativeMessage(role="user", content="go")],
+                                    tools=[], stream=True)
+
+    assert caught.value.code == NETWORK
+    assert caught.value.retryable is False, (
+        "current rule: a stream is never replayed after possibly consuming output"
+    )
+    assert caught.value.code != "agent_model_clean_eof"
+    assert len(requests) == 1
+
+
+def test_p0_clean_eof_fails_the_run_once_without_network_retry(setup_chat, tmp_path, monkeypatch):
+    """A livello di turno: la fine pulita senza finish_reason chiude il run
+    con l'esito tipizzato agent_model_clean_eof, senza schedulare alcun
+    tentativo e senza una seconda chiamata al modello."""
+    from homun.application.agent import chat_agent
+    from homun.application.agent.runs.run_execution import advance
+
+    ctx, actor, conv = setup_chat
+    with _server([sse(chunk({"content": "partial answer"})), sse("[DONE]")]) as (url, requests):
+        ctx.models.upsert_connection(
+            connection_id="openai_compatible", kind="openai_compatible",
+            display_name="Fixture", model_id="fixture", base_url=url + "/v1")
+        ctx.models.set_active("openai_compatible")
+        chat_agent.bind(ctx, actor, conv, "agent_chat")
+        run_id = chat_agent.start_chat_turn(ctx, actor, conv, "chi sei")["agent_run_id"]
+
+        assert advance(ctx, run_id) == "failed"
+        assert len(requests) == 1, "a clean EOF must not be retried"
+
+    run = ctx.repository.load().commands[run_id].result
+    assert run["error_code"] == "agent_model_clean_eof"
+    recovery = run.get("recovery") or {}
+    assert recovery.get("status") != "waiting", (
+        f"clean EOF scheduled a retry: {recovery!r}"
     )
 
 
