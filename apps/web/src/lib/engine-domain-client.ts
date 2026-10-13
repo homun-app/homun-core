@@ -4,7 +4,7 @@
  */
 
 import { ENGINE_DEFAULT_BASE_URL, EngineUnavailableError } from "./engine-client.ts";
-import { HomunClientError, homunErrorFromHttp } from "./homun-errors.ts";
+import { HomunClientError, homunErrorFromEngineEvent, homunErrorFromHttp } from "./homun-errors.ts";
 
 export const DEFAULT_WORKSPACE_ID = "ws_local";
 
@@ -215,12 +215,12 @@ export async function postEngineCommandStream(
       } else if (event === "result") {
         finalResult = data as CommandResult;
       } else if (event === "error") {
-        const code = typeof data["code"] === "string" ? data["code"] : "stream_error";
+        const code = typeof data["code"] === "string" ? data["code"] : null;
         const message =
           typeof data["message"] === "string" ? data["message"] : "Engine stream error";
-        streamError = new HomunClientError("unknown", message, {
-          retryable: code === "provider_unavailable",
-        });
+        // il codice del motore sopravvive: la copia di prodotto del mapping
+        // vince sul testo grezzo dell'eccezione che il motore incapsula
+        streamError = homunErrorFromEngineEvent(code, message, "Engine stream error");
       }
     }
   }
@@ -244,11 +244,16 @@ export type EngineFollowupNotice = {
 function parseFollowupNotices(raw: unknown): EngineFollowupNotice[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((item: Record<string, unknown>) => {
-    if (!item || !["processing", "retry_scheduled", "failed"].includes(String(item["status"]))) return [];
-    return [{ commandId: String(item["command_id"] ?? ""),
-      status: item["status"] as EngineFollowupNotice["status"],
-      errorCode: typeof item["error_code"] === "string" ? item["error_code"] : null,
-      attempts: typeof item["attempts"] === "number" ? item["attempts"] : 0 }];
+    if (!item || !["processing", "retry_scheduled", "failed"].includes(String(item["status"])))
+      return [];
+    return [
+      {
+        commandId: String(item["command_id"] ?? ""),
+        status: item["status"] as EngineFollowupNotice["status"],
+        errorCode: typeof item["error_code"] === "string" ? item["error_code"] : null,
+        attempts: typeof item["attempts"] === "number" ? item["attempts"] : 0,
+      },
+    ];
   });
 }
 
@@ -256,7 +261,15 @@ export async function listEngineConversations(
   workspaceId: string = DEFAULT_WORKSPACE_ID,
   baseUrl: string = ENGINE_DEFAULT_BASE_URL,
   actor: EngineActor = defaultLocalActor(),
-): Promise<Array<{ id: string; title: string; project_id: string | null; version: number; followups: EngineFollowupNotice[] }>> {
+): Promise<
+  Array<{
+    id: string;
+    title: string;
+    project_id: string | null;
+    version: number;
+    followups: EngineFollowupNotice[];
+  }>
+> {
   const response = await domainFetch(
     `/v1/workspaces/${workspaceId}/conversations`,
     { method: "GET", headers: { Accept: "application/json", "X-Homun-Actor-Id": actor.id } },

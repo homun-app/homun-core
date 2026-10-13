@@ -34,7 +34,8 @@ export class HomunClientError extends Error {
     this.name = "HomunClientError";
     this.code = code;
     this.httpStatus = options?.httpStatus ?? null;
-    this.retryable = options?.retryable ?? (code === "engine_unavailable" || code === "request_timeout");
+    this.retryable =
+      options?.retryable ?? (code === "engine_unavailable" || code === "request_timeout");
     if (options?.cause !== undefined) {
       this.cause = options.cause;
     }
@@ -56,9 +57,7 @@ export function homunErrorFromHttp(
       ? (body as { detail?: unknown }).detail
       : null;
   const payload =
-    detail && typeof detail === "object"
-      ? (detail as { code?: unknown; message?: unknown })
-      : null;
+    detail && typeof detail === "object" ? (detail as { code?: unknown; message?: unknown }) : null;
   const rawCode = typeof payload?.code === "string" ? payload.code : null;
   const message =
     typeof payload?.message === "string" && payload.message.trim()
@@ -69,6 +68,22 @@ export function homunErrorFromHttp(
   return new HomunClientError(code, message, {
     httpStatus: status,
     retryable: status === 503 || status === 429 || code === "request_timeout",
+  });
+}
+
+/**
+ * Map an engine event pair `{ code, message }` (e.g. an SSE `error` event)
+ * into a HomunClientError, keeping the engine code so `homunErrorUserMessage`
+ * can translate it: the raw message never reaches the UI on its own.
+ */
+export function homunErrorFromEngineEvent(
+  code: string | null,
+  message: string,
+  fallbackMessage: string,
+): HomunClientError {
+  const mapped = mapEngineCode(code, 0);
+  return new HomunClientError(mapped, message.trim() || fallbackMessage, {
+    retryable: code === "provider_unavailable" || mapped === "engine_unavailable",
   });
 }
 
@@ -129,15 +144,16 @@ export function homunErrorUserMessage(error: unknown): string {
       case "invalid_transition":
         return error.message;
       case "unknown":
-        return error.message || "Errore imprevisto.";
+        // Nessun testo grezzo di eccezione all'utente: il codice senza copia
+        // di prodotto parla con la sola copia generica.
+        return "Errore imprevisto.";
       default: {
         const _exhaustive: never = error.code;
         return _exhaustive;
       }
     }
   }
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
+  // Gli errori non tipizzati non hanno mapping: resta la copia generica, mai
+  // il messaggio interno (trace, [Errno …], nomi di modulo).
   return "Errore imprevisto.";
 }
