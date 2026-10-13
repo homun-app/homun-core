@@ -219,6 +219,16 @@ Contratto e gate prima dell'implementazione; test delle invarianti e dei
 guasti; nessuna fase dichiarata completa con soli mock; Fonte:
 simulazione|motore mai mescolate; errori tipizzati mai nascosti.
 
+### Lint, formattazione e soglia delle soppressioni
+
+`npm run lint` condivide le esclusioni con git (`.gitignore` via
+`includeIgnoreFile`) e fallisce solo per violazioni NUOVE: il debito
+esistente (81 violazioni, per lo più `exhaustive-deps` e
+`only-export-components`) è registrato in `eslint-suppressions.json`.
+La formattazione è separata (`npm run format` / `npm run format:check`,
+Prettier). Chi corregge violazioni soppresse esegue `npm run lint:prune`
+e committa il file aggiornato: la soglia può solo scendere, mai salire.
+
 ---
 
 ## 4. Archivio e fonti

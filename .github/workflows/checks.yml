@@ -55,6 +55,10 @@ jobs:
           cache: npm
       - name: Install lockfile dependencies
         run: npm ci
+      - name: Lint (existing debt suppressed, new violations fail)
+        run: npm run lint
+      - name: Prettier check
+        run: npm run format:check
       - name: Typecheck, tests, and application builds
         timeout-minutes: 10
         run: npm run check
