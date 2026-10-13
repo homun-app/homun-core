@@ -1,9 +1,10 @@
 /**
  * Slot dove il thread incontra gli stati del motore — mai tra i messaggi.
  *
- * Questi contenitori vivono fuori dal runtime assistant-ui (fratelli del
- * thread e del composer): gli avvisi restano derivati dallo stato del client
- * e non entrano nell'elenco messaggi, nel motore né nel contesto del modello.
+ * Gli slot del thread passano dalle props `threadTop`/`threadEnd` di
+ * `AgentChat`: dentro l'area scorrevole del viewport, dove si legge, ma
+ * restano nodi esterni all'elenco messaggi del runtime — derivati dallo
+ * stato del client, non inviati al motore né al contesto del modello.
  */
 import type { ReactNode } from "react";
 
