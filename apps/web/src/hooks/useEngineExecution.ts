@@ -11,7 +11,9 @@ type Transport<T, A extends unknown[]> = {
   approve: (workId: string, proposal: T, commandId: string) => Promise<T>;
 };
 export function useEngineExecution<T extends Proposal, A extends unknown[]>(
-  work: Work, onChanged: () => Promise<void>, transport: Transport<T, A>,
+  work: Work,
+  onChanged: () => Promise<void>,
+  transport: Transport<T, A>,
 ) {
   const api = useRef(transport);
   api.current = transport;
@@ -43,7 +45,8 @@ export function useEngineExecution<T extends Proposal, A extends unknown[]>(
         const next = visible.at(-1) ?? null;
         setItems(visible);
         setProposal(next);
-        const previousStatus = observed.current?.id === next?.id ? observed.current?.status : undefined;
+        const previousStatus =
+          observed.current?.id === next?.id ? observed.current?.status : undefined;
         observed.current = next ? { id: next.id, status: next.status } : null;
         if (next && executionRefreshes(next.status, previousStatus)) {
           if (["completed", "cancelled", "failed", "blocked"].includes(next.status)) renew();

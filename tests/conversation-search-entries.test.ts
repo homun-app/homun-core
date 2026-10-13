@@ -15,7 +15,13 @@ const { exports: searchModule } = loadComponent(path, {
       : { agent: "Vera", result: "Relazione demo", body: "Corpo della relazione demo" },
   describeCron: (cron: string) => describeCron(cron),
   memberProfile: (name: string, profiles: Record<string, unknown>) =>
-    (profiles && profiles[name]) || { role: "Collaboratore demo", bio: "", skills: [], tone: "", plugins: [] },
+    (profiles && profiles[name]) || {
+      role: "Collaboratore demo",
+      bio: "",
+      skills: [],
+      tone: "",
+      plugins: [],
+    },
   isHumanMember: () => false,
 });
 
@@ -90,7 +96,12 @@ const engineAgents = [
   { id: "agent_bravo", name: "Bruno", role: "Redattore", responsibility: "Scrive le relazioni" },
 ];
 const engineMaterials = [
-  { id: "mat_engine_1", project_id: "project_real", title: "Listino settembre.csv", text: "prezzi a settembre" },
+  {
+    id: "mat_engine_1",
+    project_id: "project_real",
+    title: "Listino settembre.csv",
+    text: "prezzi a settembre",
+  },
 ];
 /** What projectWorkspaceData("engine", …) feeds the caller in engine mode — with
  * simulated residue in the fields the builder must never read in engine mode. */
@@ -104,7 +115,9 @@ const dirtyEngineProjection = {
       brief: "Offerte",
     },
   ],
-  projects: [{ id: "project_real", name: "Prezzi settembre", teamId: "team_real", brief: "Confronto" }],
+  projects: [
+    { id: "project_real", name: "Prezzi settembre", teamId: "team_real", brief: "Confronto" },
+  ],
   routines: [simulatedRoutine],
   profiles: { Gianni: { role: "Collaboratore demo", bio: "", skills: [], tone: "", plugins: [] } },
   removedPeople: [],
@@ -198,14 +211,14 @@ test("engine mode: Collaboratori entries mirror engine agents 1:1 and open them 
     engineAgents,
   });
   const collaborators = entries.filter((e: { kind: string }) => e.kind === "Collaboratori");
-  assert.deepEqual(
-    Array.from(collaborators.map((c: { id: string }) => c.id)),
-    ["agent_ada", "agent_bravo"],
-  );
-  assert.deepEqual(
-    Array.from(collaborators.map((c: { title: string }) => c.title)),
-    ["Ada", "Bruno"],
-  );
+  assert.deepEqual(Array.from(collaborators.map((c: { id: string }) => c.id)), [
+    "agent_ada",
+    "agent_bravo",
+  ]);
+  assert.deepEqual(Array.from(collaborators.map((c: { title: string }) => c.title)), [
+    "Ada",
+    "Bruno",
+  ]);
   collaborators[0].open();
   collaborators[1].open();
   assert.deepEqual(opened, [
@@ -225,16 +238,10 @@ test("engine mode: Materiali entries come from engine materials, results from en
   const materials = entries.filter(
     (e: { kind: string; id: string }) => e.kind === "Materiali" && !e.id.endsWith(":result"),
   );
-  assert.deepEqual(
-    Array.from(materials.map((m: { id: string }) => m.id)),
-    ["mat_engine_1"],
-  );
+  assert.deepEqual(Array.from(materials.map((m: { id: string }) => m.id)), ["mat_engine_1"]);
   assert.equal(materials[0].title, "Listino settembre.csv");
   const results = entries.filter((e: { id: string }) => e.id.endsWith(":result"));
-  assert.deepEqual(
-    Array.from(results.map((r: { id: string }) => r.id)),
-    ["work_engine_1:result"],
-  );
+  assert.deepEqual(Array.from(results.map((r: { id: string }) => r.id)), ["work_engine_1:result"]);
   assert.equal(results[0].title, "Report listini settembre");
   assert.equal(results[0].text, "Il confronto evidenzia differenze sui listini");
   results[0].open();

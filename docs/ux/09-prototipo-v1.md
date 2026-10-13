@@ -5,6 +5,7 @@
 La v1 rende verificabili i percorsi principali di uno spazio di lavoro misto persone/agenti.
 
 ## Inclusi
+
 - Esplorazione con esempi e primo avvio separato senza esempi.
 - Creazione collaboratore, incarico diretto, progetto e documenti.
 - Home, calendario e Kanban alimentati dagli stessi incarichi.
@@ -14,6 +15,7 @@ La v1 rende verificabili i percorsi principali di uno spazio di lavoro misto per
 - Marketplace, accessi e configurazione modelli come interazioni dimostrative.
 
 ## Fuori dalla v1 UX
+
 - Esecuzione AI, invii esterni, pianificazione effettiva, credenziali e controllo accessi reale.
 - Rami paralleli/condizionali e orchestrazione distribuita.
 - Conservazione affidabile dei file e dati dopo il ricaricamento.

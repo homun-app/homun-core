@@ -14,6 +14,7 @@ Replica completa e failover sono fuori dal perimetro (F11).
 ## 0. Gate di accettazione (dal piano, scomposto in test)
 
 Pilot: **due Mac su reti diverse**. Successo quando:
+
 1. Il contributo di Giulia al progetto condiviso è visibile a Fabio (replica).
 2. Un terzo nodo non invitato non ottiene nulla (pairing + revoca).
 3. Un file si riprende dopo disconnessione (transfer riprendibile).
@@ -22,21 +23,22 @@ Pilot: **due Mac su reti diverse**. Successo quando:
 
 ## 1. Fondamenta esistenti su cui si costruisce (verificate 2026-10-07)
 
-| Fondamenta | Dove | Ruolo in F5 |
-|---|---|---|
-| `Actor{id, workspace_id, kind}` su ogni comando ed evento | `domain/models.py` | la persona autenticata diventa reale, non un header |
-| `AccessGrant` deny-by-default con `subject_id`, capability read/write/admin, status revocabile | `policy/`, B2 | già il modello membership: subject = persona, resource = progetto |
-| Event log con `sequence` monotona per workspace + SSE con cursor | `storage/`, rotte `events` | la replica F5.2 è subscribe-by-cursor, già quasi interamente scritta |
-| `SessionAuthMiddleware` con token effimero legato a un actor | `routes/session_auth.py`, desktop | sessione singola da estendere a persone multiple |
-| Contribution portal con inviti scoped monouso | `routes/contribution_invitations.py` | pattern d'invito da generalizzare in F5.1 |
-| Engine lease + `X-Homun-Actor-Id` dev-insecure | `storage/lease.py` | il dev locale resta così; il pilot gira a sessioni |
-| Desktop con motore incorporato e sessione | `apps/desktop` | il "peer" è l'app installata sull'altro Mac |
+| Fondamenta                                                                                     | Dove                                 | Ruolo in F5                                                          |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------- |
+| `Actor{id, workspace_id, kind}` su ogni comando ed evento                                      | `domain/models.py`                   | la persona autenticata diventa reale, non un header                  |
+| `AccessGrant` deny-by-default con `subject_id`, capability read/write/admin, status revocabile | `policy/`, B2                        | già il modello membership: subject = persona, resource = progetto    |
+| Event log con `sequence` monotona per workspace + SSE con cursor                               | `storage/`, rotte `events`           | la replica F5.2 è subscribe-by-cursor, già quasi interamente scritta |
+| `SessionAuthMiddleware` con token effimero legato a un actor                                   | `routes/session_auth.py`, desktop    | sessione singola da estendere a persone multiple                     |
+| Contribution portal con inviti scoped monouso                                                  | `routes/contribution_invitations.py` | pattern d'invito da generalizzare in F5.1                            |
+| Engine lease + `X-Homun-Actor-Id` dev-insecure                                                 | `storage/lease.py`                   | il dev locale resta così; il pilot gira a sessioni                   |
+| Desktop con motore incorporato e sessione                                                      | `apps/desktop`                       | il "peer" è l'app installata sull'altro Mac                          |
 
 ## 2. Le fette
 
 ### Fetta 1 — Persone, ruoli e sessioni vere (F5.1a, nessuna rete)
 
 **Contratto dominio** (`identity/` nuovo modulo, entità nel workspace store):
+
 - `Person{id, workspace_id, display_name, role: owner|admin|member, status: active|revoked, created_at}`
   — l'owner di bootstrap è chi crea lo spazio (oggi `person_fabio`).
 - `Device{id, workspace_id, person_id, name, key_fingerprint, status: pending|confirmed|revoked, last_seen_at}`
@@ -66,6 +68,7 @@ Compiti con filtri reali.
 ### Fetta 2 — Pairing tra app e trasporto (F5.1b)
 
 **Contratto pairing** (dal doc rete §Identità):
+
 - Il peer presenta `device_id`, chiave pubblica, versione protocollo,
   capacità dichiarate (indicative fino a prova).
 - L'host conferma (binding device↔persona già creata in fetta 1) e risponde
@@ -152,12 +155,12 @@ precedenti se serve comprimere i tempi.
 
 ## 6. Decisioni per Fabio (D1–D3 + una nuova)
 
-| # | Domanda | Default proposto |
-|---|---|---|
-| D1 | Chi ospita lo spazio nel pilot: il Mac di Fabio come autorità e Giulia client? Un "host aziendale" sempre acceso? | Mac di Fabio autorità nel pilot; l'host headless è già previsto dall'architettura, si valuta dopo |
-| D2 | Un collega senza l'app installata può entrare dal browser? | No nella prima versione: app-only (il browser resta della persona che possiede l'installazione). Il contribution-portal copre i contributi occasionali senza app |
-| D3 | Per il gate "reti diverse" usiamo una VPN esistente (es. Tailscale) o sviluppiamo subito il relay? | VPN esistente per il primo gate; il relay iroh entra dopo, quando il valore è dimostrato |
-| D4 (nuova) | La condivisione **memorie** tra peer (dal tuo feedback: "condividono memorie, azioni") segue il perimetro del doc distribuzione — solo voci pertinenti/consentite per progetto con provenienza, mai l'archivio intero? | Sì: memoria di progetto replicata selettivamente come qualunque altro dato; memoria personale mai |
+| #          | Domanda                                                                                                                                                                                                                | Default proposto                                                                                                                                                 |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1         | Chi ospita lo spazio nel pilot: il Mac di Fabio come autorità e Giulia client? Un "host aziendale" sempre acceso?                                                                                                      | Mac di Fabio autorità nel pilot; l'host headless è già previsto dall'architettura, si valuta dopo                                                                |
+| D2         | Un collega senza l'app installata può entrare dal browser?                                                                                                                                                             | No nella prima versione: app-only (il browser resta della persona che possiede l'installazione). Il contribution-portal copre i contributi occasionali senza app |
+| D3         | Per il gate "reti diverse" usiamo una VPN esistente (es. Tailscale) o sviluppiamo subito il relay?                                                                                                                     | VPN esistente per il primo gate; il relay iroh entra dopo, quando il valore è dimostrato                                                                         |
+| D4 (nuova) | La condivisione **memorie** tra peer (dal tuo feedback: "condividono memorie, azioni") segue il perimetro del doc distribuzione — solo voci pertinenti/consentite per progetto con provenienza, mai l'archivio intero? | Sì: memoria di progetto replicata selettivamente come qualunque altro dato; memoria personale mai                                                                |
 
 ---
 

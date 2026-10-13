@@ -21,7 +21,9 @@ type Props = {
   onCreateExample: (index: number) => void;
   engineMode?: boolean;
   onRefreshEngine?: (() => Promise<void>) | undefined;
-  onOpenSpace?: ((space: "Progetti" | "Squadra" | "Materiali", initial?: string, selected?: string) => void) | undefined;
+  onOpenSpace?:
+    | ((space: "Progetti" | "Squadra" | "Materiali", initial?: string, selected?: string) => void)
+    | undefined;
   /** Open Impostazioni → modelli for first-run CTA. */
   onOpenModels?: (() => void) | undefined;
   /** La nuova conversazione nascerà in questo progetto (eredità di memoria). */
@@ -49,8 +51,8 @@ export function ConversationWorkspaceWelcome({
       </h1>
       {newChatProject && (
         <p className="cw-welcome-project-hint" role="status">
-          Nuova conversazione nel progetto <strong>{newChatProject.name}</strong>:
-          eredita memoria, materiali e permessi del progetto.
+          Nuova conversazione nel progetto <strong>{newChatProject.name}</strong>: eredita memoria,
+          materiali e permessi del progetto.
         </p>
       )}
       <p className="cw-welcome-subtitle">
@@ -80,7 +82,9 @@ export function ConversationWorkspaceWelcome({
             onClick={() => setShowTeamOnboarding((v) => !v)}
           >
             <Users size={13} />
-            <span>{showTeamOnboarding ? "Nascondi configurazione squadra" : "Costruisci squadra con AI"}</span>
+            <span>
+              {showTeamOnboarding ? "Nascondi configurazione squadra" : "Costruisci squadra con AI"}
+            </span>
           </button>
         ) : (
           scenarios.slice(0, 3).map((s, i) =>
@@ -98,7 +102,7 @@ export function ConversationWorkspaceWelcome({
                 <span>{EXAMPLE_LABELS[i]}</span>
                 <ArrowUpRight size={12} />
               </button>
-            ) : null
+            ) : null,
           )
         )}
 
@@ -122,4 +126,3 @@ export function ConversationWorkspaceWelcome({
     </div>
   );
 }
-

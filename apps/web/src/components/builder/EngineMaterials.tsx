@@ -132,9 +132,7 @@ export function EngineMaterials({ projects }: { projects: Project[] }) {
 
   return (
     <section className="cw-workspace cw-documents cw-engine-library" aria-label="Materiali">
-      <div className="section-label">
-        MATERIALI DEI PROGETTI ({materials?.length ?? 0})
-      </div>
+      <div className="section-label">MATERIALI DEI PROGETTI ({materials?.length ?? 0})</div>
       <p className="ph-card-subtitle" style={{ marginBottom: "16px" }}>
         I file dei tuoi progetti, disponibili anche nelle conversazioni e negli strumenti del
         lavoro.

@@ -58,10 +58,10 @@ La raccolta ufficiale è un punto di scoperta di casi, non una prova della loro
 frequenza o affidabilità. Abbiamo aperto i post originali dei due esempi sotto.
 [User Stories](https://hermes-agent.nousresearch.com/docs/user-stories).
 
-| Caso raccontato | Percorso descritto dall'autore | Lezione per Homun |
-| --- | --- | --- |
-| Idee disordinate → documento | Dettatura con uno strumento esterno, testo in un topic Telegram, outline e sviluppi delle idee, Markdown locale, poi documento collaborativo Proof su richiesta | Accettare una richiesta incompleta, produrre presto una bozza leggibile, lasciare il giudizio alla persona. Non attribuire a Hermes la dettatura dello strumento esterno |
-| Segnalazioni → selezione quotidiana | Ricerche salvate sui portali inviano annunci a una casella dedicata; un cron legge gli avvisi, applica criteri personali e invia una sintesi; la persona decide chi contattare | Un ingresso affidabile e criteri chiari possono valere più di un agente che naviga liberamente. Separare raccolta, filtro e decisione |
+| Caso raccontato                     | Percorso descritto dall'autore                                                                                                                                                 | Lezione per Homun                                                                                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Idee disordinate → documento        | Dettatura con uno strumento esterno, testo in un topic Telegram, outline e sviluppi delle idee, Markdown locale, poi documento collaborativo Proof su richiesta                | Accettare una richiesta incompleta, produrre presto una bozza leggibile, lasciare il giudizio alla persona. Non attribuire a Hermes la dettatura dello strumento esterno |
+| Segnalazioni → selezione quotidiana | Ricerche salvate sui portali inviano annunci a una casella dedicata; un cron legge gli avvisi, applica criteri personali e invia una sintesi; la persona decide chi contattare | Un ingresso affidabile e criteri chiari possono valere più di un agente che naviga liberamente. Separare raccolta, filtro e decisione                                    |
 
 Fonti dirette: [idee → documenti](https://www.reddit.com/r/hermesagent/comments/1ut8o53/i_dictate_messy_ideas_into_my_phone_and_hermes/),
 [casella dedicata → selezione](https://www.reddit.com/r/hermesagent/comments/1v06ap3/i_gave_hermes_its_own_inbox_now_it_scouts/).
@@ -95,15 +95,15 @@ prossima scadenza e quale intervento resterà umano.
 
 ## Gli stessi bisogni, percorsi diversi
 
-| Bisogno | Hermes documentato | Homun oggi | Confine da rendere chiaro |
-| --- | --- | --- | --- |
-| Fare una domanda | Conversazione con eventuali strumenti | Classificazione domanda/lavoro; una domanda può restare chat | Nessun accordo obbligatorio per una risposta semplice; qualità della classificazione da valutare |
-| Confrontare due listini | Agente usa file/strumenti disponibili per risolvere il compito | Capacità deterministica CSV, proposta approvata, report/CSV da verificare | I campi e i vincoli del confronto devono risultare comprensibili prima dell'avvio |
-| Preparare una relazione | File, skill e strumenti nel contesto della conversazione | Sintesi con modello dell'assegnatario, materiali e procedure approvate | Bozza testuale con provenienza; non promessa di impaginazione DOCX/PDF o dati esterni non acquisiti |
-| Lavorare con specialisti | Bot/profili, gruppi, menzioni e deleghe | Profili, team e assegnazione delle fasi | La presenza dei team non dimostra una conversazione multi-bot equivalente a Bot Mode |
-| Ripetere un'attività | Cron esegue e consegna secondo configurazione | “Rendi ripetibile” da lavoro concluso, cadenza e nuovi lavori supervisionati | Creazione del lavoro distinta da esecuzione, revisione e invio |
-| Estendere gli strumenti | Toolset, plugin, MCP e skill | Catalogo MCP, dichiarazione/allowlist, prova e approvazione dell'esecuzione | Esecuzione MCP non ancora coperta dallo stesso recupero DBOS dei tool locali |
-| Riprendere dopo giorni | Sessioni persistenti e ricerca dello storico | Lavoro persistente con stato, piano, materiali e artifact | L'utente deve riconoscere risultato, blocco e prossima azione senza rileggere tutta la chat |
+| Bisogno                  | Hermes documentato                                             | Homun oggi                                                                   | Confine da rendere chiaro                                                                           |
+| ------------------------ | -------------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Fare una domanda         | Conversazione con eventuali strumenti                          | Classificazione domanda/lavoro; una domanda può restare chat                 | Nessun accordo obbligatorio per una risposta semplice; qualità della classificazione da valutare    |
+| Confrontare due listini  | Agente usa file/strumenti disponibili per risolvere il compito | Capacità deterministica CSV, proposta approvata, report/CSV da verificare    | I campi e i vincoli del confronto devono risultare comprensibili prima dell'avvio                   |
+| Preparare una relazione  | File, skill e strumenti nel contesto della conversazione       | Sintesi con modello dell'assegnatario, materiali e procedure approvate       | Bozza testuale con provenienza; non promessa di impaginazione DOCX/PDF o dati esterni non acquisiti |
+| Lavorare con specialisti | Bot/profili, gruppi, menzioni e deleghe                        | Profili, team e assegnazione delle fasi                                      | La presenza dei team non dimostra una conversazione multi-bot equivalente a Bot Mode                |
+| Ripetere un'attività     | Cron esegue e consegna secondo configurazione                  | “Rendi ripetibile” da lavoro concluso, cadenza e nuovi lavori supervisionati | Creazione del lavoro distinta da esecuzione, revisione e invio                                      |
+| Estendere gli strumenti  | Toolset, plugin, MCP e skill                                   | Catalogo MCP, dichiarazione/allowlist, prova e approvazione dell'esecuzione  | Esecuzione MCP non ancora coperta dallo stesso recupero DBOS dei tool locali                        |
+| Riprendere dopo giorni   | Sessioni persistenti e ricerca dello storico                   | Lavoro persistente con stato, piano, materiali e artifact                    | L'utente deve riconoscere risultato, blocco e prossima azione senza rileggere tutta la chat         |
 
 Evidenza Homun: [stato corrente](../STATO.md),
 [prove](2026-09-23-consolidamento-verifica.md),

@@ -6,13 +6,9 @@ export type UseCopyToClipboardOptions = {
   copiedDuration?: number;
 };
 
-export const useCopyToClipboard = ({
-  copiedDuration = 3000,
-}: UseCopyToClipboardOptions = {}) => {
+export const useCopyToClipboard = ({ copiedDuration = 3000 }: UseCopyToClipboardOptions = {}) => {
   const [isCopied, setIsCopied] = useState<boolean>(false);
-  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scopeGenerationRef = useRef(0);
 
   useEffect(

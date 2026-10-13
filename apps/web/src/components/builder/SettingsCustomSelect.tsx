@@ -104,14 +104,18 @@ export function SettingsCustomSelect({
     if (!icon) return null;
     if (isValidElement(icon)) {
       return (
-        <span className={`${isSelected ? "text-[#203c32]" : "text-[#647a6d]"} shrink-0 flex items-center`}>
+        <span
+          className={`${isSelected ? "text-[#203c32]" : "text-[#647a6d]"} shrink-0 flex items-center`}
+        >
           {icon}
         </span>
       );
     }
     // Component type (function or forwardRef object like Lucide icon)
     const Comp = icon as React.ComponentType<{ size?: number; className?: string }>;
-    return <Comp size={14} className={`${isSelected ? "text-[#203c32]" : "text-[#647a6d]"} shrink-0`} />;
+    return (
+      <Comp size={14} className={`${isSelected ? "text-[#203c32]" : "text-[#647a6d]"} shrink-0`} />
+    );
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -137,7 +141,9 @@ export function SettingsCustomSelect({
 
     if (e.key === "ArrowUp") {
       e.preventDefault();
-      setHighlightedIndex((prev) => (prev - 1 >= 0 ? prev - 1 : Math.max(0, filteredOptions.length - 1)));
+      setHighlightedIndex((prev) =>
+        prev - 1 >= 0 ? prev - 1 : Math.max(0, filteredOptions.length - 1),
+      );
       return;
     }
 
@@ -261,8 +267,8 @@ export function SettingsCustomSelect({
                       isSelected
                         ? "bg-[#edf2e7] text-[#203c32] font-semibold"
                         : isHighlighted
-                        ? "bg-[#f7f9f5] text-[#1c2d22]"
-                        : "text-[#263832] hover:bg-[#f7f9f5] hover:text-[#1c2d22]"
+                          ? "bg-[#f7f9f5] text-[#1c2d22]"
+                          : "text-[#263832] hover:bg-[#f7f9f5] hover:text-[#1c2d22]"
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0 pr-2">
@@ -305,7 +311,9 @@ export function SettingsCustomSelect({
                   <span className="text-sm font-bold leading-none">+</span>
                   <span>{footerAction.label}</span>
                 </button>
-              ) : <div />}
+              ) : (
+                <div />
+              )}
               {footerMeta && (
                 <span className="text-[10.5px] text-[#647a6d] font-medium shrink-0">
                   {footerMeta}

@@ -18,5 +18,7 @@ export function Wordmark({ className }: { className?: string }) {
 }
 
 export function HomunMark({ className }: { className?: string }) {
-  return <img src="/favicon.svg" alt="" aria-hidden className={cn("h-8 w-8 rounded-lg", className)} />;
+  return (
+    <img src="/favicon.svg" alt="" aria-hidden className={cn("h-8 w-8 rounded-lg", className)} />
+  );
 }

@@ -2,7 +2,11 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { Work } from "./conversation-types";
 import type { SpaceData, SpaceRoutine } from "./ConversationSpace";
-import { initialScenarios, scenarioForWork, type ConversationScenario } from "./conversation-scenarios";
+import {
+  initialScenarios,
+  scenarioForWork,
+  type ConversationScenario,
+} from "./conversation-scenarios";
 import { isHumanMember, memberProfile } from "./conversation-members";
 import { isEngineBackedWork } from "@/lib/conversation-engine-bridge";
 
@@ -21,8 +25,19 @@ type Context = {
   open: (id: string | null) => void;
 };
 
-export function createSimulationActions({ work, scenario, works, scenarios, viewer, spaceData,
-  patch, setNotice, setWorks, setScenarios, open }: Context) {
+export function createSimulationActions({
+  work,
+  scenario,
+  works,
+  scenarios,
+  viewer,
+  spaceData,
+  patch,
+  setNotice,
+  setWorks,
+  setScenarios,
+  open,
+}: Context) {
   function simulateQuestion() {
     if (!work?.catalogPlan || work.phase !== "ready") return;
     const step = work.catalogPlan.steps[work.catalogPlan.completed];

@@ -109,11 +109,7 @@ export function ConversationSettings({
       <div className="cv-settings-layout">
         <aside className="cv-settings-sidebar">
           <div className="cv-settings-sidebar__top">
-            <button
-              type="button"
-              className="cv-settings-back-btn"
-              onClick={close}
-            >
+            <button type="button" className="cv-settings-back-btn" onClick={close}>
               <ArrowLeft size={16} />
               <span>Torna all'app</span>
             </button>
@@ -186,7 +182,6 @@ export function ConversationSettings({
                   onChange={(e) => change("company", e.target.value)}
                 />
               </label>
-              
             </>
           )}
           {section === "preferences" && (
@@ -273,9 +268,14 @@ export function ConversationSettings({
           {section === "agents" && <ConversationAgentsSettingsSection actorId="person_fabio" />}
           {section === "skills" && <ConversationSkillsSettingsSection actorId="person_fabio" />}
           {section === "projects" && (
-            <div className="cv-settings-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div
+              className="cv-settings-card"
+              style={{ display: "flex", flexDirection: "column", gap: 12 }}
+            >
               <h3 style={{ margin: 0, fontSize: 16 }}>Project Hub</h3>
-              <p style={{ margin: 0, color: "#5a6e5a" }}>I progetti sono ora gestiti in modo dedicato nel nuovo Project Hub.</p>
+              <p style={{ margin: 0, color: "#5a6e5a" }}>
+                I progetti sono ora gestiti in modo dedicato nel nuovo Project Hub.
+              </p>
               <button
                 type="button"
                 className="cv-settings-btn-primary"
@@ -288,9 +288,7 @@ export function ConversationSettings({
               </button>
             </div>
           )}
-          {section === "memory" && (
-            <ConversationMemorySettingsSection actorId="person_fabio" />
-          )}
+          {section === "memory" && <ConversationMemorySettingsSection actorId="person_fabio" />}
           {section === "engine" && <ConversationEngineMaintenanceSection />}
           {section === "archive" && (
             <>
@@ -400,14 +398,12 @@ export function ConversationSettings({
                   <div className="cv-settings-card">
                     <strong>Cosa è simulato</strong>
                     <p>
-                      AI, esecuzioni, connessioni, inviti, permessi e costi. La chat riconosce esempi
-                      guidati e alcune istruzioni: non interpreta qualsiasi richiesta.
+                      AI, esecuzioni, connessioni, inviti, permessi e costi. La chat riconosce
+                      esempi guidati e alcune istruzioni: non interpreta qualsiasi richiesta.
                     </p>
                   </div>
                   <div className="cv-settings-links">
-                    <a href="/?work-demo=busy&edition=complete">
-                      Demo con 18 lavori ↗
-                    </a>
+                    <a href="/?work-demo=busy&edition=complete">Demo con 18 lavori ↗</a>
                     <a href="/">Spazio libero ↗</a>
                   </div>
                 </>

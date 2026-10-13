@@ -17,16 +17,16 @@ Run Mem0 OSS **fully local** (Ollama LLM + embedder, Qdrant vector store) behind
 
 ## Env defaults
 
-| Env | Default |
-|-----|---------|
-| `HOMUN_MEMORY_BACKEND` | `sqlite` |
-| `HOMUN_MEM0_OLLAMA_URL` | `http://127.0.0.1:11434` |
-| `HOMUN_MEM0_LLM_MODEL` | `llama3.2` |
-| `HOMUN_MEM0_EMBED_MODEL` | `nomic-embed-text` |
-| `HOMUN_MEM0_EMBED_DIMS` | `768` |
-| `HOMUN_MEM0_QDRANT_HOST` | `127.0.0.1` |
-| `HOMUN_MEM0_QDRANT_PORT` | `6333` |
-| `HOMUN_MEM0_COLLECTION` | `homun_memories` |
+| Env                      | Default                  |
+| ------------------------ | ------------------------ |
+| `HOMUN_MEMORY_BACKEND`   | `sqlite`                 |
+| `HOMUN_MEM0_OLLAMA_URL`  | `http://127.0.0.1:11434` |
+| `HOMUN_MEM0_LLM_MODEL`   | `llama3.2`               |
+| `HOMUN_MEM0_EMBED_MODEL` | `nomic-embed-text`       |
+| `HOMUN_MEM0_EMBED_DIMS`  | `768`                    |
+| `HOMUN_MEM0_QDRANT_HOST` | `127.0.0.1`              |
+| `HOMUN_MEM0_QDRANT_PORT` | `6333`                   |
+| `HOMUN_MEM0_COLLECTION`  | `homun_memories`         |
 
 ## Operator prerequisites
 

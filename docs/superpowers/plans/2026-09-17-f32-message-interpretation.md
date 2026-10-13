@@ -18,29 +18,30 @@
 
 ## File map
 
-| File | Responsibility |
-|------|----------------|
-| `engine/pyproject.toml` | Add `pydantic-ai` dependency |
-| `engine/src/homun/models/interpretation.py` | Schema: `MessageInterpretation`, mentions, command proposal |
-| `engine/src/homun/models/guardrails.py` | Post-model ID/mention validation |
-| `engine/src/homun/models/interpret.py` | Orchestrate fake vs Pydantic AI interpret |
-| `engine/src/homun/models/fake.py` | Add deterministic `interpret(...)` (same schema; no intent-regex as product NLU) |
-| `engine/src/homun/models/openai_compat.py` | Allow placeholder API keys (`ollama`, `local`); optional Ollama notes |
-| `engine/src/homun/models/registry.py` | `interpret(...)`, Ollama preset helper, wire fake/openai |
-| `engine/src/homun/routes/models.py` | `POST /v1/models/interpret` + Ollama preset endpoint |
-| `engine/src/homun/domain/service.py` | After post_message → interpret → return + event |
-| `engine/tests/test_interpret_f32.py` | Schema, guardrails, HTTP, post_message path |
-| `apps/web/src/lib/engine-models-client.ts` | `interpretMessage`, Ollama preset client helpers |
-| `apps/web/src/lib/conversation-engine-bridge.ts` | `postEngineConversationMessage` returns interpretation |
-| `apps/web/src/hooks/useEngineWorkspace.ts` | Render interpretation instead of placeholder |
-| `apps/web/src/components/EngineModelsPanel.tsx` | “Usa Ollama locale” button |
-| `engine/README.md`, piano, roadmap | Mark F3.2 progress / Ollama curl |
+| File                                             | Responsibility                                                                   |
+| ------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `engine/pyproject.toml`                          | Add `pydantic-ai` dependency                                                     |
+| `engine/src/homun/models/interpretation.py`      | Schema: `MessageInterpretation`, mentions, command proposal                      |
+| `engine/src/homun/models/guardrails.py`          | Post-model ID/mention validation                                                 |
+| `engine/src/homun/models/interpret.py`           | Orchestrate fake vs Pydantic AI interpret                                        |
+| `engine/src/homun/models/fake.py`                | Add deterministic `interpret(...)` (same schema; no intent-regex as product NLU) |
+| `engine/src/homun/models/openai_compat.py`       | Allow placeholder API keys (`ollama`, `local`); optional Ollama notes            |
+| `engine/src/homun/models/registry.py`            | `interpret(...)`, Ollama preset helper, wire fake/openai                         |
+| `engine/src/homun/routes/models.py`              | `POST /v1/models/interpret` + Ollama preset endpoint                             |
+| `engine/src/homun/domain/service.py`             | After post_message → interpret → return + event                                  |
+| `engine/tests/test_interpret_f32.py`             | Schema, guardrails, HTTP, post_message path                                      |
+| `apps/web/src/lib/engine-models-client.ts`       | `interpretMessage`, Ollama preset client helpers                                 |
+| `apps/web/src/lib/conversation-engine-bridge.ts` | `postEngineConversationMessage` returns interpretation                           |
+| `apps/web/src/hooks/useEngineWorkspace.ts`       | Render interpretation instead of placeholder                                     |
+| `apps/web/src/components/EngineModelsPanel.tsx`  | “Usa Ollama locale” button                                                       |
+| `engine/README.md`, piano, roadmap               | Mark F3.2 progress / Ollama curl                                                 |
 
 ---
 
 ### Task 1: Interpretation schema + guardrails (TDD)
 
 **Files:**
+
 - Create: `engine/src/homun/models/interpretation.py`
 - Create: `engine/src/homun/models/guardrails.py`
 - Create: `engine/tests/test_interpret_f32.py`
@@ -218,6 +219,7 @@ Expected: PASS (3 tests)
 ### Task 2: Fake interpret + registry.interpret (no live LLM)
 
 **Files:**
+
 - Modify: `engine/src/homun/models/fake.py`
 - Modify: `engine/src/homun/models/registry.py`
 - Modify: `engine/src/homun/models/__init__.py`
@@ -309,6 +311,7 @@ def run_interpret(registry, text, *, roster, provider_id):
 ### Task 3: Pydantic AI live interpret + Ollama-friendly credentials
 
 **Files:**
+
 - Modify: `engine/pyproject.toml` — add `"pydantic-ai>=1.0.0"`
 - Create/finish: `engine/src/homun/models/interpret.py`
 - Modify: `engine/src/homun/models/openai_compat.py`
@@ -433,6 +436,7 @@ Expected: all PASS (including prior F3.1)
 ### Task 4: HTTP `POST /v1/models/interpret` + Ollama preset route
 
 **Files:**
+
 - Modify: `engine/src/homun/routes/models.py`
 - Modify: `engine/tests/test_interpret_f32.py`
 
@@ -513,6 +517,7 @@ def apply_ollama_preset(body: OllamaPresetRequest) -> dict[str, Any]:
 ### Task 5: Wire `conversation.post_message` → interpret (sync)
 
 **Files:**
+
 - Modify: `engine/src/homun/domain/service.py` — inject optional interpret callback **or** interpret at HTTP/route layer to avoid domain→models coupling
 
 **Preferred (keep domain pure):** interpret in the **domain HTTP route** after successful command, not inside `DomainService._conversation_post_message`.
@@ -581,6 +586,7 @@ Follow existing domain test patterns in `engine/tests/` for headers `X-Homun-Act
 ### Task 6: Web client + Fonte=motore chat wire
 
 **Files:**
+
 - Modify: `apps/web/src/lib/conversation-engine-bridge.ts`
 - Modify: `apps/web/src/hooks/useEngineWorkspace.ts`
 - Modify: `apps/web/src/lib/engine-models-client.ts`
@@ -649,6 +655,7 @@ Expected: all green.
 ### Task 7: Docs
 
 **Files:**
+
 - Modify: `engine/README.md` — Ollama preset + interpret curl + note chat Fonte=motore
 - Modify: `docs/development/2026-09-17-piano-sviluppo.md` — check F3.2
 - Modify: `roadmap.md` — F3.2 done / in progress as accurate
@@ -672,19 +679,19 @@ curl -sS -X POST http://127.0.0.1:8765/v1/models/interpret \
 
 ## Spec coverage checklist
 
-| Spec item | Task |
-|-----------|------|
-| B: engine + chat wire | 5, 6 |
-| Pydantic AI structured output | 3 |
-| Ollama via openai_compatible | 3, 4, 6 |
-| Fake/CI same schema | 2, 4 |
-| Guardrails / no invented IDs | 1 |
-| Ambiguous @ → clarification | 1 |
-| Commands not executed | 5, 6 display copy |
-| Sync interpret | 5 |
-| Roster in context | 3, 5, 6 |
+| Spec item                           | Task                   |
+| ----------------------------------- | ---------------------- |
+| B: engine + chat wire               | 5, 6                   |
+| Pydantic AI structured output       | 3                      |
+| Ollama via openai_compatible        | 3, 4, 6                |
+| Fake/CI same schema                 | 2, 4                   |
+| Guardrails / no invented IDs        | 1                      |
+| Ambiguous @ → clarification         | 1                      |
+| Commands not executed               | 5, 6 display copy      |
+| Sync interpret                      | 5                      |
+| Roster in context                   | 3, 5, 6                |
 | No ConversationWorkspace god growth | 6 (hook + pure helper) |
-| Docs | 7 |
+| Docs                                | 7                      |
 
 ## Placeholder / consistency review
 

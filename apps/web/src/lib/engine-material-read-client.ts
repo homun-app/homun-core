@@ -75,7 +75,10 @@ export async function prepareMaterialRead(
 ): Promise<MaterialRead> {
   if (!work.engineConversationId)
     throw new HomunClientError("validation_error", "Apri prima una conversazione del motore");
-  if (!READABLE_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext)) || file.size > 2 * 1024 * 1024) {
+  if (
+    !READABLE_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext)) ||
+    file.size > 2 * 1024 * 1024
+  ) {
     throw new HomunClientError(
       "validation_error",
       "Seleziona un file leggibile (testo, CSV o PDF) fino a 2 MB",

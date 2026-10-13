@@ -153,6 +153,9 @@ export async function updateEngineAgent(input: {
     ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
   });
   return {
-    revision: typeof result.result["revision"] === "number" ? result.result["revision"] : input.expectedVersion + 1,
+    revision:
+      typeof result.result["revision"] === "number"
+        ? result.result["revision"]
+        : input.expectedVersion + 1,
   };
 }

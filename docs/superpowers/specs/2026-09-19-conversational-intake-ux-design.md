@@ -11,6 +11,7 @@ Il frontend usa text.slice(0, 100) come titolo e il messaggio intero come obiett
 La conversazione raccoglie una richiesta, che resta conservata integralmente come messaggio. Homun prepara una proposta di lavoro, senza assegnare né eseguire automaticamente. La proposta contiene un titolo breve, un obiettivo orientato al risultato, materiali necessari, vincoli espliciti e un collaboratore suggerito con motivazione basata sulle capacità realmente disponibili. Eventuali informazioni mancanti sono domande, non valori inventati.
 
 Esempio:
+
 - Titolo: Confronto listini agosto–settembre.
 - Obiettivo: Individuare variazioni di prezzo e anomalie tra i due listini e consegnare un report verificabile.
 - Vincoli: SKU esatto, nessuna conversione valutaria, anomalie separate.

@@ -85,9 +85,7 @@ export function ConversationSkillPacksSection({ onPackInstalled }: Props) {
         </button>
       </div>
 
-      {error && (
-        <HomunErrorNotice error={error} />
-      )}
+      {error && <HomunErrorNotice error={error} />}
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {packs.map((pack) => {

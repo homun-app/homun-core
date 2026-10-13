@@ -35,10 +35,7 @@ import {
   serializeAgentCognitiveConfig,
   type RoleTemplate,
 } from "./ConversationAgentsSettingsData";
-import {
-  ConversationAgentEditor,
-  type AgentSavePayload,
-} from "./ConversationAgentEditor";
+import { ConversationAgentEditor, type AgentSavePayload } from "./ConversationAgentEditor";
 import "./conversation-agents-settings.css";
 
 type Props = {
@@ -177,7 +174,10 @@ export function ConversationAgentsSettingsSection({ actorId = "person_fabio" }: 
       <div className="cv-agents-wrap">
         <div className="cv-agents-header">
           <h3>Squadra Agenti & Ruoli Specializzati</h3>
-          <p>Collega l’applicazione desktop Homun per visualizzare e configurare la tua squadra di agenti.</p>
+          <p>
+            Collega l’applicazione desktop Homun per visualizzare e configurare la tua squadra di
+            agenti.
+          </p>
         </div>
       </div>
     );
@@ -207,7 +207,8 @@ export function ConversationAgentsSettingsSection({ actorId = "person_fabio" }: 
         <div>
           <h3>Squadra Agenti & Modelli Indipendenti</h3>
           <p>
-            Ogni agente opera con il proprio modello LLM specializzato, parametri cognitivi di riflessione e strumenti dedicati.
+            Ogni agente opera con il proprio modello LLM specializzato, parametri cognitivi di
+            riflessione e strumenti dedicati.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -243,7 +244,9 @@ export function ConversationAgentsSettingsSection({ actorId = "person_fabio" }: 
         <div className="cv-agents-explainer__text">
           <strong>Modelli eterogenei per compiti specifici</strong>
           <p>
-            Assegna Claude 3.7 per compiti di architettura e codice, GPT-4o per analisi multimodale o sintesi, e modelli locali Ollama (Llama 3.3) per elaborazioni senza costi di token o fallback resiliente offline.
+            Assegna Claude 3.7 per compiti di architettura e codice, GPT-4o per analisi multimodale
+            o sintesi, e modelli locali Ollama (Llama 3.3) per elaborazioni senza costi di token o
+            fallback resiliente offline.
           </p>
         </div>
       </div>
@@ -278,12 +281,8 @@ export function ConversationAgentsSettingsSection({ actorId = "person_fabio" }: 
         ) : (
           agents.map((agent) => {
             const cognitive = parseAgentCognitiveConfig(agent.method);
-            const assignedConn = connections.find(
-              (c) => c.id === agent.preferred_connection_id,
-            );
-            const fallbackConn = connections.find(
-              (c) => c.id === cognitive.fallback_connection_id,
-            );
+            const assignedConn = connections.find((c) => c.id === agent.preferred_connection_id);
+            const fallbackConn = connections.find((c) => c.id === cognitive.fallback_connection_id);
 
             return (
               <div key={agent.id} className="cv-agent-card">
@@ -304,7 +303,9 @@ export function ConversationAgentsSettingsSection({ actorId = "person_fabio" }: 
                       </div>
                       <p className="cv-agent-card__responsibility">
                         {agent.responsibility ||
-                          (agent.instructions ? agent.instructions.slice(0, 110) + "..." : "Collaboratore operativo del team")}
+                          (agent.instructions
+                            ? agent.instructions.slice(0, 110) + "..."
+                            : "Collaboratore operativo del team")}
                       </p>
                     </div>
                   </div>
@@ -328,8 +329,8 @@ export function ConversationAgentsSettingsSection({ actorId = "person_fabio" }: 
                       {assignedConn
                         ? `${assignedConn.display_name} (${assignedConn.model_id ?? assignedConn.id})`
                         : agent.preferred_connection_id
-                        ? agent.preferred_connection_id
-                        : "Modello Predefinito Spazio"}
+                          ? agent.preferred_connection_id
+                          : "Modello Predefinito Spazio"}
                     </span>
                   </div>
 

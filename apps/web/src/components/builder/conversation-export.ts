@@ -18,10 +18,7 @@ export function downloadTextFile(filename: string, body: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function downloadWorkResult(args: {
-  scenario: ConversationScenario;
-  work: Work;
-}) {
+export function downloadWorkResult(args: { scenario: ConversationScenario; work: Work }) {
   const { scenario, work } = args;
   downloadTextFile(
     `${scenario.result}.txt`,

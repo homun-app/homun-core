@@ -14,21 +14,21 @@ Esecuzione in questa sessione. La cartella non contiene .git: niente branch/comm
 ## Passi
 
 - [x] Definire e verificare la preparazione di un incarico dimostrativo: input
-  libero, checklist non vuota, budget remoto valido, stato soltanto «da fare».
-  File: src/lib/first-work.ts; tests/first-work.test.ts.
-  Comando: node --test tests/first-work.test.ts.
+      libero, checklist non vuota, budget remoto valido, stato soltanto «da fare».
+      File: src/lib/first-work.ts; tests/first-work.test.ts.
+      Comando: node --test tests/first-work.test.ts.
 - [x] Creare src/components/builder/FirstWorkJourney.tsx e relativi componenti
-  per i campi: bisogno libero, responsabilità, conoscenze, strumenti simulati,
-  politica AI, autonomia, budget, incarico e metodo modificabile.
+      per i campi: bisogno libero, responsabilità, conoscenze, strumenti simulati,
+      politica AI, autonomia, budget, incarico e metodo modificabile.
 - [x] Conservare bozza e incarico nella sessione del browser e mantenere i dati
-  tornando indietro. Se lo storage fallisce, mantenere la sessione in memoria
-  e comunicare che il salvataggio non è disponibile.
+      tornando indietro. Se lo storage fallisce, mantenere la sessione in memoria
+      e comunicare che il salvataggio non è disponibile.
 - [x] Integrare nella pagina Crea, mantenendo i percorsi esistenti in una sezione
-  secondaria. Il componente va rimontato al cambio utente/progetto.
+      secondaria. Il componente va rimontato al cambio utente/progetto.
 - [x] Aggiungere anteprima standalone con lo stesso componente e stile esistente.
-  L'anteprima non importa autenticazione o client Supabase.
+      L'anteprima non importa autenticazione o client Supabase.
 - [x] Verificare tipi e build disponibili; percorrere il flusso in browser,
-  controllare desktop/mobile, ritorno ai passaggi, reload, budget e checklist.
+      controllare desktop/mobile, ritorno ai passaggi, reload, budget e checklist.
 - [x] Registrare esiti e limiti e mostrare l'anteprima all'utente.
 
 ## Limiti espliciti

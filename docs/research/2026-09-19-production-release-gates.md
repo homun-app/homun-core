@@ -18,14 +18,14 @@ Restano gate di distribuzione: Mac pulito, firma Developer ID/notarizzazione, ag
 
 ## Evidenza locale riproducibile
 
-| Area | Fatto verificato | Conseguenza per la release |
-|---|---|---|
-| Desktop | `apps/desktop/README.md` conferma Electron, ma la directory contiene soltanto il README | Nessuna prova di installer, Python incluso, firma, notarizzazione o aggiornamento |
-| Dipendenze | `package-lock.json` e ora `engine/requirements.lock` presenti; nessun `uv.lock`; i minimi di `pyproject.toml` restano compatibili | Installazione CI vincolata agli hash e alle versioni verificate; extra `memory` escluso dal profilo |
-| Ambiente verificato | Darwin arm64; Python 3.13.12; SQLite 3.50.4; DBOS 3.0.0; SQLAlchemy 2.0.54; Pydantic AI 2.44.0 | È un ambiente di sviluppo, non una matrice desktop certificata |
-| Cifratura | `PRAGMA cipher_version` su database **in memoria** restituisce `None`; `sqlcipher3`/`pysqlcipher3` non installati | Il driver attuale non prova alcuna cifratura SQLCipher |
-| Segreti | `models/secrets.py`: JSON plaintext con `chmod(0600)` best-effort; esiste già il protocollo `SecretStore` | La sostituzione può restare dietro una porta; non confondere permessi e cifratura |
-| Backup | `storage/backup.py`: copia online del solo workspace SQLite, hash SHA-256 e restore in directory vuota | Blob, checkpoint DBOS, ricevute runtime e recupero chiavi non sono coperti |
+| Area                | Fatto verificato                                                                                                                  | Conseguenza per la release                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Desktop             | `apps/desktop/README.md` conferma Electron, ma la directory contiene soltanto il README                                           | Nessuna prova di installer, Python incluso, firma, notarizzazione o aggiornamento                   |
+| Dipendenze          | `package-lock.json` e ora `engine/requirements.lock` presenti; nessun `uv.lock`; i minimi di `pyproject.toml` restano compatibili | Installazione CI vincolata agli hash e alle versioni verificate; extra `memory` escluso dal profilo |
+| Ambiente verificato | Darwin arm64; Python 3.13.12; SQLite 3.50.4; DBOS 3.0.0; SQLAlchemy 2.0.54; Pydantic AI 2.44.0                                    | È un ambiente di sviluppo, non una matrice desktop certificata                                      |
+| Cifratura           | `PRAGMA cipher_version` su database **in memoria** restituisce `None`; `sqlcipher3`/`pysqlcipher3` non installati                 | Il driver attuale non prova alcuna cifratura SQLCipher                                              |
+| Segreti             | `models/secrets.py`: JSON plaintext con `chmod(0600)` best-effort; esiste già il protocollo `SecretStore`                         | La sostituzione può restare dietro una porta; non confondere permessi e cifratura                   |
+| Backup              | `storage/backup.py`: copia online del solo workspace SQLite, hash SHA-256 e restore in directory vuota                            | Blob, checkpoint DBOS, ricevute runtime e recupero chiavi non sono coperti                          |
 
 Comandi eseguiti dalla radice del repository, senza aprire dati persistiti:
 

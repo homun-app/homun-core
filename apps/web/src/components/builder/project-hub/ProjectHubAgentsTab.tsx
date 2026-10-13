@@ -1,5 +1,16 @@
 import { useState, useEffect } from "react";
-import { Bot, Brain, Check, Globe, Laptop, Plus, Settings2, Shield, Trash2, Wrench } from "lucide-react";
+import {
+  Bot,
+  Brain,
+  Check,
+  Globe,
+  Laptop,
+  Plus,
+  Settings2,
+  Shield,
+  Trash2,
+  Wrench,
+} from "lucide-react";
 import { SettingsCustomSelect, type SelectOption } from "../SettingsCustomSelect";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 
@@ -95,9 +106,7 @@ export function ProjectHubAgentsTab({
     <div className="ph-tab-content">
       <div className="ph-card">
         <div className="ph-card-header">
-          <div className="section-label">
-            Squadra & Agenti ({configs.length})
-          </div>
+          <div className="section-label">Squadra & Agenti ({configs.length})</div>
           {unassignedAgents.length > 0 && (
             <button className="ph-btn-ghost" onClick={() => setAssigning(!assigning)}>
               <Plus size={13} />
@@ -123,7 +132,9 @@ export function ProjectHubAgentsTab({
             }}
           >
             <div>
-              <strong style={{ fontSize: 13, color: "#1c2d22" }}>Seleziona un collaboratore artificiale:</strong>
+              <strong style={{ fontSize: 13, color: "#1c2d22" }}>
+                Seleziona un collaboratore artificiale:
+              </strong>
               <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
                 {unassignedAgents.map((agent) => (
                   <button
@@ -171,7 +182,9 @@ export function ProjectHubAgentsTab({
                       </div>
                       <div>
                         <div className="ph-agent-name">{agentProfile.name}</div>
-                        <div className="ph-agent-role">{agentProfile.role || "Assistente Specializzato"}</div>
+                        <div className="ph-agent-role">
+                          {agentProfile.role || "Assistente Specializzato"}
+                        </div>
                       </div>
                     </div>
                     <button
@@ -188,7 +201,13 @@ export function ProjectHubAgentsTab({
                   <div className="ph-override-box">
                     <div className="ph-override-label">
                       <span>Modello LLM Esecutivo</span>
-                      <span className={isOverridden ? "ph-override-badge" : "ph-override-badge ph-override-badge--default"}>
+                      <span
+                        className={
+                          isOverridden
+                            ? "ph-override-badge"
+                            : "ph-override-badge ph-override-badge--default"
+                        }
+                      >
                         {isOverridden ? "Override attivo" : "Default dello spazio"}
                       </span>
                     </div>
@@ -202,7 +221,15 @@ export function ProjectHubAgentsTab({
 
                   {/* Tool Capabilities for this Project */}
                   <div>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#647a6d" }}>
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                        color: "#647a6d",
+                      }}
+                    >
                       Strumenti autorizzati nel progetto
                     </span>
                     <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
@@ -220,7 +247,10 @@ export function ProjectHubAgentsTab({
                             onClick={() => handleToggleTool(config.agentId, tool.id)}
                             className={`ph-tool-chip ${enabled ? "ph-tool-chip--enabled" : ""}`}
                           >
-                            <Icon size={12} className={enabled ? "text-[#157a6e]" : "text-[#7a8e83]"} />
+                            <Icon
+                              size={12}
+                              className={enabled ? "text-[#157a6e]" : "text-[#7a8e83]"}
+                            />
                             <span>{tool.label}</span>
                             {enabled && <Check size={11} className="text-[#157a6e]" />}
                           </button>

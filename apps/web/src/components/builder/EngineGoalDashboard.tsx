@@ -71,7 +71,10 @@ export function EngineGoalDashboard() {
             <div className="cw-goal-card__top">
               <div>
                 <h4 className="cw-goal-card__title">
-                  <Target size={16} style={{ display: "inline", verticalAlign: "middle", marginRight: 6 }} />
+                  <Target
+                    size={16}
+                    style={{ display: "inline", verticalAlign: "middle", marginRight: 6 }}
+                  />
                   {g.goal}
                 </h4>
                 <div className="cw-goal-card__session">ID: {g.session_id}</div>
@@ -105,7 +108,15 @@ export function EngineGoalDashboard() {
 
             {g.contract && (
               <div className="cw-goal-contract">
-                <div style={{ fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 4 }}>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    marginBottom: 6,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
                   <ShieldCheck size={14} />
                   <span>{t("goals.contract")}</span>
                 </div>
@@ -134,7 +145,9 @@ export function EngineGoalDashboard() {
 
             {g.gates && g.gates.length > 0 && (
               <div style={{ marginTop: 8 }}>
-                <strong style={{ fontSize: "0.8rem", color: "#4a5568" }}>{t("goals.gates")}:</strong>
+                <strong style={{ fontSize: "0.8rem", color: "#4a5568" }}>
+                  {t("goals.gates")}:
+                </strong>
                 <ul className="cw-goal-gates">
                   {g.gates.map((gate) => (
                     <li key={gate.gate_id}>

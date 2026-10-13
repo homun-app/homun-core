@@ -1,5 +1,14 @@
 import { useState, useEffect } from "react";
-import { MessageSquare, Bot, FileText, BookMarked, UsersRound, Plus, ArrowUp, PanelRightClose } from "lucide-react";
+import {
+  MessageSquare,
+  Bot,
+  FileText,
+  BookMarked,
+  UsersRound,
+  Plus,
+  ArrowUp,
+  PanelRightClose,
+} from "lucide-react";
 import "./project-hub.css";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { SettingsCustomSelect, type SelectOption } from "../SettingsCustomSelect";
@@ -13,11 +22,21 @@ import type { SpaceProject } from "../ConversationSpace";
 import type { Work } from "../conversation-types";
 import { useEngineStatus } from "@/hooks/useEngineStatus";
 import {
-  listEngineProjects, createEngineProject, updateEngineProject, listEngineMaterials, createEngineMaterial,
-  ingestEngineMaterial, archiveEngineMaterial, type EngineProject, type EngineMaterial,
+  listEngineProjects,
+  createEngineProject,
+  updateEngineProject,
+  listEngineMaterials,
+  createEngineMaterial,
+  ingestEngineMaterial,
+  archiveEngineMaterial,
+  type EngineProject,
+  type EngineMaterial,
 } from "@/lib/engine-projects-client";
 import {
-  listEngineMemories, addEngineMemory, deleteEngineMemory, type EngineMemoryNote,
+  listEngineMemories,
+  addEngineMemory,
+  deleteEngineMemory,
+  type EngineMemoryNote,
 } from "@/lib/engine-memory-client";
 import { listEngineAgents, type EngineAgentProfile } from "@/lib/engine-agents-client";
 import { listModelConnections } from "@/lib/engine-models-client";
@@ -59,7 +78,9 @@ export function ProjectHubView({
 
   const [engineProjectsList, setEngineProjectsList] = useState<EngineProject[]>([]);
   const [allAgents, setAllAgents] = useState<EngineAgentProfile[]>([]);
-  const [models, setModels] = useState<Array<{ id: string; name: string; kind?: "local" | "remote" }>>([]);
+  const [models, setModels] = useState<
+    Array<{ id: string; name: string; kind?: "local" | "remote" }>
+  >([]);
   const [projectMaterials, setProjectMaterials] = useState<EngineMaterial[]>([]);
   const [globalMemories, setGlobalMemories] = useState<EngineMemoryNote[]>([]);
   const [projectMemories, setProjectMemories] = useState<EngineMemoryNote[]>([]);
@@ -162,15 +183,17 @@ export function ProjectHubView({
     return {
       value: p.id,
       label,
-      desc: childWorks.length > 0
-        ? `${childWorks.length} ${childWorks.length === 1 ? "lavoro" : "lavori"}: ${childWorks.map((w) => w.title).join(", ")}`
-        : briefDesc || undefined,
+      desc:
+        childWorks.length > 0
+          ? `${childWorks.length} ${childWorks.length === 1 ? "lavoro" : "lavori"}: ${childWorks.map((w) => w.title).join(", ")}`
+          : briefDesc || undefined,
       badge: childWorks.length > 0 ? `${childWorks.length}` : undefined,
     };
   });
 
   const currentOption = projectOptions.find((opt) => opt.value === currentProjectId);
-  const projectName = currentOption?.label || activeEngineProj?.name || activeSimProj?.name || "Progetto";
+  const projectName =
+    currentOption?.label || activeEngineProj?.name || activeSimProj?.name || "Progetto";
 
   // --- Material handlers ---
   async function handleAddTextMaterial(title: string, text: string) {
@@ -180,9 +203,19 @@ export function ProjectHubView({
       setProjectMaterials(updated);
     } else {
       const simMat: EngineMaterial = {
-        id: `sim_mat_${Date.now()}`, workspace_id: "default", project_id: currentProjectId,
-        title, text, kind: "note", version: 1, status: "active", created_by: "Tu",
-        source_uri: null, content_hash: null, mime_type: "text/plain", origin_name: null,
+        id: `sim_mat_${Date.now()}`,
+        workspace_id: "default",
+        project_id: currentProjectId,
+        title,
+        text,
+        kind: "note",
+        version: 1,
+        status: "active",
+        created_by: "Tu",
+        source_uri: null,
+        content_hash: null,
+        mime_type: "text/plain",
+        origin_name: null,
       };
       setProjectMaterials((prev) => [simMat, ...prev]);
     }
@@ -195,10 +228,18 @@ export function ProjectHubView({
       setProjectMaterials(updated);
     } else {
       const simFile: EngineMaterial = {
-        id: `sim_file_${Date.now()}`, workspace_id: "default", project_id: currentProjectId,
-        title: file.name, text: `File caricato: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`,
-        kind: "document", version: 1, status: "active", created_by: "Tu",
-        source_uri: null, content_hash: null, mime_type: file.type || "application/octet-stream",
+        id: `sim_file_${Date.now()}`,
+        workspace_id: "default",
+        project_id: currentProjectId,
+        title: file.name,
+        text: `File caricato: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`,
+        kind: "document",
+        version: 1,
+        status: "active",
+        created_by: "Tu",
+        source_uri: null,
+        content_hash: null,
+        mime_type: file.type || "application/octet-stream",
         origin_name: file.name,
       };
       setProjectMaterials((prev) => [simFile, ...prev]);
@@ -216,27 +257,49 @@ export function ProjectHubView({
   // --- Memory handlers ---
   async function handleAddProjectMemory(text: string) {
     if (isEngine) {
-      const note = await addEngineMemory({ text, actorId: "person_fabio", projectId: currentProjectId });
+      const note = await addEngineMemory({
+        text,
+        actorId: "person_fabio",
+        projectId: currentProjectId,
+      });
       setProjectMemories((prev) => [note, ...prev]);
     } else {
-      setProjectMemories((prev) => [{
-        id: `sim_mem_${Date.now()}`, workspace_id: "default", text, work_id: null,
-        project_id: currentProjectId, status: "approved",
-        created_at: new Date().toISOString(), updated_at: new Date().toISOString(), created_by: "Tu",
-      }, ...prev]);
+      setProjectMemories((prev) => [
+        {
+          id: `sim_mem_${Date.now()}`,
+          workspace_id: "default",
+          text,
+          work_id: null,
+          project_id: currentProjectId,
+          status: "approved",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          created_by: "Tu",
+        },
+        ...prev,
+      ]);
     }
   }
 
   async function handlePromoteToGlobal(note: EngineMemoryNote) {
     if (isEngine) {
       try {
-        const globalNote = await addEngineMemory({ text: note.text, actorId: "person_fabio", projectId: "global" });
+        const globalNote = await addEngineMemory({
+          text: note.text,
+          actorId: "person_fabio",
+          projectId: "global",
+        });
         setGlobalMemories((prev) => [globalNote, ...prev]);
         await deleteEngineMemory({ memoryId: note.id, actorId: "person_fabio" });
         setProjectMemories((prev) => prev.filter((m) => m.id !== note.id));
-      } catch (err) { setError(err); }
+      } catch (err) {
+        setError(err);
+      }
     } else {
-      setGlobalMemories((prev) => [{ ...note, id: `global_${note.id}`, project_id: null }, ...prev]);
+      setGlobalMemories((prev) => [
+        { ...note, id: `global_${note.id}`, project_id: null },
+        ...prev,
+      ]);
       setProjectMemories((prev) => prev.filter((m) => m.id !== note.id));
     }
   }
@@ -247,18 +310,21 @@ export function ProjectHubView({
   }
 
   // --- Agent handlers ---
-  const currentAgentConfigs: ProjectAgentConfig[] = agentConfigs[currentProjectId] || (
-    activeEngineProj && allAgents.length > 0
+  const currentAgentConfigs: ProjectAgentConfig[] =
+    agentConfigs[currentProjectId] ||
+    (activeEngineProj && allAgents.length > 0
       ? allAgents.map((ag) => ({
           agentId: ag.id,
           modelOverride: activeEngineProj.agent_model_overrides?.[ag.id] ?? "",
-          enabledTools: activeEngineProj.agent_tool_overrides?.[ag.id] ?? ["web_search", "document_read"],
+          enabledTools: activeEngineProj.agent_tool_overrides?.[ag.id] ?? [
+            "web_search",
+            "document_read",
+          ],
         }))
       : [
           { agentId: "elio", modelOverride: "", enabledTools: ["web_search", "document_read"] },
           { agentId: "vera", modelOverride: "", enabledTools: ["web_search"] },
-        ]
-  );
+        ]);
 
   async function handleSaveAgentConfigs(configs: ProjectAgentConfig[]) {
     setAgentConfigs((prev) => ({ ...prev, [currentProjectId]: configs }));
@@ -278,20 +344,27 @@ export function ProjectHubView({
         });
         const updatedList = await listEngineProjects();
         setEngineProjectsList(updatedList);
-      } catch (err) { setError(err); }
+      } catch (err) {
+        setError(err);
+      }
     }
   }
 
   // --- RBAC handlers ---
   const currentMembers = projectMembers[currentProjectId] || [
     { id: "collab_fabio", name: "Fabio", email: "fabio@homun.internal", permission: "admin" },
-    { id: "collab_marco", name: "Marco Dev", email: "marco.dev@remote.internal", permission: "member" },
+    {
+      id: "collab_marco",
+      name: "Marco Dev",
+      email: "marco.dev@remote.internal",
+      permission: "member",
+    },
   ];
 
   function handleUpdatePermission(memberId: string, permission: "admin" | "member" | "reviewer") {
     setProjectMembers((prev) => ({
       ...prev,
-      [currentProjectId]: currentMembers.map((m) => m.id === memberId ? { ...m, permission } : m),
+      [currentProjectId]: currentMembers.map((m) => (m.id === memberId ? { ...m, permission } : m)),
     }));
   }
 
@@ -364,7 +437,10 @@ export function ProjectHubView({
                 searchPlaceholder="Cerca progetto..."
                 value={currentProjectId}
                 onChange={(val) => {
-                  if (val) { setCurrentProjectId(val); onSelectProject(val); }
+                  if (val) {
+                    setCurrentProjectId(val);
+                    onSelectProject(val);
+                  }
                 }}
                 options={projectOptions}
                 placeholder={projectName}
@@ -379,41 +455,61 @@ export function ProjectHubView({
 
         <div className="ph-topbar-contextual">
           <div className="ph-icon-tabs" role="tablist" aria-label="Sezioni del progetto">
-            <button role="tab" aria-selected={activeTab === "overview"}
+            <button
+              role="tab"
+              aria-selected={activeTab === "overview"}
               title={`Lavori${projectWorks.length > 0 ? ` (${projectWorks.length})` : ""}`}
               className={`ph-icon-tab ${activeTab === "overview" ? "is-active" : ""}`}
-              onClick={() => setActiveTab("overview")}>
+              onClick={() => setActiveTab("overview")}
+            >
               <MessageSquare size={15} />
-              {projectWorks.length > 0 && <span className="ph-icon-tab-badge">{projectWorks.length}</span>}
+              {projectWorks.length > 0 && (
+                <span className="ph-icon-tab-badge">{projectWorks.length}</span>
+              )}
             </button>
-            <button role="tab" aria-selected={activeTab === "agents"}
+            <button
+              role="tab"
+              aria-selected={activeTab === "agents"}
               title="Squadra"
               className={`ph-icon-tab ${activeTab === "agents" ? "is-active" : ""}`}
-              onClick={() => setActiveTab("agents")}>
+              onClick={() => setActiveTab("agents")}
+            >
               <Bot size={15} />
             </button>
-            <button role="tab" aria-selected={activeTab === "materials"}
+            <button
+              role="tab"
+              aria-selected={activeTab === "materials"}
               title="Documenti & Materiali"
               className={`ph-icon-tab ${activeTab === "materials" ? "is-active" : ""}`}
-              onClick={() => setActiveTab("materials")}>
+              onClick={() => setActiveTab("materials")}
+            >
               <FileText size={15} />
             </button>
-            <button role="tab" aria-selected={activeTab === "memory"}
+            <button
+              role="tab"
+              aria-selected={activeTab === "memory"}
               title="Memoria & Vincoli"
               className={`ph-icon-tab ${activeTab === "memory" ? "is-active" : ""}`}
-              onClick={() => setActiveTab("memory")}>
+              onClick={() => setActiveTab("memory")}
+            >
               <BookMarked size={15} />
             </button>
-            <button role="tab" aria-selected={activeTab === "rbac"}
+            <button
+              role="tab"
+              aria-selected={activeTab === "rbac"}
               title="Accessi & Deleghe"
               className={`ph-icon-tab ${activeTab === "rbac" ? "is-active" : ""}`}
-              onClick={() => setActiveTab("rbac")}>
+              onClick={() => setActiveTab("rbac")}
+            >
               <UsersRound size={15} />
             </button>
           </div>
           <span className="ph-topbar-sep" aria-hidden="true" />
-          <button className="ph-icon-tab" title="Nuovo lavoro in questo progetto"
-            onClick={() => onCreateWork?.(currentProjectId)}>
+          <button
+            className="ph-icon-tab"
+            title="Nuovo lavoro in questo progetto"
+            onClick={() => onCreateWork?.(currentProjectId)}
+          >
             <Plus size={15} />
           </button>
         </div>
@@ -469,7 +565,9 @@ export function ProjectHubView({
             onUpdateMemberPermission={handleUpdatePermission}
             onRemoveMember={handleRemoveMember}
             onAddMember={handleAddMember}
-            onImportDeliverable={async (file) => { await handleUploadFileMaterial(file); }}
+            onImportDeliverable={async (file) => {
+              await handleUploadFileMaterial(file);
+            }}
           />
         )}
       </div>
@@ -484,11 +582,18 @@ export function ProjectHubView({
             value={promptValue}
             onChange={(e) => setPromptValue(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handlePromptSubmit(); }
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handlePromptSubmit();
+              }
             }}
           />
-          <button className="ph-prompt-send" onClick={handlePromptSubmit}
-            title="Avvia" disabled={!promptValue.trim()}>
+          <button
+            className="ph-prompt-send"
+            onClick={handlePromptSubmit}
+            title="Avvia"
+            disabled={!promptValue.trim()}
+          >
             <ArrowUp size={14} />
           </button>
         </div>

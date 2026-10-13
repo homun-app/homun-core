@@ -67,7 +67,8 @@ const BUILTIN_TOOLS: UnifiedToolItem[] = [
     name: "Web Browser & Search",
     kind: "plugins",
     category: "Navigazione",
-    description: "Ricerca web in tempo reale e consultazione documentazione tramite browser sandbox.",
+    description:
+      "Ricerca web in tempo reale e consultazione documentazione tramite browser sandbox.",
     iconBg: "#0ea5e9",
     iconColor: "#ffffff",
     badge: "Integrato",
@@ -93,7 +94,8 @@ const BUILTIN_TOOLS: UnifiedToolItem[] = [
     name: "Knowledge Vault",
     kind: "plugins",
     category: "Memoria",
-    description: "Archivio vettoriale e note di progetto per il recupero semantico delle decisioni.",
+    description:
+      "Archivio vettoriale e note di progetto per il recupero semantico delle decisioni.",
     iconBg: "#8b5cf6",
     iconColor: "#ffffff",
     badge: "Attivo",
@@ -194,7 +196,7 @@ export function ConversationUnifiedPluginsSection() {
           prev.map((b) => {
             const match = engPlugs.plugins.find((p) => p.name === b.id);
             return match ? { ...b, enabled: match.enabled } : b;
-          })
+          }),
         );
       }
     } catch (cause) {
@@ -242,7 +244,8 @@ export function ConversationUnifiedPluginsSection() {
     description: sk.description || "Nessuna descrizione specificata.",
     iconBg: "#6366f1",
     iconColor: "#ffffff",
-    badge: sk.status === "approved" ? "Approvata" : sk.status === "staged" ? "In attesa" : "Archiviata",
+    badge:
+      sk.status === "approved" ? "Approvata" : sk.status === "staged" ? "In attesa" : "Archiviata",
     badgeType: sk.status === "approved" ? "ok" : sk.status === "staged" ? "pending" : "neutral",
     details: sk.body ? `${sk.body.slice(0, 80)}...` : undefined,
     enabled: sk.status === "approved",
@@ -290,7 +293,9 @@ export function ConversationUnifiedPluginsSection() {
     setError(null);
     try {
       const res = await probeEngineServer(server.id);
-      setInfo(`Server ${server.name} risponde correttamente (${res.tool_count_total} strumenti rilevati).`);
+      setInfo(
+        `Server ${server.name} risponde correttamente (${res.tool_count_total} strumenti rilevati).`,
+      );
     } catch (cause) {
       setError(cause);
     } finally {
@@ -310,9 +315,7 @@ export function ConversationUnifiedPluginsSection() {
   }
 
   async function handleToggleBuiltin(id: string, next: boolean) {
-    setBuiltins((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, enabled: next } : b))
-    );
+    setBuiltins((prev) => prev.map((b) => (b.id === id ? { ...b, enabled: next } : b)));
     try {
       if (next) {
         await enableEnginePlugin(id);
@@ -379,7 +382,8 @@ export function ConversationUnifiedPluginsSection() {
         <div>
           <h2 className="cv-unified-section__title">Plugin e strumenti</h2>
           <p className="cv-unified-section__subtitle">
-            Estendi le capacità della tua squadra con server MCP, skill procedurali, integrazioni cloud e connettori.
+            Estendi le capacità della tua squadra con server MCP, skill procedurali, integrazioni
+            cloud e connettori.
           </p>
         </div>
         <div className="cv-unified-section__actions" ref={menuRef} style={{ position: "relative" }}>
@@ -443,7 +447,8 @@ export function ConversationUnifiedPluginsSection() {
             </strong>
             <p className="m-0 leading-relaxed">
               Ogni strumento installato conferisce agli agenti nuove capacità (es. query a database,
-              consultazione web, script sandbox). <strong className="text-[#f4f1ee]">Nessuna azione critica avviene in segreto</strong>:
+              consultazione web, script sandbox).{" "}
+              <strong className="text-[#f4f1ee]">Nessuna azione critica avviene in segreto</strong>:
               Homun applica la supervisione umana (Human-in-the-Loop) e richiederà sempre la tua
               autorizzazione esplicita in chat prima di eseguire comandi o modifiche.
             </p>
@@ -540,164 +545,175 @@ export function ConversationUnifiedPluginsSection() {
           <ConversationSkillPacksSection onPackInstalled={() => void loadAll()} />
         </div>
       ) : (
-      /* Unified Rows matching ChatGPT / Desktop pattern */
-      <div className="cv-unified-list">
-        {filtered.length === 0 ? (
-          <div className="cv-unified-empty">
-            <p>
-              {activeTab === "mcp"
-                ? "Nessun server MCP configurato. Aggiungi un server per connettere database, filesystem o strumenti esterni."
-                : activeTab === "skills"
-                ? "Nessuna skill procedurale salvata. Puoi registrarne una adesso o salvarla direttamente da un messaggio dell'agente."
-                : "Nessun elemento trovato per la ricerca o categoria selezionata."}
-            </p>
-            {activeTab === "mcp" && (
-              <button
-                type="button"
-                className="cv-unified-btn is-primary"
-                style={{ marginTop: "0.5rem" }}
-                onClick={() => setMcpModalOpen(true)}
-              >
-                <Plus size={14} />
-                Aggiungi server MCP
-              </button>
-            )}
-            {activeTab === "skills" && (
-              <button
-                type="button"
-                className="cv-unified-btn is-primary"
-                style={{ marginTop: "0.5rem" }}
-                onClick={() => setSkillModalOpen(true)}
-              >
-                <Plus size={14} />
-                Registra nuova skill
-              </button>
-            )}
-          </div>
-        ) : (
-          filtered.map((item) => {
-            let iconComponent = <Puzzle size={18} />;
-            if (item.kind === "apps") iconComponent = <AppWindow size={18} />;
-            else if (item.kind === "mcp") iconComponent = <Server size={18} />;
-            else if (item.kind === "skills") iconComponent = <Sparkles size={18} />;
-
-            return (
-              <div key={item.id} className="cv-unified-row">
-                <div
-                  className="cv-unified-row__icon"
-                  style={{ backgroundColor: item.iconBg, color: item.iconColor }}
+        /* Unified Rows matching ChatGPT / Desktop pattern */
+        <div className="cv-unified-list">
+          {filtered.length === 0 ? (
+            <div className="cv-unified-empty">
+              <p>
+                {activeTab === "mcp"
+                  ? "Nessun server MCP configurato. Aggiungi un server per connettere database, filesystem o strumenti esterni."
+                  : activeTab === "skills"
+                    ? "Nessuna skill procedurale salvata. Puoi registrarne una adesso o salvarla direttamente da un messaggio dell'agente."
+                    : "Nessun elemento trovato per la ricerca o categoria selezionata."}
+              </p>
+              {activeTab === "mcp" && (
+                <button
+                  type="button"
+                  className="cv-unified-btn is-primary"
+                  style={{ marginTop: "0.5rem" }}
+                  onClick={() => setMcpModalOpen(true)}
                 >
-                  {iconComponent}
-                </div>
+                  <Plus size={14} />
+                  Aggiungi server MCP
+                </button>
+              )}
+              {activeTab === "skills" && (
+                <button
+                  type="button"
+                  className="cv-unified-btn is-primary"
+                  style={{ marginTop: "0.5rem" }}
+                  onClick={() => setSkillModalOpen(true)}
+                >
+                  <Plus size={14} />
+                  Registra nuova skill
+                </button>
+              )}
+            </div>
+          ) : (
+            filtered.map((item) => {
+              let iconComponent = <Puzzle size={18} />;
+              if (item.kind === "apps") iconComponent = <AppWindow size={18} />;
+              else if (item.kind === "mcp") iconComponent = <Server size={18} />;
+              else if (item.kind === "skills") iconComponent = <Sparkles size={18} />;
 
-                <div className="cv-unified-row__main">
-                  <div className="cv-unified-row__title-line">
-                    <span className="cv-unified-row__title">{item.name}</span>
-                    {item.badge && (
-                      <span
-                        className={`cv-unified-badge ${
-                          item.badgeType === "ok"
-                            ? "is-ok"
-                            : item.badgeType === "pending"
-                            ? "is-active"
-                            : ""
-                        }`}
-                      >
-                        {item.badge}
-                      </span>
-                    )}
-                    <span className="cv-unified-badge">{item.category}</span>
+              return (
+                <div key={item.id} className="cv-unified-row">
+                  <div
+                    className="cv-unified-row__icon"
+                    style={{ backgroundColor: item.iconBg, color: item.iconColor }}
+                  >
+                    {iconComponent}
                   </div>
-                  <p className="cv-unified-row__desc">{item.description}</p>
-                  {item.details && (
-                    <span className="cv-unified-row__submeta">{item.details}</span>
-                  )}
-                </div>
 
-                <div className="cv-unified-row__controls">
-                  {item.rawMcpServer && (
-                    <>
+                  <div className="cv-unified-row__main">
+                    <div className="cv-unified-row__title-line">
+                      <span className="cv-unified-row__title">{item.name}</span>
+                      {item.badge && (
+                        <span
+                          className={`cv-unified-badge ${
+                            item.badgeType === "ok"
+                              ? "is-ok"
+                              : item.badgeType === "pending"
+                                ? "is-active"
+                                : ""
+                          }`}
+                        >
+                          {item.badge}
+                        </span>
+                      )}
+                      <span className="cv-unified-badge">{item.category}</span>
+                    </div>
+                    <p className="cv-unified-row__desc">{item.description}</p>
+                    {item.details && (
+                      <span className="cv-unified-row__submeta">{item.details}</span>
+                    )}
+                  </div>
+
+                  <div className="cv-unified-row__controls">
+                    {item.rawMcpServer && (
+                      <>
+                        <button
+                          type="button"
+                          className="cv-unified-btn is-subtle"
+                          title="Verifica connessione"
+                          disabled={probingServerId === item.rawMcpServer.id}
+                          onClick={() => void handleProbe(item.rawMcpServer!)}
+                        >
+                          <RefreshCw
+                            size={13}
+                            className={
+                              probingServerId === item.rawMcpServer.id ? "animate-spin" : ""
+                            }
+                          />
+                          <span>
+                            {probingServerId === item.rawMcpServer.id ? "Provo…" : "Test"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="cv-unified-icon-btn"
+                          title="Rimuovi server"
+                          onClick={async () => {
+                            if (confirm(`Rimuovere il server "${item.name}"?`)) {
+                              try {
+                                await removeEngineServer(
+                                  item.rawMcpServer!.id,
+                                  item.rawMcpServer!.revision,
+                                );
+                                await loadAll();
+                              } catch (e) {
+                                setError(e);
+                              }
+                            }
+                          }}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </>
+                    )}
+
+                    {item.rawSkill && (
                       <button
                         type="button"
                         className="cv-unified-btn is-subtle"
-                        title="Verifica connessione"
-                        disabled={probingServerId === item.rawMcpServer.id}
-                        onClick={() => void handleProbe(item.rawMcpServer!)}
+                        onClick={() => setViewingSkill(item.rawSkill!)}
                       >
-                        <RefreshCw
-                          size={13}
-                          className={probingServerId === item.rawMcpServer.id ? "animate-spin" : ""}
-                        />
-                        <span>{probingServerId === item.rawMcpServer.id ? "Provo…" : "Test"}</span>
+                        <FileCode size={13} />
+                        <span>Codice</span>
                       </button>
+                    )}
+
+                    {item.rawCatalog && !item.enabled && (
                       <button
                         type="button"
-                        className="cv-unified-icon-btn"
-                        title="Rimuovi server"
+                        className="cv-unified-btn is-primary"
                         onClick={async () => {
-                          if (confirm(`Rimuovere il server "${item.name}"?`)) {
-                            try {
-                              await removeEngineServer(item.rawMcpServer!.id, item.rawMcpServer!.revision);
-                              await loadAll();
-                            } catch (e) {
-                              setError(e);
-                            }
+                          try {
+                            await declareCatalogEntry({ entry: item.rawCatalog! });
+                            await loadAll();
+                            setInfo(`Installato "${item.name}" dal catalogo.`);
+                          } catch (e) {
+                            setError(e);
                           }
                         }}
                       >
-                        <Trash2 size={15} />
+                        Installa
                       </button>
-                    </>
-                  )}
+                    )}
 
-                  {item.rawSkill && (
-                    <button
-                      type="button"
-                      className="cv-unified-btn is-subtle"
-                      onClick={() => setViewingSkill(item.rawSkill!)}
-                    >
-                      <FileCode size={13} />
-                      <span>Codice</span>
-                    </button>
-                  )}
-
-                  {item.rawCatalog && !item.enabled && (
-                    <button
-                      type="button"
-                      className="cv-unified-btn is-primary"
-                      onClick={async () => {
-                        try {
-                          await declareCatalogEntry({ entry: item.rawCatalog! });
-                          await loadAll();
-                          setInfo(`Installato "${item.name}" dal catalogo.`);
-                        } catch (e) {
-                          setError(e);
-                        }
-                      }}
-                    >
-                      Installa
-                    </button>
-                  )}
-
-                  {(item.rawSkill || item.kind === "apps" || item.id === "web-search" || item.id === "code-sandbox" || item.id === "memory-vault") && (
-                    <SettingsToggleSwitch
-                      checked={item.enabled}
-                      ariaLabel={`Abilita ${item.name}`}
-                      onChange={(next) => {
-                        if (item.rawSkill) {
-                          void handleToggleSkill(item.rawSkill, next);
-                        } else {
-                          handleToggleBuiltin(item.id, next);
-                        }
-                      }}
-                    />
-                  )}
+                    {(item.rawSkill ||
+                      item.kind === "apps" ||
+                      item.id === "web-search" ||
+                      item.id === "code-sandbox" ||
+                      item.id === "memory-vault") && (
+                      <SettingsToggleSwitch
+                        checked={item.enabled}
+                        ariaLabel={`Abilita ${item.name}`}
+                        onChange={(next) => {
+                          if (item.rawSkill) {
+                            void handleToggleSkill(item.rawSkill, next);
+                          } else {
+                            handleToggleBuiltin(item.id, next);
+                          }
+                        }}
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })
-        )}
-      </div>
+              );
+            })
+          )}
+        </div>
       )}
 
       {/* Modals extracted to subcomponents */}

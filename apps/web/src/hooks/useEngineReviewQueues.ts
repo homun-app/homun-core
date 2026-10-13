@@ -49,9 +49,10 @@ export function useEngineReviewQueues(active: boolean, pollMs = 4000): ReviewQue
     const collect = async () => {
       try {
         const works = await listEngineWorks();
-        const open = works
-          .filter((work) => work['archived'] !== true)
-          .slice(-30) as Array<{ id: string; title?: string }>;
+        const open = works.filter((work) => work["archived"] !== true).slice(-30) as Array<{
+          id: string;
+          title?: string;
+        }>;
         const [runRows, terminalRows, editRows, staged] = await Promise.all([
           Promise.all(
             open.map(async (work) => {

@@ -2,10 +2,7 @@
   "model": "qwen3.5:4b",
   "endpoint": "http://127.0.0.1:11434",
   "context_restarted": true,
-  "statuses": [
-    "running",
-    "completed"
-  ],
+  "statuses": ["running", "completed"],
   "run": {
     "id": "run",
     "work_id": "work_es25AsRLDT298Q",

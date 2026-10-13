@@ -22,11 +22,7 @@ import {
 export type { ReasoningRootProps } from "./reasoning";
 
 /** `ReasoningRoot` with the thread viewport scroll locked during disclosure animations. */
-function ReasoningRoot({
-  ref,
-  onAnimationStart,
-  ...props
-}: ReasoningRootProps) {
+function ReasoningRoot({ ref, onAnimationStart, ...props }: ReasoningRootProps) {
   const collapsibleRef = useRef<HTMLDivElement | null>(null);
   const lockScroll = useScrollLock(collapsibleRef, ANIMATION_DURATION);
 
@@ -47,22 +43,12 @@ function ReasoningRoot({
     [ref],
   );
 
-  return (
-    <ReasoningRootBase
-      ref={composedRef}
-      onAnimationStart={handleAnimationStart}
-      {...props}
-    />
-  );
+  return <ReasoningRootBase ref={composedRef} onAnimationStart={handleAnimationStart} {...props} />;
 }
 
 const ReasoningImpl: ReasoningMessagePartComponent = () => <MarkdownText />;
 
-const ReasoningGroupImpl: ReasoningGroupComponent = ({
-  children,
-  startIndex,
-  endIndex,
-}) => {
+const ReasoningGroupImpl: ReasoningGroupComponent = ({ children, startIndex, endIndex }) => {
   const isReasoningStreaming = useAuiState((s) => {
     if (s.message.status?.type !== "running") return false;
     for (let index = startIndex; index <= endIndex; index++) {
@@ -81,9 +67,7 @@ const ReasoningGroupImpl: ReasoningGroupComponent = ({
   );
 };
 
-const Reasoning = memo(
-  ReasoningImpl,
-) as unknown as ReasoningMessagePartComponent & {
+const Reasoning = memo(ReasoningImpl) as unknown as ReasoningMessagePartComponent & {
   Root: typeof ReasoningRoot;
   Trigger: typeof ReasoningTrigger;
   Content: typeof ReasoningContent;

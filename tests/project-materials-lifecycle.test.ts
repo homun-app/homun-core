@@ -10,12 +10,17 @@ test("reading an unprojected work never posts an ensure command", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
     requests.push(init?.method ?? "GET");
-    return Response.json({items: [{ id: "conv", version: 1, project_id: null }]});
+    return Response.json({ items: [{ id: "conv", version: 1, project_id: null }] });
   };
   try {
-    assert.equal(await projects.findEngineProjectForWork({engineConversationId: "conv"} as Work), null);
+    assert.equal(
+      await projects.findEngineProjectForWork({ engineConversationId: "conv" } as Work),
+      null,
+    );
     assert.deepEqual(requests, ["GET"]);
-  } finally { globalThis.fetch = original; }
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 test("folder ingestion retains typed failures with file names and continues", async () => {
@@ -23,7 +28,7 @@ test("folder ingestion retains typed failures with file names and continues", as
   const files = [new File(["a"], "bad.csv"), new File(["b"], "good.csv")];
   const result = await lifecycle.ingestMaterialFiles(files, async (file) => {
     if (file.name === "bad.csv") throw cause;
-    return {materialId: "good", created: true};
+    return { materialId: "good", created: true };
   });
   assert.deepEqual(result.addedIds, ["good"]);
   assert.equal(result.failures[0].fileName, "bad.csv");

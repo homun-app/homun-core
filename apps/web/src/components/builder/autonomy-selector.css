@@ -84,13 +84,17 @@
   color: var(--popover-foreground);
   border: 1px solid var(--border);
   border-radius: var(--radius, 10px);
-  box-shadow: 0 10px 25px -4px rgba(0, 0, 0, 0.08), 0 4px 12px -2px rgba(0, 0, 0, 0.04);
+  box-shadow:
+    0 10px 25px -4px rgba(0, 0, 0, 0.08),
+    0 4px 12px -2px rgba(0, 0, 0, 0.04);
   z-index: 99999;
   overflow: hidden;
 }
 
 :is(.dark) .autonomy-popover {
-  box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.65), 0 8px 16px -6px rgba(0, 0, 0, 0.4);
+  box-shadow:
+    0 16px 36px -4px rgba(0, 0, 0, 0.65),
+    0 8px 16px -6px rgba(0, 0, 0, 0.4);
 }
 
 .autonomy-popover-header {
@@ -131,7 +135,9 @@
   width: 100%;
   text-align: left;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 
 .autonomy-option-item:hover {

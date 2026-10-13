@@ -14,18 +14,18 @@ Il perimetro di prodotto resta quello delle specifiche: motore Python indipenden
 
 ## Evidenze sul codice attuale
 
-| Osservazione | Evidenza | Revisione necessaria |
-|---|---|---|
-| Orchestrazione concentrata | `domain/service.py`: 1.712 righe, con regole, autorizzazioni, I/O file e chiamate al runtime | Separare funzionalità e dipendenze, oltre ai file |
-| Shell UI ancora estesa | `ConversationWorkspace.tsx`: 1.672 righe | Composizione dei pannelli; logica e stato separati per funzionalità |
-| Snapshot globale a ogni save | `SqliteWorkspaceRepository.save` cancella e reinserisce entities, events e commands | Transazioni incrementali su dati indicizzati e letture paginate |
-| Stato autorevole duplicato nel processo | Store globale caricato in memoria; il repository persiste successivamente | Database autorevole; cache/read model espliciti e invalidabili |
-| Deduplica incompleta | `DomainService.apply` confronta il tipo, non il payload, per un command_id esistente | Identità della richiesta persistita e controllo di contenuto, attore e workspace |
-| Identità dichiarata dal client | `_actor_from_headers` costruisce Actor da X-Homun-Actor-Id | Identità derivata da sessione verificata; membership e policy lato motore |
-| Permessi non uniformi | Le route memoria non applicano i grant di progetto come quelle dei materiali | Policy comune sulle letture, sul retrieval, sugli export e sulle azioni |
-| Durabilità dichiarata troppo presto nello stream | `/commands/stream` emette `persisted` prima di `ctx.persist()` | Eventi dopo il commit; token provvisori distinguibili da fatti durevoli |
-| Effetti avviati dentro il servizio | DomainService chiama il bridge DBOS e scrive blob | Commit del dominio e consegna al runtime con contratto di recupero |
-| Recovery incompleto | Backup attuale esclude blob; le credenziali sono JSON in chiaro con permessi 0600 | Backup coerente completo, custodia delle chiavi e procedura di ripristino |
+| Osservazione                                     | Evidenza                                                                                     | Revisione necessaria                                                             |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Orchestrazione concentrata                       | `domain/service.py`: 1.712 righe, con regole, autorizzazioni, I/O file e chiamate al runtime | Separare funzionalità e dipendenze, oltre ai file                                |
+| Shell UI ancora estesa                           | `ConversationWorkspace.tsx`: 1.672 righe                                                     | Composizione dei pannelli; logica e stato separati per funzionalità              |
+| Snapshot globale a ogni save                     | `SqliteWorkspaceRepository.save` cancella e reinserisce entities, events e commands          | Transazioni incrementali su dati indicizzati e letture paginate                  |
+| Stato autorevole duplicato nel processo          | Store globale caricato in memoria; il repository persiste successivamente                    | Database autorevole; cache/read model espliciti e invalidabili                   |
+| Deduplica incompleta                             | `DomainService.apply` confronta il tipo, non il payload, per un command_id esistente         | Identità della richiesta persistita e controllo di contenuto, attore e workspace |
+| Identità dichiarata dal client                   | `_actor_from_headers` costruisce Actor da X-Homun-Actor-Id                                   | Identità derivata da sessione verificata; membership e policy lato motore        |
+| Permessi non uniformi                            | Le route memoria non applicano i grant di progetto come quelle dei materiali                 | Policy comune sulle letture, sul retrieval, sugli export e sulle azioni          |
+| Durabilità dichiarata troppo presto nello stream | `/commands/stream` emette `persisted` prima di `ctx.persist()`                               | Eventi dopo il commit; token provvisori distinguibili da fatti durevoli          |
+| Effetti avviati dentro il servizio               | DomainService chiama il bridge DBOS e scrive blob                                            | Commit del dominio e consegna al runtime con contratto di recupero               |
+| Recovery incompleto                              | Backup attuale esclude blob; le credenziali sono JSON in chiaro con permessi 0600            | Backup coerente completo, custodia delle chiavi e procedura di ripristino        |
 
 Prova eseguita in questo turno, senza file né provider: due `conversation.create` con lo stesso command_id e titoli diversi restituiscono lo stesso risultato e mantengono il primo titolo, invece di segnalare conflitto. È una verifica della deduplica attuale, non una correzione.
 
@@ -49,19 +49,19 @@ Hermes resta riferimento per contesto, skill, ciclo degli strumenti e casi opera
 
 Un'installazione locale può contenere più moduli con confini verificabili. Separare processi soltanto dove occorre isolamento o un ciclo di vita diverso; il numero di processi non misura la modularità. Il codice di composizione collega dipendenze esplicite all'avvio e non offre un service locator globale ai moduli.
 
-| Modulo | Responsabilità e dati posseduti | Contratto verso gli altri |
-|---|---|---|
-| Identity/access | Sessioni, membership, grant, revoche | Principal verificato e decisioni di accesso |
-| Conversations | Messaggi, riferimenti, continuità, sequenza degli eventi | Letture autorizzate e append versionato |
-| Work/planning | Obiettivo, revisioni del piano, contributi, transizioni | Comandi validati, eventi e snapshot del lavoro |
-| Agent profiles | Identità e revisioni del collaboratore | Profilo eseguibile immutabile per tentativo |
-| Context | Selezione di storico, contratto, fonti e memorie | Pacchetto di contesto con provenienza e budget |
-| Agent execution | Adattamento del loop Pydantic AI e lifecycle del tentativo | Risultato, errore, contributo o azione proposta tipizzati |
-| Tool capabilities | Catalogo, connessioni, ToolGrant, invocazione controllata | Capacità utilizzabili e risultati con ricevuta |
-| Durable execution | Integrazione DBOS, attese, consegna e riconciliazione | Run/attempt e avanzamenti durevoli |
-| Materials/artifacts | Originali, versioni, estrazione, consegne | Riferimenti immutabili, hash e contenuto autorizzato |
-| Knowledge/skills | Lezioni, procedure, approvazioni e indice | Recall/procedura con ambito, fonte e versione |
-| Usage/budgets | Consumi, riserve, limiti e riconciliazione | Autorizzazione della spesa e registrazione per tentativo |
+| Modulo              | Responsabilità e dati posseduti                            | Contratto verso gli altri                                 |
+| ------------------- | ---------------------------------------------------------- | --------------------------------------------------------- |
+| Identity/access     | Sessioni, membership, grant, revoche                       | Principal verificato e decisioni di accesso               |
+| Conversations       | Messaggi, riferimenti, continuità, sequenza degli eventi   | Letture autorizzate e append versionato                   |
+| Work/planning       | Obiettivo, revisioni del piano, contributi, transizioni    | Comandi validati, eventi e snapshot del lavoro            |
+| Agent profiles      | Identità e revisioni del collaboratore                     | Profilo eseguibile immutabile per tentativo               |
+| Context             | Selezione di storico, contratto, fonti e memorie           | Pacchetto di contesto con provenienza e budget            |
+| Agent execution     | Adattamento del loop Pydantic AI e lifecycle del tentativo | Risultato, errore, contributo o azione proposta tipizzati |
+| Tool capabilities   | Catalogo, connessioni, ToolGrant, invocazione controllata  | Capacità utilizzabili e risultati con ricevuta            |
+| Durable execution   | Integrazione DBOS, attese, consegna e riconciliazione      | Run/attempt e avanzamenti durevoli                        |
+| Materials/artifacts | Originali, versioni, estrazione, consegne                  | Riferimenti immutabili, hash e contenuto autorizzato      |
+| Knowledge/skills    | Lezioni, procedure, approvazioni e indice                  | Recall/procedura con ambito, fonte e versione             |
+| Usage/budgets       | Consumi, riserve, limiti e riconciliazione                 | Autorizzazione della spesa e registrazione per tentativo  |
 
 Storage, cifratura, segreti, API e telemetria forniscono adattatori ai contratti. Non devono diventare nuove directory generiche che possiedono tutte le regole. Moduli che condividono una transazione possono usare la stessa unità di lavoro, senza accedere direttamente alle tabelle altrui.
 
@@ -109,14 +109,14 @@ Limiti per run e budget del lavoro comprendono figli, retry, sintesi e altri con
 
 La revisione del confronto Hermes è questa: il contesto rimane la prima grande capacità agentica da completare, ma deve poggiare su garanzie transazionali, identità e moduli già corretti.
 
-| Tranche | Contenuto | Condizione per chiuderla |
-|---|---|---|
-| A. Baseline e decisioni di fondazione | Stato attuale reviewabile; mappa dei moduli/dipendenze; contratti e invarianti; prove di cifratura, segreti e packaging; CI | Decisioni tecniche motivate da prove; elenco di ciò che si conserva e migra; nessun comportamento noto perso |
-| B. Nucleo transazionale e modulare | Estrarre handler/regole/repository; schema incrementale e migrazioni; deduplica completa; outbox; sessione verificata e policy comune; API sottili | Concorrenza, replay, rollback, revoca e crash tra commit/consegna verificati; niente stato globale autorevole |
-| C. Lifecycle e recupero dei dati | Blob/versioni, cifratura scelta, segreti OS, backup completo, restore e upgrade; startup/shutdown verificati | Mac pulito: installazione, import, riavvio, upgrade e restore senza perdita delle fonti e senza esiti inventati |
-| D. Fondamenta agentiche | Context, runner Pydantic AI, registry capacità, budget, streaming/cancel e collegamento DBOS | Sessioni lunghe, tool multipli, errori, contributi, interruzioni e revoche corretti con provider reale |
-| E. Conoscenza e consegne | Skill, apprendimento supervisionato, artifact e review per versione | Lezione applicata nel proprio ambito; risultato correggibile; approvazione invalida dopo modifica |
-| F. Collaborazione e verifica del prodotto | Collegamento autorizzato tra installazioni e workflow di prodotto sulle stesse API | Due installazioni, rete interrotta/revoca/ripresa, scenari aziendali e limiti operativi verificati |
+| Tranche                                   | Contenuto                                                                                                                                          | Condizione per chiuderla                                                                                        |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| A. Baseline e decisioni di fondazione     | Stato attuale reviewabile; mappa dei moduli/dipendenze; contratti e invarianti; prove di cifratura, segreti e packaging; CI                        | Decisioni tecniche motivate da prove; elenco di ciò che si conserva e migra; nessun comportamento noto perso    |
+| B. Nucleo transazionale e modulare        | Estrarre handler/regole/repository; schema incrementale e migrazioni; deduplica completa; outbox; sessione verificata e policy comune; API sottili | Concorrenza, replay, rollback, revoca e crash tra commit/consegna verificati; niente stato globale autorevole   |
+| C. Lifecycle e recupero dei dati          | Blob/versioni, cifratura scelta, segreti OS, backup completo, restore e upgrade; startup/shutdown verificati                                       | Mac pulito: installazione, import, riavvio, upgrade e restore senza perdita delle fonti e senza esiti inventati |
+| D. Fondamenta agentiche                   | Context, runner Pydantic AI, registry capacità, budget, streaming/cancel e collegamento DBOS                                                       | Sessioni lunghe, tool multipli, errori, contributi, interruzioni e revoche corretti con provider reale          |
+| E. Conoscenza e consegne                  | Skill, apprendimento supervisionato, artifact e review per versione                                                                                | Lezione applicata nel proprio ambito; risultato correggibile; approvazione invalida dopo modifica               |
+| F. Collaborazione e verifica del prodotto | Collegamento autorizzato tra installazioni e workflow di prodotto sulle stesse API                                                                 | Due installazioni, rete interrotta/revoca/ripresa, scenari aziendali e limiti operativi verificati              |
 
 Le identità e i contratti peer si definiscono in A/B; il trasporto e la collaborazione completi si validano in F. Nessuna promessa di collaborazione produttiva prima di quel gate. Stessa logica per le altre capacità: assenti o dichiaratamente non rilasciate fino alla prova, senza fallback sulla simulazione.
 
@@ -149,7 +149,6 @@ Le soglie prestazionali e i modelli supportati si fissano in A usando hardware e
 ## Decisione da prendere
 
 Adottare questa sequenza come revisione delle priorità, confermando lo stack esistente. Il primo impegno è A+B: confini dei moduli e nucleo affidabile dei comandi, con scelte di dati/identità/cifratura/packaging verificate prima di estendere l'esecuzione agentica. Le milestone precedenti restano evidenze di componenti implementati; non vengono presentate come certificazione di produzione.
-
 
 ## Attuazione autorizzata — 19 settembre 2026
 

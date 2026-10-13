@@ -10,10 +10,10 @@ Receipt resumes the model once; only the final agent result becomes an artifact.
 - [x] Stage action + waiting_external atomically; bind proposal to run epoch/call.
 - [x] Validate current run before external dispatch; cancellation fences approvals.
 - [x] Preserve receipt independently, resume through DBOS reconciliation without
-  duplicate effects, allow model correction after known tool/preflight errors.
+      duplicate effects, allow model correction after known tool/preflight errors.
 - [x] UI server selection, tool summary and exact per-action approval panel.
 - [x] Tests for normal path, crash/replay, unavailable tools, cancellation, drift;
-  real MCP/model evidence; independent review and full regression; local merge.
+      real MCP/model evidence; independent review and full regression; local merge.
 
 Scope is native tools only; legacy JSON runs retain previous surface. Unknown
 external outcomes block the run for reconciliation; never auto-retry them. MCP

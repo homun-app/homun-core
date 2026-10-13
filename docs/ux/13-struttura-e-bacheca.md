@@ -1,7 +1,9 @@
 # Struttura visiva e Kanban operativo
+
 16 settembre 2026.
 
 ## Regole per la baseline
+
 - Navigazione dello spazio in alto: Home, collaboratori, automazioni, documenti,
   plugin. Stesso peso visivo. Squadra e progetti sono contenuti espandibili sotto;
   profilo e impostazioni restano in fondo.
@@ -23,6 +25,7 @@ e [NN/g, progressive disclosure](https://www.nngroup.com/articles/progressive-di
 Questi principi guidano le scelte; non costituiscono una certificazione di accessibilità.
 
 ## Modifiche
+
 Sidebar riordinata; titoli compatti e nomi diretti per squadra/progetti.
 Riepilogo generico per tutti i compiti non guidati, oltre alla demo assistita.
 Bacheca con drag and drop e menu Sposta. Colonne con larghezza minima leggibile.
@@ -30,6 +33,7 @@ Regole comuni di transizione per bacheca, riepilogo e selettore di stato.
 I cambiamenti riconciliano dipendenze sequenziali e consegne.
 
 ## Evidenza e limiti
+
 Ispezionate screenshot e navigazione di Home, squadra, progetti, bacheca,
 documenti, plugin, automazioni, impostazioni e compito. Non ogni configurazione
 o combinazione di ruoli è stata provata.
@@ -45,8 +49,10 @@ locale. Le colonne descrivono stati del sistema; colonne personalizzate e corsie
 non sono implementate. Non è stata provata una reale sessione multiutente.
 
 ## Chiusura della baseline: cosa rimane
+
 La struttura navigabile è più coerente; non dichiarare l’intero prodotto definitivo.
 Prima di fissare i contratti del motore, completare:
+
 1. identità/versioni comuni degli allegati e anteprime di risultati diversi;
 2. rappresentazione dell’autonomia per competenza e della formazione supervisionata;
 3. fonti e connessioni disponibili, indisponibili o da autorizzare;

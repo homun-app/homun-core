@@ -7,10 +7,7 @@ import { useRef, useState } from "react";
 import type { Work } from "./conversation-types";
 import { useProjectMaterials } from "@/hooks/useProjectMaterials";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
-import {
-  eligibleForPreparation,
-  READ_UPLOAD_EXTENSIONS,
-} from "@/lib/engine-material-selection";
+import { eligibleForPreparation, READ_UPLOAD_EXTENSIONS } from "@/lib/engine-material-selection";
 import "./engine-tool-chain.css";
 import "./engine-material-selection.css";
 
@@ -75,7 +72,11 @@ export function EngineWorkNeedsCard({
           {sources.materials.map((material) => {
             const name = material.origin_name ?? material.title;
             return (
-              <li key={material.id} className="cw-material-row" title={`SHA-256: ${material.content_hash}`}>
+              <li
+                key={material.id}
+                className="cw-material-row"
+                title={`SHA-256: ${material.content_hash}`}
+              >
                 <span className="cw-material-row__text">
                   <span className="cw-material-row__name">{name}</span>
                   <small className="cw-material-row__meta">
@@ -121,8 +122,8 @@ export function EngineWorkNeedsCard({
       </div>
       {notice && <p className="cw-hint">{notice}</p>}
       <p className="cw-intake-note">
-        I file restano nel progetto. Quando sono pronti, rivedi l'accordo in chat dicendo cosa
-        fare: per esempio «ora confronta i due listini».
+        I file restano nel progetto. Quando sono pronti, rivedi l'accordo in chat dicendo cosa fare:
+        per esempio «ora confronta i due listini».
       </p>
       <input
         ref={filesInput}

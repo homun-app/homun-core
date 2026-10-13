@@ -1,19 +1,6 @@
 import { useMemo, useState } from "react";
-import {
-  Plus,
-  Search,
-  Zap,
-  ShieldCheck,
-  Eye,
-  Paperclip,
-  AtSign,
-  Check,
-} from "lucide-react";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@homun/ui/components/popover";
+import { Plus, Search, Zap, ShieldCheck, Eye, Paperclip, AtSign, Check } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@homun/ui/components/popover";
 import type { AutonomyLevel } from "./conversation-preferences";
 import "./composer-plus-menu.css";
 
@@ -121,12 +108,7 @@ export function ComposerPlusMenu({
         </button>
       </PopoverTrigger>
 
-      <PopoverContent
-        side="top"
-        align="start"
-        sideOffset={10}
-        className="composer-plus-popover"
-      >
+      <PopoverContent side="top" align="start" sideOffset={10} className="composer-plus-popover">
         <div className="composer-plus-search">
           <Search size={13} />
           <input
@@ -155,10 +137,7 @@ export function ComposerPlusMenu({
                       setOpen(false);
                     }}
                   >
-                    <div
-                      className="composer-plus-item-icon"
-                      style={{ color: mode.color }}
-                    >
+                    <div className="composer-plus-item-icon" style={{ color: mode.color }}>
                       <Icon size={14} />
                     </div>
                     <div className="composer-plus-item-body">

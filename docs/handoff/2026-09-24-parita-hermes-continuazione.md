@@ -3,7 +3,6 @@
 Data: 25 settembre 2026. Checkpoint del codice: tip locale `fabio/hermes-parity` / `main` (nessun push; vedi git log -1).
 Questo documento trasferisce il lavoro a un'altra chat. Non certifica parità raggiunta.
 
-
 ## Progresso 24–25 settembre 2026
 
 Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
@@ -48,7 +47,6 @@ Commit locali su `fabio/hermes-parity` (ff su main locale, nessun push):
 **Prossimo passo eseguibile:** prove live con credenziali; prove provider con credenziali; H39 / H40 / H41 / H43 / H45 continuazione parità verso chiusura integrale H01–H46.
 
 **Blocchi esterni (non inventare):** token canali reali; TCC Accessibility/Screen Recording per prove H16 live macOS; DISPLAY + xdotool su Linux; `HOMUN_MODAL_ALLOW_LIVE` / `HOMUN_DAYTONA_ALLOW_LIVE` + SDK per prove cloud a pagamento; Copilot CLI con `--acp` per prova H39 live.
-
 
 ## 1. Obiettivo e decisioni già prese
 
@@ -160,13 +158,13 @@ a tutte le varianti upstream, non righe Hxx automaticamente concluse.
 
 Ultime tranche, tutte integrate localmente:
 
-| Commit | Risultato |
-| --- | --- |
-| `f1d2c740` | Backend Docker proprio, riconnettibile, intenti durevoli |
-| `6b6261b8` | Proposte terminali e approvazioni esatte persistenti |
+| Commit     | Risultato                                                     |
+| ---------- | ------------------------------------------------------------- |
+| `f1d2c740` | Backend Docker proprio, riconnettibile, intenti durevoli      |
+| `6b6261b8` | Proposte terminali e approvazioni esatte persistenti          |
 | `02a30302` | Chiamata terminale dal modello e ripresa con receipt canonica |
-| `3ab790cd` | Durata approvata e watchdog durevole |
-| `f505e160` | File del workspace e consegne immutabili scaricabili |
+| `3ab790cd` | Durata approvata e watchdog durevole                          |
+| `f505e160` | File del workspace e consegne immutabili scaricabili          |
 
 ### Terminale
 
@@ -212,19 +210,19 @@ né gestione definitiva retention/quota/revisione allegati.
 Percorsi relativi alla radice repository; i moduli applicativi sono sotto
 `engine/src/homun/application/` salvo indicazione diversa.
 
-| Area | Moduli da leggere |
-| --- | --- |
-| Run, consenso, esecuzione | `agent_runs.py`, `agent_run_execution.py`, `agent_native.py` |
-| Registro e bridge | `agent_tool_registry.py`, `agent_tool_bridge.py`, `engine/src/homun/tools/registry.py` |
-| MCP esterno | `agent_external.py`, `agent_external_link.py`, `external_tools.py` |
-| Risultati grandi | `agent_results.py` |
-| Ripresa workflow | `engine/src/homun/runtime/workflows/agent_run.py` |
-| Backend | `engine/src/homun/execution/contracts.py`, `cli.py`, `docker.py` |
-| Terminale applicativo | `terminal_contracts.py`, `terminal_jobs.py`, `terminal_state.py`, `terminal_watchdog.py` |
-| Terminale nativo | `agent_terminal_contracts.py`, `agent_terminal_link.py`, `agent_terminal.py` |
-| Accesso file | `engine/src/homun/execution/files.py` |
-| Tool file | `workspace_file_contracts.py`, `workspace_files.py` |
-| Download e GC | `work_outputs.py`, `material_ingest.py` |
+| Area                      | Moduli da leggere                                                                        |
+| ------------------------- | ---------------------------------------------------------------------------------------- |
+| Run, consenso, esecuzione | `agent_runs.py`, `agent_run_execution.py`, `agent_native.py`                             |
+| Registro e bridge         | `agent_tool_registry.py`, `agent_tool_bridge.py`, `engine/src/homun/tools/registry.py`   |
+| MCP esterno               | `agent_external.py`, `agent_external_link.py`, `external_tools.py`                       |
+| Risultati grandi          | `agent_results.py`                                                                       |
+| Ripresa workflow          | `engine/src/homun/runtime/workflows/agent_run.py`                                        |
+| Backend                   | `engine/src/homun/execution/contracts.py`, `cli.py`, `docker.py`                         |
+| Terminale applicativo     | `terminal_contracts.py`, `terminal_jobs.py`, `terminal_state.py`, `terminal_watchdog.py` |
+| Terminale nativo          | `agent_terminal_contracts.py`, `agent_terminal_link.py`, `agent_terminal.py`             |
+| Accesso file              | `engine/src/homun/execution/files.py`                                                    |
+| Tool file                 | `workspace_file_contracts.py`, `workspace_files.py`                                      |
+| Download e GC             | `work_outputs.py`, `material_ingest.py`                                                  |
 
 Cercare con `rg --files` i file UI/API per individuarne il percorso effettivo:
 `EngineAgentRun.tsx`, `EngineAgentTerminalApproval.tsx`, `EngineWorkOutputs.tsx`,
@@ -361,17 +359,17 @@ Stato della matrice al checkpoint: H01, H02, H05, H06, H07, H09, H10, H11,
 H36, H40 parziali; le altre righe non verificate. “Non verificato” non significa
 necessariamente assente: ispezionare prima il codice Homun.
 
-| ID | Ambito da chiudere secondo i dettagli e cataloghi della matrice |
-| --- | --- |
-| H01–H04 | Loop, streaming/uso/budget, controlli, domande laterali, prompt/istruzioni |
-| H05–H08 | Contesto/cache/compressione, recovery/provider, registry, chiarimenti |
-| H09–H13 | Terminale, tutti i backend, file/LSP, rollback/worktree, Python/RPC |
-| H14–H16 | Web, browser, computer e desktop |
-| H17–H20 | Memoria, motori sostituibili, caricamento e ciclo di vita skill |
-| H21–H24 | Subagenti, completamento durevole, Kanban, advisor/aggregazione |
-| H25–H29 | Obiettivi, heartbeat, proattività, scheduler e sue garanzie operative |
-| H30–H35 | Sessioni, storage, gateway, canali, superfici CLI/UI, API compatibili |
-| H36–H40 | MCP completo, plugin, provider, adapter alternativi, sicurezza/consensi |
+| ID      | Ambito da chiudere secondo i dettagli e cataloghi della matrice             |
+| ------- | --------------------------------------------------------------------------- |
+| H01–H04 | Loop, streaming/uso/budget, controlli, domande laterali, prompt/istruzioni  |
+| H05–H08 | Contesto/cache/compressione, recovery/provider, registry, chiarimenti       |
+| H09–H13 | Terminale, tutti i backend, file/LSP, rollback/worktree, Python/RPC         |
+| H14–H16 | Web, browser, computer e desktop                                            |
+| H17–H20 | Memoria, motori sostituibili, caricamento e ciclo di vita skill             |
+| H21–H24 | Subagenti, completamento durevole, Kanban, advisor/aggregazione             |
+| H25–H29 | Obiettivi, heartbeat, proattività, scheduler e sue garanzie operative       |
+| H30–H35 | Sessioni, storage, gateway, canali, superfici CLI/UI, API compatibili       |
+| H36–H40 | MCP completo, plugin, provider, adapter alternativi, sicurezza/consensi     |
 | H41–H46 | Media/voce, deliverable, integrazioni, setup/distribuzione, eval, cataloghi |
 
 Leggere le righe singole nella matrice: questa tabella è soltanto un indice.

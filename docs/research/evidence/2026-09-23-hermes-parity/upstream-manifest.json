@@ -47826,13 +47826,8 @@
   "reference_repository": "https://github.com/NousResearch/hermes-agent",
   "schema_version": 1,
   "selection": {
-    "additional_root_patterns": [
-      "hermes_state*",
-      "setup-hermes*"
-    ],
-    "excluded_basename_prefixes": [
-      ".env"
-    ],
+    "additional_root_patterns": ["hermes_state*", "setup-hermes*"],
+    "excluded_basename_prefixes": [".env"],
     "excluded_components": [
       ".git",
       ".venv",
@@ -47843,14 +47838,7 @@
       ".mypy_cache",
       "secrets"
     ],
-    "excluded_extensions": [
-      ".pyc",
-      ".pyo",
-      ".pem",
-      ".key",
-      ".p12",
-      ".pfx"
-    ],
+    "excluded_extensions": [".pyc", ".pyo", ".pem", ".key", ".p12", ".pfx"],
     "root_files": [
       "COMPAT_MANIFEST.md",
       "Dockerfile",

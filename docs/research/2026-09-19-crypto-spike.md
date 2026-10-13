@@ -15,19 +15,19 @@
 
 ## Risultati osservati
 
-| Verifica sintetica | Risultato |
-| --- | --- |
-| `PRAGMA cipher_version` | `4.12.0 community` |
-| `PRAGMA journal_mode=WAL` | `wal` |
-| WAL presente dopo commit | sì |
-| Stringa del record in chiaro nel WAL | non trovata; controllo limitato, non audit crittografico |
-| Riapertura con chiave corretta | record recuperato |
-| SQLite standard senza chiave | lettura schema rifiutata |
-| SQLCipher con chiave errata | lettura schema rifiutata |
+| Verifica sintetica                                    | Risultato                                                         |
+| ----------------------------------------------------- | ----------------------------------------------------------------- |
+| `PRAGMA cipher_version`                               | `4.12.0 community`                                                |
+| `PRAGMA journal_mode=WAL`                             | `wal`                                                             |
+| WAL presente dopo commit                              | sì                                                                |
+| Stringa del record in chiaro nel WAL                  | non trovata; controllo limitato, non audit crittografico          |
+| Riapertura con chiave corretta                        | record recuperato                                                 |
+| SQLite standard senza chiave                          | lettura schema rifiutata                                          |
+| SQLCipher con chiave errata                           | lettura schema rifiutata                                          |
 | Backup tramite API nativa verso connessione già keyed | record recuperabile con chiave; SQLite standard rifiuta il backup |
-| DBOS 3 con engine SQLAlchemy personalizzato | migrazioni completate, 12 tabelle create |
-| Workflow DBOS sintetico | completato, risultato atteso |
-| Database DBOS via SQLite standard / chiave errata | entrambe le letture rifiutate |
+| DBOS 3 con engine SQLAlchemy personalizzato           | migrazioni completate, 12 tabelle create                          |
+| Workflow DBOS sintetico                               | completato, risultato atteso                                      |
+| Database DBOS via SQLite standard / chiave errata     | entrambe le letture rifiutate                                     |
 
 L'output JSON integrale contiene tutte le verifiche sopra come valori `true`, oltre a versione, modalità WAL e numero di tabelle. Il processo ha scritto log delle migrazioni fino alla versione 114 e `DBOS successfully shut down`.
 

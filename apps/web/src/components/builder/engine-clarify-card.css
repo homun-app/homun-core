@@ -47,7 +47,9 @@
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.875rem;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .cw-clarify-choice:hover {

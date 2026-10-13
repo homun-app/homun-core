@@ -24,7 +24,8 @@ export const it = {
     corrections_placeholder: "Descrivi cosa correggere nei materiali o nel risultato",
     approved_status: "Risultato approvato: lavoro completato.",
     phase_verified: "Fase verificata: il lavoro passa a «{next}».",
-    changes_requested_status: "Correzioni richieste. Seleziona i materiali aggiornati e prepara una nuova proposta da approvare.",
+    changes_requested_status:
+      "Correzioni richieste. Seleziona i materiali aggiornati e prepara una nuova proposta da approvare.",
     files_produced: "File prodotti",
     files_produced_desc: "Copie salvate per la tua verifica. Non sono risultati già approvati.",
   },
@@ -37,13 +38,17 @@ export const it = {
   },
   gateway: {
     title: "Supervisione e Canali Esterni",
-    description: "Collega Telegram o Slack per ricevere notifiche su chiarimenti e deliverable pronti, rispondendo direttamente dal cellulare.",
+    description:
+      "Collega Telegram o Slack per ricevere notifiche su chiarimenti e deliverable pronti, rispondendo direttamente dal cellulare.",
     authorized_channels: "Canali autorizzati",
-    no_channels: "Nessun canale esterno collegato. Le notifiche e le decisioni restano esclusive del browser.",
+    no_channels:
+      "Nessun canale esterno collegato. Le notifiche e le decisioni restano esclusive del browser.",
     pending_requests: "Richieste di accoppiamento in attesa",
-    pending_desc: "Questi codici sono stati inviati da Telegram o Slack e attendono la tua autorizzazione.",
+    pending_desc:
+      "Questi codici sono stati inviati da Telegram o Slack e attendono la tua autorizzazione.",
     has_code_prompt: "Hai un codice ricevuto dal Bot?",
-    has_code_desc: "Se hai avviato il bot su Telegram e ti ha fornito un codice a 8 caratteri, inseriscilo qui:",
+    has_code_desc:
+      "Se hai avviato il bot su Telegram e ti ha fornito un codice a 8 caratteri, inseriscilo qui:",
     generate_title: "Genera codice di accoppiamento",
     generate_desc: "Crea un codice a 8 caratteri con validità di 1 ora da inviare al bot:",
     generate_btn: "Genera codice per {platform}",
@@ -89,7 +94,8 @@ export const it = {
   },
   documents: {
     title: "Documenti",
-    subtitle: "Ogni documento qui dentro è un risultato approvato da te: confronti, sintesi, consegne finali. Restano nel motore, pronti quando servono.",
+    subtitle:
+      "Ogni documento qui dentro è un risultato approvato da te: confronti, sintesi, consegne finali. Restano nel motore, pronti quando servono.",
     verified_single: "risultato verificato",
     verified_multiple: "risultati verificati",
     search_placeholder: "Cerca per titolo, lavoro o contenuto…",
@@ -99,9 +105,11 @@ export const it = {
   },
   routines: {
     title: "Automazioni",
-    subtitle: "Ogni routine ripete l'affidamento, mai l'approvazione: a ogni ricorrenza nasce un lavoro vero che aspetta il tuo via, con revisione finale.",
+    subtitle:
+      "Ogni routine ripete l'affidamento, mai l'approvazione: a ogni ricorrenza nasce un lavoro vero che aspetta il tuo via, con revisione finale.",
     active_count: "{count} attive",
-    empty: "Nessuna routine. Apri un lavoro riuscito e scegli «Rendi ripetibile» dal suo riepilogo.",
+    empty:
+      "Nessuna routine. Apri un lavoro riuscito e scegli «Rendi ripetibile» dal suo riepilogo.",
     pause: "Metti in pausa",
     resume: "Riprendi",
     stop: "Interrompi",
@@ -109,7 +117,8 @@ export const it = {
   },
   goals: {
     title: "Obiettivi multi-turno",
-    subtitle: "Contratti di verifica, barriere di attesa e criteri deterministici per compiti a lungo termine.",
+    subtitle:
+      "Contratti di verifica, barriere di attesa e criteri deterministici per compiti a lungo termine.",
     active_goals: "Obiettivi attivi",
     no_goals: "Nessun obiettivo attivo configurato.",
     contract: "Contratto di verifica",

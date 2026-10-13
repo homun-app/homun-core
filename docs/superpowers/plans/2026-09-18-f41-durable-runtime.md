@@ -14,17 +14,17 @@
 
 ## Files
 
-| Path | Role |
-|------|------|
-| `engine/src/homun/runtime/` | Package: capabilities + DBOS + receipts + bridge |
-| `engine/src/homun/domain/models.py` | `Run` entity |
-| `engine/src/homun/domain/store.py` | `runs` dict |
-| `engine/src/homun/storage/sqlite.py` | Persist `run` kind |
-| `engine/src/homun/domain/service.py` | Wire start/contribute → bridge |
-| `engine/src/homun/routes/domain.py` | `GET .../runs/{id}`, `GET .../works/{id}/run` |
-| `engine/src/homun/app.py` / `context.py` | Launch/shutdown DBOS with lifespan |
-| `engine/pyproject.toml` | Add `dbos` dependency |
-| `engine/tests/test_f41_durable_runtime.py` | Receipts + happy path + reconcile |
+| Path                                       | Role                                             |
+| ------------------------------------------ | ------------------------------------------------ |
+| `engine/src/homun/runtime/`                | Package: capabilities + DBOS + receipts + bridge |
+| `engine/src/homun/domain/models.py`        | `Run` entity                                     |
+| `engine/src/homun/domain/store.py`         | `runs` dict                                      |
+| `engine/src/homun/storage/sqlite.py`       | Persist `run` kind                               |
+| `engine/src/homun/domain/service.py`       | Wire start/contribute → bridge                   |
+| `engine/src/homun/routes/domain.py`        | `GET .../runs/{id}`, `GET .../works/{id}/run`    |
+| `engine/src/homun/app.py` / `context.py`   | Launch/shutdown DBOS with lifespan               |
+| `engine/pyproject.toml`                    | Add `dbos` dependency                            |
+| `engine/tests/test_f41_durable_runtime.py` | Receipts + happy path + reconcile                |
 
 ---
 

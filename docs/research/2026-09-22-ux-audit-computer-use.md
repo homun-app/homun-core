@@ -12,7 +12,7 @@
   alcuna etichetta visibile** «Fonte: simulazione | motore» → G6 violato (D4), ed è proprio
   la mescolanza silenziosa che le regole di repo vietano.
 - **Nota ambiente**: la shell Electron (`npm run desktop:dev`) è stata avviata ma non era
-  automatizzabile: l'helper Computer Use di ZCode non ha il permesso *Accessibilità* di macOS
+  automatizzabile: l'helper Computer Use di ZCode non ha il permesso _Accessibilità_ di macOS
   (concessione solo da System Settings, intervento utente). Sessione proseguita sulla
   superficie web prevista dalla procedura.
 - Durante la sessione il motore su 8765 è stato **riavviato** (stesso profilo, stessa porta)
@@ -36,6 +36,7 @@ onesta in chat, nessun lavoro forzato (G5 ok).
 ## Diario UX
 
 ### Interazione 0 — Avvio, Panoramica iniziale
+
 - [COSA VEDO] Panoramica «Il tuo spazio»: un solo invito centrale («Scrivi cosa vuoi ottenere.
   Decidiamo insieme come farlo.»), esempio pratico, casella di messaggio in basso con invio
   disabilitato, nota «Archivio locale», campanella notifiche (badge 2), toggle sidebar e
@@ -47,6 +48,7 @@ onesta in chat, nessun lavoro forzato (G5 ok).
 - Evidenza: `assets/2026-09-22-ux-audit/step-00-panoramica-iniziale.png`
 
 ### Interazione 1 — Invio del bisogno
+
 - [COSA VEDO] Dopo l'invio: casella svuotata, invio di nuovo disabilitato, stato
   «Homun sta elaborando…» con pulsante «Annulla». Il messaggio inviato NON appare in chat
   durante l'attesa; l'hero resta finché l'interpretazione non arriva.
@@ -57,6 +59,7 @@ onesta in chat, nessun lavoro forzato (G5 ok).
 - Evidenza: `assets/2026-09-22-ux-audit/step-01b-elaborazione.png`
 
 ### Interazione 2 — Proposta di lavoro
+
 - [COSA VEDO] Conversazione creata e intitolata «Monitoraggio preventivi e risposte»; mio
   messaggio riportato in chat; regione «Proposta di lavoro» con riepilogo, attività prevista,
   risultato atteso, responsabile proposto (Elena · Coordinatore Preventivi), motivazione
@@ -70,12 +73,14 @@ onesta in chat, nessun lavoro forzato (G5 ok).
 - Evidenza: `assets/2026-09-22-ux-audit/step-02-proposta-post-refresh.png`
 
 ### Test G7 — Refresh a metà flusso
+
 - [COSA VEDO] F5 con proposta in attesa di conferma: la conversazione torna identica
   (messaggio, proposta, CTA, pannello riepilogo, badge 3). Nessuna perdita, nessun avviso
   necessario perché lo stato è integro.
 - [GIUDIZIO] **Eccellente** — G7 superato su refresh a metà flusso (prima della conferma).
 
 ### Interazione 3 — Conferma: «Crea il collaboratore e affida»
+
 - [COSA VEDO] La proposta diventa «ACCORDO DI LAVORO», stato «Concordato · in preparazione»,
   responsabile Elena attiva. Compare la scheda «Cosa serve ora» con i prerequisiti e i
   pulsanti «Aggiungi file»/«Aggiungi cartella», più la guida: «rivedi l'accordo in chat
@@ -85,6 +90,7 @@ onesta in chat, nessun lavoro forzato (G5 ok).
 - Evidenza: `assets/2026-09-22-ux-audit/step-03-accordo-cosa-serve-ora.png`
 
 ### Interazione 4 — Invio dei dati in chat (come suggerito dall'app)
+
 - [COSA VEDO] Messaggio riportato subito in chat; attese oneste e a fasi («sta leggendo il
   messaggio…» → «sta preparando la proposta di accordo…») con contatore dei secondi;
   pulsanti del pannello disabilitati durante l'invio. MA dopo ~55 s l'accordo sparisce e
@@ -100,6 +106,7 @@ onesta in chat, nessun lavoro forzato (G5 ok).
   dati riavvia l'intake invece di aggiornare il lavoro concordato. → RIPARAZIONE (D1).
 
 ### Interazione 5 — Recupero via chat («non creare Bruno, usa Elena»)
+
 - [COSA VEDO] La proposta aggiornata rimuove Bruno («Collaboratore: Bruno → —», «Nessun
   collaboratore selezionato»); il pannello destro però continua a indicare
   «Responsabile: Elena». Al click su «Conferma il riepilogo» compare l'avviso tipizzato:
@@ -110,6 +117,7 @@ onesta in chat, nessun lavoro forzato (G5 ok).
 - [GIUDIZIO] **Accettabile** — recupero possibile ma contorto.
 
 ### Interazione 6 — Refresh dopo 409, riconferma, menzione @
+
 - [COSA VEDO] Dopo F5 lo stato è intatto e l'avviso è scomparso (G7 ok); la riconferma
   funziona: accordo «Report preventivi attivi e scaduti», «Concordato · in preparazione».
   Però in chat l'accordo dice «Responsabile: Nessun collaboratore selezionato» mentre il
@@ -122,6 +130,7 @@ onesta in chat, nessun lavoro forzato (G5 ok).
 - Evidenza: `assets/2026-09-22-ux-audit/step-04-stato-blocco-accordo.png`
 
 ### Verifica G6 — Etichetta «Fonte: simulazione | motore»
+
 - [COSA VEDO] In nessuna schermata visitata (principale, sidebar aperta, impostazioni →
   Spazio e profilo / Modelli e budget / Dati della demo) compare l'etichetta
   «Fonte: simulazione | motore». Presenti solo indicatori indiretti («Sessione locale»,
@@ -135,6 +144,7 @@ onesta in chat, nessun lavoro forzato (G5 ok).
 ## Riparazioni (modalità RIPARAZIONE)
 
 ### D1 — La revisione post-accordo scartava il collaboratore in carica
+
 - **Sintomo**: dopo l'accordo con Elena, l'invio in chat dei materiali (come suggerito
   dall'app) generava una NUOVA proposta «PRIMA DI COMINCIARE» con un nuovo collaboratore
   (Bruno, duplicato del ruolo), tornando a «In attesa della tua conferma». Il percorso
@@ -160,6 +170,7 @@ onesta in chat, nessun lavoro forzato (G5 ok).
 - Evidenza prima: `step-04-stato-blocco-accordo.png`; dopo: `step-05-dopo-fix-revisione-elena.png`.
 
 ### D2 — La menzione @ non trovava i membri della squadra del motore
+
 - **Sintomo**: «@Elena» → «Riferimenti disponibili: Nessun risultato» pur esistendo Elena
   in Squadra; l'aiuto a schermo promette «Usa @ per un collaboratore».
 - **Causa**: i riferimenti del composer derivavano solo dagli scenari demo (simulazione);
@@ -178,6 +189,7 @@ esistente. Nessun commit eseguito (non richiesto).
 ## Diario UX (dopo le riparazioni)
 
 ### Interazione 7 — Ripresa dal punto d'interruzione (post-fix)
+
 - [COSA VEDO] «@Elena» ora propone Elena nel menu menzioni; il messaggio con dati viene
   riportato subito in chat; attese a fasi con contatore; dopo ~40 s la revisione mostra
   «Cosa cambia»: Vincoli aggiunti e «Collaboratore: — → Elena»; «Ti propongo: Elena»;
@@ -186,6 +198,7 @@ esistente. Nessun commit eseguito (non richiesto).
 - Evidenza: `step-05-dopo-fix-revisione-elena.png`
 
 ### Interazione 8 — Chiusura dell'incarico (tentativo)
+
 - [COSA VEDO] Menu Azioni della chat: Rinomina / Sposta in un progetto / Crea progetto /
   Rendi ricorrente — **nessuna chiusura**. Vista Compiti: filtro di ricerca efficace
   (1 risultato), pannello dettagli con scadenza e solo «Apri conversazione». Nessuna
@@ -198,6 +211,7 @@ esistente. Nessun commit eseguito (non richiesto).
   «Da concordare» in momenti diversi della navigazione (D9).
 
 ### Interazione 9 — Variante: input volutamente sbagliato/parziale
+
 - [COSA VEDO] Inviato «prevented» (vago, errato). Homun risponde in chat: «Il messaggio
   'prevented' è ambiguo… ho bisogno di sapere esattamente cosa è stato prevenuto e in
   quale contesto», spiegando che nessun lavoro è stato avviato e nessun collaboratore
@@ -216,6 +230,7 @@ Su richiesta del titolare, tutti i difetti in backlog sono stati corretti e veri
 TIME_WAIT — `[Errno 48] Address already in use` incontrato due volte in sessione).
 
 ### D7 — Chiusura dei lavori di sola preparazione
+
 - Scoperta: il comando **`work.cancel` esisteva già nel motore** (handler, policy, transizione
   DRAFT→CANCELLED, test dedicati) — era la web a non esporlo mai.
 - Fix (web): nuovo `apps/web/src/lib/engine-work-lifecycle.ts` (`closeEngineWork` →
@@ -228,16 +243,19 @@ TIME_WAIT — `[Errno 48] Address already in use` incontrato due volte in sessio
   «Chiuso», nota «Lavoro chiuso senza eseguirlo: l'accordo resta nello storico».
 
 ### D4 — Etichetta Fonte sempre visibile
+
 - Fix: la topbar ora dichiara «Fonte: motore · Sessione locale · Fabio» in modalità motore e
   «Fonte: simulazione · Vista demo…» in simulazione (`ConversationWorkspaceTopbar.tsx`).
 - Verificato in app su ogni schermata (la topbar è comune a tutte le viste).
 
 ### D5 — 409 senza recupero guidato
+
 - Fix: `useWorkIntake.confirm` estende il recupero già esistente per il 404 anche al
   `version_conflict`: ricarica la proposta fresca invece dell'errore secco; testo dell'errore
   riscritto in modo onesto per il contesto locale (`homun-errors.ts`).
 
 ### D9 — Stato sidebar oscillante
+
 - Causa: `engineIntakeConfirmed` era derivato solo dall'intake caricato per il lavoro attivo.
 - Fix (motore): `has_confirmed_intake` in `policy/intake.py`; la lista e il dettaglio lavori
   espongono `intake_confirmed` (`routes/reads.py`); il bridge web lo riporta su ogni lavoro
@@ -247,16 +265,19 @@ TIME_WAIT — `[Errno 48] Address already in use` incontrato due volte in sessio
   senza regressioni navigando.
 
 ### D10 — ID interni in chat
+
 - Fix: `format_interpretation_for_chat` (`models/interpret.py`) non include più gli id grezzi
   nei «Candidati» — solo nomi visibili. (I messaggi storici già salvati restano come erano.)
 
 ### D6 — Contatori «Dati della demo»
+
 - Fix: i contatori contano la sorgente viva (`visibleWorks`, progetti proiettati); in modalità
   motore il conteggio materiali dice «nei progetti» invece di uno zero falso
   (`ConversationWorkspace.tsx`, `ConversationSettings.tsx`).
 - Verificato in app: «20 lavori · 5 progetti · nei progetti materiali».
 
 ### D8+D11 — Primo messaggio senza eco, attese mute
+
 - Fix: il primo invio dalla Panoramica ora crea il lavoro-bozza, **apre subito la
   conversazione** e affida il messaggio a `postMessage` (nuovo helper
   `engine-first-send.ts`; `createWork(..., draftOnly)` in `useEngineWorkspace`): eco immediato
@@ -269,6 +290,7 @@ TIME_WAIT — `[Errno 48] Address already in use` incontrato due volte in sessio
   officina» arrivata.
 
 ### D12 — «Nuovo» profilo con lo stesso nome del collaboratore in carica (residuo di D1, trovato su desktop)
+
 - **Sintomo**: sulla shell desktop, la revisione post-accordo proponeva Elena come
   new_agent (stesso nome) dichiarando lo staffing cambiato: il guard D1 onorava la
   dichiarazione e confermando si sarebbe creato un duplicato in squadra.
@@ -287,20 +309,20 @@ test desktop 8/8.
 
 ## Tabella dei difetti (aggiornata a fine seconda sessione)
 
-| ID | Descrizione | Goal violato | Priorità | Stato | Evidenza |
-|----|-------------|--------------|----------|-------|----------|
-| D1 | Revisione post-accordo con collaboratore gemello | G1, G7 percepito | P1 | **Corretto** (prima sessione) | step-04 → step-05 |
-| D2 | Menzione @ senza agenti motore | G1, G5 | P1 | **Corretto** (prima sessione) | step-05 |
-| D3 | Responsabile incoerente chat/pannello | coerenza | P2 | **Corretto** (da D1) | step-05 |
-| D4 | Etichetta «Fonte» assente | **G6** | P1 | **Corretto** (topbar esplicita) | step-07 |
-| D5 | 409 senza recupero guidato | G7 | P2 | **Corretto** (ricarica guidata + testo onesto) | — |
-| D6 | Contatori demo incoerenti | coerenza | P2 | **Corretto** (sorgente viva) | — |
-| D7 | Nessuna chiusura per lavori di preparazione | G1, G5 | P1 | **Corretto** (`work.cancel` esposto in UI) | step-07 |
-| D8 | Primo messaggio non ecoato | G2 | P2 | **Corretto** (apertura immediata + eco) | — |
-| D9 | Stato sidebar oscillante | coerenza | P2 | **Corretto** (`intake_confirmed` dal motore) | — |
-| D10 | ID interni in chat | G4/G5 | P2 | **Corretto** (nomi soltanto) | — |
-| D11 | Attese mute/monolitiche | G2 | P2 | **Corretto** (fasi + testo onesto ovunque) | — |
-| D12 | new_agent con nome uguale al collaboratore in carica → duplicato in squadra | G1, coerenza | P1 | **Corretto** (ri-ancoraggio stesso-nome; trovato e verificato su desktop) | step-08 |
+| ID  | Descrizione                                                                 | Goal violato     | Priorità | Stato                                                                     | Evidenza          |
+| --- | --------------------------------------------------------------------------- | ---------------- | -------- | ------------------------------------------------------------------------- | ----------------- |
+| D1  | Revisione post-accordo con collaboratore gemello                            | G1, G7 percepito | P1       | **Corretto** (prima sessione)                                             | step-04 → step-05 |
+| D2  | Menzione @ senza agenti motore                                              | G1, G5           | P1       | **Corretto** (prima sessione)                                             | step-05           |
+| D3  | Responsabile incoerente chat/pannello                                       | coerenza         | P2       | **Corretto** (da D1)                                                      | step-05           |
+| D4  | Etichetta «Fonte» assente                                                   | **G6**           | P1       | **Corretto** (topbar esplicita)                                           | step-07           |
+| D5  | 409 senza recupero guidato                                                  | G7               | P2       | **Corretto** (ricarica guidata + testo onesto)                            | —                 |
+| D6  | Contatori demo incoerenti                                                   | coerenza         | P2       | **Corretto** (sorgente viva)                                              | —                 |
+| D7  | Nessuna chiusura per lavori di preparazione                                 | G1, G5           | P1       | **Corretto** (`work.cancel` esposto in UI)                                | step-07           |
+| D8  | Primo messaggio non ecoato                                                  | G2               | P2       | **Corretto** (apertura immediata + eco)                                   | —                 |
+| D9  | Stato sidebar oscillante                                                    | coerenza         | P2       | **Corretto** (`intake_confirmed` dal motore)                              | —                 |
+| D10 | ID interni in chat                                                          | G4/G5            | P2       | **Corretto** (nomi soltanto)                                              | —                 |
+| D11 | Attese mute/monolitiche                                                     | G2               | P2       | **Corretto** (fasi + testo onesto ovunque)                                | —                 |
+| D12 | new_agent con nome uguale al collaboratore in carica → duplicato in squadra | G1, coerenza     | P1       | **Corretto** (ri-ancoraggio stesso-nome; trovato e verificato su desktop) | step-08           |
 
 Con D7 corretto e la shell Electron verificata (sezione sotto), il percorso guida
 «primo collaboratore» risulta completabile dalla A alla Z su **entrambe** le superfici

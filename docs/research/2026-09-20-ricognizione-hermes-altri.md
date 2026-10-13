@@ -43,9 +43,9 @@ Fix di consistenza sulle scritture batch (abort transazionale di `current_entrie
 
 **Nessuna lezione ritirata; due raffinate e una aggiunta:**
 
-1. *Raffinata — budget (lezione 4):* contatori granulari inclusi i token di cache; cap propri per i delegati, inferiori al cap del lavoro; riconciliazione delta/cumulativa esplicita.
-2. *Raffinata — approvazioni (lezione 3):* se introduciamo politiche configurabili: fail-closed verso l'umano, disclosure di ciò che esce dalla macchina, e la modalità vive nella configurazione del workspace senza toccare i contratti.
-3. *Aggiunta — costo del cache-prefix:* ogni meccanismo che riscrive lo storico inviato (compaction, sync silenziosi) rompe il caching del provider: il costo va dichiarato e misurato, non subito per default.
+1. _Raffinata — budget (lezione 4):_ contatori granulari inclusi i token di cache; cap propri per i delegati, inferiori al cap del lavoro; riconciliazione delta/cumulativa esplicita.
+2. _Raffinata — approvazioni (lezione 3):_ se introduciamo politiche configurabili: fail-closed verso l'umano, disclosure di ciò che esce dalla macchina, e la modalità vive nella configurazione del workspace senza toccare i contratti.
+3. _Aggiunta — costo del cache-prefix:_ ogni meccanismo che riscrive lo storico inviato (compaction, sync silenziosi) rompe il caching del provider: il costo va dichiarato e misurato, non subito per default.
 
 **Conferme di rotta:** transcript canonico immutabile + contesto composto (più forte dell'approccio Hermes); memoria/procedure come versioni con diff (Letta); proposta-prima-di-esecuzione come prassi (OpenHands, e il nostro intake).
 

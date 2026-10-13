@@ -69,7 +69,11 @@ type Props = {
   onCancelInFlight?: () => void;
   agentNames?: Record<string, string> | undefined;
   onStartWork?: (() => Promise<void>) | undefined;
-  onOpenSpace?: (space: "Progetti" | "Squadra" | "Materiali", initial?: string, selected?: string) => void;
+  onOpenSpace?: (
+    space: "Progetti" | "Squadra" | "Materiali",
+    initial?: string,
+    selected?: string,
+  ) => void;
   autonomyLevel?: AutonomyLevel | undefined;
   onAutonomyLevelChange?: ((level: AutonomyLevel) => void) | undefined;
   modelConnectionId?: string | undefined;
@@ -136,12 +140,18 @@ export function ConversationWorkspaceChatStage({
         revision: 1,
         name: "Homun",
         role: "Coordinatore del lavoro",
-        responsibility: "Coordinamento della squadra, pianificazione e orchestrazione sicura dei flussi operativi.",
-        specializations: ["Orchestrazione collaborativa", "Coordinamento agenti", "Supervisione umana"],
+        responsibility:
+          "Coordinamento della squadra, pianificazione e orchestrazione sicura dei flussi operativi.",
+        specializations: [
+          "Orchestrazione collaborativa",
+          "Coordinamento agenti",
+          "Supervisione umana",
+        ],
         status: "active",
         autonomy_mode: "supervised",
         capabilities: ["general"],
-        instructions: "Coordina l'esecuzione del lavoro nel rispetto delle autorizzazioni dell'utente, supervisiona i passaggi critici e gestisce le staffette tra collaboratori.",
+        instructions:
+          "Coordina l'esecuzione del lavoro nel rispetto delle autorizzazioni dell'utente, supervisiona i passaggi critici e gestisce le staffette tra collaboratori.",
         method: "Collaborativo con supervisione umana.",
       });
       return;
@@ -150,7 +160,7 @@ export function ConversationWorkspaceChatStage({
       (a) =>
         a.id === idOrName ||
         a.name.toLowerCase() === idOrName.toLowerCase() ||
-        (agentNames?.[idOrName] && agentNames[idOrName].toLowerCase() === a.name.toLowerCase())
+        (agentNames?.[idOrName] && agentNames[idOrName].toLowerCase() === a.name.toLowerCase()),
     );
     if (found) {
       setInspectedAgent(found);
@@ -229,10 +239,7 @@ export function ConversationWorkspaceChatStage({
             <>
               <div className="cw-date">OGGI · IL LAVORO COMINCIA QUI</div>
               {work.messages.map((m, i) => (
-                <article
-                  key={i}
-                  className={`cw-message ${m.who}`}
-                >
+                <article key={i} className={`cw-message ${m.who}`}>
                   <small>
                     {m.sender || (m.who === "you" ? work.requester || "Tu" : scenario!.agent)}
                   </small>
@@ -241,7 +248,9 @@ export function ConversationWorkspaceChatStage({
                   ) : m.who === "agent" ? (
                     <ChatMarkdown content={cleanMessageText(m.text)} streaming={m.partial} />
                   ) : (
-                    <p className={m.partial ? "cw-message-partial" : undefined}>{cleanMessageText(m.text)}</p>
+                    <p className={m.partial ? "cw-message-partial" : undefined}>
+                      {cleanMessageText(m.text)}
+                    </p>
                   )}
                   {m.who === "agent" && !m.partial && (
                     <div className="cw-msg-actions">
@@ -253,8 +262,9 @@ export function ConversationWorkspaceChatStage({
                       >
                         <Copy size={13} />
                       </button>
-                      {engineMode && onSaveMemory && (
-                        m.memorySaved ? (
+                      {engineMode &&
+                        onSaveMemory &&
+                        (m.memorySaved ? (
                           <span className="cw-msg-action-saved" title="Salvato in memoria">
                             <BookmarkCheck size={13} />
                           </span>
@@ -268,8 +278,7 @@ export function ConversationWorkspaceChatStage({
                           >
                             <Bookmark size={13} />
                           </button>
-                        )
-                      )}
+                        ))}
                       {engineMode && onSaveSkill && (
                         <button
                           type="button"
@@ -293,13 +302,16 @@ export function ConversationWorkspaceChatStage({
                   )}
                 </article>
               ))}
-              {engineMode && <ConversationAgentLive
-                stream={agentStream}
-                hiddenWhenAnswered={(work?.messages ?? []).some((m, i) =>
-                  i >= work.messages.length - 3 && m.who === "agent" && !m.partial)}
-              />}
+              {engineMode && (
+                <ConversationAgentLive
+                  stream={agentStream}
+                  hiddenWhenAnswered={(work?.messages ?? []).some(
+                    (m, i) => i >= work.messages.length - 3 && m.who === "agent" && !m.partial,
+                  )}
+                />
+              )}
               <ConversationBrowserPip
-                conversationId={engineMode ? work?.engineConversationId ?? undefined : undefined}
+                conversationId={engineMode ? (work?.engineConversationId ?? undefined) : undefined}
                 runActive={agentStream.runActive}
               />
               {work.catalogPlan &&
@@ -332,8 +344,8 @@ export function ConversationWorkspaceChatStage({
               {work.catalogPlan && (work.phase === "review" || work.phase === "approved") && (
                 <div className="cc-chat-proposal" data-chat-delivery>
                   <strong>
-                    {work.phase === "approved" ? "Risultato approvato" : "La consegna è pronta"} ·
-                    v{work.revision}
+                    {work.phase === "approved" ? "Risultato approvato" : "La consegna è pronta"} · v
+                    {work.revision}
                   </strong>
                   <p>{scenario!.result}</p>
                   <p className="cw-hint">
@@ -391,15 +403,18 @@ export function ConversationWorkspaceChatStage({
               )}
             </>
           )}
-          {engineMode && work?.source === "engine" && work.enginePlan && work.enginePlan.length > 0 && (
-            <EnginePlanRelayTimeline
-              work={work}
-              agentNames={agentNames}
-              busy={engineBusy}
-              onStartWork={onStartWork}
-              onInspectAgent={handleInspectAgent}
-            />
-          )}
+          {engineMode &&
+            work?.source === "engine" &&
+            work.enginePlan &&
+            work.enginePlan.length > 0 && (
+              <EnginePlanRelayTimeline
+                work={work}
+                agentNames={agentNames}
+                busy={engineBusy}
+                onStartWork={onStartWork}
+                onInspectAgent={handleInspectAgent}
+              />
+            )}
           {engineMode && work?.source === "engine" && engineIntake && (
             <EngineWorkIntake
               key={work.id}
@@ -431,7 +446,9 @@ export function ConversationWorkspaceChatStage({
             onModelConnectionIdChange={onModelConnectionIdChange}
           />
           {historyLoading && (work?.messages ?? []).length === 0 && (
-            <p className="cw-hint" role="status">Caricamento conversazione…</p>
+            <p className="cw-hint" role="status">
+              Caricamento conversazione…
+            </p>
           )}
           {notice && (
             <p className="cw-notice" role="status">
@@ -441,16 +458,12 @@ export function ConversationWorkspaceChatStage({
               </button>
             </p>
           )}
-
         </div>
       </section>
       {!panelOpen && <ConversationMarginaliaSpine work={work} intake={engineIntake} />}
       {panelOpen && details}
       {inspectedAgent && (
-        <EngineAgentProfileModal
-          agent={inspectedAgent}
-          onClose={() => setInspectedAgent(null)}
-        />
+        <EngineAgentProfileModal agent={inspectedAgent} onClose={() => setInspectedAgent(null)} />
       )}
     </div>
   );

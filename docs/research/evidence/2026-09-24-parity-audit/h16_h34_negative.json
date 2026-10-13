@@ -43,11 +43,7 @@
     "png_bytes": 70,
     "real_w": 1,
     "real_h": 1,
-    "elements": [
-      "Run",
-      "Search file",
-      "Editor"
-    ],
+    "elements": ["Run", "Search file", "Editor"],
     "app": "Code"
   },
   "h16_actions": {
@@ -59,10 +55,7 @@
       "delivery_mode": "background",
       "details": {
         "ref": 1,
-        "coords": [
-          10,
-          10
-        ]
+        "coords": [10, 10]
       }
     },
     "type": {

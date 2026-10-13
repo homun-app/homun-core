@@ -10,11 +10,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { SettingsToggleSwitch } from "../SettingsToggleSwitch";
-import {
-  CHANNELS_CATALOG,
-  type ChannelDefinition,
-  type ChannelStatus,
-} from "./messaging-data";
+import { CHANNELS_CATALOG, type ChannelDefinition, type ChannelStatus } from "./messaging-data";
 import { ChannelBrandIcon } from "./ChannelBrandIcon";
 import { ChannelQrModal } from "./ChannelQrModal";
 import {
@@ -36,9 +32,11 @@ export function MessagingView() {
   const [savedConfigs, setSavedConfigs] = useState<Record<string, SavedChannelConfig>>(() => {
     try {
       const raw = localStorage.getItem("homun_messaging_channels_config");
-      return raw ? JSON.parse(raw) : {
-        telegram: { enabled: false, fields: {} },
-      };
+      return raw
+        ? JSON.parse(raw)
+        : {
+            telegram: { enabled: false, fields: {} },
+          };
     } catch {
       return {};
     }
@@ -91,10 +89,7 @@ export function MessagingView() {
   }, [loadEnginePlatforms]);
 
   const selectedChannel = useMemo<ChannelDefinition>(() => {
-    return (
-      CHANNELS_CATALOG.find((c) => c.id === selectedChannelId) ??
-      CHANNELS_CATALOG[0]!
-    );
+    return CHANNELS_CATALOG.find((c) => c.id === selectedChannelId) ?? CHANNELS_CATALOG[0]!;
   }, [selectedChannelId]);
 
   function handleSelectChannel(id: string) {
@@ -235,7 +230,7 @@ export function MessagingView() {
     if (!searchQuery.trim()) return CHANNELS_CATALOG;
     const q = searchQuery.toLowerCase().trim();
     return CHANNELS_CATALOG.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q)
+      (c) => c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q),
     );
   }, [searchQuery]);
 
@@ -294,15 +289,15 @@ export function MessagingView() {
                     status === "active"
                       ? "is-active"
                       : status === "needs_setup"
-                      ? "is-needs-setup"
-                      : ""
+                        ? "is-needs-setup"
+                        : ""
                   }`}
                   title={
                     status === "active"
                       ? "Attivo"
                       : status === "needs_setup"
-                      ? "Richiede configurazione"
-                      : "Disattivato"
+                        ? "Richiede configurazione"
+                        : "Disattivato"
                   }
                 />
               </button>
@@ -325,7 +320,9 @@ export function MessagingView() {
             </div>
 
             {(savedConfigs[selectedChannel.id]?.enabled ||
-              Object.values(savedConfigs[selectedChannel.id]?.fields ?? {}).some((v) => v.trim())) && (
+              Object.values(savedConfigs[selectedChannel.id]?.fields ?? {}).some((v) =>
+                v.trim(),
+              )) && (
               <button
                 type="button"
                 className="msg-test-btn msg-disconnect-btn"
@@ -368,7 +365,8 @@ export function MessagingView() {
                 <span className="msg-rec-pill">Consigliato</span>
               </div>
               <p className="msg-quick-setup-desc">
-                Inquadra il codice QR con l'app di Telegram sul tuo telefono: il tuo bot dedicato verrà creato e collegato a Homun in automatico, senza configurazione manuale.
+                Inquadra il codice QR con l'app di Telegram sul tuo telefono: il tuo bot dedicato
+                verrà creato e collegato a Homun in automatico, senza configurazione manuale.
               </p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
@@ -451,7 +449,9 @@ export function MessagingView() {
           {testState.status === "success" && (
             <div className="msg-test-banner is-success">
               <Check size={14} />
-              <span>{testState.message || "Credenziali e endpoint validati con successo dal motore."}</span>
+              <span>
+                {testState.message || "Credenziali e endpoint validati con successo dal motore."}
+              </span>
             </div>
           )}
           {testState.status === "error" && (

@@ -179,7 +179,8 @@ export function EngineClarifyCard({
 
       {isExpired && (
         <div className="mb-3 rounded bg-red-50 p-2 text-xs text-red-700 border border-red-200">
-          Il tempo per rispondere è scaduto. La richiesta è in fase di completamento o scadenza automatica.
+          Il tempo per rispondere è scaduto. La richiesta è in fase di completamento o scadenza
+          automatica.
         </div>
       )}
 
@@ -292,12 +293,7 @@ export function EngineClarifyCard({
             Allega cartella
           </button>
         </div>
-        <button
-          type="button"
-          className="cw-primary"
-          disabled={!canSubmit}
-          onClick={handleSubmit}
-        >
+        <button type="button" className="cw-primary" disabled={!canSubmit} onClick={handleSubmit}>
           Invia risposta
         </button>
       </div>

@@ -44,6 +44,7 @@ automatico, hub/condivisione.
 ## Realizzazione fetta 1 (23/09/2026, verificato dal vivo)
 
 Motore:
+
 - `ExternalServer` + `external.create/update/remove` (solo persona, validazioni
   trasporto) e client MCP minimale senza SDK: JSON-RPC 2.0 su stdio/HTTP,
   initialize + `tools/list`, timeout 10 s, ambiente del sottoprocesso limitato
@@ -59,6 +60,7 @@ Motore:
   `GET/POST /skills`, `POST /skills/{id}/approve|reject|archive`.
 
 Web:
+
 - Impostazioni → **Plugin e capacità** ora apre con «Server MCP» (dichiara
   stdio/HTTP con allowlist, **Prova connessione** che elenca gli strumenti
   reali scoperti e quelli ammessi) sopra il catalogo capacità; nuova sezione

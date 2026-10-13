@@ -11,8 +11,9 @@
   background-color: #dce4d5;
   border: 1px solid #c8d4c1;
   cursor: pointer;
-  transition: background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
-              border-color 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.18s cubic-bezier(0.4, 0, 0.2, 1);
   outline: none;
   flex-shrink: 0;
 }
@@ -22,7 +23,9 @@
 }
 
 .cv-toggle-switch:focus-visible {
-  box-shadow: 0 0 0 2px #fbfbf8, 0 0 0 4px #203c32;
+  box-shadow:
+    0 0 0 2px #fbfbf8,
+    0 0 0 4px #203c32;
 }
 
 .cv-toggle-switch.is-checked {

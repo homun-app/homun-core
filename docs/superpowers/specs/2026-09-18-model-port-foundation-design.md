@@ -35,17 +35,17 @@ UI / domain routes
 
 ## ModelPort surface (v1)
 
-| Method | Purpose |
-|--------|---------|
-| `list_connections()` | Configured connections (no secrets) |
-| `get_connection(id)` | One connection |
-| `upsert_connection(...)` | Create/update provider kind, model, base_url, secret |
-| `delete_connection(id)` | Remove connection + optional secret |
-| `set_active(id)` | Active connection for chat/interpret |
-| `verify(id)` | Probe without claiming chat success |
-| `complete(messages, *, connection_id?)` | Sync completion |
-| `stream(messages, *, connection_id?)` | Iterator of text chunks then final usage |
-| `list_usage(limit)` | Ledger rows |
+| Method                                  | Purpose                                              |
+| --------------------------------------- | ---------------------------------------------------- |
+| `list_connections()`                    | Configured connections (no secrets)                  |
+| `get_connection(id)`                    | One connection                                       |
+| `upsert_connection(...)`                | Create/update provider kind, model, base_url, secret |
+| `delete_connection(id)`                 | Remove connection + optional secret                  |
+| `set_active(id)`                        | Active connection for chat/interpret                 |
+| `verify(id)`                            | Probe without claiming chat success                  |
+| `complete(messages, *, connection_id?)` | Sync completion                                      |
+| `stream(messages, *, connection_id?)`   | Iterator of text chunks then final usage             |
+| `list_usage(limit)`                     | Ledger rows                                          |
 
 Interpret/plan stay **callers** of `complete`/`stream` (or a thin `interpret` helper that uses the port) — not a second provider stack.
 
@@ -68,14 +68,14 @@ For `kind=pydantic_ai`, model identity is `pydantic_provider` + `model_id` (adap
 
 ## Slice A (ship first)
 
-| Item | Choice |
-|------|--------|
-| Port + types | `ModelPort`, `Connection`, reuse `ChatMessage` / `CompletionResult` / `UsageEntry` |
-| Adapters | Fake + OpenAICompat (wrap existing) + PydanticAIAdapter for `openai` / `ollama` / `anthropic` (anthropic optional extra) |
-| Registry | `ModelRegistry` implements or owns ModelPort; HTTP routes talk only to the port |
-| API | Keep `/v1/models/*`; add connection CRUD if missing; `POST /v1/models/chat` for complete; stream SSE under `/v1/models/chat/stream` |
-| UI | Impostazioni → Modelli: list connections, set active, verify, pick model; thin “prova chat” box |
-| Simulation | Stay hidden when Fonte=motore; chat uses ModelPort only |
+| Item         | Choice                                                                                                                              |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Port + types | `ModelPort`, `Connection`, reuse `ChatMessage` / `CompletionResult` / `UsageEntry`                                                  |
+| Adapters     | Fake + OpenAICompat (wrap existing) + PydanticAIAdapter for `openai` / `ollama` / `anthropic` (anthropic optional extra)            |
+| Registry     | `ModelRegistry` implements or owns ModelPort; HTTP routes talk only to the port                                                     |
+| API          | Keep `/v1/models/*`; add connection CRUD if missing; `POST /v1/models/chat` for complete; stream SSE under `/v1/models/chat/stream` |
+| UI           | Impostazioni → Modelli: list connections, set active, verify, pick model; thin “prova chat” box                                     |
+| Simulation   | Stay hidden when Fonte=motore; chat uses ModelPort only                                                                             |
 
 ## Slice B (next)
 

@@ -1,10 +1,6 @@
 {
   "fixture": "real Ollama tool choice + real stdio; scripted explicit human approval; restart before receipt consumption",
-  "statuses": [
-    "waiting_external",
-    "running",
-    "completed"
-  ],
+  "statuses": ["waiting_external", "running", "completed"],
   "approvals": [
     {
       "id": "run:external:76adaaf03a4d29df56f96299",
@@ -170,9 +166,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "code"
-            ],
+            "required": ["code"],
             "additionalProperties": false
           }
         }

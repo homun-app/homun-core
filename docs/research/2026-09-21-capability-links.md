@@ -22,6 +22,7 @@
 **Frontend** (166 passati): typecheck, build, architettura 0 errori/29 avvisi, `git diff --check` pulito, OpenAPI rigenerata.
 
 **Modello reale (GLM 5.3 Flash):**
+
 - Prima richiesta CSV → nuovo profilo **Bruno** con `capabilities: ['compare_csv']` → confermato e persistito con il collegamento.
 - Seconda richiesta CSV con **due agenti** (Bruno collegato + Marco generico senza collegamento) → il modello raccomanda **Bruno** (quello con il collegamento — corretto).
 

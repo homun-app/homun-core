@@ -5,24 +5,26 @@ stessi prompt/task. Nessuna chiave API esterna. Hermes = commit pinned c9dca726 
 Homun = working tree homun2 @ 131ffe05, motore `python -m homun serve --dev-insecure` su 127.0.0.1:8765.
 
 ## Ambiente
+
 - Hermes provider: custom → http://127.0.0.1:11434/v1, model qwen3.5:4b (config:`~/.hermes/config.yaml`, backup `config.yaml.pre-parity-test`)
 - Homun active connection: openai_compatible → http://127.0.0.1:11434/v1, qwen3.5:4b
 - Docker attivo; immagine terminale Homun: alpine sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 ## Risultati
 
-| # | Capability | Hermes | Homun | Note |
-|---|---|---|---|---|
-| T1 | Core chat loop | PASS ("OK") | PASS (5s, "OK, sono Homun…") | Homun passa dall'interprete (kind=reply) |
-| T2 | Agente crea file | PASS (file tool, host, /tmp/parity_hermes/parity_test.txt) | PASS (write_workspace_file + approvazione digest, workspace in data-dir) | Homun: immagine Docker pinned obbligatoria; run propose→approve + file-edit approve |
-| T3 | Memoria cross-session | PASS ("Teal" in sessione nuova) | PASS solo con run `memory:true` (memory_recall trova il fatto); **il path conversazionale (post_message) NON inietta memoria** ("Non ho accesso ai tuoi dati personali") | Homun: capability opt-in per run; API memories CRUD+recall OK |
-| T4 | Cron/scheduling + fire reale | PASS (job 5m, fired 08:23:52, cron_ok.txt scritto) — richiede gateway attivo | PASS (routine */5, fired 08:25, work "Routine parity" → ready) — schedule DBOS in-process | Entrambi durabili; architetture diverse |
-| T5 | Skill catalogo | 57 skill builtin | 2 skill di workspace (agent/person), nessun catalogo builtin | Gap grande di catalogo, non di motore |
-| T6 | Terminale | PASS (esecuzione su HOST, auto-approve in -z) | PASS (terminal_execute in container Docker pinned, exit 0) | Filosofie opposte: host+fiducia vs container+digest |
-| T7 | API OpenAI-compat | PASS (:8642, bearer API_SERVER_KEY obbligatorio anche in loopback, model "hermes-agent") | PASS (:8765/v1/chat/completions, "API-OK") | Hermes: agent-backed; Homun: endpoint diretto |
-| T8 | Canali | gateway con piattaforme configurabili (telegram/whatsapp/slack/...), WhatsApp via `hermes whatsapp` (QR interattivo, non testato) | 33 adattatori registrati (tutti disabled); onboarding WhatsApp API presente ma sidecar `wa-rs-bridge` (:8902) assente → errore tipizzato `bridge_unreachable` | Nessuno dei due testato end-to-end su canale reale |
+| #   | Capability                   | Hermes                                                                                                                            | Homun                                                                                                                                                                    | Note                                                                                |
+| --- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| T1  | Core chat loop               | PASS ("OK")                                                                                                                       | PASS (5s, "OK, sono Homun…")                                                                                                                                             | Homun passa dall'interprete (kind=reply)                                            |
+| T2  | Agente crea file             | PASS (file tool, host, /tmp/parity_hermes/parity_test.txt)                                                                        | PASS (write_workspace_file + approvazione digest, workspace in data-dir)                                                                                                 | Homun: immagine Docker pinned obbligatoria; run propose→approve + file-edit approve |
+| T3  | Memoria cross-session        | PASS ("Teal" in sessione nuova)                                                                                                   | PASS solo con run `memory:true` (memory_recall trova il fatto); **il path conversazionale (post_message) NON inietta memoria** ("Non ho accesso ai tuoi dati personali") | Homun: capability opt-in per run; API memories CRUD+recall OK                       |
+| T4  | Cron/scheduling + fire reale | PASS (job 5m, fired 08:23:52, cron_ok.txt scritto) — richiede gateway attivo                                                      | PASS (routine */5, fired 08:25, work "Routine parity" → ready) — schedule DBOS in-process                                                                                | Entrambi durabili; architetture diverse                                             |
+| T5  | Skill catalogo               | 57 skill builtin                                                                                                                  | 2 skill di workspace (agent/person), nessun catalogo builtin                                                                                                             | Gap grande di catalogo, non di motore                                               |
+| T6  | Terminale                    | PASS (esecuzione su HOST, auto-approve in -z)                                                                                     | PASS (terminal_execute in container Docker pinned, exit 0)                                                                                                               | Filosofie opposte: host+fiducia vs container+digest                                 |
+| T7  | API OpenAI-compat            | PASS (:8642, bearer API_SERVER_KEY obbligatorio anche in loopback, model "hermes-agent")                                          | PASS (:8765/v1/chat/completions, "API-OK")                                                                                                                               | Hermes: agent-backed; Homun: endpoint diretto                                       |
+| T8  | Canali                       | gateway con piattaforme configurabili (telegram/whatsapp/slack/...), WhatsApp via `hermes whatsapp` (QR interattivo, non testato) | 33 adattatori registrati (tutti disabled); onboarding WhatsApp API presente ma sidecar `wa-rs-bridge` (:8902) assente → errore tipizzato `bridge_unreachable`            | Nessuno dei due testato end-to-end su canale reale                                  |
 
 ## Differenze progettuali emerse
+
 1. **Sicurezza di esecuzione**: Hermes esegue sull'host e chiede approvazioni interattive (auto in one-shot); Homun richiede immagine Docker pinned by digest + approvazioni digest esplicite (run, terminal job, file edit) via API.
 2. **Capability model**: Hermes = tutto attivo di default (config globale); Homun = capability opt-in per singolo run (memory/skills/delegation/... default false).
 3. **Memoria conversazionale**: Hermes inietta memoria in ogni sessione; Homun la espone solo come tool negli agent run — il semplice post_message non la usa (gap funzionale reale).
@@ -30,20 +32,24 @@ Homun = working tree homun2 @ 131ffe05, motore `python -m homun serve --dev-inse
 5. **Skill**: Hermes porta un catalogo di 57 skill; Homun non ha catalogo iniziale.
 
 ## Non testati in questa passata
+
 delegation/subagent (H21), steering/interrupt (H02), side questions (H03), compressione contesto (H05),
 web/browser tools (H14/H15, richiedono rete), checkpoint/rollback (H12), MCP, plugins, media/voice (H41),
 canali reali end-to-end (T8 approfondito), batch/evals (H45).
 
 ## Suite interna Homun (contesto)
+
 `npm run engine:test`: **1843 passed, 1 failed, 9 skipped** (228s). L'unico fallimento era una
 regressione reale trovata dai test: `NameError: asyncio` in `src/homun/models/native_errors.py:207`
 (classify_transport) — import mancante. Corretto in sessione (aggiunto `import asyncio`);
 `tests/test_native_stream_transport.py` ora 23/23 verdi.
 
 ## Auto-approve (implementato in sessione, 30/09)
+
 Supervision levels: `AgentProfile.autonomy_mode` (supervised|autonomous) esisteva già ma non era consumato.
 
 Implementato:
+
 - `engine/src/homun/application/approval_auto.py` — policy sweep: run `pending_approval` di agenti
   `autonomous` auto-approvati via il percorso canonico `agent_runs.approve` (digest+authority+journal);
   gate terminali in-run auto-approvati SOLO con policy `docker-offline-v1` (l'host `local-private-v1`
@@ -58,6 +64,7 @@ Implementato:
 ## Memoria scoped + apprendimento (implementato e verificato live, 30/09 pomeriggio)
 
 **Scope memoria** (`memory/types.py`, `memory/visibility.py`, entrambi i port):
+
 - `MemoryNote.scope` ∈ {project, agent, person, global} + `subject_id` + `source_memory_id`;
   migrazione automatica dei payload legacy (project_id → project, altrimenti global).
 - Composizione recall nei run: progetto del work + note work-bound + **craft dell'agente assegnato**.
@@ -70,6 +77,7 @@ Implementato:
   **mai** memorie di progetto) e `POST /memories/packs/import` (skill importate in quarantena).
 
 **Apprendimento** (`application/skill_reflection.py`, derivato da Hermes MIT):
+
 - reflection post-run sui run completati con capability skills: prompt anti-degrado
   (lezione=regola+perché, niente narrazioni/id, stessa lezione=una regola, patch in posto),
   può solo patchare skill agent-authored o proporre nuove — tutto staged.
@@ -82,6 +90,7 @@ Implementato:
 **Test**: +15 nuovi (test_memory_scoping.py, test_skill_reflection.py); suite 1859 passed / 0 failed.
 
 **Verifica live** (`tools/parity/live_acceptance.py`, modello reale qwen3.5:4b):
+
 - isolamento: agente Menta su progetto Beta vede la craft promossa da Alpha, NON vede la nota
   globale né le memorie di altri progetti (craft_visible=true, global_leak=false);
 - apprendimento end-to-end: correzione del supervisore → skill "Price List Formatting Rule"
@@ -91,12 +100,14 @@ Implementato:
 ## Curatore + delivery cron (implementato e verificato live, 30/09 sera)
 
 **Curatore** (`application/skill_curator.py`, derivato da Hermes curator MIT):
+
 - pass di manutenzione interval-gated (24h, stato in data-dir) nel pump;
 - archivia (mai cancella) skill agent-authored staged stantie (>7gg) e approved mai usate (>30gg);
   le skill delle persone sono intoccabili; tutto via comandi skill.archive giornalati e reversibili;
 - rotta `POST /v1/workspaces/{ws}/skills/curate` (forzatura, solo persone).
 
 **Delivery cron → canali** (`application/cron_deliveries.py`):
+
 - consumo della coda cron_deliveries: target `chat` (messaggio engine nella conversazione di origine)
   e `<platform>:<chat>` (via adapter + send_with_media_dispatch); retry fino a 3 con errori tipizzati
   (channel_unconfigured / channel_unsupported / delivery_transport_failed…);
@@ -105,6 +116,7 @@ Implementato:
   prima i job si creavano solo via tool agente.
 
 **Bug trovati e corretti dai test live** (nessuno era regressione delle feature nuove):
+
 1. pump rotto da shadowing di `deliver_pending` (import locale) — UnboundLocalError ad ogni pass;
    run in coda mai partiti. Fix: alias dell'import.
 2. `list_workspace_files` con `path:"."` (comportamento variabile del modello) rifiutato come
@@ -119,6 +131,7 @@ delivery `sent` → messaggio recapitato nella conversazione target.
 **Suite finale: 1863 passed / 9 skipped / 0 failed.**
 
 ## Batteria parity Hermes rifatta (30/09 sera, stesso modello qwen3.5:4b via Ollama)
+
 - Hermes: T1 OK · T2 file OK · T6 terminale OK · T3 memoria "Teal" OK (identico al mattino).
 - Homun: vedi battery sopra — con il pomeriggio di lavoro: run autonomi senza click,
   memoria scoped con isolamento cross-progetto verificato, apprendimento con gate umano,
@@ -174,7 +187,7 @@ Upstream confermato: **github.com/NousResearch/hermes-agent** (remote del ref pi
 - Live: sync 58/58 aggiornate con resources (pdf 20 file, github 16), `kept_human` 0; il gap
   dei support file (26 skill li citavano a vuoto) è chiuso: 24 skill ora li espongono.
 - API `/skills` ora espone `resources` (lista file) oltre ad `author_id`.
-**Suite: 1868 passed / 0 failed.**
+  **Suite: 1868 passed / 0 failed.**
 
 ## Adattamento vocabolario Hermes→Homun (catalogo v2, 30/07 notte-fonda)
 
@@ -194,7 +207,7 @@ Le skill portate verbatim parlavano ancora Hermes (write_file ×29, read_file ×
   55 approvate di cui 53 con nota di adattamento.
 - Nota operativa: la prima regen aveva cancellato il .git del repo (rmtree) — perso il commit v1
   (rigenerabile); il generatore ora preserva .git. Repo attuale: commit `08aeafe`.
-**Suite: 1870 passed / 0 failed.**
+  **Suite: 1870 passed / 0 failed.**
 
 **Aggiornamento: note per-body rimosse.** Su richiesta, i body non portano più il commento
 "Adapted for Homun…" (attribuzione MIT interamente a livello di repo: LICENSE/NOTICE/manifest
@@ -205,6 +218,7 @@ registrato-ma-fallito non avvelena più le riesecuzioni con lo stesso id. Sync f
 17 aggiornate, 0 errori, 0 kept_human; 55 approvate senza nota. Suite 1870.
 
 ## Artefatti
+
 - Script riusabili: tools/parity/homun_cmd.sh, tools/parity/t2_homun_agent_file.sh, tools/parity/t6_homun_terminal.sh
 - Evidenza run: t2_homun_run.json (questa directory)
 - File creati dagli agenti: /tmp/parity_hermes/{parity_test.txt,term_test.txt,cron_ok.txt};
@@ -216,17 +230,17 @@ registrato-ma-fallito non avvelena più le riesecuzioni con lo stesso id. Sync f
 Obiettivo: uscire dal buio sulle aree elencate come "non testate in questa passata".
 Metodo: superficie via probe black-box sul motore live + esercizio profondo dove contava.
 
-| Area | Superficie | Esercizio | Esito |
-|---|---|---|---|
-| Steering/interrupt (H02) | route_message → steer atomico | **LIVE**: run nativo Vega in volo, messaggio "step2 → 'done 2 rivisto'" | **PASS** — `agent_control: steer`, ack, run completato, step2.txt contiene "done 2 rivisto" |
-| Capability surface | 1 run pending con tutti i flag | probe | **42 tool registrati**: browser×7, web×3 (search/extract/x), delegation×3, goals×8+subgoals, clarify×2, cron, session_manage, execute_code, gateway_manage, memory×4, skills×5 |
-| Memoria conversazionale (T3 gap) | — | **LIVE** (chiuso in sessione, commit 3f1191d8) | **PASS** — conversazione pura ricorda "teal"; isolamento cross-persona verificato (PIN di Marta non arriva a Fabio) |
-| Compressione contesto (H05) | `micro_compaction` in RunToolPolicy | unit (test_agent_overflow.py) | superficie+unit OK, non esercitata live |
-| Checkpoint/rollback (H12) | sessions API + session_manage tool | unit (test_checkpoints_and_worktrees, test_c1_checkpoints_lsp, test_canonical_sessions, 13 file session_*) | molto coperto a unit, non esercitato live |
-| MCP | /mcp/servers CRUD + test + tools per work + propose/approve | unit (test_agent_mcp) | OK |
-| Plugins | API enable/disable/data/reload-config | unit | OK |
-| Media/voice (H41) | /media/tts/synthesize, /media/voice/wake-check, wake-word | parziale | superficie presente |
-| Batch/evals (H45) | /research/batch/run + BatchEvalRunner | **NESSUN test** | **gap reale**: implementazione ed endpoint senza unit test |
+| Area                             | Superficie                                                  | Esercizio                                                                                                  | Esito                                                                                                                                                                          |
+| -------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Steering/interrupt (H02)         | route_message → steer atomico                               | **LIVE**: run nativo Vega in volo, messaggio "step2 → 'done 2 rivisto'"                                    | **PASS** — `agent_control: steer`, ack, run completato, step2.txt contiene "done 2 rivisto"                                                                                    |
+| Capability surface               | 1 run pending con tutti i flag                              | probe                                                                                                      | **42 tool registrati**: browser×7, web×3 (search/extract/x), delegation×3, goals×8+subgoals, clarify×2, cron, session_manage, execute_code, gateway_manage, memory×4, skills×5 |
+| Memoria conversazionale (T3 gap) | —                                                           | **LIVE** (chiuso in sessione, commit 3f1191d8)                                                             | **PASS** — conversazione pura ricorda "teal"; isolamento cross-persona verificato (PIN di Marta non arriva a Fabio)                                                            |
+| Compressione contesto (H05)      | `micro_compaction` in RunToolPolicy                         | unit (test_agent_overflow.py)                                                                              | superficie+unit OK, non esercitata live                                                                                                                                        |
+| Checkpoint/rollback (H12)        | sessions API + session_manage tool                          | unit (test_checkpoints_and_worktrees, test_c1_checkpoints_lsp, test_canonical_sessions, 13 file session_*) | molto coperto a unit, non esercitato live                                                                                                                                      |
+| MCP                              | /mcp/servers CRUD + test + tools per work + propose/approve | unit (test_agent_mcp)                                                                                      | OK                                                                                                                                                                             |
+| Plugins                          | API enable/disable/data/reload-config                       | unit                                                                                                       | OK                                                                                                                                                                             |
+| Media/voice (H41)                | /media/tts/synthesize, /media/voice/wake-check, wake-word   | parziale                                                                                                   | superficie presente                                                                                                                                                            |
+| Batch/evals (H45)                | /research/batch/run + BatchEvalRunner                       | **NESSUN test**                                                                                            | **gap reale**: implementazione ed endpoint senza unit test                                                                                                                     |
 
 Conclusione: quasi tutto esisteva già ed è coperto dai test; il buco era l'esercizio live.
 Veri gap rimasti: batch/evals senza test; web/browser/delegation/media da esercizio live end-to-end.
@@ -235,16 +249,16 @@ Veri gap rimasti: batch/evals senza test; web/browser/delegation/media da eserci
 
 Azzerati i gap azzerabili emersi dalla batteria estesa:
 
-| Gap | Chiusura | Verifica |
-|---|---|---|
-| Batch/evals senza test | `tests/test_batch_eval.py` (5): aggregazione, eccezioni, resume da checkpoint, rifiuto senza executor, endpoint HTTP (200/503) | unit |
-| Governance entità | comandi `work.archive` / `conversation.archive` (reversibili, `restore:true`) con permessi write + version; già esistevano team/project/material/skill archive | unit (5) + **live dogfood**: 7 archiviazioni di probe via command bus |
-| approval_channel non esposto | il campo `_approval_channel` veniva scartato da pydantic (il chip "auto-approvazione prevista" non aveva mai dati); ora `public()` lo espone come `approval_channel` ufficiale + campo RunView + tipo/pannello web | unit (1) |
-| Badge autonomia UI | la UI offriva `strict/semi/autonomous` ma il motore accetta solo `supervised/autonomous` → salvataggi rotti e agente supervisionato etichettato "Semi-autonomo"; allineati livelli, template e badge | live UI: 2 Autonomo / 2 Supervisione umana / 0 residui |
-| Scope memoria non visibile | tipo + `memoryScopeLabel` + badge nelle viste elenco/recall; nota person ora etichettata "Personale · person_fabio" | live UI |
-| Catalogo skill non navigabile | pannello "Catalogo Skill" (57 skill, ricerca, filtri con conteggi, corpo espandibile, uso, risorse) + sync dal repository + `usage_count`/`last_used_at` esposti dall'API | live UI: ricerca "price" → 2 risultati |
-| Web tools mai esercitati (H14) | **LIVE**: run con `web_pages:true`, agente chiama `web_extract` su example.com → 200 + contenuto | live |
-| Delegation mai esercitata (H21) | **LIVE**: senza team approvato → blocco tipizzato `delegation_agent_not_approved` (security ok); con team Vega+Bruno → child run assegnato a Bruno, `_delegation_result.result = "BANANA"` esatto | live end-to-end |
+| Gap                             | Chiusura                                                                                                                                                                                                           | Verifica                                                              |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Batch/evals senza test          | `tests/test_batch_eval.py` (5): aggregazione, eccezioni, resume da checkpoint, rifiuto senza executor, endpoint HTTP (200/503)                                                                                     | unit                                                                  |
+| Governance entità               | comandi `work.archive` / `conversation.archive` (reversibili, `restore:true`) con permessi write + version; già esistevano team/project/material/skill archive                                                     | unit (5) + **live dogfood**: 7 archiviazioni di probe via command bus |
+| approval_channel non esposto    | il campo `_approval_channel` veniva scartato da pydantic (il chip "auto-approvazione prevista" non aveva mai dati); ora `public()` lo espone come `approval_channel` ufficiale + campo RunView + tipo/pannello web | unit (1)                                                              |
+| Badge autonomia UI              | la UI offriva `strict/semi/autonomous` ma il motore accetta solo `supervised/autonomous` → salvataggi rotti e agente supervisionato etichettato "Semi-autonomo"; allineati livelli, template e badge               | live UI: 2 Autonomo / 2 Supervisione umana / 0 residui                |
+| Scope memoria non visibile      | tipo + `memoryScopeLabel` + badge nelle viste elenco/recall; nota person ora etichettata "Personale · person_fabio"                                                                                                | live UI                                                               |
+| Catalogo skill non navigabile   | pannello "Catalogo Skill" (57 skill, ricerca, filtri con conteggi, corpo espandibile, uso, risorse) + sync dal repository + `usage_count`/`last_used_at` esposti dall'API                                          | live UI: ricerca "price" → 2 risultati                                |
+| Web tools mai esercitati (H14)  | **LIVE**: run con `web_pages:true`, agente chiama `web_extract` su example.com → 200 + contenuto                                                                                                                   | live                                                                  |
+| Delegation mai esercitata (H21) | **LIVE**: senza team approvato → blocco tipizzato `delegation_agent_not_approved` (security ok); con team Vega+Bruno → child run assegnato a Bruno, `_delegation_result.result = "BANANA"` esatto                  | live end-to-end                                                       |
 
 Nota: la nota "teal" era duplicata (globale del mattino pre-scope + person di oggi); eliminata la globale, tenuta la person.
 

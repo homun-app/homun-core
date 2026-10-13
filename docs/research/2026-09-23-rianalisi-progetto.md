@@ -6,17 +6,17 @@ Analisi di `main`, commit `e5155baf`, versione sorgente `0.2.1001`. Working tree
 
 **Prove eseguite in questa analisi**
 
-| Controllo | Esito attuale | Perimetro |
-| --- | --- | --- |
-| `npm run check` | Passato | TypeScript, 193 test frontend, build web e prototipo |
-| `npm run engine:test` | 499 passati, 1 saltato | 91,39 s; un warning di deprecazione Starlette/AnyIO |
-| `npm run desktop:test` | 8 passati | Processo motore, protocollo, startup e packaging; nessun test updater nella suite |
-| `npm run architecture:check` | 0 errori, 35 avvisi dimensione | Verifica automatica dei confini; non certifica correttezza dei flussi |
-| OpenAPI `--check` | Allineata | Snapshot attuale e route del motore |
-| Inventory packaging | 1 passato | `engine/packaging/test_inventory.py` |
-| `npm run lint` | Non concluso | Interrotto dopo circa 3 minuti senza risultato; non conteggiato come passato o fallito |
-| Riproduzioni mirate | 4 difetti riprodotti | Recupero catena, budget assegnatario, riconciliazione routine, doppio dialogo updater |
-| GUI installata | Osservata | Finestra reale e albero accessibilità; versione installata 0.2.1000, diversa dal sorgente |
+| Controllo                    | Esito attuale                  | Perimetro                                                                                 |
+| ---------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------- |
+| `npm run check`              | Passato                        | TypeScript, 193 test frontend, build web e prototipo                                      |
+| `npm run engine:test`        | 499 passati, 1 saltato         | 91,39 s; un warning di deprecazione Starlette/AnyIO                                       |
+| `npm run desktop:test`       | 8 passati                      | Processo motore, protocollo, startup e packaging; nessun test updater nella suite         |
+| `npm run architecture:check` | 0 errori, 35 avvisi dimensione | Verifica automatica dei confini; non certifica correttezza dei flussi                     |
+| OpenAPI `--check`            | Allineata                      | Snapshot attuale e route del motore                                                       |
+| Inventory packaging          | 1 passato                      | `engine/packaging/test_inventory.py`                                                      |
+| `npm run lint`               | Non concluso                   | Interrotto dopo circa 3 minuti senza risultato; non conteggiato come passato o fallito    |
+| Riproduzioni mirate          | 4 difetti riprodotti           | Recupero catena, budget assegnatario, riconciliazione routine, doppio dialogo updater     |
+| GUI installata               | Osservata                      | Finestra reale e albero accessibilità; versione installata 0.2.1000, diversa dal sorgente |
 
 Log e tre script Python riproducibili sono in `/tmp/homun-reanalysis-20260923/`. Usano directory temporanee, provider finto e scheduler simulato. Gli assert dei tre script confermano il difetto: il loro exit 0 **non** significa che il comportamento del prodotto sia corretto. Vedere il README nella stessa directory.
 
@@ -78,15 +78,15 @@ La build emette avvisi sui chunk oltre 500 kB. Il lint globale include una confi
 
 **Architettura e prodotto**
 
-| Area | Valutazione sul codice attuale |
-| --- | --- |
-| Dominio e persistenza | Separazione sostanziale fra comandi, policy, storage, API e runtime; comandi versionati e artifact sono una base da mantenere |
-| Esecuzione | Confronto CSV, lettura e sintesi sono capacità concrete; `general` resta preparazione; le catene lettura/confronto hanno un confine di recupero da correggere |
-| Supervisione | Proposta, approvazione e revisione restano esplicite; serve uniformità dei vincoli anche per sintesi e MCP |
-| Routine | Creano lavori supervisionati secondo una ricorrenza; non dimostrano esecuzione autonoma completa del lavoro |
-| Frontend | Chat, riepilogo, team, documenti e impostazioni hanno collegamenti reali; alcuni ingressi laterali mantengono una seconda fonte di stato |
-| Modularità | Motore ben suddiviso; `ConversationWorkspace.tsx` è a 1425 righe, vicino alla soglia indicata da AGENTS; 35 avvisi includono anche copie legacy/prototipo |
-| Distribuzione | Pipeline, firma e updater sono presenti nel sorgente; firma, notarizzazione, installazione su Mac pulito e aggiornamento completo non riverificati in questa analisi |
+| Area                  | Valutazione sul codice attuale                                                                                                                                       |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dominio e persistenza | Separazione sostanziale fra comandi, policy, storage, API e runtime; comandi versionati e artifact sono una base da mantenere                                        |
+| Esecuzione            | Confronto CSV, lettura e sintesi sono capacità concrete; `general` resta preparazione; le catene lettura/confronto hanno un confine di recupero da correggere        |
+| Supervisione          | Proposta, approvazione e revisione restano esplicite; serve uniformità dei vincoli anche per sintesi e MCP                                                           |
+| Routine               | Creano lavori supervisionati secondo una ricorrenza; non dimostrano esecuzione autonoma completa del lavoro                                                          |
+| Frontend              | Chat, riepilogo, team, documenti e impostazioni hanno collegamenti reali; alcuni ingressi laterali mantengono una seconda fonte di stato                             |
+| Modularità            | Motore ben suddiviso; `ConversationWorkspace.tsx` è a 1425 righe, vicino alla soglia indicata da AGENTS; 35 avvisi includono anche copie legacy/prototipo            |
+| Distribuzione         | Pipeline, firma e updater sono presenti nel sorgente; firma, notarizzazione, installazione su Mac pulito e aggiornamento completo non riverificati in questa analisi |
 
 La finestra installata osservata conserva il modello chat centrale + riepilogo laterale e rende visibili contributi mancanti, scadenza e budget. È una prova della schermata corrente sulla 0.2.1000, non accettazione end-to-end della 0.2.1001. I tentativi di navigazione sono stati fermati dallo strumento perché rilevava una variazione della superficie: non sono stati forzati. Non sono stati inviati messaggi a modelli reali né alterati lavori del profilo personale.
 

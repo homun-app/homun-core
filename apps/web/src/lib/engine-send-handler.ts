@@ -78,6 +78,16 @@ export function handleEngineSend({
   }
 
   // First message of a new work: create draft and route
-  sendEngineFirstMessage(engine, text, open, setNotice, bumpOwnSend, attachments, autonomyLevel, modelConnectionId, projectId);
+  sendEngineFirstMessage(
+    engine,
+    text,
+    open,
+    setNotice,
+    bumpOwnSend,
+    attachments,
+    autonomyLevel,
+    modelConnectionId,
+    projectId,
+  );
   return true;
 }

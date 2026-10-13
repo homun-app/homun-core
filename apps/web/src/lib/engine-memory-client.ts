@@ -41,7 +41,11 @@ export type MemoryListResult = {
   memories: EngineMemoryNote[];
 };
 
-async function memoryFetch(path: string, init?: RequestInit, baseUrl = ENGINE_DEFAULT_BASE_URL): Promise<Response> {
+async function memoryFetch(
+  path: string,
+  init?: RequestInit,
+  baseUrl = ENGINE_DEFAULT_BASE_URL,
+): Promise<Response> {
   try {
     return await fetch(`${baseUrl}${path}`, init);
   } catch (cause) {

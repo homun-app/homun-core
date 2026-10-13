@@ -39,8 +39,7 @@ function mockFetch(calls: Array<(url: string) => Response>) {
   };
 }
 
-const intakeList = (status: string) => () =>
-  Response.json({ items: [{ id: "i1", status }] });
+const intakeList = (status: string) => () => Response.json({ items: [{ id: "i1", status }] });
 const classify = (kind: string) => () => Response.json({ kind });
 const classifyJson = (body: unknown) => () => Response.json(body);
 const unavailable = () =>
@@ -60,18 +59,28 @@ test("a work request after a confirmed idle agreement proposes a supervised revi
   const mock = mockFetch([intakeList("confirmed"), classify("work_request")]);
   try {
     assert.deepEqual(
-      await routeEngineFirstMessage(work({ engineStatus: "draft", title: "Preparazione" }), "Ora confronta i due listini"),
+      await routeEngineFirstMessage(
+        work({ engineStatus: "draft", title: "Preparazione" }),
+        "Ora confronta i due listini",
+      ),
       { route: "propose" },
     );
-  } finally { mock.restore(); }
+  } finally {
+    mock.restore();
+  }
 });
 
 test("a question after a confirmed idle agreement remains chat", async () => {
   const mock = mockFetch([intakeList("confirmed"), classify("question")]);
   try {
-    assert.deepEqual(await routeEngineFirstMessage(work({ engineStatus: "draft" }), "Quali file ti servono?"), { route: "chat" });
+    assert.deepEqual(
+      await routeEngineFirstMessage(work({ engineStatus: "draft" }), "Quali file ti servono?"),
+      { route: "chat" },
+    );
     assert.equal(mock.seen.filter((url) => url.includes("/classify")).length, 1);
-  } finally { mock.restore(); }
+  } finally {
+    mock.restore();
+  }
 });
 
 test("a confirmed agreement with a plan or result cannot re-enter intake", async () => {
@@ -82,9 +91,13 @@ test("a confirmed agreement with a plan or result cannot re-enter intake", async
   ]) {
     const mock = mockFetch([intakeList("confirmed"), classify("work_request")]);
     try {
-      assert.deepEqual(await routeEngineFirstMessage(work(state), "Confronta di nuovo"), { route: "chat" });
+      assert.deepEqual(await routeEngineFirstMessage(work(state), "Confronta di nuovo"), {
+        route: "chat",
+      });
       assert.equal(mock.seen.length, 1);
-    } finally { mock.restore(); }
+    } finally {
+      mock.restore();
+    }
   }
 });
 
@@ -157,10 +170,9 @@ test("a fresh work's first message routes through classification", async () => {
   }
   const mock3 = mockFetch([unavailable()]);
   try {
-    assert.deepEqual(
-      await classifyFreshRequest("work_new", "Qualsiasi testo con il modello giù"),
-      { route: "propose" },
-    );
+    assert.deepEqual(await classifyFreshRequest("work_new", "Qualsiasi testo con il modello giù"), {
+      route: "propose",
+    });
   } finally {
     mock3.restore();
   }

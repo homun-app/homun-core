@@ -57,11 +57,18 @@ export function EngineWorkspaceWorkPanel({
   onCreateRoutine?: ((input: { name: string; cron: string }) => Promise<void>) | undefined;
   onSetBudget?: ((modelAttempts: number) => Promise<void>) | undefined;
   onSetDue?: ((dueDate: string | null) => Promise<void>) | undefined;
-  onRevisePlan?: ((action: {
-    insertAfterStepId?: string | null;
-    newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string };
-    removeStepId?: string;
-  }) => Promise<void>) | undefined;
+  onRevisePlan?:
+    | ((action: {
+        insertAfterStepId?: string | null;
+        newStep?: {
+          title: string;
+          assigneeId: string;
+          capability?: string;
+          outputExpected?: string;
+        };
+        removeStepId?: string;
+      }) => Promise<void>)
+    | undefined;
   agents?: Array<{ id: string; name: string; status: string }> | undefined;
   agentNames?: Record<string, string> | undefined;
 }) {
@@ -94,7 +101,12 @@ export function EngineWorkspaceWorkPanel({
       </div>
       <h2 title={work.title}>{work.title}</h2>
       {onRename && (
-        <WorkTitleEditor key={`title:${work.id}`} title={work.title} busy={busy} onRename={onRename} />
+        <WorkTitleEditor
+          key={`title:${work.id}`}
+          title={work.title}
+          busy={busy}
+          onRename={onRename}
+        />
       )}
       {work.engineObjectiveProposed ? (
         <section className="cw-engine-objective">
@@ -130,7 +142,9 @@ export function EngineWorkspaceWorkPanel({
             ) : (
               <>
                 {ownerName || "Homun"}
-                {!ownerName && <span className="cw-engine-summary__hint"> lavora direttamente con te</span>}
+                {!ownerName && (
+                  <span className="cw-engine-summary__hint"> lavora direttamente con te</span>
+                )}
               </>
             )}
           </dd>
@@ -156,7 +170,10 @@ export function EngineWorkspaceWorkPanel({
                 onClick={() => onOpenSpace("Progetti", "", work.projectId)}
                 title="Apri nel Project Hub"
               >
-                <span>{spaceData.projects.find((project) => project.id === work.projectId)?.name || "Caricamento…"}</span>
+                <span>
+                  {spaceData.projects.find((project) => project.id === work.projectId)?.name ||
+                    "Caricamento…"}
+                </span>
                 <span style={{ fontSize: 11, color: "#8a9a86" }}>↗ Hub</span>
               </button>
             ) : (
@@ -193,7 +210,9 @@ export function EngineWorkspaceWorkPanel({
             ))}
           </ul>
           {materials.count > materials.items.length && (
-            <p className="cw-intake-note">+{materials.count - materials.items.length} altri nel progetto</p>
+            <p className="cw-intake-note">
+              +{materials.count - materials.items.length} altri nel progetto
+            </p>
           )}
         </section>
       )}
@@ -211,8 +230,18 @@ export function EngineWorkspaceWorkPanel({
         agents={agents ?? []}
       />
       {work.source === "engine" && work.id && (
-        <><EngineWorkOutputs key={work.id} workId={work.id} />
-        <ExternalToolsSection workId={work.id} runnable={!awaitingConfirmation && work.engineStatus !== "completed" && work.engineStatus !== "cancelled" && work.engineStatus !== "review"} /></>
+        <>
+          <EngineWorkOutputs key={work.id} workId={work.id} />
+          <ExternalToolsSection
+            workId={work.id}
+            runnable={
+              !awaitingConfirmation &&
+              work.engineStatus !== "completed" &&
+              work.engineStatus !== "cancelled" &&
+              work.engineStatus !== "review"
+            }
+          />
+        </>
       )}
       <FinalDeliverySection work={work} busy={busy} onSubmitArtifact={onSubmitArtifact} />
       {work.engineStatus === "completed" && onCreateRoutine && (
@@ -228,7 +257,9 @@ export function EngineWorkspaceWorkPanel({
       <CloseWorkSection work={work} busy={busy} onCloseWork={onCloseWork} />
       <HomunErrorNotice error={sources.error} />
       {contributionPanel}
-      {work.engineStatus === "running" && <EngineAskPerson work={work} onChanged={onRefreshEngine} />}
+      {work.engineStatus === "running" && (
+        <EngineAskPerson work={work} onChanged={onRefreshEngine} />
+      )}
       {work.engineStatus === "waiting_input" && <EngineContributionInvitations workId={work.id} />}
     </aside>
   );
@@ -251,9 +282,12 @@ function FinalDeliverySection({
   // Deliverable when every earlier phase succeeded and what's left is the final
   // human phase (still waiting or already running): delivering is the go.
   const last = steps?.[steps.length - 1];
-  const earlierDone = !!steps?.length && steps.slice(0, -1).every((step) => step.status === "succeeded");
-  const finalHuman = !!last && last.capability === "general"
-    && (last.status === "pending" || last.status === "running");
+  const earlierDone =
+    !!steps?.length && steps.slice(0, -1).every((step) => step.status === "succeeded");
+  const finalHuman =
+    !!last &&
+    last.capability === "general" &&
+    (last.status === "pending" || last.status === "running");
   const deliverable =
     !!onSubmitArtifact &&
     earlierDone &&
@@ -264,8 +298,8 @@ function FinalDeliverySection({
     <section className="cw-engine-summary__delivery" aria-label="Consegna del risultato">
       <h3>Consegna il risultato</h3>
       <p className="cw-engine-summary__hint">
-        Tutte le fasi hanno il loro esito: consegna il risultato finale per la verifica.
-        Dopo l'approvazione il lavoro risulta completato.
+        Tutte le fasi hanno il loro esito: consegna il risultato finale per la verifica. Dopo
+        l'approvazione il lavoro risulta completato.
       </p>
       <textarea
         className="cw-input"
@@ -388,7 +422,10 @@ function WorkDueSection({
   const [error, setError] = useState<unknown>(null);
   if (!onSetDue) return null;
   const today = new Date().toISOString().slice(0, 10);
-  const overdue = !!work.engineDue && work.engineDue < today && !["completed", "cancelled"].includes(work.engineStatus ?? "");
+  const overdue =
+    !!work.engineDue &&
+    work.engineDue < today &&
+    !["completed", "cancelled"].includes(work.engineStatus ?? "");
   const changed = draft !== (work.engineDue ?? "");
   return (
     <section className="cw-engine-summary__due" aria-label="Scadenza">
@@ -401,17 +438,25 @@ function WorkDueSection({
       <div className="cs-actions">
         <label>
           Entro il
-          <input type="date" value={draft} disabled={busy || saving}
-            onChange={(event) => setDraft(event.target.value)} />
+          <input
+            type="date"
+            value={draft}
+            disabled={busy || saving}
+            onChange={(event) => setDraft(event.target.value)}
+          />
         </label>
-        <button type="button" className="cw-secondary" disabled={busy || saving || !changed}
+        <button
+          type="button"
+          className="cw-secondary"
+          disabled={busy || saving || !changed}
           onClick={() => {
             setSaving(true);
             setError(null);
             onSetDue(draft || null)
               .catch(setError)
               .finally(() => setSaving(false));
-          }}>
+          }}
+        >
           {saving ? "Sto salvando…" : draft ? "Salva scadenza" : "Togli scadenza"}
         </button>
       </div>
@@ -440,13 +485,14 @@ function WorkBudgetSection({
   const attempts = budget?.caps.model_attempts ?? 40;
   const spent = budget?.spent.attempts ?? 0;
   const parsed = Number(draft);
-  const changed = Number.isInteger(parsed) && parsed >= 1 && parsed <= 100000 && parsed !== attempts;
+  const changed =
+    Number.isInteger(parsed) && parsed >= 1 && parsed <= 100000 && parsed !== attempts;
   return (
     <section className="cw-engine-summary__budget" aria-label="Budget del lavoro">
       <h3>Budget del lavoro</h3>
       <p className="cw-engine-summary__hint">
-        Tentativi del modello usati dal lavoro: {spent} di {attempts}. Il limite si alza solo
-        da qui, mai in automatico.
+        Tentativi del modello usati dal lavoro: {spent} di {attempts}. Il limite si alza solo da
+        qui, mai in automatico.
       </p>
       {onSetBudget && (
         <div className="cs-actions">

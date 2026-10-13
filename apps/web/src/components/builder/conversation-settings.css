@@ -68,7 +68,9 @@
   cursor: pointer;
   padding: 6px 8px;
   border-radius: var(--radius-md, 6px);
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
 }
 .cv-settings-back-btn:hover {
   background: var(--color-sidebar-accent, #e9eeec);
@@ -145,7 +147,9 @@
   cursor: pointer;
   text-align: left;
   width: 100%;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
 }
 .cv-settings-nav-item:hover {
   background: var(--color-sidebar-accent, #e9eeec);
@@ -622,8 +626,23 @@
   }
 }
 
-.cv-people-row { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; }
-.cv-people-row small { display: block; }
+.cv-people-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 0;
+}
+.cv-people-row small {
+  display: block;
+}
 
-.cv-model-suggestion { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 6px 0 0; }
-.cv-model-suggestion small { display: block; }
+.cv-model-suggestion {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 0;
+}
+.cv-model-suggestion small {
+  display: block;
+}

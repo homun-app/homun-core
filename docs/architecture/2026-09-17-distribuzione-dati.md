@@ -6,15 +6,15 @@
 
 Ogni oggetto ha un nodo responsabile e copie autorizzate, nessuna replica indiscriminata dell'azienda. Per la prima versione, stato di piano, permessi e budget di uno spazio hanno una sola autorità. File privati possono restare su altri dispositivi: il piano conserva un riferimento e deve mostrare quando la fonte è offline. Questo distingue chi conserva il file da chi coordina il lavoro.
 
-| Dato | Distribuzione proposta |
-|---|---|
-| File personali non collegati | Restano sul dispositivo d'origine |
-| File collegato al lavoro | Trasferire versione selezionata o estratto verificabile al nodo esecutore autorizzato |
-| Chat e piano condivisi | Copia degli eventi necessari ai partecipanti autorizzati; niente sincronizzazione di tutte le chat |
-| Risultato | Torna al nodo del lavoro; disponibile ai destinatari previsti |
-| Memoria agente/progetto | Solo voci pertinenti e consentite, con provenienza; non intero archivio |
-| Credenziali | Restano nel secret store del nodo; delegare la capacità invece della chiave |
-| Backup | Copia cifrata su destinazione scelta, separata dalla normale condivisione |
+| Dato                         | Distribuzione proposta                                                                             |
+| ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| File personali non collegati | Restano sul dispositivo d'origine                                                                  |
+| File collegato al lavoro     | Trasferire versione selezionata o estratto verificabile al nodo esecutore autorizzato              |
+| Chat e piano condivisi       | Copia degli eventi necessari ai partecipanti autorizzati; niente sincronizzazione di tutte le chat |
+| Risultato                    | Torna al nodo del lavoro; disponibile ai destinatari previsti                                      |
+| Memoria agente/progetto      | Solo voci pertinenti e consentite, con provenienza; non intero archivio                            |
+| Credenziali                  | Restano nel secret store del nodo; delegare la capacità invece della chiave                        |
+| Backup                       | Copia cifrata su destinazione scelta, separata dalla normale condivisione                          |
 
 Un estratto può essere insufficiente: l'agente chiede un ulteriore accesso motivato; non trasferisce automaticamente tutto il file. Registro leggibile: cosa è stato condiviso, versione, con chi, per quale lavoro. Una retention può richiedere la cancellazione della copia, senza promettere che un destinatario ostile non l'abbia duplicata.
 

@@ -14,6 +14,7 @@ Hermes rc.35-v0.21.5 del 2026-10-07 (`research/evidence/2026-10-07-parity-rc35/`
 ## 1. Cosa è fatto (verificato per fase)
 
 ### F0 — Decisioni e prove
+
 - ✅ F0.1 inventario riuso vecchio Homun → `research/2026-09-19-hermes-homun-comparison.md`, `2026-09-23-owned-core-verifica.md`
 - ✅ F0.2 runtime adottato: Pydantic AI + DBOS (ADR D-RUN-01)
 - ✅ F0.3 packaging: app Electron avvia il proprio motore (bundle/venv) con sessione; installer `apps/desktop/dist-installers/Homun-0.2.0-arm64.dmg`
@@ -21,23 +22,29 @@ Hermes rc.35-v0.21.5 del 2026-10-07 (`research/evidence/2026-10-07-parity-rc35/`
 - ◐ F0.5 cifratura a riposo: `storage/encryption.py` con SQLCipher, ma D-CRYPTO-01 resta aperta (non dichiarata pronta)
 
 ### F1-F2 — Dominio, persistenza, API
+
 ✅ Complete (comandi/eventi con actor e versioni, SQLite WAL ottimistica,
 API con cursor, backup consistente F2.5 — restore drill riuscito su backup
 reale il 2026-10-07).
 
 ### F3 — Chat e piano reali
+
 ✅ Completa (provider fake+reali, interpretazione, patch versionate,
 streaming interrompibile, Mem0 locale).
 
 ### F4 — Esecuzione, input e risultati
+
 ✅ **Completa** (le caselle stantie del piano sono state verificate):
+
 - F4.3 contributi tipizzati: `application/agent_clarification.py`, `clarify_contracts.py`, intake
 - F4.4 artifacts versionati: `routes/work_outputs.py`, `application/work_outputs.py`
 - F4.5 review su versione + autonomia (`autonomy_mode` supervised/autonomous con auto-approvazione policy)
 - F4.6 pausa/annulla/steer/ripresa: `application/agent_control.py`, visibili in chat e pannello lavori
 
 ### F5 — Collaborazione tra applicazioni ◐ **fetta 1 consegnata (2026-10-07)**
+
 Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
+
 - ✅ **Fetta 1** — persone, inviti monouso, sessioni: `Person`/`PersonDevice`
   nel dominio, comandi invite/confirm/revoke/bootstrap, inviti monouso con
   secret validato nel comando, `POST /v1/session/redeem` che apre sessioni
@@ -118,6 +125,7 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   irrisolto. GET assignment + rotta/CLI reconcile. Test: `test_delegation_f56.py`.
 
 ### F6 — Strumenti e connettori
+
 - ✅ F6.2 web search (ddgs, `tools/search.py`, protezione errori-retry)
 - ✅ F6.4 MCP (rotte `mcp.py`+oauth, catalogo connettori, skill builtin versionate `builtin_skills.py`)
 - ◐ F6.5 email: trasporto smtp presente negli adattatori canale, non provata end-to-end
@@ -126,6 +134,7 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
 - ⬜ F6.3 connettore Trello (mai avviato)
 
 ### F7 — Automazioni
+
 - ✅ F7.3 scheduler persistente DBOS con misfire policy e deduplica (`application/cron_manager.py`, `cron_contracts.py`, `cron_dispatcher.py`)
 - ◐ F7.1 conversazione→metodo: c'è `skill_reflection.py` (lezioni apprese), manca la promozione esplicita a routine
 - ◐ F7.2 routine con schema/riepilogo (creatore UI nel pannello lavoro, nella vista Automazioni e via «Ripeti» su un lavoro completato)
@@ -133,12 +142,14 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
 - **Vista Automazioni (Fonte: motore)**: la voce della sidebar gira sulle routine vere del motore dal 2026-10-07; la mescolanza residua con la simulazione è stata corretta il 2026-10-12 (proiezione `SpaceData` senza campi simulati in modalità motore, «Ripeti» su lavori del motore che apre il creatore precompilato, Impostazioni → Automazioni con conteggi veri e fonte dichiarata). Stesso giorno: la ricerca globale (⌘K) in modalità motore indicizza solo dati del motore (lavori, messaggi, risultati dagli artefatti, team, progetti, materiali dei progetti, automazioni, collaboratori = `engine.agents`); una sola regola di idoneità per «Ripeti»/creatore routine (`engineRepeatDecision`). Dal 2026-10-12 la ricerca non ha più piè di pagina: lo stato di una fonte che non risponde («I materiali non sono raggiungibili…» a zero risultati, «Alcuni materiali mancano:» in cima quando il resto risponde) sta dove si legge, nell'area risultati; la modalità è dichiarata una volta sola in cima al thread della chat («Fonte: simulazione», niente in modalità motore).
 
 ### F8 — Memoria e formazione
+
 - ✅ F8.1 budget di contesto e riassunti con provenienza (`models/context_summary.py`, parity Hermes)
 - ✅ F8.3 correzione→lezione→riprova (`application/skill_reflection.py`)
 - ◐ F8.2 memorie per ambito con isolamento progetto (memory ports + ledger); promozione decisioni condivise da fare
 - ◐ F8.4 invalidazione su revoca; ◐ F8.5 retrieval semantico (Mem0/Qdrant locali, backends esterni)
 
 ### F9 — Modelli e costi
+
 - ✅ F9.1 adattatori locali multipli (Ollama, OpenAI-compatibile, LM Studio…)
 - ✅ F9.2 ledger budget con riserve atomiche e ricevute persistenti (`application/budgets.py`, `budget_settlement.py`)
 - ◐ F9.3 settings separati (esiste il pannello, perimetro da ordinare)
@@ -146,12 +157,14 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
 - ⬜ F9.5 routing automatico qualità/costo
 
 ### F10 — Release e operatività
+
 - ✅ F10.1 installer Mac (DMG/ZIP arm64, pipeline firma/notarizzazione)
 - ◐ F10.4 diagnostica: health con stato db, recovery mode con quarantena e diagnosi in chat, backup automatici giornalieri con retention
 - ◐ F10.5 macchina pulita: restore drill verificato 2026-10-07; pilot 2-5 utenti da fare (dopo F5)
 - ⬜ F10.2 stress 100 file/50 progetti; ⬜ F10.3 accessibilità; ◐ F10.6 inventario licenze
 
 ### Consegnato oltre il piano
+
 - **Chat assistant-ui ufficiale**: thread del registry verbatim, streaming
   live con ragionamento separato, tool group dentro il thread, ragionamento
   e tool visibili anche nello storico (`feat f74e1eb0`)
@@ -169,17 +182,17 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
 
 ## 2. Debiti aperti verificati (non-previsti dal piano)
 
-| Debito | Stato | Dove |
-|---|---|---|
-| ~~Vista Automazioni senza creazione~~ | ✅ corretto 2026-10-07: creator in vista con lavori modello pre-filtrati | `research/2026-10-07-feedback-desktop.md` |
-| Vista Compiti/filtri incomprensibile | da rifare contro F5 (persona≠device) | idem |
-| Connettori duplicati con i canali | da unificare/etichettare | idem |
-| Errori connettore visibili | ✅ corretto 2026-10-07 | commit feedback |
-| Gap parity Hermes: anti-loop in streaming, think inline nel pane, clean-EOF, coda al confine tool-call | ✅ portati 2026-10-12 (`fix/hermes-streaming-parity`): runaway live con la STESSA soglia del fine turno (400) e cadenza a raddoppio su contenuto e ragionamento — di Hermes è portata la cadenza, non la soglia 16k (un solo criterio dal vivo e a fine turno, fissato da test di coerenza); scrubber think stateless (`split_think`) che alimenta il pane e tiene pulita la risposta; clean-EOF tipizzato e mai ritentato; coda al confine tool-call verificata non applicabile (nessun salto basato su prefisso) | `research/evidence/2026-10-07-parity-rc35/RIASSUNTO-TEST.md`, `engine/tests/test_hermes_streaming_p0_gaps.py` |
-| Anomalia: conversazione scomparsa dopo riavvio (2026-10-07) | RIDIAGNOSTICATA 2026-10-12: l'ipotesi "WAL perso durante kill -9" era errata — con `synchronous=FULL` in WAL ogni transazione confermata è durabile e sopravvive al kill del processo. Sulla stessa macchina esistono due database sani e distinti (app desktop: `~/Library/Application Support/Homun/engine/ws_local.sqlite3`, motore di sviluppo: `~/Library/Application Support/Homun2/engine/ws_local.sqlite3`), entrambi con conversazioni del 7 ottobre: l'ipotesi più probabile è che la conversazione sia stata cercata nel database sbagliato. Non è confermata: serve il titolo della conversazione per cercarla in entrambi. Causa aggravante corretta in questa PR: la recovery scattava anche su errori non di corruzione (SQLITE_BUSY/CANTOPEN/PERM/FULL...) mettendo in quarantena database sani; ora solo `SQLITE_CORRUPT*`/`SQLITE_NOTADB` e ValidationError; ogni EncryptionError è fatale, perché un workspace cifrato avviato senza chiave non è distinguibile da un file danneggiato e la quarantena lo sostituirebbe con uno vuoto. Diagnosi: `/v1/health` espone percorso del db e cartella dati, più riga `Workspace:` nel log di avvio | engine/storage |
-| ~~post_message senza controllo authority~~ | ✅ corretto 2026-10-08 (revisione F5): buco pre-mutation critico con i peer | policy/commands.py |
-| ConflictError transitorio in `expire_waiting` | osservato, non bloccante | sessione 2026-10-02 |
-| Confine contesti in `homun/application` | ✅ 2026-10-10: pacchetto piatto (285 moduli) riorganizzato in 10 contesti (`agent` 71, `work` 48, `computer` 37, `integrations` 32, `sessions` 28, `automation` 23, `channels` 17, `ops` 14, `providers` 10, `memory` 5) con solo spostamenti e riscrittura import (`tools/application_contexts.json`, `tools/apply_application_contexts.py`). Stesso giorno: `agent/` divisa di secondo livello in `runs/` (16, ciclo di vita+recupero), `tools/` (5), `terminal/` (5), `moa/` (6), `clarify/` (6), `workspace/` (10); 23 moduli restano alla radice `agent/` (chat/control, runtime modello, native, approval). Debito residuo: **158 import fra contesti diversi** (avviso in `check_architecture.py`, che ora rifiuta anche nuovi file piatti in `homun/application/`) — base per la fase successiva di porte pubbliche: un facade per contesto per collassare le coppie modulo→modulo in pochi import | engine/src/homun/application |
+| Debito                                                                                                 | Stato                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Dove                                                                                                          |
+| ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| ~~Vista Automazioni senza creazione~~                                                                  | ✅ corretto 2026-10-07: creator in vista con lavori modello pre-filtrati                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | `research/2026-10-07-feedback-desktop.md`                                                                     |
+| Vista Compiti/filtri incomprensibile                                                                   | da rifare contro F5 (persona≠device)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | idem                                                                                                          |
+| Connettori duplicati con i canali                                                                      | da unificare/etichettare                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | idem                                                                                                          |
+| Errori connettore visibili                                                                             | ✅ corretto 2026-10-07                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | commit feedback                                                                                               |
+| Gap parity Hermes: anti-loop in streaming, think inline nel pane, clean-EOF, coda al confine tool-call | ✅ portati 2026-10-12 (`fix/hermes-streaming-parity`): runaway live con la STESSA soglia del fine turno (400) e cadenza a raddoppio su contenuto e ragionamento — di Hermes è portata la cadenza, non la soglia 16k (un solo criterio dal vivo e a fine turno, fissato da test di coerenza); scrubber think stateless (`split_think`) che alimenta il pane e tiene pulita la risposta; clean-EOF tipizzato e mai ritentato; coda al confine tool-call verificata non applicabile (nessun salto basato su prefisso)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `research/evidence/2026-10-07-parity-rc35/RIASSUNTO-TEST.md`, `engine/tests/test_hermes_streaming_p0_gaps.py` |
+| Anomalia: conversazione scomparsa dopo riavvio (2026-10-07)                                            | RIDIAGNOSTICATA 2026-10-12: l'ipotesi "WAL perso durante kill -9" era errata — con `synchronous=FULL` in WAL ogni transazione confermata è durabile e sopravvive al kill del processo. Sulla stessa macchina esistono due database sani e distinti (app desktop: `~/Library/Application Support/Homun/engine/ws_local.sqlite3`, motore di sviluppo: `~/Library/Application Support/Homun2/engine/ws_local.sqlite3`), entrambi con conversazioni del 7 ottobre: l'ipotesi più probabile è che la conversazione sia stata cercata nel database sbagliato. Non è confermata: serve il titolo della conversazione per cercarla in entrambi. Causa aggravante corretta in questa PR: la recovery scattava anche su errori non di corruzione (SQLITE_BUSY/CANTOPEN/PERM/FULL...) mettendo in quarantena database sani; ora solo `SQLITE_CORRUPT*`/`SQLITE_NOTADB` e ValidationError; ogni EncryptionError è fatale, perché un workspace cifrato avviato senza chiave non è distinguibile da un file danneggiato e la quarantena lo sostituirebbe con uno vuoto. Diagnosi: `/v1/health` espone percorso del db e cartella dati, più riga `Workspace:` nel log di avvio | engine/storage                                                                                                |
+| ~~post_message senza controllo authority~~                                                             | ✅ corretto 2026-10-08 (revisione F5): buco pre-mutation critico con i peer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | policy/commands.py                                                                                            |
+| ConflictError transitorio in `expire_waiting`                                                          | osservato, non bloccante                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | sessione 2026-10-02                                                                                           |
+| Confine contesti in `homun/application`                                                                | ✅ 2026-10-10: pacchetto piatto (285 moduli) riorganizzato in 10 contesti (`agent` 71, `work` 48, `computer` 37, `integrations` 32, `sessions` 28, `automation` 23, `channels` 17, `ops` 14, `providers` 10, `memory` 5) con solo spostamenti e riscrittura import (`tools/application_contexts.json`, `tools/apply_application_contexts.py`). Stesso giorno: `agent/` divisa di secondo livello in `runs/` (16, ciclo di vita+recupero), `tools/` (5), `terminal/` (5), `moa/` (6), `clarify/` (6), `workspace/` (10); 23 moduli restano alla radice `agent/` (chat/control, runtime modello, native, approval). Debito residuo: **158 import fra contesti diversi** (avviso in `check_architecture.py`, che ora rifiuta anche nuovi file piatti in `homun/application/`) — base per la fase successiva di porte pubbliche: un facade per contesto per collassare le coppie modulo→modulo in pochi import                                                                                                                                                                                                                                                      | engine/src/homun/application                                                                                  |
 
 ---
 
@@ -201,6 +214,7 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
 6. **F9.5** routing automatico (dopo dati di usage reali dal pilot).
 
 ### Regola di lavoro (invariata)
+
 Contratto e gate prima dell'implementazione; test delle invarianti e dei
 guasti; nessuna fase dichiarata completa con soli mock; Fonte:
 simulazione|motore mai mescolate; errori tipizzati mai nascosti.
@@ -218,14 +232,14 @@ simulazione|motore mai mescolate; errori tipizzati mai nascosti.
 ## Release 0.2.1002 (2026-10-08)
 
 PR #409 su main, tutte le build verdi (macOS firmata PR-validation, macOS
-+ Linux + Windows multi-OS, checks backend/frontend). Sette giri di fix
-CI: snapshot OpenAPI, cua-driver pinnato con stdout isolato e installer
-PowerShell su Windows (percorso %LOCALAPPDATA%), dipendenze Windows del
-bundle (pefile/pywin32-ctypes con hash), test packaging multi-architettura,
-packager lazy, test con provider reale o Chrome saltati dove mancano con
-motivo dichiarato. **Sbloccata su Apple** (2026-10-08, Fabio Cantone): il
-blocco notarizzazione del tag v0.2.1002 (403 «A required agreement is
-missing or has expired») era un problema amministrativo dell'accordo
-Apple Developer del team — ora risolto. Non è un problema di codice o
-pipeline; la notarizzazione non è più bloccata da quell'accordo.
 
+- Linux + Windows multi-OS, checks backend/frontend). Sette giri di fix
+  CI: snapshot OpenAPI, cua-driver pinnato con stdout isolato e installer
+  PowerShell su Windows (percorso %LOCALAPPDATA%), dipendenze Windows del
+  bundle (pefile/pywin32-ctypes con hash), test packaging multi-architettura,
+  packager lazy, test con provider reale o Chrome saltati dove mancano con
+  motivo dichiarato. **Sbloccata su Apple** (2026-10-08, Fabio Cantone): il
+  blocco notarizzazione del tag v0.2.1002 (403 «A required agreement is
+  missing or has expired») era un problema amministrativo dell'accordo
+  Apple Developer del team — ora risolto. Non è un problema di codice o
+  pipeline; la notarizzazione non è più bloccata da quell'accordo.

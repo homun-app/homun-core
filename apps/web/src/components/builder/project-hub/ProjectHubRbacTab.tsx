@@ -1,5 +1,16 @@
 import { useState, useRef } from "react";
-import { UsersRound, Shield, ShieldCheck, Eye, Plus, Download, Upload, Trash2, CheckCircle2, Laptop } from "lucide-react";
+import {
+  UsersRound,
+  Shield,
+  ShieldCheck,
+  Eye,
+  Plus,
+  Download,
+  Upload,
+  Trash2,
+  CheckCircle2,
+  Laptop,
+} from "lucide-react";
 import { SettingsCustomSelect, type SelectOption } from "../SettingsCustomSelect";
 import { InviteCollaboratorModal, type CollaboratorData } from "../InviteCollaboratorModal";
 import type { EngineProject } from "@/lib/engine-projects-client";
@@ -108,9 +119,7 @@ export function ProjectHubRbacTab({
     <div className="ph-tab-content">
       <div className="ph-card">
         <div className="ph-card-header">
-          <div className="section-label">
-            Squadra Umana & Permessi ({members.length})
-          </div>
+          <div className="section-label">Squadra Umana & Permessi ({members.length})</div>
           <button className="ph-btn-ghost" onClick={() => setModalOpen(true)}>
             <Plus size={13} />
             Aggiungi Membro
@@ -203,8 +212,9 @@ export function ProjectHubRbacTab({
               <h4 style={{ margin: 0 }}>Deleghe Remote: Homun Work Capsules</h4>
             </div>
             <p>
-              Esporta il contesto operativo e le istruzioni di questo progetto in un pacchetto cifrato per
-              lavorare offline o delegare task su un altro computer senza condividere l'intero database.
+              Esporta il contesto operativo e le istruzioni di questo progetto in un pacchetto
+              cifrato per lavorare offline o delegare task su un altro computer senza condividere
+              l'intero database.
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
@@ -225,7 +235,10 @@ export function ProjectHubRbacTab({
             <button
               className="ph-btn-primary"
               onClick={() => {
-                const title = prompt("Titolo dell'incarico da delegare nella Work Capsule:", "Analisi deliverable");
+                const title = prompt(
+                  "Titolo dell'incarico da delegare nella Work Capsule:",
+                  "Analisi deliverable",
+                );
                 if (title) {
                   setCapsuleTaskTitle(title);
                   setCapsuleInstructions("Istruzioni per il collaboratore");

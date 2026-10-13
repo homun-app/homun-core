@@ -56,7 +56,11 @@ test("requestGatewayPairing sends platform and credentials and returns generated
     });
   };
   try {
-    const res = await requestGatewayPairing({ platform: "telegram", userId: "user_999", username: "marco" });
+    const res = await requestGatewayPairing({
+      platform: "telegram",
+      userId: "user_999",
+      username: "marco",
+    });
     assert.equal(requestBody.platform, "telegram");
     assert.equal(requestBody.user_id, "user_999");
     assert.equal(requestBody.username, "marco");

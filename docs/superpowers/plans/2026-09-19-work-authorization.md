@@ -13,7 +13,7 @@ Blocked intents retain a typed permission_denied error and can retry after regra
 no revocation is claimed to undo IO already accepted by the runtime.
 
 - [x] Add regression cases for all work/plan command entrances, conversation creation,
-  replay after revocation, linked project scope, and revoked/expired outbox delivery.
+      replay after revocation, linked project scope, and revoked/expired outbox delivery.
 - [x] Implement policy/work.py, wire DomainService and runtime/outbox.py.
 - [x] Verify HTTP command returns typed 403; domain state/receipts remain unchanged.
 - [x] Run focused/full backend and architecture checks, rebuild and smoke the bundle.

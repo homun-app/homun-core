@@ -92,7 +92,15 @@ function groupWorksByDate(items: Work[]) {
 }
 
 /** Riga conversazione: punto discreto quando una sua risposta è in gioco. */
-function WorkRow({ work, active, onOpen }: { work: Work; active: string | null; onOpen: (id: string | null) => void }) {
+function WorkRow({
+  work,
+  active,
+  onOpen,
+}: {
+  work: Work;
+  active: string | null;
+  onOpen: (id: string | null) => void;
+}) {
   const badge = conversationFollowupBadge(work.engineFollowups ?? []);
   return (
     <button
@@ -101,7 +109,10 @@ function WorkRow({ work, active, onOpen }: { work: Work; active: string | null; 
       {...(badge ? { title: badge.title } : {})}
     >
       <div className="cw-sb-item-left">
-        <MessageSquare size={13} style={{ color: work.id === active ? "#18181b" : "#71717a", flexShrink: 0 }} />
+        <MessageSquare
+          size={13}
+          style={{ color: work.id === active ? "#18181b" : "#71717a", flexShrink: 0 }}
+        />
         <span className="cw-sb-row-title">{work.title}</span>
         {badge && (
           <>
@@ -109,7 +120,10 @@ function WorkRow({ work, active, onOpen }: { work: Work; active: string | null; 
             <span
               className="cw-sb-dot"
               aria-hidden="true"
-              style={{ backgroundColor: badge.tone === "error" ? "#b4552f" : "#b08b2e", flexShrink: 0 }}
+              style={{
+                backgroundColor: badge.tone === "error" ? "#b4552f" : "#b08b2e",
+                flexShrink: 0,
+              }}
             />
             <span className="sr-only">{badge.title}</span>
           </>
@@ -187,7 +201,9 @@ export function ConversationWorkspaceSidebar({
 
   const unassignedWorks = visibleWorks.filter((w) => !w.projectId && !w.coordinatedBy);
   const { today, yesterday, older } = groupWorksByDate(unassignedWorks);
-  const docCount = visibleWorks.filter((w) => w.source === "engine" && w.engineLatestArtifact).length;
+  const docCount = visibleWorks.filter(
+    (w) => w.source === "engine" && w.engineLatestArtifact,
+  ).length;
 
   const uniqueAgents = scenarios.filter(
     (s, i) =>
@@ -202,11 +218,19 @@ export function ConversationWorkspaceSidebar({
     <aside className="cw-sidebar" hidden={!sidebarOpen} style={{ width: sidebarWidth }}>
       {/* Resize handle */}
       {onSidebarWidthChange && (
-        <div className="cw-sb-resize-handle" onMouseDown={handleResizeMouseDown} title="Trascina per ridimensionare" />
+        <div
+          className="cw-sb-resize-handle"
+          onMouseDown={handleResizeMouseDown}
+          title="Trascina per ridimensionare"
+        />
       )}
       {/* Brand Header */}
       <div className="cw-sb-brand-row">
-        <div className="cw-sb-brand-left" onClick={() => onOpenSpace("Progetti")} title="Spazio di lavoro">
+        <div
+          className="cw-sb-brand-left"
+          onClick={() => onOpenSpace("Progetti")}
+          title="Spazio di lavoro"
+        >
           <span className="cw-sb-badge">H</span>
           <span className="cw-sb-brand-title">Homun</span>
           <ChevronsUpDown size={12} className="cw-sb-brand-chevron" />
@@ -222,7 +246,11 @@ export function ConversationWorkspaceSidebar({
       </div>
 
       {/* Quick Search */}
-      <div className="cw-sb-search" onClick={onSearchOpen} title={`Cerca ovunque (${searchShortcut})`}>
+      <div
+        className="cw-sb-search"
+        onClick={onSearchOpen}
+        title={`Cerca ovunque (${searchShortcut})`}
+      >
         <Search size={14} className="cw-sb-search-icon" />
         <span className="cw-sb-search-text">Cerca</span>
         <kbd className="cw-sb-search-kbd">{searchShortcut}</kbd>
@@ -266,7 +294,7 @@ export function ConversationWorkspaceSidebar({
             <FileText size={15} />
             <span>Documenti</span>
           </div>
-          {((docCount || 0) + (libraryCount || 0)) > 0 && (
+          {(docCount || 0) + (libraryCount || 0) > 0 && (
             <span className="cw-sb-count">{(docCount || 0) + (libraryCount || 0)}</span>
           )}
         </button>
@@ -321,7 +349,10 @@ export function ConversationWorkspaceSidebar({
                   onClick={() => onOpenSpace("Progetti", "", p.id)}
                 >
                   <div className="cw-sb-item-left">
-                    <Folder size={13} style={{ color: isActive ? "#18181b" : "#71717a", flexShrink: 0 }} />
+                    <Folder
+                      size={13}
+                      style={{ color: isActive ? "#18181b" : "#71717a", flexShrink: 0 }}
+                    />
                     <span className="cw-sb-row-title">{p.name}</span>
                   </div>
                   {count > 0 && <span className="cw-sb-count">{count}</span>}
@@ -411,7 +442,7 @@ export function ConversationWorkspaceSidebar({
                     className="cw-sb-row"
                     onClick={() =>
                       window.dispatchEvent(
-                        new CustomEvent("homun:inspect-agent", { detail: agent })
+                        new CustomEvent("homun:inspect-agent", { detail: agent }),
                       )
                     }
                     title={`Visualizza scheda di ${agent.name}`}
@@ -438,7 +469,9 @@ export function ConversationWorkspaceSidebar({
                     <span className="cw-sb-dot" style={{ backgroundColor: "#10b981" }} />
                     <span className="cw-sb-row-title">{s.agent}</span>
                   </div>
-                  <span className="cw-sb-role-sub">{memberProfile(s.agent, spaceData.profiles).role}</span>
+                  <span className="cw-sb-role-sub">
+                    {memberProfile(s.agent, spaceData.profiles).role}
+                  </span>
                 </button>
               ))}
           </div>
@@ -447,7 +480,11 @@ export function ConversationWorkspaceSidebar({
 
       {/* User profile footer */}
       <div className="cw-sb-footer">
-        <button className="cw-sb-profile-btn" onClick={onOpenSettings} title="Impostazioni dello spazio">
+        <button
+          className="cw-sb-profile-btn"
+          onClick={onOpenSettings}
+          title="Impostazioni dello spazio"
+        >
           <span className="cw-sb-avatar">{preferences.displayName.slice(0, 1)}</span>
           <div className="cw-sb-user-text">
             <span className="cw-sb-username">{preferences.displayName}</span>
@@ -464,10 +501,16 @@ export function ConversationWorkspaceSidebar({
               title="Notifiche"
             >
               <Bell size={15} />
-              {!!notificationCount && <span className="cw-sb-notif-badge">{notificationCount}</span>}
+              {!!notificationCount && (
+                <span className="cw-sb-notif-badge">{notificationCount}</span>
+              )}
             </button>
           )}
-          <button className="cw-sb-footer-btn" onClick={onOpenSettings} title="Impostazioni dello spazio">
+          <button
+            className="cw-sb-footer-btn"
+            onClick={onOpenSettings}
+            title="Impostazioni dello spazio"
+          >
             <Settings size={15} />
           </button>
           <ConversationHelpPopover

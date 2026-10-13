@@ -1,9 +1,6 @@
 import { useState } from "react";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
-import {
-  reviewEngineMemories,
-  type MemoryReviewReport,
-} from "@/lib/engine-memory-review-client";
+import { reviewEngineMemories, type MemoryReviewReport } from "@/lib/engine-memory-review-client";
 import { CheckCircle2, AlertTriangle, Sparkles, Trash2, X, RefreshCw } from "lucide-react";
 
 type Props = {
@@ -118,7 +115,8 @@ export function ConversationMemoryReviewModal({
         <div className="mt-4 max-h-[50vh] overflow-y-auto space-y-3 pr-1">
           {!report && !loading && (
             <p className="py-8 text-center text-xs text-neutral-500">
-              Clicca su &quot;Analizza memorie&quot; per individuare note ridondanti o duplicate tramite confronto semantico.
+              Clicca su &quot;Analizza memorie&quot; per individuare note ridondanti o duplicate
+              tramite confronto semantico.
             </p>
           )}
 
@@ -129,7 +127,8 @@ export function ConversationMemoryReviewModal({
                 Nessuna nota ridondante rilevata
               </p>
               <p className="text-xs text-neutral-500 mt-1">
-                Tutte le {report.total_reviewed} memorie analizzate sono uniche rispetto alla soglia impostata.
+                Tutte le {report.total_reviewed} memorie analizzate sono uniche rispetto alla soglia
+                impostata.
               </p>
             </div>
           )}
@@ -138,7 +137,8 @@ export function ConversationMemoryReviewModal({
             <div className="space-y-4">
               <div className="flex items-center justify-between text-xs text-neutral-500">
                 <span>
-                  Trovati <strong>{report.duplicate_clusters}</strong> cluster di duplicati su {report.total_reviewed} note.
+                  Trovati <strong>{report.duplicate_clusters}</strong> cluster di duplicati su{" "}
+                  {report.total_reviewed} note.
                 </span>
                 {report.status === "pruned" && (
                   <span className="font-medium text-emerald-600 dark:text-emerald-400">
@@ -166,7 +166,10 @@ export function ConversationMemoryReviewModal({
                       RIDONDANTI (sovrapposizione &gt;= {Math.round(cluster.max_similarity * 100)}%)
                     </span>
                     {cluster.redundant_notes.map((r) => (
-                      <div key={r.id} className="text-neutral-600 dark:text-neutral-400 flex items-start justify-between gap-2">
+                      <div
+                        key={r.id}
+                        className="text-neutral-600 dark:text-neutral-400 flex items-start justify-between gap-2"
+                      >
                         <span className="italic">{r.text}</span>
                         <span className="font-mono text-[10px] text-neutral-400 shrink-0">
                           {Math.round(r.similarity * 100)}%
@@ -181,9 +184,7 @@ export function ConversationMemoryReviewModal({
         </div>
 
         <div className="mt-6 flex items-center justify-between border-t border-neutral-100 pt-4 dark:border-neutral-800">
-          <span className="text-[11px] text-neutral-400">
-            Jaccard token clustering
-          </span>
+          <span className="text-[11px] text-neutral-400">Jaccard token clustering</span>
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
@@ -198,7 +199,11 @@ export function ConversationMemoryReviewModal({
                 className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Elimina {report.candidates.reduce((acc, c) => acc + c.redundant_notes.length, 0)} ridondanti
+                Elimina {report.candidates.reduce(
+                  (acc, c) => acc + c.redundant_notes.length,
+                  0,
+                )}{" "}
+                ridondanti
               </button>
             )}
           </div>

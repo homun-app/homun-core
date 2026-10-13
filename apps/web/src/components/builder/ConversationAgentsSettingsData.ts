@@ -58,12 +58,12 @@ export function parseAgentCognitiveConfig(methodStr?: string | null): AgentCogni
     const parsed = JSON.parse(methodStr) as Record<string, unknown>;
     const res: AgentCognitiveConfig = {
       fallback_connection_id:
-        typeof parsed["fallback_connection_id"] === "string" ? parsed["fallback_connection_id"] : null,
+        typeof parsed["fallback_connection_id"] === "string"
+          ? parsed["fallback_connection_id"]
+          : null,
       thinking_mode: Boolean(parsed["thinking_mode"]),
-      temperature:
-        typeof parsed["temperature"] === "number" ? parsed["temperature"] : 0.5,
-      max_tokens:
-        typeof parsed["max_tokens"] === "number" ? parsed["max_tokens"] : 8192,
+      temperature: typeof parsed["temperature"] === "number" ? parsed["temperature"] : 0.5,
+      max_tokens: typeof parsed["max_tokens"] === "number" ? parsed["max_tokens"] : 8192,
     };
     if (typeof parsed["notes"] === "string") {
       res.notes = parsed["notes"];
@@ -111,7 +111,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
   {
     name: "Architetto di Prodotto",
     role: "Product Architect & Strategist",
-    responsibility: "Definisce requisiti, roadmap e scompone gli obiettivi in deliverable operativi.",
+    responsibility:
+      "Definisce requisiti, roadmap e scompone gli obiettivi in deliverable operativi.",
     instructions:
       "Sei l'Architetto del Prodotto. Il tuo compito è analizzare la visione dell'utente, chiarire ambiguità e strutturare piani d'azione pragmatici con criteri di accettazione verificabili.",
     autonomyMode: "supervised",

@@ -92,7 +92,12 @@ export function useWorkIntake(
     setError(null);
     try {
       setProposal(
-        await confirmWorkIntake(proposal.work_id, proposal, approval.current, Boolean(proposal.new_agent)),
+        await confirmWorkIntake(
+          proposal.work_id,
+          proposal,
+          approval.current,
+          Boolean(proposal.new_agent),
+        ),
       );
       await callback.current();
     } catch (cause) {
@@ -100,7 +105,10 @@ export function useWorkIntake(
       // the cached proposal is dead: refresh the intake list instead of showing
       // a dead-end error. The fresh proposal is the guided recovery — the person
       // confirms again on current data.
-      if (isHomunClientError(cause) && (cause.code === "not_found" || cause.code === "version_conflict")) {
+      if (
+        isHomunClientError(cause) &&
+        (cause.code === "not_found" || cause.code === "version_conflict")
+      ) {
         setProposal(null);
         setError(null);
         try {

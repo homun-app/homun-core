@@ -116,7 +116,9 @@ export function EngineAgentProfileModal({
                   </div>
                   <div>
                     <strong>Vault di Progetto</strong>
-                    <p>Deposito e consultazione dei dataset e dei report generati durante le fasi.</p>
+                    <p>
+                      Deposito e consultazione dei dataset e dei report generati durante le fasi.
+                    </p>
                   </div>
                 </div>
               )}
@@ -127,7 +129,9 @@ export function EngineAgentProfileModal({
                   </div>
                   <div>
                     <strong>Memoria di Contesto</strong>
-                    <p>Mantenimento delle evidenze concordate e dello storico delle deliberazioni.</p>
+                    <p>
+                      Mantenimento delle evidenze concordate e dello storico delle deliberazioni.
+                    </p>
                   </div>
                 </div>
               )}
@@ -144,7 +148,8 @@ export function EngineAgentProfileModal({
           </section>
 
           {/* Responsabilità & Specializzazioni */}
-          {(agent.responsibility || (agent.specializations && agent.specializations.length > 0)) && (
+          {(agent.responsibility ||
+            (agent.specializations && agent.specializations.length > 0)) && (
             <section className="cw-agent-modal__section">
               <span className="cw-agent-modal__section-title">Responsabilità e Ambito</span>
               {agent.responsibility && (
@@ -166,9 +171,7 @@ export function EngineAgentProfileModal({
           {agent.instructions && (
             <section className="cw-agent-modal__section">
               <span className="cw-agent-modal__section-title">Istruzioni operative assegnate</span>
-              <div className="cw-agent-modal__instructions">
-                {agent.instructions}
-              </div>
+              <div className="cw-agent-modal__instructions">{agent.instructions}</div>
             </section>
           )}
 
@@ -193,11 +196,7 @@ export function EngineAgentProfileModal({
 
         {/* Footer */}
         <footer className="cw-agent-modal__footer">
-          <button
-            type="button"
-            className="cw-agent-modal__btn-secondary"
-            onClick={onClose}
-          >
+          <button type="button" className="cw-agent-modal__btn-secondary" onClick={onClose}>
             Chiudi
           </button>
         </footer>

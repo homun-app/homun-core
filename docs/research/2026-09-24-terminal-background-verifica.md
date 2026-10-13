@@ -61,6 +61,7 @@ secondo avvio non ripete il comando. Arrestare una sessione non tocca l'altra.
 Non è un container: percorsi assoluti e rete restano raggiungibili. Non ci sono
 stdin né terminale. Motore: 983 passati, 1 saltato. Web: 226 passati.
 Architettura: 0 errori, 35 avvisi dimensionali preesistenti. OpenAPI rigenerato.
+
 ## Host SSH
 
 Un run può scegliere un host SSH al posto del container o del processo locale.

@@ -13,14 +13,14 @@ Multilingual: intent comes from the model, not keyword/regex routing. Determinis
 
 ## Decisions (approved in conversation)
 
-| Decision | Choice |
-|----------|--------|
-| Slice | **B** — engine interpret + wire ConversationWorkspace (Fonte=motore). Not A-then-replace. |
-| Authority | Engine owns interpret + persistence; UI renders structured result. |
-| Provider | Reuse `openai_compatible` with Ollama preset (`http://127.0.0.1:11434/v1`). |
-| Structured output | Pydantic AI `Agent` + `output_type=MessageInterpretation` in the engine package. |
-| Fake / CI | Same schema via fake or Pydantic AI `TestModel`; live Ollama tests are manual/optional, separate from CI. |
-| Commands | Proposals only in F3.2 — domain does **not** apply plan patches yet (F3.3). |
+| Decision          | Choice                                                                                                    |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| Slice             | **B** — engine interpret + wire ConversationWorkspace (Fonte=motore). Not A-then-replace.                 |
+| Authority         | Engine owns interpret + persistence; UI renders structured result.                                        |
+| Provider          | Reuse `openai_compatible` with Ollama preset (`http://127.0.0.1:11434/v1`).                               |
+| Structured output | Pydantic AI `Agent` + `output_type=MessageInterpretation` in the engine package.                          |
+| Fake / CI         | Same schema via fake or Pydantic AI `TestModel`; live Ollama tests are manual/optional, separate from CI. |
+| Commands          | Proposals only in F3.2 — domain does **not** apply plan patches yet (F3.3).                               |
 
 ## Architecture
 
@@ -42,15 +42,15 @@ command_proposal + @ UI
 
 ### Modules
 
-| Module | Responsibility |
-|--------|----------------|
-| `homun/models/interpretation.py` | Pydantic models: `MessageInterpretation`, mention candidates, command proposal stub |
-| `homun/models/interpret_agent.py` | Build Pydantic AI agent; map registry provider → model; run interpret |
-| `homun/models/guardrails.py` | Thin post-checks: drop unknown IDs; force clarification if mention ≠ 1 match |
-| `homun/routes/models.py` | `POST /v1/models/interpret` (testable without chat) |
-| Domain post_message path | After save user message, call interpret, save typed assistant turn / event |
-| `useEngineWorkspace.postMessage` | Replace F3 placeholder with engine interpretation payload |
-| Thin UI | Show clarification / candidates / “proposta (non applicata)” — no new god-file growth in ConversationWorkspace |
+| Module                            | Responsibility                                                                                                 |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `homun/models/interpretation.py`  | Pydantic models: `MessageInterpretation`, mention candidates, command proposal stub                            |
+| `homun/models/interpret_agent.py` | Build Pydantic AI agent; map registry provider → model; run interpret                                          |
+| `homun/models/guardrails.py`      | Thin post-checks: drop unknown IDs; force clarification if mention ≠ 1 match                                   |
+| `homun/routes/models.py`          | `POST /v1/models/interpret` (testable without chat)                                                            |
+| Domain post_message path          | After save user message, call interpret, save typed assistant turn / event                                     |
+| `useEngineWorkspace.postMessage`  | Replace F3 placeholder with engine interpretation payload                                                      |
+| Thin UI                           | Show clarification / candidates / “proposta (non applicata)” — no new god-file growth in ConversationWorkspace |
 
 ### Schema (sketch)
 
@@ -102,13 +102,13 @@ class MessageInterpretation(BaseModel):
 
 ## Testing
 
-| Layer | What |
-|-------|------|
-| Unit | Schema + guardrails (invented ID rejected; ambiguous @ → clarification) |
-| Engine HTTP | `POST /v1/models/interpret` with fake/TestModel |
+| Layer            | What                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------ |
+| Unit             | Schema + guardrails (invented ID rejected; ambiguous @ → clarification)              |
+| Engine HTTP      | `POST /v1/models/interpret` with fake/TestModel                                      |
 | Engine chat path | post_message yields interpretation payload in response or subsequent messages/events |
-| Web | postMessage mapping; no placeholder string; simulation untouched |
-| Manual | Ollama running → verify → send IT and EN message → structured reply or clarification |
+| Web              | postMessage mapping; no placeholder string; simulation untouched                     |
+| Manual           | Ollama running → verify → send IT and EN message → structured reply or clarification |
 
 ## Explicit follow-ups (“sistemiamo dopo”)
 

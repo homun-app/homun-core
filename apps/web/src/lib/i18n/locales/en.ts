@@ -26,7 +26,8 @@ export const en: TranslationDictionary = {
     corrections_placeholder: "Describe what to correct in materials or outcome",
     approved_status: "Outcome approved: work completed.",
     phase_verified: "Phase verified: work advances to «{next}».",
-    changes_requested_status: "Changes requested. Select updated materials and prepare a new proposal for approval.",
+    changes_requested_status:
+      "Changes requested. Select updated materials and prepare a new proposal for approval.",
     files_produced: "Files produced",
     files_produced_desc: "Copies saved for your verification. They are not yet approved outcomes.",
   },
@@ -39,13 +40,16 @@ export const en: TranslationDictionary = {
   },
   gateway: {
     title: "Supervision & External Channels",
-    description: "Connect Telegram or Slack to receive notifications and approve outcomes directly from your mobile phone.",
+    description:
+      "Connect Telegram or Slack to receive notifications and approve outcomes directly from your mobile phone.",
     authorized_channels: "Authorized channels",
-    no_channels: "No external channels connected. Notifications and decisions remain in the browser.",
+    no_channels:
+      "No external channels connected. Notifications and decisions remain in the browser.",
     pending_requests: "Pending pairing requests",
     pending_desc: "These codes were requested from Telegram or Slack and await your authorization.",
     has_code_prompt: "Received a code from the Bot?",
-    has_code_desc: "If you started the Telegram or Slack bot and received an 8-character code, enter it here:",
+    has_code_desc:
+      "If you started the Telegram or Slack bot and received an 8-character code, enter it here:",
     generate_title: "Generate pairing code",
     generate_desc: "Create an 8-character code valid for 1 hour to send to the bot:",
     generate_btn: "Generate code for {platform}",
@@ -91,7 +95,8 @@ export const en: TranslationDictionary = {
   },
   documents: {
     title: "Documents",
-    subtitle: "Every document here is an outcome approved by you: comparisons, summaries, final deliveries. Saved in the engine, ready when needed.",
+    subtitle:
+      "Every document here is an outcome approved by you: comparisons, summaries, final deliveries. Saved in the engine, ready when needed.",
     verified_single: "verified outcome",
     verified_multiple: "verified outcomes",
     search_placeholder: "Search by title, work, or content…",
@@ -101,7 +106,8 @@ export const en: TranslationDictionary = {
   },
   routines: {
     title: "Automations",
-    subtitle: "Every routine repeats assignment, never approval: every recurrence spawns real work awaiting your approval, with final review.",
+    subtitle:
+      "Every routine repeats assignment, never approval: every recurrence spawns real work awaiting your approval, with final review.",
     active_count: "{count} active",
     empty: "No routines. Open a successful work and choose «Make repeatable» from its summary.",
     pause: "Pause",
@@ -111,7 +117,8 @@ export const en: TranslationDictionary = {
   },
   goals: {
     title: "Multi-turn goals",
-    subtitle: "Verification contracts, wait barriers, and deterministic quality gates for long-term objectives.",
+    subtitle:
+      "Verification contracts, wait barriers, and deterministic quality gates for long-term objectives.",
     active_goals: "Active goals",
     no_goals: "No active goals configured.",
     contract: "Verification contract",
@@ -149,4 +156,3 @@ export const en: TranslationDictionary = {
     no_plugins: "No plugins configured.",
   },
 };
-

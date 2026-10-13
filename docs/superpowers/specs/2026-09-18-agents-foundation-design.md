@@ -46,11 +46,11 @@ Rules:
 
 ## Commands
 
-| Command | Notes |
-|---------|--------|
+| Command        | Notes                                                                                              |
+| -------------- | -------------------------------------------------------------------------------------------------- |
 | `agent.create` | Payload may include role, instructions, preferred_connection_id, status (default `active`), avatar |
-| `agent.update` | Patch with `expected_version` |
-| `agent.rename` | Unchanged |
+| `agent.update` | Patch with `expected_version`                                                                      |
+| `agent.rename` | Unchanged                                                                                          |
 
 ## HTTP / UI
 

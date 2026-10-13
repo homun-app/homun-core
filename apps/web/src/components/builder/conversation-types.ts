@@ -16,7 +16,15 @@ export type EnginePlanStepProjection = {
   id: string;
   title: string;
   assignee_id: string;
-  status: "pending" | "running" | "waiting_input" | "waiting_approval" | "succeeded" | "failed" | "cancelled" | "superseded";
+  status:
+    | "pending"
+    | "running"
+    | "waiting_input"
+    | "waiting_approval"
+    | "succeeded"
+    | "failed"
+    | "cancelled"
+    | "superseded";
   capability: string;
   output_expected: string;
 };
@@ -67,7 +75,13 @@ export type Work = {
   archived?: boolean;
   catalogPlan?: CatalogPlan;
   coordinatedBy?: string;
-  request?: { to: string; viaInvitation?: boolean; need: string; status: "pending" | "resolved"; childId?: string };
+  request?: {
+    to: string;
+    viaInvitation?: boolean;
+    need: string;
+    status: "pending" | "resolved";
+    childId?: string;
+  };
   routineId?: string;
   runNumber?: number;
   startedAt?: string;
@@ -99,15 +113,18 @@ export type Work = {
   /** Accepted plan steps (phase ladder) from the engine works list. */
   enginePlan?: EnginePlanStepProjection[] | undefined;
   /** Current artifact version awaiting (or having received) human review. */
-  engineLatestArtifact?: { id: string; version: number; title: string; content: string } | undefined;
+  engineLatestArtifact?:
+    { id: string; version: number; title: string; content: string } | undefined;
   /** ISO date the person set as deadline (engine works). */
   engineDue?: string | null | undefined;
   /** Per-work model budget (attempts/tokens caps with spend counters). */
-  engineBudget?: {
-    version: number;
-    caps: { model_attempts: number; input_tokens: number | null; output_tokens: number | null };
-    spent: { attempts: number; input_tokens: number; output_tokens: number };
-  } | undefined;
+  engineBudget?:
+    | {
+        version: number;
+        caps: { model_attempts: number; input_tokens: number | null; output_tokens: number | null };
+        spent: { attempts: number; input_tokens: number; output_tokens: number };
+      }
+    | undefined;
   /** Pending contribution request id (Fonte=motore). */
   engineContributionRequestId?: string;
   /** Current objective from engine domain (Fonte=motore). */

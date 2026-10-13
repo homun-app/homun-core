@@ -1,5 +1,7 @@
 # Miglioramento percorso incarico
+
 Direzione approvata: pannello laterale, schede con passaggio attuale e blocco, home sintetica, assegnazione dalla conversazione e risultato leggibile.
+
 1. Usare un dialog laterale nativo con focus contenuto, Escape e ritorno al controllo di apertura.
 2. Migliorare schede con progresso, passaggio attuale e segnalazione deterministica di scadenza vicina/in ritardo.
 3. Aggiungere materiali, note e risultato locale al singolo incarico. Non dichiarare risultati generati né invii esterni.
@@ -8,6 +10,7 @@ Direzione approvata: pannello laterale, schede con passaggio attuale e blocco, h
 6. Verificare TypeScript/build e browser: focus, chiusura, materiali, risultato, conversione nota e mobile.
 
 ## Verifica completata
+
 - TypeScript, lint dei componenti modificati e build prototipo superati.
 - Browser: pannello laterale, chiusura Escape, focus nel dialog e ripristino sulla scheda di apertura.
 - Browser: allegato locale presente anche dopo riapertura, sblocco e checklist, risultato manuale visibile nella scheda completata.

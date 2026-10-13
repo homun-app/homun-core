@@ -44,7 +44,8 @@ type Props = {
   engineAgents?: EngineAgentProfile[] | undefined;
   engineTeams?: EngineTeam[] | undefined;
   engineRoutines?: EngineRoutine[] | undefined;
-  onCreateRoutineFromWork?: ((workId: string, input: { name: string; cron: string }) => Promise<void>) | undefined;
+  onCreateRoutineFromWork?:
+    ((workId: string, input: { name: string; cron: string }) => Promise<void>) | undefined;
   engineMode?: boolean;
   space: SpaceView;
   spaceInitial: string;
@@ -235,8 +236,7 @@ export function ConversationWorkspaceSpaceHost({
     );
   }
 
-  if (engineMode && space === "Spazi remoti")
-    return <EngineRemoteSpacesBrowser />;
+  if (engineMode && space === "Spazi remoti") return <EngineRemoteSpacesBrowser />;
   if (engineMode && space === "Automazioni")
     return (
       <EngineRoutines
@@ -339,7 +339,9 @@ export function ConversationWorkspaceSpaceHost({
 
     return (
       <UnifiedDocumentsAndMaterials
-        activeTab={spaceInitial === "materials" || space === "Materiali" ? "materials" : "documents"}
+        activeTab={
+          spaceInitial === "materials" || space === "Materiali" ? "materials" : "documents"
+        }
         documentsView={documentsView}
         materialsView={materialsView}
       />

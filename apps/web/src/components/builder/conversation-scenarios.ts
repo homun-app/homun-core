@@ -77,10 +77,7 @@ export const initialScenarios: ConversationScenario[] = [
   },
 ];
 
-export const phaseText: Record<
-  "proposal" | "waiting" | "ready" | "review" | "approved",
-  string
-> = {
+export const phaseText: Record<"proposal" | "waiting" | "ready" | "review" | "approved", string> = {
   proposal: "Da concordare",
   waiting: "Serve il tuo contributo",
   ready: "Pronto a partire",

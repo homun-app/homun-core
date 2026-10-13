@@ -453,12 +453,15 @@
 
 /* Highlight pulse for scroll-to target */
 @keyframes gentle-highlight {
-  0% { background-color: rgba(104, 122, 89, 0.16); border-radius: 8px; }
-  100% { background-color: transparent; }
+  0% {
+    background-color: rgba(104, 122, 89, 0.16);
+    border-radius: 8px;
+  }
+  100% {
+    background-color: transparent;
+  }
 }
 
 .cw-highlight-pulse {
   animation: gentle-highlight 2s ease-out;
 }
-
-

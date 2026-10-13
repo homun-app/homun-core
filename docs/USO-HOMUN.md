@@ -142,7 +142,6 @@ La [ricerca Hermes/Homun](research/2026-09-23-hermes-homun-utilizzo.md) prepara
 l'analisi UX di questi percorsi; le implementazioni successive sono descritte
 nel [rapporto operativo](research/2026-09-23-homun-operativo-verifica.md).
 
-
 ## Eseguire un comando con Homun
 
 Nella versione di sviluppo puoi abilitare **Terminale isolato (opzionale)** quando

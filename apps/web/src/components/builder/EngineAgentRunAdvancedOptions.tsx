@@ -169,8 +169,8 @@ export function EngineAgentRunAdvancedOptions({
         {sshTerminal && (
           <>
             <p>
-              Ogni comando resta da approvare. Homun non usa la configurazione SSH di questo computer
-              e non copia i file.
+              Ogni comando resta da approvare. Homun non usa la configurazione SSH di questo
+              computer e non copia i file.
             </p>
             <label>
               Host

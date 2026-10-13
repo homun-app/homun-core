@@ -22,11 +22,11 @@ Questa è una proposta, non una decisione già approvata da Fabio. Non chiamarla
 
 ## Tre livelli distinti
 
-| Livello | Cosa abilita | Cosa non risolve |
-|---|---|---|
-| Collegamento tra app | Chat, consultazione, contributi e file tra dispositivi autorizzati | Non decide chi può modificare/eseguire |
-| Delega di esecuzione | Un nodo esegue un passo per un altro | Non replica automaticamente identità, memoria, credenziali o permessi |
-| Replica e failover | Continuare quando il nodo proprietario non è disponibile | Richiede consenso, conflitti, revoche e protezione da doppie azioni |
+| Livello              | Cosa abilita                                                       | Cosa non risolve                                                      |
+| -------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Collegamento tra app | Chat, consultazione, contributi e file tra dispositivi autorizzati | Non decide chi può modificare/eseguire                                |
+| Delega di esecuzione | Un nodo esegue un passo per un altro                               | Non replica automaticamente identità, memoria, credenziali o permessi |
+| Replica e failover   | Continuare quando il nodo proprietario non è disponibile           | Richiede consenso, conflitti, revoche e protezione da doppie azioni   |
 
 Costruire in quest'ordine. Non utilizzare merge di documenti per decidere chi può inviare un'email o spendere budget.
 

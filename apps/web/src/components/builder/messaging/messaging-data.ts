@@ -28,7 +28,8 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
     subtitle: "Esegui Homun dai messaggi privati, gruppi o canali Telegram.",
     iconColor: "#229ed9",
     quickSetupAvailable: true,
-    quickSetupLabel: "Scansiona un codice QR e conferma su Telegram. Homun rileverà il tuo ID utente automaticamente.",
+    quickSetupLabel:
+      "Scansiona un codice QR e conferma su Telegram. Homun rileverà il tuo ID utente automaticamente.",
     credentialsGuide:
       "Su Telegram, cerca @BotFather, invia /newbot e copia l'HTTP API token generato. Poi apri @userinfobot per scoprire il tuo ID utente numerico.",
     guideUrl: "https://core.telegram.org/bots/tutorial",
@@ -47,7 +48,8 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
         placeholder: "es. 987654321, 123456789",
         type: "text",
         required: false,
-        helpText: "Consigliato. ID numerici separati da virgola ricavati da @userinfobot. Senza questo campo, chiunque potrà inviare messaggi al tuo bot.",
+        helpText:
+          "Consigliato. ID numerici separati da virgola ricavati da @userinfobot. Senza questo campo, chiunque potrà inviare messaggi al tuo bot.",
       },
     ],
   },
@@ -101,7 +103,8 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
         placeholder: "xapp-xxxxxxxx-xxxxxxxx-xxxxxxxx",
         type: "password",
         required: false,
-        helpText: "Permette a Homun di ricevere eventi Slack senza esporre porte aperte su Internet.",
+        helpText:
+          "Permette a Homun di ricevere eventi Slack senza esporre porte aperte su Internet.",
       },
     ],
   },
@@ -163,10 +166,12 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
   {
     id: "whatsapp",
     name: "WhatsApp",
-    subtitle: "Ricevi ed esegui richieste direttamente dal tuo WhatsApp personale, senza account Meta.",
+    subtitle:
+      "Ricevi ed esegui richieste direttamente dal tuo WhatsApp personale, senza account Meta.",
     iconColor: "#25d366",
     quickSetupAvailable: true,
-    quickSetupLabel: "Scansiona un codice QR da WhatsApp → Dispositivi collegati. Il tuo numero sarà l'unico autorizzato.",
+    quickSetupLabel:
+      "Scansiona un codice QR da WhatsApp → Dispositivi collegati. Il tuo numero sarà l'unico autorizzato.",
     credentialsGuide:
       "Il canale usa il sidecar locale wa-rs-bridge (github.com/homunbot/wa-rs), che possiede la sessione WhatsApp Web: nessun account Meta né URL pubblica. Avvia il sidecar e usa la configurazione rapida con il QR.",
     guideUrl: "https://github.com/homunbot/wa-rs",
@@ -177,7 +182,8 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
         placeholder: "es. 393331234567, 393339876543@s.whatsapp.net",
         type: "text",
         required: false,
-        helpText: "Il QR imposta automaticamente il tuo numero. Aggiungi qui altri JID (o numeri nudi) separati da virgola per autorizzarli.",
+        helpText:
+          "Il QR imposta automaticamente il tuo numero. Aggiungi qui altri JID (o numeri nudi) separati da virgola per autorizzarli.",
       },
       {
         id: "bridge_url",
@@ -185,7 +191,8 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
         placeholder: "http://127.0.0.1:8902",
         type: "text",
         required: false,
-        helpText: "Opzionale: default http://127.0.0.1:8902 (o HOMUN_WHATSAPP_BRIDGE_URL nel motore).",
+        helpText:
+          "Opzionale: default http://127.0.0.1:8902 (o HOMUN_WHATSAPP_BRIDGE_URL nel motore).",
       },
       {
         id: "bridge_binary",
@@ -193,7 +200,8 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
         placeholder: "/percorso/wa-rs-bridge",
         type: "text",
         required: false,
-        helpText: "Opzionale: se il canale è attivo e nessun bridge risponde, il motore lo avvia da questo percorso (default: HOMUN_WHATSAPP_BRIDGE_BIN, bin del venv, PATH).",
+        helpText:
+          "Opzionale: se il canale è attivo e nessun bridge risponde, il motore lo avvia da questo percorso (default: HOMUN_WHATSAPP_BRIDGE_BIN, bin del venv, PATH).",
       },
     ],
   },
@@ -332,8 +340,7 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
     name: "SMS (Twilio)",
     subtitle: "Invio e ricezione di SMS con notifiche istantanee via API Twilio.",
     iconColor: "#f22f46",
-    credentialsGuide:
-      "Recupera Account SID e Auth Token dalla dashboard della console Twilio.",
+    credentialsGuide: "Recupera Account SID e Auth Token dalla dashboard della console Twilio.",
     fields: [
       {
         id: "account_sid",
@@ -365,8 +372,20 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
     iconColor: "#007fff",
     credentialsGuide: "Crea una DingTalk Enterprise App e genera AppKey e AppSecret.",
     fields: [
-      { id: "client_id", label: "AppKey (Client ID)", placeholder: "ding...", type: "text", required: true },
-      { id: "client_secret", label: "AppSecret", placeholder: "secret", type: "password", required: true },
+      {
+        id: "client_id",
+        label: "AppKey (Client ID)",
+        placeholder: "ding...",
+        type: "text",
+        required: true,
+      },
+      {
+        id: "client_secret",
+        label: "AppSecret",
+        placeholder: "secret",
+        type: "password",
+        required: true,
+      },
     ],
   },
   {
@@ -378,7 +397,13 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
       "Apri Feishu Open Platform, crea un'applicazione e ottieni App ID e App Secret per l'invio messaggi IM.",
     fields: [
       { id: "app_id", label: "App ID", placeholder: "cli_a1b2c3...", type: "text", required: true },
-      { id: "app_secret", label: "App Secret", placeholder: "secret", type: "password", required: true },
+      {
+        id: "app_secret",
+        label: "App Secret",
+        placeholder: "secret",
+        type: "password",
+        required: true,
+      },
     ],
   },
   {
@@ -389,7 +414,13 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
     credentialsGuide:
       "Crea un Google Cloud Project, abilita l'API Google Chat e configura un webhook in entrata per lo Space.",
     fields: [
-      { id: "webhook_url", label: "Incoming Webhook URL", placeholder: "https://chat.googleapis.com/v1/spaces/...", type: "password", required: true },
+      {
+        id: "webhook_url",
+        label: "Incoming Webhook URL",
+        placeholder: "https://chat.googleapis.com/v1/spaces/...",
+        type: "password",
+        required: true,
+      },
     ],
   },
   {
@@ -397,9 +428,16 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
     name: "WeCom (group bot)",
     subtitle: "Bot personalizzato per gruppi Enterprise WeChat.",
     iconColor: "#2072e5",
-    credentialsGuide: "Aggiungi un bot personalizzato a un gruppo WeCom e copia la chiave del webhook.",
+    credentialsGuide:
+      "Aggiungi un bot personalizzato a un gruppo WeCom e copia la chiave del webhook.",
     fields: [
-      { id: "webhook_key", label: "Webhook Key", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", type: "password", required: true },
+      {
+        id: "webhook_key",
+        label: "Webhook Key",
+        placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        type: "password",
+        required: true,
+      },
     ],
   },
   {
@@ -409,7 +447,13 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
     iconColor: "#07c160",
     credentialsGuide: "Configura il token del server bridge compatibile Weixin.",
     fields: [
-      { id: "bridge_token", label: "Bridge Token", placeholder: "token", type: "password", required: true },
+      {
+        id: "bridge_token",
+        label: "Bridge Token",
+        placeholder: "token",
+        type: "password",
+        required: true,
+      },
     ],
   },
   {
@@ -430,7 +474,13 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
     iconColor: "#ff4d4f",
     credentialsGuide: "Inserisci la chiave API fornita dal portale Tencent Yuanbao.",
     fields: [
-      { id: "api_key", label: "Yuanbao API Key", placeholder: "yb_...", type: "password", required: true },
+      {
+        id: "api_key",
+        label: "Yuanbao API Key",
+        placeholder: "yb_...",
+        type: "password",
+        required: true,
+      },
     ],
   },
   {
@@ -440,10 +490,34 @@ export const CHANNELS_CATALOG: ChannelDefinition[] = [
     iconColor: "#4a5568",
     credentialsGuide: "Specifica server, porta, nickname e canali da monitorare.",
     fields: [
-      { id: "host", label: "IRC Server Host", placeholder: "irc.libera.chat", type: "text", required: true },
-      { id: "port", label: "Porta (es. 6697 SSL)", placeholder: "6697", type: "text", required: false },
-      { id: "nickname", label: "Nickname Bot", placeholder: "HomunBot", type: "text", required: true },
-      { id: "channels", label: "Canali (separati da virgola)", placeholder: "#homun, #dev", type: "text", required: false },
+      {
+        id: "host",
+        label: "IRC Server Host",
+        placeholder: "irc.libera.chat",
+        type: "text",
+        required: true,
+      },
+      {
+        id: "port",
+        label: "Porta (es. 6697 SSL)",
+        placeholder: "6697",
+        type: "text",
+        required: false,
+      },
+      {
+        id: "nickname",
+        label: "Nickname Bot",
+        placeholder: "HomunBot",
+        type: "text",
+        required: true,
+      },
+      {
+        id: "channels",
+        label: "Canali (separati da virgola)",
+        placeholder: "#homun, #dev",
+        type: "text",
+        required: false,
+      },
     ],
   },
 ];

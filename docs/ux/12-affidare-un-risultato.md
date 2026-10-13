@@ -1,4 +1,5 @@
 # Affidare un risultato — prova UX
+
 16 settembre 2026.
 
 Da Home, “Affida un risultato” apre una richiesta libera e una proposta modificabile.

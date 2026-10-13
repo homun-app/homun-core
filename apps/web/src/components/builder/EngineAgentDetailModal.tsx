@@ -70,24 +70,19 @@ export function EngineAgentDetailModal({
                   <span
                     className={`cw-agent-autonomy-badge ${target.agent.autonomy_mode ?? "supervised"}`}
                   >
-                    {AUTONOMY_LABELS[target.agent.autonomy_mode ?? "supervised"] ?? "Sotto supervisione"}
+                    {AUTONOMY_LABELS[target.agent.autonomy_mode ?? "supervised"] ??
+                      "Sotto supervisione"}
                   </span>
                 )}
               </div>
               <p className="cw-modal-role">{role}</p>
-              {isAgent && target.agent.tone && (
-                <p className="cw-modal-tone">{target.agent.tone}</p>
-              )}
+              {isAgent && target.agent.tone && <p className="cw-modal-tone">{target.agent.tone}</p>}
             </div>
           </div>
 
           <div className="cw-modal-top-actions">
             {isAgent && onChanged && mode === "overview" && (
-              <button
-                type="button"
-                className="cw-modal-btn-subtle"
-                onClick={() => setMode("edit")}
-              >
+              <button type="button" className="cw-modal-btn-subtle" onClick={() => setMode("edit")}>
                 <Pencil size={13} />
                 <span>Modifica</span>
               </button>
@@ -109,11 +104,7 @@ export function EngineAgentDetailModal({
             <div className="cw-modal-edit-container">
               <div className="cw-modal-edit-top">
                 <h3>Modifica profilo collaboratore</h3>
-                <button
-                  type="button"
-                  className="cs-link"
-                  onClick={() => setMode("overview")}
-                >
+                <button type="button" className="cs-link" onClick={() => setMode("overview")}>
                   Torna alla panoramica
                 </button>
               </div>

@@ -1,6 +1,11 @@
 /** Typed transport for a supervised model synthesis phase. */
 import { ENGINE_DEFAULT_BASE_URL } from "./engine-client.ts";
-import { DEFAULT_WORKSPACE_ID, defaultLocalActor, domainFetch, listEngineWorks } from "./engine-domain-client.ts";
+import {
+  DEFAULT_WORKSPACE_ID,
+  defaultLocalActor,
+  domainFetch,
+  listEngineWorks,
+} from "./engine-domain-client.ts";
 import { homunErrorFromHttp } from "./homun-errors.ts";
 import type { Work } from "../components/builder/conversation-types.ts";
 
@@ -50,8 +55,7 @@ async function request(workId: string, suffix = "", body?: unknown): Promise<any
     30_000,
   );
   const result = await response.json();
-  if (!response.ok)
-    throw homunErrorFromHttp(response.status, result, "Sintesi non disponibile");
+  if (!response.ok) throw homunErrorFromHttp(response.status, result, "Sintesi non disponibile");
   return result;
 }
 
@@ -81,7 +85,8 @@ export async function prepareSynthesis(
   const existing = (await listSyntheses(work.id)).find((item) => item.id === operationId);
   if (existing) return existing;
   const current = (await listEngineWorks()).find((w) => w["id"] === work.id);
-  if (!current) throw homunErrorFromHttp(404, { detail: "Lavoro non accessibile" }, "Lavoro non accessibile");
+  if (!current)
+    throw homunErrorFromHttp(404, { detail: "Lavoro non accessibile" }, "Lavoro non accessibile");
   return request(work.id, "", {
     command_id: operationId,
     material_ids: materialIds,

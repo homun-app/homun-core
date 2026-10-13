@@ -16,7 +16,12 @@ import {
   SheetTitle,
 } from "@homun/ui/components/sheet";
 import { Skeleton } from "@homun/ui/components/skeleton";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@homun/ui/components/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@homun/ui/components/tooltip";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;

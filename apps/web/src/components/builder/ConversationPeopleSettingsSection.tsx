@@ -26,10 +26,7 @@ import {
   FolderGit2,
   Settings2,
 } from "lucide-react";
-import {
-  InviteCollaboratorModal,
-  type CollaboratorData,
-} from "./InviteCollaboratorModal";
+import { InviteCollaboratorModal, type CollaboratorData } from "./InviteCollaboratorModal";
 import { SettingsCustomSelect } from "./SettingsCustomSelect";
 import "./conversation-people-settings.css";
 
@@ -246,14 +243,11 @@ export function ConversationPeopleSettingsSection() {
         <div>
           <h3>Persone & Squadra Umana</h3>
           <p>
-            Gestisci chi collabora in questo spazio aziendale, i ruoli di accesso ai progetti e la delega di incarichi su altri computer.
+            Gestisci chi collabora in questo spazio aziendale, i ruoli di accesso ai progetti e la
+            delega di incarichi su altri computer.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={openInvite}
-          className="cv-unified-btn is-primary text-xs"
-        >
+        <button type="button" onClick={openInvite} className="cv-unified-btn is-primary text-xs">
           <Plus size={14} />
           <span>Invita Collaboratore</span>
         </button>
@@ -281,7 +275,9 @@ export function ConversationPeopleSettingsSection() {
         <div className="cv-people-explainer__text">
           <strong>Collaborazione d'impresa e governance dei permessi</strong>
           <p>
-            Non tutti i membri devono vedere tutto. I titolari amministrano l'infrastruttura e le chiavi API, mentre sviluppatori e consulenti esterni accedono esclusivamente ai progetti a loro assegnati.
+            Non tutti i membri devono vedere tutto. I titolari amministrano l'infrastruttura e le
+            chiavi API, mentre sviluppatori e consulenti esterni accedono esclusivamente ai progetti
+            a loro assegnati.
           </p>
         </div>
       </div>
@@ -311,15 +307,15 @@ export function ConversationPeopleSettingsSection() {
                           collab.permission === "admin"
                             ? "cv-people-card__badge-admin"
                             : collab.permission === "reviewer"
-                            ? "border-blue-500/30 text-blue-300 bg-blue-500/10"
-                            : ""
+                              ? "border-blue-500/30 text-blue-300 bg-blue-500/10"
+                              : ""
                         }`}
                       >
                         {collab.permission === "admin"
                           ? "Titolare / Admin"
                           : collab.permission === "member"
-                          ? "Membro Operativo"
-                          : "Revisore Esterno"}
+                            ? "Membro Operativo"
+                            : "Revisore Esterno"}
                       </span>
                     </div>
                     <span className="cv-people-card__email">
@@ -358,8 +354,8 @@ export function ConversationPeopleSettingsSection() {
                   {collab.permission === "admin"
                     ? "Accesso globale garantito su tutti i progetti, impostazioni e credenziali."
                     : assignedProjectNames.length > 0
-                    ? `Autorizzato su: ${assignedProjectNames.join(", ")}`
-                    : "Nessun progetto ristretto assegnato (in attesa di delega)."}
+                      ? `Autorizzato su: ${assignedProjectNames.join(", ")}`
+                      : "Nessun progetto ristretto assegnato (in attesa di delega)."}
                 </span>
                 <span className="font-mono text-[#8fe3d0] flex items-center gap-1">
                   <UserCheck size={11} />
@@ -383,8 +379,10 @@ export function ConversationPeopleSettingsSection() {
           </span>
         </div>
         <p className="text-xs text-[#647a6d] leading-relaxed">
-          Permette all'azienda di delegare una parte del lavoro a un collaboratore esterno o a un altro computer.
-          Esporta un pacchetto d'incarico autonomo che include contesto e requisiti; una volta completato, re-importa il deliverable per far proseguire la pipeline degli agenti.
+          Permette all'azienda di delegare una parte del lavoro a un collaboratore esterno o a un
+          altro computer. Esporta un pacchetto d'incarico autonomo che include contesto e requisiti;
+          una volta completato, re-importa il deliverable per far proseguire la pipeline degli
+          agenti.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
@@ -397,7 +395,8 @@ export function ConversationPeopleSettingsSection() {
                   <span>1. Esporta Pacchetto Incarico (.homun-task)</span>
                 </strong>
                 <span className="text-[11.5px] text-[#647a6d] block leading-relaxed">
-                  Genera il brief con le istruzioni dell'agente da inviare via mail, chat o chiavetta.
+                  Genera il brief con le istruzioni dell'agente da inviare via mail, chat o
+                  chiavetta.
                 </span>
               </div>
 
@@ -477,7 +476,8 @@ export function ConversationPeopleSettingsSection() {
                 <span>2. Importa Consegna Completata</span>
               </strong>
               <span className="text-[11.5px] text-[#647a6d] block mb-4 leading-relaxed">
-                Quando il collaboratore rimanda il lavoro completato, caricalo qui per aggiornare i materiali del progetto e notificare la squadra di agenti.
+                Quando il collaboratore rimanda il lavoro completato, caricalo qui per aggiornare i
+                materiali del progetto e notificare la squadra di agenti.
               </span>
 
               <div

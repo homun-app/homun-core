@@ -144,14 +144,14 @@ Separate per tipo, come da metodo:
 
 Secondo passaggio (dopo la segnalazione delle regressioni), stesso ambiente:
 
-  - invio durante lettura sopra (scroll a 0): la vista è tornata esattamente al
-    fondo (top 1918 con fondo 1918) mostrando messaggio e bubble di attesa;
-  - la domanda che falliva con `provider_unavailable` (output thinking con
-    prosa) ora risponde: probe API dello stesso comando stream (fasi → 7 token
-    → result, nessun errore) e invio GUI riuscito («3 SKU nuovi»);
-  - verifica visiva della bubble di attesa tramite screenshot (allineamento e
-    tipografia coerenti con gli altri messaggi, nota di errore ben visibile
-    quando presente).
+- invio durante lettura sopra (scroll a 0): la vista è tornata esattamente al
+  fondo (top 1918 con fondo 1918) mostrando messaggio e bubble di attesa;
+- la domanda che falliva con `provider_unavailable` (output thinking con
+  prosa) ora risponde: probe API dello stesso comando stream (fasi → 7 token
+  → result, nessun errore) e invio GUI riuscito («3 SKU nuovi»);
+- verifica visiva della bubble di attesa tramite screenshot (allineamento e
+  tipografia coerenti con gli altri messaggi, nota di errore ben visibile
+  quando presente).
 - **Pacchetto:** ricostruito nel secondo passaggio
   (`dist/desktop/2026-09-21T17-02-12-831Z`, nome UTC — 19:02 locali) con motore
   e web aggiornati; test desktop **8/8** con motore incorporato. Avvio nativo
@@ -214,8 +214,6 @@ Dopo la consegna delle correzioni, con il via di Fabio («procedi»):
 
 ## File toccati
 
-
-
 - Nuovi: `apps/web/src/lib/chat-autoscroll-policy.ts`,
   `apps/web/src/hooks/useChatAutoScroll.ts`,
   `apps/web/src/components/builder/ConversationAgentWait.tsx` (+ css),
@@ -231,7 +229,7 @@ Dopo la consegna delle correzioni, con il via di Fabio («procedi»):
   dell'attesa), `conversation-types.ts` (`AgentWait`, `engineIntakeConfirmed`),
   `useEngineWorkspace.ts` (fasi di attesa e messaggio preservato sull'errore),
   i tre hook tool, le tre schede tool (nota guidata), `engine-work-status.ts`
-  + pannello/lista lavori (etichetta bozze accordate), `engine-status-bar.css`
-  (blocco rimosso, foglio morto), `engine/src/homun/models/interpret.py` e
-  `intake.py` (estrattore condiviso), `tools/architecture-baseline.json`
-  (budget abbassato 1442 → 1431).
+  - pannello/lista lavori (etichetta bozze accordate), `engine-status-bar.css`
+    (blocco rimosso, foglio morto), `engine/src/homun/models/interpret.py` e
+    `intake.py` (estrattore condiviso), `tools/architecture-baseline.json`
+    (budget abbassato 1442 → 1431).

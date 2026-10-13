@@ -28,10 +28,13 @@ export function EngineArtifactReview({
     };
 
     if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).then(markCopied).catch(() => {
-        fallbackCopy(text);
-        markCopied();
-      });
+      navigator.clipboard
+        .writeText(text)
+        .then(markCopied)
+        .catch(() => {
+          fallbackCopy(text);
+          markCopied();
+        });
     } else {
       fallbackCopy(text);
       markCopied();

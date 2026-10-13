@@ -109,11 +109,7 @@
                 "properties": {
                   "operation": {
                     "type": "string",
-                    "enum": [
-                      "read",
-                      "write",
-                      "fetch"
-                    ]
+                    "enum": ["read", "write", "fetch"]
                   },
                   "path": {
                     "type": "string"
@@ -123,10 +119,7 @@
                     "description": "Content for write; empty string otherwise."
                   }
                 },
-                "required": [
-                  "operation",
-                  "path"
-                ]
+                "required": ["operation", "path"]
               }
             }
           }
@@ -251,11 +244,7 @@
                 "properties": {
                   "operation": {
                     "type": "string",
-                    "enum": [
-                      "read",
-                      "write",
-                      "fetch"
-                    ]
+                    "enum": ["read", "write", "fetch"]
                   },
                   "path": {
                     "type": "string"
@@ -265,10 +254,7 @@
                     "description": "Content for write; empty string otherwise."
                   }
                 },
-                "required": [
-                  "operation",
-                  "path"
-                ]
+                "required": ["operation", "path"]
               }
             }
           }
@@ -429,11 +415,7 @@
                 "properties": {
                   "operation": {
                     "type": "string",
-                    "enum": [
-                      "read",
-                      "write",
-                      "fetch"
-                    ]
+                    "enum": ["read", "write", "fetch"]
                   },
                   "path": {
                     "type": "string"
@@ -443,10 +425,7 @@
                     "description": "Content for write; empty string otherwise."
                   }
                 },
-                "required": [
-                  "operation",
-                  "path"
-                ]
+                "required": ["operation", "path"]
               }
             }
           }
@@ -617,11 +596,7 @@
                 "properties": {
                   "operation": {
                     "type": "string",
-                    "enum": [
-                      "read",
-                      "write",
-                      "fetch"
-                    ]
+                    "enum": ["read", "write", "fetch"]
                   },
                   "path": {
                     "type": "string"
@@ -631,10 +606,7 @@
                     "description": "Content for write; empty string otherwise."
                   }
                 },
-                "required": [
-                  "operation",
-                  "path"
-                ]
+                "required": ["operation", "path"]
               }
             }
           }
@@ -824,11 +796,7 @@
                 "properties": {
                   "operation": {
                     "type": "string",
-                    "enum": [
-                      "read",
-                      "write",
-                      "fetch"
-                    ]
+                    "enum": ["read", "write", "fetch"]
                   },
                   "path": {
                     "type": "string"
@@ -838,10 +806,7 @@
                     "description": "Content for write; empty string otherwise."
                   }
                 },
-                "required": [
-                  "operation",
-                  "path"
-                ]
+                "required": ["operation", "path"]
               }
             }
           }

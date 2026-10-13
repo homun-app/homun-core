@@ -33,7 +33,11 @@ type CapabilityTab = "skills" | "tools" | "connectors" | "plugins";
 
 const RUN_TOOL_SURFACE: Array<{ name: string; label: string; note: string }> = [
   { name: "terminal", label: "Terminale", note: "container Docker pinned, approvazione a digest" },
-  { name: "computer_use", label: "Computer use", note: "desktop a tre livelli: hard-block, sensibili, allowlist" },
+  {
+    name: "computer_use",
+    label: "Computer use",
+    note: "desktop a tre livelli: hard-block, sensibili, allowlist",
+  },
   { name: "browser", label: "Browser", note: "7 tool: open, click, type, snapshot…" },
   { name: "web_pages", label: "Web", note: "web_search, web_extract, x_search" },
   { name: "memory", label: "Memoria", note: "scoped person/progetto/agente/spazio" },
@@ -79,7 +83,9 @@ export function CapabilitiesView() {
       const [s, c, p, k] = await Promise.all([
         listEngineSkills(true).catch(() => []),
         listEngineChannelPlatforms().catch(() => []),
-        listEnginePlugins().then((summary) => summary.plugins).catch(() => []),
+        listEnginePlugins()
+          .then((summary) => summary.plugins)
+          .catch(() => []),
         listEngineConnectors().catch(() => []),
       ]);
       setSkills(s);
@@ -132,7 +138,10 @@ export function CapabilitiesView() {
     !q || fields.some((f) => (f ?? "").toLowerCase().includes(q));
 
   const filteredSkills = useMemo(
-    () => skills.filter((s) => s.status !== "archived" && match(s.name, s.description, s.tags.join(" "))),
+    () =>
+      skills.filter(
+        (s) => s.status !== "archived" && match(s.name, s.description, s.tags.join(" ")),
+      ),
     [skills, q],
   );
   const filteredChannels = useMemo(
@@ -141,14 +150,18 @@ export function CapabilitiesView() {
   );
   const [connectorFilter, setConnectorFilter] = useState<"all" | "connected" | "pending">("all");
   const sortedConnectors = useMemo(() => {
-    const rank = (k: HostedConnector) => k.connected ? 0 : k.declared ? 1 : 2;
+    const rank = (k: HostedConnector) => (k.connected ? 0 : k.declared ? 1 : 2);
     return [...connectors].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   }, [connectors]);
   const filteredConnectors = useMemo(
-    () => sortedConnectors.filter((k) => match(k.name, k.description, k.keywords.join(" "))
-      && (connectorFilter === "all"
-        || (connectorFilter === "connected" && k.connected)
-        || (connectorFilter === "pending" && !k.connected))),
+    () =>
+      sortedConnectors.filter(
+        (k) =>
+          match(k.name, k.description, k.keywords.join(" ")) &&
+          (connectorFilter === "all" ||
+            (connectorFilter === "connected" && k.connected) ||
+            (connectorFilter === "pending" && !k.connected)),
+      ),
     [sortedConnectors, q, connectorFilter],
   );
   const connectedCount = connectors.filter((k) => k.connected).length;
@@ -205,7 +218,9 @@ export function CapabilitiesView() {
         </div>
       </header>
 
-      <div ref={noticeRef}><HomunErrorNotice error={error} /></div>
+      <div ref={noticeRef}>
+        <HomunErrorNotice error={error} />
+      </div>
 
       <main className="cap-grid-wrap">
         {loading ? (
@@ -220,9 +235,15 @@ export function CapabilitiesView() {
                     <span className="cap-card-version">rev {s.revision}</span>
                   </div>
                   <div className="cap-card-author-row">
-                    <span className="cap-card-author">{s.author_id || (s.author_type === "agent" ? "un agente" : "una persona")}</span>
+                    <span className="cap-card-author">
+                      {s.author_id || (s.author_type === "agent" ? "un agente" : "una persona")}
+                    </span>
                     <span className="cap-card-version">
-                      {s.status === "staged" ? "in quarantena" : s.usage_count > 0 ? `usata ${s.usage_count}×` : "mai usata"}
+                      {s.status === "staged"
+                        ? "in quarantena"
+                        : s.usage_count > 0
+                          ? `usata ${s.usage_count}×`
+                          : "mai usata"}
                     </span>
                   </div>
                   <p className="cap-card-desc">{s.description}</p>
@@ -241,7 +262,13 @@ export function CapabilitiesView() {
                         disabled={busy !== null}
                         onClick={() =>
                           void act(`skill:${s.id}:approve`, () =>
-                            skillEngineAction({ skillId: s.id, action: "approve", expectedVersion: s.revision }))}
+                            skillEngineAction({
+                              skillId: s.id,
+                              action: "approve",
+                              expectedVersion: s.revision,
+                            }),
+                          )
+                        }
                       >
                         Approva
                       </button>
@@ -251,7 +278,13 @@ export function CapabilitiesView() {
                         disabled={busy !== null}
                         onClick={() =>
                           void act(`skill:${s.id}:reject`, () =>
-                            skillEngineAction({ skillId: s.id, action: "reject", expectedVersion: s.revision }))}
+                            skillEngineAction({
+                              skillId: s.id,
+                              action: "reject",
+                              expectedVersion: s.revision,
+                            }),
+                          )
+                        }
                       >
                         Rifiuta
                       </button>
@@ -263,7 +296,13 @@ export function CapabilitiesView() {
                       disabled={busy !== null}
                       onClick={() =>
                         void act(`skill:${s.id}:archive`, () =>
-                          skillEngineAction({ skillId: s.id, action: "archive", expectedVersion: s.revision }))}
+                          skillEngineAction({
+                            skillId: s.id,
+                            action: "archive",
+                            expectedVersion: s.revision,
+                          }),
+                        )
+                      }
                     >
                       Archivia
                     </button>
@@ -271,7 +310,9 @@ export function CapabilitiesView() {
                 </div>
               </article>
             ))}
-            {filteredSkills.length === 0 && <div className="cap-empty">Nessuna skill corrisponde.</div>}
+            {filteredSkills.length === 0 && (
+              <div className="cap-empty">Nessuna skill corrisponde.</div>
+            )}
           </div>
         ) : activeTab === "tools" ? (
           <div className="cap-grid">
@@ -287,123 +328,147 @@ export function CapabilitiesView() {
               </article>
             ))}
             <div className="cap-empty" style={{ border: "none" }}>
-              In Homun i tool non si accendono globalmente: si scelgono per singolo run
-              (flag di capability) o per agente nella directory. I comandi restano sempre
-              sotto approvazione a digest.
+              In Homun i tool non si accendono globalmente: si scelgono per singolo run (flag di
+              capability) o per agente nella directory. I comandi restano sempre sotto approvazione
+              a digest.
             </div>
           </div>
         ) : activeTab === "connectors" ? (
           <>
-          <div className="cap-grid">
-            {filteredChannels.map((c) => (
-              <article key={c.id} className="cap-card">
-                <div>
-                  <div className="cap-card-top">
-                    <h4 className="cap-card-title">{c.name}</h4>
-                    <SettingsToggleSwitch
-                      checked={c.enabled}
-                      disabled={busy !== null}
-                      onChange={(val) =>
-                        void act(`channel:${c.id}`, () =>
-                          updateEngineChannelPlatform(c.id, { enabled: val }))}
-                      ariaLabel={`Abilita canale ${c.name}`}
-                    />
-                  </div>
-                  <div className="cap-card-author-row">
-                    <span className="cap-card-author">{c.id}</span>
-                    <span className="cap-card-version">
-                      {c.state === "connected" ? "connesso" : c.enabled ? "da configurare" : "disattivato"}
-                    </span>
-                  </div>
-                  <p className="cap-card-desc">
-                    {c.state === "connected"
-                      ? "Attivo e configurato."
-                      : c.enabled
-                        ? "Abilitato, in attesa di credenziali."
-                        : "Disattivato."}
-                  </p>
-                </div>
-                <div className="cap-card-footer">
-                  <button
-                    type="button"
-                    className="cap-filter-item"
-                    onClick={() => openConfig(c)}
-                  >
-                    {expanded === c.id ? "Chiudi" : "Configura"}
-                  </button>
-                </div>
-                {expanded === c.id && (
-                  <form
-                    style={{ display: "grid", gap: 6, marginTop: 8 }}
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void act(`channel-config:${c.id}`, () =>
-                        updateEngineChannelPlatform(c.id, { enabled: true, fields: draftFields }));
-                    }}
-                  >
-                    {Object.keys(draftFields).map((key) => {
-                      const defined = CHANNELS_CATALOG.find((d) => d.id === c.id)
-                        ?.fields.find((f) => f.id === key);
-                      return (
-                        <label key={key} style={{ display: "grid", gap: 2, fontSize: 11 }}>
-                          <span>{defined?.label ?? key}{defined?.required ? " *" : ""}</span>
-                          <input
-                            type={key.toLowerCase().includes("token") ? "password" : "text"}
-                            value={draftFields[key] ?? ""}
-                            placeholder={defined?.placeholder ?? key}
-                            onChange={(e) =>
-                              setDraftFields((prev) => ({ ...prev, [key]: e.target.value }))}
-                            className="cap-search-input"
-                            style={{ width: "100%" }}
-                          />
-                        </label>
-                      );
-                    })}
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <input
-                        type="text"
-                        value={newFieldKey}
-                        placeholder="nuova chiave (es. bot_token)"
-                        onChange={(e) => setNewFieldKey(e.target.value)}
-                        className="cap-search-input"
-                        style={{ flex: 1 }}
+            <div className="cap-grid">
+              {filteredChannels.map((c) => (
+                <article key={c.id} className="cap-card">
+                  <div>
+                    <div className="cap-card-top">
+                      <h4 className="cap-card-title">{c.name}</h4>
+                      <SettingsToggleSwitch
+                        checked={c.enabled}
+                        disabled={busy !== null}
+                        onChange={(val) =>
+                          void act(`channel:${c.id}`, () =>
+                            updateEngineChannelPlatform(c.id, { enabled: val }),
+                          )
+                        }
+                        ariaLabel={`Abilita canale ${c.name}`}
                       />
-                      <button
-                        type="button"
-                        className="cap-filter-item"
-                        onClick={() => {
-                          const key = newFieldKey.trim();
-                          if (key && !(key in draftFields)) {
-                            setDraftFields((prev) => ({ ...prev, [key]: "" }));
-                          }
-                          setNewFieldKey("");
-                        }}
-                      >
-                        Aggiungi campo
-                      </button>
                     </div>
-                    <button
-                      type="submit"
-                      className="cap-filter-item is-selected"
-                      disabled={busy !== null}
-                    >
-                      Salva configurazione
+                    <div className="cap-card-author-row">
+                      <span className="cap-card-author">{c.id}</span>
+                      <span className="cap-card-version">
+                        {c.state === "connected"
+                          ? "connesso"
+                          : c.enabled
+                            ? "da configurare"
+                            : "disattivato"}
+                      </span>
+                    </div>
+                    <p className="cap-card-desc">
+                      {c.state === "connected"
+                        ? "Attivo e configurato."
+                        : c.enabled
+                          ? "Abilitato, in attesa di credenziali."
+                          : "Disattivato."}
+                    </p>
+                  </div>
+                  <div className="cap-card-footer">
+                    <button type="button" className="cap-filter-item" onClick={() => openConfig(c)}>
+                      {expanded === c.id ? "Chiudi" : "Configura"}
                     </button>
-                    <span style={{ fontSize: 10, opacity: 0.7 }}>
-                      Il salvataggio abilita il canale; i segreti restano nel motore.
-                    </span>
-                  </form>
-                )}
-              </article>
-            ))}
-            {filteredChannels.length === 0 && <div className="cap-empty">Nessun connettore canale corrisponde.</div>}
-          </div>
-          <div className="cap-card-footer" style={{ marginTop: 16, borderTop: "1px solid #dce4d5", paddingTop: 12, justifyContent: "space-between" }}>
+                  </div>
+                  {expanded === c.id && (
+                    <form
+                      style={{ display: "grid", gap: 6, marginTop: 8 }}
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void act(`channel-config:${c.id}`, () =>
+                          updateEngineChannelPlatform(c.id, { enabled: true, fields: draftFields }),
+                        );
+                      }}
+                    >
+                      {Object.keys(draftFields).map((key) => {
+                        const defined = CHANNELS_CATALOG.find((d) => d.id === c.id)?.fields.find(
+                          (f) => f.id === key,
+                        );
+                        return (
+                          <label key={key} style={{ display: "grid", gap: 2, fontSize: 11 }}>
+                            <span>
+                              {defined?.label ?? key}
+                              {defined?.required ? " *" : ""}
+                            </span>
+                            <input
+                              type={key.toLowerCase().includes("token") ? "password" : "text"}
+                              value={draftFields[key] ?? ""}
+                              placeholder={defined?.placeholder ?? key}
+                              onChange={(e) =>
+                                setDraftFields((prev) => ({ ...prev, [key]: e.target.value }))
+                              }
+                              className="cap-search-input"
+                              style={{ width: "100%" }}
+                            />
+                          </label>
+                        );
+                      })}
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input
+                          type="text"
+                          value={newFieldKey}
+                          placeholder="nuova chiave (es. bot_token)"
+                          onChange={(e) => setNewFieldKey(e.target.value)}
+                          className="cap-search-input"
+                          style={{ flex: 1 }}
+                        />
+                        <button
+                          type="button"
+                          className="cap-filter-item"
+                          onClick={() => {
+                            const key = newFieldKey.trim();
+                            if (key && !(key in draftFields)) {
+                              setDraftFields((prev) => ({ ...prev, [key]: "" }));
+                            }
+                            setNewFieldKey("");
+                          }}
+                        >
+                          Aggiungi campo
+                        </button>
+                      </div>
+                      <button
+                        type="submit"
+                        className="cap-filter-item is-selected"
+                        disabled={busy !== null}
+                      >
+                        Salva configurazione
+                      </button>
+                      <span style={{ fontSize: 10, opacity: 0.7 }}>
+                        Il salvataggio abilita il canale; i segreti restano nel motore.
+                      </span>
+                    </form>
+                  )}
+                </article>
+              ))}
+              {filteredChannels.length === 0 && (
+                <div className="cap-empty">Nessun connettore canale corrisponde.</div>
+              )}
+            </div>
+            <div
+              className="cap-card-footer"
+              style={{
+                marginTop: 16,
+                borderTop: "1px solid #dce4d5",
+                paddingTop: 12,
+                justifyContent: "space-between",
+              }}
+            >
               <span style={{ fontSize: 12, color: "#647a6d" }}>
                 Connettori ospitati — {connectedCount} collegati su {connectors.length}
               </span>
               <div style={{ display: "flex", gap: 6 }}>
-            {([["all", "Tutti"], ["connected", `Collegati ${connectedCount}`], ["pending", "Da collegare"]] as const).map(([id, label]) => (
+                {(
+                  [
+                    ["all", "Tutti"],
+                    ["connected", `Collegati ${connectedCount}`],
+                    ["pending", "Da collegare"],
+                  ] as const
+                ).map(([id, label]) => (
                   <button
                     key={id}
                     type="button"
@@ -416,88 +481,103 @@ export function CapabilitiesView() {
               </div>
             </div>
             <div className="cap-grid">
-            {filteredConnectors.map((k) => (
-              <article key={k.name} className="cap-card">
-                <div>
-                  <div className="cap-card-top">
-                    <h4 className="cap-card-title">{k.name}</h4>
-                    <span
-                      className="cap-card-version"
-                      style={k.connected
-                        ? { color: "#1f7a4d", fontWeight: 600, background: "rgba(31,122,77,0.08)",
-                            padding: "2px 8px", borderRadius: 999 }
-                        : undefined}
-                    >
-                      {k.connected ? "✓ collegato" : k.declared ? "da autorizzare" : ""}
-                    </span>
+              {filteredConnectors.map((k) => (
+                <article key={k.name} className="cap-card">
+                  <div>
+                    <div className="cap-card-top">
+                      <h4 className="cap-card-title">{k.name}</h4>
+                      <span
+                        className="cap-card-version"
+                        style={
+                          k.connected
+                            ? {
+                                color: "#1f7a4d",
+                                fontWeight: 600,
+                                background: "rgba(31,122,77,0.08)",
+                                padding: "2px 8px",
+                                borderRadius: 999,
+                              }
+                            : undefined
+                        }
+                      >
+                        {k.connected ? "✓ collegato" : k.declared ? "da autorizzare" : ""}
+                      </span>
+                    </div>
+                    <p className="cap-card-desc">{k.description}</p>
                   </div>
-                  <p className="cap-card-desc">{k.description}</p>
-                </div>
-                <div className="cap-card-footer">
-                  <div className="cap-card-tags">
-                    {k.keywords.slice(0, 3).map((word) => (
-                      <span key={word} className="cap-tag-pill">{word}</span>
-                    ))}
+                  <div className="cap-card-footer">
+                    <div className="cap-card-tags">
+                      {k.keywords.slice(0, 3).map((word) => (
+                        <span key={word} className="cap-tag-pill">
+                          {word}
+                        </span>
+                      ))}
+                    </div>
+                    {k.connected ? (
+                      <button
+                        type="button"
+                        className="cap-filter-item"
+                        disabled
+                        title="Già autorizzato: i tool arrivano tramite i gate di approvazione"
+                      >
+                        Collegato
+                      </button>
+                    ) : oauthLink?.name === k.name ? (
+                      <a
+                        href={oauthLink.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="cap-filter-item is-selected"
+                        style={{ textDecoration: "none" }}
+                      >
+                        Apri l'autorizzazione →
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        className="cap-filter-item is-selected"
+                        disabled={busy !== null}
+                        onClick={() => {
+                          // finestra aperta al click (gesto utente): niente popup blocker
+                          const popup = window.open("", "_blank");
+                          void act(`connector:${k.name}`, async () => {
+                            const serverId =
+                              k.server_id ?? (await installEngineConnector(k.name)).server_id;
+                            const flow = await startConnectorOAuth(serverId);
+                            if (popup && !popup.closed) {
+                              popup.location.href = flow.authorize_url;
+                            } else {
+                              setOauthLink({ name: k.name, url: flow.authorize_url });
+                            }
+                          }).then((ok) => {
+                            // niente autorizzazione in arrivo: il popup resta
+                            // bianco e l'errore si legge solo in cima alla pagina
+                            if (!ok && popup && !popup.closed) popup.close();
+                          });
+                        }}
+                      >
+                        Connetti
+                      </button>
+                    )}
+                    {oauthLink?.name === k.name && (
+                      <span style={{ fontSize: 10, opacity: 0.7 }}>
+                        Si apre la pagina del fornitore; dopo l'autorizzazione torna qui.
+                      </span>
+                    )}
                   </div>
-                  {k.connected ? (
-                    <button type="button" className="cap-filter-item" disabled
-                      title="Già autorizzato: i tool arrivano tramite i gate di approvazione">
-                      Collegato
-                    </button>
-                  ) : oauthLink?.name === k.name ? (
-                    <a
-                      href={oauthLink.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="cap-filter-item is-selected"
-                      style={{ textDecoration: "none" }}
-                    >
-                      Apri l'autorizzazione →
-                    </a>
-                  ) : (
-                    <button
-                      type="button"
-                      className="cap-filter-item is-selected"
-                      disabled={busy !== null}
-                      onClick={() => {
-                        // finestra aperta al click (gesto utente): niente popup blocker
-                        const popup = window.open("", "_blank");
-                        void act(`connector:${k.name}`, async () => {
-                          const serverId = k.server_id
-                            ?? (await installEngineConnector(k.name)).server_id;
-                          const flow = await startConnectorOAuth(serverId);
-                          if (popup && !popup.closed) {
-                            popup.location.href = flow.authorize_url;
-                          } else {
-                            setOauthLink({ name: k.name, url: flow.authorize_url });
-                          }
-                        }).then((ok) => {
-                          // niente autorizzazione in arrivo: il popup resta
-                          // bianco e l'errore si legge solo in cima alla pagina
-                          if (!ok && popup && !popup.closed) popup.close();
-                        });
-                      }}
-                    >
-                      Connetti
-                    </button>
-                  )}
-                  {oauthLink?.name === k.name && (
-                    <span style={{ fontSize: 10, opacity: 0.7 }}>
-                      Si apre la pagina del fornitore; dopo l'autorizzazione torna qui.
-                    </span>
-                  )}
-                </div>
-              </article>
-            ))}
-            {filteredConnectors.length === 0 && <div className="cap-empty">Nessun connettore del catalogo corrisponde.</div>}
-          </div>
+                </article>
+              ))}
+              {filteredConnectors.length === 0 && (
+                <div className="cap-empty">Nessun connettore del catalogo corrisponde.</div>
+              )}
+            </div>
           </>
         ) : (
           <div className="cap-grid">
             {plugins.length === 0 ? (
               <div className="cap-empty">
-                Nessun plugin registrato nel motore. Quando un plugin viene installato
-                (API <code>/v1/plugins</code>) compare qui con i suoi tool. Fonte: motore.
+                Nessun plugin registrato nel motore. Quando un plugin viene installato (API{" "}
+                <code>/v1/plugins</code>) compare qui con i suoi tool. Fonte: motore.
               </div>
             ) : (
               filteredPlugins.map((p) => (
@@ -510,7 +590,9 @@ export function CapabilitiesView() {
                         disabled={busy !== null}
                         onChange={(val) =>
                           void act(`plugin:${p.name}`, () =>
-                            val ? enableEnginePlugin(p.name) : disableEnginePlugin(p.name))}
+                            val ? enableEnginePlugin(p.name) : disableEnginePlugin(p.name),
+                          )
+                        }
                         ariaLabel={`Abilita plugin ${p.name}`}
                       />
                     </div>
@@ -525,7 +607,9 @@ export function CapabilitiesView() {
             )}
           </div>
         )}
-        <p className="cap-empty" style={{ border: "none" }}>Fonte: motore.</p>
+        <p className="cap-empty" style={{ border: "none" }}>
+          Fonte: motore.
+        </p>
       </main>
     </div>
   );

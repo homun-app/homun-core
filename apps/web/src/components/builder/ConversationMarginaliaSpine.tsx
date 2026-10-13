@@ -1,7 +1,15 @@
 import { useState } from "react";
 import type { Work } from "./conversation-types";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
-import { Bookmark, Sparkles, CheckCircle2, ShieldCheck, Layers, FileText, ArrowRight } from "lucide-react";
+import {
+  Bookmark,
+  Sparkles,
+  CheckCircle2,
+  ShieldCheck,
+  Layers,
+  FileText,
+  ArrowRight,
+} from "lucide-react";
 import "./conversation-marginalia.css";
 
 export type SalientPoint = {
@@ -14,7 +22,10 @@ export type SalientPoint = {
   targetSelector: string;
 };
 
-export function extractSalientPoints(work?: Work | undefined, intake?: WorkIntakeState | undefined): SalientPoint[] {
+export function extractSalientPoints(
+  work?: Work | undefined,
+  intake?: WorkIntakeState | undefined,
+): SalientPoint[] {
   if (!work) return [];
   const points: SalientPoint[] = [];
 
@@ -72,7 +83,10 @@ export function extractSalientPoints(work?: Work | undefined, intake?: WorkIntak
   });
 
   // 5. Vault / Output riutilizzabili
-  if (work.engineLatestArtifact || (work.source === "engine" && work.engineStatus === "completed")) {
+  if (
+    work.engineLatestArtifact ||
+    (work.source === "engine" && work.engineStatus === "completed")
+  ) {
     points.push({
       id: "vault",
       category: "Vault di progetto",
@@ -96,7 +110,8 @@ function navigateToPoint(point: SalientPoint) {
     setTimeout(() => target.classList.remove("cw-highlight-pulse"), 2200);
 
     // If there is an input or textarea inside, focus it
-    const input = target.querySelector("input, textarea") as HTMLInputElement | HTMLTextAreaElement | null;
+    const input = target.querySelector("input, textarea") as
+      HTMLInputElement | HTMLTextAreaElement | null;
     if (input) {
       setTimeout(() => input.focus(), 350);
     }
@@ -145,17 +160,11 @@ export function ConversationMarginaliaSpine({
               {isActive && (
                 <div className="cw-marginalia-popover" role="tooltip">
                   <div className="cw-marginalia-popover__header">
-                    <span className="cw-marginalia-popover__category">
-                      ({point.category})
-                    </span>
+                    <span className="cw-marginalia-popover__category">({point.category})</span>
                     <Icon size={12} className="cw-marginalia-popover__icon" />
                   </div>
-                  <strong className="cw-marginalia-popover__title">
-                    {point.title}
-                  </strong>
-                  <p className="cw-marginalia-popover__detail">
-                    {point.detail}
-                  </p>
+                  <strong className="cw-marginalia-popover__title">{point.title}</strong>
+                  <p className="cw-marginalia-popover__detail">{point.detail}</p>
                   <button
                     type="button"
                     className="cw-marginalia-popover__action"

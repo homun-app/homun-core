@@ -35,7 +35,11 @@ export function ConversationTasks({
   const [dueError, setDueError] = useState<unknown>(null);
   const [feedback, setFeedback] = useState("");
   const [view, setView] = useState(initialView);
-  if (initialView && ["Elenco", "Kanban", "Calendario"].includes(initialView) && view !== initialView) {
+  if (
+    initialView &&
+    ["Elenco", "Kanban", "Calendario"].includes(initialView) &&
+    view !== initialView
+  ) {
     setView(initialView);
   }
   const [focus, setFocus] = useState("Tutti");

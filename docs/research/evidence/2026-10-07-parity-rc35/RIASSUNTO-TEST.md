@@ -9,12 +9,12 @@ Homun = main @ f74e1eb0, motore su 127.0.0.1:8765. Immagine terminal Homun:
 
 ## Risultati
 
-| # | Capability | Hermes rc.35 | Homun | Note |
-|---|---|---|---|---|
-| T1 | Core chat loop | PASS ("OK") | PASS (verificato in chat UI, streaming) | entrambi su qwen3.5:4b |
-| T2 | Agente crea file | PASS (file su host, contenuto esatto) | PASS (`write_workspace_file`, approvazioni digest, file nel workspace) | Homun: 2 observation (list + write) |
-| T3 | Memoria cross-session | **FAIL** (nessuna memoria persistita: dir `memories/` vuota, state.db senza tabella) | idem a settembre (capability opt-in) | **upstream ha rimosso i memory provider bundled** → plugin catalog (supermemory/Honcho): senza plugin non c'è memoria |
-| T6 | Terminale | **FAIL con qwen3.5:4b** (il modello non invoca MAI il tool terminale: `tool_calls=0` su tutte le prove in state.db; risponde testo) | PASS (terminal_execute in container pinned, **exit 0**, 2 turni, approvazione job verificata) | limite del modello 4b sul tool-calling di hermes, non del motore |
+| #   | Capability            | Hermes rc.35                                                                                                                        | Homun                                                                                         | Note                                                                                                                  |
+| --- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| T1  | Core chat loop        | PASS ("OK")                                                                                                                         | PASS (verificato in chat UI, streaming)                                                       | entrambi su qwen3.5:4b                                                                                                |
+| T2  | Agente crea file      | PASS (file su host, contenuto esatto)                                                                                               | PASS (`write_workspace_file`, approvazioni digest, file nel workspace)                        | Homun: 2 observation (list + write)                                                                                   |
+| T3  | Memoria cross-session | **FAIL** (nessuna memoria persistita: dir `memories/` vuota, state.db senza tabella)                                                | idem a settembre (capability opt-in)                                                          | **upstream ha rimosso i memory provider bundled** → plugin catalog (supermemory/Honcho): senza plugin non c'è memoria |
+| T6  | Terminale             | **FAIL con qwen3.5:4b** (il modello non invoca MAI il tool terminale: `tool_calls=0` su tutte le prove in state.db; risponde testo) | PASS (terminal_execute in container pinned, **exit 0**, 2 turni, approvazione job verificata) | limite del modello 4b sul tool-calling di hermes, non del motore                                                      |
 
 ## Bug trovato e corretto durante il test (Homun)
 

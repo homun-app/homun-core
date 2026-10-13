@@ -28,7 +28,9 @@ function dockProgress(ratio) {
     if (process.platform === "darwin" && app.dock && typeof app.dock.setProgress === "function") {
       app.dock.setProgress(Math.max(0, Math.min(1, ratio)));
     }
-  } catch { /* dock unavailable in this session */ }
+  } catch {
+    /* dock unavailable in this session */
+  }
 }
 
 function offerUpdate(info) {
@@ -50,7 +52,8 @@ function offerUpdate(info) {
   const choice = dialog.showMessageBoxSync({
     type: "info",
     message: `Nuova versione di Homun: ${info.version}`,
-    detail: "Puoi scaricarla adesso: vedrai l'avanzamento e al termine decidi se riavviare subito. Le note complete sono nella pagina delle release.",
+    detail:
+      "Puoi scaricarla adesso: vedrai l'avanzamento e al termine decidi se riavviare subito. Le note complete sono nella pagina delle release.",
     buttons: ["Scarica adesso", "Apri le note", "Più tardi"],
     defaultId: 0,
     cancelId: 2,
@@ -79,11 +82,11 @@ function startDownload(version) {
 function initUpdater() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.on("error", error => {
+  autoUpdater.on("error", (error) => {
     console.error("updater:", error.message);
   });
   autoUpdater.on("update-available", offerUpdate);
-  autoUpdater.on("download-progress", progress => {
+  autoUpdater.on("download-progress", (progress) => {
     progressWindow?.update(progress);
     dockProgress(progress.percent / 100);
   });
@@ -91,7 +94,9 @@ function initUpdater() {
     // A staged download equal to the running version (leftover after an
     // install-on-quit) must not prompt again: only a genuinely newer build.
     if (info?.version && autoUpdater.currentVersion.compare(info.version) >= 0) {
-      console.log(`updater: staged ${info.version} is not newer than ${autoUpdater.currentVersion.version}, ignoring`);
+      console.log(
+        `updater: staged ${info.version} is not newer than ${autoUpdater.currentVersion.version}, ignoring`,
+      );
       return;
     }
     downloading = false;
@@ -114,19 +119,25 @@ function initUpdater() {
     if (choice === 0) autoUpdater.quitAndInstall(false, true);
   });
   // A failed check (offline, feed unreachable) must never disturb the session.
-  void autoUpdater.checkForUpdates().then((result) => {
-    // E2E hook: scripted update runs skip the dialogs and drive the whole
-    // download -> install-on-quit chain deterministically (no native-dialog
-    // automation exists for CI).
-    if (process.env.HOMUN_DESKTOP_UPDATE_E2E === "1" && result?.updateInfo?.version
-        && autoUpdater.currentVersion.compare(result.updateInfo.version) < 0
-        && !downloading) {
-      console.log(`E2E update: downloading ${result.updateInfo.version}`);
-      startDownload(result.updateInfo.version);
-    }
-  }).catch(error => {
-    console.error("updater check failed:", error.message);
-  });
+  void autoUpdater
+    .checkForUpdates()
+    .then((result) => {
+      // E2E hook: scripted update runs skip the dialogs and drive the whole
+      // download -> install-on-quit chain deterministically (no native-dialog
+      // automation exists for CI).
+      if (
+        process.env.HOMUN_DESKTOP_UPDATE_E2E === "1" &&
+        result?.updateInfo?.version &&
+        autoUpdater.currentVersion.compare(result.updateInfo.version) < 0 &&
+        !downloading
+      ) {
+        console.log(`E2E update: downloading ${result.updateInfo.version}`);
+        startDownload(result.updateInfo.version);
+      }
+    })
+    .catch((error) => {
+      console.error("updater check failed:", error.message);
+    });
 }
 
 /** Manual check from Settings: same dialog when found, a status when current. */
@@ -137,7 +148,8 @@ async function checkNow() {
       current,
       available: false,
       version: null,
-      error: "Auto-update is available for the AppImage on Linux; .deb installs update from the release page.",
+      error:
+        "Auto-update is available for the AppImage on Linux; .deb installs update from the release page.",
     };
   }
   try {

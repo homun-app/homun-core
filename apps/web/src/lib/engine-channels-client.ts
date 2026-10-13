@@ -54,14 +54,19 @@ export async function updateEngineChannelPlatform(
   platformId: string,
   payload: ChannelPlatformUpdatePayload,
 ): Promise<{ ok: boolean; platform: string; enabled: boolean }> {
-  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/platforms/${encodeURIComponent(platformId)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  const res = await fetch(
+    `${getBaseUrl()}/v1/gateway/channels/platforms/${encodeURIComponent(platformId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.detail?.message || err?.detail || `Errore salvataggio canale (HTTP ${res.status})`);
+    throw new Error(
+      err?.detail?.message || err?.detail || `Errore salvataggio canale (HTTP ${res.status})`,
+    );
   }
   return res.json();
 }
@@ -69,12 +74,17 @@ export async function updateEngineChannelPlatform(
 export async function deleteEngineChannelPlatform(
   platformId: string,
 ): Promise<{ ok: boolean; platform: string }> {
-  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/platforms/${encodeURIComponent(platformId)}`, {
-    method: "DELETE",
-  });
+  const res = await fetch(
+    `${getBaseUrl()}/v1/gateway/channels/platforms/${encodeURIComponent(platformId)}`,
+    {
+      method: "DELETE",
+    },
+  );
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.detail?.message || err?.detail || `Errore rimozione canale (HTTP ${res.status})`);
+    throw new Error(
+      err?.detail?.message || err?.detail || `Errore rimozione canale (HTTP ${res.status})`,
+    );
   }
   return res.json();
 }
@@ -83,11 +93,14 @@ export async function testEngineChannelPlatform(
   platformId: string,
   fields?: Record<string, string>,
 ): Promise<ChannelPlatformTestResponse> {
-  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/platforms/${encodeURIComponent(platformId)}/test`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fields: fields || {} }),
-  });
+  const res = await fetch(
+    `${getBaseUrl()}/v1/gateway/channels/platforms/${encodeURIComponent(platformId)}/test`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields: fields || {} }),
+    },
+  );
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     return {
@@ -113,7 +126,9 @@ export type TelegramOnboardingStatusResponse = {
   expires_at?: string;
 };
 
-export async function startTelegramOnboarding(botName = "Homun Agent"): Promise<TelegramOnboardingStartResponse> {
+export async function startTelegramOnboarding(
+  botName = "Homun Agent",
+): Promise<TelegramOnboardingStartResponse> {
   const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/telegram/onboarding/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -121,19 +136,29 @@ export async function startTelegramOnboarding(botName = "Homun Agent"): Promise<
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.detail?.message || err?.detail || `Impossibile avviare la creazione bot (HTTP ${res.status})`);
+    throw new Error(
+      err?.detail?.message ||
+        err?.detail ||
+        `Impossibile avviare la creazione bot (HTTP ${res.status})`,
+    );
   }
   return res.json();
 }
 
-export async function getTelegramOnboardingStatus(pairingId: string): Promise<TelegramOnboardingStatusResponse> {
-  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/telegram/onboarding/${encodeURIComponent(pairingId)}`);
+export async function getTelegramOnboardingStatus(
+  pairingId: string,
+): Promise<TelegramOnboardingStatusResponse> {
+  const res = await fetch(
+    `${getBaseUrl()}/v1/gateway/channels/telegram/onboarding/${encodeURIComponent(pairingId)}`,
+  );
   if (!res.ok) {
     if (res.status === 410) {
       return { status: "expired" };
     }
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.detail?.message || err?.detail || `Errore verifica stato bot (HTTP ${res.status})`);
+    throw new Error(
+      err?.detail?.message || err?.detail || `Errore verifica stato bot (HTTP ${res.status})`,
+    );
   }
   return res.json();
 }
@@ -141,23 +166,39 @@ export async function getTelegramOnboardingStatus(pairingId: string): Promise<Te
 export async function applyTelegramOnboarding(
   pairingId: string,
   allowedUserIds?: string[],
-): Promise<{ ok: boolean; platform: string; bot_username?: string; enabled: boolean; fields?: Record<string, string> }> {
-  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/telegram/onboarding/${encodeURIComponent(pairingId)}/apply`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ allowed_user_ids: allowedUserIds }),
-  });
+): Promise<{
+  ok: boolean;
+  platform: string;
+  bot_username?: string;
+  enabled: boolean;
+  fields?: Record<string, string>;
+}> {
+  const res = await fetch(
+    `${getBaseUrl()}/v1/gateway/channels/telegram/onboarding/${encodeURIComponent(pairingId)}/apply`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ allowed_user_ids: allowedUserIds }),
+    },
+  );
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.detail?.message || err?.detail || `Errore applicazione bot Telegram (HTTP ${res.status})`);
+    throw new Error(
+      err?.detail?.message ||
+        err?.detail ||
+        `Errore applicazione bot Telegram (HTTP ${res.status})`,
+    );
   }
   return res.json();
 }
 
 export async function cancelTelegramOnboarding(pairingId: string): Promise<{ ok: boolean }> {
-  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/telegram/onboarding/${encodeURIComponent(pairingId)}`, {
-    method: "DELETE",
-  });
+  const res = await fetch(
+    `${getBaseUrl()}/v1/gateway/channels/telegram/onboarding/${encodeURIComponent(pairingId)}`,
+    {
+      method: "DELETE",
+    },
+  );
   return res.json().catch(() => ({ ok: true }));
 }
 
@@ -187,41 +228,65 @@ export async function startWhatsAppOnboarding(): Promise<WhatsAppOnboardingStart
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.detail?.message || err?.detail || `Impossibile avviare il pairing WhatsApp (HTTP ${res.status})`);
+    throw new Error(
+      err?.detail?.message ||
+        err?.detail ||
+        `Impossibile avviare il pairing WhatsApp (HTTP ${res.status})`,
+    );
   }
   return res.json();
 }
 
-export async function getWhatsAppOnboardingStatus(pairingId: string): Promise<WhatsAppOnboardingStatusResponse> {
-  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/whatsapp/onboarding/${encodeURIComponent(pairingId)}`);
+export async function getWhatsAppOnboardingStatus(
+  pairingId: string,
+): Promise<WhatsAppOnboardingStatusResponse> {
+  const res = await fetch(
+    `${getBaseUrl()}/v1/gateway/channels/whatsapp/onboarding/${encodeURIComponent(pairingId)}`,
+  );
   if (!res.ok) {
     if (res.status === 410 || res.status === 404) {
       return { status: "expired" };
     }
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.detail?.message || err?.detail || `Errore verifica pairing WhatsApp (HTTP ${res.status})`);
+    throw new Error(
+      err?.detail?.message ||
+        err?.detail ||
+        `Errore verifica pairing WhatsApp (HTTP ${res.status})`,
+    );
   }
   return res.json();
 }
 
-export async function applyWhatsAppOnboarding(
-  pairingId: string,
-): Promise<{ ok: boolean; platform: string; jid?: string; enabled: boolean; fields?: Record<string, string> }> {
-  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/whatsapp/onboarding/${encodeURIComponent(pairingId)}/apply`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-  });
+export async function applyWhatsAppOnboarding(pairingId: string): Promise<{
+  ok: boolean;
+  platform: string;
+  jid?: string;
+  enabled: boolean;
+  fields?: Record<string, string>;
+}> {
+  const res = await fetch(
+    `${getBaseUrl()}/v1/gateway/channels/whatsapp/onboarding/${encodeURIComponent(pairingId)}/apply`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.detail?.message || err?.detail || `Errore applicazione WhatsApp (HTTP ${res.status})`);
+    throw new Error(
+      err?.detail?.message || err?.detail || `Errore applicazione WhatsApp (HTTP ${res.status})`,
+    );
   }
   return res.json();
 }
 
 export async function cancelWhatsAppOnboarding(pairingId: string): Promise<{ ok: boolean }> {
-  const res = await fetch(`${getBaseUrl()}/v1/gateway/channels/whatsapp/onboarding/${encodeURIComponent(pairingId)}`, {
-    method: "DELETE",
-  });
+  const res = await fetch(
+    `${getBaseUrl()}/v1/gateway/channels/whatsapp/onboarding/${encodeURIComponent(pairingId)}`,
+    {
+      method: "DELETE",
+    },
+  );
   return res.json().catch(() => ({ ok: true }));
 }

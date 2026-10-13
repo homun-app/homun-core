@@ -40,26 +40,37 @@ async function peopleFetch(path: string, init?: RequestInit): Promise<unknown> {
   return body;
 }
 
-export async function listEnginePeople(actorId: string, signal?: AbortSignal): Promise<EnginePerson[]> {
+export async function listEnginePeople(
+  actorId: string,
+  signal?: AbortSignal,
+): Promise<EnginePerson[]> {
   const body = await peopleFetch(`/v1/workspaces/ws_local/people`, {
-    headers: { "X-Homun-Actor-Id": actorId }, ...(signal ? { signal } : {}),
+    headers: { "X-Homun-Actor-Id": actorId },
+    ...(signal ? { signal } : {}),
   });
   const items = (body as { items?: unknown }).items;
-  if (!Array.isArray(items)) throw new HomunClientError("validation_error", "Elenco persone non valido");
+  if (!Array.isArray(items))
+    throw new HomunClientError("validation_error", "Elenco persone non valido");
   return items as EnginePerson[];
 }
 
-export async function listEnginePeopleInvites(actorId: string, signal?: AbortSignal): Promise<EnginePersonInvite[]> {
+export async function listEnginePeopleInvites(
+  actorId: string,
+  signal?: AbortSignal,
+): Promise<EnginePersonInvite[]> {
   const body = await peopleFetch(`/v1/workspaces/ws_local/people/invites`, {
-    headers: { "X-Homun-Actor-Id": actorId }, ...(signal ? { signal } : {}),
+    headers: { "X-Homun-Actor-Id": actorId },
+    ...(signal ? { signal } : {}),
   });
   const items = (body as { items?: unknown }).items;
-  if (!Array.isArray(items)) throw new HomunClientError("validation_error", "Elenco inviti non valido");
+  if (!Array.isArray(items))
+    throw new HomunClientError("validation_error", "Elenco inviti non valido");
   return items as EnginePersonInvite[];
 }
 
 export async function createEnginePersonInvite(
-  actorId: string, input: { role: "admin" | "member"; note?: string },
+  actorId: string,
+  input: { role: "admin" | "member"; note?: string },
 ): Promise<{ token: string; expires_at: string }> {
   const body = await peopleFetch(`/v1/workspaces/ws_local/people/invites`, {
     method: "POST",
@@ -76,18 +87,24 @@ export async function createEnginePersonInvite(
 
 export async function revokeEnginePerson(actorId: string, personId: string): Promise<void> {
   await peopleFetch(`/v1/workspaces/ws_local/people/${encodeURIComponent(personId)}/revoke`, {
-    method: "POST", headers: { "X-Homun-Actor-Id": actorId },
+    method: "POST",
+    headers: { "X-Homun-Actor-Id": actorId },
   });
 }
 
 export async function revokeEnginePersonInvite(actorId: string, inviteId: string): Promise<void> {
-  await peopleFetch(`/v1/workspaces/ws_local/people/invites/${encodeURIComponent(inviteId)}/revoke`, {
-    method: "POST", headers: { "X-Homun-Actor-Id": actorId },
-  });
+  await peopleFetch(
+    `/v1/workspaces/ws_local/people/invites/${encodeURIComponent(inviteId)}/revoke`,
+    {
+      method: "POST",
+      headers: { "X-Homun-Actor-Id": actorId },
+    },
+  );
 }
 
 export async function revokeEngineDevice(actorId: string, deviceId: string): Promise<void> {
   await peopleFetch(`/v1/workspaces/ws_local/devices/${encodeURIComponent(deviceId)}/revoke`, {
-    method: "POST", headers: { "X-Homun-Actor-Id": actorId },
+    method: "POST",
+    headers: { "X-Homun-Actor-Id": actorId },
   });
 }

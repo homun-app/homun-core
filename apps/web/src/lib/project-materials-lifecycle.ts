@@ -23,7 +23,9 @@ export async function ingestMaterialFiles(
 const listeners = new Set<(projectId: string) => void>();
 export function subscribeMaterialChanges(listener: (projectId: string) => void) {
   listeners.add(listener);
-  return () => { listeners.delete(listener); };
+  return () => {
+    listeners.delete(listener);
+  };
 }
 export function notifyMaterialChange(projectId: string) {
   for (const listener of listeners) listener(projectId);
@@ -36,6 +38,8 @@ export function createMaterialRequestGuard() {
       const request = ++revision;
       return () => revision === request;
     },
-    invalidate() { revision += 1; },
+    invalidate() {
+      revision += 1;
+    },
   };
 }

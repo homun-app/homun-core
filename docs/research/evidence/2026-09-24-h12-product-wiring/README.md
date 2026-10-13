@@ -1,6 +1,7 @@
 # Evidence: H12 checkpoint product wiring (2026-09-24)
 
 ## Gap closed
+
 - Approved workspace writes (`workspace_file_edits._apply`) take a shadow checkpoint
   before mutation and record the agent write for selective rollback.
 - Default store: `HOMUN_DATA_DIR/checkpoints`.
@@ -9,6 +10,7 @@
 Hermes treats checkpoints as infrastructure (not a model tool); Homun mirrors that.
 
 ## Commands
+
 ```bash
 cd engine && .venv/bin/python -m pytest \
   tests/test_h12_product_wiring.py \
@@ -17,5 +19,6 @@ cd engine && .venv/bin/python -m pytest \
 ```
 
 ## Residual
+
 - Working-diff inspection tool for operators remains optional.
 - Chronos / full rollback UX surfaces open.

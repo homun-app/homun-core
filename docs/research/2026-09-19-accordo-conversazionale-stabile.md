@@ -21,18 +21,18 @@ Invariati: proposta → conferma prima dell'assegnazione; approvazione separata 
 
 ## Moduli
 
-| Modulo | Ruolo |
-| --- | --- |
-| `engine/src/homun/models/intake.py` | `IntakeBrief.changed_fields` (Literal) + prompt aggiornato |
-| `engine/src/homun/application/intake_brief.py` | nuovo: carry-over engine-side, conservazione staffing azionabile, diff |
-| `engine/src/homun/application/intake.py` | stabilizzazione in `propose`, `changes` nella proposta |
-| `engine/src/homun/routes/intake.py`, `contracts/openapi/v1-engine.json` | contratto esteso con default retrocompatibili (proposte vecchie senza i campi restano valide) |
-| `apps/web/src/lib/engine-intake-display.ts` | nuovo: presentazione italiana del diff + gate «accordo rivedibile» |
-| `apps/web/src/components/builder/EngineWorkIntake.tsx` | «Cosa cambia», gate azioni, marcatura storica |
-| `apps/web/src/lib/conversation-engine-bridge.ts`, `conversation-types.ts` | esposizione `enginePlanRevision`/`engineArtifactVersion` |
-| `apps/web/src/lib/engine-transcript-lifecycle.ts` | nuovo: politica pura di ricaricamento del transcript |
-| `apps/web/src/hooks/useEngineTranscript.ts` | ricarica per valore (non per identità array), contenuto conservato, overlay eliminato solo a stream concluso |
-| `apps/web/src/hooks/useEngineWorkspace.ts` | sequenza di reload esplicita dopo `refresh`; rimozione segnaposto parziale nel percorso intake |
+| Modulo                                                                    | Ruolo                                                                                                        |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `engine/src/homun/models/intake.py`                                       | `IntakeBrief.changed_fields` (Literal) + prompt aggiornato                                                   |
+| `engine/src/homun/application/intake_brief.py`                            | nuovo: carry-over engine-side, conservazione staffing azionabile, diff                                       |
+| `engine/src/homun/application/intake.py`                                  | stabilizzazione in `propose`, `changes` nella proposta                                                       |
+| `engine/src/homun/routes/intake.py`, `contracts/openapi/v1-engine.json`   | contratto esteso con default retrocompatibili (proposte vecchie senza i campi restano valide)                |
+| `apps/web/src/lib/engine-intake-display.ts`                               | nuovo: presentazione italiana del diff + gate «accordo rivedibile»                                           |
+| `apps/web/src/components/builder/EngineWorkIntake.tsx`                    | «Cosa cambia», gate azioni, marcatura storica                                                                |
+| `apps/web/src/lib/conversation-engine-bridge.ts`, `conversation-types.ts` | esposizione `enginePlanRevision`/`engineArtifactVersion`                                                     |
+| `apps/web/src/lib/engine-transcript-lifecycle.ts`                         | nuovo: politica pura di ricaricamento del transcript                                                         |
+| `apps/web/src/hooks/useEngineTranscript.ts`                               | ricarica per valore (non per identità array), contenuto conservato, overlay eliminato solo a stream concluso |
+| `apps/web/src/hooks/useEngineWorkspace.ts`                                | sequenza di reload esplicita dopo `refresh`; rimozione segnaposto parziale nel percorso intake               |
 
 ## Prove eseguite (distinte per tipo)
 

@@ -1,9 +1,7 @@
 {
   "fixture": "real source reads with scripted choices; real local summary/final model",
   "model": "qwen3.5:4b",
-  "statuses": [
-    "failed"
-  ],
+  "statuses": ["failed"],
   "run_status": "failed",
   "error_code": "agent_context_summary_failed",
   "context_policy": {

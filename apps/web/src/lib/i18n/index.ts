@@ -69,4 +69,3 @@ export function t(path: string, params?: Record<string, string | number>): strin
   }
   return typeof current === "string" ? formatString(current, params) : path;
 }
-

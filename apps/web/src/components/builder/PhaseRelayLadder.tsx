@@ -2,7 +2,18 @@ import { useState } from "react";
 import type { Work } from "./conversation-types";
 import { defaultLocalActor } from "@/lib/engine-domain-client";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
-import { Check, ArrowRight, Clock, AlertCircle, Play, FileText, FileSpreadsheet, Bot, User, Layers } from "lucide-react";
+import {
+  Check,
+  ArrowRight,
+  Clock,
+  AlertCircle,
+  Play,
+  FileText,
+  FileSpreadsheet,
+  Bot,
+  User,
+  Layers,
+} from "lucide-react";
 
 const STEP_STATUS_LABELS: Record<string, string> = {
   pending: "In attesa",
@@ -45,11 +56,18 @@ export function PhaseRelayLadder({
   busy: boolean;
   materialsCount: number;
   onStartWork?: (() => Promise<void>) | undefined;
-  onRevisePlan?: ((action: {
-    insertAfterStepId?: string | null;
-    newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string };
-    removeStepId?: string;
-  }) => Promise<void>) | undefined;
+  onRevisePlan?:
+    | ((action: {
+        insertAfterStepId?: string | null;
+        newStep?: {
+          title: string;
+          assigneeId: string;
+          capability?: string;
+          outputExpected?: string;
+        };
+        removeStepId?: string;
+      }) => Promise<void>)
+    | undefined;
   agents: Array<{ id: string; name: string; status: string }>;
 }) {
   const steps = work.enginePlan;
@@ -75,18 +93,31 @@ export function PhaseRelayLadder({
 
       <ol className="cw-relay-ladder">
         {steps.map((step, index) => {
-          const isCurrent = step.status === "running" || (step === firstPending && work.engineStatus === "ready");
+          const isCurrent =
+            step.status === "running" || (step === firstPending && work.engineStatus === "ready");
           const isDone = step.status === "succeeded";
-          const isWaitingAuth = step.status === "waiting_approval" || step.status === "waiting_input";
+          const isWaitingAuth =
+            step.status === "waiting_approval" || step.status === "waiting_input";
           const meta = capabilityMeta(step.capability);
           const Icon = meta.icon;
-          const assigneeName = agentNames?.[step.assignee_id] ?? (step.assignee_id === defaultLocalActor().id ? (step.capability === "general" ? "Tu" : "Homun") : "Collaboratore");
+          const assigneeName =
+            agentNames?.[step.assignee_id] ??
+            (step.assignee_id === defaultLocalActor().id
+              ? step.capability === "general"
+                ? "Tu"
+                : "Homun"
+              : "Collaboratore");
           const nextStep = steps[index + 1];
 
           return (
-            <li key={step.id} className={`cw-relay-step cw-relay-step--${step.status} ${isCurrent ? "cw-relay-step--active" : ""}`}>
+            <li
+              key={step.id}
+              className={`cw-relay-step cw-relay-step--${step.status} ${isCurrent ? "cw-relay-step--active" : ""}`}
+            >
               <div className="cw-relay-step__header">
-                <span className={`cw-relay-step__badge ${isDone ? "is-done" : isCurrent ? "is-active" : ""}`}>
+                <span
+                  className={`cw-relay-step__badge ${isDone ? "is-done" : isCurrent ? "is-active" : ""}`}
+                >
                   {isDone ? <Check size={12} strokeWidth={3} /> : index + 1}
                 </span>
                 <span className="cw-relay-step__title">{step.title}</span>
@@ -117,7 +148,10 @@ export function PhaseRelayLadder({
               {nextStep && isDone && (
                 <div className="cw-relay-handoff">
                   <ArrowRight size={12} />
-                  <span>Passaggio di consegne a <strong>{agentNames?.[nextStep.assignee_id] ?? "prossimo bot"}</strong></span>
+                  <span>
+                    Passaggio di consegne a{" "}
+                    <strong>{agentNames?.[nextStep.assignee_id] ?? "prossimo bot"}</strong>
+                  </span>
                 </div>
               )}
             </li>
@@ -127,11 +161,7 @@ export function PhaseRelayLadder({
 
       {startable && firstPending ? (
         <div className="cs-actions cw-relay-start-action">
-          <button
-            className="cw-primary"
-            disabled={busy}
-            onClick={() => void onStartWork!()}
-          >
+          <button className="cw-primary" disabled={busy} onClick={() => void onStartWork!()}>
             <Play size={13} />
             Autorizza ed esegui: {firstPending.title}
           </button>
@@ -175,11 +205,18 @@ function PhaseReviseControls({
   busy: boolean;
   steps: NonNullable<Work["enginePlan"]>;
   agents: Array<{ id: string; name: string; status: string }>;
-  onRevisePlan?: ((action: {
-    insertAfterStepId?: string | null;
-    newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string };
-    removeStepId?: string;
-  }) => Promise<void>) | undefined;
+  onRevisePlan?:
+    | ((action: {
+        insertAfterStepId?: string | null;
+        newStep?: {
+          title: string;
+          assigneeId: string;
+          capability?: string;
+          outputExpected?: string;
+        };
+        removeStepId?: string;
+      }) => Promise<void>)
+    | undefined;
 }) {
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
@@ -189,7 +226,9 @@ function PhaseReviseControls({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
   if (!onRevisePlan) return null;
-  const revisable = ["draft", "ready", "running", "review", "paused"].includes(work.engineStatus ?? "");
+  const revisable = ["draft", "ready", "running", "review", "paused"].includes(
+    work.engineStatus ?? "",
+  );
   if (!revisable) return null;
   const pendingSteps = steps.filter((step) => step.status === "pending");
   const activeAgents = agents.filter((agent) => agent.status === "active");
@@ -221,11 +260,20 @@ function PhaseReviseControls({
     <div className="cw-engine-summary__revise" aria-label="Modifica fasi">
       {removingId ? (
         <div className="cs-actions">
-          <button type="button" className="cw-secondary" disabled={saving}
-            onClick={() => void run({ removeStepId: removingId })}>
+          <button
+            type="button"
+            className="cw-secondary"
+            disabled={saving}
+            onClick={() => void run({ removeStepId: removingId })}
+          >
             {saving ? "Sto rimuovendo…" : "Sì, rimuovi la fase"}
           </button>
-          <button type="button" className="cs-link" disabled={saving} onClick={() => setRemovingId(null)}>
+          <button
+            type="button"
+            className="cs-link"
+            disabled={saving}
+            onClick={() => setRemovingId(null)}
+          >
             Annulla
           </button>
         </div>
@@ -244,24 +292,39 @@ function PhaseReviseControls({
         >
           <label>
             Nuova fase
-            <input value={title} maxLength={120} disabled={saving}
-              onChange={(event) => setTitle(event.target.value)} placeholder="Es. Rileggere la sintesi" />
+            <input
+              value={title}
+              maxLength={120}
+              disabled={saving}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Es. Rileggere la sintesi"
+            />
           </label>
           <div className="cw-agent-editor__row">
             <label>
               Chi la esegue
-              <select aria-label="Assegnatario della nuova fase" value={assigneeId} disabled={saving}
-                onChange={(event) => setAssigneeId(event.target.value)}>
+              <select
+                aria-label="Assegnatario della nuova fase"
+                value={assigneeId}
+                disabled={saving}
+                onChange={(event) => setAssigneeId(event.target.value)}
+              >
                 <option value="">Scegli…</option>
                 {activeAgents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>{agent.name}</option>
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
                 ))}
               </select>
             </label>
             <label>
               Capacità
-              <select aria-label="Capacità della nuova fase" value={capability} disabled={saving}
-                onChange={(event) => setCapability(event.target.value)}>
+              <select
+                aria-label="Capacità della nuova fase"
+                value={capability}
+                disabled={saving}
+                onChange={(event) => setCapability(event.target.value)}
+              >
                 <option value="general">Generale / Umano</option>
                 <option value="agent_run">Esecuzione Agente</option>
                 <option value="compare_csv">Confronto CSV</option>
@@ -274,7 +337,12 @@ function PhaseReviseControls({
             <button className="cw-primary" disabled={saving || !title.trim() || !assigneeId}>
               {saving ? "Aggiunta…" : "Aggiungi al piano"}
             </button>
-            <button type="button" className="cw-secondary" disabled={saving} onClick={() => setAdding(false)}>
+            <button
+              type="button"
+              className="cw-secondary"
+              disabled={saving}
+              onClick={() => setAdding(false)}
+            >
               Annulla
             </button>
           </div>
@@ -288,7 +356,12 @@ function PhaseReviseControls({
                 {pendingSteps.map((step) => (
                   <li key={step.id}>
                     <span>{step.title}</span>
-                    <button type="button" className="cs-link" disabled={saving || busy} onClick={() => setRemovingId(step.id)}>
+                    <button
+                      type="button"
+                      className="cs-link"
+                      disabled={saving || busy}
+                      onClick={() => setRemovingId(step.id)}
+                    >
                       Rimuovi
                     </button>
                   </li>
@@ -296,7 +369,12 @@ function PhaseReviseControls({
               </ul>
             </details>
           )}
-          <button type="button" className="cs-link" disabled={busy || saving} onClick={() => setAdding(true)}>
+          <button
+            type="button"
+            className="cs-link"
+            disabled={busy || saving}
+            onClick={() => setAdding(true)}
+          >
             + Aggiungi una fase
           </button>
         </div>

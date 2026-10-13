@@ -23,7 +23,9 @@ test("preparation retry recovers existing proposal without a new revision or upl
     );
     assert.equal(result.id, "stable-operation");
     assert.equal(calls, 1);
-  } finally { globalThis.fetch = original; }
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 test("comparison approval submits exact digest and revision with bound actor", async () => {

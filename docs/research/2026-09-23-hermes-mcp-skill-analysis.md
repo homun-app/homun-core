@@ -14,10 +14,10 @@
 
 ```yaml
 mcp_servers:
-  project_fs:                      # stdio: sottoprocesso locale
+  project_fs: # stdio: sottoprocesso locale
     command: "npx"
     args: ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/my-project"]
-  stripe:                          # HTTP: remoto con autenticazione
+  stripe: # HTTP: remoto con autenticazione
     url: "https://mcp.stripe.com"
     headers: { Authorization: "Bearer ***" }
     tools:
@@ -63,6 +63,7 @@ toolset), `required_environment_variables` (chiede i segreti al primo uso),
 standard: When to Use, Procedure, Pitfalls, Verification.
 
 **Caricamento progressivo (3 livelli)** — la chiave dei costi-token:
+
 - L0 `skills_list()` → nome/descrizione/categoria (~3k token per tutto il catalogo);
 - L1 `skill_view(name)` → SKILL.md completo;
 - L2 `skill_view(name, path)` → un singolo file di riferimento.
@@ -72,8 +73,9 @@ scoperta in linguaggio naturale via `skills_list`. Bundle (`skill-bundles/*.yaml
 raggruppano skill sotto un comando.
 
 **Creazione e apprendimento**:
+
 - `/learn` trasforma materiale (URL, directory, conversazioni, note) in skill; i sorgenti
-  grandi diventano *knowledge-base skill*: SKILL.md snello con indice + capitoli
+  grandi diventano _knowledge-base skill_: SKILL.md snello con indice + capitoli
   distillati in `references/`;
 - **`skill_manage`** = strumento dell'agente stesso (create/patch/delete/write_file):
   registra una procedura quando ha capito qualcosa di riutilizzabile o è stato corretto.
@@ -81,6 +83,7 @@ raggruppano skill sotto un comando.
   dell'incident log).
 
 **Supervisione** (di nuovo il punto per Homun):
+
 - `skills.write_approval: true` → **ogni scrittura dell'agente finisce in staging**
   (`~/.hermes/pending/skills/`) e si approva con `/skills pending|diff|approve|reject`;
   gli staging sopravvivono ai riavvii;
@@ -108,7 +111,7 @@ I tre principi trasferibili sono esattamente i tre pilastri di Homun:
 2. **Esecuzione supervisionata** — gli strumenti MCP diventano capacità del registro:
    il tool esterno entra nel vocabolario `capabilities` del motore con la stessa
    grammatica (proposta → approvazione della persona → esecuzione → revisione).
-   L'elicitation e il sampling di Hermes confermano il pattern: anche il *server*
+   L'elicitation e il sampling di Hermes confermano il pattern: anche il _server_
    può chiedere, ma la risposta passa dall'approvazione della persona con limiti
    (rate/cap) dichiarati.
 3. **Skill come memoria procedurale supervisionata** — markdown con frontmatter,

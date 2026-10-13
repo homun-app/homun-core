@@ -21,9 +21,7 @@ function convertMessage(msg: ChatStreamMessage): ThreadMessageLike {
     id: msg.id,
     role: msg.role,
     content: [
-      ...(msg.reasoning
-        ? [{ type: "reasoning" as const, text: msg.reasoning }]
-        : []),
+      ...(msg.reasoning ? [{ type: "reasoning" as const, text: msg.reasoning }] : []),
       ...(msg.tools ?? []).map((tool) => ({
         type: "tool-call" as const,
         toolCallId: tool.id,

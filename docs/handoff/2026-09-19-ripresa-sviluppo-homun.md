@@ -41,16 +41,16 @@ Il repository è collegato a Lovable: non riscrivere la storia pubblicata (force
 
 ## 3. Architettura adottata
 
-| Confine | Proprietario / responsabilità |
-| --- | --- |
-| UI | React/TypeScript in `apps/web`, conversazione e pannelli |
-| Desktop | Electron in `apps/desktop`; avvia e possiede il processo motore |
-| Motore | Python in `engine/src/homun`, API indipendente dalla UI |
-| Modelli | ModelRegistry/ModelPort e adattatori provider |
-| Loop agentico | Pydantic AI, secondo l’ADR adottata; non significa che ogni lavoro abbia già un loop generale operativo |
-| Durabilità | DBOS: attese, esecuzioni, ripresa; evitare un secondo scheduler concorrente |
-| Dominio e sicurezza | Homun: comandi, revisioni, autorizzazioni, materiali, artifact, ricevute, budget |
-| Persistenza locale | SQLite workspace, checkpoint DBOS, blob gestiti e ricevute |
+| Confine             | Proprietario / responsabilità                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------- |
+| UI                  | React/TypeScript in `apps/web`, conversazione e pannelli                                                |
+| Desktop             | Electron in `apps/desktop`; avvia e possiede il processo motore                                         |
+| Motore              | Python in `engine/src/homun`, API indipendente dalla UI                                                 |
+| Modelli             | ModelRegistry/ModelPort e adattatori provider                                                           |
+| Loop agentico       | Pydantic AI, secondo l’ADR adottata; non significa che ogni lavoro abbia già un loop generale operativo |
+| Durabilità          | DBOS: attese, esecuzioni, ripresa; evitare un secondo scheduler concorrente                             |
+| Dominio e sicurezza | Homun: comandi, revisioni, autorizzazioni, materiali, artifact, ricevute, budget                        |
+| Persistenza locale  | SQLite workspace, checkpoint DBOS, blob gestiti e ricevute                                              |
 
 La shell usa `homun://app`, sandbox, context isolation, Node disabilitato nel renderer e proxy API ristretto. Il token effimero rimane nel processo principale. Il launcher lega la sessione al principale locale `person_fabio`; non è un sistema di autenticazione multiutente pronto.
 
@@ -94,25 +94,25 @@ Il backend blocca anche i comandi generici di piano/avvio/assegnazione che tenti
 
 Percorsi relativi alla radice del repository.
 
-| Area | File / directory |
-| --- | --- |
-| Sintesi strutturata | `engine/src/homun/models/intake.py` |
-| Proposta e conferma | `engine/src/homun/application/intake.py`, `intake_policy.py` |
-| Gate operativi intake | `engine/src/homun/policy/intake.py` |
-| API intake | `engine/src/homun/routes/intake.py`, `contracts/openapi/v1-engine.json` |
-| Rinomina | `engine/src/homun/domain/commands/naming.py` |
-| Confronto e approvazione | `engine/src/homun/application/price_comparisons.py`, `price_comparison_policy.py`, `price_comparison_execution.py` |
-| Policy condivise | `engine/src/homun/policy/` |
-| Runtime e backup | `engine/src/homun/runtime/`, `storage/installation_backup.py`, `storage/backup.py` |
-| Trasporto/creazione UI | `apps/web/src/lib/engine-intake-client.ts`, `engine-intake-creation.ts`, `engine-work-naming.ts` |
-| Stato conversazione | `apps/web/src/hooks/useEngineWorkspace.ts`, `useEngineWorkspaceSnapshot.ts`, `useEngineTranscript.ts`, `useWorkIntake.ts` |
-| Presentazione intake | `apps/web/src/components/builder/EngineWorkIntake.tsx`, `engine-work-intake.css` |
-| Riepilogo | `EngineWorkspaceWorkPanel.tsx`, `EngineWorkObjectiveEditor.tsx`, `engine-work-summary.css` nella stessa directory |
-| Confronto UI | `EnginePriceComparison.tsx`, `apps/web/src/hooks/usePriceComparison.ts` |
-| Composizione UI | `ConversationWorkspaceChatStage.tsx`, `ConversationWorkspaceSidebar.tsx`, `ConversationWorkspaceSpaceHost.tsx` |
-| Squadra reale | `EngineWorkspaceAgents.tsx` |
-| Test principali | `engine/tests/test_intake.py`, `test_price_comparison_execution.py`, `tests/engine-intake-client.test.ts` |
-| Packaging | `tools/build_engine_bundle.py`, `apps/desktop/scripts/package-app.mjs`, `engine/packaging/smoke.py` |
+| Area                     | File / directory                                                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| Sintesi strutturata      | `engine/src/homun/models/intake.py`                                                                                       |
+| Proposta e conferma      | `engine/src/homun/application/intake.py`, `intake_policy.py`                                                              |
+| Gate operativi intake    | `engine/src/homun/policy/intake.py`                                                                                       |
+| API intake               | `engine/src/homun/routes/intake.py`, `contracts/openapi/v1-engine.json`                                                   |
+| Rinomina                 | `engine/src/homun/domain/commands/naming.py`                                                                              |
+| Confronto e approvazione | `engine/src/homun/application/price_comparisons.py`, `price_comparison_policy.py`, `price_comparison_execution.py`        |
+| Policy condivise         | `engine/src/homun/policy/`                                                                                                |
+| Runtime e backup         | `engine/src/homun/runtime/`, `storage/installation_backup.py`, `storage/backup.py`                                        |
+| Trasporto/creazione UI   | `apps/web/src/lib/engine-intake-client.ts`, `engine-intake-creation.ts`, `engine-work-naming.ts`                          |
+| Stato conversazione      | `apps/web/src/hooks/useEngineWorkspace.ts`, `useEngineWorkspaceSnapshot.ts`, `useEngineTranscript.ts`, `useWorkIntake.ts` |
+| Presentazione intake     | `apps/web/src/components/builder/EngineWorkIntake.tsx`, `engine-work-intake.css`                                          |
+| Riepilogo                | `EngineWorkspaceWorkPanel.tsx`, `EngineWorkObjectiveEditor.tsx`, `engine-work-summary.css` nella stessa directory         |
+| Confronto UI             | `EnginePriceComparison.tsx`, `apps/web/src/hooks/usePriceComparison.ts`                                                   |
+| Composizione UI          | `ConversationWorkspaceChatStage.tsx`, `ConversationWorkspaceSidebar.tsx`, `ConversationWorkspaceSpaceHost.tsx`            |
+| Squadra reale            | `EngineWorkspaceAgents.tsx`                                                                                               |
+| Test principali          | `engine/tests/test_intake.py`, `test_price_comparison_execution.py`, `tests/engine-intake-client.test.ts`                 |
+| Packaging                | `tools/build_engine_bundle.py`, `apps/desktop/scripts/package-app.mjs`, `engine/packaging/smoke.py`                       |
 
 `ConversationWorkspace.tsx` era a 1.459 righe e `useEngineWorkspace.ts` a 461. Il controllo architetturale aveva zero errori e 29 avvisi legacy. Non interpretare ciò come eliminazione di tutti i file troppo grandi.
 

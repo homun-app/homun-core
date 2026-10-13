@@ -18,6 +18,6 @@ riconcilia le scadenze trascorse. Non è un timer autonomo del daemon Docker e n
 garantisce arresto puntuale a motore spento. Questo resta un requisito aperto.
 
 - [x] RED: consenso durata, scadenza fissa, stop scaduto, nessuno stop anticipato,
-  processi già terminati, riavvio, legacy, guasti isolati e run annullato.
+      processi già terminati, riavvio, legacy, guasti isolati e run annullato.
 - [x] Contratti compatibili e watchdog senza duplicare il salvataggio delle prove.
 - [x] Runtime/UI/receipt; prove Docker, test, revisione, docs e merge locale.

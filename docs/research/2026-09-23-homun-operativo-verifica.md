@@ -101,14 +101,14 @@ ai budget e al catalogo disponibile.
 Misurare il tempo al primo risultato utile, le decisioni comprese, i passaggi
 ridondanti e la capacità di riprendere dopo una pausa. Scenari da usare:
 
-| Scenario | Risultato utile | Attrito da osservare |
-| --- | --- | --- |
-| Chiedo una bozza una tantum | Documento pronto da correggere | Accordo, prepara e avvia sono tre passaggi; capire quando accorparli |
-| Descrivo la mia azienda | Piccola squadra comprensibile | Linguaggio dei ruoli, numero proposto, separazione persone/bot |
-| Affido un lavoro alla squadra | Un esito coordinato | Chi lavora, perché viene consultato, quali dati vede |
-| Serve un dato a Marta | Domanda chiara e risposta riutilizzata | Link e raggiungibilità locale, identità, attesa visibile al proprietario |
-| Correggo una consegna | Nuova versione con modifiche richieste | Differenze tra versioni, fase corrente, numero di approvazioni |
-| Torno dopo due giorni | So cosa è pronto e cosa dipende da me | Chat, Compiti e Documenti devono dare lo stesso prossimo passo |
+| Scenario                      | Risultato utile                        | Attrito da osservare                                                     |
+| ----------------------------- | -------------------------------------- | ------------------------------------------------------------------------ |
+| Chiedo una bozza una tantum   | Documento pronto da correggere         | Accordo, prepara e avvia sono tre passaggi; capire quando accorparli     |
+| Descrivo la mia azienda       | Piccola squadra comprensibile          | Linguaggio dei ruoli, numero proposto, separazione persone/bot           |
+| Affido un lavoro alla squadra | Un esito coordinato                    | Chi lavora, perché viene consultato, quali dati vede                     |
+| Serve un dato a Marta         | Domanda chiara e risposta riutilizzata | Link e raggiungibilità locale, identità, attesa visibile al proprietario |
+| Correggo una consegna         | Nuova versione con modifiche richieste | Differenze tra versioni, fase corrente, numero di approvazioni           |
+| Torno dopo due giorni         | So cosa è pronto e cosa dipende da me  | Chat, Compiti e Documenti devono dare lo stesso prossimo passo           |
 
 La nicchia da validare è la continuità del lavoro con persone e AI: contesto,
 responsabilità, passaggi di mano e risultati riutilizzabili. Il numero di bot o

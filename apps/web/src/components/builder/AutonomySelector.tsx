@@ -18,7 +18,8 @@ const AUTONOMY_OPTIONS: AutonomyOption[] = [
     level: "autonomous",
     label: "Autonomo",
     badge: "Delega totale",
-    description: "L'agente esegue senza pause (tool, terminale, codice, subagenti) e consegna il risultato.",
+    description:
+      "L'agente esegue senza pause (tool, terminale, codice, subagenti) e consegna il risultato.",
     icon: Zap,
     color: "#d97706",
   },
@@ -26,7 +27,8 @@ const AUTONOMY_OPTIONS: AutonomyOption[] = [
     level: "guarded",
     label: "Con guardrail",
     badge: "Bilanciato",
-    description: "Autonomo su esplorazione, codice e test; chiede conferma su azioni esterne o critiche.",
+    description:
+      "Autonomo su esplorazione, codice e test; chiede conferma su azioni esterne o critiche.",
     icon: ShieldCheck,
     color: "#059669",
   },
@@ -71,12 +73,7 @@ export function AutonomySelector({
         </button>
       </PopoverTrigger>
 
-      <PopoverContent
-        side="top"
-        align="start"
-        sideOffset={8}
-        className="autonomy-popover"
-      >
+      <PopoverContent side="top" align="start" sideOffset={8} className="autonomy-popover">
         <div className="autonomy-popover-header">
           <strong>Livello di autonomia</strong>
           <small>Decidi quanta delega affidare agli agenti</small>

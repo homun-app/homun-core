@@ -4,9 +4,13 @@ import { planConflictRecovery } from "../apps/web/src/lib/engine-conflict-recove
 import { HomunClientError } from "../apps/web/src/lib/homun-errors.ts";
 
 test("a stale expected_version is recovered with a guided refresh, not a dry error", () => {
-  const conflict = new HomunClientError("version_conflict", "Work changed; refresh before proposing", {
-    httpStatus: 409,
-  });
+  const conflict = new HomunClientError(
+    "version_conflict",
+    "Work changed; refresh before proposing",
+    {
+      httpStatus: 409,
+    },
+  );
   const plan = planConflictRecovery(conflict);
   assert.equal(plan.kind, "refreshed");
   if (plan.kind === "refreshed") {

@@ -26,29 +26,29 @@ Riferimenti: [architettura](../architecture/2026-09-17-motore-homun.md), [rete t
 
 ## 1. Decisioni e gate
 
-| ID | Decisione | Proposta | Quando serve |
-|---|---|---|---|
-| D1 | Proprietà dello spazio e distribuzione | Nodo responsabile per spazio, copie autorizzate selettive | Prima dello schema persistente |
-| D2 | Operatività offline | Letture già disponibili e bozze; comandi condivisi in attesa | Prima di rete e sync |
-| D3 | Accesso Internet | Diretto quando possibile, relay configurabile se necessario | Prima del pilot fuori LAN |
-| D4 | Runtime | Python modulare; SDK agente dietro adattatore | Fine F0 |
-| D5 | Framework esecuzione | **Adottato:** DBOS + Pydantic AI; hardening MCP/cifratura/packaging sullo stesso stack | Fine F0 (adozione 2026-09-17; prove residue = miglioramento) |
-| D6 | Modelli iniziali | Un remoto e uno locale scelti su casi di prova/hardware | Prima di F3 live |
-| D7 | Connettori iniziali | Materiali locali, ricerca web, Trello; email in fase seguente | Prima di F6 |
-| D8 | Distribuzione desktop | Mac iniziale, pacchetto autosufficiente senza Docker obbligatorio | Fine F0 |
-| D9 | Disponibilità continua | Nodo aziendale acceso opzionale; nessuna promessa a nodi spenti | Prima di automazioni |
-| D10 | Licenza e confini gratuiti | Core gratuito; licenza e costi servizi dichiarati | Prima di rilascio pubblico |
+| ID  | Decisione                              | Proposta                                                                               | Quando serve                                                 |
+| --- | -------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| D1  | Proprietà dello spazio e distribuzione | Nodo responsabile per spazio, copie autorizzate selettive                              | Prima dello schema persistente                               |
+| D2  | Operatività offline                    | Letture già disponibili e bozze; comandi condivisi in attesa                           | Prima di rete e sync                                         |
+| D3  | Accesso Internet                       | Diretto quando possibile, relay configurabile se necessario                            | Prima del pilot fuori LAN                                    |
+| D4  | Runtime                                | Python modulare; SDK agente dietro adattatore                                          | Fine F0                                                      |
+| D5  | Framework esecuzione                   | **Adottato:** DBOS + Pydantic AI; hardening MCP/cifratura/packaging sullo stesso stack | Fine F0 (adozione 2026-09-17; prove residue = miglioramento) |
+| D6  | Modelli iniziali                       | Un remoto e uno locale scelti su casi di prova/hardware                                | Prima di F3 live                                             |
+| D7  | Connettori iniziali                    | Materiali locali, ricerca web, Trello; email in fase seguente                          | Prima di F6                                                  |
+| D8  | Distribuzione desktop                  | Mac iniziale, pacchetto autosufficiente senza Docker obbligatorio                      | Fine F0                                                      |
+| D9  | Disponibilità continua                 | Nodo aziendale acceso opzionale; nessuna promessa a nodi spenti                        | Prima di automazioni                                         |
+| D10 | Licenza e confini gratuiti             | Core gratuito; licenza e costi servizi dichiarati                                      | Prima di rilascio pubblico                                   |
 
 Le domande su D1–D3 sono in discussione con Fabio. Il piano permette di avanzare sui contratti comuni ma non tratta queste proposte come approvate.
 
 ## 2. Milestone di prodotto
 
-| Traguardo | Cosa può fare Fabio | Fasi |
-|---|---|---|
-| Alpha locale | Un lavoro reale con materiale, piano, pausa/ripresa, consegna e revisione | F0–F4 |
-| Pilot collaborativo | Due app condividono contesto autorizzato e una delega verificabile; un connettore reale | F5–F6 |
-| Beta aziendale | Routine, memoria, costi, settings completi, backup e installazione affidabile | F7–F10 |
-| Estensione successiva | Replica avanzata, failover, nuovi canali, automazione del desktop | F11 |
+| Traguardo             | Cosa può fare Fabio                                                                     | Fasi   |
+| --------------------- | --------------------------------------------------------------------------------------- | ------ |
+| Alpha locale          | Un lavoro reale con materiale, piano, pausa/ripresa, consegna e revisione               | F0–F4  |
+| Pilot collaborativo   | Due app condividono contesto autorizzato e una delega verificabile; un connettore reale | F5–F6  |
+| Beta aziendale        | Routine, memoria, costi, settings completi, backup e installazione affidabile           | F7–F10 |
+| Estensione successiva | Replica avanzata, failover, nuovi canali, automazione del desktop                       | F11    |
 
 Il prototipo resta disponibile come riferimento e simulatore in tutte le fasi. Ogni feature reale deve dichiarare disponibilità/errore; non deve ricadere silenziosamente su una risposta finta.
 
@@ -140,8 +140,8 @@ Dipendenza: F2, D6. Moduli: `models/`, `planning/`, `context/`, `UsageEntry`; co
 - [x] F3.2 Interpretare messaggi come risposta, chiarimento o proposta di comando. Risoluzione @ per ID, candidati ambigui nella UI condivisa, mai assegnazioni per nome indovinato.
 - [x] F3.3 Estrarre risultato atteso, criteri, input e passi; validare output del modello prima di creare bozza. Chiedere soltanto dati mancanti rilevanti.
 - [x] F3.4 Modifiche da chat e manuali producono la stessa patch versionata; anteprima leggibile per cambi di obiettivo/responsabile/effetti.
-- [x] F3.5 Streaming interrompibile, messaggio parziale marcato, timeout e retry limitato; UsageAttempt ledger; ModelPort/provider token stream (`/chat/stream` live + `/commands/stream` source=modelport). *(spec 2026-09-18-f35 slices A–E)*
-- [x] F3.5a Integrare MemoryPort e Mem0 OSS locale: ricordo approvato, persistenza, isolamento due progetti, rettifica, cancellazione, export; Settings export/rectify; nessuna ricostruzione piano via memoria. *(spec 2026-09-18-f35a + mem0-local-stack; packaging/cifratura ancora D-CRYPTO-01 / Electron)*
+- [x] F3.5 Streaming interrompibile, messaggio parziale marcato, timeout e retry limitato; UsageAttempt ledger; ModelPort/provider token stream (`/chat/stream` live + `/commands/stream` source=modelport). _(spec 2026-09-18-f35 slices A–E)_
+- [x] F3.5a Integrare MemoryPort e Mem0 OSS locale: ricordo approvato, persistenza, isolamento due progetti, rettifica, cancellazione, export; Settings export/rectify; nessuna ricostruzione piano via memoria. _(spec 2026-09-18-f35a + mem0-local-stack; packaging/cifratura ancora D-CRYPTO-01 / Electron)_
 
 Gate: tre casi diversi (catalogo, ricerca, analisi log) senza ramo hardcoded per settore; piano valido, obiettivo mantenuto in 10 messaggi di correzione. Prove live separate dai test fake. **PASS (fake CI)** — `tests/test_f3_acceptance_gate.py` (2026-09-18).
 
@@ -241,39 +241,39 @@ Fuori dalla prima beta: failover automatico e consenso distribuito; collaborazio
 
 Da formalizzare in OpenAPI/JSON Schema F1, con un'unica generazione dei tipi frontend:
 
-| Operazione | Dati necessari | Esito |
-|---|---|---|
-| Invia messaggio | conversation_id, testo, riferimenti, command_id | message_id + proposta o risposta; nessun avvio implicito fuori policy |
-| Accetta/modifica piano | work_id, expected_version, patch o revision_id | nuova revisione o conflitto |
-| Avvia/sospendi/annulla | work_id, revision_id, command_id | stato persistito e run_id |
-| Fornisci contributo | request_id, version, text/material_ids/choice | accettato oppure spiegazione del dato ancora mancante |
-| Revisiona risultato | artifact_version_id, decisione, commento | review_id e transizione consentita |
-| Autorizza azione | approval_id, action_hash | concessione puntuale o rifiuto, non modifica globale dei permessi |
-| Iscrivi eventi | workspace_id, cursor | eventi autorizzati, sequenza e cursor riprendibile |
-| Delega al nodo | assignment_id, step_attempt_id, policy scope, input manifest | accettazione distinta da risultato finale |
+| Operazione             | Dati necessari                                               | Esito                                                                 |
+| ---------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Invia messaggio        | conversation_id, testo, riferimenti, command_id              | message_id + proposta o risposta; nessun avvio implicito fuori policy |
+| Accetta/modifica piano | work_id, expected_version, patch o revision_id               | nuova revisione o conflitto                                           |
+| Avvia/sospendi/annulla | work_id, revision_id, command_id                             | stato persistito e run_id                                             |
+| Fornisci contributo    | request_id, version, text/material_ids/choice                | accettato oppure spiegazione del dato ancora mancante                 |
+| Revisiona risultato    | artifact_version_id, decisione, commento                     | review_id e transizione consentita                                    |
+| Autorizza azione       | approval_id, action_hash                                     | concessione puntuale o rifiuto, non modifica globale dei permessi     |
+| Iscrivi eventi         | workspace_id, cursor                                         | eventi autorizzati, sequenza e cursor riprendibile                    |
+| Delega al nodo         | assignment_id, step_attempt_id, policy scope, input manifest | accettazione distinta da risultato finale                             |
 
 Actor e workspace autorizzato provengono dalla sessione verificata: non fidarsi dei campi dichiarati dal client. Codici di errore distinti: conflict, permission_denied, input_missing, provider_unavailable, budget_exceeded, execution_unknown.
 
 ## 6. Matrice di accettazione
 
-| Caso | Evidenza richiesta | Fase |
-|---|---|---|
-| Conversazione senza progetto | Creazione, piano e consegna reali senza project_id | F1–F4 |
-| Nuovo progetto da chat | Stessi ID, messaggi e file, più chat separate | F2 |
-| Catalogo multipersona | Materiale mancante, Vera verifica, Marta produce, Fabio approva | F4/F5 |
-| Cambia piano in corso | Nuova revisione, storico integro, niente doppia esecuzione | F4 |
-| Risultato non testuale | Artifact apribile, versione e download corretti | F4 |
-| Crash in ogni punto critico | Ripresa o esito incerto esplicito, mai successo inventato | F4/F6 |
-| Revoca permessi durante attesa | Ripresa negata, dati non esposti | F5 |
-| Due modifiche simultanee | Conflitto gestito senza perdita silenziosa | F1/F5 |
-| Due nodi e rete interrotta | Messaggio/file ripreso una volta, stato di consegna chiaro | F5 |
-| Prompt injection in file/tool | Nessuna espansione di tool, accesso o autorizzazione | F4/F6 |
-| Timeout invio esterno | Riconciliazione; nessun retry cieco | F6 |
-| Automazione a ora legale | Occorrenza corretta e deduplicata | F7 |
-| Memoria tra progetti | Isolamento anche in ricerca e riassunti | F8 |
-| Modalità locale | Nessun invio remoto inclusi servizi ausiliari | F9 |
-| Budget concorrente | Riserva controllata e rendiconto senza doppi conteggi | F9 |
-| Backup/ripristino | File, stato e riferimenti ricostruiti su installazione pulita | F10 |
+| Caso                           | Evidenza richiesta                                              | Fase  |
+| ------------------------------ | --------------------------------------------------------------- | ----- |
+| Conversazione senza progetto   | Creazione, piano e consegna reali senza project_id              | F1–F4 |
+| Nuovo progetto da chat         | Stessi ID, messaggi e file, più chat separate                   | F2    |
+| Catalogo multipersona          | Materiale mancante, Vera verifica, Marta produce, Fabio approva | F4/F5 |
+| Cambia piano in corso          | Nuova revisione, storico integro, niente doppia esecuzione      | F4    |
+| Risultato non testuale         | Artifact apribile, versione e download corretti                 | F4    |
+| Crash in ogni punto critico    | Ripresa o esito incerto esplicito, mai successo inventato       | F4/F6 |
+| Revoca permessi durante attesa | Ripresa negata, dati non esposti                                | F5    |
+| Due modifiche simultanee       | Conflitto gestito senza perdita silenziosa                      | F1/F5 |
+| Due nodi e rete interrotta     | Messaggio/file ripreso una volta, stato di consegna chiaro      | F5    |
+| Prompt injection in file/tool  | Nessuna espansione di tool, accesso o autorizzazione            | F4/F6 |
+| Timeout invio esterno          | Riconciliazione; nessun retry cieco                             | F6    |
+| Automazione a ora legale       | Occorrenza corretta e deduplicata                               | F7    |
+| Memoria tra progetti           | Isolamento anche in ricerca e riassunti                         | F8    |
+| Modalità locale                | Nessun invio remoto inclusi servizi ausiliari                   | F9    |
+| Budget concorrente             | Riserva controllata e rendiconto senza doppi conteggi           | F9    |
+| Backup/ripristino              | File, stato e riferimenti ricostruiti su installazione pulita   | F10   |
 
 Proposta di soglie pilot: 30 scenari deterministici di dominio senza fallimenti; 20 casi AI rappresentativi con almeno 90% piani strutturalmente validi e zero azioni non autorizzate osservate; 10 cicli di crash/resume per punto critico senza doppio effetto nel connettore di prova. Queste soglie sono gate iniziali, non prove di affidabilità universale. Misurare interventi umani, errori, tempo e costo oltre alla riuscita tecnica.
 
@@ -295,7 +295,6 @@ Dopo F0 stimare giornate per pacchetto con intervallo ottimistico/probabile/pess
 - Nessuna riscrittura della cronologia pubblicata; preservare la versione prototipo consultabile.
 
 **Primo passo concreto proposto:** chiudere il modello di distribuzione dati e avviare F0, non aggiungere subito chiamate AI al componente di 2.969 righe.
-
 
 ## Aggiornamento eseguito — 19 settembre 2026
 

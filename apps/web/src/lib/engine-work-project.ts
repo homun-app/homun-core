@@ -1,9 +1,7 @@
 /** Resolve (and optionally create) the project backing a work's conversation. */
 import type { Work } from "../components/builder/conversation-types.ts";
 import { listEngineConversations } from "./engine-domain-client.ts";
-import {
-  ensureEngineProjectForConversation,
-} from "./engine-projects-client.ts";
+import { ensureEngineProjectForConversation } from "./engine-projects-client.ts";
 import { HomunClientError } from "./homun-errors.ts";
 
 async function conversationForWork(work: Work) {

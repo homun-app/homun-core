@@ -71,11 +71,7 @@ const FollowupSuggestionsRow: FC = () => {
 
 export const ThreadFollowupSuggestions: FC = () => (
   <AuiIf
-    condition={(s) =>
-      !s.thread.isEmpty &&
-      !s.thread.isRunning &&
-      s.thread.suggestions.length > 0
-    }
+    condition={(s) => !s.thread.isEmpty && !s.thread.isRunning && s.thread.suggestions.length > 0}
   >
     <FollowupSuggestionsRow />
   </AuiIf>

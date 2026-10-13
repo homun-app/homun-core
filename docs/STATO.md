@@ -29,6 +29,7 @@ Le sezioni successive conservano lo stato storico del 25 settembre. I loro conte
 ## Stato storico del 25 settembre 2026
 
 Aggiornato il 25 settembre 2026: integrazione completa del percorso supervisionato del motore Homun nell'interfaccia utente, canali esterni, i18n e packaging standalone.
+
 - Allegati file in chat: invio e ingestione automatica dei file allegati nel progetto di lavoro tramite `ingestWorkAttachments` e associazione al turno del motore.
 - Domande a margine (/btw): routing dedicato da chat senza alterare il transcript principale dell'esecuzione in corso via `handleEngineSend` e `askEngineSideQuestion`.
 - Chiarimenti interattivi strutturati: componente `EngineClarifyCard` con parser per domande singole/multiple, badge per opzione consigliata `(Consigliato)`, campo note aggiuntive e file allegati, integrato direttamente in `ConversationContribution`.
@@ -161,8 +162,6 @@ Una verifica del sorgente non aggiorna l'app installata.
   di approvazione (`request_approval`, `resolve_approval` con decisioni una-volta/sessione/sempre/nega),
   registro degli artifact e snapshot di stato condivisi in tempo reale; esposto via endpoint REST `/v1/surfaces`.
 
-
-
 - Orchestrazione compiti con Kanban durevole e contratti PR (`KanbanStore`, `KanbanWorkflow`, H23)
   con persistenza SQLite WAL, isolamento dei profili, tracciamento DAG delle dipendenze,
   assegnazione worker con lease temporizzati e rinnovo heartbeat, recupero automatico
@@ -203,8 +202,6 @@ Una verifica del sorgente non aggiorna l'app installata.
   credenziali multiple per provider con rotazione round-robin, gestione degli stati ok/cooldown/dead,
   finestre temporali di cooldown su errori 429/quota, e router ausiliario con catene di fallback
   prioritizzate e audit trail completo di tutti i tentativi di failover.
-
-
 
 - Controlli nativi di pausa/ripresa/annullamento e correzioni dalla chat, con
   invalidazione delle risposte superate, conservazione degli esiti incerti e
@@ -313,13 +310,11 @@ controlli mirati includono la migrazione delle invocazioni DBOS precedenti.
 Prova Ollama su due fonti con pausa/correzione/ripresa riuscita. Il percorso verso
 la [parità Hermes](research/2026-09-23-hermes-parity-matrix.md) resta aperto.
 
-
 Il [primo nucleo nativo](research/2026-09-23-owned-core-verifica.md) aggiunge
 verifiche di trasporto, ripresa, autorità e una prova Ollama reale. Suite completa
 finale: 625 test motore passati, 1 saltato, inclusi 17 test nativi.
 OpenAPI invariato; wheel con attribuzione verificata.
 L'app installata non è stata aggiornata.
-
 
 Il [rapporto operativo](research/2026-09-23-homun-operativo-verifica.md) distingue
 prove automatiche, modello locale reale e limiti. Suite: 608 motore passati e 1
@@ -390,7 +385,6 @@ riprendere il lavoro. La qualità va misurata con utenti del target, non dedotta
 dai test. Il [confronto Hermes](research/2026-09-23-hermes-homun-utilizzo.md)
 conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
 
-
 - **H34 surfaces (2026-09-24)**: SurfaceGatewayManager persiste sessioni, approvazioni,
   steering e artifact su SQLite; reconnect dopo restart del processo.
 
@@ -432,11 +426,8 @@ conserva lo snapshot di ricerca e rinvia alle implementazioni successive.
 - **Sottosistema H39 (Runtime alternativi)**: integrazioni opzionali per runtime alternativi e gateway (`CodexAppServerAdapter`, `CopilotAcpClient`, `RelayRuntime`, `ManagedToolGateway`, endpoint `/v1/runtimes`), adattamento protocollo JSON-RPC Codex App-Server con streaming eventi e traduzione comandi/tool, client GitHub Copilot ACP via stdio reale (`StdioAcpTransport`) quando la CLI è presente su PATH, proxy NeMo Relay aziendale con isolamento sessioni e iniezione header `x-dynamo-session-id`, e gateway per tool cloud gestiti con autenticazione Bearer e segnalazione esplicita del gap di servizio quando non configurato, senza alcuna dipendenza runtime da Hermes.
 - **Sottosistema H40 (Sicurezza e approvazioni)**: sicurezza del nucleo e approvazioni (`check_path_safety`, `validate_within_dir`, `is_safe_url`, `redact_secrets`, `VaultStore`, `WriteApprovalGate`, endpoint `/v1/safety`), confinamento cartelle con blocco traversal `..` e caratteri di controllo non sicuri, protezione percorsi sensibili (`.env`, chiavi SSH, shadow), prevenzione SSRF su IP privati/loopback ed endpoint di metadati cloud (`169.254.169.254`, `metadata.google.internal`), normalizzazione URL IDNA/URI, rilevamento credenziali in userinfo e query params, mascheramento token e scrubbing chiavi private, vault credenziali crittografato a riposo con Fernet e handle opachi per i modelli con registrazione automatica nel redattore, e gate di approvazione scritture con garanzia di esecuzione strettamente singola e rifiuti verificabili a zero effetti collaterali.
 - **Sottosistema H41 (Media e multimodale)**: fornitori e strumenti multimediali (`VisionAnalyzer`, `ImageGenerator`, `VideoGenerator`, `SpeechToTextTranscriber`, `TextToSpeechSynthesizer`, `VoiceSession`, `WakeWordDetector`, endpoint `/v1/media`), preparazione e normalizzazione sorgenti per analisi visiva reale (Ollama / endpoint vision) e sintesi TTS (macOS `say`), con rifiuto onesto `backend_unavailable` per generatori di immagini/video e trascrizione vocale finché non collegati a provider live.
-- **Sottosistema H42 (Deliverable e artefatti)**: comportamento artefatti del nucleo, modalità di consegna e protezione blocchi di codice (`DeliverablePolicy`, `DeliverableExtractor`, `DeliverableLedger`, endpoint `/v1/deliverables`), classificazione deterministica formati deliverable (PDF, fogli di calcolo, immagini, audio, presentazioni), confinamento di sicurezza nella cartella di lavoro con blocco categorico di file sorgente, eseguibili e segreti (.py, .sh, .env, .log), esclusione rigorosa dei blocchi di codice fenced (```...```) e backtick inline (`...`) dall'estrazione per evitare che percorsi usati negli esempi di codice vengano trattati come deliverable, sostituzione sicura con testo in prosa [nomefile], e registro consegne thread-safe con ricevute immutabili e garanzia at-most-once.
+- **Sottosistema H42 (Deliverable e artefatti)**: comportamento artefatti del nucleo, modalità di consegna e protezione blocchi di codice (`DeliverablePolicy`, `DeliverableExtractor`, `DeliverableLedger`, endpoint `/v1/deliverables`), classificazione deterministica formati deliverable (PDF, fogli di calcolo, immagini, audio, presentazioni), confinamento di sicurezza nella cartella di lavoro con blocco categorico di file sorgente, eseguibili e segreti (.py, .sh, .env, .log), esclusione rigorosa dei blocchi di codice fenced (`...`) e backtick inline (`...`) dall'estrazione per evitare che percorsi usati negli esempi di codice vengano trattati come deliverable, sostituzione sicura con testo in prosa [nomefile], e registro consegne thread-safe con ricevute immutabili e garanzia at-most-once.
 - **Sottosistema H43 (Integrazioni terze parti)**: integrazioni opzionali (`HomeAssistantAdapter`, `DiscordAdapter`, `FeishuAdapter`, `YuanbaoAdapter`, `SpotifyAdapter`, `MeetingManager`, `parse_teams_meeting_resource`, endpoint `/v1/integrations`), validazione sintassi e blocco domini pericolosi per Home Assistant (prevenzione shell/SSRF), introspezione server Discord, gestione intent e azioni reversibili (pin/unpin messaggio, assegnazione/rimozione ruolo) con risposte limitate (4MB/64KB), lettura documenti e gestione thread commenti Feishu/Lark, interazione gruppi Yuanbao con invio sticker, formattazione menzioni standardizzata e disambiguazione destinatari, controllo riproduzione e libreria Spotify reversibile (salvataggio/rimozione brano), gestione chiamate Google Meet con trascrizione e sintesi vocale realtime, e parsing risorse meeting Microsoft Teams Graph, con rifiuto tipizzato quando non configurate.
 - **Sottosistema H44 (Operazioni, profili e daemon)**: operazioni, profili e ciclo di vita daemon (`ProfileOperationsManager`, `ConfigLifecycleManager`, `DoctorDiagnostics`, `DaemonManager`, endpoint `/v1/operations`), gestione ciclo di vita profili con isolamento cartelle e nomi alfanumerici, pacchetti di distribuzione con verifica integrità SHA256 e import/export sicuro, migrazioni schema di configurazione con backup automatici e supporto v1->v2 idempotente, diagnostica di sistema (Doctor) con controlli piattaforma (Python, SQLite JSON1/FTS5), strumenti sviluppatore (git, ripgrep, node), backend terminale (Docker, shell locale, SSH), permessi storage e integrità database con autoriparazione, e gestione del daemon con tracciamento PID, rilevamento PID obsoleti, terminazione pulita SIGTERM e riavvio controllato.
 - **Sottosistema H45 (Ricerca ed evals)**: ricerca opzionale, benchmark, compressione traiettorie e osservabilità (`TrajectoryStore`, `TrajectoryCompressor`, `BatchEvalRunner`, `ObservabilityCollector`, endpoint `/v1/research`), persistenza sicura file-lock (flock) in formato ShareGPT con conversione tag scratchpad (`<REASONING_SCRATCHPAD>` a `<think>`) e rilevamento incompleti, compressione traiettorie su budget token con protezione della testa (sistema, primo utente, prima azione gpt, primo tool) e della coda senza spezzare mai le coppie `<tool_call>`/`<tool_response>`, esecutore concorrente di dataset di benchmark con pool di worker configurabile, checkpointing JSONL per ripresa (`--resume`) e aggregazione statistica dei tool, e tracciamento distribuito (span e trace) con esportazione compatibile OpenTelemetry e Langfuse.
 - **Sottosistema H46 (Catalogo e compagno virtuale)**: catalogo e superfici opzionali (`CompanionManager`, `AchievementTracker`, `TourAndTipManager`, `DiskCleanupEngine`, `SecurityGuidanceScanner`, `CatalogPacksManager`, endpoint `/v1/catalog`), compagno virtuale persistente con meccanica dei bisogni, livelli ed estetiche skin ASCII con toggle esplicito, registro e sblocco traguardi (achievements) con calcolo punteggio, tour guidato di onboarding e consigli contestuali (`/btw`, menzioni selettive), pulizia disco del workspace con scansione dry-run dei file temporanei/cache/log e rimozione selettiva sicura, guida di sicurezza contro pattern pericolosi (piping curl a shell, chmod 777, token in chiaro), e manifesto completo dei pacchetti di competenze del catalogo con installazione e disinstallazione atomica senza omissione di extra.
-
-
-

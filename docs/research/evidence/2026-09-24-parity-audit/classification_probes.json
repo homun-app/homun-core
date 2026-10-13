@@ -25,11 +25,7 @@
     "vault_dir"
   ],
   "agent_default_tool_count": 3,
-  "agent_default_tools": [
-    "list_materials",
-    "read_material",
-    "search_materials"
-  ],
+  "agent_default_tools": ["list_materials", "read_material", "search_materials"],
   "NOT_in_agent_loop": {
     "desktop": true,
     "media": true,

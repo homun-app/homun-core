@@ -120,9 +120,15 @@
   color: #18181b;
 }
 
-.cw-artifact-markdown h1 { font-size: 16px; }
-.cw-artifact-markdown h2 { font-size: 15px; }
-.cw-artifact-markdown h3 { font-size: 13px; }
+.cw-artifact-markdown h1 {
+  font-size: 16px;
+}
+.cw-artifact-markdown h2 {
+  font-size: 15px;
+}
+.cw-artifact-markdown h3 {
+  font-size: 13px;
+}
 
 /* Flat clean table: no outer box, no cell borders, only row hairlines */
 .cw-artifact-markdown table {

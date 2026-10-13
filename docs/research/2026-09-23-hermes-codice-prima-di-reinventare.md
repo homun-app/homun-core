@@ -37,13 +37,13 @@ quanto questa differenza spieghi gli errori osservati con Qwen 4B.
 
 ## Decisioni da prendere prima della prossima implementazione
 
-| Area | Valutazione necessaria | Direzione iniziale |
-| --- | --- | --- |
-| Esecuzione | Riusare Hermes come componente oppure adattare i suoi moduli? | Confrontare dipendenze, API, aggiornabilità e confine con DBOS; non introdurre due proprietari dello stato |
-| Prompt e contesto | Quali blocchi vengono realmente inviati con il modello scelto? | Ricostruire il prompt effettivo e adottare la composizione esistente dove applicabile |
-| Strumenti e messaggi | Chiamate native, risultati correlati, errori correggibili | Preferire protocolli consolidati a un nuovo schema proprietario senza vantaggio misurato |
-| Recupero | Risposta vuota, argomento errato, overflow, interruzione | Studiare implementazione e test upstream prima di aggiungere altre regole ad hoc |
-| Squadra aziendale | Contesto organizzativo, persone, responsabilità, consegne | Concentrare qui lo sviluppo specifico di Homun |
+| Area                 | Valutazione necessaria                                         | Direzione iniziale                                                                                         |
+| -------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Esecuzione           | Riusare Hermes come componente oppure adattare i suoi moduli?  | Confrontare dipendenze, API, aggiornabilità e confine con DBOS; non introdurre due proprietari dello stato |
+| Prompt e contesto    | Quali blocchi vengono realmente inviati con il modello scelto? | Ricostruire il prompt effettivo e adottare la composizione esistente dove applicabile                      |
+| Strumenti e messaggi | Chiamate native, risultati correlati, errori correggibili      | Preferire protocolli consolidati a un nuovo schema proprietario senza vantaggio misurato                   |
+| Recupero             | Risposta vuota, argomento errato, overflow, interruzione       | Studiare implementazione e test upstream prima di aggiungere altre regole ad hoc                           |
+| Squadra aziendale    | Contesto organizzativo, persone, responsabilità, consegne      | Concentrare qui lo sviluppo specifico di Homun                                                             |
 
 La prossima prova deve usare gli stessi compiti, modello, informazioni e strumenti
 nei due sistemi. Misurare risultato corretto, richieste ripetute, chiamate, costo,

@@ -30,4 +30,5 @@ Il collegamento alla raccolta risolve il riutilizzo nell'incarico; allegati di c
 - Consegna: artefatti versionati, fonti e verifiche, revisore e feedback associati alla versione esatta. Le correzioni restano esempi candidati alla formazione, non promozioni automatiche.
 
 ## Aggiornamento successivo
+
 Il percorso rapido, la normalizzazione degli incarichi e il trasporto di contesto nelle procedure sono stati consolidati; prova di primo avvio completata. Vedi `15-percorsi-unificati.md` per evidenze e limiti aggiornati.

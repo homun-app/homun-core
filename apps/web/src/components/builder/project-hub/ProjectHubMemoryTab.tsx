@@ -1,5 +1,15 @@
 import { useState } from "react";
-import { BookMarked, Globe, Plus, Search, Sparkles, Trash2, Edit2, Check, AlertCircle } from "lucide-react";
+import {
+  BookMarked,
+  Globe,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+  Edit2,
+  Check,
+  AlertCircle,
+} from "lucide-react";
 import type { EngineMemoryNote } from "@/lib/engine-memory-client";
 
 type Props = {
@@ -60,9 +70,7 @@ export function ProjectHubMemoryTab({
       {/* Top Banner and Actions */}
       <div className="ph-card">
         <div className="ph-card-header">
-          <div className="section-label">
-            Memoria & Vincoli ({projectMemories.length})
-          </div>
+          <div className="section-label">Memoria & Vincoli ({projectMemories.length})</div>
           <button className="ph-btn-ghost" onClick={() => setAdding(!adding)}>
             <Plus size={13} />
             Nuovo Vincolo
@@ -84,7 +92,9 @@ export function ProjectHubMemoryTab({
               gap: 10,
             }}
           >
-            <strong style={{ fontSize: 13, color: "#1c2d22" }}>Nuova regola o preferenza di progetto</strong>
+            <strong style={{ fontSize: 13, color: "#1c2d22" }}>
+              Nuova regola o preferenza di progetto
+            </strong>
             <textarea
               placeholder="Es. 'Questo cliente vuole tutti i report con tabelle riassuntive e importi in Euro con IVA scorporata.'"
               rows={3}
@@ -155,14 +165,20 @@ export function ProjectHubMemoryTab({
             Policy Ereditate dallo Spazio Globale (Azienda)
           </div>
           {globalMemories.length === 0 ? (
-            <p style={{ fontSize: 12, color: "#7d918c", fontStyle: "italic", margin: "4px 0 12px" }}>
+            <p
+              style={{ fontSize: 12, color: "#7d918c", fontStyle: "italic", margin: "4px 0 12px" }}
+            >
               Nessuna policy globale non negoziabile definita a livello aziendale.
             </p>
           ) : (
             globalMemories.map((note) => (
               <div key={note.id} className="ph-memory-item ph-memory-item--global">
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1 }}>
-                  <Globe size={16} className="text-[#157a6e]" style={{ flexShrink: 0, marginTop: 2 }} />
+                  <Globe
+                    size={16}
+                    className="text-[#157a6e]"
+                    style={{ flexShrink: 0, marginTop: 2 }}
+                  />
                   <div>
                     <div className="ph-memory-text">{note.text}</div>
                     <div className="ph-memory-meta">
@@ -188,7 +204,8 @@ export function ProjectHubMemoryTab({
               <BookMarked className="ph-empty-icon" />
               <h4 className="ph-empty-title">Nessun vincolo specifico salvato</h4>
               <p className="ph-empty-desc">
-                Aggiungi preferenze e requisiti del cliente che gli agenti devono rispettare in ogni risposta.
+                Aggiungi preferenze e requisiti del cliente che gli agenti devono rispettare in ogni
+                risposta.
               </p>
             </div>
           ) : (
@@ -265,7 +282,8 @@ export function ProjectHubMemoryTab({
             </div>
             <p style={{ fontSize: 13, color: "#556c5e", margin: 0, lineHeight: 1.45 }}>
               Vuoi rendere questa regola una linea guida permanente dello spazio? Sarà applicata
-              automaticamente a <strong>tutti i progetti correnti e futuri</strong> da tutta la squadra.
+              automaticamente a <strong>tutti i progetti correnti e futuri</strong> da tutta la
+              squadra.
             </p>
             <div
               style={{
@@ -288,11 +306,7 @@ export function ProjectHubMemoryTab({
               >
                 Annulla
               </button>
-              <button
-                className="ph-btn-primary"
-                onClick={confirmPromote}
-                disabled={busy}
-              >
+              <button className="ph-btn-primary" onClick={confirmPromote} disabled={busy}>
                 Conferma Promozione
               </button>
             </div>

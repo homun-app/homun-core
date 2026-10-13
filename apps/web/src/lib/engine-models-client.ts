@@ -181,7 +181,12 @@ export async function addPooledCredential(input: {
   if (!response.ok) {
     await readError(response, `Add pooled credential failed with HTTP ${response.status}`);
   }
-  return (await response.json()) as { key_id: string; provider: string; status: string; masked_secret: string };
+  return (await response.json()) as {
+    key_id: string;
+    provider: string;
+    status: string;
+    masked_secret: string;
+  };
 }
 
 export async function listPooledCredentials(
@@ -189,7 +194,9 @@ export async function listPooledCredentials(
   engineBaseUrl?: string,
 ): Promise<PooledCredentialInfo[]> {
   const baseUrl = engineBaseUrl ?? ENGINE_DEFAULT_BASE_URL;
-  const url = provider ? `/v1/credentials/pool?provider=${encodeURIComponent(provider)}` : "/v1/credentials/pool";
+  const url = provider
+    ? `/v1/credentials/pool?provider=${encodeURIComponent(provider)}`
+    : "/v1/credentials/pool";
   const response = await modelsFetch(
     url,
     { method: "GET", headers: { Accept: "application/json" } },

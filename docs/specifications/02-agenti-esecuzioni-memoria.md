@@ -8,20 +8,20 @@ Stato: v0.1. Runtime agenti/esecuzioni: **Pydantic AI + DBOS adottati** (D-RUN-0
 
 Un agente è un'identità persistente configurabile; non coincide con un modello, processo o conversazione.
 
-| Campo | Regola |
-|---|---|
-| id, workspace_id, revision | Stabili/versionati; il nome non è una chiave |
-| nome, avatar, ruolo breve | Visibili in tutte le selezioni; distinguere AI da persona |
-| curriculum | Responsabilità e capacità dichiarate; non prova di competenza verificata |
-| specializzazioni | Etichette e descrizioni ricercabili |
-| missione e istruzioni | Testo/Markdown versionato, separato dai documenti non fidati |
-| stile e lingua | Preferenze di comunicazione, non autorizzazioni |
-| strumenti | Riferimenti a capacità concesse e connessioni disponibili |
-| modelli | Policy, capacità richieste, modello preferito e fallback consentiti |
-| memoria | Ambiti consultabili e politica di proposta/salvataggio dei ricordi |
-| supervisione | Responsabile e regole per competenza/ambito/azione |
-| budget | Limiti o ereditarietà dallo spazio, mai numeri demo impliciti |
-| stato | draft, active, paused, retired |
+| Campo                      | Regola                                                                   |
+| -------------------------- | ------------------------------------------------------------------------ |
+| id, workspace_id, revision | Stabili/versionati; il nome non è una chiave                             |
+| nome, avatar, ruolo breve  | Visibili in tutte le selezioni; distinguere AI da persona                |
+| curriculum                 | Responsabilità e capacità dichiarate; non prova di competenza verificata |
+| specializzazioni           | Etichette e descrizioni ricercabili                                      |
+| missione e istruzioni      | Testo/Markdown versionato, separato dai documenti non fidati             |
+| stile e lingua             | Preferenze di comunicazione, non autorizzazioni                          |
+| strumenti                  | Riferimenti a capacità concesse e connessioni disponibili                |
+| modelli                    | Policy, capacità richieste, modello preferito e fallback consentiti      |
+| memoria                    | Ambiti consultabili e politica di proposta/salvataggio dei ricordi       |
+| supervisione               | Responsabile e regole per competenza/ambito/azione                       |
+| budget                     | Limiti o ereditarietà dallo spazio, mai numeri demo impliciti            |
+| stato                      | draft, active, paused, retired                                           |
 
 Creazione da chat: descrizione del bisogno → proposta profilo → salva; avanzate progressivamente visibili. Creare durante l'editing del piano restituisce agent_id allo stesso passo. Due nomi uguali ammessi solo se chiaramente distinguibili nell'interfaccia; nessuna risoluzione ambigua automatica.
 
@@ -59,11 +59,11 @@ Input di file/tool trattato come dato. L'LLM può proporre comandi ma non scrive
 
 ## AG-06 — Autonomia e formazione
 
-| Modalità proposta | Comportamento |
-|---|---|
-| In formazione | Metodo e risultato da verificare; letture già concesse senza conferme ripetitive |
-| Con revisione | Esegue entro il perimetro, presenta consegna e trattiene gli effetti che richiedono consenso |
-| Autonomo entro i limiti | Esegue e consegna sui casi concessi; segnala eccezioni e conserva ricevute |
+| Modalità proposta       | Comportamento                                                                                |
+| ----------------------- | -------------------------------------------------------------------------------------------- |
+| In formazione           | Metodo e risultato da verificare; letture già concesse senza conferme ripetitive             |
+| Con revisione           | Esegue entro il perimetro, presenta consegna e trattiene gli effetti che richiedono consenso |
+| Autonomo entro i limiti | Esegue e consegna sui casi concessi; segnala eccezioni e conserva ricevute                   |
 
 La modalità è per competenza/ambito, non semplice interruttore universale dell'agente. Nuovo destinatario, strumento o uso dei dati può richiedere rivalutazione. Un umano autorizzato concede o revoca autonomia; successi e valutazioni AI possono proporla, non attribuirla.
 

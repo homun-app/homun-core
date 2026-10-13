@@ -10,7 +10,12 @@ declare global {
     homunDesktop?: Readonly<{
       engineBaseUrl: string;
       updateStatus?: () => Promise<{ current: string }>;
-      updateCheck?: () => Promise<{ current: string; available: boolean; version: string | null; error?: string }>;
+      updateCheck?: () => Promise<{
+        current: string;
+        available: boolean;
+        version: string | null;
+        error?: string;
+      }>;
     }>;
   }
 }

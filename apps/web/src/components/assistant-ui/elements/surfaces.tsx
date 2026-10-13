@@ -34,8 +34,7 @@ export const labelSwap =
 
 export const labelSwapIn = "opacity-100 blur-none";
 
-export const labelSwapOut =
-  "pointer-events-none select-none opacity-0 blur-[2px]";
+export const labelSwapOut = "pointer-events-none select-none opacity-0 blur-[2px]";
 
 export const collapsePanel =
   "h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] data-[ending-style]:h-0 data-[starting-style]:h-0 motion-reduce:transition-none";
@@ -50,10 +49,7 @@ export function ShimmerLabel({
   ...props
 }: ComponentProps<"span"> & { active?: boolean }) {
   return (
-    <span
-      className={cn(active && "shimmer motion-reduce:animate-none", className)}
-      {...props}
-    />
+    <span className={cn(active && "shimmer motion-reduce:animate-none", className)} {...props} />
   );
 }
 
@@ -86,8 +82,7 @@ export function SwapLabel({
   useLayoutEffect(() => {
     const target = layers[active]?.current;
     if (!target) return undefined;
-    const measure = () =>
-      setWidth(Math.ceil(target.getBoundingClientRect().width));
+    const measure = () => setWidth(Math.ceil(target.getBoundingClientRect().width));
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(target);
@@ -107,10 +102,7 @@ export function SwapLabel({
           key={index}
           ref={layers[index]}
           aria-hidden={active !== index}
-          className={cn(
-            labelSwap,
-            active === index ? labelSwapIn : labelSwapOut,
-          )}
+          className={cn(labelSwap, active === index ? labelSwapIn : labelSwapOut)}
         >
           {layer}
         </span>

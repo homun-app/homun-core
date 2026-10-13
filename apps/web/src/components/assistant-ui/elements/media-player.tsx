@@ -1,30 +1,18 @@
 "use client";
 
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ComponentProps,
-  type RefObject,
-} from "react";
+import { useEffect, useRef, useState, type ComponentProps, type RefObject } from "react";
 import { PauseIcon, PlayIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { field, inkButton, mono, paper } from "./surfaces";
 
-export interface AudioPlayerProps extends Omit<
-  ComponentProps<"div">,
-  "children"
-> {
+export interface AudioPlayerProps extends Omit<ComponentProps<"div">, "children"> {
   src: string;
   title?: string | undefined;
   artwork?: string | undefined;
   durationMs?: number | undefined;
 }
 
-export interface VideoPlayerProps extends Omit<
-  ComponentProps<"div">,
-  "children"
-> {
+export interface VideoPlayerProps extends Omit<ComponentProps<"div">, "children"> {
   src: string;
   poster?: string | undefined;
   title?: string | undefined;
@@ -62,10 +50,7 @@ function useMediaDuration(
       : undefined;
 
   return {
-    duration:
-      metadata.src === src
-        ? (metadata.duration ?? fallbackDuration)
-        : fallbackDuration,
+    duration: metadata.src === src ? (metadata.duration ?? fallbackDuration) : fallbackDuration,
     setDurationFromMetadata: (duration: number) => {
       if (Number.isFinite(duration) && duration >= 0) {
         setMetadata({ src, duration });
@@ -89,27 +74,18 @@ export function AudioPlayer({
     playing: false,
     hasError: false,
   });
-  const { duration, setDurationFromMetadata } = useMediaDuration(
-    audioRef,
-    src,
-    durationMs,
-  );
+  const { duration, setDurationFromMetadata } = useMediaDuration(audioRef, src, durationMs);
   const playbackState =
-    playback.src === src
-      ? playback
-      : { src, currentTime: 0, playing: false, hasError: false };
+    playback.src === src ? playback : { src, currentTime: 0, playing: false, hasError: false };
   const { currentTime, playing, hasError } = playbackState;
   const update = (patch: Partial<Omit<typeof playback, "src">>) =>
     setPlayback((current) => ({
-      ...(current.src === src
-        ? current
-        : { src, currentTime: 0, playing: false, hasError: false }),
+      ...(current.src === src ? current : { src, currentTime: 0, playing: false, hasError: false }),
       ...patch,
     }));
   const displayTitle = title ?? "Audio";
   const playbackLabel = title ? ` ${title}` : " audio";
-  const durationLabel =
-    duration === undefined ? "--:--" : formatDuration(duration);
+  const durationLabel = duration === undefined ? "--:--" : formatDuration(duration);
 
   useEffect(() => {
     if (audioRef.current?.error) {
@@ -129,29 +105,18 @@ export function AudioPlayer({
 
     void audio.play().then(
       () => update({ playing: true }),
-      () =>
-        update(
-          audio.error ? { hasError: true, playing: false } : { playing: false },
-        ),
+      () => update(audio.error ? { hasError: true, playing: false } : { playing: false }),
     );
   };
 
   return (
     <div
       data-slot="audio-player"
-      className={cn(
-        paper,
-        "flex w-full max-w-md items-center gap-3 rounded-2xl p-3",
-        className,
-      )}
+      className={cn(paper, "flex w-full max-w-md items-center gap-3 rounded-2xl p-3", className)}
       {...props}
     >
       {artwork ? (
-        <img
-          src={artwork}
-          alt=""
-          className="size-10 shrink-0 rounded-lg object-cover"
-        />
+        <img src={artwork} alt="" className="size-10 shrink-0 rounded-lg object-cover" />
       ) : null}
       <button
         type="button"
@@ -170,9 +135,7 @@ export function AudioPlayer({
         )}
       </button>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <span className="truncate text-[13.5px] font-medium">
-          {displayTitle}
-        </span>
+        <span className="truncate text-[13.5px] font-medium">{displayTitle}</span>
         <input
           type="range"
           min={0}
@@ -203,9 +166,7 @@ export function AudioPlayer({
         onLoadedMetadata={(event) => {
           setDurationFromMetadata(event.currentTarget.duration);
         }}
-        onTimeUpdate={(event) =>
-          update({ currentTime: event.currentTarget.currentTime })
-        }
+        onTimeUpdate={(event) => update({ currentTime: event.currentTarget.currentTime })}
         onPlay={() => update({ playing: true })}
         onPause={() => update({ playing: false })}
         onError={() => update({ hasError: true, playing: false })}
@@ -229,11 +190,7 @@ export function VideoPlayer({
   ...props
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const { duration, setDurationFromMetadata } = useMediaDuration(
-    videoRef,
-    src,
-    durationMs,
-  );
+  const { duration, setDurationFromMetadata } = useMediaDuration(videoRef, src, durationMs);
   const ratioClassName =
     ratio === "1:1"
       ? "aspect-square"
@@ -260,10 +217,7 @@ export function VideoPlayer({
           playsInline
           preload="metadata"
           aria-label={title ?? "Video"}
-          className={cn(
-            "block max-w-full",
-            ratio !== "auto" && "h-full w-full object-contain",
-          )}
+          className={cn("block max-w-full", ratio !== "auto" && "h-full w-full object-contain")}
           onLoadedMetadata={(event) => {
             setDurationFromMetadata(event.currentTarget.duration);
           }}
@@ -272,14 +226,10 @@ export function VideoPlayer({
       {(title || duration !== undefined) && (
         <div className="flex min-w-0 items-center gap-2 px-1">
           {title ? (
-            <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium">
-              {title}
-            </span>
+            <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium">{title}</span>
           ) : null}
           {duration !== undefined ? (
-            <span
-              className={cn(mono, "text-foreground/45 shrink-0 tabular-nums")}
-            >
+            <span className={cn(mono, "text-foreground/45 shrink-0 tabular-nums")}>
               {formatDuration(duration)}
             </span>
           ) : null}

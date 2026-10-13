@@ -26,21 +26,30 @@ export function ConversationMcpSettingsSection() {
   useEffect(() => {
     let active = true;
     listEngineServers()
-      .then((items) => { if (active) setServers(items); })
-      .catch((cause) => { if (active) setError(cause); });
-    return () => { active = false; };
+      .then((items) => {
+        if (active) setServers(items);
+      })
+      .catch((cause) => {
+        if (active) setError(cause);
+      });
+    return () => {
+      active = false;
+    };
   }, [reloadSeq]);
 
   const reload = () => setReloadSeq((n) => n + 1);
 
   return (
     <>
-      <CatalogSection declaredNames={new Set((servers ?? []).map((s) => s.name))} onChanged={reload} />
+      <CatalogSection
+        declaredNames={new Set((servers ?? []).map((s) => s.name))}
+        onChanged={reload}
+      />
       <h3>Server MCP</h3>
       <p>
-        Collega strumenti esterni (file, database, GitHub…): dichiari il server, decidi
-        quali strumenti ammettere e lo provi. L'esecuzione resta sempre un atto che
-        approvi tu: nessuno strumento parte in silenzio.
+        Collega strumenti esterni (file, database, GitHub…): dichiari il server, decidi quali
+        strumenti ammettere e lo provi. L'esecuzione resta sempre un atto che approvi tu: nessuno
+        strumento parte in silenzio.
       </p>
       {servers === null && !error && <p role="status">Leggo i server dichiarati…</p>}
       {servers?.length === 0 && !adding && (
@@ -51,7 +60,10 @@ export function ConversationMcpSettingsSection() {
       ))}
       {adding ? (
         <AddServerForm
-          onSaved={async () => { setAdding(false); reload(); }}
+          onSaved={async () => {
+            setAdding(false);
+            reload();
+          }}
           onCancel={() => setAdding(false)}
         />
       ) : (
@@ -87,17 +99,31 @@ function ServerCard({ server, onChanged }: { server: ExternalServer; onChanged: 
     <div className="cv-settings-card">
       <strong>{server.name}</strong>
       <p className="cv-mcp-meta">
-        {server.transport === "stdio" ? `${server.command} ${server.args.join(" ")}`.trim() : server.url}
-        {server.tools_include.length > 0 && ` · strumenti ammessi: ${server.tools_include.join(", ")}`}
+        {server.transport === "stdio"
+          ? `${server.command} ${server.args.join(" ")}`.trim()
+          : server.url}
+        {server.tools_include.length > 0 &&
+          ` · strumenti ammessi: ${server.tools_include.join(", ")}`}
         {server.tools_exclude.length > 0 && ` · esclusi: ${server.tools_exclude.join(", ")}`}
       </p>
       <div className="cs-actions">
-        <button type="button" className="cw-secondary" disabled={probing} onClick={() => void test()}>
+        <button
+          type="button"
+          className="cw-secondary"
+          disabled={probing}
+          onClick={() => void test()}
+        >
           {probing ? "Provo…" : "Prova connessione"}
         </button>
         {confirmRemove ? (
           <>
-            <button type="button" className="cw-secondary" onClick={() => void removeEngineServer(server.id, server.revision).then(onChanged).catch(setError)}>
+            <button
+              type="button"
+              className="cw-secondary"
+              onClick={() =>
+                void removeEngineServer(server.id, server.revision).then(onChanged).catch(setError)
+              }
+            >
               Sì, rimuovi
             </button>
             <button type="button" className="cs-link" onClick={() => setConfirmRemove(false)}>
@@ -123,7 +149,10 @@ function ServerCard({ server, onChanged }: { server: ExternalServer; onChanged: 
   );
 }
 
-function AddServerForm({ onSaved, onCancel }: {
+function AddServerForm({
+  onSaved,
+  onCancel,
+}: {
   onSaved: () => Promise<void>;
   onCancel: () => void;
 }) {
@@ -146,7 +175,12 @@ function AddServerForm({ onSaved, onCancel }: {
         command: command.trim(),
         args: args.trim() ? args.trim().split(/\s+/) : [],
         url: url.trim(),
-        toolsInclude: toolsInclude.trim() ? toolsInclude.split(",").map((t) => t.trim()).filter(Boolean) : [],
+        toolsInclude: toolsInclude.trim()
+          ? toolsInclude
+              .split(",")
+              .map((t) => t.trim())
+              .filter(Boolean)
+          : [],
       });
       await onSaved();
     } catch (cause) {
@@ -157,17 +191,33 @@ function AddServerForm({ onSaved, onCancel }: {
   }
 
   return (
-    <form className="cv-mcp-add" aria-label="Nuovo server MCP"
-      onSubmit={(event) => { event.preventDefault(); void save(); }}>
+    <form
+      className="cv-mcp-add"
+      aria-label="Nuovo server MCP"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+    >
       <div className="cw-agent-editor__row">
         <label>
           Nome
-          <input value={name} maxLength={80} disabled={saving} onChange={(e) => setName(e.target.value)} placeholder="Es. GitHub del magazzino" />
+          <input
+            value={name}
+            maxLength={80}
+            disabled={saving}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Es. GitHub del magazzino"
+          />
         </label>
         <label>
           Trasporto
-          <select aria-label="Trasporto" value={transport} disabled={saving}
-            onChange={(e) => setTransport(e.target.value as "stdio" | "http")}>
+          <select
+            aria-label="Trasporto"
+            value={transport}
+            disabled={saving}
+            onChange={(e) => setTransport(e.target.value as "stdio" | "http")}
+          >
             <option value="stdio">Locale (comando)</option>
             <option value="http">Remoto (URL)</option>
           </select>
@@ -177,29 +227,54 @@ function AddServerForm({ onSaved, onCancel }: {
         <>
           <label>
             Comando
-            <input value={command} maxLength={300} disabled={saving} onChange={(e) => setCommand(e.target.value)}
-              placeholder="Es. npx -y @modelcontextprotocol/server-filesystem" />
+            <input
+              value={command}
+              maxLength={300}
+              disabled={saving}
+              onChange={(e) => setCommand(e.target.value)}
+              placeholder="Es. npx -y @modelcontextprotocol/server-filesystem"
+            />
           </label>
           <label>
             Argomenti (separati da spazio)
-            <input value={args} maxLength={300} disabled={saving} onChange={(e) => setArgs(e.target.value)}
-              placeholder="Es. /Users/tuoi/progetti/magazzino" />
+            <input
+              value={args}
+              maxLength={300}
+              disabled={saving}
+              onChange={(e) => setArgs(e.target.value)}
+              placeholder="Es. /Users/tuoi/progetti/magazzino"
+            />
           </label>
         </>
       ) : (
         <label>
           URL
-          <input value={url} maxLength={500} disabled={saving} onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://mcp.esempio.com" />
+          <input
+            value={url}
+            maxLength={500}
+            disabled={saving}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://mcp.esempio.com"
+          />
         </label>
       )}
       <label>
         Strumenti ammessi (virgole; vuoto = tutti)
-        <input value={toolsInclude} maxLength={300} disabled={saving} onChange={(e) => setToolsInclude(e.target.value)}
-          placeholder="Es. list_issues, create_issue" />
+        <input
+          value={toolsInclude}
+          maxLength={300}
+          disabled={saving}
+          onChange={(e) => setToolsInclude(e.target.value)}
+          placeholder="Es. list_issues, create_issue"
+        />
       </label>
       <div className="cs-actions">
-        <button className="cw-secondary" disabled={saving || !name.trim() || (transport === "stdio" ? !command.trim() : !url.trim())}>
+        <button
+          className="cw-secondary"
+          disabled={
+            saving || !name.trim() || (transport === "stdio" ? !command.trim() : !url.trim())
+          }
+        >
           {saving ? "Salvo…" : "Dichiara server"}
         </button>
         <button type="button" className="cs-link" disabled={saving} onClick={onCancel}>
@@ -219,9 +294,15 @@ export function ConversationSkillsSettingsSection() {
   useEffect(() => {
     let active = true;
     listEngineSkills()
-      .then((items) => { if (active) setSkills(items); })
-      .catch((cause) => { if (active) setError(cause); });
-    return () => { active = false; };
+      .then((items) => {
+        if (active) setSkills(items);
+      })
+      .catch((cause) => {
+        if (active) setError(cause);
+      });
+    return () => {
+      active = false;
+    };
   }, [reloadSeq]);
 
   const reload = () => setReloadSeq((n) => n + 1);
@@ -231,25 +312,34 @@ export function ConversationSkillsSettingsSection() {
     <>
       <h3>Skill (procedure)</h3>
       <p>
-        Procedure riutilizzabili scritte in chat: quelle proposte dall'agente nascono
-        «da approvare» e diventano operative solo con il tuo via. Le archiviate non
-        si cancellano mai.
+        Procedure riutilizzabili scritte in chat: quelle proposte dall'agente nascono «da approvare»
+        e diventano operative solo con il tuo via. Le archiviate non si cancellano mai.
       </p>
       {staged.length > 0 && (
         <p className="cv-settings-note" role="status">
-          {staged.length} {staged.length === 1 ? "procedura attende" : "procedure attendono"} la tua approvazione.
+          {staged.length} {staged.length === 1 ? "procedura attende" : "procedure attendono"} la tua
+          approvazione.
         </p>
       )}
       {skills === null && !error && <p role="status">Leggo le procedure…</p>}
-      {skills?.length === 0 && <p className="cv-settings-note">Nessuna procedura. In chat, su un messaggio dell'agente, scegli «Salva come procedura».</p>}
+      {skills?.length === 0 && (
+        <p className="cv-settings-note">
+          Nessuna procedura. In chat, su un messaggio dell'agente, scegli «Salva come procedura».
+        </p>
+      )}
       {skills?.map((skill) => (
         <div className="cv-settings-card" key={skill.id}>
           <strong>{skill.name}</strong>
           <p>
             {skill.description || "Senza descrizione."}{" "}
             <small>
-              {skill.status === "staged" ? "Da approvare" : skill.status === "approved" ? "Approvata" : "Archiviata"}
-              {" · "}{skill.author_type === "agent" ? "proposta dall'agente" : "scritta da te"}
+              {skill.status === "staged"
+                ? "Da approvare"
+                : skill.status === "approved"
+                  ? "Approvata"
+                  : "Archiviata"}
+              {" · "}
+              {skill.author_type === "agent" ? "proposta dall'agente" : "scritta da te"}
             </small>
           </p>
           {skill.body && (
@@ -260,19 +350,52 @@ export function ConversationSkillsSettingsSection() {
           )}
           {skill.status === "staged" && (
             <div className="cs-actions">
-              <button type="button" className="cw-secondary"
-                onClick={() => void skillEngineAction({ skillId: skill.id, action: "approve", expectedVersion: skill.revision }).then(reload).catch(setError)}>
+              <button
+                type="button"
+                className="cw-secondary"
+                onClick={() =>
+                  void skillEngineAction({
+                    skillId: skill.id,
+                    action: "approve",
+                    expectedVersion: skill.revision,
+                  })
+                    .then(reload)
+                    .catch(setError)
+                }
+              >
                 Approva
               </button>
-              <button type="button" className="cs-link"
-                onClick={() => void skillEngineAction({ skillId: skill.id, action: "reject", expectedVersion: skill.revision }).then(reload).catch(setError)}>
+              <button
+                type="button"
+                className="cs-link"
+                onClick={() =>
+                  void skillEngineAction({
+                    skillId: skill.id,
+                    action: "reject",
+                    expectedVersion: skill.revision,
+                  })
+                    .then(reload)
+                    .catch(setError)
+                }
+              >
                 Respingi
               </button>
             </div>
           )}
           {skill.status === "approved" && (
-            <button type="button" className="cs-link"
-              onClick={() => void skillEngineAction({ skillId: skill.id, action: "archive", expectedVersion: skill.revision }).then(reload).catch(setError)}>
+            <button
+              type="button"
+              className="cs-link"
+              onClick={() =>
+                void skillEngineAction({
+                  skillId: skill.id,
+                  action: "archive",
+                  expectedVersion: skill.revision,
+                })
+                  .then(reload)
+                  .catch(setError)
+              }
+            >
               Archivia
             </button>
           )}
@@ -283,9 +406,11 @@ export function ConversationSkillsSettingsSection() {
   );
 }
 
-
 /** Repo-vetted entries, inert until declared; source always visible first. */
-function CatalogSection({ declaredNames, onChanged }: {
+function CatalogSection({
+  declaredNames,
+  onChanged,
+}: {
   declaredNames: Set<string>;
   onChanged: () => void;
 }) {
@@ -297,9 +422,15 @@ function CatalogSection({ declaredNames, onChanged }: {
   useEffect(() => {
     let active = true;
     listEngineCatalog()
-      .then((items) => { if (active) setEntries(items); })
-      .catch((cause) => { if (active) setError(cause); });
-    return () => { active = false; };
+      .then((items) => {
+        if (active) setEntries(items);
+      })
+      .catch((cause) => {
+        if (active) setError(cause);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function declare(entry: CatalogEntry) {
@@ -319,8 +450,8 @@ function CatalogSection({ declaredNames, onChanged }: {
     <section aria-label="Catalogo curato" className="cv-mcp-catalog">
       <h4>Catalogo curato</h4>
       <p className="cv-settings-note">
-        Voci verificate in questo repository, inerti finché non le dichiari tu:
-        il comando è sempre visibile prima di qualunque esecuzione.
+        Voci verificate in questo repository, inerti finché non le dichiari tu: il comando è sempre
+        visibile prima di qualunque esecuzione.
       </p>
       {entries === null && !error && <p role="status">Leggo il catalogo…</p>}
       {entries?.map((entry) => {
@@ -330,7 +461,9 @@ function CatalogSection({ declaredNames, onChanged }: {
             <strong>{entry.name}</strong>
             <p>{entry.description}</p>
             <p className="cv-settings-note">
-              <code>{entry.command} {entry.args_prefix.join(" ")}</code>
+              <code>
+                {entry.command} {entry.args_prefix.join(" ")}
+              </code>
               {entry.tools_include.length > 0 && ` · strumenti: ${entry.tools_include.join(", ")}`}
               {entry.tools_exclude.length > 0 && ` · esclusi: ${entry.tools_exclude.join(", ")}`}
               {` · sorgente: ${entry.source}`}
@@ -338,17 +471,25 @@ function CatalogSection({ declaredNames, onChanged }: {
             {entry.needs_path && (
               <label>
                 {entry.needs_path}
-                <input value={paths[entry.id] ?? ""} disabled={busyId === entry.id || declared}
-                       onChange={(e) => setPaths((p) => ({ ...p, [entry.id]: e.target.value }))} />
+                <input
+                  value={paths[entry.id] ?? ""}
+                  disabled={busyId === entry.id || declared}
+                  onChange={(e) => setPaths((p) => ({ ...p, [entry.id]: e.target.value }))}
+                />
               </label>
             )}
             <div className="cs-actions">
               {declared ? (
                 <small>Dichiarato</small>
               ) : (
-                <button type="button" className="cw-secondary"
-                        disabled={busyId === entry.id || (!!entry.needs_path && !(paths[entry.id] ?? "").trim())}
-                        onClick={() => void declare(entry)}>
+                <button
+                  type="button"
+                  className="cw-secondary"
+                  disabled={
+                    busyId === entry.id || (!!entry.needs_path && !(paths[entry.id] ?? "").trim())
+                  }
+                  onClick={() => void declare(entry)}
+                >
                   {busyId === entry.id ? "Dichiaro…" : "Dichiara"}
                 </button>
               )}

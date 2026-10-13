@@ -129,8 +129,7 @@ export function resolveFirstMessageRoute(input: {
   classification?: WorkIntakeKind;
 }): "chat" | "propose" {
   const needsAgreement =
-    (input.hasIntake && !input.intakeConfirmed) ||
-    (!input.hasIntake && input.isNewRequest);
+    (input.hasIntake && !input.intakeConfirmed) || (!input.hasIntake && input.isNewRequest);
   if (!needsAgreement) return "chat";
   return input.classification === "question" ? "chat" : "propose";
 }

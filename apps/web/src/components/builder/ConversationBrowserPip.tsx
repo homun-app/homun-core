@@ -16,8 +16,12 @@ type PipState = {
  * apre il browser compaiono URL corrente e screenshot della pagina.
  */
 export function ConversationBrowserPip({
-  conversationId, runActive,
-}: { conversationId?: string | undefined; runActive: boolean }) {
+  conversationId,
+  runActive,
+}: {
+  conversationId?: string | undefined;
+  runActive: boolean;
+}) {
   const [state, setState] = useState<PipState>({ active: false });
   const [closed, setClosed] = useState(false);
 
@@ -94,7 +98,9 @@ export function ConversationBrowserPip({
           {state.web.titles.length > 0 && (
             <ul className="space-y-0.5">
               {state.web.titles.map((title) => (
-                <li key={title} className="truncate text-[11px] text-[#263832]">· {title}</li>
+                <li key={title} className="truncate text-[11px] text-[#263832]">
+                  · {title}
+                </li>
               ))}
             </ul>
           )}

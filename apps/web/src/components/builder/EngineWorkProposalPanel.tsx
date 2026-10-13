@@ -4,7 +4,11 @@ import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import type { WorkIntake, WorkIntakePlanStep } from "@/lib/engine-intake-client";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { WorkTitleEditor } from "./WorkTitleEditor";
-import { briefChangeLines, intakeConfirmLabel, preservedFieldLabels } from "@/lib/engine-intake-display";
+import {
+  briefChangeLines,
+  intakeConfirmLabel,
+  preservedFieldLabels,
+} from "@/lib/engine-intake-display";
 
 export function EngineWorkProposalPanel({
   work,
@@ -33,7 +37,12 @@ export function EngineWorkProposalPanel({
 
       <h2 title={proposal.title}>{proposal.title}</h2>
       {onRename && (
-        <WorkTitleEditor key={`title:${work.id}`} title={work.title} busy={isBusy} onRename={onRename} />
+        <WorkTitleEditor
+          key={`title:${work.id}`}
+          title={work.title}
+          busy={isBusy}
+          onRename={onRename}
+        />
       )}
 
       <section className="cw-engine-objective">
@@ -162,7 +171,11 @@ export function EngineWorkProposalPanel({
         </form>
       )}
 
-      {intake.busy && <p className="cw-engine-summary__hint" role="status">Sto aggiornando la proposta…</p>}
+      {intake.busy && (
+        <p className="cw-engine-summary__hint" role="status">
+          Sto aggiornando la proposta…
+        </p>
+      )}
       <HomunErrorNotice error={intake.error} />
     </aside>
   );

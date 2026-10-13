@@ -23,14 +23,14 @@
 
 ## Model extensions (`MaterialVersion`)
 
-| Field | Meaning |
-|-------|---------|
-| `origin_name` | Original filename or relative path from folder pick |
-| `relative_path` | Optional path within imported folder |
+| Field             | Meaning                                                           |
+| ----------------- | ----------------------------------------------------------------- |
+| `origin_name`     | Original filename or relative path from folder pick               |
+| `relative_path`   | Optional path within imported folder                              |
 | `storage_relpath` | Path under `data_dir` for original bytes (nullable for note/link) |
-| `byte_size` | Original size |
-| `extract_status` | `none` \| `extracted` \| `unsupported` \| `failed` |
-| `text` | Extracted text (or note body); empty when unsupported |
+| `byte_size`       | Original size                                                     |
+| `extract_status`  | `none` \| `extracted` \| `unsupported` \| `failed`                |
+| `text`            | Extracted text (or note body); empty when unsupported             |
 
 `kind` for ingested files stays `file_ref`; `source_uri` may hold `homun-blob://{material_id}/v{version}` after ingest.
 
@@ -38,19 +38,19 @@
 
 `engine/src/homun/materials/`:
 
-| Module | Job |
-|--------|-----|
-| `blob.py` | Write/read originals under `{data_dir}/materials/{id}/v{n}/original` |
-| `extract.py` | Detect mime; extract TXT/CSV/PDF text; else unsupported |
+| Module       | Job                                                                  |
+| ------------ | -------------------------------------------------------------------- |
+| `blob.py`    | Write/read originals under `{data_dir}/materials/{id}/v{n}/original` |
+| `extract.py` | Detect mime; extract TXT/CSV/PDF text; else unsupported              |
 
 ## Commands / HTTP
 
-| Surface | Behavior |
-|---------|----------|
+| Surface                                   | Behavior                                                                               |
+| ----------------------------------------- | -------------------------------------------------------------------------------------- |
 | `POST .../projects/{id}/materials/ingest` | Multipart: `file` (+ optional `relative_path`, `title`); write grant; returns material |
-| `GET .../materials/{id}/content` | Metadata + extract_status + text (read grant) |
-| `GET .../materials/{id}/blob` | Raw original bytes (read grant); 404 if no blob |
-| `work.provide_contribution` | `text` optional if `material_ids` non-empty; `material_ref` = first id for DBOS |
+| `GET .../materials/{id}/content`          | Metadata + extract_status + text (read grant)                                          |
+| `GET .../materials/{id}/blob`             | Raw original bytes (read grant); 404 if no blob                                        |
+| `work.provide_contribution`               | `text` optional if `material_ids` non-empty; `material_ref` = first id for DBOS        |
 
 ## UI
 

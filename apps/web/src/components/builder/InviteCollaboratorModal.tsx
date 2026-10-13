@@ -4,15 +4,7 @@
  */
 
 import { useState } from "react";
-import {
-  X,
-  UserPlus,
-  Shield,
-  ShieldCheck,
-  Eye,
-  Check,
-  FolderGit2,
-} from "lucide-react";
+import { X, UserPlus, Shield, ShieldCheck, Eye, Check, FolderGit2 } from "lucide-react";
 import type { EngineProject } from "@/lib/engine-projects-client";
 
 export type CollaboratorData = {
@@ -58,12 +50,7 @@ const PERMISSION_OPTIONS = [
   },
 ];
 
-export function InviteCollaboratorModal({
-  initialData,
-  projects,
-  onSave,
-  onClose,
-}: Props) {
+export function InviteCollaboratorModal({ initialData, projects, onSave, onClose }: Props) {
   const [name, setName] = useState(initialData?.name ?? "");
   const [email, setEmail] = useState(initialData?.email ?? "");
   const [role, setRole] = useState(initialData?.role ?? "");
@@ -98,8 +85,7 @@ export function InviteCollaboratorModal({
   // Deduplicate projects and build distinct display labels
   const projectLabels = projects.map((p, index) => {
     const duplicates = projects.filter((other) => other.name === p.name);
-    const label =
-      duplicates.length > 1 ? `${p.name} (#${p.id.slice(0, 6)})` : p.name;
+    const label = duplicates.length > 1 ? `${p.name} (#${p.id.slice(0, 6)})` : p.name;
     return { ...p, displayLabel: label };
   });
 
@@ -131,7 +117,10 @@ export function InviteCollaboratorModal({
         </div>
 
         {/* Form Body - Griglia a due colonne ariosa */}
-        <form onSubmit={handleSubmit} className="px-8 py-6 overflow-y-auto flex-1 space-y-6 bg-[#fbfbf8]">
+        <form
+          onSubmit={handleSubmit}
+          className="px-8 py-6 overflow-y-auto flex-1 space-y-6 bg-[#fbfbf8]"
+        >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
             {/* Colonna Sinistra: Dati anagrafici e perimetro progetti */}
             <div className="space-y-4">
@@ -222,9 +211,7 @@ export function InviteCollaboratorModal({
                             </div>
                             <div
                               className={`w-4 h-4 rounded-md flex items-center justify-center shrink-0 transition-colors ${
-                                isChecked
-                                  ? "bg-[#203c32] text-white"
-                                  : "border border-[#dce4d5]"
+                                isChecked ? "bg-[#203c32] text-white" : "border border-[#dce4d5]"
                               }`}
                             >
                               {isChecked && <Check size={11} />}
@@ -262,9 +249,7 @@ export function InviteCollaboratorModal({
                         <div className="flex items-center gap-2.5">
                           <div
                             className={`w-4 h-4 rounded-full flex items-center justify-center transition-colors ${
-                              isSelected
-                                ? "bg-[#203c32]"
-                                : "border border-[#dce4d5] bg-white"
+                              isSelected ? "bg-[#203c32]" : "border border-[#dce4d5] bg-white"
                             }`}
                           >
                             {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
@@ -293,7 +278,8 @@ export function InviteCollaboratorModal({
 
               {permission === "admin" && (
                 <div className="mt-4 p-3.5 rounded-xl bg-[#fef3c7] text-[#92400e] border border-[#fde68a] text-xs leading-relaxed">
-                  L'amministratore gode di accesso incondizionato a tutti i progetti, impostazioni di sicurezza, credenziali dei modelli LLM e canali di comunicazione dello spazio.
+                  L'amministratore gode di accesso incondizionato a tutti i progetti, impostazioni
+                  di sicurezza, credenziali dei modelli LLM e canali di comunicazione dello spazio.
                 </div>
               )}
             </div>

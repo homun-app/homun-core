@@ -42,7 +42,10 @@ type Props = {
   projectId?: string | null;
 };
 
-export function ConversationMemorySettingsSection({ actorId, projectId: initialProjectId = null }: Props) {
+export function ConversationMemorySettingsSection({
+  actorId,
+  projectId: initialProjectId = null,
+}: Props) {
   const status = useEngineStatus();
   const engineReady = status.connection === "connected" && status.capabilities?.features.memory;
 
@@ -66,7 +69,7 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
   const [error, setError] = useState<unknown>(null);
 
   // Determine current effective project ID based on level
-  const effectiveProjectId = activeLevel === "project" ? (selectedProjectId || null) : null;
+  const effectiveProjectId = activeLevel === "project" ? selectedProjectId || null : null;
 
   async function refresh() {
     try {
@@ -240,7 +243,8 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
     );
   }
 
-  const selectedProjName = projects.find((p) => p.id === selectedProjectId)?.name ?? selectedProjectId;
+  const selectedProjName =
+    projects.find((p) => p.id === selectedProjectId)?.name ?? selectedProjectId;
 
   return (
     <div className="space-y-5" aria-label="Gestione memoria approvata">
@@ -249,7 +253,8 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
         <div>
           <h3>Memoria Approvata & Vincoli Cognitivi</h3>
           <p className="text-xs text-[#9db3ad]">
-            Solo principi esplicitamente approvati dall'utente. Nessuna cattura automatica silenziosa.
+            Solo principi esplicitamente approvati dall'utente. Nessuna cattura automatica
+            silenziosa.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -369,8 +374,7 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
       <div className="p-4 rounded-xl bg-[#edf2e7] border border-[rgba(104,122,89,0.12)] space-y-3">
         <strong className="text-xs font-bold text-[#1c2d22] block">
           Aggiungi Nuova Regola Approvata (
-          {activeLevel === "space" ? "Spazio Globale" : selectedProjName}
-          )
+          {activeLevel === "space" ? "Spazio Globale" : selectedProjName})
         </strong>
         <textarea
           rows={2}
@@ -428,9 +432,14 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
 
         {recallHits.length > 0 && (
           <div className="space-y-2 pt-2 border-t border-[#dce4d5]">
-            <span className="text-[11px] font-semibold text-[#203c32]">Risultati trovati ({recallHits.length}):</span>
+            <span className="text-[11px] font-semibold text-[#203c32]">
+              Risultati trovati ({recallHits.length}):
+            </span>
             {recallHits.map((h) => (
-              <div key={`hit-${h.id}`} className="p-2.5 rounded-lg bg-white border border-[#dce4d5] text-xs text-[#1c2d22]">
+              <div
+                key={`hit-${h.id}`}
+                className="p-2.5 rounded-lg bg-white border border-[#dce4d5] text-xs text-[#1c2d22]"
+              >
                 <p>{h.text}</p>
                 <span className="text-[10px] text-[#647a6d] block mt-1">
                   {memoryScopeLabel(h)} · {h.status}
@@ -445,13 +454,15 @@ export function ConversationMemorySettingsSection({ actorId, projectId: initialP
       <div className="space-y-3">
         <div className="flex items-center justify-between text-xs text-[#647a6d]">
           <span>
-            Ricordi approvati ({notes.length}) — {activeLevel === "space" ? "Spazio Globale" : selectedProjName}
+            Ricordi approvati ({notes.length}) —{" "}
+            {activeLevel === "space" ? "Spazio Globale" : selectedProjName}
           </span>
         </div>
 
         {notes.length === 0 ? (
           <div className="p-8 rounded-xl bg-white border border-[#dce4d5] text-center text-xs text-[#647a6d]">
-            Nessun ricordo registrato in questo ambito. Salva una regola o un vincolo con il modulo sopra.
+            Nessun ricordo registrato in questo ambito. Salva una regola o un vincolo con il modulo
+            sopra.
           </div>
         ) : (
           notes.map((note) => (

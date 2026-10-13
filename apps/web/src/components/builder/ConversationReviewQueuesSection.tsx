@@ -98,7 +98,8 @@ export function ConversationReviewQueuesSection({ actorId }: { actorId?: string 
                   disabled={busy !== null}
                   onClick={() =>
                     void act(`${run.id}:approve`, () =>
-                      approveAgentRun(workId, run, `ui-approve-${run.id}`))
+                      approveAgentRun(workId, run, `ui-approve-${run.id}`),
+                    )
                   }
                 >
                   Approva ed esegui
@@ -155,7 +156,9 @@ export function ConversationReviewQueuesSection({ actorId }: { actorId?: string 
                   type="button"
                   className="cv-unified-btn is-primary text-xs"
                   disabled={busy !== null}
-                  onClick={() => void act(`${edit.id}:approve`, () => approveFileEdit(workId, edit))}
+                  onClick={() =>
+                    void act(`${edit.id}:approve`, () => approveFileEdit(workId, edit))
+                  }
                 >
                   Approva e scrivi il file
                 </button>
@@ -198,7 +201,12 @@ export function ConversationReviewQueuesSection({ actorId }: { actorId?: string 
                     disabled={busy !== null}
                     onClick={() =>
                       void act(`${skill.id}:reject`, () =>
-                        skillEngineAction({ skillId: skill.id, action: "reject", expectedVersion: skill.revision }))
+                        skillEngineAction({
+                          skillId: skill.id,
+                          action: "reject",
+                          expectedVersion: skill.revision,
+                        }),
+                      )
                     }
                   >
                     Respingi
@@ -209,7 +217,12 @@ export function ConversationReviewQueuesSection({ actorId }: { actorId?: string 
                     disabled={busy !== null}
                     onClick={() =>
                       void act(`${skill.id}:approve`, () =>
-                        skillEngineAction({ skillId: skill.id, action: "approve", expectedVersion: skill.revision }))
+                        skillEngineAction({
+                          skillId: skill.id,
+                          action: "approve",
+                          expectedVersion: skill.revision,
+                        }),
+                      )
                     }
                   >
                     Approva nel catalogo
@@ -222,9 +235,7 @@ export function ConversationReviewQueuesSection({ actorId }: { actorId?: string 
       )}
 
       {actorId && (
-        <p className="text-[11px] text-[#9db3ad]">
-          Operazioni come {actorId} · Fonte: motore.
-        </p>
+        <p className="text-[11px] text-[#9db3ad]">Operazioni come {actorId} · Fonte: motore.</p>
       )}
     </div>
   );
@@ -253,7 +264,8 @@ function MobileApprovals({ actorId }: { actorId?: string | undefined }) {
   if (binding) {
     return (
       <p className="text-[11px] text-[#9db3ad]">
-        Autorizzazioni da mobile: canale {binding.platform} collegato — le richieste arrivano lì con un codice, rispondi «A» o «R».
+        Autorizzazioni da mobile: canale {binding.platform} collegato — le richieste arrivano lì con
+        un codice, rispondi «A» o «R».
       </p>
     );
   }
@@ -282,7 +294,11 @@ function MobileApprovals({ actorId }: { actorId?: string | undefined }) {
 }
 
 function QueueStats({
-  loading, runs, terminal, edits, skills,
+  loading,
+  runs,
+  terminal,
+  edits,
+  skills,
 }: {
   loading: boolean;
   runs: number;
@@ -300,13 +316,7 @@ function QueueStats({
   );
 }
 
-function QueueStat({
-  label, count, loading,
-}: {
-  label: string;
-  count: number;
-  loading: boolean;
-}) {
+function QueueStat({ label, count, loading }: { label: string; count: number; loading: boolean }) {
   const quiet = loading || count === 0;
   return (
     <div className="px-3 py-2.5">
@@ -323,7 +333,9 @@ function QueueStat({
 }
 
 function QueueSection({
-  title, count, children,
+  title,
+  count,
+  children,
 }: {
   title: string;
   count: number;

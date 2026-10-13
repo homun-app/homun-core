@@ -130,7 +130,9 @@
   background: #ffffff !important;
   border: 1px solid rgba(0, 0, 0, 0.12) !important;
   border-radius: 10px !important;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15), 0 0 1px rgba(0, 0, 0, 0.2) !important;
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.15),
+    0 0 1px rgba(0, 0, 0, 0.2) !important;
   width: 360px !important;
   max-width: calc(100vw - 32px) !important;
   padding: 8px !important;

@@ -79,72 +79,72 @@ export function ConversationContribution({
                 }}
               />
             ) : (
-            <>
-              <textarea
-                aria-label="Risposta alla richiesta"
-                placeholder="Scrivi le informazioni o un link…"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-              />
-              <div className="cs-actions">
-                <button className="cw-secondary" onClick={() => upload.current?.click()}>
-                  Allega file
-                </button>
-                <button className="cw-secondary" onClick={() => folder.current?.click()}>
-                  Allega cartella
-                </button>
-              </div>
-              {files.map((f, i) => (
-                <p key={i} className="cw-file">
-                  {f.webkitRelativePath || f.name}
-                  <button
-                    aria-label={`Rimuovi allegato ${f.name}`}
-                    onClick={() => setFiles(files.filter((_, j) => i !== j))}
-                  >
-                    ×
-                  </button>
-                </p>
-              ))}
-              <details className="cw-details">
-                <summary>Usa materiali già presenti</summary>
-                <input
-                  aria-label="Cerca materiale richiesto"
-                  placeholder="Cerca materiale…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+              <>
+                <textarea
+                  aria-label="Risposta alla richiesta"
+                  placeholder="Scrivi le informazioni o un link…"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
                 />
-                <div style={{ maxHeight: 150, overflowY: "auto" }}>
-                  {materials
-                    .filter((m) => m.name.toLowerCase().includes(query.toLowerCase()))
-                    .map((m) => (
-                      <label key={m.id}>
-                        <input
-                          type="checkbox"
-                          checked={ids.includes(m.id)}
-                          onChange={(e) =>
-                            setIds(
-                              e.target.checked ? [...ids, m.id] : ids.filter((id) => id !== m.id),
-                            )
-                          }
-                        />
-                        {m.name}
-                      </label>
-                    ))}
+                <div className="cs-actions">
+                  <button className="cw-secondary" onClick={() => upload.current?.click()}>
+                    Allega file
+                  </button>
+                  <button className="cw-secondary" onClick={() => folder.current?.click()}>
+                    Allega cartella
+                  </button>
                 </div>
-              </details>
-              <button
-                className="cw-primary"
-                disabled={!text.trim() && !files.length && !ids.length}
-                onClick={() => {
-                  onDeliver(text, files, ids);
-                  setText("");
-                  setFiles([]);
-                  setIds([]);
-                }}
-              >
-                Invia contributo
-              </button>
-            </>
+                {files.map((f, i) => (
+                  <p key={i} className="cw-file">
+                    {f.webkitRelativePath || f.name}
+                    <button
+                      aria-label={`Rimuovi allegato ${f.name}`}
+                      onClick={() => setFiles(files.filter((_, j) => i !== j))}
+                    >
+                      ×
+                    </button>
+                  </p>
+                ))}
+                <details className="cw-details">
+                  <summary>Usa materiali già presenti</summary>
+                  <input
+                    aria-label="Cerca materiale richiesto"
+                    placeholder="Cerca materiale…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  <div style={{ maxHeight: 150, overflowY: "auto" }}>
+                    {materials
+                      .filter((m) => m.name.toLowerCase().includes(query.toLowerCase()))
+                      .map((m) => (
+                        <label key={m.id}>
+                          <input
+                            type="checkbox"
+                            checked={ids.includes(m.id)}
+                            onChange={(e) =>
+                              setIds(
+                                e.target.checked ? [...ids, m.id] : ids.filter((id) => id !== m.id),
+                              )
+                            }
+                          />
+                          {m.name}
+                        </label>
+                      ))}
+                  </div>
+                </details>
+                <button
+                  className="cw-primary"
+                  disabled={!text.trim() && !files.length && !ids.length}
+                  onClick={() => {
+                    onDeliver(text, files, ids);
+                    setText("");
+                    setFiles([]);
+                    setIds([]);
+                  }}
+                >
+                  Invia contributo
+                </button>
+              </>
             )
           ) : (
             <p className="cw-hint">

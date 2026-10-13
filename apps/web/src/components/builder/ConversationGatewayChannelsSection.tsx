@@ -228,7 +228,8 @@ export function ConversationGatewayChannelsSection({
               Notifiche Consegne Concluse nello Spazio
             </strong>
             <span className="text-xs text-[#647a6d]">
-              Mostra nel centro notifiche locale anche le consegne già approvate. Le richieste e i chiarimenti restano sempre visibili.
+              Mostra nel centro notifiche locale anche le consegne già approvate. Le richieste e i
+              chiarimenti restano sempre visibili.
             </span>
           </div>
           <SettingsToggleSwitch
@@ -248,8 +249,8 @@ export function ConversationGatewayChannelsSection({
           <strong>Controllo remoto senza installare app aggiuntive</strong>
           <p>
             Gli agenti non mandano messaggi a caso: quando si fermano per un dubbio o completano una
-            bozza importante, ricevi un messaggio diretto con i dettagli salienti. Puoi rispondere con
-            un messaggio vocale o di testo e Homun aggiornerà la sessione in tempo reale.
+            bozza importante, ricevi un messaggio diretto con i dettagli salienti. Puoi rispondere
+            con un messaggio vocale o di testo e Homun aggiornerà la sessione in tempo reale.
           </p>
         </div>
       </div>
@@ -333,14 +334,14 @@ export function ConversationGatewayChannelsSection({
                             item.platform === "telegram"
                               ? "rgba(34, 158, 217, 0.2)"
                               : item.platform === "whatsapp"
-                              ? "rgba(37, 211, 102, 0.2)"
-                              : "rgba(224, 30, 90, 0.2)",
+                                ? "rgba(37, 211, 102, 0.2)"
+                                : "rgba(224, 30, 90, 0.2)",
                           color:
                             item.platform === "telegram"
                               ? "#38bdf8"
                               : item.platform === "whatsapp"
-                              ? "#4ade80"
-                              : "#f472b6",
+                                ? "#4ade80"
+                                : "#f472b6",
                         }}
                       >
                         {item.platform === "telegram" ? (
@@ -353,7 +354,9 @@ export function ConversationGatewayChannelsSection({
                       </div>
                       <div className="cv-gateway-connected-meta">
                         <strong>{item.username ? `@${item.username}` : item.user_id}</strong>
-                        <span>ID: {item.user_id} · Canale {item.platform}</span>
+                        <span>
+                          ID: {item.user_id} · Canale {item.platform}
+                        </span>
                       </div>
                     </div>
                     <button
@@ -487,8 +490,8 @@ export function ConversationGatewayChannelsSection({
               {activeTab === "telegram"
                 ? "Configurazione Bot Telegram"
                 : activeTab === "whatsapp"
-                ? "Configurazione WhatsApp Business / Web"
-                : "Configurazione App & Webhook Slack"}
+                  ? "Configurazione WhatsApp Business / Web"
+                  : "Configurazione App & Webhook Slack"}
             </h4>
             <span className={`cv-gateway-wizard__badge ${activeTab}`}>{activeTab}</span>
           </div>
@@ -519,7 +522,8 @@ export function ConversationGatewayChannelsSection({
                 <strong>Invia il comando di accoppiamento</strong>
                 <p>
                   Avvia la conversazione con il bot e invia il comando <code>/pair</code> o{" "}
-                  <code>/start</code>. Il bot ti risponderà con un codice di sicurezza a 8 caratteri.
+                  <code>/start</code>. Il bot ti risponderà con un codice di sicurezza a 8
+                  caratteri.
                 </p>
               </div>
             </div>
@@ -529,7 +533,8 @@ export function ConversationGatewayChannelsSection({
               <div className="cv-gateway-step__body">
                 <strong>Incolla il codice qui sotto</strong>
                 <p>
-                  Inserisci il codice ricevuto per completare l’autorizzazione bidirezionale crittografata.
+                  Inserisci il codice ricevuto per completare l’autorizzazione bidirezionale
+                  crittografata.
                 </p>
               </div>
             </div>
@@ -554,8 +559,8 @@ export function ConversationGatewayChannelsSection({
               <div className="cv-gateway-step__body">
                 <strong>Registra il numero</strong>
                 <p>
-                  Inserisci il tuo numero di cellulare con prefisso internazionale per ricevere il codice
-                  di verifica direttamente in chat WhatsApp.
+                  Inserisci il tuo numero di cellulare con prefisso internazionale per ricevere il
+                  codice di verifica direttamente in chat WhatsApp.
                 </p>
               </div>
             </div>
@@ -580,8 +585,8 @@ export function ConversationGatewayChannelsSection({
               <div className="cv-gateway-step__body">
                 <strong>Installa l'integrazione Homun</strong>
                 <p>
-                  Aggiungi l'app Homun al tuo workspace Slack o configura una Incoming Webhook
-                  nel canale desiderato (es. <code>#homun-team</code>).
+                  Aggiungi l'app Homun al tuo workspace Slack o configura una Incoming Webhook nel
+                  canale desiderato (es. <code>#homun-team</code>).
                 </p>
               </div>
             </div>
@@ -644,7 +649,9 @@ export function ConversationGatewayChannelsSection({
               onClick={() => setShowAdvanceGen(!showAdvanceGen)}
               className="text-[11px] text-[#8fe3d0] hover:underline bg-transparent border-none p-0 cursor-pointer"
             >
-              {showAdvanceGen ? "Nascondi opzioni avanzate" : "Hai bisogno di generare tu il codice?"}
+              {showAdvanceGen
+                ? "Nascondi opzioni avanzate"
+                : "Hai bisogno di generare tu il codice?"}
             </button>
           </div>
 
@@ -652,8 +659,8 @@ export function ConversationGatewayChannelsSection({
           {showAdvanceGen && (
             <div className="mt-3 pt-3 border-t border-[rgba(255,255,255,0.08)]">
               <p className="text-xs text-[#9db3ad] mb-2">
-                Se il tuo bot richiede che sia Homun a emettere il codice preventivo da comunicare in
-                chat, compilalo qui:
+                Se il tuo bot richiede che sia Homun a emettere il codice preventivo da comunicare
+                in chat, compilalo qui:
               </p>
               <form onSubmit={(e) => void handleGenerate(e)} className="flex items-center gap-2">
                 <input

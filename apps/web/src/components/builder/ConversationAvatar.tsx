@@ -7,7 +7,8 @@ export function ConversationAvatar({
   human?: boolean;
   large?: boolean;
 }) {
-  const color = name === "Marta" ? "peach" : name === "Vera" ? "lilac" : name === "Homun" ? "sage" : "mint";
+  const color =
+    name === "Marta" ? "peach" : name === "Vera" ? "lilac" : name === "Homun" ? "sage" : "mint";
   return (
     <span
       aria-hidden="true"

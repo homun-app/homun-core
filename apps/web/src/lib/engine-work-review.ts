@@ -30,6 +30,9 @@ export function reviewEngineWork(input: {
     actor: defaultLocalActor(),
   }).then((result) => ({
     status: String(result.result["status"] ?? ""),
-    version: typeof result.result["version"] === "number" ? result.result["version"] : input.expectedVersion,
+    version:
+      typeof result.result["version"] === "number"
+        ? result.result["version"]
+        : input.expectedVersion,
   }));
 }

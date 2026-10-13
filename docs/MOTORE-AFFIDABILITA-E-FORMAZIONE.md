@@ -1,9 +1,9 @@
 # Motore Homun: affidabilità, formazione e verifica
 
 > Riferimento di visione. Al 23/9 lo stato reale è in [STATO](STATO.md), i percorsi attuali nella [guida d’uso](USO-HOMUN.md). Autonomia estesa e collaborazione remota qui descritte non sono dichiarazioni di funzionalità già consegnate.
-Data: 16 settembre 2026.
-Stato: indirizzi di prodotto raccolti con Fabio; requisiti e proposte per il futuro motore.
-Non descrive capacità già implementate e non sceglie runtime, modelli o framework.
+> Data: 16 settembre 2026.
+> Stato: indirizzi di prodotto raccolti con Fabio; requisiti e proposte per il futuro motore.
+> Non descrive capacità già implementate e non sceglie runtime, modelli o framework.
 
 ## 1. Obiettivo da preservare
 
@@ -42,12 +42,14 @@ accessibili, destinatari e limiti. Preparare una bozza, modificarla in un sistem
 condiviso e inviarla all’esterno sono autorizzazioni diverse.
 
 Esempio illustrativo per lo stesso collaboratore:
+
 - ricercare nei documenti autorizzati: autonomo;
 - preparare un preventivo: risultato da verificare;
 - modificare prezzi nel gestionale: operazione da autorizzare;
 - inviare al cliente: conferma sempre richiesta.
 
 Livelli proposti, da validare nella UX:
+
 1. **In formazione:** propone il metodo e prepara una prova; le operazioni con
    effetti aziendali richiedono il controllo previsto. Le letture già autorizzate
    non devono generare una conferma per ogni click.
@@ -65,6 +67,7 @@ L’agente può tornare a chiedere aiuto quando il caso esce da ciò che sa gest
 ## 4. Contratto del lavoro e ciclo di controllo
 
 All’affidamento, conservare:
+
 - richiesta originale e risultato atteso;
 - criteri di accettazione, vincoli e scadenza eventuale;
 - contesto e fonti autorizzate;
@@ -81,6 +84,7 @@ Se il risultato non è verificabile, manca una fonte o il costo previsto supera
 il limite, espone l’eccezione e la decisione necessaria.
 
 Distinguere:
+
 - proposta di azione;
 - azione autorizzata;
 - azione eseguita;
@@ -98,6 +102,7 @@ di correttezza né sostituisce autorizzazioni umane richieste.
 che il modello aggiorni automaticamente i propri pesi.
 
 Per ogni esperienza utile, la proposta è registrare:
+
 - obiettivo e contesto, con provenienza e confini di accesso;
 - procedura/versione, strumenti e modello impiegati;
 - risultato e versione effettivamente valutati;
@@ -109,6 +114,7 @@ Possibili riusi: esempi approvati, istruzioni circoscritte, checklist, memoria d
 lavoro e nuove versioni di procedure. Fine-tuning e scelta dei meccanismi sono aperti.
 
 Il feedback va distinto in:
+
 - errore su questo caso;
 - preferenza personale o del cliente;
 - regola aziendale da riutilizzare.
@@ -128,6 +134,7 @@ rappresentativi prima di trattarle come affidabili.
 Un unico punto di revisione, con anteprime specializzate per formato.
 
 Presentazione principale proposta:
+
 1. cosa era stato richiesto;
 2. risultato da aprire, con autore/agente e versione;
 3. sintesi delle modifiche o del lavoro svolto;
@@ -138,15 +145,15 @@ Azioni essenziali: **Approva**, **Chiedi una modifica**, **Segnala un problema**
 Il feedback deve poter riferirsi al risultato intero o a una parte precisa.
 I dettagli tecnici e la cronologia completa restano espandibili.
 
-| Risultato | Vista utile |
-| --- | --- |
-| Documento o relazione | Anteprima leggibile, confronto versioni, commenti |
-| Codice | File modificati, diff e risultati dei controlli |
-| Immagine | Anteprima, confronto, annotazione su un’area |
-| Ricerca | Sintesi, fonti apribili, distinzione fatti/ipotesi |
-| Foglio o dati strutturati | Tabella, variazioni e controlli sui dati |
+| Risultato                 | Vista utile                                               |
+| ------------------------- | --------------------------------------------------------- |
+| Documento o relazione     | Anteprima leggibile, confronto versioni, commenti         |
+| Codice                    | File modificati, diff e risultati dei controlli           |
+| Immagine                  | Anteprima, confronto, annotazione su un’area              |
+| Ricerca                   | Sintesi, fonti apribili, distinzione fatti/ipotesi        |
+| Foglio o dati strutturati | Tabella, variazioni e controlli sui dati                  |
 | Azione su un’applicazione | Prima/dopo, oggetti modificati e ricevuta dell’operazione |
-| Formato non supportato | Metadati, download o apertura nell’app compatibile |
+| Formato non supportato    | Metadati, download o apertura nell’app compatibile        |
 
 La struttura può ospitare qualsiasi file; non si promette un’anteprima nativa di
 qualsiasi formato. Il fallback deve essere onesto e utilizzabile.

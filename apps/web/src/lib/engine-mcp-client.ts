@@ -66,9 +66,16 @@ const jsonHeaders = {
 };
 
 export async function listEngineServers(): Promise<ExternalServer[]> {
-  const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/servers`,
-    { method: "GET", headers: jsonHeaders });
-  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Server esterni non disponibili");
+  const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/servers`, {
+    method: "GET",
+    headers: jsonHeaders,
+  });
+  if (!response.ok)
+    throw homunErrorFromHttp(
+      response.status,
+      await response.json().catch(() => null),
+      "Server esterni non disponibili",
+    );
   return ((await response.json()) as { items: ExternalServer[] }).items ?? [];
 }
 
@@ -108,9 +115,12 @@ export async function removeEngineServer(serverId: string, expectedVersion: numb
 export async function probeEngineServer(serverId: string): Promise<ProbeResult> {
   const response = await mcpFetch(
     `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/servers/${encodeURIComponent(serverId)}/test`,
-    { method: "POST", headers: jsonHeaders });
+    { method: "POST", headers: jsonHeaders },
+  );
   if (!response.ok) {
-    const detail = (await response.json().catch(() => null)) as { detail?: { message?: string } } | null;
+    const detail = (await response.json().catch(() => null)) as {
+      detail?: { message?: string };
+    } | null;
     throw new Error(detail?.detail?.message ?? `Probe failed: HTTP ${response.status}`);
   }
   return (await response.json()) as ProbeResult;
@@ -119,18 +129,32 @@ export async function probeEngineServer(serverId: string): Promise<ProbeResult> 
 export async function listEngineSkills(includeArchived = false): Promise<Skill[]> {
   const response = await mcpFetch(
     `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/skills${includeArchived ? "?include_archived=true" : ""}`,
-    { method: "GET", headers: jsonHeaders });
-  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Catalogo skill non disponibile");
+    { method: "GET", headers: jsonHeaders },
+  );
+  if (!response.ok)
+    throw homunErrorFromHttp(
+      response.status,
+      await response.json().catch(() => null),
+      "Catalogo skill non disponibile",
+    );
   return ((await response.json()) as { items: Skill[] }).items ?? [];
 }
 
-export async function syncEngineSkills(input?: { path?: string; rebase?: boolean }): Promise<SkillSyncResult> {
+export async function syncEngineSkills(input?: {
+  path?: string;
+  rebase?: boolean;
+}): Promise<SkillSyncResult> {
   const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/skills/sync`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify({ path: input?.path ?? "", rebase: input?.rebase ?? false }),
   });
-  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Sincronizzazione skill non riuscita");
+  if (!response.ok)
+    throw homunErrorFromHttp(
+      response.status,
+      await response.json().catch(() => null),
+      "Sincronizzazione skill non riuscita",
+    );
   return (await response.json()) as SkillSyncResult;
 }
 
@@ -171,7 +195,16 @@ export async function skillEngineAction(input: {
 export type ExternalToolCall = {
   id: string;
   agent_run_id?: string;
-  status: "pending_approval" | "result_ready" | "running" | "completed" | "failed" | "publication_pending" | "outcome_unknown" | "tool_error" | "blocked";
+  status:
+    | "pending_approval"
+    | "result_ready"
+    | "running"
+    | "completed"
+    | "failed"
+    | "publication_pending"
+    | "outcome_unknown"
+    | "tool_error"
+    | "blocked";
   work_id: string;
   server_id: string;
   server_name: string;
@@ -205,22 +238,30 @@ export async function proposeEngineToolCall(input: {
     }),
   });
   if (!response.ok) {
-    const detail = (await response.json().catch(() => null)) as { detail?: { message?: string } } | null;
+    const detail = (await response.json().catch(() => null)) as {
+      detail?: { message?: string };
+    } | null;
     throw new Error(detail?.detail?.message ?? `Propose failed: HTTP ${response.status}`);
   }
   return (await response.json()) as ExternalToolCall;
 }
 
-export async function approveEngineToolCall(proposalId: string, digest: string): Promise<ExternalToolCall> {
+export async function approveEngineToolCall(
+  proposalId: string,
+  digest: string,
+): Promise<ExternalToolCall> {
   const response = await mcpFetch(
     `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/tools/${encodeURIComponent(proposalId)}/approve`,
     {
       method: "POST",
       headers: { ...jsonHeaders },
       body: JSON.stringify({ command_id: crypto.randomUUID(), digest }),
-    });
+    },
+  );
   if (!response.ok) {
-    const detail = (await response.json().catch(() => null)) as { detail?: { message?: string } } | null;
+    const detail = (await response.json().catch(() => null)) as {
+      detail?: { message?: string };
+    } | null;
     throw homunErrorFromHttp(response.status, detail, "Approvazione esterna non disponibile");
   }
   return (await response.json()) as ExternalToolCall;
@@ -229,8 +270,14 @@ export async function approveEngineToolCall(proposalId: string, digest: string):
 export async function listEngineToolCalls(workId: string): Promise<ExternalToolCall[]> {
   const response = await mcpFetch(
     `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/works/${encodeURIComponent(workId)}/mcp/tools`,
-    { method: "GET", headers: jsonHeaders });
-  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Azioni esterne non disponibili");
+    { method: "GET", headers: jsonHeaders },
+  );
+  if (!response.ok)
+    throw homunErrorFromHttp(
+      response.status,
+      await response.json().catch(() => null),
+      "Azioni esterne non disponibili",
+    );
   return ((await response.json()) as { items: ExternalToolCall[] }).items ?? [];
 }
 
@@ -249,8 +296,10 @@ export type CatalogEntry = {
 };
 
 export async function listEngineCatalog(): Promise<CatalogEntry[]> {
-  const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/catalog`,
-    { method: "GET", headers: jsonHeaders });
+  const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/catalog`, {
+    method: "GET",
+    headers: jsonHeaders,
+  });
   if (!response.ok) throw new Error(`Catalog failed: HTTP ${response.status}`);
   return ((await response.json()) as { items: CatalogEntry[] }).items ?? [];
 }
@@ -261,7 +310,10 @@ export async function declareCatalogEntry(input: {
 }): Promise<{ server_id: string }> {
   const args = [...input.entry.args_prefix];
   if (input.entry.needs_path && input.path?.trim()) {
-    if (input.entry.args_prefix.length > 0 && input.entry.args_prefix[input.entry.args_prefix.length - 1]?.startsWith("--")) {
+    if (
+      input.entry.args_prefix.length > 0 &&
+      input.entry.args_prefix[input.entry.args_prefix.length - 1]?.startsWith("--")
+    ) {
       args.push(input.path.trim());
     } else {
       args.push(input.path.trim());
@@ -277,17 +329,26 @@ export async function declareCatalogEntry(input: {
   });
 }
 
-
 export type ExternalDeliveryPreview = {
-  proposal_id: string; work_id: string; expected_version: number;
-  title: string; objective: string; text: string; digest: string; receipt_hash: string;
+  proposal_id: string;
+  work_id: string;
+  expected_version: number;
+  title: string;
+  objective: string;
+  text: string;
+  digest: string;
+  receipt_hash: string;
 };
 
 async function deliveryRequest(proposalId: string, body?: object) {
   const response = await mcpFetch(
     `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/tools/${encodeURIComponent(proposalId)}/delivery`,
-    { method: body ? "POST" : "GET", headers: jsonHeaders,
-      ...(body ? { body: JSON.stringify(body) } : {}) });
+    {
+      method: body ? "POST" : "GET",
+      headers: jsonHeaders,
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    },
+  );
   const result = await response.json();
   if (!response.ok) throw homunErrorFromHttp(response.status, result, "Consegna non disponibile");
   return result;
@@ -297,9 +358,14 @@ export function previewEngineToolDelivery(proposalId: string): Promise<ExternalD
   return deliveryRequest(proposalId);
 }
 
-export function approveEngineToolDelivery(preview: ExternalDeliveryPreview, commandId: string): Promise<ExternalToolCall> {
+export function approveEngineToolDelivery(
+  preview: ExternalDeliveryPreview,
+  commandId: string,
+): Promise<ExternalToolCall> {
   return deliveryRequest(preview.proposal_id, {
-    command_id: commandId, expected_version: preview.expected_version, digest: preview.digest,
+    command_id: commandId,
+    expected_version: preview.expected_version,
+    digest: preview.digest,
   });
 }
 
@@ -314,24 +380,43 @@ export type HostedConnector = {
 };
 
 export async function listEngineConnectors(): Promise<HostedConnector[]> {
-  const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/connectors`,
-    { method: "GET", headers: jsonHeaders });
-  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Catalogo connettori non disponibile");
+  const response = await mcpFetch(`/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/connectors`, {
+    method: "GET",
+    headers: jsonHeaders,
+  });
+  if (!response.ok)
+    throw homunErrorFromHttp(
+      response.status,
+      await response.json().catch(() => null),
+      "Catalogo connettori non disponibile",
+    );
   return ((await response.json()) as { items: HostedConnector[] }).items ?? [];
 }
 
 export async function installEngineConnector(name: string): Promise<{ server_id: string }> {
   const response = await mcpFetch(
     `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/connectors/${encodeURIComponent(name)}/install`,
-    { method: "POST", headers: jsonHeaders });
-  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Installazione connettore non riuscita");
+    { method: "POST", headers: jsonHeaders },
+  );
+  if (!response.ok)
+    throw homunErrorFromHttp(
+      response.status,
+      await response.json().catch(() => null),
+      "Installazione connettore non riuscita",
+    );
   return (await response.json()) as { server_id: string };
 }
 
 export async function startConnectorOAuth(serverId: string): Promise<{ authorize_url: string }> {
   const response = await mcpFetch(
     `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/mcp/connectors/${encodeURIComponent(serverId)}/oauth/start`,
-    { method: "POST", headers: jsonHeaders });
-  if (!response.ok) throw homunErrorFromHttp(response.status, await response.json().catch(() => null), "Avvio OAuth non riuscito");
+    { method: "POST", headers: jsonHeaders },
+  );
+  if (!response.ok)
+    throw homunErrorFromHttp(
+      response.status,
+      await response.json().catch(() => null),
+      "Avvio OAuth non riuscito",
+    );
   return (await response.json()) as { authorize_url: string };
 }

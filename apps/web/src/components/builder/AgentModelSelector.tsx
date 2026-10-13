@@ -1,19 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown, Search, Star, AlertCircle, X } from "lucide-react";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@homun/ui/components/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@homun/ui/components/popover";
 import {
   listModelProviders,
   listOllamaTags,
   type ModelProviderInfo,
 } from "@/lib/engine-models-client";
-import {
-  KNOWN_MODEL_PRESETS,
-  findModelPreset,
-} from "@/lib/known-model-presets";
+import { KNOWN_MODEL_PRESETS, findModelPreset } from "@/lib/known-model-presets";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import "./agent-model-selector.css";
 
@@ -38,9 +31,12 @@ type GroupedProviderModels = {
 function getModelCapabilityTag(model: string, kind: "cloud" | "local"): string {
   if (kind === "local") return "Locale";
   const m = model.toLowerCase();
-  if (m.includes("mini") || m.includes("flash") || m.includes("haiku") || m.includes("nano")) return "Veloce";
-  if (m.includes("o1") || m.includes("o3") || m.includes("r1") || m.includes("reasoning")) return "Ragionamento";
-  if (m.includes("opus") || m.includes("sonnet") || m.includes("gpt-4o") || m.includes("pro")) return "Avanzato";
+  if (m.includes("mini") || m.includes("flash") || m.includes("haiku") || m.includes("nano"))
+    return "Veloce";
+  if (m.includes("o1") || m.includes("o3") || m.includes("r1") || m.includes("reasoning"))
+    return "Ragionamento";
+  if (m.includes("opus") || m.includes("sonnet") || m.includes("gpt-4o") || m.includes("pro"))
+    return "Avanzato";
   return "Standard";
 }
 
@@ -172,7 +168,9 @@ export function AgentModelSelector({
 
     return activeProviders
       .map((group) => {
-        const provMatches = group.providerName.toLowerCase().includes(q) || group.providerId.toLowerCase().includes(q);
+        const provMatches =
+          group.providerName.toLowerCase().includes(q) ||
+          group.providerId.toLowerCase().includes(q);
         const matchingModels = provMatches
           ? group.models
           : group.models.filter((m) => m.toLowerCase().includes(q));
@@ -224,9 +222,12 @@ export function AgentModelSelector({
               <span className="truncate max-w-[130px]">
                 {currentSelectionLabel.isDefault
                   ? `Spazio (${spaceDefaultInfo.split("·")[0]?.trim() || "Default"})`
-                  : (currentSelectionLabel.modelId || currentSelectionLabel.title)}
+                  : currentSelectionLabel.modelId || currentSelectionLabel.title}
               </span>
-              <ChevronDown size={11} className={`cw-agent-model-chevron ${open ? "rotate-180" : ""}`} />
+              <ChevronDown
+                size={11}
+                className={`cw-agent-model-chevron ${open ? "rotate-180" : ""}`}
+              />
             </button>
           ) : (
             <button
@@ -263,7 +264,12 @@ export function AgentModelSelector({
           )}
         </PopoverTrigger>
 
-        <PopoverContent align="start" side={side} sideOffset={sideOffset} className="cw-agent-model-popover">
+        <PopoverContent
+          align="start"
+          side={side}
+          sideOffset={sideOffset}
+          className="cw-agent-model-popover"
+        >
           {/* Real-time search bar */}
           <div className="cw-agent-model-search">
             <Search size={14} />
@@ -302,9 +308,7 @@ export function AgentModelSelector({
                       <div className="cw-agent-model-item-name font-medium">
                         Quello dello spazio (predefinito)
                       </div>
-                      <div className="text-[11px] text-zinc-500">
-                        Attuale: {spaceDefaultInfo}
-                      </div>
+                      <div className="text-[11px] text-zinc-500">Attuale: {spaceDefaultInfo}</div>
                     </div>
                   </div>
                   {!value && <Check size={14} className="text-emerald-600 flex-shrink-0" />}
@@ -340,9 +344,7 @@ export function AgentModelSelector({
                           <span className="cw-agent-model-item-name font-mono text-[12px]">
                             {model}
                           </span>
-                          {isDef && (
-                            <span className="cw-agent-model-item-tag">predefinito</span>
-                          )}
+                          {isDef && <span className="cw-agent-model-item-tag">predefinito</span>}
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0">
                           <span className="cw-agent-model-item-tag">
@@ -369,7 +371,8 @@ export function AgentModelSelector({
                 <div>
                   <strong>Nessun provider attivo</strong>
                   <br />
-                  Configura una chiave API o avvia Ollama nella sezione Modelli &amp; Connessioni per assegnare modelli dedicati.
+                  Configura una chiave API o avvia Ollama nella sezione Modelli &amp; Connessioni
+                  per assegnare modelli dedicati.
                 </div>
               </div>
             )}
