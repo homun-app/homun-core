@@ -84,7 +84,7 @@ export function chatStatusNotices(state: ChatStatusState): ChatStatusNotice[] {
   }
   const notices: ChatStatusNotice[] = [];
   if (state.gateError != null) {
-    const actions: ChatStatusAction[] = [{ id: "refresh", label: "Riprova la connessione" }];
+    const actions: ChatStatusAction[] = [{ id: "refresh", label: "Riprova" }];
     if (state.canOpenModels) {
       actions.push({ id: "open-models", label: "Apri modelli" });
     }
@@ -93,9 +93,10 @@ export function chatStatusNotices(state: ChatStatusState): ChatStatusNotice[] {
       scope: "global",
       kind: "engine-unreachable",
       severity: "error",
-      text: "Homun (motore) non è raggiungibile su questo computer. I lavori restano sul percorso motore — non passiamo alla simulazione.",
+      text: "Homun non è raggiungibile su questo computer.",
       hint:
-        `Verifica che Homun sia avviato, poi riprova${state.canOpenModels ? " o controlla i modelli collegati" : ""}.` +
+        `Verifica che Homun sia avviato, poi riprova${state.canOpenModels ? " o controlla i modelli collegati" : ""}. ` +
+        "I lavori restano sul percorso motore: nessun passaggio alla simulazione." +
         (state.workCount === 0
           ? " La lista lavori resta vuota finché la connessione non torna."
           : ""),

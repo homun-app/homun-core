@@ -86,15 +86,15 @@ test("motore irraggiungibile: un solo avviso globale, stesse azioni e stesso err
   assert.equal(notice.scope, "global");
   assert.equal(notice.kind, "engine-unreachable");
   assert.equal(notice.severity, "error");
-  assert.match(notice.text, /Homun \(motore\) non è raggiungibile su questo computer/);
-  assert.match(notice.text, /non passiamo alla simulazione/);
+  assert.match(notice.text, /Homun non è raggiungibile su questo computer\./);
+  assert.match(notice.hint!, /nessun passaggio alla simulazione/);
   assert.match(
     notice.hint!,
     /Verifica che Homun sia avviato, poi riprova o controlla i modelli collegati\./,
   );
   assert.equal(notice.error, gateError);
   assert.deepEqual(notice.actions, [
-    { id: "refresh", label: "Riprova la connessione" },
+    { id: "refresh", label: "Riprova" },
     { id: "open-models", label: "Apri modelli" },
   ]);
   // mai l'etichetta di simulazione mentre si è sul percorso motore
@@ -115,7 +115,7 @@ test("motore irraggiungibile senza modelli configurabili e lista vuota: azione e
     workCount: 0,
   });
   const notice = notices[0]!;
-  assert.deepEqual(notice.actions, [{ id: "refresh", label: "Riprova la connessione" }]);
+  assert.deepEqual(notice.actions, [{ id: "refresh", label: "Riprova" }]);
   assert.match(notice.hint!, /Verifica che Homun sia avviato, poi riprova\./);
   assert.match(notice.hint!, /La lista lavori resta vuota finché la connessione non torna\./);
 });
@@ -290,7 +290,7 @@ test("avviso singolo: ruolo alert per gli errori, status per il resto", async ()
     })[0];
     const alert = ui.render({ notice: failing, onAction: () => {}, busy: false });
     assert.match(alert, /role="alert"/);
-    assert.match(alert, /Riprova la connessione/);
+    assert.match(alert, /Riprova/);
     assert.match(alert, /Apri modelli/);
     assert.match(alert, /Verifica che Homun sia avviato/);
     // errore tipizzato ripreso da HomunErrorNotice, con la sua classe dedicata
@@ -298,7 +298,7 @@ test("avviso singolo: ruolo alert per gli errori, status per il resto", async ()
     assert.match(alert, /role="alert"/);
 
     const busy = ui.render({ notice: failing, onAction: () => {}, busy: true });
-    assert.match(busy, /Riprova la connessione<\/button>/);
+    assert.match(busy, /Riprova<\/button>/);
     assert.match(busy, /disabled=""/);
   } finally {
     await ui.close();
@@ -324,7 +324,7 @@ test("slot sopra il composer: avvisi globali ed esito breve «Connessione ripris
       onAction: () => {},
     });
     assert.match(offline, /non è raggiungibile/);
-    assert.match(offline, /Riprova la connessione/);
+    assert.match(offline, /Riprova/);
 
     const restored = ui.render({ notices: [], resolved: true });
     assert.match(restored, /Connessione ripristinata/);
@@ -414,7 +414,7 @@ test("stage motore: avvisi nel thread e nel composer, non tra i messaggi del run
     // globale sopra il campo di scrittura, con le due azioni
     assert.match(out, /data-chat-status-slot="composer"/);
     assert.match(out, /non è raggiungibile/);
-    assert.match(out, /Riprova la connessione/);
+    assert.match(out, /Riprova/);
     assert.match(out, /Apri modelli/);
     // il campo di scrittura dichiara il motivo: disabilitato con il testo conservato
     assert.match(out, /<textarea[^>]* disabled=""/);

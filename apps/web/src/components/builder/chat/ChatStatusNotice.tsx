@@ -1,8 +1,10 @@
 /**
  * Un avviso di stato del motore disegnato come messaggio di sistema:
- * centrato, discreto, né bolla di Homun né della persona. Gli errori
- * tipizzati ripassano da `HomunErrorNotice`; gli stati parlano con
- * role="status", gli errori bloccanti con role="alert".
+ * compatto — una riga principale, il motivo in piccolo e grigio, azioni in
+ * linea larghe quanto il loro testo. La gravità parla su un solo elemento
+ * (la barra a sinistra), non sul testo. Gli errori tipizzati ripassano da
+ * `HomunErrorNotice`; gli stati parlano con role="status", gli errori
+ * bloccanti con role="alert".
  */
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import type { ChatStatusActionId, ChatStatusNotice } from "@/lib/chat-status-notices";
@@ -21,26 +23,28 @@ export function ChatStatusNotice({ notice, onAction, busy = false }: Props) {
       data-chat-status={notice.kind}
       role={notice.severity === "error" ? "alert" : "status"}
     >
-      <p>{notice.text}</p>
-      {notice.hint && <p className="cw-chat-status__hint">{notice.hint}</p>}
-      {notice.error != null && (
-        <HomunErrorNotice error={notice.error} className="cw-chat-status__error" />
-      )}
-      {notice.actions && notice.actions.length > 0 && (
-        <div className="cw-chat-status__row">
-          {notice.actions.map((action) => (
-            <button
-              key={action.id}
-              type="button"
-              className="cw-secondary"
-              disabled={busy && action.id === "refresh"}
-              onClick={() => onAction?.(action.id)}
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="cw-chat-status__body">
+        <p>{notice.text}</p>
+        {notice.hint && <p className="cw-chat-status__hint">{notice.hint}</p>}
+        {notice.error != null && (
+          <HomunErrorNotice error={notice.error} className="cw-chat-status__error" />
+        )}
+        {notice.actions && notice.actions.length > 0 && (
+          <div className="cw-chat-status__row">
+            {notice.actions.map((action) => (
+              <button
+                key={action.id}
+                type="button"
+                className="cw-chat-status__action"
+                disabled={busy && action.id === "refresh"}
+                onClick={() => onAction?.(action.id)}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
