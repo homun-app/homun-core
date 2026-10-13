@@ -38,15 +38,7 @@ import { useWorkIntake, type WorkIntakeState } from "./useWorkIntake";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import type { EngineTeam } from "@/lib/engine-projects-client";
 import { renameEngineWork } from "@/lib/engine-work-naming";
-import {
-  closeEngineWork,
-  reviseEnginePlan,
-  setEngineWorkBudget,
-  setEngineWorkDue,
-  setEngineWorkProject,
-  startEngineWork,
-  submitEngineArtifact,
-} from "@/lib/engine-work-lifecycle";
+import { closeEngineWork, reviseEnginePlan, setEngineWorkBudget, setEngineWorkDue, setEngineWorkProject, startEngineWork, submitEngineArtifact } from "@/lib/engine-work-lifecycle";
 import {
   createEngineRoutine,
   routineEngineAction,
@@ -61,10 +53,7 @@ import { confirmWorkIntake, proposeWorkIntake } from "@/lib/engine-intake-client
 import { approveAgentRun, prepareAgentRun } from "@/lib/engine-agent-run-client";
 import type { AutonomyLevel } from "@/components/builder/conversation-preferences";
 import { applyIntakePreview } from "@/lib/engine-intake-display";
-import {
-  routeEngineFirstMessage,
-  type FirstMessageRoute,
-} from "@/lib/engine-first-message-routing";
+import { routeEngineFirstMessage, type FirstMessageRoute } from "@/lib/engine-first-message-routing";
 export type EngineWorkspaceState = {
   dataSource: EngineDataSource;
   backend: "simulation" | "engine";
@@ -88,48 +77,15 @@ export type EngineWorkspaceState = {
   setWorkBudget: (work: Work, modelAttempts: number) => Promise<void>;
   setDue: (work: Work, dueDate: string | null) => Promise<void>;
   setProject: (work: Work, projectId: string | null) => Promise<void>;
-  createRoutine: (input: {
-    name: string;
-    cron: string;
-    conversationId: string;
-    template: EngineRoutine["template"];
-  }) => Promise<void>;
+  createRoutine: (input: { name: string; cron: string; conversationId: string; template: EngineRoutine["template"] }) => Promise<void>;
   createRoutineFromWork: (workId: string, input: { name: string; cron: string }) => Promise<void>;
   /** Completed engine works with a roster-agent plan; undefined when the API would reject. */
-  routineCreatorFor: (
-    work: Work,
-  ) => ((input: { name: string; cron: string }) => Promise<void>) | undefined;
-  routineAction: (
-    routineId: string,
-    action: "pause" | "resume" | "stop" | "skip_next",
-    expectedVersion: number,
-  ) => Promise<void>;
-  updateRoutine: (
-    routineId: string,
-    expectedVersion: number,
-    changes: { name?: string; cron?: string },
-  ) => Promise<void>;
-  revisePlan: (
-    work: Work,
-    action: {
-      insertAfterStepId?: string | null;
-      newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string };
-      removeStepId?: string;
-    },
-  ) => Promise<void>;
-  createWork: (
-    title: string,
-    objective: string,
-    draftOnly?: boolean,
-    projectId?: string,
-  ) => Promise<Work | null>;
-  postMessage: (
-    work: Work,
-    text: string,
-    attachments?: File[],
-    autonomyLevel?: AutonomyLevel,
-    modelConnectionId?: string,
-  ) => Promise<void>;
+  routineCreatorFor: (work: Work) => ((input: { name: string; cron: string }) => Promise<void>) | undefined;
+  routineAction: (routineId: string, action: "pause" | "resume" | "stop" | "skip_next", expectedVersion: number) => Promise<void>;
+  updateRoutine: (routineId: string, expectedVersion: number, changes: { name?: string; cron?: string }) => Promise<void>;
+  revisePlan: (work: Work, action: { insertAfterStepId?: string | null; newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string }; removeStepId?: string }) => Promise<void>;
+  createWork: (title: string, objective: string, draftOnly?: boolean, projectId?: string) => Promise<Work | null>;
+  postMessage: (work: Work, text: string, attachments?: File[], autonomyLevel?: AutonomyLevel, modelConnectionId?: string) => Promise<void>;
   confirmPatch: (work: Work, messageIndex: number) => Promise<void>;
   discardPatch: (work: Work, messageIndex: number) => void;
   applyObjectivePatch: (work: Work, nextObjective: string) => Promise<void>;
@@ -160,16 +116,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
   const gateError = mode.gateError;
   const engineReady = mode.engineReady;
 
-  const {
-    rawWorks,
-    projects,
-    agents,
-    teams,
-    routines,
-    followups,
-    loaded,
-    refresh: refreshSnapshot,
-  } = useEngineWorkspaceSnapshot(engineReady, () => setMessageOverlay({}), setError);
+  const {rawWorks, projects, agents, teams, routines, followups, loaded, refresh: refreshSnapshot} = useEngineWorkspaceSnapshot(engineReady, () => setMessageOverlay({}), setError);
 
   // Explicit transcript reloads: actions that may have persisted messages bump
   // the sequence; a plain inventory refresh re-render never interrupts reading.
@@ -179,33 +126,16 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     bumpTranscriptSeq();
   }, [refreshSnapshot]);
 
-  const { history: transcript, loading: historyLoading } = useEngineTranscript(
-    engineReady,
-    activeWorkId,
-    rawWorks,
-    messageOverlay,
-    setMessageOverlay,
-    setError,
-    transcriptSeq,
-  );
+  const {history: transcript, loading: historyLoading} = useEngineTranscript(engineReady, activeWorkId, rawWorks, messageOverlay, setMessageOverlay, setError, transcriptSeq);
 
   const baseWorks = useMemo(
     () =>
       rawWorks.map((raw) => {
         const record = parseEngineWorkRecord(raw);
-        const mapped = engineWorkToUiWork(
-          record,
-          currentTranscriptActions(
-            messageOverlay[record.id] ??
-              (record.id === activeWorkId
-                ? transcript?.workId === record.id
-                  ? transcript.messages
-                  : []
-                : []),
-            record.version,
-          ),
-        );
-        const owner = agents.find((agent) => agent.id === raw["owner_id"]);
+        const mapped = engineWorkToUiWork(record, currentTranscriptActions(messageOverlay[record.id] ?? (record.id === activeWorkId
+          ? transcript?.workId === record.id ? transcript.messages : []
+          : []), record.version));
+        const owner = agents.find(agent => agent.id === raw["owner_id"]);
         if (owner) mapped.engineOwnerName = owner.name;
         // i followup viaggiano con il lavoro: la barra laterale li indica
         // senza una nuova catena di prop dallo shell
@@ -227,9 +157,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
   // Single owner of the active work's brief: the chat card, the right panel
   // and the works projection below all read this instance.
   const [intakeSeq, bumpIntakeSeq] = useReducer((count: number) => count + 1, 0);
-  const activeBaseWork = activeWorkId
-    ? (baseWorks.find((w) => w.id === activeWorkId) ?? null)
-    : null;
+  const activeBaseWork = activeWorkId ? baseWorks.find((w) => w.id === activeWorkId) ?? null : null;
   const intake = useWorkIntake(backend === "engine" ? activeBaseWork : null, refresh, intakeSeq);
 
   // While a brief awaits confirmation its proposal drives what the person
@@ -262,12 +190,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     setBusy(false);
   }
 
-  async function createWork(
-    _title: string,
-    objective: string,
-    draftOnly = false,
-    projectId?: string,
-  ): Promise<Work | null> {
+  async function createWork(_title: string, objective: string, draftOnly = false, projectId?: string): Promise<Work | null> {
     if (backend !== "engine" || !engineReady) return null;
     const signal = beginRequest();
     try {
@@ -291,18 +214,10 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     } catch (cause) {
       if (!(isHomunClientError(cause) && cause.code === "request_cancelled")) setError(cause);
       return null;
-    } finally {
-      endRequest(signal);
-    }
+    } finally { endRequest(signal); }
   }
 
-  async function postMessage(
-    work: Work,
-    text: string,
-    attachments?: File[],
-    autonomyLevel?: AutonomyLevel,
-    modelConnectionId?: string,
-  ): Promise<void> {
+  async function postMessage(work: Work, text: string, attachments?: File[], autonomyLevel?: AutonomyLevel, modelConnectionId?: string): Promise<void> {
     if (backend !== "engine" || work.source !== "engine" || !work.engineConversationId) {
       throw new Error("postMessage requires an engine-backed work");
     }
@@ -362,7 +277,12 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
             signal,
             routed.language,
           );
-          await confirmWorkIntake(work.id, intake, crypto.randomUUID(), Boolean(intake.new_agent));
+          await confirmWorkIntake(
+            work.id,
+            intake,
+            crypto.randomUUID(),
+            Boolean(intake.new_agent),
+          );
           bumpIntakeSeq();
           await refresh();
 
@@ -415,14 +335,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
               : message,
           ),
         }));
-        await proposeWorkIntake(
-          work.id,
-          effectiveText,
-          work.revision,
-          crypto.randomUUID(),
-          signal,
-          routed.language,
-        );
+        await proposeWorkIntake(work.id, effectiveText, work.revision, crypto.randomUUID(), signal, routed.language);
         bumpIntakeSeq();
         await refresh();
         // The request is durable (the engine posts it before synthesis) and
@@ -447,10 +360,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
           streamed += chunk;
           const live = streamed;
           setMessageOverlay((current) => {
-            const base = current[work.id] ?? [
-              ...prior,
-              { who: "you" as const, sender: "Fabio", text },
-            ];
+            const base = current[work.id] ?? [...prior, { who: "you" as const, sender: "Fabio", text }];
             const withoutPartial = base.filter((m) => !(m.who === "agent" && m.partial));
             return {
               ...current,
@@ -622,12 +532,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     const text = message.text.trim().slice(0, 20000);
     if (!text) return;
     const title = text.split("\n")[0]!.slice(0, 60) || "Procedura";
-    await createEngineSkill({
-      name: title,
-      description: title.slice(0, 60),
-      body: text,
-      authorType: "agent",
-    });
+    await createEngineSkill({ name: title, description: title.slice(0, 60), body: text, authorType: "agent" });
   }
 
   async function saveMemoryFromMessage(work: Work, messageIndex: number): Promise<void> {
@@ -699,7 +604,8 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
         actor,
       });
       const label =
-        text.trim() || `Contributo: ${[...files.map((f) => f.name), ...ingestedIds].join(", ")}`;
+        text.trim() ||
+        `Contributo: ${[...files.map((f) => f.name), ...ingestedIds].join(", ")}`;
       setMessageOverlay((current) => {
         const list = [...(current[work.id] ?? work.messages)];
         list.push(
@@ -732,28 +638,15 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     busy,
     works,
     intake,
-    projects,
-    agents,
-    teams,
-    routines,
+    projects, agents, teams, routines,
     refresh,
-    renameWork: async (work, title) => {
-      await renameEngineWork(work.id, title, work.revision);
-      await refresh();
-    },
-    closeWork: async (work) => {
-      await closeEngineWork(work.id, work.revision);
-      await refresh();
-    },
-    startWork: async (work) => {
-      await startEngineWork(work.id, work.revision);
-      await refresh();
-    },
+    renameWork: async (work, title) => { await renameEngineWork(work.id, title, work.revision); await refresh(); },
+    closeWork: async (work) => { await closeEngineWork(work.id, work.revision); await refresh(); },
+    startWork: async (work) => { await startEngineWork(work.id, work.revision); await refresh(); },
     submitArtifact: async (work, title, content) => {
       let version = work.revision;
       // The final human phase starts by being delivered: READY → RUNNING → REVIEW.
-      if (work.engineStatus === "ready")
-        version = (await startEngineWork(work.id, version)).version;
+      if (work.engineStatus === "ready") version = (await startEngineWork(work.id, version)).version;
       await submitEngineArtifact(work.id, version, title, content);
       await refresh();
     },

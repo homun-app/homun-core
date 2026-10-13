@@ -50,9 +50,7 @@ export function ChannelQrModal({
   const [error, setError] = useState<string | null>(null);
   const [deepLink, setDeepLink] = useState<string | null>(null);
   const [pairingId, setPairingId] = useState<string | null>(null);
-  const [onboardingPhase, setOnboardingPhase] = useState<"idle" | "waiting" | "ready" | "applied">(
-    "idle",
-  );
+  const [onboardingPhase, setOnboardingPhase] = useState<"idle" | "waiting" | "ready" | "applied">("idle");
   const [botUsername, setBotUsername] = useState<string | null>(null);
   const [ownerUserId, setOwnerUserId] = useState<string | null>(null);
   const [tokenInput, setTokenInput] = useState("");
@@ -165,9 +163,7 @@ export function ChannelQrModal({
               const match = res.message.match(/@([A-Za-z0-9_]+)/);
               const uname = match ? match[1] : null;
               setBotUsername(uname ?? null);
-              const link = uname
-                ? `https://t.me/${uname}?start=homun_pair`
-                : "https://t.me/BotFather";
+              const link = uname ? `https://t.me/${uname}?start=homun_pair` : "https://t.me/BotFather";
               setDeepLink(link);
               const qr = await generateQr(link);
               setQrDataUrl(qr);
@@ -202,13 +198,7 @@ export function ChannelQrModal({
   // Poll for onboarding readiness (Telegram gateway QR / WhatsApp bridge)
   useEffect(() => {
     const supportsPolling = channelId === "telegram" || channelId === "whatsapp";
-    if (
-      !isOpen ||
-      !supportsPolling ||
-      activeTab !== "quick_qr" ||
-      onboardingPhase !== "waiting" ||
-      !pairingId
-    ) {
+    if (!isOpen || !supportsPolling || activeTab !== "quick_qr" || onboardingPhase !== "waiting" || !pairingId) {
       return;
     }
 
@@ -231,8 +221,7 @@ export function ChannelQrModal({
                 await onSaveTokenAndFields(applied.fields || { ...currentFields });
               }
             } catch (applyErr: unknown) {
-              if (isMounted)
-                setError(applyErr instanceof Error ? applyErr.message : String(applyErr));
+              if (isMounted) setError(applyErr instanceof Error ? applyErr.message : String(applyErr));
             }
             return;
           }
@@ -282,8 +271,7 @@ export function ChannelQrModal({
               await onSaveTokenAndFields(fieldsToSave);
             }
           } catch (applyErr: unknown) {
-            if (isMounted)
-              setError(applyErr instanceof Error ? applyErr.message : String(applyErr));
+            if (isMounted) setError(applyErr instanceof Error ? applyErr.message : String(applyErr));
           }
           return;
         }
@@ -310,16 +298,7 @@ export function ChannelQrModal({
       isMounted = false;
       if (timer) window.clearTimeout(timer);
     };
-  }, [
-    isOpen,
-    channelId,
-    activeTab,
-    onboardingPhase,
-    pairingId,
-    currentFields,
-    onSaveTokenAndFields,
-    qrDataUrl,
-  ]);
+  }, [isOpen, channelId, activeTab, onboardingPhase, pairingId, currentFields, onSaveTokenAndFields, qrDataUrl]);
 
   // Handle manual token submission (Official Homun Bot flow)
   async function handleApplyCustomToken(e: React.FormEvent) {
@@ -425,8 +404,7 @@ export function ChannelQrModal({
             {onboardingPhase !== "applied" ? (
               <>
                 <p className="msg-modal-desc">
-                  Crea un bot autentico con nome <strong>Homun</strong> e il tuo username dedicato.
-                  Sarà di tua esclusiva proprietà su Telegram senza intermediari.
+                  Crea un bot autentico con nome <strong>Homun</strong> e il tuo username dedicato. Sarà di tua esclusiva proprietà su Telegram senza intermediari.
                 </p>
 
                 <a
@@ -443,26 +421,15 @@ export function ChannelQrModal({
                 <div className="msg-steps-card">
                   <div className="msg-step-item">
                     <span className="msg-step-num">1</span>
-                    <span>
-                      Assegna il nome che desideri (es. <strong>Homun</strong> o{" "}
-                      <strong>Mio Agente Homun</strong>).
-                    </span>
+                    <span>Assegna il nome che desideri (es. <strong>Homun</strong> o <strong>Mio Agente Homun</strong>).</span>
                   </div>
                   <div className="msg-step-item">
                     <span className="msg-step-num">2</span>
-                    <span>
-                      Scegli uno username unico che finisca con <code>bot</code> (es.{" "}
-                      <strong>
-                        <code>fabio_homun_bot</code>
-                      </strong>
-                      ).
-                    </span>
+                    <span>Scegli uno username unico che finisca con <code>bot</code> (es. <strong><code>fabio_homun_bot</code></strong>).</span>
                   </div>
                   <div className="msg-step-item">
                     <span className="msg-step-num">3</span>
-                    <span>
-                      Copia il token HTTP API che ti restituisce BotFather e incollalo qui:
-                    </span>
+                    <span>Copia il token HTTP API che ti restituisce BotFather e incollalo qui:</span>
                   </div>
                 </div>
 
@@ -497,15 +464,7 @@ export function ChannelQrModal({
               </>
             ) : (
               /* Already connected Bot Homun */
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                  alignItems: "center",
-                  width: "100%",
-                }}
-              >
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center", width: "100%" }}>
                 {qrDataUrl && (
                   <div className="msg-modal-qr-box">
                     <img src={qrDataUrl} alt="QR Bot Homun" className="msg-modal-qr-img" />
@@ -518,8 +477,7 @@ export function ChannelQrModal({
                   </span>
                 </div>
                 <p className="msg-modal-desc">
-                  Inquadra il codice QR con lo smartphone per iniziare subito a chattare con il tuo
-                  bot Homun su Telegram!
+                  Inquadra il codice QR con lo smartphone per iniziare subito a chattare con il tuo bot Homun su Telegram!
                 </p>
                 {deepLink && (
                   <a
@@ -540,25 +498,19 @@ export function ChannelQrModal({
 
         {/* TAB 2: Quick Gateway QR Onboarding */}
         {channelId === "telegram" && activeTab === "quick_qr" && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-              alignItems: "center",
-              width: "100%",
-            }}
-          >
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center", width: "100%" }}>
             <div className="msg-modal-qr-box">
               {loading ? (
                 <div className="msg-modal-qr-loading">
                   <Loader2 size={32} className="animate-spin text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">
-                    Inizializzazione bot Gateway…
-                  </span>
+                  <span className="text-xs text-muted-foreground">Inizializzazione bot Gateway…</span>
                 </div>
               ) : qrDataUrl ? (
-                <img src={qrDataUrl} alt={`QR Code ${channelName}`} className="msg-modal-qr-img" />
+                <img
+                  src={qrDataUrl}
+                  alt={`QR Code ${channelName}`}
+                  className="msg-modal-qr-img"
+                />
               ) : (
                 <div className="msg-modal-qr-loading">
                   <AlertCircle size={28} className="text-destructive" />
@@ -568,51 +520,19 @@ export function ChannelQrModal({
             </div>
 
             {onboardingPhase === "waiting" && (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 6,
-                  alignItems: "center",
-                  width: "100%",
-                }}
-              >
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontSize: 12,
-                    color: "#2563eb",
-                    background: "rgba(37,99,235,0.08)",
-                    padding: "4px 10px",
-                    borderRadius: 12,
-                    fontWeight: 500,
-                  }}
-                >
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center", width: "100%" }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#2563eb", background: "rgba(37,99,235,0.08)", padding: "4px 10px", borderRadius: 12, fontWeight: 500 }}>
                   <Loader2 size={12} className="animate-spin" />
-                  <span>
-                    In attesa che tu prema <strong>Avvia</strong> su Telegram…
-                  </span>
+                  <span>In attesa che tu prema <strong>Avvia</strong> su Telegram…</span>
                 </div>
                 <p className="msg-modal-desc" style={{ fontSize: 11.5 }}>
-                  Genera una sessione gateway cloud di test. Su Telegram si aprirà il bot gestore
-                  Nous per assegnare il bot di prova. Per avere un bot ufficiale con nome Homun e
-                  username personalizzato, usa la scheda <strong>Bot Ufficiale Homun</strong>.
+                  Genera una sessione gateway cloud di test. Su Telegram si aprirà il bot gestore Nous per assegnare il bot di prova. Per avere un bot ufficiale con nome Homun e username personalizzato, usa la scheda <strong>Bot Ufficiale Homun</strong>.
                 </p>
               </div>
             )}
 
             {(onboardingPhase === "ready" || onboardingPhase === "applied") && (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 8,
-                  alignItems: "center",
-                  width: "100%",
-                }}
-              >
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center", width: "100%" }}>
                 <div className="msg-modal-bot-badge" style={{ width: "100%" }}>
                   <Check size={16} className="text-emerald-600" />
                   <span>
@@ -631,22 +551,12 @@ export function ChannelQrModal({
 
         {/* WhatsApp bridge pairing */}
         {channelId === "whatsapp" && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-              alignItems: "center",
-              width: "100%",
-            }}
-          >
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center", width: "100%" }}>
             <div className="msg-modal-qr-box">
               {loading ? (
                 <div className="msg-modal-qr-loading">
                   <Loader2 size={32} className="animate-spin text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">
-                    Connessione al bridge WhatsApp…
-                  </span>
+                  <span className="text-xs text-muted-foreground">Connessione al bridge WhatsApp…</span>
                 </div>
               ) : qrDataUrl ? (
                 <img src={qrDataUrl} alt="QR WhatsApp" className="msg-modal-qr-img" />
@@ -659,52 +569,19 @@ export function ChannelQrModal({
             </div>
 
             {onboardingPhase === "waiting" && (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 6,
-                  alignItems: "center",
-                  width: "100%",
-                }}
-              >
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontSize: 12,
-                    color: "#059669",
-                    background: "rgba(5,150,105,0.08)",
-                    padding: "4px 10px",
-                    borderRadius: 12,
-                    fontWeight: 500,
-                  }}
-                >
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center", width: "100%" }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#059669", background: "rgba(5,150,105,0.08)", padding: "4px 10px", borderRadius: 12, fontWeight: 500 }}>
                   <Loader2 size={12} className="animate-spin" />
                   <span>In attesa della scansione da WhatsApp…</span>
                 </div>
                 <p className="msg-modal-desc" style={{ fontSize: 11.5 }}>
-                  Sul telefono:{" "}
-                  <strong>
-                    WhatsApp → Impostazioni → Dispositivi collegati → Collega un dispositivo
-                  </strong>{" "}
-                  e inquadra questo codice. La sessione resta collegata; il numero autorizzato di
-                  default è il tuo.
+                  Sul telefono: <strong>WhatsApp → Impostazioni → Dispositivi collegati → Collega un dispositivo</strong> e inquadra questo codice. La sessione resta collegata; il numero autorizzato di default è il tuo.
                 </p>
               </div>
             )}
 
             {(onboardingPhase === "ready" || onboardingPhase === "applied") && (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 8,
-                  alignItems: "center",
-                  width: "100%",
-                }}
-              >
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center", width: "100%" }}>
                 <div className="msg-modal-bot-badge" style={{ width: "100%" }}>
                   <Check size={16} className="text-emerald-600" />
                   <span>WhatsApp collegato</span>
@@ -721,15 +598,7 @@ export function ChannelQrModal({
 
         {/* Other non-Telegram channels */}
         {channelId !== "telegram" && channelId !== "whatsapp" && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-              alignItems: "center",
-              width: "100%",
-            }}
-          >
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center", width: "100%" }}>
             <div className="msg-modal-qr-box">
               {loading ? (
                 <div className="msg-modal-qr-loading">
@@ -737,7 +606,11 @@ export function ChannelQrModal({
                   <span className="text-xs text-muted-foreground">Caricamento…</span>
                 </div>
               ) : qrDataUrl ? (
-                <img src={qrDataUrl} alt={`QR Code ${channelName}`} className="msg-modal-qr-img" />
+                <img
+                  src={qrDataUrl}
+                  alt={`QR Code ${channelName}`}
+                  className="msg-modal-qr-img"
+                />
               ) : (
                 <div className="msg-modal-qr-loading">
                   <AlertCircle size={28} className="text-destructive" />
@@ -773,19 +646,17 @@ export function ChannelQrModal({
             </a>
           )}
 
-          {channelId === "telegram" &&
-            activeTab === "quick_qr" &&
-            onboardingPhase !== "applied" && (
-              <button
-                type="button"
-                className="msg-test-btn"
-                onClick={initTelegramOnboarding}
-                title="Crea nuovo QR"
-              >
-                <RefreshCw size={13} />
-                <span>Rigenera</span>
-              </button>
-            )}
+          {channelId === "telegram" && activeTab === "quick_qr" && onboardingPhase !== "applied" && (
+            <button
+              type="button"
+              className="msg-test-btn"
+              onClick={initTelegramOnboarding}
+              title="Crea nuovo QR"
+            >
+              <RefreshCw size={13} />
+              <span>Rigenera</span>
+            </button>
+          )}
 
           {channelId === "whatsapp" && onboardingPhase !== "applied" && (
             <button
@@ -799,7 +670,11 @@ export function ChannelQrModal({
             </button>
           )}
 
-          <button type="button" className="msg-save-btn" onClick={onClose}>
+          <button
+            type="button"
+            className="msg-save-btn"
+            onClick={onClose}
+          >
             {onboardingPhase === "applied" ? "Fatto" : "Chiudi"}
           </button>
         </div>
