@@ -11,7 +11,7 @@ import {
   planTranscriptLoad,
   type TranscriptView,
 } from "@/lib/engine-transcript-lifecycle";
-import { isHomunClientError } from "@/lib/homun-errors";
+import { isEngineConnectionLoss } from "@/lib/engine-read-retention";
 
 type Overlay = Record<string, ConversationMessage[]>;
 export function useEngineTranscript(
@@ -99,7 +99,7 @@ export function useEngineTranscript(
         // La caduta della connessione conserva il thread già consegnato
         // (l'avviso la racconta); le letture negate o non valide continuano
         // a non lasciare in pagina ciò che era visibile, come prima.
-        if (isHomunClientError(cause) && cause.code === "engine_unavailable") {
+        if (isEngineConnectionLoss(cause)) {
           onError(cause);
           return;
         }
