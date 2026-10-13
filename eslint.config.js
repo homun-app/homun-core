@@ -52,7 +52,11 @@ export default tseslint.config(
           ],
         },
       ],
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      // Le due regole d'avviso sono errori: il debito esistente sta nelle
+      // bulk suppressions (eslint-suppressions.json) e ogni violazione NUOVA
+      // fa fallire eslint . (le soppressioni si applicano solo agli errori).
+      "react-hooks/exhaustive-deps": "error",
+      "react-refresh/only-export-components": ["error", { allowConstantExport: true }],
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
