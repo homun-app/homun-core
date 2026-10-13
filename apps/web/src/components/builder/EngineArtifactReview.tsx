@@ -51,7 +51,9 @@ export function EngineArtifactReview({
         el.select();
         document.execCommand("copy");
         document.body.removeChild(el);
-      } catch {}
+      } catch {
+        // copia legacy non disponibile: il testo resta selezionabile a mano
+      }
     }
   }, [artifact?.content]);
 

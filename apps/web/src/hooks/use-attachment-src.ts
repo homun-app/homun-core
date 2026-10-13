@@ -12,7 +12,6 @@ const useFileSrc = (file: File | undefined) => {
     // commit, so allocation, revocation, and clearing the entry that names a
     // revoked URL all belong to the effect.
     if (!file) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEntry(undefined);
       return;
     }

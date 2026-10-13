@@ -163,7 +163,7 @@ function FileIconDisplay({ mimeType, className, children, ...props }: FileIconDi
       className={cn("text-muted-foreground shrink-0", className)}
       {...props}
     >
-      {/* eslint-disable-next-line react-hooks/static-components -- The helper only selects module-level icon components. */}
+      {/* getMimeTypeIcon seleziona solo componenti icona definiti a livello di modulo. */}
       {children ?? <IconComponent className="size-5" />}
     </span>
   );

@@ -82,9 +82,13 @@ const defaultFilenameFromImage = (image: string): string => {
     let basename = encodedBasename;
     try {
       basename = decodeURIComponent(encodedBasename);
-    } catch {}
+    } catch {
+      // nome codificato non valido: resta quello estratto dall'URL
+    }
     if (/\.(png|jpe?g|webp|gif|svg)$/i.test(basename)) return basename;
-  } catch {}
+  } catch {
+    // URL non interpretabile: sotto c'è il nome di ripiego
+  }
   return "image.png";
 };
 
@@ -496,6 +500,7 @@ function RegenerateButton({ onRegenerate }: { onRegenerate: () => void | Promise
         try {
           await onRegenerate();
         } catch {
+          // la rigenerazione fallita si lascia all'esito mostrato dal thread
         } finally {
           setIsRegenerating(false);
         }

@@ -247,7 +247,9 @@ const formatUnknownValue = (value: unknown, space?: number): string => {
 
     const json = JSON.stringify(value, null, space);
     if (json !== undefined) return json;
-  } catch {}
+  } catch {
+    // valori non serializzabili: sotto si prova String(value)
+  }
 
   try {
     return String(value);
