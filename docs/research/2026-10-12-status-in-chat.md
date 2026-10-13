@@ -70,7 +70,37 @@ creata via API `POST /v1/models/connections`): run fallito con
 | 12 | **prima**: `origin/main` a motore fermo | il banner sopra l'area di lavoro (worktree su main, porta 4184) | `12-…png` |
 
 Confronto prima/dopo: `12-…png` (banner su main) contro `02-…png` (avviso
-nel punto in cui si legge e si scrive).
+nel punto in cui si legge e scrive).
+
+## Riverifica dopo le quattro correzioni della revisione — 2026-10-13
+
+Motore reale con `HOMUN_DATA_DIR` temporaneo, provider attivo reso
+irraggiungibile (`POST /v1/models/providers/openai_compatible/credentials`
+con `base_url` su una porta che rifiuta): risposta chat fallita con
+`provider_unavailable`, retry programmato, esaurito dopo 3 tentativi.
+Screenshot sostituiti; per ognuno, la riga di ciò che si vede:
+
+- **02** — Una sola scheda avviso compatta (barra rossa a sinistra, riga
+  «Homun non è raggiungibile su questo computer.», motivo in grigio,
+  dettaglio tipizzato, pill «Riprova»/«Apri modelli» larghe quanto il
+  testo) e la bozza «Bozza da non perdere» conservata nel composer
+  disabilitato.
+- **05** — Conversazione «Listini» aperta a motore fermo: il thread con i
+  SUOI messaggi resta leggibile, sopra il campo di scrittura l'avviso
+  compatto di motore fermo, composer bloccato.
+- **06** — «Risposta interrotta; un nuovo tentativo è programmato.»
+  interamente visibile in fondo al thread, dentro l'area scorrevole (con
+  barra colorata a sinistra).
+- **07** — Lo stesso avviso aggiornato sul posto: «Risposta non completata
+  dopo 3 tentativi. Il recupero automatico è terminato.» con il dettaglio
+  tipizzato «Il modello non è disponibile…» in grigio e barra rossa.
+- **08** — Sidebar con «Listini» (pallino rosso) e «Logs» (pallino
+  arancione); il thread di «Logs» mostra UN solo followup, il suo.
+
+Nota onesta: l'aggiornamento da «interrotta» a «3 tentativi» il web lo
+rilegge ricaricando la conversazione — i retry senza messaggi nuovi non
+emettono eventi SSE che refreshino l'inventario (vedi «notato ma non
+fatto» nella descrizione della PR).
 
 ## Test
 
