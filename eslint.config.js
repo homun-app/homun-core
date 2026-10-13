@@ -1,3 +1,5 @@
+import { includeIgnoreFile } from "@eslint/compat";
+import { fileURLToPath } from "node:url";
 import js from "@eslint/js";
 import eslintPluginPrettier from "eslint-plugin-prettier/recommended";
 import globals from "globals";
@@ -5,7 +7,11 @@ import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
+// Un'unica fonte di verità: ciò che git ignora è ignorato anche dal lint.
+const gitIgnored = includeIgnoreFile(fileURLToPath(new URL("./.gitignore", import.meta.url)));
+
 export default tseslint.config(
+  gitIgnored,
   {
     ignores: [
       "**/dist/**",
