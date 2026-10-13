@@ -9,6 +9,7 @@
  */
 
 import { homunErrorFromHttp } from "./homun-errors.ts";
+import { isEngineConnectionLoss } from "./engine-read-retention.ts";
 
 export type ChatStatusActionId = "refresh" | "open-models";
 
@@ -95,8 +96,7 @@ export function chatStatusNotices(state: ChatStatusState): ChatStatusNotice[] {
       severity: "error",
       text: "Homun non è raggiungibile su questo computer.",
       hint:
-        `Verifica che Homun sia avviato, poi riprova${state.canOpenModels ? " o controlla i modelli collegati" : ""}. ` +
-        "I lavori restano sul percorso motore: nessun passaggio alla simulazione." +
+        `Avvialo, poi premi Riprova${state.canOpenModels ? " o controlla i modelli collegati" : ""}.` +
         (state.workCount === 0
           ? " La lista lavori resta vuota finché la connessione non torna."
           : ""),
@@ -105,14 +105,20 @@ export function chatStatusNotices(state: ChatStatusState): ChatStatusNotice[] {
     });
   }
   if (state.error != null) {
-    notices.push({
-      id: "engine-error",
-      scope: "global",
-      kind: "engine-error",
-      severity: "error",
-      text: "L'ultima operazione verso il motore non è riuscita.",
-      error: state.error,
-    });
+    // Un guasto, un avviso: quando il gate dice «irraggiungibile», l'errore
+    // della stessa caduta di connessione non produce una seconda dichiarazione.
+    // Gli errori di altro tipo restano visibili accanto al primo.
+    const duplicateOfGate = state.gateError != null && isEngineConnectionLoss(state.error);
+    if (!duplicateOfGate) {
+      notices.push({
+        id: "engine-error",
+        scope: "global",
+        kind: "engine-error",
+        severity: "error",
+        text: "L'ultima operazione verso il motore non è riuscita.",
+        error: state.error,
+      });
+    }
   }
   for (const followup of state.followups) {
     const failed = followup.status === "failed";

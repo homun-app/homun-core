@@ -255,3 +255,37 @@ test("P4: la conversazione aperta sopravvive alla caduta del motore e si ricaric
   await page.locator(".cw-sb-row", { hasText: "Listini" }).click();
   await expect(thread).toContainText("arrivata dopo la riconnessione", { timeout: 10_000 });
 });
+
+test("P5: la caduta del motore durante un invio produce UN solo avviso, senza testo grezzo", async ({
+  page,
+}) => {
+  const state = { online: true, extraConversation: false, extraMessage: false };
+  await mockEngine(page, state);
+  // Il motore cade mentre il messaggio viaggia: il comando in corso fallisce
+  // con un errore di connessione (la stessa causa del gate) e da lì in poi
+  // tutte le chiamate cadono. Un guasto, un avviso.
+  await page.route("**/v1/**", (route) => {
+    if (new URL(route.request().url()).pathname.includes("/commands/")) {
+      state.online = false;
+      return route.abort();
+    }
+    if (!state.online) return route.abort();
+    return route.fallback();
+  });
+  await page.goto("/");
+  await page.locator(".cw-sb-row", { hasText: "Listini" }).click();
+
+  const composer = page.locator(".cw-composer textarea");
+  await expect(composer).toBeEnabled();
+  await composer.fill("Aggiorna i listini dei fornitori");
+  await composer.press("Enter");
+
+  // il gate dichiara l'irraggiungibile…
+  const gate = page.locator('[data-chat-status="engine-unreachable"]');
+  await expect(gate).toBeVisible({ timeout: 15_000 });
+  // …e l'errore della stessa caduta NON raddoppia l'avviso
+  await expect(page.locator('[data-chat-status="engine-error"]')).toHaveCount(0);
+  // nessun testo tecnico grezzo in pagina
+  await expect(page.locator("body")).not.toContainText("Errno");
+  await expect(page.locator("body")).not.toContainText("L'ultima operazione verso il motore");
+});

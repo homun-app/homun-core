@@ -17,7 +17,8 @@ import {
   type ChatStatusState,
 } from "../apps/web/src/lib/chat-status-notices.ts";
 import { nextResolvedEpisode } from "../apps/web/src/hooks/useTransientResolved.ts";
-import { isHomunClientError } from "../apps/web/src/lib/homun-errors.ts";
+import { homunErrorFromHttp, isHomunClientError } from "../apps/web/src/lib/homun-errors.ts";
+import { EngineUnavailableError } from "../apps/web/src/lib/engine-client.ts";
 
 const healthyEngine: ChatStatusState = {
   dataSource: "engine",
@@ -87,11 +88,10 @@ test("motore irraggiungibile: un solo avviso globale, stesse azioni e stesso err
   assert.equal(notice.kind, "engine-unreachable");
   assert.equal(notice.severity, "error");
   assert.match(notice.text, /Homun non è raggiungibile su questo computer\./);
-  assert.match(notice.hint!, /nessun passaggio alla simulazione/);
-  assert.match(
-    notice.hint!,
-    /Verifica che Homun sia avviato, poi riprova o controlla i modelli collegati\./,
-  );
+  // suggerimento breve, senza la frase per sviluppatori sul percorso dati
+  assert.match(notice.hint!, /Avvialo, poi premi Riprova o controlla i modelli collegati\./);
+  assert.doesNotMatch(notice.hint!, /simulazione/i);
+  assert.doesNotMatch(notice.hint!, /percorso motore/i);
   assert.equal(notice.error, gateError);
   assert.deepEqual(notice.actions, [
     { id: "refresh", label: "Riprova" },
@@ -116,8 +116,57 @@ test("motore irraggiungibile senza modelli configurabili e lista vuota: azione e
   });
   const notice = notices[0]!;
   assert.deepEqual(notice.actions, [{ id: "refresh", label: "Riprova" }]);
-  assert.match(notice.hint!, /Verifica che Homun sia avviato, poi riprova\./);
+  assert.match(notice.hint!, /Avvialo, poi premi Riprova\./);
   assert.match(notice.hint!, /La lista lavori resta vuota finché la connessione non torna\./);
+});
+
+test("un solo guasto, un solo avviso: l'errore di connessione non raddoppia l'irraggiungibile", () => {
+  // il guasto reale del client: la connessione al motore caduta (stesso
+  // codice che accende l'avviso di gate), sia dalla mappatura HTTP…
+  const fromHttp = homunErrorFromHttp(
+    503,
+    {
+      detail: {
+        code: "engine_unavailable",
+        message: "Engine unreachable at http://127.0.0.1:8765",
+      },
+    },
+    "offline",
+  );
+  // …sia dalla classe che avvolge i fetch caduti
+  const fromFetch = new EngineUnavailableError("Engine unreachable at http://127.0.0.1:8765");
+  const gateError = new Error("offline");
+  for (const connectionLoss of [fromHttp, fromFetch]) {
+    const notices = chatStatusNotices({
+      ...healthyEngine,
+      gateError,
+      error: connectionLoss,
+    });
+    assert.equal(notices.length, 1, "una sola condizione dichiarata, non due");
+    assert.equal(notices[0]!.kind, "engine-unreachable");
+    // l'avviso superstite resta quello del gate, con il suo stesso errore
+    assert.equal(notices[0]!.error, gateError);
+    assert.equal(
+      notices.some((n) => n.kind === "engine-error"),
+      false,
+    );
+  }
+});
+
+test("motore irraggiungibile con errore di altro tipo: due avvisi distinti restano visibili", () => {
+  const notices = chatStatusNotices({
+    ...healthyEngine,
+    gateError: new Error("offline"),
+    error: homunErrorFromHttp(
+      503,
+      { detail: { code: "provider_unavailable", message: "Local model interpret failed" } },
+      "fallback",
+    ),
+  });
+  assert.deepEqual(
+    notices.map((n) => n.kind),
+    ["engine-unreachable", "engine-error"],
+  );
 });
 
 test("errore tipizzato del client: avviso globale sopra il campo di scrittura", () => {
@@ -292,7 +341,7 @@ test("avviso singolo: ruolo alert per gli errori, status per il resto", async ()
     assert.match(alert, /role="alert"/);
     assert.match(alert, /Riprova/);
     assert.match(alert, /Apri modelli/);
-    assert.match(alert, /Verifica che Homun sia avviato/);
+    assert.match(alert, /Avvialo, poi premi Riprova/);
     // errore tipizzato ripreso da HomunErrorNotice, con la sua classe dedicata
     assert.match(alert, /cw-chat-status__error/);
     assert.match(alert, /role="alert"/);
@@ -329,6 +378,42 @@ test("slot sopra il composer: avvisi globali ed esito breve «Connessione ripris
     const restored = ui.render({ notices: [], resolved: true });
     assert.match(restored, /Connessione ripristinata/);
     assert.match(restored, /role="status"/);
+  } finally {
+    await ui.close();
+  }
+});
+
+test("nessun testo grezzo all'utente: i motivi passano dal mapping di prodotto", async () => {
+  const ui = await componentRenderer(
+    "/apps/web/src/components/builder/chat/ChatStatusNotice.tsx",
+    "ChatStatusNotice",
+  );
+  try {
+    // l'errore nasce nello stesso grafo vite del componente: instanceof su
+    // HomunClientError funziona solo entro lo stesso bundle
+    const errorsModule = (await ui.loadModule(
+      "/apps/web/src/lib/homun-errors.ts",
+    )) as typeof import("../apps/web/src/lib/homun-errors.ts");
+    const rawException = new errorsModule.HomunClientError(
+      "unknown",
+      "Local model interpret failed: [Errno 61] Connection refused",
+    );
+    const notice = chatStatusNotices({ ...healthyEngine, error: rawException })[0]!;
+    const markup = ui.render({ notice });
+    assert.match(markup, /Errore imprevisto\./);
+    assert.doesNotMatch(markup, /Errno/);
+    assert.doesNotMatch(markup, /Local model interpret/);
+
+    // lo stesso testo grezzo con il codice vero del motore: la copia di
+    // prodotto del codice vince sul messaggio grezzo
+    const providerDown = new errorsModule.HomunClientError(
+      "provider_unavailable",
+      "Local model interpret failed: [Errno 61] Connection refused",
+    );
+    const providerNotice = chatStatusNotices({ ...healthyEngine, error: providerDown })[0]!;
+    const providerMarkup = ui.render({ notice: providerNotice });
+    assert.match(providerMarkup, /Il modello non è disponibile\./);
+    assert.doesNotMatch(providerMarkup, /Errno/);
   } finally {
     await ui.close();
   }
