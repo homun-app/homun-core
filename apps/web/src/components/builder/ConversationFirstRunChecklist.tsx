@@ -1,6 +1,7 @@
 /**
  * Actionable first-run checklist when Fonte=motore but no usable model is linked.
- * Never offers simulation fallback.
+ * Never offers simulation fallback. Il motore fermo non si dichiara qui: l'unico
+ * avviso è quello deciso da `chatStatusNotices`, sopra il campo di scrittura.
  */
 import { useEffect, useState } from "react";
 import { ArrowRight, PlugZap } from "lucide-react";
@@ -45,21 +46,9 @@ export function ConversationFirstRunChecklist({ onOpenModels }: Props) {
   }, [engineReady, status.connection]);
 
   if (status.dataSource !== "engine") return null;
-  if (status.connection === "checking") return null;
-  if (status.connection === "absent") {
-    return (
-      <div className="cw-first-run" role="status">
-        <PlugZap size={16} aria-hidden />
-        <div className="cw-first-run__body">
-          <strong>Homun non è ancora raggiungibile</strong>
-          <p>
-            Avvia Homun su questo computer, poi riprova. Restiamo sul percorso motore — niente
-            demo simulata.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  // la condizione di motore fermo appartiene all'avviso sopra il campo di
+  // scrittura: qui non si ripete (nessun doppio avviso)
+  if (status.connection !== "connected") return null;
   if (ready !== false) return null;
 
   return (

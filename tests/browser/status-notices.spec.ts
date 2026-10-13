@@ -150,12 +150,19 @@ test("P2: a motore fermo la schermata iniziale ha UN solo avviso di motore irrag
   await page.route("**/v1/**", (route) => route.abort());
   await page.goto("/");
 
+  // l'avviso sopra il campo di scrittura è l'unica dichiarazione
   const composerNotice = page.locator('[data-chat-status="engine-unreachable"]');
   await expect(composerNotice).toBeVisible();
+  await expect(composerNotice).toHaveCount(1);
 
-  // la scheda di benvenuto non ripete la condizione: una sola fonte
+  // nessuna scheda di benvenuto ripete la condizione: una sola fonte
   const welcomeCard = page.locator(".cw-first-run", { hasText: "raggiungibile" });
   await expect(welcomeCard).toHaveCount(0);
-  const saying = page.getByText(/raggiungibile/);
+
+  // in tutta la pagina un solo elemento-notizia dichiara la condizione
+  // (il dettaglio tipizzato dentro l'avviso non è una seconda dichiarazione)
+  const saying = page
+    .locator("[data-chat-status], .cw-first-run")
+    .filter({ hasText: "raggiungibile" });
   await expect(saying).toHaveCount(1);
 });
