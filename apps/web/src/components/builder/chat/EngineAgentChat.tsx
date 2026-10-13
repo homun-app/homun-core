@@ -113,29 +113,37 @@ export function EngineAgentChat({
     <div className="cw-stage">
       <section className="cw-conversation">
         <div className="cw-history">
-          <ThreadTopStatusNotices notices={status.threadTop} />
           {showThread ? (
             <>
               <ConversationBrowserPip
                 conversationId={conversationId}
                 runActive={agentStream.runActive}
               />
-              <AgentChat messages={messages} isRunning={isRunning || engineBusy} />
+              {/* gli avvisi vivono DENTRO l'area scorrevole del thread: si
+                  legono dove si leggono i messaggi, non oltre il suo fondo */}
+              <AgentChat
+                messages={messages}
+                isRunning={isRunning || engineBusy}
+                threadTop={<ThreadTopStatusNotices notices={status.threadTop} />}
+                threadEnd={<ThreadEndStatusNotices notices={status.threadEnd} />}
+              />
             </>
           ) : (
-            <ConversationWorkspaceWelcome
-              assignee={assignee}
-              scenarios={scenarios}
-              spaceData={spaceData}
-              onCreateExample={onCreateExample}
-              engineMode
-              onRefreshEngine={onRefreshEngine}
-              onOpenSpace={onOpenSpace}
-              onOpenModels={onOpenModels}
-              newChatProject={newChatProject}
-            />
+            <>
+              <ThreadTopStatusNotices notices={status.threadTop} />
+              <ConversationWorkspaceWelcome
+                assignee={assignee}
+                scenarios={scenarios}
+                spaceData={spaceData}
+                onCreateExample={onCreateExample}
+                engineMode
+                onRefreshEngine={onRefreshEngine}
+                onOpenSpace={onOpenSpace}
+                onOpenModels={onOpenModels}
+                newChatProject={newChatProject}
+              />
+            </>
           )}
-          <ThreadEndStatusNotices notices={status.threadEnd} />
         </div>
         <div className="cw-composer">
           <ComposerStatusNotices

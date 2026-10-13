@@ -43,6 +43,7 @@ import {
   type TextMessagePartComponent,
   type ToolCallMessagePartComponent,
   useAuiState,
+  useThreadViewportStore,
 } from "@assistant-ui/react";
 import {
   ArrowDownIcon,
@@ -65,9 +66,12 @@ import {
 import {
   createContext,
   useContext,
+  useEffect,
+  useRef,
   type ComponentType,
   type FC,
   type PropsWithChildren,
+  type ReactNode,
 } from "react";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
@@ -129,6 +133,10 @@ const taskAwareGroupBy = (
 export type ThreadProps = {
   components?: ThreadComponents | undefined;
   autoFocus?: boolean | undefined;
+  /** Contenuto in cima al thread, dentro l'area scorrevole, prima dei messaggi. */
+  threadTop?: ReactNode | undefined;
+  /** Contenuto in fondo al thread, dentro l'area scorrevole, dopo i messaggi. */
+  threadEnd?: ReactNode | undefined;
 };
 
 const EMPTY_COMPONENTS: ThreadComponents = {};
@@ -173,20 +181,24 @@ const ThreadHistorySkeleton: FC = () => (
 export const Thread: FC<ThreadProps> = ({
   components = EMPTY_COMPONENTS,
   autoFocus = true,
+  threadTop,
+  threadEnd,
 }) => {
   const isEmpty = useAuiState(isNewChatView);
 
   return (
     <ThreadComponentsContext.Provider value={components}>
-      <ThreadRoot isEmpty={isEmpty} autoFocus={autoFocus} />
+      <ThreadRoot isEmpty={isEmpty} autoFocus={autoFocus} threadTop={threadTop} threadEnd={threadEnd} />
     </ThreadComponentsContext.Provider>
   );
 };
 
-const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
-  isEmpty,
-  autoFocus,
-}) => {
+const ThreadRoot: FC<{
+  isEmpty: boolean;
+  autoFocus: boolean;
+  threadTop?: ReactNode | undefined;
+  threadEnd?: ReactNode | undefined;
+}> = ({ isEmpty, autoFocus, threadTop, threadEnd }) => {
   const { Welcome = ThreadWelcome, Composer: ComposerSlot = Composer } =
     useContext(ThreadComponentsContext);
 
@@ -212,6 +224,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
             isEmpty && "justify-center",
           )}
         >
+          {threadTop}
           <AuiIf condition={isNewChatView}>
             <Welcome />
           </AuiIf>
@@ -227,6 +240,8 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
               {() => <ThreadMessage />}
             </ThreadPrimitive.Messages>
           </div>
+
+          <ThreadEndSlot>{threadEnd}</ThreadEndSlot>
 
           <ThreadPrimitive.ViewportFooter
             className={cn(
@@ -373,6 +388,33 @@ const ThreadScrollToBottom: FC = () => {
         <ArrowDownIcon />
       </TooltipIconButton>
     </ThreadPrimitive.ScrollToBottom>
+  );
+};
+
+/**
+ * Slot di fine thread, dentro il viewport scorrevole. Quando il suo contenuto
+ * compare o cambia (un avviso che si aggiorna sul posto) il thread scorre in
+ * fondo per mostrarlo, come accade per un messaggio nuovo.
+ */
+const ThreadEndSlot: FC<PropsWithChildren> = ({ children }) => {
+  const slotRef = useRef<HTMLDivElement>(null);
+  const viewport = useThreadViewportStore();
+  useEffect(() => {
+    const slot = slotRef.current;
+    if (!slot) return;
+    const reveal = () => {
+      if (slot.childElementCount === 0) return;
+      viewport.getState().scrollToBottom({ behavior: "smooth" });
+    };
+    reveal();
+    const changes = new MutationObserver(reveal);
+    changes.observe(slot, { childList: true, subtree: true, characterData: true });
+    return () => changes.disconnect();
+  }, [viewport]);
+  return (
+    <div data-slot="aui_thread-end-slot" className="empty:hidden">
+      {children}
+    </div>
   );
 };
 

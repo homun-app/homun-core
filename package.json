@@ -24,7 +24,8 @@
     "desktop:dev": "npm run build && electron apps/desktop/src/main.cjs",
     "desktop:test": "node --test apps/desktop/tests/*.test.cjs",
     "desktop:package": "npm run build && node apps/desktop/scripts/package-app.mjs",
-    "desktop:build": "python3 tools/build_engine_bundle.py && npm run desktop:package"
+    "desktop:build": "python3 tools/build_engine_bundle.py && npm run desktop:package",
+    "test:browser": "playwright test"
   },
   "overrides": {
     "rolldown": "1.2.1",
@@ -101,6 +102,7 @@
   "devDependencies": {
     "@electron/packager": "20.3.0",
     "@eslint/js": "^9.32.0",
+    "@playwright/test": "^1.64.0",
     "@types/node": "^22.16.5",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.0",
