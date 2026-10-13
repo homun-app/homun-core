@@ -6,3 +6,6 @@ pnpm-lock.yaml
 package-lock.json
 bun.lock
 routeTree.gen.ts
+# snapshot canonico generato da tools/export_openapi.py: la sua formattazione
+# è quella del generatore (json.dumps sort_keys), verificata byte per byte in CI
+contracts/openapi/v1-engine.json
