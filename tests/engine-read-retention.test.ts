@@ -17,7 +17,6 @@ import {
   type EngineWorkspaceCollections,
 } from "../apps/web/src/lib/engine-read-retention.ts";
 import { homunErrorFromHttp, HomunClientError } from "../apps/web/src/lib/homun-errors.ts";
-import { EngineUnavailableError } from "../apps/web/src/lib/engine-client.ts";
 
 const connectionLossFromHttp = () =>
   homunErrorFromHttp(
@@ -64,9 +63,12 @@ test("errore di connessione: l'ultimo snapshot consegnato resta, stesso riferime
   const snapshot = populatedSnapshot();
   // il guasto reale del client, sia dalla mappatura HTTP…
   assert.equal(workspaceAfterReadFailure(connectionLossFromHttp(), snapshot), snapshot);
-  // …sia dalla classe che avvolge i fetch caduti in domainFetch/engineFetch
+  // …sia dall'errore che avvolge i fetch caduti in domainFetch/engineFetch
   assert.equal(
-    workspaceAfterReadFailure(new EngineUnavailableError("Engine unreachable"), snapshot),
+    workspaceAfterReadFailure(
+      new HomunClientError("engine_unavailable", "Engine unreachable"),
+      snapshot,
+    ),
     snapshot,
   );
 });
@@ -92,7 +94,10 @@ test("il thread resta consegnato solo a motore irraggiungibile: ogni altro codic
   // riconosce la caduta della connessione: lo stesso check vale per ogni
   // codice tipizzato del client.
   assert.equal(isEngineConnectionLoss(connectionLossFromHttp()), true);
-  assert.equal(isEngineConnectionLoss(new EngineUnavailableError("fetch caduto")), true);
+  assert.equal(
+    isEngineConnectionLoss(new HomunClientError("engine_unavailable", "fetch caduto")),
+    true,
+  );
   const otherCodes = [
     denied(),
     revoked(),

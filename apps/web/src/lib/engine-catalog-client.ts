@@ -2,7 +2,7 @@
  * Client for Engine Skill Catalog Packs (F3.6 / H46).
  */
 
-import { ENGINE_DEFAULT_BASE_URL, EngineUnavailableError } from "./engine-client.ts";
+import { ENGINE_DEFAULT_BASE_URL, engineUnreachableError } from "./engine-client.ts";
 import { homunErrorFromHttp } from "./homun-errors.ts";
 
 export type SkillPack = {
@@ -24,10 +24,7 @@ async function catalogFetch(
   try {
     return await fetch(`${baseUrl}${path}`, init);
   } catch (cause) {
-    throw new EngineUnavailableError(
-      `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
-      cause,
-    );
+    throw engineUnreachableError(baseUrl, cause);
   }
 }
 

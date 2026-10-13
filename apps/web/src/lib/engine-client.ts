@@ -49,20 +49,16 @@ export type EngineCapabilities = {
 
 export type EngineDataSource = "simulation" | "engine";
 
-/** @deprecated Prefer HomunClientError with code engine_unavailable */
-export class EngineUnavailableError extends HomunClientError {
-  constructor(message: string, cause?: unknown) {
-    super("engine_unavailable", message, { cause, retryable: true });
-    this.name = "EngineUnavailableError";
-  }
-}
-
-/** @deprecated Prefer HomunClientError with code engine_capability_missing */
-export class EngineCapabilityError extends HomunClientError {
-  constructor(message: string) {
-    super("engine_capability_missing", message, { retryable: false });
-    this.name = "EngineCapabilityError";
-  }
+/**
+ * Il motore non risponde: lo stesso errore tipizzato per ogni client, con il
+ * codice `engine_unavailable` (retryable) e la causa originale incapsulata.
+ */
+export function engineUnreachableError(baseUrl: string, cause?: unknown): HomunClientError {
+  return new HomunClientError(
+    "engine_unavailable",
+    `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
+    { cause },
+  );
 }
 
 async function engineFetch(path: string, baseUrl: string, signal?: AbortSignal): Promise<Response> {
@@ -76,10 +72,7 @@ async function engineFetch(path: string, baseUrl: string, signal?: AbortSignal):
     }
     return await fetch(`${baseUrl}${path}`, init);
   } catch (cause) {
-    throw new EngineUnavailableError(
-      `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
-      cause,
-    );
+    throw engineUnreachableError(baseUrl, cause);
   }
 }
 
@@ -89,7 +82,10 @@ export async function fetchEngineHealth(
 ): Promise<EngineHealth> {
   const response = await engineFetch("/v1/health", baseUrl, signal);
   if (!response.ok) {
-    throw new EngineUnavailableError(`Engine health failed with HTTP ${response.status}`);
+    throw new HomunClientError(
+      "engine_unavailable",
+      `Engine health failed with HTTP ${response.status}`,
+    );
   }
   return (await response.json()) as EngineHealth;
 }
@@ -100,7 +96,10 @@ export async function fetchEngineCapabilities(
 ): Promise<EngineCapabilities> {
   const response = await engineFetch("/v1/capabilities", baseUrl, signal);
   if (!response.ok) {
-    throw new EngineUnavailableError(`Engine capabilities failed with HTTP ${response.status}`);
+    throw new HomunClientError(
+      "engine_unavailable",
+      `Engine capabilities failed with HTTP ${response.status}`,
+    );
   }
   return (await response.json()) as EngineCapabilities;
 }
@@ -118,12 +117,14 @@ export function assertEngineReadyForDomain(
     return;
   }
   if (!online) {
-    throw new EngineUnavailableError(
+    throw new HomunClientError(
+      "engine_unavailable",
       "Engine data source selected, but the engine is not connected. No silent fallback to simulation.",
     );
   }
   if (!capabilities?.features.domain) {
-    throw new EngineCapabilityError(
+    throw new HomunClientError(
+      "engine_capability_missing",
       "Engine is connected, but domain capability is false. Real work APIs are not available yet.",
     );
   }

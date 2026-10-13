@@ -3,7 +3,7 @@
  * Explicit engine path — never invents completions when the provider is down.
  */
 
-import { ENGINE_DEFAULT_BASE_URL, EngineUnavailableError } from "./engine-client.ts";
+import { ENGINE_DEFAULT_BASE_URL, engineUnreachableError } from "./engine-client.ts";
 import { homunErrorFromHttp } from "./homun-errors.ts";
 
 export type ModelProviderInfo = {
@@ -40,10 +40,7 @@ async function modelsFetch(path: string, init: RequestInit, baseUrl: string): Pr
   try {
     return await fetch(`${baseUrl}${path}`, init);
   } catch (cause) {
-    throw new EngineUnavailableError(
-      `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
-      cause,
-    );
+    throw engineUnreachableError(baseUrl, cause);
   }
 }
 

@@ -2,7 +2,7 @@
  * Client for Engine Memory Review & Deduplication (preview and prune).
  */
 
-import { ENGINE_DEFAULT_BASE_URL, EngineUnavailableError } from "./engine-client.ts";
+import { ENGINE_DEFAULT_BASE_URL, engineUnreachableError } from "./engine-client.ts";
 import { DEFAULT_WORKSPACE_ID } from "./engine-domain-client.ts";
 import { homunErrorFromHttp } from "./homun-errors.ts";
 
@@ -70,10 +70,7 @@ export async function reviewEngineMemories(
       }),
     });
   } catch (cause) {
-    throw new EngineUnavailableError(
-      `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
-      cause,
-    );
+    throw engineUnreachableError(baseUrl, cause);
   }
 
   if (!response.ok) {

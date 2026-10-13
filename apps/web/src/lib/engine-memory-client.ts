@@ -3,7 +3,7 @@
  * Approved notes only — never auto-captured from chat.
  */
 
-import { ENGINE_DEFAULT_BASE_URL, EngineUnavailableError } from "./engine-client.ts";
+import { ENGINE_DEFAULT_BASE_URL, engineUnreachableError } from "./engine-client.ts";
 import { HomunClientError, homunErrorFromHttp } from "./homun-errors.ts";
 import { DEFAULT_WORKSPACE_ID } from "./engine-domain-client.ts";
 
@@ -49,10 +49,7 @@ async function memoryFetch(
   try {
     return await fetch(`${baseUrl}${path}`, init);
   } catch (cause) {
-    throw new EngineUnavailableError(
-      `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
-      cause,
-    );
+    throw engineUnreachableError(baseUrl, cause);
   }
 }
 

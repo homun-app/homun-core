@@ -3,7 +3,7 @@
  * Explicit engine path — never invents collaborators when the engine is down.
  */
 
-import { ENGINE_DEFAULT_BASE_URL, EngineUnavailableError } from "./engine-client.ts";
+import { ENGINE_DEFAULT_BASE_URL, engineUnreachableError } from "./engine-client.ts";
 import {
   DEFAULT_WORKSPACE_ID,
   defaultLocalActor,
@@ -37,10 +37,7 @@ async function agentsFetch(path: string, init: RequestInit, baseUrl: string): Pr
   try {
     return await fetch(`${baseUrl}${path}`, init);
   } catch (cause) {
-    throw new EngineUnavailableError(
-      `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
-      cause,
-    );
+    throw engineUnreachableError(baseUrl, cause);
   }
 }
 

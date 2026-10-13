@@ -2,7 +2,7 @@
  * Client for Channel Inbound Queue and Recovery (H32/H33/D1).
  */
 
-import { ENGINE_DEFAULT_BASE_URL, EngineUnavailableError } from "./engine-client.ts";
+import { ENGINE_DEFAULT_BASE_URL, engineUnreachableError } from "./engine-client.ts";
 import { homunErrorFromHttp } from "./homun-errors.ts";
 
 export type InboundQueueItem = {
@@ -34,10 +34,7 @@ async function queueFetch(
   try {
     return await fetch(`${baseUrl}${path}`, init);
   } catch (cause) {
-    throw new EngineUnavailableError(
-      `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
-      cause,
-    );
+    throw engineUnreachableError(baseUrl, cause);
   }
 }
 

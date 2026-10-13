@@ -3,7 +3,7 @@
  * Membership is organizational only; AccessGrant is deny-by-default for projects.
  */
 
-import { ENGINE_DEFAULT_BASE_URL, EngineUnavailableError } from "./engine-client.ts";
+import { ENGINE_DEFAULT_BASE_URL, engineUnreachableError } from "./engine-client.ts";
 import {
   DEFAULT_WORKSPACE_ID,
   defaultLocalActor,
@@ -76,10 +76,7 @@ async function orgFetch(path: string, init: RequestInit, baseUrl: string): Promi
   try {
     return await fetch(`${baseUrl}${path}`, init);
   } catch (cause) {
-    throw new EngineUnavailableError(
-      `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
-      cause,
-    );
+    throw engineUnreachableError(baseUrl, cause);
   }
 }
 
