@@ -1,13 +1,19 @@
-/** Authoritative work inventory; denied refreshes discard previously visible data. */
+/** Last engine snapshot; on connection loss it stays visible read-only. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   listEngineWorks,
   listEngineConversations,
   type EngineFollowupNotice,
 } from "@/lib/engine-domain-client";
-import { listEngineProjects, listEngineTeams, type EngineProject, type EngineTeam } from "@/lib/engine-projects-client";
+import {
+  listEngineProjects,
+  listEngineTeams,
+  type EngineProject,
+  type EngineTeam,
+} from "@/lib/engine-projects-client";
 import { listEngineRoutines, type EngineRoutine } from "@/lib/engine-routines-client";
 import { listEngineAgents, type EngineAgentProfile } from "@/lib/engine-agents-client";
+import { isHomunClientError } from "@/lib/homun-errors";
 export function useEngineWorkspaceSnapshot(
   ready: boolean,
   clearOverlay: () => void,
@@ -29,32 +35,39 @@ export function useEngineWorkspaceSnapshot(
     const current = ++generation.current;
     setLoaded(false);
     if (!ready) {
-      setRawWorks([]);
-      setProjects([]);
-      setAgents([]);
-      setTeams([]);
-      setRoutines([]);
-      setFollowups([]);
-      clearRef.current();
+      // Il motore non risponde: l'ultimo snapshot ricevuto resta visibile, in
+      // sola lettura — conversazioni, lavori e thread aperto compresi, con il
+      // campo di scrittura bloccato e l'avviso che lo dice. Nessun dato
+      // inventato e nessuna simulazione: solo ciò che il motore aveva già
+      // restituito. Alla riconnessione si ricarica tutto normalmente.
+      setLoaded(true);
       return;
     }
     try {
-      const [items, conversations, currentProjects, currentAgents, currentTeams, currentRoutines] = await Promise.all([
-        listEngineWorks(),
-        listEngineConversations(),
-        listEngineProjects(),
-        listEngineAgents(),
-        listEngineTeams(),
-        listEngineRoutines(),
-      ]);
+      const [items, conversations, currentProjects, currentAgents, currentTeams, currentRoutines] =
+        await Promise.all([
+          listEngineWorks(),
+          listEngineConversations(),
+          listEngineProjects(),
+          listEngineAgents(),
+          listEngineTeams(),
+          listEngineRoutines(),
+        ]);
       if (current !== generation.current) return;
       // A work linked to a project only through its conversation still gets
       // the project's materials: mirror the engine's work_project_ids rule.
-      setRawWorks(items.map((work) =>
-        work["project_id"] == null
-          ? { ...work, project_id: conversations.find((c) => c.id === work["primary_conversation_id"])?.project_id ?? null }
-          : work,
-      ));
+      setRawWorks(
+        items.map((work) =>
+          work["project_id"] == null
+            ? {
+                ...work,
+                project_id:
+                  conversations.find((c) => c.id === work["primary_conversation_id"])?.project_id ??
+                  null,
+              }
+            : work,
+        ),
+      );
       setProjects(currentProjects);
       setAgents(currentAgents);
       setTeams(currentTeams.filter((team) => team.status !== "archived"));
@@ -70,13 +83,18 @@ export function useEngineWorkspaceSnapshot(
       );
     } catch (cause) {
       if (current === generation.current) {
-        setRawWorks([]);
-        setProjects([]);
-        setTeams([]);
-      setRoutines([]);
-      setAgents([]);
-        setFollowups([]);
-        clearRef.current();
+        // La caduta della connessione conserva l'ultimo snapshot ricevuto
+        // (l'avviso la racconta); le letture negate o non valide continuano
+        // a scartare ciò che era visibile, come prima.
+        if (!isHomunClientError(cause) || cause.code !== "engine_unavailable") {
+          setRawWorks([]);
+          setProjects([]);
+          setTeams([]);
+          setRoutines([]);
+          setAgents([]);
+          setFollowups([]);
+          clearRef.current();
+        }
         onError(cause);
       }
       throw cause;
