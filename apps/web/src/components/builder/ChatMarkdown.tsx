@@ -67,7 +67,7 @@ function parseBlocks(text: string): BlockNode[] {
   let i = 0;
 
   while (i < lines.length) {
-    const line = (lines[i] ?? "") ?? "";
+    const line = lines[i] ?? "";
 
     // Fenced code block
     const fenceMatch = line.match(/^```(\w*)/);
@@ -75,8 +75,8 @@ function parseBlocks(text: string): BlockNode[] {
       const lang = fenceMatch[1] || "";
       const codeLines: string[] = [];
       i++;
-      while (i < lines.length && !((lines[i] ?? "") ?? "").startsWith("```")) {
-        codeLines.push((lines[i] ?? "") ?? "");
+      while (i < lines.length && !(lines[i] ?? "").startsWith("```")) {
+        codeLines.push(lines[i] ?? "");
         i++;
       }
       i++; // skip closing ```
