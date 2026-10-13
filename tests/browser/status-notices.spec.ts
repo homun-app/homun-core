@@ -12,24 +12,46 @@ import { expect, test, type Locator, type Route } from "@playwright/test";
 const CONVERSATION_ID = "conv-listini";
 const WORK_ID = "work-listini";
 
-const transcript = () => ({
-  items: Array.from({ length: 30 }, (_, index) => ({
-    id: `m-${index}`,
-    text:
-      index % 2 === 0
-        ? `Domanda numero ${index} della conversazione, con un po' di testo per occupare righe.`
-        : `Risposta numero ${index}: testo sufficientemente lungo da occupare più di una riga nel thread.`,
-    author_id: index % 2 === 0 ? "person_fabio" : "homun_engine",
-  })),
-  cursor: 30,
+type EngineMockState = {
+  online: boolean;
+  /** Alla riconnessione il motore restituisce anche la conversazione «Logs». */
+  extraConversation: boolean;
+  /** …e un messaggio in più nella trascrizione di «Listini». */
+  extraMessage: boolean;
+};
+
+const transcript = (extraMessage: boolean) => ({
+  items: [
+    ...Array.from({ length: 30 }, (_, index) => ({
+      id: `m-${index}`,
+      text:
+        index % 2 === 0
+          ? `Domanda numero ${index} della conversazione, con un po' di testo per occupare righe.`
+          : `Risposta numero ${index}: testo sufficientemente lungo da occupare più di una riga nel thread.`,
+      author_id: index % 2 === 0 ? "person_fabio" : "homun_engine",
+    })),
+    ...(extraMessage
+      ? [
+          {
+            id: "m-30",
+            text: "Risposta numero 30, arrivata dopo la riconnessione.",
+            author_id: "homun_engine",
+          },
+        ]
+      : []),
+  ],
+  cursor: extraMessage ? 31 : 30,
   has_more: false,
 });
 
-/** Motore raggiungibile, con una conversazione apribile e un followup attivo. */
-async function mockEngineOnline(page: import("@playwright/test").Page): Promise<void> {
+/** Motore intercettato: online/offline e contenuti dipendono dallo stato. */
+async function mockEngine(
+  page: import("@playwright/test").Page,
+  state: EngineMockState,
+): Promise<void> {
   await page.route("**/v1/**", async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
+    if (!state.online) return route.abort();
+    const path = new URL(route.request().url()).pathname;
     const json = (body: unknown) => route.fulfill({ json: body as object });
     if (path === "/v1/health") {
       return json({ status: "ok", version: "test", uptime_seconds: 5 });
@@ -81,6 +103,17 @@ async function mockEngineOnline(page: import("@playwright/test").Page): Promise<
               },
             ],
           },
+          ...(state.extraConversation
+            ? [
+                {
+                  id: "conv-logs",
+                  title: "Logs",
+                  project_id: null,
+                  version: 1,
+                  followups: [],
+                },
+              ]
+            : []),
         ],
       });
     }
@@ -95,11 +128,23 @@ async function mockEngineOnline(page: import("@playwright/test").Page): Promise<
             version: 1,
             primary_conversation_id: CONVERSATION_ID,
           },
+          ...(state.extraConversation
+            ? [
+                {
+                  id: "work-logs",
+                  title: "Logs",
+                  objective: "Mettere ordine nei log",
+                  status: "draft",
+                  version: 1,
+                  primary_conversation_id: "conv-logs",
+                },
+              ]
+            : []),
         ],
       });
     }
     if (path.includes(`/conversations/${CONVERSATION_ID}/messages`)) {
-      return json(transcript());
+      return json(transcript(state.extraMessage));
     }
     if (path.includes("/events")) {
       return route.fulfill({ contentType: "text/event-stream", body: ": quiet\n\n" });
@@ -127,7 +172,7 @@ test.beforeEach(async ({ page }) => {
 test("P1: l'avviso di fine thread è visibile dentro l'area scorrevole del thread", async ({
   page,
 }) => {
-  await mockEngineOnline(page);
+  await mockEngine(page, { online: true, extraConversation: false, extraMessage: false });
   await page.goto("/");
   await page.locator(".cw-sb-row", { hasText: "Listini" }).click();
 
@@ -165,4 +210,48 @@ test("P2: a motore fermo la schermata iniziale ha UN solo avviso di motore irrag
     .locator("[data-chat-status], .cw-first-run")
     .filter({ hasText: "raggiungibile" });
   await expect(saying).toHaveCount(1);
+});
+
+test("P4: la conversazione aperta sopravvive alla caduta del motore e si ricarica alla riconnessione", async ({
+  page,
+}) => {
+  const state = { online: true, extraConversation: false, extraMessage: false };
+  await mockEngine(page, state);
+  await page.goto("/");
+  await page.locator(".cw-sb-row", { hasText: "Listini" }).click();
+
+  // snapshot caricato: la conversazione aperta mostra i suoi messaggi
+  const thread = page.locator('[data-slot="aui_thread-viewport"]');
+  await expect(thread).toContainText("Risposta numero 29");
+  const composer = page.locator(".cw-composer textarea");
+  await expect(composer).toBeEnabled();
+
+  // il motore cade: avviso sopra il campo di scrittura, in sola lettura
+  state.online = false;
+  const notice = page.locator('[data-chat-status="engine-unreachable"]');
+  await expect(notice).toBeVisible({ timeout: 10_000 });
+  await expect(composer).toBeDisabled();
+
+  // l'elenco delle conversazioni NON si svuota e il thread resta leggibile
+  await expect(page.locator(".cw-sb-row", { hasText: "Listini" })).toBeVisible();
+  await expect(thread).toContainText("Risposta numero 29");
+
+  // un «Riprova» mentre è giù non svuota il thread
+  await notice.getByRole("button", { name: "Riprova" }).click();
+  await expect(thread).toContainText("Risposta numero 29");
+
+  // riconnessione: il motore ha una conversazione e un messaggio in più
+  state.online = true;
+  state.extraConversation = true;
+  state.extraMessage = true;
+  await expect(notice).toBeHidden({ timeout: 15_000 });
+  await expect(page.locator(".cw-sb-row", { hasText: "Logs" })).toBeVisible({ timeout: 10_000 });
+  await expect(composer).toBeEnabled();
+
+  // il thread aperto si ricarica normalmente riaprendo la conversazione
+  await page.locator(".cw-sb-row", { hasText: "Logs" }).click();
+  // il followup di Listini non entra nel thread di un'altra conversazione
+  await expect(page.locator('[data-chat-status="followup"]')).toBeHidden({ timeout: 10_000 });
+  await page.locator(".cw-sb-row", { hasText: "Listini" }).click();
+  await expect(thread).toContainText("arrivata dopo la riconnessione", { timeout: 10_000 });
 });

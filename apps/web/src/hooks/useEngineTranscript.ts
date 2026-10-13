@@ -6,7 +6,12 @@ import {
   mergeTranscriptAnnotations,
   type TranscriptAnnotation,
 } from "@/lib/engine-transcript-client";
-import { canDropOverlay, planTranscriptLoad, type TranscriptView } from "@/lib/engine-transcript-lifecycle";
+import {
+  canDropOverlay,
+  planTranscriptLoad,
+  type TranscriptView,
+} from "@/lib/engine-transcript-lifecycle";
+import { isHomunClientError } from "@/lib/homun-errors";
 
 type Overlay = Record<string, ConversationMessage[]>;
 export function useEngineTranscript(
@@ -25,11 +30,21 @@ export function useEngineTranscript(
   const annotationsRef = useRef<Record<string, TranscriptAnnotation[]>>({});
   const overlayRef = useRef(overlay);
   overlayRef.current = overlay;
-  const viewRef = useRef<TranscriptView>({ activeId: null, conversationId: undefined, reloadSeq: -1 });
+  const viewRef = useRef<TranscriptView>({
+    activeId: null,
+    conversationId: undefined,
+    reloadSeq: -1,
+  });
   const conversationId = rawWorks.find((work) => work["id"] === activeId)?.[
     "primary_conversation_id"
   ];
   useEffect(() => {
+    // A motore fermo la trascrizione non si ricarica e non si azzera: il
+    // thread resta quello che il motore aveva già consegnato (lettura in
+    // sola lettura). La vista non avanza, così un reload esplicito chiesto
+    // mentre la connessione è caduta resta in sospeso e parte alla
+    // riconnessione.
+    if (!enabled) return;
     // Inventory refreshes re-render with a new rawWorks array identity; the
     // value-based comparison below keeps them from interrupting the reader.
     const next: TranscriptView = {
@@ -81,6 +96,13 @@ export function useEngineTranscript(
       })
       .catch((cause) => {
         if (controller.signal.aborted) return;
+        // La caduta della connessione conserva il thread già consegnato
+        // (l'avviso la racconta); le letture negate o non valide continuano
+        // a non lasciare in pagina ciò che era visibile, come prima.
+        if (isHomunClientError(cause) && cause.code === "engine_unavailable") {
+          onError(cause);
+          return;
+        }
         delete annotationsRef.current[activeId!];
         // Denied or failed reads must not leave previously visible content.
         setHistory({ workId: activeId!, messages: [] });
