@@ -13,7 +13,11 @@ import {
 } from "@/lib/engine-projects-client";
 import { listEngineRoutines, type EngineRoutine } from "@/lib/engine-routines-client";
 import { listEngineAgents, type EngineAgentProfile } from "@/lib/engine-agents-client";
-import { isHomunClientError } from "@/lib/homun-errors";
+import {
+  emptyEngineWorkspaceCollections,
+  workspaceAfterReadFailure,
+  type EngineWorkspaceCollections,
+} from "@/lib/engine-read-retention";
 export function useEngineWorkspaceSnapshot(
   ready: boolean,
   clearOverlay: () => void,
@@ -29,8 +33,19 @@ export function useEngineWorkspaceSnapshot(
   const [routines, setRoutines] = useState<EngineRoutine[]>([]);
   const [loaded, setLoaded] = useState(false);
   const generation = useRef(0);
+  // L'ultimo snapshot consegnato dal motore: la politica di ritenzione decide
+  // per ogni collezione se sopravvive a una lettura fallita.
+  const deliveredRef = useRef<EngineWorkspaceCollections>(emptyEngineWorkspaceCollections());
   const clearRef = useRef(clearOverlay);
   clearRef.current = clearOverlay;
+  const applyCollections = useCallback((next: EngineWorkspaceCollections) => {
+    setRawWorks(next.rawWorks);
+    setProjects(next.projects);
+    setAgents(next.agents);
+    setTeams(next.teams);
+    setRoutines(next.routines);
+    setFollowups(next.followups);
+  }, []);
   const refresh = useCallback(async () => {
     const current = ++generation.current;
     setLoaded(false);
@@ -56,8 +71,8 @@ export function useEngineWorkspaceSnapshot(
       if (current !== generation.current) return;
       // A work linked to a project only through its conversation still gets
       // the project's materials: mirror the engine's work_project_ids rule.
-      setRawWorks(
-        items.map((work) =>
+      const delivered: EngineWorkspaceCollections = {
+        rawWorks: items.map((work) =>
           work["project_id"] == null
             ? {
                 ...work,
@@ -67,41 +82,38 @@ export function useEngineWorkspaceSnapshot(
               }
             : work,
         ),
-      );
-      setProjects(currentProjects);
-      setAgents(currentAgents);
-      setTeams(currentTeams.filter((team) => team.status !== "archived"));
-      setRoutines(currentRoutines.filter((r) => r.status !== "stopped"));
-      setFollowups(
-        conversations.flatMap((conversation) =>
+        projects: currentProjects,
+        agents: currentAgents,
+        teams: currentTeams.filter((team) => team.status !== "archived"),
+        routines: currentRoutines.filter((r) => r.status !== "stopped"),
+        followups: conversations.flatMap((conversation) =>
           conversation.followups.map((notice) => ({
             ...notice,
             conversationId: conversation.id,
             conversationTitle: conversation.title,
           })),
         ),
-      );
+      };
+      deliveredRef.current = delivered;
+      applyCollections(delivered);
     } catch (cause) {
       if (current === generation.current) {
         // La caduta della connessione conserva l'ultimo snapshot ricevuto
         // (l'avviso la racconta); le letture negate o non valide continuano
         // a scartare ciò che era visibile, come prima.
-        if (!isHomunClientError(cause) || cause.code !== "engine_unavailable") {
-          setRawWorks([]);
-          setProjects([]);
-          setTeams([]);
-          setRoutines([]);
-          setAgents([]);
-          setFollowups([]);
-          clearRef.current();
-        }
+        const retained = workspaceAfterReadFailure(cause, deliveredRef.current);
+        const discarded = retained !== deliveredRef.current;
+        deliveredRef.current = retained;
+        // a connessione caduta i riferimenti sono gli stessi: React non ridisegna
+        applyCollections(retained);
+        if (discarded) clearRef.current();
         onError(cause);
       }
       throw cause;
     } finally {
       if (current === generation.current) setLoaded(true);
     }
-  }, [ready, onError]);
+  }, [ready, onError, applyCollections]);
   useEffect(() => {
     void refresh().catch(() => {});
     return () => {
