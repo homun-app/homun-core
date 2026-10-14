@@ -2,7 +2,7 @@
   "description": "Frozen legacy debt on 2026-09-19. Never increase budgets or broaden exceptions. Lower budgets after reductions; remove obsolete entries.",
   "line_budgets": {
     "apps/web/src/components/ai-elements/code-block.tsx": 521,
-    "apps/web/src/components/ai-elements/prompt-input.tsx": 1463,
+    "apps/web/src/components/ai-elements/prompt-input.tsx": 1307,
     "apps/web/src/components/builder/ConversationMaterials.tsx": 959,
     "apps/web/src/components/builder/ConversationSpace.tsx": 1010,
     "apps/web/src/components/builder/ConversationWorkspace.tsx": 1350,
