@@ -15,7 +15,6 @@ eslint-suppressions.json
 # "Never increase budgets"): la riformattazione Prettier li porterebbe oltre il
 # budget (ConversationWorkspace 1350 -> 1541). Si sbloccano solo riducendoli,
 # poi si tolgono da qui e dal baseline.
-apps/web/src/components/ai-elements/code-block.tsx
 apps/web/src/components/ai-elements/prompt-input.tsx
 apps/web/src/components/builder/ConversationSpace.tsx
 apps/web/src/components/builder/ConversationWorkspace.tsx
