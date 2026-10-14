@@ -1,4 +1,7 @@
-import { initialScenarios, type ConversationScenario } from "@/components/builder/conversation-scenarios.ts";
+import {
+  initialScenarios,
+  type ConversationScenario,
+} from "@/components/builder/conversation-scenarios.ts";
 import { memberProfile } from "@/components/builder/conversation-members.ts";
 import type { SpaceData } from "@/components/builder/ConversationSpace.ts";
 

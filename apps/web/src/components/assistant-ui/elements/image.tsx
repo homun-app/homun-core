@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  memo,
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  type PropsWithChildren,
-} from "react";
+import { memo, useState, useEffect, useCallback, useRef, type PropsWithChildren } from "react";
 import { createPortal } from "react-dom";
 import { cva, type VariantProps } from "class-variance-authority";
 import {
@@ -20,10 +13,7 @@ import {
   ShieldAlertIcon,
   XIcon,
 } from "lucide-react";
-import type {
-  ImageMessagePart,
-  ImageMessagePartComponent,
-} from "@assistant-ui/react";
+import type { ImageMessagePart, ImageMessagePartComponent } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
 import { hostOf, safeHref } from "../utils/href";
 
@@ -49,9 +39,7 @@ const dataUriToBlob = (dataUri: string): Blob | null => {
   const commaIndex = dataUri.indexOf(",");
   const meta = commaIndex >= 0 ? dataUri.slice(0, commaIndex) : dataUri;
   const data = commaIndex >= 0 ? dataUri.slice(commaIndex + 1) : "";
-  const mime =
-    meta.match(/data:([^;]+)/i)?.[1]?.toLowerCase() ??
-    "application/octet-stream";
+  const mime = meta.match(/data:([^;]+)/i)?.[1]?.toLowerCase() ?? "application/octet-stream";
   if (!/;base64/i.test(meta)) {
     const parts: BlobPart[] = [];
     let last = 0;
@@ -60,10 +48,7 @@ const dataUriToBlob = (dataUri: string): Blob | null => {
       const run = match[0];
       const escaped = new Uint8Array(run.length / 3);
       for (let index = 0; index < escaped.length; index++) {
-        escaped[index] = Number.parseInt(
-          run.slice(index * 3 + 1, index * 3 + 3),
-          16,
-        );
+        escaped[index] = Number.parseInt(run.slice(index * 3 + 1, index * 3 + 3), 16);
       }
       parts.push(escaped);
       last = match.index + run.length;
@@ -97,15 +82,17 @@ const defaultFilenameFromImage = (image: string): string => {
     let basename = encodedBasename;
     try {
       basename = decodeURIComponent(encodedBasename);
-    } catch {}
+    } catch {
+      // nome codificato non valido: resta quello estratto dall'URL
+    }
     if (/\.(png|jpe?g|webp|gif|svg)$/i.test(basename)) return basename;
-  } catch {}
+  } catch {
+    // URL non interpretabile: sotto c'è il nome di ripiego
+  }
   return "image.png";
 };
 
-const downloadImagePart = (
-  part: Pick<ImageMessagePart, "image" | "filename">,
-): void => {
+const downloadImagePart = (part: Pick<ImageMessagePart, "image" | "filename">): void => {
   if (typeof document === "undefined") return;
   const filename = part.filename ?? defaultFilenameFromImage(part.image);
   const isDataUri = /^data:/i.test(part.image);
@@ -123,9 +110,7 @@ const downloadImagePart = (
   if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 40_000);
 };
 
-const copyImagePart = async (
-  part: Pick<ImageMessagePart, "image">,
-): Promise<void> => {
+const copyImagePart = async (part: Pick<ImageMessagePart, "image">): Promise<void> => {
   if (
     typeof navigator === "undefined" ||
     !navigator.clipboard ||
@@ -141,39 +126,29 @@ const copyImagePart = async (
   await navigator.clipboard.write([new ClipboardItem({ [mime]: blob })]);
 };
 
-const imageVariants = cva(
-  "aui-image-root relative overflow-hidden rounded-lg",
-  {
-    variants: {
-      variant: {
-        outline: "border-border border",
-        ghost: "",
-        muted: "bg-muted/50",
-      },
-      size: {
-        sm: "max-w-64",
-        default: "max-w-96",
-        lg: "max-w-[512px]",
-        full: "w-full",
-      },
+const imageVariants = cva("aui-image-root relative overflow-hidden rounded-lg", {
+  variants: {
+    variant: {
+      outline: "border-border border",
+      ghost: "",
+      muted: "bg-muted/50",
     },
-    defaultVariants: {
-      variant: "outline",
-      size: "default",
+    size: {
+      sm: "max-w-64",
+      default: "max-w-96",
+      lg: "max-w-[512px]",
+      full: "w-full",
     },
   },
-);
+  defaultVariants: {
+    variant: "outline",
+    size: "default",
+  },
+});
 
-export type ImageRootProps = React.ComponentProps<"div"> &
-  VariantProps<typeof imageVariants>;
+export type ImageRootProps = React.ComponentProps<"div"> & VariantProps<typeof imageVariants>;
 
-function ImageRoot({
-  className,
-  variant,
-  size,
-  children,
-  ...props
-}: ImageRootProps) {
+function ImageRoot({ className, variant, size, children, ...props }: ImageRootProps) {
   return (
     <div
       data-slot="image-root"
@@ -232,11 +207,7 @@ function ImagePreview({
   return (
     <div
       data-slot="image-preview"
-      className={cn(
-        "relative",
-        fixedRatio ? ratioClassName : "min-h-32",
-        containerClassName,
-      )}
+      className={cn("relative", fixedRatio ? ratioClassName : "min-h-32", containerClassName)}
     >
       {!loaded && !error && (
         <div
@@ -292,13 +263,7 @@ export type ImageSourceProps = {
   iconUrl?: string | undefined;
 } & React.ComponentProps<"div">;
 
-function ImageSource({
-  className,
-  label,
-  url,
-  iconUrl,
-  ...props
-}: ImageSourceProps) {
+function ImageSource({ className, label, url, iconUrl, ...props }: ImageSourceProps) {
   const href = safeHref(url);
   const host = hostOf(url);
   const displayLabel = label || host;
@@ -354,20 +319,13 @@ function ImageSource({
   );
 }
 
-function ImageFilename({
-  className,
-  children,
-  ...props
-}: React.ComponentProps<"span">) {
+function ImageFilename({ className, children, ...props }: React.ComponentProps<"span">) {
   if (!children) return null;
 
   return (
     <span
       data-slot="image-filename"
-      className={cn(
-        "text-muted-foreground block truncate px-2 py-1.5 text-xs",
-        className,
-      )}
+      className={cn("text-muted-foreground block truncate px-2 py-1.5 text-xs", className)}
       {...props}
     >
       {children}
@@ -498,10 +456,7 @@ function ImageGenerating({ className }: { className?: string }) {
   return (
     <div
       data-slot="image-generating"
-      className={cn(
-        "bg-muted/50 flex min-h-32 items-center justify-center p-4",
-        className,
-      )}
+      className={cn("bg-muted/50 flex min-h-32 items-center justify-center p-4", className)}
     >
       <Loader2Icon className="text-muted-foreground size-8 animate-spin" />
       <span className="sr-only">Generating image…</span>
@@ -509,13 +464,7 @@ function ImageGenerating({ className }: { className?: string }) {
   );
 }
 
-function ImageContentFilterError({
-  className,
-  reason,
-}: {
-  className?: string;
-  reason?: string;
-}) {
+function ImageContentFilterError({ className, reason }: { className?: string; reason?: string }) {
   return (
     <div
       data-slot="image-content-filter-error"
@@ -541,11 +490,7 @@ export type ImageActionsProps = {
   className?: string;
 };
 
-function RegenerateButton({
-  onRegenerate,
-}: {
-  onRegenerate: () => void | Promise<void>;
-}) {
+function RegenerateButton({ onRegenerate }: { onRegenerate: () => void | Promise<void> }) {
   const [isRegenerating, setIsRegenerating] = useState(false);
   return (
     <button
@@ -555,6 +500,7 @@ function RegenerateButton({
         try {
           await onRegenerate();
         } catch {
+          // la rigenerazione fallita si lascia all'esito mostrato dal thread
         } finally {
           setIsRegenerating(false);
         }
@@ -564,19 +510,14 @@ function RegenerateButton({
       aria-label="Regenerate image"
       className="hover:bg-muted inline-flex size-7 items-center justify-center rounded disabled:opacity-50"
     >
-      <RefreshCwIcon
-        className={cn("size-4", isRegenerating && "animate-spin")}
-      />
+      <RefreshCwIcon className={cn("size-4", isRegenerating && "animate-spin")} />
     </button>
   );
 }
 
 function ImageActions({ part, onRegenerate, className }: ImageActionsProps) {
   return (
-    <div
-      data-slot="image-actions"
-      className={cn("flex items-center gap-1 p-1", className)}
-    >
+    <div data-slot="image-actions" className={cn("flex items-center gap-1 p-1", className)}>
       <button
         type="button"
         onClick={() => downloadImagePart(part)}

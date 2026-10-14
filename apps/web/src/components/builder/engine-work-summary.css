@@ -225,7 +225,9 @@
 .cw-relay-step--running,
 .cw-relay-step--active {
   border-color: #687a59;
-  box-shadow: 0 0 0 1px #687a59, 0 4px 12px rgba(104, 122, 89, 0.08);
+  box-shadow:
+    0 0 0 1px #687a59,
+    0 4px 12px rgba(104, 122, 89, 0.08);
   background: #ffffff;
 }
 .cw-relay-step--waiting_input,
@@ -261,9 +263,15 @@
   animation: pulse-ring 2s infinite;
 }
 @keyframes pulse-ring {
-  0% { box-shadow: 0 0 0 0 rgba(104, 122, 89, 0.4); }
-  70% { box-shadow: 0 0 0 6px rgba(104, 122, 89, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(104, 122, 89, 0); }
+  0% {
+    box-shadow: 0 0 0 0 rgba(104, 122, 89, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(104, 122, 89, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(104, 122, 89, 0);
+  }
 }
 .cw-relay-step__title {
   font-size: 13px;
@@ -437,7 +445,3 @@
   font-size: 10px;
   word-break: break-all;
 }
-
-
-
-

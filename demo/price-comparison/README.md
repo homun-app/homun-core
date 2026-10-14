@@ -20,15 +20,15 @@ Dopo la conferma, seleziona i CSV nei campi **Listino precedente** e **Listino a
 
 ## Risultati attesi
 
-| Esito | Articoli |
-| --- | ---: |
-| Confrontabili | 9 |
-| Aumentati | 4 |
-| Diminuiti | 3 |
-| Invariati | 2 |
-| Nuovi | 3 |
-| Rimossi | 3 |
-| SKU esclusi per anomalie | 3 |
+| Esito                    | Articoli |
+| ------------------------ | -------: |
+| Confrontabili            |        9 |
+| Aumentati                |        4 |
+| Diminuiti                |        3 |
+| Invariati                |        2 |
+| Nuovi                    |        3 |
+| Rimossi                  |        3 |
+| SKU esclusi per anomalie |        3 |
 
 Il motore emette 4 segnalazioni per i 3 SKU esclusi: due occorrenze duplicate, un prezzo mancante e un cambio valuta.
 

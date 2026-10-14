@@ -1,11 +1,7 @@
 {
   "model": "qwen3.5:4b",
   "context_restarted": true,
-  "statuses": [
-    "running",
-    "running",
-    "completed"
-  ],
+  "statuses": ["running", "running", "completed"],
   "run": {
     "id": "run",
     "work_id": "work_gJDoWmUs08RbvQ",

@@ -22,8 +22,13 @@ export type ConversationStreamState = {
 };
 
 const EMPTY: ConversationStreamState = {
-  connected: false, answerText: "", thinking: "", visibleText: "",
-  tools: [], runActive: false, runStatus: null,
+  connected: false,
+  answerText: "",
+  thinking: "",
+  visibleText: "",
+  tools: [],
+  runActive: false,
+  runStatus: null,
 };
 
 function splitThink(text: string): { thinking: string; visible: string } {

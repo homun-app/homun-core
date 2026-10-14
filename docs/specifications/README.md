@@ -26,20 +26,20 @@ Le prescrizioni dei documenti descrivono il comportamento desiderato. Non dichia
 
 ## Decisioni consolidate
 
-| Stato | Direzione |
-|---|---|
-| C | Motore Python indipendente dall'interfaccia |
-| C | React/TypeScript come primo client; API riutilizzabili da un futuro client Flutter |
-| C | Comunicazione remota/tunneling tra installazioni; dati locali e trasferimento soltanto del necessario |
-| C | Cifratura dei dati; tecnica e recupero chiavi ancora da scegliere |
-| C | Chat come ingresso principale; piani, richieste e risultati comprensibili nello stesso contesto |
-| C | Agenti configurabili, team, progetti con più chat, materiali, plugin, automazioni e settings |
-| C | Riutilizzare componenti esistenti per funzionare presto; componenti Homun sostituibili gradualmente |
-| C | **Pydantic AI + DBOS** come runtime agenti/esecuzioni (D-RUN-01 chiusa 2026-09-17); Homun resta proprietario di piano, policy e ricevute; hardening (MCP, cifratura checkpoint, packaging) sullo stesso stack |
-| P | Una sola autorità per spazio nella prima rete, senza backend centrale Homun obbligatorio |
-| P | Archivio conoscenze portabile e adattatore memoria; Mem0 OSS candidato, non adozione irrevocabile |
-| P | HTTP/OpenAPI per comandi e letture, SSE per eventi, trasferimento file riprendibile |
-| D | Trasporto tunnel, librerie cifratura, modelli iniziali, policy offline, framework memoria definitivo |
+| Stato | Direzione                                                                                                                                                                                                     |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C     | Motore Python indipendente dall'interfaccia                                                                                                                                                                   |
+| C     | React/TypeScript come primo client; API riutilizzabili da un futuro client Flutter                                                                                                                            |
+| C     | Comunicazione remota/tunneling tra installazioni; dati locali e trasferimento soltanto del necessario                                                                                                         |
+| C     | Cifratura dei dati; tecnica e recupero chiavi ancora da scegliere                                                                                                                                             |
+| C     | Chat come ingresso principale; piani, richieste e risultati comprensibili nello stesso contesto                                                                                                               |
+| C     | Agenti configurabili, team, progetti con più chat, materiali, plugin, automazioni e settings                                                                                                                  |
+| C     | Riutilizzare componenti esistenti per funzionare presto; componenti Homun sostituibili gradualmente                                                                                                           |
+| C     | **Pydantic AI + DBOS** come runtime agenti/esecuzioni (D-RUN-01 chiusa 2026-09-17); Homun resta proprietario di piano, policy e ricevute; hardening (MCP, cifratura checkpoint, packaging) sullo stesso stack |
+| P     | Una sola autorità per spazio nella prima rete, senza backend centrale Homun obbligatorio                                                                                                                      |
+| P     | Archivio conoscenze portabile e adattatore memoria; Mem0 OSS candidato, non adozione irrevocabile                                                                                                             |
+| P     | HTTP/OpenAPI per comandi e letture, SSE per eventi, trasferimento file riprendibile                                                                                                                           |
+| D     | Trasporto tunnel, librerie cifratura, modelli iniziali, policy offline, framework memoria definitivo                                                                                                          |
 
 **Blockchain:** citata come possibile tecnologia dall'utente, non scelta. Raccomandazione corrente: cifratura convenzionale e registro verificabile, senza blockchain nella v1.
 

@@ -1,13 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  Settings2,
-  Check,
-  Plus,
-  Search,
-  Star,
-  Layers,
-  ArrowRight,
-} from "lucide-react";
+import { Settings2, Check, Plus, Search, Star, Layers, ArrowRight } from "lucide-react";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { useEngineStatus } from "@/hooks/useEngineStatus";
 import {
@@ -81,9 +73,10 @@ export function ConversationUnifiedModelsSection({
   const displayList: ProviderCardData[] = KNOWN_PRESETS.map((preset) => {
     const fromEngine = providers.find((p) => p.id === preset.id);
     const isAct = activeProviderId === preset.id;
-    const isConfigured = preset.kind === "local"
-      ? (ollamaTags.length > 0 || Boolean(fromEngine?.configured))
-      : Boolean(fromEngine?.credential_present);
+    const isConfigured =
+      preset.kind === "local"
+        ? ollamaTags.length > 0 || Boolean(fromEngine?.configured)
+        : Boolean(fromEngine?.credential_present);
 
     let displayModel = fromEngine?.default_model || preset.defaultModel;
     let avail = [...preset.availableModels];
@@ -197,12 +190,11 @@ export function ConversationUnifiedModelsSection({
           <Layers size={17} />
         </div>
         <div className="cv-unified-guidance-banner__content">
-          <div className="cv-unified-guidance-banner__title">
-            Pool di Modelli Multi-Provider
-          </div>
+          <div className="cv-unified-guidance-banner__title">Pool di Modelli Multi-Provider</div>
           <p className="cv-unified-guidance-banner__text">
             Tutti i provider con credenziali configurate sono attivi contemporaneamente nel pool.
-            Puoi assegnare cervelli e modelli diversi a ciascun collaboratore AI (es. Claude 3.7 per il codice, GPT-4o per l'analisi, Ollama per i task locali senza costi) nella sezione{" "}
+            Puoi assegnare cervelli e modelli diversi a ciascun collaboratore AI (es. Claude 3.7 per
+            il codice, GPT-4o per l'analisi, Ollama per i task locali senza costi) nella sezione{" "}
             {onNavigateSection ? (
               <button
                 type="button"
@@ -214,7 +206,8 @@ export function ConversationUnifiedModelsSection({
             ) : (
               <strong>Catalogo Agenti dello Spazio</strong>
             )}
-            . Il provider contrassegnato con <em>Predefinito Spazio</em> viene usato come fallback per le operazioni generiche.
+            . Il provider contrassegnato con <em>Predefinito Spazio</em> viene usato come fallback
+            per le operazioni generiche.
           </p>
         </div>
       </div>
@@ -238,7 +231,10 @@ export function ConversationUnifiedModelsSection({
             className={`cv-unified-tab ${filterTab === "cloud" ? "is-active" : ""}`}
             onClick={() => setFilterTab("cloud")}
           >
-            Cloud <span className="cv-unified-tab__count">{displayList.filter((d) => d.kind === "cloud").length}</span>
+            Cloud{" "}
+            <span className="cv-unified-tab__count">
+              {displayList.filter((d) => d.kind === "cloud").length}
+            </span>
           </button>
           <button
             type="button"
@@ -247,7 +243,10 @@ export function ConversationUnifiedModelsSection({
             className={`cv-unified-tab ${filterTab === "local" ? "is-active" : ""}`}
             onClick={() => setFilterTab("local")}
           >
-            Locali <span className="cv-unified-tab__count">{displayList.filter((d) => d.kind === "local").length}</span>
+            Locali{" "}
+            <span className="cv-unified-tab__count">
+              {displayList.filter((d) => d.kind === "local").length}
+            </span>
           </button>
         </div>
 
@@ -286,14 +285,20 @@ export function ConversationUnifiedModelsSection({
                     {item.kind === "local" ? "Locale" : "Cloud"}
                   </span>
                   {item.configured ? (
-                    <span className="cv-unified-badge is-pool" title="Configurato e disponibile per tutti gli agenti nel pool">
+                    <span
+                      className="cv-unified-badge is-pool"
+                      title="Configurato e disponibile per tutti gli agenti nel pool"
+                    >
                       <span className="cv-unified-dot is-green" /> Nel Pool
                     </span>
                   ) : (
                     <span className="cv-unified-badge is-muted">Non configurato</span>
                   )}
                   {item.isActive && (
-                    <span className="cv-unified-badge is-default-space" title="Fallback predefinito per lo spazio">
+                    <span
+                      className="cv-unified-badge is-default-space"
+                      title="Fallback predefinito per lo spazio"
+                    >
                       <Star size={11} fill="currentColor" /> Predefinito Spazio
                     </span>
                   )}
@@ -350,7 +355,11 @@ export function ConversationUnifiedModelsSection({
                 <span
                   key={m}
                   className={`cv-unified-model-pill ${m === item.defaultModel && item.isActive ? "is-default" : ""}`}
-                  title={m === item.defaultModel ? "Modello predefinito di questo provider" : "Disponibile per gli agenti"}
+                  title={
+                    m === item.defaultModel
+                      ? "Modello predefinito di questo provider"
+                      : "Disponibile per gli agenti"
+                  }
                 >
                   {m}
                 </span>

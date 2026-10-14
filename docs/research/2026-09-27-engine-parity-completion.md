@@ -14,18 +14,18 @@ La [verifica Git e dei percorsi esistenti](2026-09-27-branch-reconciliation.md) 
 
 ## Cambiamenti implementati
 
-| Percorso | Comportamento verificato | Limite residuo |
-|---|---|---|
-| Consegne | Claim SQLite prima dell'IO; destinazione inclusa nell'identità; esito media esplicito; rifiuto, assenza adapter e incertezza distinti; nessun reinvio automatico dopo crash incerto | Upload media dei canali e riconciliazione delle consegne incerte da completare |
-| Codex, Relay, ACP | Protocollo stdio con handshake e conclusione effettiva; POST HTTP configurato; ACP crea proposte canoniche approvabili; input sintetici rifiutati nelle API produttive | Codex resume/history, listener ACP persistente e integrazione NeMo completa non implementati |
-| Approvazioni generiche | Approvazione senza executor resta in attesa; dispatch persistito prima dell'effetto; eccezione dopo dispatch produce esito incerto | Il ledger generico non sostituisce né collega automaticamente tutti gli executor canonici |
-| Sessioni | Lettura, messaggi, esportazione, importazione, usage e mutazioni confinati al workspace; ID importati nuovi; record orfani in quarantena | Il gestore sessioni non è ancora la cronologia canonica dei run |
-| Cron | Una sola occorrenza per scadenza/evento; attivazione evento autenticata; staging idempotente; attesa approvazione separata dal successo; riconciliazione terminale; contatori protetti da edit concorrenti; script cancellabili senza bloccare il pump | Delivery remoto, skills nominate e workdir dell'agente pianificato restano incompleti |
-| Policy strumenti | Surface/toolset/allow/deny persistiti e approvati; lista vuota significa nessun tool; restrizioni applicate anche alla discovery; micro-compaction attiva; contesto fallback persistito | Opzioni esplicite; nessuna attivazione implicita o nuovo controllo UI |
-| Chiarimenti | Contributi canonici e risposte validate; deadline opzionale durevole; draft parziali del destinatario; scadenza e risposta concorrenti serializzate; stessa ricevuta tool dopo riavvio | Scadenze riconciliate dal pump attivo o al riavvio, non a motore spento; countdown e autosalvataggio draft UI non collegati |
-| Delegazione | Figli canonici persistenti, dispatch indipendente, contesto isolato, strumenti di sola lettura entro il catalogo approvato; budget sottratto all'inviluppo del padre; risultato ammesso una sola volta; padre e figli non condividono la pubblicazione finale | Scritture del figlio, delega ricorsiva e isolamento worktree rifiutati con errore tipizzato |
-| Goal, heartbeat, loop | Giudizio modello con accounting; journal di valutazione; attesa durevole e wake idempotenti; API umana autenticata per configurazione; precedenza a correzioni/pausa; gate shell con approvazioni e ricevute canoniche; stato `waiting_automation` visibile e controllabile | Gate collegati ai job terminale approvati; card UI e prova del bundle aggiornato ancora da completare |
-| Python e documenti | Processo con cwd canonica, ambiente ridotto, timeout/cancel, output limitato, RPC limitata agli strumenti read-only; receipt persistita impedisce replay incerto; estrazione DOCX/XLSX/PPTX con limiti ZIP/XML | Non è una sandbox OS; processi che si distaccano dalla sessione richiedono isolamento più forte; LSP e terminale completo restano aperti |
+| Percorso               | Comportamento verificato                                                                                                                                                                                                                                                    | Limite residuo                                                                                                                           |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Consegne               | Claim SQLite prima dell'IO; destinazione inclusa nell'identità; esito media esplicito; rifiuto, assenza adapter e incertezza distinti; nessun reinvio automatico dopo crash incerto                                                                                         | Upload media dei canali e riconciliazione delle consegne incerte da completare                                                           |
+| Codex, Relay, ACP      | Protocollo stdio con handshake e conclusione effettiva; POST HTTP configurato; ACP crea proposte canoniche approvabili; input sintetici rifiutati nelle API produttive                                                                                                      | Codex resume/history, listener ACP persistente e integrazione NeMo completa non implementati                                             |
+| Approvazioni generiche | Approvazione senza executor resta in attesa; dispatch persistito prima dell'effetto; eccezione dopo dispatch produce esito incerto                                                                                                                                          | Il ledger generico non sostituisce né collega automaticamente tutti gli executor canonici                                                |
+| Sessioni               | Lettura, messaggi, esportazione, importazione, usage e mutazioni confinati al workspace; ID importati nuovi; record orfani in quarantena                                                                                                                                    | Il gestore sessioni non è ancora la cronologia canonica dei run                                                                          |
+| Cron                   | Una sola occorrenza per scadenza/evento; attivazione evento autenticata; staging idempotente; attesa approvazione separata dal successo; riconciliazione terminale; contatori protetti da edit concorrenti; script cancellabili senza bloccare il pump                      | Delivery remoto, skills nominate e workdir dell'agente pianificato restano incompleti                                                    |
+| Policy strumenti       | Surface/toolset/allow/deny persistiti e approvati; lista vuota significa nessun tool; restrizioni applicate anche alla discovery; micro-compaction attiva; contesto fallback persistito                                                                                     | Opzioni esplicite; nessuna attivazione implicita o nuovo controllo UI                                                                    |
+| Chiarimenti            | Contributi canonici e risposte validate; deadline opzionale durevole; draft parziali del destinatario; scadenza e risposta concorrenti serializzate; stessa ricevuta tool dopo riavvio                                                                                      | Scadenze riconciliate dal pump attivo o al riavvio, non a motore spento; countdown e autosalvataggio draft UI non collegati              |
+| Delegazione            | Figli canonici persistenti, dispatch indipendente, contesto isolato, strumenti di sola lettura entro il catalogo approvato; budget sottratto all'inviluppo del padre; risultato ammesso una sola volta; padre e figli non condividono la pubblicazione finale               | Scritture del figlio, delega ricorsiva e isolamento worktree rifiutati con errore tipizzato                                              |
+| Goal, heartbeat, loop  | Giudizio modello con accounting; journal di valutazione; attesa durevole e wake idempotenti; API umana autenticata per configurazione; precedenza a correzioni/pausa; gate shell con approvazioni e ricevute canoniche; stato `waiting_automation` visibile e controllabile | Gate collegati ai job terminale approvati; card UI e prova del bundle aggiornato ancora da completare                                    |
+| Python e documenti     | Processo con cwd canonica, ambiente ridotto, timeout/cancel, output limitato, RPC limitata agli strumenti read-only; receipt persistita impedisce replay incerto; estrazione DOCX/XLSX/PPTX con limiti ZIP/XML                                                              | Non è una sandbox OS; processi che si distaccano dalla sessione richiedono isolamento più forte; LSP e terminale completo restano aperti |
 
 ## B5 — streaming e letture concorrenti
 
@@ -177,6 +177,7 @@ C3c2, correzione dell'intervallo di cambio endpoint: il registro confronta l'ide
 **C4 / H04 (Progressive Project Instructions & Subdirectory Hints) conclusa e congelata:** implementato il modulo dedicato `subdirectory_hints.py` con tracker per-run durevole `SubdirectoryHintTracker` integrato sia in `workspace_files.execute` sia in `agent_run_execution` e `agent_parallel_reads`. L'agente che naviga in sotto-cartelle tramite invocazioni di tool (file o comandi terminale `cd`/`pushd`/`workdir`) scopre on-demand le istruzioni di contesto annidate (`AGENTS.override.md` > `AGENTS.md` > `agents.md` > `CLAUDE.md` > `claude.md` > `.cursorrules`), risalendo fino a 5 livelli di antenati. I symlink che oltrepassano la radice del workspace (`is_relative_to(working_dir)`) o che puntano a file protetti/segreti (`.env`, credenziali, chiavi SSH) vengono rifiutati in modo tassativo. I file di istruzione oltre i 32.000 caratteri vengono troncati con conservazione di head (40%) + tail (60%) e marker esplicito indicante il path completo. Il contenuto già caricato viene deduplicato tramite SHA-256 (incluso il seed della root caricato all'avvio) e lo stato del tracker è persistito atomicamente in `run['_subdirectory_hints']` nel repository SQLite per prevenire duplicate injection attraverso restart o nei turni successivi. Il contesto scoperto viene allegato esclusivamente all'osservazione del risultato del tool (`subdirectory_context`), lasciando immutabile il system prompt iniziale approvato e preservando pienamente il prompt caching (H05). Integrata la compatibilità con la micro-compaction sui turni passati senza alterare i risultati recenti o il contesto annidato. 19 test dedicati passati in `test_c4_subdirectory_hints.py`. OpenAPI snapshot conforme; typecheck TypeScript exit 0; controllo architetturale a 0 errori e 31 avvisi dimensionali conformi al baseline. Suite completa del motore su directory temporanea isolata `HOMUN_DATA_DIR` congelata a **1781 passati, 1 saltato, 1 avviso FastMCP in 214,81 s**.
 
 **C1 (Terminal/Files, LSP Lifecycle, Checkpoint Approvals) conclusa e congelata:**
+
 - Collegati nel catalogo strumenti dell'agente (`agent_tool_registry.py`) i tool per la gestione dei checkpoint filesystem: `checkpoint_list` (elenco ordinato dei commit), `checkpoint_diff` (diff e stat rispetto allo stato attuale dei file), `checkpoint_plan_restore` (anteprima del rollback sicuro con protezione delle modifiche utente successive), e `checkpoint_restore` (ripristino distruttivo dei file con approvazione esatta obbligatoria).
 - Inserito `checkpoint_restore` tra le operazioni di scrittura (`WRITE_TOOL_NAMES`) in `surface_toolset_policy.py`, garantendo il rifiuto immediato in modalità `readonly` e l'obbligo di consenso esplicito (`ConflictError` in assenza di autorizzazione approvata).
 - Implementato il manager di ciclo di vita `LSPService` in `engine/src/homun/execution/lsp_lifecycle.py` per language server reali (`pyright`, `gopls`, `typescript-language-server`, `rust-analyzer`), con rilevamento veritiero della presenza su host (`shutil.which`), gestione dell'associazione e rilascio dei workspace (`release_workspace`), baseline snapshots per il calcolo dei soli diagnostici introdotti e spegnimento controllato a fine processo (`atexit`).
@@ -184,6 +185,7 @@ C3c2, correzione dell'intervallo di cambio endpoint: il registro confronta l'ide
 - 7 test dedicati in `test_c1_checkpoints_lsp.py` passati; 14 test PTY/virtual screen in `test_c1b_terminal_pty.py` passati; zero errori architetturali e 31 avvisi dimensionali conformi al baseline; typecheck TypeScript exit 0. Suite completa del motore su directory temporanea isolata `HOMUN_DATA_DIR` congelata a **1788 passati, 1 saltato, 1 avviso FastMCP in 218,97 s (3m 38s)**.
 
 **C3 (Memory, Skills & Sessions refinement) conclusa e congelata:**
+
 - Estesi i contratti e gli strumenti delle skill (`skill_contracts.py`, `skill_tools.py`) con:
   - **Progressive skill resources**: la visualizzazione delle skill (`skill_view`) espone on-demand i path dei file di risorsa allegati senza caricarne l'intero contenuto in avanti. Il nuovo tool `skill_resource` consente il recupero del singolo file di risorsa (script, configurazioni, guide) con stringente protezione da path traversal (rifiuto di `..`, percorsi assoluti, caratteri di controllo) e blocco per skill staged/in quarantena con errore tipizzato `skill_untrusted`.
   - **Skill setup e trust approval**: implementato il tool `skill_trust` e registrato tra le operazioni mutative (`WRITE_TOOL_NAMES` in `surface_toolset_policy.py`). Un attore agente non può approvare o mutare la fiducia di una skill senza esplicita autorizzazione umana (`_skill_trust_approved` o `approval_token`), con fallimento immediato in `ConflictError` in caso di chiamata non autorizzata o di disallineamento della revisione attesa (`expected_version`). In presenza di autorizzazione, la transizione transita con l'autorità delegata della persona umana approvante.
@@ -193,6 +195,7 @@ C3c2, correzione dell'intervallo di cambio endpoint: il registro confronta l'ide
 - **Tutto lo Stage C (C1, C2, C3, C4) è ora completamente completato e certificato.**
 
 **D2a / H14 (Web Providers Dispatcher) conclusa e congelata:**
+
 - Esteso e allineato `engine/src/homun/execution/web_providers.py` rispetto all'inventario e ai protocolli upstream di Hermes (`.audit-hermes-ref/plugins/web/`):
   - Integrati i protocolli reali di ricerca per `perplexity` (Perplexity Search API `POST /search` con `search_context_size: low` e fallback sulle citations), `xai` (xAI Responses API `POST /responses` con tool `web_search`, modello configurabile `grok-build-0.1` e parsing dell'envelope JSON/citations di Grok), `parallel` (Parallel Search API `POST /v1beta/search` con parametri `search_queries`, `objective`, `mode`, `max_results`), e `keenable` (Keenable Search API `POST /v1/search` sia keyed sia keyless su free-tier anonimo con header `X-Keenable-Title: homun-engine`).
   - Implementato `execute_provider_extract` per l'estrazione sincrona dei contenuti web via provider dedicati: `parallel` (`POST /v1beta/extract` con `full_content: True`) e `keenable` (`GET /v1/fetch?url=...`), con rifiuto esplicito tipizzato `web_provider_unsupported` in caso di richiesta di provider privi di supporto ad estrazione (es. `searxng`, `brave`).
@@ -202,6 +205,7 @@ C3c2, correzione dell'intervallo di cambio endpoint: il registro confronta l'ide
 - 8 test dedicati passati in `test_d2a_web_providers.py` con server HTTP locali reali (`ThreadingHTTPServer`); 13 test passati in `test_web_pages.py`; OpenAPI snapshot conforme (`export_openapi.py --check` exit 0); architettura a 0 errori e 31 avvisi dimensionali conformi al baseline.
 
 **Stage A (A1, A2, A3, A5) e Stage B3 formalmente congelati:**
+
 - Eseguita la suite congiunta di certificazione isolata con **80 test passati in 8,75 s**:
   - `test_delivery_outcomes.py`: A1 deliverable claims e receipts con esiti veritieri.
   - `test_codex_stdio_transport.py` e `test_runtime_http_and_acp.py`: A2 alternative runtimes e stdio child transport.
@@ -211,6 +215,7 @@ C3c2, correzione dell'intervallo di cambio endpoint: il registro confronta l'ide
 - Verificati anche 21 test delle suite adiacenti (`test_h42_deliverables.py`, `test_cron_dispatcher_and_chronos.py`, `test_cron_jobs_and_scheduler.py`, `test_cron_activation_api.py`, `test_delegation_tools.py`).
 
 **D1 (Channels Inbound Lifecycle, Queue, Recovery & Media Protocols) conclusa e congelata:**
+
 - Implementata la coda durevole SQLite `InboundChannelQueue` (`channel_inbound_queue.py`):
   - Inserimento atomico dei messaggi inbound (`pending`), assegnazione con lease e lock anti-concorrenza (`claim_next` con `BEGIN IMMEDIATE`), marcatura esiti (`completed`, `failed`), e procedura di ripristino per riavvii / crash (`recover_stale_claims`).
 - Implementato il supervisore di consegna e media `ChannelDeliverySupervisor` (`channel_delivery_recovery.py`):
@@ -219,7 +224,7 @@ C3c2, correzione dell'intervallo di cambio endpoint: il registro confronta l'ide
 - Implementato il poller di canale resiliente `ChannelPoller` con avanzamento durevole dell'`offset` per evitare duplicazioni di messaggi dopo restart.
 - Implementata e registrata la rotta API `channel_ingress_api.py` (`/v1/gateway/channels/` per webhook ingress, query queue, trigger di recovery e polling).
 - 11 test dedicati passati in `test_d1_channel_lifecycle.py`; 28 test passati in `test_gateway_and_channels.py`; OpenAPI snapshot aggiornato e verificato (`export_openapi.py --check` exit 0); TypeScript `npm run typecheck` exit 0; architettura a 0 errori e 31 avvisi dimensionali conformi al baseline.
-**D2 (MCP/Plugins/Providers: Interactive OAuth, Elicitation & Pre-Tool Hooks) conclusa e congelata:**
+  **D2 (MCP/Plugins/Providers: Interactive OAuth, Elicitation & Pre-Tool Hooks) conclusa e congelata:**
 - Implementato `MCPOAuthBroker` (`mcp_oauth.py`) per il flusso di autenticazione interattivo PKCE (generazione code verifier/challenge S256, build authorization URL, scambio codice di autorizzazione con token).
 - Implementata la gestione interattiva delle elicitation (`install_product_elicitation` / `set_elicitation_callback`) con flag di attivazione esplicito `HOMUN_MCP_ELICITATION`.
 - Implementati ed eseguiti i pre-tool execution hooks (`agent_run_execution.py`) che invocano `PluginManager.call_hook("pre_tool_call", ...)` con blocco/autorizzazione puntuale prima dell'esecuzione del tool.
@@ -227,6 +232,7 @@ C3c2, correzione dell'intervallo di cambio endpoint: il registro confronta l'ide
 - 6 test dedicati passati in `test_d2_mcp_plugins_providers.py`; 16 test passati in `test_mcp_protocol.py`.
 
 **D3 (Media Backends, Voice Mode & Integrations) conclusa e congelata:**
+
 - `media_backends.py`: implementati `resolve_image_dispatcher`, `resolve_video_dispatcher`, `resolve_stt_dispatcher` con dispatchers canonici (`openai_image_dispatcher`, `fal_video_dispatcher`, `whisper_stt_dispatcher`) e fallback trasparenti per testing.
 - `routes/media_api.py`: collegate le route FastAPI ai dispatcher di risoluzione.
 - `media_voice_mode.py`: implementati `bind_audio_pipeline`, `feed_audio_chunk` e callback di cancellazione per barge-in bidirezionale.
@@ -234,6 +240,7 @@ C3c2, correzione dell'intervallo di cambio endpoint: il registro confronta l'ide
 - 6 test dedicati passati in `test_d3_media_integrations.py`; 14 test passati in `test_h41_media.py` e `test_h43_integrations.py`.
 
 **D4 (Operations Daemon, Batch Runner & Catalogs) conclusa e congelata:**
+
 - `daemon_lifecycle.py`: implementati `start` e `restart` reali con gestione processi orfani, attesa su zombie (`waitpid`), e rigenerazione del PID del demone.
 - `batch_eval_runner.py` e `routes/research_api.py`: implementato `create_canonical_batch_executor` collegato a `ModelRegistry` e `TrajectoryStore`.
 - `surface_catalog_packs.py`: estesi i catalog pack `productivity` (incluso `pdf_toolkit` con script operativi verificati) e `research`, con supporto per directory `SKILL.md` e risorse bundle.
@@ -262,4 +269,3 @@ C3c2, correzione dell'intervallo di cambio endpoint: il registro confronta l'ide
 
 1. Integrazione UI generale ed eventuale collegamento delle viste frontend alle nuove capability native del motore completato.
 2. Verifica su desktop app con build packaging ed esecuzione end-to-end con display reale.
-

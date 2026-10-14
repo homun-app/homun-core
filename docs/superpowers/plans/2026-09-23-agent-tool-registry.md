@@ -20,13 +20,13 @@ not authorize a native call. A later invocation journal must preserve external
 receipts and uncertain effects before MCP may join adaptive execution.
 
 - [x] Pure instance-scoped registry: registration, schema snapshots, duplicate
-  rejection, strict validation, deterministic manifest/search and typed failures.
+      rejection, strict validation, deterministic manifest/search and typed failures.
 - [x] Bind existing tools plus tool_search; native schemas and dispatch share
-  registry; pin and validate new manifests, preserve old-run tool surface.
+      registry; pin and validate new manifests, preserve old-run tool surface.
 - [x] Verify model→tool_search→selected tool→final, malformed arguments,
-  unavailable collaborator, manifest drift, replay and revoked source behavior.
+      unavailable collaborator, manifest drift, replay and revoked source behavior.
 - [x] MCP SDK transport: actual initialized handshake, descriptors/pagination,
-  session HTTP/SSE, fail-closed errors and bounded lifetime; protocol fixtures.
+      session HTTP/SSE, fail-closed errors and bounded lifetime; protocol fixtures.
 - [x] Review, full regression, documentation and local integration. H07/H36
-  stay partial until dynamic MCP binding, lazy activation, spill and effect
-  receipts are implemented and proven end-to-end.
+      stay partial until dynamic MCP binding, lazy activation, spill and effect
+      receipts are implemented and proven end-to-end.

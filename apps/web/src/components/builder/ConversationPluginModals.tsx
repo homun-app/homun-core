@@ -55,13 +55,18 @@ export function AddMcpServerModal({
             </div>
             <ul className="list-disc pl-4 space-y-1">
               <li>
-                <strong className="text-[#f4f1ee]">Rilevamento automatico:</strong> Homun interroga il server per catalogare gli strumenti disponibili (es. query database, lettura file).
+                <strong className="text-[#f4f1ee]">Rilevamento automatico:</strong> Homun interroga
+                il server per catalogare gli strumenti disponibili (es. query database, lettura
+                file).
               </li>
               <li>
-                <strong className="text-[#f4f1ee]">Controllo umano (HITL):</strong> Nessuna azione esterna o scrittura avviene a tua insaputa. Gli agenti devono richiedere approvazione esplicita prima di invocare i tool.
+                <strong className="text-[#f4f1ee]">Controllo umano (HITL):</strong> Nessuna azione
+                esterna o scrittura avviene a tua insaputa. Gli agenti devono richiedere
+                approvazione esplicita prima di invocare i tool.
               </li>
               <li>
-                <strong className="text-[#f4f1ee]">Disponibilità:</strong> Puoi attivare o disattivare il server per la squadra in qualsiasi momento con un toggle.
+                <strong className="text-[#f4f1ee]">Disponibilità:</strong> Puoi attivare o
+                disattivare il server per la squadra in qualsiasi momento con un toggle.
               </li>
             </ul>
           </div>
@@ -233,7 +238,9 @@ export function AddSkillModal({
         <form className="cv-unified-modal__body" onSubmit={onSubmit}>
           <div className="p-3 rounded-lg bg-[rgba(21,122,110,0.12)] border border-[rgba(143,227,208,0.25)] text-xs text-[#9db3ad]">
             <strong className="text-[#f4f1ee] block mb-1">Cosa accade con una Skill:</strong>
-            Una skill insegna agli agenti della squadra una sequenza di passaggi standardizzati (SOP) da seguire per compiti ricorrenti, garantendo coerenza di esecuzione tra tutti i collaboratori.
+            Una skill insegna agli agenti della squadra una sequenza di passaggi standardizzati
+            (SOP) da seguire per compiti ricorrenti, garantendo coerenza di esecuzione tra tutti i
+            collaboratori.
           </div>
 
           <div className="cv-unified-form-field">

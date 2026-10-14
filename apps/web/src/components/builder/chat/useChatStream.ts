@@ -44,7 +44,9 @@ const ACTIVE_RUN_STATUSES = new Set([
 export function useChatStream(conversationId: string | undefined) {
   const [serverMessages, setServerMessages] = useState<ChatStreamMessage[]>([]);
   const [pending, setPending] = useState<{ id: string; text: string }[]>([]);
-  const [stream, setStream] = useState<{ runId: string; text: string; reasoning?: string } | null>(null);
+  const [stream, setStream] = useState<{ runId: string; text: string; reasoning?: string } | null>(
+    null,
+  );
   const [isRunning, setIsRunning] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [toolEvents, setToolEvents] = useState<ChatToolEvent[]>([]);
@@ -95,21 +97,19 @@ export function useChatStream(conversationId: string | undefined) {
           content: m.text,
           ...(m.reasoning ? { reasoning: m.reasoning } : {}),
           ...(m.tools && m.tools.length > 0
-            ? { tools: m.tools.map((tool, toolIndex) => ({
-                id: `${messageId}:${toolIndex}`,
-                tool: tool.tool,
-                message: tool.message,
-              })) }
+            ? {
+                tools: m.tools.map((tool, toolIndex) => ({
+                  id: `${messageId}:${toolIndex}`,
+                  tool: tool.tool,
+                  message: tool.message,
+                })),
+              }
             : {}),
         };
       });
       // cala le bolle ottimistiche ormai presenti nella trascrizione
-      const echoed = new Set(
-        next.filter((m) => m.role === "user").map((m) => m.content.trim()),
-      );
-      pendingRef.current = pendingRef.current.filter(
-        (p) => !echoed.has(p.text.trim()),
-      );
+      const echoed = new Set(next.filter((m) => m.role === "user").map((m) => m.content.trim()));
+      pendingRef.current = pendingRef.current.filter((p) => !echoed.has(p.text.trim()));
       setPending([...pendingRef.current]);
       // la risposta consegnata sostituisce la bolla in streaming
       const answers = next.filter((m) => m.role === "assistant").length;
@@ -283,13 +283,15 @@ export function useChatStream(conversationId: string | undefined) {
       // la bolla in streaming compare solo quando ha qualcosa da mostrare:
       // prima del primo token l'attività è indicata dall'hint sotto il thread
       ...(stream && (stream.text || stream.reasoning || toolEvents.length)
-        ? [{
-            id: `stream:${stream.runId}`,
-            role: "assistant" as const,
-            content: stream.text,
-            ...(stream.reasoning ? { reasoning: stream.reasoning } : {}),
-            tools: toolEvents,
-          }]
+        ? [
+            {
+              id: `stream:${stream.runId}`,
+              role: "assistant" as const,
+              content: stream.text,
+              ...(stream.reasoning ? { reasoning: stream.reasoning } : {}),
+              tools: toolEvents,
+            },
+          ]
         : []),
     ],
     [serverMessages, pending, stream, toolEvents],

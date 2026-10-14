@@ -1,13 +1,6 @@
 {
   "fixture": "real Ollama tool choice + real stdio; scripted explicit human approval; restart before receipt consumption",
-  "statuses": [
-    "running",
-    "running",
-    "running",
-    "waiting_external",
-    "running",
-    "completed"
-  ],
+  "statuses": ["running", "running", "running", "waiting_external", "running", "completed"],
   "approvals": [
     {
       "id": "run:external:a15efde6a2789853296077a3",
@@ -69,9 +62,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "code"
-                ],
+                "required": ["code"],
                 "additionalProperties": false
               },
               "toolset": "mcp",
@@ -87,9 +78,7 @@
       {
         "tool": "tool_describe",
         "arguments": {
-          "names": [
-            "mcp__orders__lookup_order_2ebf25ce30ea"
-          ]
+          "names": ["mcp__orders__lookup_order_2ebf25ce30ea"]
         },
         "message": "Use tool_describe",
         "result": {
@@ -104,9 +93,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "code"
-                ],
+                "required": ["code"],
                 "additionalProperties": false
               }
             }
@@ -219,9 +206,7 @@
             "id": "call_p8c5qsgq",
             "name": "tool_describe",
             "arguments": {
-              "names": [
-                "mcp__orders__lookup_order_2ebf25ce30ea"
-              ]
+              "names": ["mcp__orders__lookup_order_2ebf25ce30ea"]
             }
           }
         ],
@@ -299,9 +284,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "code"
-            ],
+            "required": ["code"],
             "additionalProperties": false
           }
         }

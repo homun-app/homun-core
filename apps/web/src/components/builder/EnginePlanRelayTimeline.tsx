@@ -1,6 +1,15 @@
 import type { Work } from "./conversation-types";
 import { defaultLocalActor } from "@/lib/engine-domain-client";
-import { Check, ArrowRight, Play, Bot, FileText, FileSpreadsheet, Layers, User } from "lucide-react";
+import {
+  Check,
+  ArrowRight,
+  Play,
+  Bot,
+  FileText,
+  FileSpreadsheet,
+  Layers,
+  User,
+} from "lucide-react";
 import "./engine-plan-relay.css";
 
 function capabilityMeta(cap: string) {
@@ -37,21 +46,32 @@ export function EnginePlanRelayTimeline({
   const succeededSteps = steps.filter((step) => step.status === "succeeded");
   const runningStep = steps.find((step) => step.status === "running");
   const firstPending = steps.find((step) => step.status === "pending");
-  const waitingApproval = steps.find((step) => step.status === "waiting_approval" || step.status === "waiting_input");
+  const waitingApproval = steps.find(
+    (step) => step.status === "waiting_approval" || step.status === "waiting_input",
+  );
 
   // Show authorization checkpoint if firstPending is ready to run or waiting approval
-  const needsAuth = waitingApproval || (work.engineStatus === "ready" && firstPending && !!onStartWork);
+  const needsAuth =
+    waitingApproval || (work.engineStatus === "ready" && firstPending && !!onStartWork);
   const authStep = waitingApproval || firstPending;
 
   return (
-    <div className="cw-relay-timeline" id="cw-relay-timeline" aria-label="Staffetta collaborativa nel flusso">
+    <div
+      className="cw-relay-timeline"
+      id="cw-relay-timeline"
+      aria-label="Staffetta collaborativa nel flusso"
+    >
       {/* Succeeded Phases - Visible milestones of the handoff */}
       {succeededSteps.map((step, idx) => {
         const meta = capabilityMeta(step.capability);
         const Icon = meta.icon;
-        const assignee = agentNames?.[step.assignee_id] ?? (step.assignee_id === defaultLocalActor().id ? "Homun" : "Collaboratore");
+        const assignee =
+          agentNames?.[step.assignee_id] ??
+          (step.assignee_id === defaultLocalActor().id ? "Homun" : "Collaboratore");
         const nextStep = steps.find((s, i) => i === steps.indexOf(step) + 1);
-        const nextAssignee = nextStep ? (agentNames?.[nextStep.assignee_id] ?? "collaboratore") : null;
+        const nextAssignee = nextStep
+          ? (agentNames?.[nextStep.assignee_id] ?? "collaboratore")
+          : null;
 
         return (
           <div key={step.id} className="cw-relay-timeline__milestone">
@@ -80,7 +100,9 @@ export function EnginePlanRelayTimeline({
               </div>
               {step.output_expected && (
                 <div className="cw-relay-timeline__asset">
-                  <span>Consegnato: <em>{step.output_expected}</em></span>
+                  <span>
+                    Consegnato: <em>{step.output_expected}</em>
+                  </span>
                 </div>
               )}
               {nextStep && (
@@ -128,7 +150,7 @@ export function EnginePlanRelayTimeline({
                     {agentNames?.[runningStep.assignee_id] ?? "Homun"}
                   </button>
                 ) : (
-                  agentNames?.[runningStep.assignee_id] ?? "Homun"
+                  (agentNames?.[runningStep.assignee_id] ?? "Homun")
                 )}{" "}
                 al lavoro
               </span>
@@ -145,18 +167,15 @@ export function EnginePlanRelayTimeline({
       {/* Failed Phase Notice */}
       {steps.find((s) => s.status === "failed") && (
         <div className="cw-relay-timeline__milestone is-failed">
-          <div className="cw-relay-timeline__icon is-failed">
-            !
-          </div>
+          <div className="cw-relay-timeline__icon is-failed">!</div>
           <div className="cw-relay-timeline__body">
             <div className="cw-relay-timeline__title">
               <strong>Interruzione: {steps.find((s) => s.status === "failed")?.title}</strong>
-              <span className="cw-relay-timeline__pill is-failed">
-                Richiede intervento
-              </span>
+              <span className="cw-relay-timeline__pill is-failed">Richiede intervento</span>
             </div>
             <p className="cw-relay-timeline__hint">
-              La fase ha riscontrato un errore. Puoi riavviarla o modificare il piano dal pannello laterale.
+              La fase ha riscontrato un errore. Puoi riavviarla o modificare il piano dal pannello
+              laterale.
             </p>
           </div>
         </div>
@@ -164,7 +183,12 @@ export function EnginePlanRelayTimeline({
 
       {/* Human Gatekeeper Checkpoint */}
       {needsAuth && authStep && (
-        <div className="cw-relay-timeline__checkpoint" id="cw-relay-checkpoint" role="region" aria-label="Cancello di controllo umano">
+        <div
+          className="cw-relay-timeline__checkpoint"
+          id="cw-relay-checkpoint"
+          role="region"
+          aria-label="Cancello di controllo umano"
+        >
           <div className="cw-relay-timeline__checkpoint-header">
             <span className="cw-relay-timeline__checkpoint-badge">SUPERVISIONE RICHIESTA</span>
             <span className="cw-relay-timeline__checkpoint-phase">Fase: {authStep.title}</span>
@@ -178,12 +202,19 @@ export function EnginePlanRelayTimeline({
                 title="Visualizza scheda collaboratore"
                 onClick={() => onInspectAgent(authStep.assignee_id)}
               >
-                <strong>{agentNames?.[authStep.assignee_id] ?? (authStep.assignee_id === defaultLocalActor().id ? "Homun" : "Collaboratore")}</strong>
+                <strong>
+                  {agentNames?.[authStep.assignee_id] ??
+                    (authStep.assignee_id === defaultLocalActor().id ? "Homun" : "Collaboratore")}
+                </strong>
               </button>
             ) : (
-              <strong>{agentNames?.[authStep.assignee_id] ?? (authStep.assignee_id === defaultLocalActor().id ? "Homun" : "Collaboratore")}</strong>
+              <strong>
+                {agentNames?.[authStep.assignee_id] ??
+                  (authStep.assignee_id === defaultLocalActor().id ? "Homun" : "Collaboratore")}
+              </strong>
             )}
-            . Nessuna operazione o scrittura sul sistema verrà eseguita senza il tuo esplicito via libera.
+            . Nessuna operazione o scrittura sul sistema verrà eseguita senza il tuo esplicito via
+            libera.
           </p>
           {onStartWork && work.engineStatus === "ready" && (
             <button

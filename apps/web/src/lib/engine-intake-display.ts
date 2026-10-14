@@ -32,7 +32,8 @@ function clip(value: string, max = 80): string {
 }
 
 function renderValue(field: string, value: string | string[] | null | undefined): string {
-  if (Array.isArray(value)) return value.length > 0 ? value.map((v) => clip(v, 40)).join(" · ") : "—";
+  if (Array.isArray(value))
+    return value.length > 0 ? value.map((v) => clip(v, 40)).join(" · ") : "—";
   if (typeof value === "string") {
     if (field === "capability") return CAPABILITY_LABELS[value] ?? value;
     return clip(value);
@@ -65,11 +66,7 @@ export function isAgreementRevisable(work: {
   enginePlanRevision?: number;
   engineArtifactVersion?: number;
 }): boolean {
-  return (
-    work.engineStatus === "draft" &&
-    !work.enginePlanRevision &&
-    !work.engineArtifactVersion
-  );
+  return work.engineStatus === "draft" && !work.enginePlanRevision && !work.engineArtifactVersion;
 }
 
 /** The one action the person owes while a brief awaits their decision. */

@@ -14,15 +14,15 @@ No silent jump to an agent chat. No inventing roster IDs. Simulation stays isola
 
 ## Decisions (approved in conversation)
 
-| Decision | Choice |
-|----------|--------|
-| Product slice | **B** — engine + chat path for «cambia obiettivo…» / «assegna a @…» with preview → confirm |
-| Confirm UX | **Card buttons** Conferma / Annulla (Hermes-style once/deny; not free-text «sì» alone) |
-| Architecture | **Unified `WorkPatch`** — one preview + one apply used by chat and manual UI |
-| Inspiration | [Hermes Agent](https://hermes-agent.nousresearch.com/) approval flow and observable changes — adapted to Homun’s work/plan model, not shell YOLO |
-| Interpret kind | Dedicated `patch_proposal` after engine `preview_patch` (not raw unvalidated `command_proposal`) |
-| Pending state | Ephemeral: proposal lives on the assistant message / event payload — **no** pending_patch table in F3.4 |
-| Annulla | Chat ack only (no domain mutation); optional audit event later |
+| Decision       | Choice                                                                                                                                           |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Product slice  | **B** — engine + chat path for «cambia obiettivo…» / «assegna a @…» with preview → confirm                                                       |
+| Confirm UX     | **Card buttons** Conferma / Annulla (Hermes-style once/deny; not free-text «sì» alone)                                                           |
+| Architecture   | **Unified `WorkPatch`** — one preview + one apply used by chat and manual UI                                                                     |
+| Inspiration    | [Hermes Agent](https://hermes-agent.nousresearch.com/) approval flow and observable changes — adapted to Homun’s work/plan model, not shell YOLO |
+| Interpret kind | Dedicated `patch_proposal` after engine `preview_patch` (not raw unvalidated `command_proposal`)                                                 |
+| Pending state  | Ephemeral: proposal lives on the assistant message / event payload — **no** pending_patch table in F3.4                                          |
+| Annulla        | Chat ack only (no domain mutation); optional audit event later                                                                                   |
 
 ## Architecture
 
@@ -48,14 +48,14 @@ Manual panel builds the same `changes[]` and calls the same `preview_patch` / `a
 
 ### Modules (keep small — no ConversationWorkspace growth)
 
-| Module | Responsibility |
-|--------|----------------|
-| `homun/domain/patch.py` | `WorkPatchChange`, `WorkPatchProposal`, validate against work + roster + plan |
-| `homun/domain/service.py` | Commands `work.preview_patch`, `work.apply_patch` |
+| Module                                            | Responsibility                                                                |
+| ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `homun/domain/patch.py`                           | `WorkPatchChange`, `WorkPatchProposal`, validate against work + roster + plan |
+| `homun/domain/service.py`                         | Commands `work.preview_patch`, `work.apply_patch`                             |
 | `homun/models/interpretation.py` + `interpret.py` | `kind: patch_proposal` + draft changes; engine runs `preview_patch` before UI |
-| `homun/models/guardrails.py` | Reject unknown IDs; force clarification if `@` ≠ 1 candidate |
-| Thin UI | `WorkPatchPreviewCard` + wire confirm/cancel in engine postMessage overlay |
-| Fake provider | Deterministic patch proposals for CI |
+| `homun/models/guardrails.py`                      | Reject unknown IDs; force clarification if `@` ≠ 1 candidate                  |
+| Thin UI                                           | `WorkPatchPreviewCard` + wire confirm/cancel in engine postMessage overlay    |
+| Fake provider                                     | Deterministic patch proposals for CI                                          |
 
 ### Schema (sketch)
 
@@ -83,11 +83,11 @@ class WorkPatchProposal(BaseModel):
 
 ### Commands
 
-| Command | Mutates? | Behavior |
-|---------|----------|----------|
-| `work.preview_patch` | No | Validate `changes` against current work/plan/roster; fill `from_value` + `summary_lines`; return proposal |
-| `work.apply_patch` | Yes | Require `expected_version == work.version`; apply all changes atomically; bump version; if any plan field → new plan revision (reuse `plan.revise` internals or equivalent); emit `work.patched` |
-| (Annulla) | No | UI acknowledges; no `apply_patch`. Domain unchanged. |
+| Command              | Mutates? | Behavior                                                                                                                                                                                         |
+| -------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `work.preview_patch` | No       | Validate `changes` against current work/plan/roster; fill `from_value` + `summary_lines`; return proposal                                                                                        |
+| `work.apply_patch`   | Yes      | Require `expected_version == work.version`; apply all changes atomically; bump version; if any plan field → new plan revision (reuse `plan.revise` internals or equivalent); emit `work.patched` |
+| (Annulla)            | No       | UI acknowledges; no `apply_patch`. Domain unchanged.                                                                                                                                             |
 
 Conflict → **409** with typed code; UI asks to refresh and re-preview.
 
@@ -120,10 +120,10 @@ Conflict → **409** with typed code; UI asks to refresh and re-preview.
 
 ## Gate
 
-1. Fake: chat «cambia obiettivo a X» → preview card → Conferma → `work.objective == X` and version +1.  
-2. Fake: «assegna [passo] a @Vera» with unique roster hit → apply → step assignee updated via new plan revision.  
-3. Manual UI builds identical `changes` → same `apply_patch` result.  
-4. Ambiguous `@` → clarification, no mutation.  
+1. Fake: chat «cambia obiettivo a X» → preview card → Conferma → `work.objective == X` and version +1.
+2. Fake: «assegna [passo] a @Vera» with unique roster hit → apply → step assignee updated via new plan revision.
+3. Manual UI builds identical `changes` → same `apply_patch` result.
+4. Ambiguous `@` → clarification, no mutation.
 5. Stale `expected_version` → 409, no partial apply.
 
 ## Resolved for first cut

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { defaultPreferences, type AutonomyLevel } from "../apps/web/src/components/builder/conversation-preferences.ts";
+import {
+  defaultPreferences,
+  type AutonomyLevel,
+} from "../apps/web/src/components/builder/conversation-preferences.ts";
 import { handleEngineSend } from "../apps/web/src/lib/engine-send-handler.ts";
 import type { Work } from "../apps/web/src/components/builder/conversation-types.ts";
 import type { EngineWorkspaceState } from "../apps/web/src/hooks/useEngineWorkspace.ts";
@@ -47,8 +50,12 @@ test("handleEngineSend propagates autonomyLevel to engine postMessage", async ()
     text: "Esegui questo compito in autonomia",
     attachments: [],
     open: () => {},
-    setNotice: (msg) => { noticeMsg = msg; },
-    bumpOwnSend: () => { bumped = true; },
+    setNotice: (msg) => {
+      noticeMsg = msg;
+    },
+    bumpOwnSend: () => {
+      bumped = true;
+    },
     autonomyLevel: "autonomous",
   });
 

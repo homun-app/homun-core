@@ -6,10 +6,10 @@ capacità attuali, prove e limiti. I percorsi simulati restano espliciti.
 
 ## Prototipo UX (simulato)
 
-- [x] Backend, ruoli, isolamento progetti *(demo / IndexedDB, non motore)*
-- [x] Chat con AI Elements + empty state *(simulazione)*
-- [x] Automazioni, plugin, persone *(simulazione)*
-- [x] Panoramica "viva": bot come collaboratori, attenzione, diario di bordo *(simulazione)*
+- [x] Backend, ruoli, isolamento progetti _(demo / IndexedDB, non motore)_
+- [x] Chat con AI Elements + empty state _(simulazione)_
+- [x] Automazioni, plugin, persone _(simulazione)_
+- [x] Panoramica "viva": bot come collaboratori, attenzione, diario di bordo _(simulazione)_
 - [x] Rifinire Automazioni e Plugin allo stesso livello (tema scuro editoriale)
 - [x] Pagina "Crea": percorso guidato conversazionale + mappa visiva per automazioni e collaboratori
 - [ ] Modalita mappa anche per i collaboratori (strumenti collegati come nodi)

@@ -6,23 +6,23 @@
 
 ## Risultati della serie principale
 
-| Scenario | Hermes | OpenHands SDK |
-| --- | --- | --- |
-| Consegna diretta | 2/2 controlli operativi superati | 2/2 |
-| Correzione dopo pausa | 0/2: non legge notes.md dopo la correzione | 2/2 |
-| Ripresa in nuovo processo | 2/2 | 2/2 |
-| Totale | **4/6** | **6/6** |
+| Scenario                  | Hermes                                     | OpenHands SDK |
+| ------------------------- | ------------------------------------------ | ------------- |
+| Consegna diretta          | 2/2 controlli operativi superati           | 2/2           |
+| Correzione dopo pausa     | 0/2: non legge notes.md dopo la correzione | 2/2           |
+| Ripresa in nuovo processo | 2/2                                        | 2/2           |
+| Totale                    | **4/6**                                    | **6/6**       |
 
 Tutti i processi sono terminati con codice zero. Un'uscita pulita non basta: i due casi Hermes incompleti dichiaravano comunque completato il lavoro. Entrambi i motori hanno aggiornato correttamente responsabile, budget e scadenza nei casi di correzione; il difetto osservato è il mancato recupero del secondo materiale. Le tracce Hermes registrano la lettura di notes.md come non eseguita dopo l'interruzione; il run successivo passa alla scrittura. Il comportamento si ripete nelle due prove.
 
 I controlli automatici derivano dalla richiesta: lettura riuscita di entrambi i materiali, artefatto presente, valori attesi senza quelli superati, massimo 180 parole, tre passi, approvazione umana, fonte pubblica recuperata, rilettura del piano, stato finale del runtime e pausa realmente attivata quando prevista. Non misurano da soli l'utilità del piano o l'assenza di fatti inventati.
 
-| Misura sui sei casi di ciascun motore | Hermes | OpenHands SDK |
-| --- | ---: | ---: |
-| Mediana tempo processi, incluse pausa/ripresa | 59,8 s | 55,7 s |
-| Chiamate al modello | 28 | 36 |
-| Token di ingresso cumulati, inclusi token in cache | 108.943 | 206.630 |
-| Token di uscita cumulati | 3.421 | 3.656 |
+| Misura sui sei casi di ciascun motore              |  Hermes | OpenHands SDK |
+| -------------------------------------------------- | ------: | ------------: |
+| Mediana tempo processi, incluse pausa/ripresa      |  59,8 s |        55,7 s |
+| Chiamate al modello                                |      28 |            36 |
+| Token di ingresso cumulati, inclusi token in cache | 108.943 |       206.630 |
+| Token di uscita cumulati                           |   3.421 |         3.656 |
 
 Tempi osservati su questa macchina, comprensivi di avvio e fonte pubblica; non dimostrano un vantaggio generale di velocità. I token di ingresso includono cronologia reinviata e cache: non sono una stima di fattura. Costo API non applicabile all'inferenza locale; energia non misurata. Gli input e la pagina IANA restituita hanno lo stesso hash fra i dodici casi. I risultati sono nel [riepilogo strutturato](evidence/2026-09-23-agent-runtime/summary.json), con tracce per ogni caso nella stessa directory.
 

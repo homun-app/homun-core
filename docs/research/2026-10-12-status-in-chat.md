@@ -14,11 +14,11 @@ non sono messaggi della conversazione, non entrano mai nell'elenco messaggi
 del runtime (`useExternalStoreRuntime` riceve solo `useChatStream`), non sono
 inviati al motore né al modello.
 
-| Slot | Posizione | Contenuto |
-| --- | --- | --- |
-| `composer` | `.cw-composer`, prima di `StudioChatInput` (in `EngineAgentChat`) | avvisi globali (motore irraggiungibile, `gateError`, `error`) + esito breve «Connessione ripristinata.» |
-| `thread-top` | `.cw-history`, primo elemento (in `EngineAgentChat` e `ConversationWorkspaceChatStage`) | «Fonte: simulazione — nessun dato reale è collegato.» (solo simulazione) |
-| `thread-end` | `.cw-history`, dopo `<AgentChat/>` | followup della conversazione aperta |
+| Slot         | Posizione                                                                               | Contenuto                                                                                               |
+| ------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `composer`   | `.cw-composer`, prima di `StudioChatInput` (in `EngineAgentChat`)                       | avvisi globali (motore irraggiungibile, `gateError`, `error`) + esito breve «Connessione ripristinata.» |
+| `thread-top` | `.cw-history`, primo elemento (in `EngineAgentChat` e `ConversationWorkspaceChatStage`) | «Fonte: simulazione — nessun dato reale è collegato.» (solo simulazione)                                |
+| `thread-end` | `.cw-history`, dopo `<AgentChat/>`                                                      | followup della conversazione aperta                                                                     |
 
 I followup non possono agganciarsi al turno (`commandId`): la trascrizione del
 motore (`engine-transcript-client`) non espone alcun legame messaggio↔comando,
@@ -54,20 +54,20 @@ connessione modello del motore non raggiungibile (`broken_provider`,
 creata via API `POST /v1/models/connections`): run fallito con
 `provider_unavailable`, retry programmato, poi esaurito dopo 3 tentativi.
 
-| # | Scenario | Esito | Screenshot |
-| --- | --- | --- | --- |
-| 01 | motore sano, nessuna conversazione | zero avvisi, nessun banner | `assets/2026-10-12-status-in-chat/01-…png` |
-| 02 | motore fermo, schermata iniziale | avviso `role="alert"` sopra il composer, Riprova/Apri modelli, composer disabilitato, **bozza conservata** | `02-…png` |
-| 03 | riavvio motore + «Riprova la connessione» | «Connessione ripristinata.» | `03-…png` |
-| 04 | dopo 6s | esito scomparso, thread pulito, composer riabilitato, bozza ancora lì | `04-…png` |
-| 05 | motore fermo con conversazione aperta | avviso sopra il campo di scrittura (l'inventario si svuota: comportamento pre-esistente, l'avviso resta dove si scrive) | `05-…png` |
-| 06 | risposta interrotta | «Risposta interrotta; un nuovo tentativo è programmato.» solo nel thread della SUA conversazione + punto laterale | `06-…png` |
-| 07 | retry esaurito | stesso avviso aggiornato sul posto: «non completata dopo 3 tentativi», `data-error-code="provider_unavailable"`, punto laterale rosso | `07-…png` |
-| 08 | due conversazioni con followup | ciascuna mostra solo il suo; pallini laterali distinti | `08-…png` |
-| 09 | ricerca ⌘K a motore fermo | nessun `<footer>`; «Nessun risultato. I materiali non sono raggiungibili in questo momento.» + motivo tipizzato (stato locale della ricerca) | `09-…png` |
-| 10 | modalità simulazione | «Fonte: simulazione» primo elemento del thread, `role="status"` | `10-…png` |
-| 11 | simulazione con conversazione aperta | la fonte resta in cima sopra i messaggi | `11-…png` |
-| 12 | **prima**: `origin/main` a motore fermo | il banner sopra l'area di lavoro (worktree su main, porta 4184) | `12-…png` |
+| #   | Scenario                                  | Esito                                                                                                                                        | Screenshot                                 |
+| --- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| 01  | motore sano, nessuna conversazione        | zero avvisi, nessun banner                                                                                                                   | `assets/2026-10-12-status-in-chat/01-…png` |
+| 02  | motore fermo, schermata iniziale          | avviso `role="alert"` sopra il composer, Riprova/Apri modelli, composer disabilitato, **bozza conservata**                                   | `02-…png`                                  |
+| 03  | riavvio motore + «Riprova la connessione» | «Connessione ripristinata.»                                                                                                                  | `03-…png`                                  |
+| 04  | dopo 6s                                   | esito scomparso, thread pulito, composer riabilitato, bozza ancora lì                                                                        | `04-…png`                                  |
+| 05  | motore fermo con conversazione aperta     | avviso sopra il campo di scrittura (l'inventario si svuota: comportamento pre-esistente, l'avviso resta dove si scrive)                      | `05-…png`                                  |
+| 06  | risposta interrotta                       | «Risposta interrotta; un nuovo tentativo è programmato.» solo nel thread della SUA conversazione + punto laterale                            | `06-…png`                                  |
+| 07  | retry esaurito                            | stesso avviso aggiornato sul posto: «non completata dopo 3 tentativi», `data-error-code="provider_unavailable"`, punto laterale rosso        | `07-…png`                                  |
+| 08  | due conversazioni con followup            | ciascuna mostra solo il suo; pallini laterali distinti                                                                                       | `08-…png`                                  |
+| 09  | ricerca ⌘K a motore fermo                 | nessun `<footer>`; «Nessun risultato. I materiali non sono raggiungibili in questo momento.» + motivo tipizzato (stato locale della ricerca) | `09-…png`                                  |
+| 10  | modalità simulazione                      | «Fonte: simulazione» primo elemento del thread, `role="status"`                                                                              | `10-…png`                                  |
+| 11  | simulazione con conversazione aperta      | la fonte resta in cima sopra i messaggi                                                                                                      | `11-…png`                                  |
+| 12  | **prima**: `origin/main` a motore fermo   | il banner sopra l'area di lavoro (worktree su main, porta 4184)                                                                              | `12-…png`                                  |
 
 Confronto prima/dopo: `12-…png` (banner su main) contro `02-…png` (avviso
 nel punto in cui si legge e scrive).

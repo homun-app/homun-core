@@ -13,7 +13,7 @@ export type DelegationItem = {
 };
 
 export function extractDelegations(
-  observations?: Array<{ tool?: string; message?: string; result?: unknown }> | undefined
+  observations?: Array<{ tool?: string; message?: string; result?: unknown }> | undefined,
 ): DelegationItem[] {
   if (!observations || !Array.isArray(observations)) return [];
 
@@ -26,7 +26,10 @@ export function extractDelegations(
       continue;
     }
 
-    const res = (obs.result && typeof obs.result === "object" ? obs.result : {}) as Record<string, unknown>;
+    const res = (obs.result && typeof obs.result === "object" ? obs.result : {}) as Record<
+      string,
+      unknown
+    >;
     const delId = (res["delegation_id"] || res["id"]) as string | undefined;
     if (!delId || typeof delId !== "string") continue;
 
@@ -36,10 +39,10 @@ export function extractDelegations(
       rawStatus === "running"
         ? "running"
         : rawStatus === "cancelled"
-        ? "cancelled"
-        : rawStatus === "failed"
-        ? "failed"
-        : "completed";
+          ? "cancelled"
+          : rawStatus === "failed"
+            ? "failed"
+            : "completed";
 
     const item: DelegationItem = {
       delegationId: delId,
@@ -48,9 +51,15 @@ export function extractDelegations(
       agentId: (res["agent_id"] as string | undefined) ?? existing?.agentId,
       result: res["result"] !== undefined ? String(res["result"]) : existing?.result,
       message: (res["message"] as string | undefined) ?? existing?.message,
-      structuredOutput: (res["structured_output"] as Record<string, unknown> | null | undefined) ?? existing?.structuredOutput,
+      structuredOutput:
+        (res["structured_output"] as Record<string, unknown> | null | undefined) ??
+        existing?.structuredOutput,
       schemaError: (res["schema_error"] as string | null | undefined) ?? existing?.schemaError,
-      turnsUsed: (res["turns_used"] as number | undefined) ?? (res["turns"] as number | undefined) ?? existing?.turnsUsed ?? 1,
+      turnsUsed:
+        (res["turns_used"] as number | undefined) ??
+        (res["turns"] as number | undefined) ??
+        existing?.turnsUsed ??
+        1,
     };
 
     map.set(delId, item);

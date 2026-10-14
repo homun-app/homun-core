@@ -16,11 +16,11 @@ content_hash, mime_type, version, status (`active` | `archived`), created_by.
 
 ## Commands
 
-| Command | Behavior |
-|---------|----------|
-| `material.create` | Requires **write** on project |
-| `material.update` | expected_version; write |
-| `material.archive` | write |
+| Command            | Behavior                      |
+| ------------------ | ----------------------------- |
+| `material.create`  | Requires **write** on project |
+| `material.update`  | expected_version; write       |
+| `material.archive` | write                         |
 
 ## HTTP / UI
 

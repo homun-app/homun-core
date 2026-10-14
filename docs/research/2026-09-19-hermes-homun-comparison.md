@@ -38,17 +38,17 @@ La policy ufficiale definisce Hermes un agente personale single-tenant e conside
 
 ## 3. Confronto sintetico
 
-| Fondamenta | Evidenza Hermes | Stato osservato Homun | Direzione proposta |
-|---|---|---|---|
-| Conversazione e contesto | Trascrizione persistita, contesto composto, selezione e compressione sostituibili | Interpretazione del messaggio corrente con roster; manca composizione completa di storico, lavoro e materiali | Primo intervento |
-| Esecuzione agentica | Ciclo modello → tool → osservazione → nuova decisione | Adattatori modello e output tipizzati; workflow DBOS ancora dimostrativo | Usare il loop Pydantic AI con capacità Homun |
-| Memoria | Note brevi, ricerca sessioni, provider esterno opzionale | Ledger approvato SQLite, ricerca semplice e Mem0 opzionale | Collegare recall autorizzato al contesto e misurarlo |
-| Skill | Indice sintetico, caricamento su richiesta, modifica e revisione opzionale | Contratto di prodotto previsto; catalogo eseguibile ancora da completare | Procedure versionate e portabili |
-| Strumenti | Registro con schema, handler, disponibilità; MCP e backend separati | Grants su progetti, ToolGrant previsto nelle specifiche | Registro unico e controllo backend per invocazione |
-| Delega | Figli con contesto esplicito, capacità filtrate e limiti | Profili/roster e piano di lavoro; esecuzione coordinata incompleta | Brief strutturato, input minimo, revisione e budget |
-| Ripresa | Sessioni, lease, registri cron, claim e recovery dei task | DBOS e ricevute; da integrare con effetti reali | Conservare un solo proprietario del recovery |
-| Apprendimento | Scritture memoria/skill e review in background; gate configurabile | Note approvate; formazione per ambito nelle specifiche | Proposta → revisione → nuova prova |
-| Costi | Contabilità e limiti operativi; contatori iterazioni per agente | UsageAttempt e usage sconosciuto esplicito; riserve da realizzare | Budget complessivo per lavoro, inclusi costi ausiliari |
+| Fondamenta               | Evidenza Hermes                                                                   | Stato osservato Homun                                                                                         | Direzione proposta                                     |
+| ------------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Conversazione e contesto | Trascrizione persistita, contesto composto, selezione e compressione sostituibili | Interpretazione del messaggio corrente con roster; manca composizione completa di storico, lavoro e materiali | Primo intervento                                       |
+| Esecuzione agentica      | Ciclo modello → tool → osservazione → nuova decisione                             | Adattatori modello e output tipizzati; workflow DBOS ancora dimostrativo                                      | Usare il loop Pydantic AI con capacità Homun           |
+| Memoria                  | Note brevi, ricerca sessioni, provider esterno opzionale                          | Ledger approvato SQLite, ricerca semplice e Mem0 opzionale                                                    | Collegare recall autorizzato al contesto e misurarlo   |
+| Skill                    | Indice sintetico, caricamento su richiesta, modifica e revisione opzionale        | Contratto di prodotto previsto; catalogo eseguibile ancora da completare                                      | Procedure versionate e portabili                       |
+| Strumenti                | Registro con schema, handler, disponibilità; MCP e backend separati               | Grants su progetti, ToolGrant previsto nelle specifiche                                                       | Registro unico e controllo backend per invocazione     |
+| Delega                   | Figli con contesto esplicito, capacità filtrate e limiti                          | Profili/roster e piano di lavoro; esecuzione coordinata incompleta                                            | Brief strutturato, input minimo, revisione e budget    |
+| Ripresa                  | Sessioni, lease, registri cron, claim e recovery dei task                         | DBOS e ricevute; da integrare con effetti reali                                                               | Conservare un solo proprietario del recovery           |
+| Apprendimento            | Scritture memoria/skill e review in background; gate configurabile                | Note approvate; formazione per ambito nelle specifiche                                                        | Proposta → revisione → nuova prova                     |
+| Costi                    | Contabilità e limiti operativi; contatori iterazioni per agente                   | UsageAttempt e usage sconosciuto esplicito; riserve da realizzare                                             | Budget complessivo per lavoro, inclusi costi ausiliari |
 
 Le sezioni seguenti precisano evidenze e limiti delle righe.
 
@@ -102,11 +102,11 @@ Per gli strumenti potenti, i permessi del dominio devono incontrare un confine o
 
 ## 5. Tre alternative
 
-| Opzione | Vantaggio | Costo e limite | Valutazione |
-|---|---|---|---|
-| A. Pattern e componenti selezionati, stack Homun invariato | Migliora le parti mancanti preservando dominio e decisioni adottate | Richiede adattare e verificare i componenti scelti | Raccomandata |
-| B. Hermes come esecutore esterno di alcuni passi | Accesso rapido a capacità agentiche già integrate | Due sistemi di sessione/memoria/approval; traduzione di eventi, risultati e cancellazione; isolamento da dimostrare | Eventuale esperimento successivo, circoscritto |
-| C. Fork di Hermes come base di Homun | Grande superficie di funzionalità iniziale | Ridefinizione di autorità, identità, policy, durabilità, aggiornamenti e prodotto | Non giustificata dalle evidenze attuali |
+| Opzione                                                    | Vantaggio                                                           | Costo e limite                                                                                                      | Valutazione                                    |
+| ---------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| A. Pattern e componenti selezionati, stack Homun invariato | Migliora le parti mancanti preservando dominio e decisioni adottate | Richiede adattare e verificare i componenti scelti                                                                  | Raccomandata                                   |
+| B. Hermes come esecutore esterno di alcuni passi           | Accesso rapido a capacità agentiche già integrate                   | Due sistemi di sessione/memoria/approval; traduzione di eventi, risultati e cancellazione; isolamento da dimostrare | Eventuale esperimento successivo, circoscritto |
+| C. Fork di Hermes come base di Homun                       | Grande superficie di funzionalità iniziale                          | Ridefinizione di autorità, identità, policy, durabilità, aggiornamenti e prodotto                                   | Non giustificata dalle evidenze attuali        |
 
 Hermes espone protocolli per integrazione programmatica, quindi B è tecnicamente esplorabile; non è stata provata qui. Un prototipo dovrebbe ricevere solo un brief e input autorizzati, produrre un risultato ispezionabile e non possedere lo stato aziendale. [Protocolli di integrazione](https://hermes-agent.nousresearch.com/docs/developer-guide/programmatic-integration).
 
@@ -114,14 +114,14 @@ Il repository riporta [licenza MIT][h-license]. Un eventuale riuso di codice dev
 
 ## 6. Ordine proposto per continuare sulle fondamenta
 
-| Passo | Lavoro | Criterio verificabile di uscita |
-|---|---|---|
-| 0. Consolidare la base corrente | Stato documentato, checkpoint Git reviewabile, distinzione capability presente/integrata/provata; inventario dei dati recuperabili | Backup/ripristino includono materiali e stato necessario ai run, oppure dichiarano esattamente ciò che non recuperano |
-| 1. Contesto e sessioni | Composizione unica, cronologia nativa, riferimenti/versioni, budget, autorizzazione comune prima del recupero | Comprende una correzione dopo riavvio; non include informazioni del cliente non autorizzato; mantiene obiettivo e approvazioni dopo sintesi |
-| 2. Runner e capacità | Loop Pydantic AI con strumenti Homun; registry, errori, cancellazione, policy e budget | Una richiesta porta a lettura → tool → osservazione → risposta; tool revocato negato anche in una run esistente |
-| 3. Skill e apprendimento | Catalogo su richiesta, procedure versionate, proposte di lezione e revisione | Skill caricata solo se pertinente; correzione applicata nello stesso ambito e assente in un altro |
-| 4. Durabilità integrata | Collegamento runner/DBOS, contributi tipizzati, ricevute e riconciliazione | Crash prima/dopo effetto senza falsa conferma o retry cieco; input duplicato non duplica il lavoro |
-| 5. Consegna e calibrazione | Artifact versionati, revisione e misure su compiti diversi | Catalogo, ricerca e documento completano il ciclo; qualità/latenza/costo misurati con modelli reali |
+| Passo                           | Lavoro                                                                                                                             | Criterio verificabile di uscita                                                                                                             |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0. Consolidare la base corrente | Stato documentato, checkpoint Git reviewabile, distinzione capability presente/integrata/provata; inventario dei dati recuperabili | Backup/ripristino includono materiali e stato necessario ai run, oppure dichiarano esattamente ciò che non recuperano                       |
+| 1. Contesto e sessioni          | Composizione unica, cronologia nativa, riferimenti/versioni, budget, autorizzazione comune prima del recupero                      | Comprende una correzione dopo riavvio; non include informazioni del cliente non autorizzato; mantiene obiettivo e approvazioni dopo sintesi |
+| 2. Runner e capacità            | Loop Pydantic AI con strumenti Homun; registry, errori, cancellazione, policy e budget                                             | Una richiesta porta a lettura → tool → osservazione → risposta; tool revocato negato anche in una run esistente                             |
+| 3. Skill e apprendimento        | Catalogo su richiesta, procedure versionate, proposte di lezione e revisione                                                       | Skill caricata solo se pertinente; correzione applicata nello stesso ambito e assente in un altro                                           |
+| 4. Durabilità integrata         | Collegamento runner/DBOS, contributi tipizzati, ricevute e riconciliazione                                                         | Crash prima/dopo effetto senza falsa conferma o retry cieco; input duplicato non duplica il lavoro                                          |
+| 5. Consegna e calibrazione      | Artifact versionati, revisione e misure su compiti diversi                                                                         | Catalogo, ricerca e documento completano il ciclo; qualità/latenza/costo misurati con modelli reali                                         |
 
 Questo ordine può essere adattato alle dipendenze: i contratti di autorizzazione e contabilità iniziano nel passo 1 e vengono applicati nel passo 2, non aggiunti alla fine. Packaging e cifratura restano prove precoci di fattibilità già previste nell'ADR; non propongo di rimandarle fino alla beta.
 
@@ -131,11 +131,11 @@ Per il primo confronto fra modelli preparerei un insieme piccolo e ripetibile di
 
 Sono stati eseguiti sei file di test upstream Hermes sullo snapshot indicato:
 
-| Test | Risultato |
-|---|---|
-| `tests/agent/test_iteration_budget_race.py` + `tests/hermes_state/test_session_turn_lease.py` | 24 passati |
-| `tests/agent/test_context_engine.py` + `tests/tools/test_memory_tool.py` | 70 passati |
-| `tests/tools/test_write_approval.py` + `tests/cron/test_execution_ledger.py` | 41 passati al secondo avvio |
+| Test                                                                                          | Risultato                   |
+| --------------------------------------------------------------------------------------------- | --------------------------- |
+| `tests/agent/test_iteration_budget_race.py` + `tests/hermes_state/test_session_turn_lease.py` | 24 passati                  |
+| `tests/agent/test_context_engine.py` + `tests/tools/test_memory_tool.py`                      | 70 passati                  |
+| `tests/tools/test_write_approval.py` + `tests/cron/test_execution_ledger.py`                  | 41 passati al secondo avvio |
 
 Totale finale: **135 test passati**, nei sei file selezionati; non è la suite completa Hermes. I primi due comandi hanno chiuso con exit code 0. Nel terzo, il primo avvio aveva 39 passati e due casi bloccati da `ModuleNotFoundError: psutil`, anche nel teardown. Dopo l'aggiunta di `psutil==7.2.2` in una directory temporanea, il medesimo comando ha riportato 41 passati. Il codice upstream non è stato modificato.
 

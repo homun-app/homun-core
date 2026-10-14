@@ -32,16 +32,16 @@ prosecuzione approvata da Fabio. Nessuna release pubblicata o installata.
 
 ## Verifiche eseguite
 
-| Controllo | Esito | Confine della prova |
-| --- | --- | --- |
-| Suite motore, Python 3.13.12 | 533 passati, 1 saltato | Provider finti; un warning Starlette/AnyIO |
-| `npm run check` | Passato | Typecheck, 201 test, build web e prototipo |
-| `npm run desktop:test` | 11 passati | Processo, protocollo e updater con Electron simulato |
-| Architettura | 0 errori, 35 avvisi | Confini e budget di dimensione |
-| OpenAPI `--check` | Allineata | Contratto corrente invariato |
-| Inventory packaging | 1 passato | Inventario generato; non ricostruzione del pacchetto firmato |
-| `git diff --check` | Passato | Nessun errore whitespace |
-| Lint globale | 2717 errori, 62 warning | Debito non risolto: 2711 errori di formato, 6 altre violazioni |
+| Controllo                    | Esito                   | Confine della prova                                            |
+| ---------------------------- | ----------------------- | -------------------------------------------------------------- |
+| Suite motore, Python 3.13.12 | 533 passati, 1 saltato  | Provider finti; un warning Starlette/AnyIO                     |
+| `npm run check`              | Passato                 | Typecheck, 201 test, build web e prototipo                     |
+| `npm run desktop:test`       | 11 passati              | Processo, protocollo e updater con Electron simulato           |
+| Architettura                 | 0 errori, 35 avvisi     | Confini e budget di dimensione                                 |
+| OpenAPI `--check`            | Allineata               | Contratto corrente invariato                                   |
+| Inventory packaging          | 1 passato               | Inventario generato; non ricostruzione del pacchetto firmato   |
+| `git diff --check`           | Passato                 | Nessun errore whitespace                                       |
+| Lint globale                 | 2717 errori, 62 warning | Debito non risolto: 2711 errori di formato, 6 altre violazioni |
 
 Il lint è ora delimitato dai percorsi generati (dist, output, virtualenv e
 pacchetti esclusi) e termina. Il confronto su archivio pulito del commit base,

@@ -88,7 +88,10 @@ export async function routineEngineAction(input: {
         "Content-Type": "application/json",
         "X-Homun-Actor-Id": (input.actor ?? defaultLocalActor()).id,
       },
-      body: JSON.stringify({ command_id: crypto.randomUUID(), expected_version: input.expectedVersion }),
+      body: JSON.stringify({
+        command_id: crypto.randomUUID(),
+        expected_version: input.expectedVersion,
+      }),
     },
     ENGINE_DEFAULT_BASE_URL,
   );
@@ -133,7 +136,9 @@ export async function previewEngineCron(
 ): Promise<string[]> {
   const url = `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/routines/preview?cron=${encodeURIComponent(cron)}&tz=${encodeURIComponent(timezone)}`;
   const response = await routinesFetch(
-    url, { method: "GET", headers: { Accept: "application/json" } }, baseUrl,
+    url,
+    { method: "GET", headers: { Accept: "application/json" } },
+    baseUrl,
   );
   if (!response.ok) throw new Error(`Cron preview failed: HTTP ${response.status}`);
   const body = (await response.json()) as { next: string[] };
@@ -144,12 +149,14 @@ export async function previewEngineCron(
 export type RoutineWorkSource = {
   title: string;
   engineObjective?: string | undefined;
-  enginePlan?: Array<{
-    title: string;
-    assignee_id?: string | undefined;
-    capability?: string | undefined;
-    output_expected?: string | undefined;
-  }> | undefined;
+  enginePlan?:
+    | Array<{
+        title: string;
+        assignee_id?: string | undefined;
+        capability?: string | undefined;
+        output_expected?: string | undefined;
+      }>
+    | undefined;
 };
 
 /** Roster agents use `agent_*` ids; person/owner ids are rejected by routine.create. */
@@ -171,9 +178,7 @@ export function workSupportsRoutineTemplate(work: RoutineWorkSource): boolean {
 
 export function routineTemplateFromWork(work: RoutineWorkSource): EngineRoutine["template"] {
   if (!workSupportsRoutineTemplate(work)) {
-    throw new Error(
-      "Routine template needs at least one plan step assigned to a roster agent",
-    );
+    throw new Error("Routine template needs at least one plan step assigned to a roster agent");
   }
   return {
     title: work.title,

@@ -8,10 +8,7 @@ import {
 
 describe("formatInterpretationForUi", () => {
   it("formats reply text", () => {
-    assert.equal(
-      formatInterpretationForUi({ kind: "reply", text: "Ciao", mentions: [] }),
-      "Ciao",
-    );
+    assert.equal(formatInterpretationForUi({ kind: "reply", text: "Ciao", mentions: [] }), "Ciao");
   });
 
   it("marks command proposals toward plan draft", () => {
@@ -46,7 +43,9 @@ describe("parseInterpretation", () => {
     const parsed = parseInterpretation({
       kind: "clarification",
       text: "Chi?",
-      mentions: [{ raw: "@Alex", candidates: [{ id: "a1", display_name: "Alex", kind: "person" }] }],
+      mentions: [
+        { raw: "@Alex", candidates: [{ id: "a1", display_name: "Alex", kind: "person" }] },
+      ],
     });
     assert.ok(parsed);
     assert.equal(parsed.kind, "clarification");

@@ -30,8 +30,7 @@ const IDLE_PLAN: TranscriptLoadPlan = { load: false, clearFirst: false, keepDuri
 
 export function planTranscriptLoad(prev: TranscriptView, next: TranscriptView): TranscriptLoadPlan {
   if (next.activeId === null || next.conversationId === undefined) return IDLE_PLAN;
-  const switched =
-    prev.activeId !== next.activeId || prev.conversationId !== next.conversationId;
+  const switched = prev.activeId !== next.activeId || prev.conversationId !== next.conversationId;
   if (switched) return { load: true, clearFirst: true, keepDuringLoad: false };
   if (next.reloadSeq !== prev.reloadSeq)
     return { load: true, clearFirst: false, keepDuringLoad: true };

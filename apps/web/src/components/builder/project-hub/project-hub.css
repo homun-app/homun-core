@@ -743,7 +743,9 @@
   background: #ffffff;
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 12px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.04);
   color: #18181b;
   z-index: 100;
 }
@@ -881,7 +883,9 @@
   background: transparent;
   color: #8a9d92;
   cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
 }
 
 .ph-icon-tab:hover {
@@ -951,7 +955,9 @@
   background: #ffffff;
   border: 1px solid var(--color-border, #e3e7e5);
   border-radius: 8px;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
 }
 
 .ph-prompt-box:focus-within {

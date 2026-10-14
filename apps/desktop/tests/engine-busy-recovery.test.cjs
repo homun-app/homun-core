@@ -1,11 +1,11 @@
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
-const { mkdtemp, rm, readFile, writeFile } = require('node:fs/promises');
-const os = require('node:os');
-const path = require('node:path');
-const { once } = require('node:events');
-const { startEngine } = require('../src/engine-process.cjs');
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const { spawn } = require("node:child_process");
+const { mkdtemp, rm, readFile, writeFile } = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+const { once } = require("node:events");
+const { startEngine } = require("../src/engine-process.cjs");
 
 // A stale data-dir owner that survives SIGTERM, like a wedged uvicorn shutdown.
 // The 'homun-engine stand-in' text matters: recovery must only kill homun processes.
@@ -38,46 +38,78 @@ require('node:http').createServer((req, res) => {
 });`;
 
 function processAlive(pid) {
-  try { process.kill(pid, 0); return true; }
-  catch (error) { return error.code === 'EPERM'; }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
 }
 
-test('busy data dir: stale wedged holder is force-killed and startup retries once', { timeout: 30000 }, async () => {
-  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'homun-busy-recovery-'));
-  const holder = spawn(process.execPath, ['-e', WEDGED_HOLDER], { stdio: 'ignore' });
-  await once(holder, 'spawn');
-  let engine;
-  try {
-    await writeFile(path.join(dataDir, 'holder.pid'), String(holder.pid));
-    engine = await startEngine({ executable: process.execPath, args: ['-e', BUSY_ENGINE], dataDir, cwd: dataDir, timeout: 15000 });
-    assert.equal(engine.recoveredFromPid, holder.pid);
-    assert.ok(!processAlive(holder.pid), 'Stale holder must be force-killed');
-    assert.equal((await fetch(engine.baseUrl + '/v1/health', { headers: { Authorization: `Bearer ${engine.token}` } })).status, 200);
-    assert.equal(Number(await readFile(path.join(dataDir, 'attempts'), 'utf8')), 2, 'Engine must retry exactly once');
-  } finally {
-    await engine?.stop();
-    holder.kill('SIGKILL');
-    await rm(dataDir, { recursive: true, force: true });
-  }
-});
-
-test('busy data dir: a foreign holder is reported, never killed', { timeout: 30000 }, async () => {
-  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'homun-foreign-holder-'));
-  const holder = spawn(process.execPath, ['-e', FOREIGN_HOLDER], { stdio: 'ignore' });
-  await once(holder, 'spawn');
-  try {
-    await writeFile(path.join(dataDir, 'holder.pid'), String(holder.pid));
-    await assert.rejects(
-      startEngine({ executable: process.execPath, args: ['-e', BUSY_ENGINE], dataDir, cwd: dataDir, timeout: 15000 }),
-      error => {
-        assert.match(error.message, /did not become ready/);
-        assert.equal(error.info.startupFailure.reason, 'engine-dir-busy');
-        assert.equal(error.info.recovery.reason, 'foreign-process');
-        return true;
+test(
+  "busy data dir: stale wedged holder is force-killed and startup retries once",
+  { timeout: 30000 },
+  async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "homun-busy-recovery-"));
+    const holder = spawn(process.execPath, ["-e", WEDGED_HOLDER], { stdio: "ignore" });
+    await once(holder, "spawn");
+    let engine;
+    try {
+      await writeFile(path.join(dataDir, "holder.pid"), String(holder.pid));
+      engine = await startEngine({
+        executable: process.execPath,
+        args: ["-e", BUSY_ENGINE],
+        dataDir,
+        cwd: dataDir,
+        timeout: 15000,
       });
-    assert.ok(processAlive(holder.pid), 'Foreign process must survive recovery');
+      assert.equal(engine.recoveredFromPid, holder.pid);
+      assert.ok(!processAlive(holder.pid), "Stale holder must be force-killed");
+      assert.equal(
+        (
+          await fetch(engine.baseUrl + "/v1/health", {
+            headers: { Authorization: `Bearer ${engine.token}` },
+          })
+        ).status,
+        200,
+      );
+      assert.equal(
+        Number(await readFile(path.join(dataDir, "attempts"), "utf8")),
+        2,
+        "Engine must retry exactly once",
+      );
+    } finally {
+      await engine?.stop();
+      holder.kill("SIGKILL");
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  },
+);
+
+test("busy data dir: a foreign holder is reported, never killed", { timeout: 30000 }, async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "homun-foreign-holder-"));
+  const holder = spawn(process.execPath, ["-e", FOREIGN_HOLDER], { stdio: "ignore" });
+  await once(holder, "spawn");
+  try {
+    await writeFile(path.join(dataDir, "holder.pid"), String(holder.pid));
+    await assert.rejects(
+      startEngine({
+        executable: process.execPath,
+        args: ["-e", BUSY_ENGINE],
+        dataDir,
+        cwd: dataDir,
+        timeout: 15000,
+      }),
+      (error) => {
+        assert.match(error.message, /did not become ready/);
+        assert.equal(error.info.startupFailure.reason, "engine-dir-busy");
+        assert.equal(error.info.recovery.reason, "foreign-process");
+        return true;
+      },
+    );
+    assert.ok(processAlive(holder.pid), "Foreign process must survive recovery");
   } finally {
-    holder.kill('SIGKILL');
+    holder.kill("SIGKILL");
     await rm(dataDir, { recursive: true, force: true });
   }
 });

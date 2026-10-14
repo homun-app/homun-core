@@ -85,18 +85,18 @@ questo senso (it + en), senza gonfiare le promesse: la sintesi produce una
 
 - [x] Capability `synthesize` + TRANSPORT_IDS (fatto, 22/9).
 - [x] Letterali intake (`capability`, `PlanStepDraft`, route) + prompt intake
-  onesto (it+en): scrivere/redigere/sintetizzare da materiali → synthesize;
-  `general` resta per azioni fuori dal motore (fatto, 22/9).
+      onesto (it+en): scrivere/redigere/sintetizzare da materiali → synthesize;
+      `general` resta per azioni fuori dal motore (fatto, 22/9).
 - [x] Prompt `synthesis/compose` it+en (identità dell'assegnatario, regole
-  anti-invenzione, lingua della richiesta) (fatto, 22/9).
+      anti-invenzione, lingua della richiesta) (fatto, 22/9).
 - [x] `application/synthesis.py` + `synthesis_execution.py` +
-  `routes/synthesis.py` + workflow DBOS `synthesis` collegato a pump e
-  dispatcher (fatto, 22/9).
+      `routes/synthesis.py` + workflow DBOS `synthesis` collegato a pump e
+      dispatcher (fatto, 22/9).
 - [x] Test (8): flusso completo con provider fake; connessione preferita
-  onorata e dichiarata; fallback onesto; digest alterato rifiutato;
-  ammissione per fase su piano multi-fase (capability general con fase
-  synthesize); artifact in REVIEW con provenienza; fallimento modello onesto;
-  budget del lavoro conta il tentativo. Suite: 496 verdi.
+      onorata e dichiarata; fallback onesto; digest alterato rifiutato;
+      ammissione per fase su piano multi-fase (capability general con fase
+      synthesize); artifact in REVIEW con provenienza; fallimento modello onesto;
+      budget del lavoro conta il tentativo. Suite: 496 verdi.
 
 ## 6. Seconda fetta (web + verifica dal vivo)
 

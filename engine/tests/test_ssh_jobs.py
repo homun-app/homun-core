@@ -14,6 +14,11 @@ from test_agent_runs import setup
 
 
 class Server:
+    """Porta effimera e attesa attiva: pronto quando risponde, non dopo un tempo fisso."""
+
+    START_ATTEMPTS = 3
+    READY_TIMEOUT_S = 10.0
+
     def __init__(self, root: Path):
         self.root = root
         self.root.mkdir(mode=0o700)
@@ -24,17 +29,42 @@ class Server:
         self.host_key = subprocess.run(["/usr/bin/ssh-keygen", "-y", "-f", str(root / "host")],
                                        check=True, capture_output=True, text=True).stdout.split()
         self.host_key = " ".join(self.host_key[:2])
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            self.port = probe.getsockname()[1]
-        config = root / "sshd_config"
-        config.write_text(
-            f"Port {self.port}\nListenAddress 127.0.0.1\nHostKey {root / 'host'}\nPidFile {root / 'sshd.pid'}\n"
-            f"AuthorizedKeysFile {root / 'client.pub'}\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n"
-            "UsePAM no\nStrictModes no\nPrintMotd no\n")
-        self.process = subprocess.Popen(["/usr/sbin/sshd", "-f", str(config), "-E", str(root / "sshd.log"), "-D"])
-        time.sleep(0.2)
         self.homes: list[Path] = []
+        log = root / "sshd.log"
+        last_reason = "sshd.log is empty"
+        for _ in range(self.START_ATTEMPTS):
+            self.port = _free_port()
+            (root / "sshd_config").write_text(
+                f"Port {self.port}\nListenAddress 127.0.0.1\nHostKey {root / 'host'}\nPidFile {root / 'sshd.pid'}\n"
+                f"AuthorizedKeysFile {root / 'client.pub'}\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n"
+                "UsePAM no\nStrictModes no\nPrintMotd no\n")
+            # ogni tentativo racconta solo se stesso nel log
+            log.unlink(missing_ok=True)
+            self.process = subprocess.Popen(["/usr/sbin/sshd", "-f", str(root / "sshd_config"), "-E", str(log), "-D"])
+            if self._wait_until_ready():
+                return
+            last_reason = log.read_text() if log.exists() else "(sshd.log missing)"
+            if _port_busy(last_reason):
+                continue  # porta presa tra la scelta e il bind: riprova con una nuova
+            self.close()
+            raise AssertionError(
+                f"sshd never accepted connections on 127.0.0.1:{self.port} "
+                f"within {self.READY_TIMEOUT_S}s\nsshd.log:\n{last_reason}")
+        self.close()
+        raise AssertionError(
+            f"sshd could not bind any of {self.START_ATTEMPTS} free ports\nsshd.log:\n{last_reason}")
+
+    def _wait_until_ready(self) -> bool:
+        deadline = time.monotonic() + self.READY_TIMEOUT_S
+        while time.monotonic() < deadline:
+            if self.process.poll() is not None:
+                return False
+            try:
+                with socket.create_connection(("127.0.0.1", self.port), timeout=0.25):
+                    return True
+            except OSError:
+                time.sleep(0.05)
+        return False
 
     def close(self):
         self.process.terminate()
@@ -44,6 +74,16 @@ class Server:
             self.process.kill()
         for home in self.homes:
             shutil.rmtree(home, ignore_errors=True)
+
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _port_busy(log: str) -> bool:
+    return "Address already in use" in log or "Cannot bind any address" in log
 
 
 def spec(server: Server, run_id: str, command: str) -> SshJobSpec:

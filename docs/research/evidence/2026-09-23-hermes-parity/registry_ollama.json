@@ -1,11 +1,7 @@
 {
   "fixture": "real model choices and tool IO",
   "model": "qwen3.5:4b",
-  "statuses": [
-    "running",
-    "running",
-    "completed"
-  ],
+  "statuses": ["running", "running", "completed"],
   "run": {
     "id": "run",
     "work_id": "work_76u3_XpEzRF-Cg",
@@ -69,9 +65,7 @@
                     "type": "integer"
                   }
                 },
-                "required": [
-                  "material_id"
-                ],
+                "required": ["material_id"],
                 "title": "ReadArguments",
                 "type": "object"
               },

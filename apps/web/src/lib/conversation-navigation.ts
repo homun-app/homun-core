@@ -7,9 +7,7 @@ import type { SpaceView } from "@/components/builder/ConversationSpace";
 const NAVIGATION_PATTERN =
   /^(?:apri|mostra|vai a|gestisci)\s+(?:(?:le|la|i|il|ai|alle)\s+)?(impostazioni|compiti|materiali|squadra|progetti|plugin|automazioni)$/;
 
-export type ConversationNavigation =
-  | { target: "settings" }
-  | { target: "space"; view: SpaceView };
+export type ConversationNavigation = { target: "settings" } | { target: "space"; view: SpaceView };
 
 export function parseConversationNavigation(text: string): ConversationNavigation | null {
   const match = text.trim().toLowerCase().match(NAVIGATION_PATTERN);

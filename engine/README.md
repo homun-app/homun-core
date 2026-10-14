@@ -142,16 +142,16 @@ HOMUN_MEMORY_BACKEND=mem0 npm run engine:dev
 curl -sS http://127.0.0.1:8765/v1/memory/status
 ```
 
-| Env | Default |
-|-----|---------|
-| `HOMUN_MEMORY_BACKEND` | `sqlite` |
-| `HOMUN_MEM0_OLLAMA_URL` | `http://127.0.0.1:11434` |
-| `HOMUN_MEM0_LLM_MODEL` | `llama3.2` |
-| `HOMUN_MEM0_EMBED_MODEL` | `nomic-embed-text` |
-| `HOMUN_MEM0_EMBED_DIMS` | `768` |
-| `HOMUN_MEM0_QDRANT_HOST` | `127.0.0.1` |
-| `HOMUN_MEM0_QDRANT_PORT` | `6333` |
-| `HOMUN_MEM0_COLLECTION` | `homun_memories` |
+| Env                      | Default                  |
+| ------------------------ | ------------------------ |
+| `HOMUN_MEMORY_BACKEND`   | `sqlite`                 |
+| `HOMUN_MEM0_OLLAMA_URL`  | `http://127.0.0.1:11434` |
+| `HOMUN_MEM0_LLM_MODEL`   | `llama3.2`               |
+| `HOMUN_MEM0_EMBED_MODEL` | `nomic-embed-text`       |
+| `HOMUN_MEM0_EMBED_DIMS`  | `768`                    |
+| `HOMUN_MEM0_QDRANT_HOST` | `127.0.0.1`              |
+| `HOMUN_MEM0_QDRANT_PORT` | `6333`                   |
+| `HOMUN_MEM0_COLLECTION`  | `homun_memories`         |
 
 Live integration test: `HOMUN_MEM0_LIVE=1 .venv/bin/pytest tests/test_mem0_local_stack.py -m integration`.
 
@@ -215,11 +215,11 @@ Homun owns **ModelPort** (`homun.models.port`): connections, verify, complete/st
 Vendor SDKs (including **Pydantic AI**) live only under `homun.models.adapters/`.
 Swap an adapter without touching chat UI, agents, or memory.
 
-| Adapter | Kind | Role |
-|---------|------|------|
-| `FakeModelAdapter` | `fake` | Deterministic, no network |
-| `OpenAICompatModelAdapter` | `openai_compatible` | Ollama / any OpenAI-HTTP |
-| `adapters/pydantic_ai.py` | helpers | Structured interpret + optional PAI chat |
+| Adapter                    | Kind                | Role                                     |
+| -------------------------- | ------------------- | ---------------------------------------- |
+| `FakeModelAdapter`         | `fake`              | Deterministic, no network                |
+| `OpenAICompatModelAdapter` | `openai_compatible` | Ollama / any OpenAI-HTTP                 |
+| `adapters/pydantic_ai.py`  | helpers             | Structured interpret + optional PAI chat |
 
 **Build order:** LLM foundations → agents → memory → projects → product flow.
 
@@ -330,7 +330,6 @@ Questo è un profilo locale, non un provider di identità multiutente.
 
 Gli esempi curl senza Bearer in questa pagina valgono per `--dev-insecure`,
 esplicitamente limitato al loopback. In tale modalità gli header attore sono:
-
 
 - `X-Homun-Actor-Id`
 - `X-Homun-Actor-Name` (opzionale)

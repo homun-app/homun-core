@@ -13,6 +13,7 @@ Il riepilogo mostra limite remoto e disponibilità del consumo, distinguendo val
 ## Verifica
 
 Browser, partendo da `?empty=1`:
+
 - Creato Ada descrivendo responsabilità e nome, senza progetti o bot preimpostati.
 - Affidato dalla Home un compito con metodo e limite 0,50 €.
 - Consegnato un file, richiesta una correzione, nuova revisione e approvazione.

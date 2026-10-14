@@ -14,9 +14,9 @@ Never recursively recover overflow of the summary call. Controls fence the marke
 - [x] Add forced planner mode with protected-context/no-cut/unknown-window tests.
 - [x] Persist overflow recovery intent under the current lease/epoch/input fence.
 - [x] Consume intent in summary preparation, clear only after valid checkpoint;
-  accepted acting round or human control resets its decision-specific counter.
+      accepted acting round or human control resets its decision-specific counter.
 - [x] Verify overflow→summary→final, restart, no duplicate tools, budgets,
-  no-cut/unknown-window terminal outcome and concurrent control.
+      no-cut/unknown-window terminal outcome and concurrent control.
 - [x] Record fixture evidence and limits, review, regression, commit and integrate.
 
 This does not implement provider-specific output-limit repair, tokenizer metadata

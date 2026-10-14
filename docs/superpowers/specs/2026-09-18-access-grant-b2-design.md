@@ -19,10 +19,10 @@ Capability ladder: admin ⊃ write ⊃ read. Only active non-expired grants coun
 
 ## Commands
 
-| Command | Behavior |
-|---------|----------|
-| `grant.issue` | Issuer must have `admin` on the project |
-| `grant.revoke` | Sets status=revoked; requires `admin` |
+| Command        | Behavior                                |
+| -------------- | --------------------------------------- |
+| `grant.issue`  | Issuer must have `admin` on the project |
+| `grant.revoke` | Sets status=revoked; requires `admin`   |
 
 Bootstrap: `project.create` / `project.create_from_conversation` issues an
 `admin` grant to the creating actor.

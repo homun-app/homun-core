@@ -3,7 +3,13 @@
  * Storage failures stay visible; never invent a successful persist.
  */
 
-import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import {
+  useEffect,
+  useRef,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from "react";
 import { defaultPreferences, type ConversationPreferences } from "./conversation-preferences";
 import type { ConversationMaterial } from "./ConversationMaterials";
 import type { ConversationScenario } from "./conversation-scenarios";

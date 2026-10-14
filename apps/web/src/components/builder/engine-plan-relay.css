@@ -66,9 +66,18 @@
 }
 
 @keyframes pulse-ring-blue {
-  0% { transform: scale(0.9); opacity: 1; }
-  50% { transform: scale(1.4); opacity: 0.5; }
-  100% { transform: scale(0.9); opacity: 1; }
+  0% {
+    transform: scale(0.9);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 1;
+  }
 }
 
 .cw-relay-timeline__body {
@@ -213,4 +222,3 @@
   outline: 2px solid #687a59;
   outline-offset: 2px;
 }
-

@@ -34,26 +34,26 @@ Non costruire subito sincronizzazione bidirezionale locale/cloud. Ogni spazio ha
 
 ## 3. Stato verificato nel codice
 
-| Base | Evidenza locale | Conseguenza |
-|---|---|---|
-| UX attuale | `apps/web/src/components/builder/ConversationWorkspace.tsx` (monolite UI) | Separare orchestrazione UI e regole di dominio durante la migrazione, senza riscrittura estetica |
-| Lavoro simulato | `Work`, `Phase`, scenari e risultati precompilati nello stesso file | Non usare gli scenari come tipi di lavoro reali |
-| Piano | `apps/web/src/components/builder/ConversationCatalogPlan.tsx`: passi con agente per nome e contatore completed | Passare a ID, stato per passo, dipendenze e revisioni |
-| Persistenza demo | `apps/web/src/components/builder/conversation-storage.ts`: snapshot IndexedDB | Utile per demo; il database del motore diventerà la fonte dei dati reali |
-| Settings | `ConversationSettings.tsx`, `conversation-preferences.ts` sotto `apps/web/src/components/builder/` | Separare preferenze personali, politiche di spazio e configurazione runtime |
-| Backend precedente | `prototypes/reference/src/routes/api/chat.ts` | Richiede projectId, sceglie il primo bot del progetto, usa gateway fisso: non è il nuovo runtime |
-| Supabase | migrazioni in `supabase/migrations`, client nel riferimento | Esistono organizzazioni, ruoli, chat e pipeline; presenza statica non prova funzionamento, adeguatezza o sicurezza |
-| Vecchio Homun | `../app` con moduli Rust, desktop e componenti Python | Candidato al riuso selettivo, non dipendenza implicita di Homun2 |
+| Base               | Evidenza locale                                                                                                | Conseguenza                                                                                                        |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| UX attuale         | `apps/web/src/components/builder/ConversationWorkspace.tsx` (monolite UI)                                      | Separare orchestrazione UI e regole di dominio durante la migrazione, senza riscrittura estetica                   |
+| Lavoro simulato    | `Work`, `Phase`, scenari e risultati precompilati nello stesso file                                            | Non usare gli scenari come tipi di lavoro reali                                                                    |
+| Piano              | `apps/web/src/components/builder/ConversationCatalogPlan.tsx`: passi con agente per nome e contatore completed | Passare a ID, stato per passo, dipendenze e revisioni                                                              |
+| Persistenza demo   | `apps/web/src/components/builder/conversation-storage.ts`: snapshot IndexedDB                                  | Utile per demo; il database del motore diventerà la fonte dei dati reali                                           |
+| Settings           | `ConversationSettings.tsx`, `conversation-preferences.ts` sotto `apps/web/src/components/builder/`             | Separare preferenze personali, politiche di spazio e configurazione runtime                                        |
+| Backend precedente | `prototypes/reference/src/routes/api/chat.ts`                                                                  | Richiede projectId, sceglie il primo bot del progetto, usa gateway fisso: non è il nuovo runtime                   |
+| Supabase           | migrazioni in `supabase/migrations`, client nel riferimento                                                    | Esistono organizzazioni, ruoli, chat e pipeline; presenza statica non prova funzionamento, adeguatezza o sicurezza |
+| Vecchio Homun      | `../app` con moduli Rust, desktop e componenti Python                                                          | Candidato al riuso selettivo, non dipendenza implicita di Homun2                                                   |
 
 Nessun servizio remoto è stato modificato o verificato durante questa analisi; nessuna credenziale è stata letta.
 
 ## 4. Tre strade e compromessi
 
-| Approccio | Vantaggio | Costo/rischio | Valutazione |
-|---|---|---|---|
-| Python modulare + UX React | Coerente con preferenza espressa, integrazioni e isolamento del dominio | Packaging e gestione di due linguaggi | **Proposto** |
-| Estendere tutto in TypeScript/Supabase | Riutilizza gateway, auth e stack esistente | Richiede comunque worker persistente, nuovo dominio e strategia desktop; forte eredità della struttura per progetto | Alternativa se server-first è prioritario |
-| Recuperare il vecchio runtime Rust | Componenti già presenti per strumenti, memoria e desktop | Accoppiamenti e costi di verifica/migrazione non ancora misurati | Audit selettivo, niente migrazione totale preventiva |
+| Approccio                              | Vantaggio                                                               | Costo/rischio                                                                                                       | Valutazione                                          |
+| -------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Python modulare + UX React             | Coerente con preferenza espressa, integrazioni e isolamento del dominio | Packaging e gestione di due linguaggi                                                                               | **Proposto**                                         |
+| Estendere tutto in TypeScript/Supabase | Riutilizza gateway, auth e stack esistente                              | Richiede comunque worker persistente, nuovo dominio e strategia desktop; forte eredità della struttura per progetto | Alternativa se server-first è prioritario            |
+| Recuperare il vecchio runtime Rust     | Componenti già presenti per strumenti, memoria e desktop                | Accoppiamenti e costi di verifica/migrazione non ancora misurati                                                    | Audit selettivo, niente migrazione totale preventiva |
 
 Queste valutazioni sono giudizi progettuali basati sul codice e sui requisiti, non benchmark.
 
@@ -94,44 +94,44 @@ Un coordinatore è un agente che può proporre deleghe; il scheduler applica dip
 
 ### Moduli e responsabilità
 
-| Modulo | Responsabilità esclusiva |
-|---|---|
-| domain | Entità, comandi, transizioni, revisioni, invarianti |
-| identity/policy | Attore autenticato, membership, accesso, concessioni e revoche |
-| runtime | Coda, lease, checkpoint, cancellazione, retry e riconciliazione |
-| planning | Proposte e modifiche del piano; non esegue azioni esterne |
-| models | Capacità provider, streaming, limiti di contesto, usage e routing |
-| tools | Manifest, connessioni, invocazioni, isolamento e ricevute |
-| materials | Blob/versioni, collegamenti, estrazione, anteprima e accesso |
-| context/memory | Selezione fonti, riassunti, lezioni e budget token |
-| automations | Regole, orari/eventi, deduplica e creazione di run |
-| notifications | Proiezione di richieste e risultati per destinatario |
-| storage | Transazioni, migrazioni, backup e ripristino |
-| api | Trasporto, validazione dei contratti e flusso eventi |
+| Modulo          | Responsabilità esclusiva                                          |
+| --------------- | ----------------------------------------------------------------- |
+| domain          | Entità, comandi, transizioni, revisioni, invarianti               |
+| identity/policy | Attore autenticato, membership, accesso, concessioni e revoche    |
+| runtime         | Coda, lease, checkpoint, cancellazione, retry e riconciliazione   |
+| planning        | Proposte e modifiche del piano; non esegue azioni esterne         |
+| models          | Capacità provider, streaming, limiti di contesto, usage e routing |
+| tools           | Manifest, connessioni, invocazioni, isolamento e ricevute         |
+| materials       | Blob/versioni, collegamenti, estrazione, anteprima e accesso      |
+| context/memory  | Selezione fonti, riassunti, lezioni e budget token                |
+| automations     | Regole, orari/eventi, deduplica e creazione di run                |
+| notifications   | Proiezione di richieste e risultati per destinatario              |
+| storage         | Transazioni, migrazioni, backup e ripristino                      |
+| api             | Trasporto, validazione dei contratti e flusso eventi              |
 
 ## 6. Modello dei dati
 
 Tutte le entità hanno ID stabile, workspace_id, date UTC e versione quando modificabili. I riferimenti usano ID, mai il nome visualizzato.
 
-| Entità | Contenuto e relazioni |
-|---|---|
-| Workspace / Membership | Spazio autoritativo, persone, ruoli e politiche |
-| Person / Agent / Team | Identità; agente con curriculum, competenze, istruzioni versionate e policy modello; team con membri e coordinatore |
-| Project | Obiettivo condiviso, membri/team, materiali e memoria; nessuna chat globale obbligatoria |
-| Conversation / Message | Chat con project_id facoltativo, partecipanti, messaggi e riferimenti tipizzati ad agenti/file/lavori |
-| Work | Obiettivo, richiesta originale, criteri, vincoli, requester, responsabile, revisore, scadenza e budget; può collegare più conversazioni |
-| WorkConversation | Collega un lavoro alle conversazioni che ne discutono, indicandone una principale; non duplica il lavoro |
-| PlanRevision / Step | Revisione immutabile; passi con responsabile, input richiesti, output atteso, dipendenze e controlli |
-| Run / StepAttempt | Esecuzione di una revisione e singoli tentativi; un retry non è un nuovo lavoro |
-| ContributionRequest | Che cosa manca, chi deve fornirlo, formato/criteri, passo bloccato, scadenza e risposte; testo/file/link/scelta |
-| Artifact / ArtifactVersion | Risultato concreto, MIME, blob/hash, origine, produttore, fonti ed evidenze |
-| Review / ActionApproval | Revisione di un risultato e autorizzazione di un effetto esterno sono entità distinte, riferite a una versione/hash |
-| Material / MaterialLink / AccessGrant | Oggetto nella raccolta, associazione organizzativa, concessione d'accesso; collegare non amplia automaticamente la visibilità |
-| ProcedureRevision / Automation | Metodo riutilizzabile e regola di attivazione, separati dalla singola esecuzione |
-| Plugin / Installation / Connection / ToolGrant | Capacità disponibile, installazione, account collegato e uso autorizzato sono separati |
-| MemoryEntry / Lesson | Ambito, provenienza, autore, validità, versione, accesso e stato di approvazione |
-| UsageEntry / BudgetReservation | Consumi per chiamata/tentativo, stima/consuntivo, riserva e rilascio |
-| DomainEvent / Notification | Storico delle transizioni e proiezione per destinatario; leggere una notifica non completa il compito |
+| Entità                                         | Contenuto e relazioni                                                                                                                   |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Workspace / Membership                         | Spazio autoritativo, persone, ruoli e politiche                                                                                         |
+| Person / Agent / Team                          | Identità; agente con curriculum, competenze, istruzioni versionate e policy modello; team con membri e coordinatore                     |
+| Project                                        | Obiettivo condiviso, membri/team, materiali e memoria; nessuna chat globale obbligatoria                                                |
+| Conversation / Message                         | Chat con project_id facoltativo, partecipanti, messaggi e riferimenti tipizzati ad agenti/file/lavori                                   |
+| Work                                           | Obiettivo, richiesta originale, criteri, vincoli, requester, responsabile, revisore, scadenza e budget; può collegare più conversazioni |
+| WorkConversation                               | Collega un lavoro alle conversazioni che ne discutono, indicandone una principale; non duplica il lavoro                                |
+| PlanRevision / Step                            | Revisione immutabile; passi con responsabile, input richiesti, output atteso, dipendenze e controlli                                    |
+| Run / StepAttempt                              | Esecuzione di una revisione e singoli tentativi; un retry non è un nuovo lavoro                                                         |
+| ContributionRequest                            | Che cosa manca, chi deve fornirlo, formato/criteri, passo bloccato, scadenza e risposte; testo/file/link/scelta                         |
+| Artifact / ArtifactVersion                     | Risultato concreto, MIME, blob/hash, origine, produttore, fonti ed evidenze                                                             |
+| Review / ActionApproval                        | Revisione di un risultato e autorizzazione di un effetto esterno sono entità distinte, riferite a una versione/hash                     |
+| Material / MaterialLink / AccessGrant          | Oggetto nella raccolta, associazione organizzativa, concessione d'accesso; collegare non amplia automaticamente la visibilità           |
+| ProcedureRevision / Automation                 | Metodo riutilizzabile e regola di attivazione, separati dalla singola esecuzione                                                        |
+| Plugin / Installation / Connection / ToolGrant | Capacità disponibile, installazione, account collegato e uso autorizzato sono separati                                                  |
+| MemoryEntry / Lesson                           | Ambito, provenienza, autore, validità, versione, accesso e stato di approvazione                                                        |
+| UsageEntry / BudgetReservation                 | Consumi per chiamata/tentativo, stima/consuntivo, riserva e rilascio                                                                    |
+| DomainEvent / Notification                     | Storico delle transizioni e proiezione per destinatario; leggere una notifica non completa il compito                                   |
 
 UI minimale non significa cancellare queste distinzioni dal motore. All'utente si mostrano soltanto quando modificano una decisione.
 
@@ -139,18 +139,18 @@ UI minimale non significa cancellare queste distinzioni dal motore. All'utente s
 
 Stati del lavoro: draft, ready, running, waiting_input, waiting_approval, paused, review, completed, failed, cancelled. Archiviazione come attributo distinto; un lavoro running non si archivia prima di sospenderlo o annullarlo esplicitamente.
 
-| Evento | Prima → dopo | Condizione |
-|---|---|---|
-| Accettazione piano | draft → ready | Responsabilità, output e criteri validi |
-| Avvio | ready → running | Policy, input, modello e budget disponibili |
-| Mancanza dati | running → waiting_input | Richiesta persistita con destinatario e input atteso |
-| Risposta | waiting_input → ready | Contributo valido e autorizzato; nuove policy ricontrollate |
-| Azione soggetta a consenso | running → waiting_approval | Parametri e versione dell'azione congelati |
-| Fine esecuzione | running → review | Artifact ed evidenze salvati; controlli completati |
-| Accettazione | review → completed | Revisore autorizzato sulla versione corrente |
-| Autonomia prevista | running → completed | Policy applicabile e controlli soddisfatti, ricevuta salvata |
-| Correzione | review → ready | Nuova revisione del piano, storico conservato |
-| Errore non recuperabile | running → failed | Motivo, tentativi ed eventuali effetti incerti registrati |
+| Evento                     | Prima → dopo               | Condizione                                                   |
+| -------------------------- | -------------------------- | ------------------------------------------------------------ |
+| Accettazione piano         | draft → ready              | Responsabilità, output e criteri validi                      |
+| Avvio                      | ready → running            | Policy, input, modello e budget disponibili                  |
+| Mancanza dati              | running → waiting_input    | Richiesta persistita con destinatario e input atteso         |
+| Risposta                   | waiting_input → ready      | Contributo valido e autorizzato; nuove policy ricontrollate  |
+| Azione soggetta a consenso | running → waiting_approval | Parametri e versione dell'azione congelati                   |
+| Fine esecuzione            | running → review           | Artifact ed evidenze salvati; controlli completati           |
+| Accettazione               | review → completed         | Revisore autorizzato sulla versione corrente                 |
+| Autonomia prevista         | running → completed        | Policy applicabile e controlli soddisfatti, ricevuta salvata |
+| Correzione                 | review → ready             | Nuova revisione del piano, storico conservato                |
+| Errore non recuperabile    | running → failed           | Motivo, tentativi ed eventuali effetti incerti registrati    |
 
 Ogni passo ha stato proprio: pending, running, waiting_input, waiting_approval, succeeded, failed, cancelled, superseded. Il numero di passi completati è una proiezione, non la fonte dello stato.
 

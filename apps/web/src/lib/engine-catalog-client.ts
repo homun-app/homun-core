@@ -2,7 +2,7 @@
  * Client for Engine Skill Catalog Packs (F3.6 / H46).
  */
 
-import { ENGINE_DEFAULT_BASE_URL, EngineUnavailableError } from "./engine-client.ts";
+import { ENGINE_DEFAULT_BASE_URL, engineUnreachableError } from "./engine-client.ts";
 import { homunErrorFromHttp } from "./homun-errors.ts";
 
 export type SkillPack = {
@@ -16,14 +16,15 @@ export type SkillPack = {
   author?: string;
 };
 
-async function catalogFetch(path: string, init?: RequestInit, baseUrl = ENGINE_DEFAULT_BASE_URL): Promise<Response> {
+async function catalogFetch(
+  path: string,
+  init?: RequestInit,
+  baseUrl = ENGINE_DEFAULT_BASE_URL,
+): Promise<Response> {
   try {
     return await fetch(`${baseUrl}${path}`, init);
   } catch (cause) {
-    throw new EngineUnavailableError(
-      `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
-      cause,
-    );
+    throw engineUnreachableError(baseUrl, cause);
   }
 }
 
@@ -36,12 +37,19 @@ export async function fetchCatalogPacks(baseUrl = ENGINE_DEFAULT_BASE_URL): Prom
   return (await response.json()) as SkillPack[];
 }
 
-export async function installCatalogPack(packId: string, baseUrl = ENGINE_DEFAULT_BASE_URL): Promise<SkillPack> {
-  const response = await catalogFetch("/v1/catalog/packs/install", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ pack_id: packId }),
-  }, baseUrl);
+export async function installCatalogPack(
+  packId: string,
+  baseUrl = ENGINE_DEFAULT_BASE_URL,
+): Promise<SkillPack> {
+  const response = await catalogFetch(
+    "/v1/catalog/packs/install",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pack_id: packId }),
+    },
+    baseUrl,
+  );
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw homunErrorFromHttp(response.status, body, "Failed to install catalog pack");
@@ -49,12 +57,19 @@ export async function installCatalogPack(packId: string, baseUrl = ENGINE_DEFAUL
   return (await response.json()) as SkillPack;
 }
 
-export async function uninstallCatalogPack(packId: string, baseUrl = ENGINE_DEFAULT_BASE_URL): Promise<{ success: boolean; pack_id: string }> {
-  const response = await catalogFetch("/v1/catalog/packs/uninstall", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ pack_id: packId }),
-  }, baseUrl);
+export async function uninstallCatalogPack(
+  packId: string,
+  baseUrl = ENGINE_DEFAULT_BASE_URL,
+): Promise<{ success: boolean; pack_id: string }> {
+  const response = await catalogFetch(
+    "/v1/catalog/packs/uninstall",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pack_id: packId }),
+    },
+    baseUrl,
+  );
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw homunErrorFromHttp(response.status, body, "Failed to uninstall catalog pack");

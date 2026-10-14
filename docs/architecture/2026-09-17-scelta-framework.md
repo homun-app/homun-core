@@ -18,12 +18,12 @@ Non implementare un nuovo runtime generico di code/checkpoint/retry. Usare DBOS 
 
 ## Confronto circoscritto
 
-| Soluzione | Licenza core verificata | Giudizio per Homun |
-|---|---|---|
-| Pydantic AI + DBOS | MIT + MIT | Scelta: agenti e continuità separati, riuso del runtime senza imporre una piattaforma centrale |
-| LangGraph | MIT | Alternativa valida con checkpoint; non esclusa per limiti di licenza. Non serve sommarla a DBOS |
-| Agno / AgentOS | Apache-2.0 nel repository corrente | Molte funzioni integrate, compresi team e runtime; candidato più completo se scegliessimo una piattaforma integrata. Preferenza Homun per separazione e controllo locale, non pretesa inferiorità di Agno |
-| Pydantic AI + Temporal | MIT per Pydantic; licenza/versioni Temporal da verificare prima dell'adozione | Alternativa di esecuzione per un eventuale deployment aziendale, non prima scelta per ridurre infrastruttura desktop |
+| Soluzione              | Licenza core verificata                                                       | Giudizio per Homun                                                                                                                                                                                        |
+| ---------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pydantic AI + DBOS     | MIT + MIT                                                                     | Scelta: agenti e continuità separati, riuso del runtime senza imporre una piattaforma centrale                                                                                                            |
+| LangGraph              | MIT                                                                           | Alternativa valida con checkpoint; non esclusa per limiti di licenza. Non serve sommarla a DBOS                                                                                                           |
+| Agno / AgentOS         | Apache-2.0 nel repository corrente                                            | Molte funzioni integrate, compresi team e runtime; candidato più completo se scegliessimo una piattaforma integrata. Preferenza Homun per separazione e controllo locale, non pretesa inferiorità di Agno |
+| Pydantic AI + Temporal | MIT per Pydantic; licenza/versioni Temporal da verificare prima dell'adozione | Alternativa di esecuzione per un eventuale deployment aziendale, non prima scelta per ridurre infrastruttura desktop                                                                                      |
 
 Fonti confronto: [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence), [Agno AgentOS](https://docs.agno.com/agent-os/introduction), [Pydantic Temporal](https://pydantic.dev/docs/ai/capabilities/durable_execution/temporal/).
 
@@ -45,13 +45,13 @@ Verificare la cifratura anche del database di checkpoint: può conservare input/
 
 ## Cosa riutilizziamo / cosa sviluppiamo
 
-| Riutilizzo | Codice specifico Homun |
-|---|---|
-| Ciclo LLM, tool calling, validazione output | Contratto del lavoro, piano modificabile e responsabilità |
-| Checkpoint, comunicazioni workflow, recupero | Consistenza fra eventi aziendali e workflow |
-| Client MCP e provider modelli | Catalogo, concessioni, destinazione dati e ricevute |
-| Librerie storage, cifratura e trasporto | Distribuzione selettiva, pairing e gestione chiavi |
-| Primitive di contesto e cronologia | Memoria per progetto/agente con provenienza, revisione e accesso |
+| Riutilizzo                                   | Codice specifico Homun                                           |
+| -------------------------------------------- | ---------------------------------------------------------------- |
+| Ciclo LLM, tool calling, validazione output  | Contratto del lavoro, piano modificabile e responsabilità        |
+| Checkpoint, comunicazioni workflow, recupero | Consistenza fra eventi aziendali e workflow                      |
+| Client MCP e provider modelli                | Catalogo, concessioni, destinazione dati e ricevute              |
+| Librerie storage, cifratura e trasporto      | Distribuzione selettiva, pairing e gestione chiavi               |
+| Primitive di contesto e cronologia           | Memoria per progetto/agente con provenienza, revisione e accesso |
 
 Non adottare automaticamente un servizio memoria esterno: prima chiarire regole e conservare controllo dei dati. Non occorre reinventare ricerca o embedding; occorre applicare i confini di Homun.
 

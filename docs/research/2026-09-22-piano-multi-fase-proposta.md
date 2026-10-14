@@ -19,15 +19,15 @@ il lavoro si chiude **con un risultato**.
 
 ## 2. Cosa riusiamo così com'è (non si inventa nulla di nuovo)
 
-| Pezzo | Dove esiste già | Note |
-|---|---|---|
-| Piano con passi, dipendenze, assegnatari | `plan.propose` / `plan.accept` / `plan.revise` (motore, testati) | `PlanStep`: title, assignee_id, depends_on, output_expected, status |
-| Avvio supervisionato | `work.start` (passa in RUNNING, primo passo in esecuzione) | già ammesso solo con intake confermato |
-| «Tocca a te» per passi umani | `work.request/provide_contribution` + `pending_contribution` già mostrato in UI | è il meccanismo raccolta-contributi |
-| Esecuzione + revisione + chiusura con esito | flusso `compare_csv` esistente (`work.submit_artifact` → `work.review` → COMPLETED) | da generalizzare oltre il confronto |
-| Notifica «il lavoro propone qualcosa» | sistema **followup** già in UI (campanella + riepilogo) | canale per la proposta automatica del passo |
-| Vocabolario UI dei piani | `ConversationCatalogPlan` della demo («X/N completati», riordino, assegna) | da portare in modalità motore |
-| Lettura del piano da UI | `GET /v1/works/{id}` restituisce già `plan` | nessuna nuova lettura |
+| Pezzo                                       | Dove esiste già                                                                     | Note                                                                |
+| ------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Piano con passi, dipendenze, assegnatari    | `plan.propose` / `plan.accept` / `plan.revise` (motore, testati)                    | `PlanStep`: title, assignee_id, depends_on, output_expected, status |
+| Avvio supervisionato                        | `work.start` (passa in RUNNING, primo passo in esecuzione)                          | già ammesso solo con intake confermato                              |
+| «Tocca a te» per passi umani                | `work.request/provide_contribution` + `pending_contribution` già mostrato in UI     | è il meccanismo raccolta-contributi                                 |
+| Esecuzione + revisione + chiusura con esito | flusso `compare_csv` esistente (`work.submit_artifact` → `work.review` → COMPLETED) | da generalizzare oltre il confronto                                 |
+| Notifica «il lavoro propone qualcosa»       | sistema **followup** già in UI (campanella + riepilogo)                             | canale per la proposta automatica del passo                         |
+| Vocabolario UI dei piani                    | `ConversationCatalogPlan` della demo («X/N completati», riordino, assegna)          | da portare in modalità motore                                       |
+| Lettura del piano da UI                     | `GET /v1/works/{id}` restituisce già `plan`                                         | nessuna nuova lettura                                               |
 
 **Principio guida** (dagli appunti di prodotto): l'intake non esegue mai, propone; ogni
 transizione che consuma risorse o produce effetti passa da una conferma umana esplicita.
@@ -160,6 +160,7 @@ caso «due listini + un documento».
 ## 9. Fetta 1: com'è stata realizzata (2026-09-22)
 
 Motore:
+
 - `models/intake.py`: `PlanStepDraft` (tollerante nella forma, stretto nel senso:
   capability del registro, assegnatario risolvibile) + `IntakeBrief.plan_steps`
   (max 5) + `plan_steps` dichiarabile in `changed_fields`; sintesi con un retry
@@ -176,6 +177,7 @@ Motore:
   round-trip per lavoro); `routes/intake.py`: `plan_steps` nel trasporto.
 
 Web:
+
 - Card proposta: sezione «Fasi del lavoro» (titolo, capacità, attese, assegnatario)
   con nota dell'ack onesto; «Fasi» nelle etichette di diff/campi invariati.
 - Pannello riepilogo: regione «Fasi del lavoro» con stato per fase e assegnatario,
@@ -198,6 +200,7 @@ automatico al passo successivo, riordino/revisione del piano da UI, chiusura
 ## 10. Fetta 2: avanzamento delle fasi e chiusura con esito (2026-09-22)
 
 Motore:
+
 - `work.review` (approve) con fasi ancora in attesa **avanza** invece di completare:
   il lavoro torna Pronto, la fase successiva parte solo con il nuovo via esplicito;
   messaggio onesto in chat («Fase verificata e completata. Prossima: «X»…»).
@@ -208,6 +211,7 @@ Motore:
 - La lista lavori espone anche l'artefatto corrente (`latest_artifact`).
 
 Web:
+
 - Card «RISULTATO DA VERIFICARE» generica in chat per qualsiasi lavoro in
   revisione (titolo, contenuto, azioni di revisione) — non più solo per il
   confronto CSV.
@@ -229,6 +233,7 @@ visibile; si rimuove su richiesta.
 ## 11. Fetta 3: le fasi eseguibili viaggiano coi loro strumenti reali (2026-09-22)
 
 Motore (`application/phase_execution.py`, condiviso da confronto e lettura):
+
 - Un accordo «general» con una fase `compare_csv`/`read_material` **ammette lo
   strumento su quella fase** (la capability dell'intake non forza più il lavoro
   intero); il tool non crea un secondo piano monofase: la scala delle fasi È il
@@ -238,6 +243,7 @@ Motore (`application/phase_execution.py`, condiviso da confronto e lettura):
   della fase e la revisione umana avanza come nella fetta 2.
 
 Web:
+
 - La UI dello strumento giusto compare sulla fase corrente (`PhaseTool` in
   chat): selezione CSV → prepara → «Approva ed esegui confronto» → report.
 - Proprietà della revisione per provenienza: l'artefatto lo revisiona la fase

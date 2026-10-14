@@ -17,7 +17,7 @@ esporre log e stato. Lo stop è riservato al proprietario/revisore, rifiuta un
 avvio ancora in corso; altrimenti usa l'ID verificato dal backend.
 
 - [x] Test RED: proposta senza IO, consenso esatto, attore, versione, replay,
-  crash dopo avvio, recupero, accesso revocato, stato nonzero e stop.
+      crash dopo avvio, recupero, accesso revocato, stato nonzero e stop.
 - [x] Servizio applicativo in moduli piccoli; riuso policy e backend.
 - [x] Rotte tipizzate autenticate proposta/elenco/approva/refresh/stop, OpenAPI.
 - [x] Test API e prova Docker reale attraverso servizio con riapertura SQLite.

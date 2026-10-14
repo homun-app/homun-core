@@ -5,37 +5,40 @@
 Direzione confermata da Fabio il 17 settembre 2026: mantenere la nuova UX conversazionale e prevedere tutte le capacità della versione Studio precedente. Questo documento è un inventario del codice e una proposta di collocazione, non una certificazione di funzionamento né di prontezza del motore.
 
 ## Regola di prodotto
+
 Chat per chiedere, chiarire e decidere. Pannello destro per stato attuale e azione successiva. Raccolte e ricerca per ritrovare. Il dettaglio viene aperto quando serve; una capacità avanzata non viene eliminata perché la schermata iniziale è minimale.
 
 La nuova bozza è ancora un esperimento separato con dati in memoria. Non ha ancora la parità funzionale della versione precedente. La versione precedente resta disponibile come riferimento.
 
 ## Inventario e collocazione
-| Capacità presente o rappresentata nello Studio | Copertura della nuova bozza | Collocazione prevista |
-| --- | --- | --- |
-| Creazione e personalizzazione agente, ruolo, curriculum, competenze e tono | Collaboratori dimostrativi fissi; profilo sintetico | Creazione in chat, scheda riutilizzabile di agente con dettagli modificabili |
-| Persone reali, inviti e ruoli | Persone dimostrative nel team | Invito proposto in chat; identità e accessi in scheda/impostazioni |
-| Team, coordinatore, assegnazioni, filtri, drag and drop | Team e coordinatore; niente trascinamento o gestione completa membri salvati | Conversazione di team, membri nel pannello, selettore condiviso e ricercabile |
-| Progetti, obiettivi, squadra, responsabilità | Collegamento team/progetto/lavori basilare | Conversazione di progetto, contesto e attività nel pannello |
-| Compiti, scadenze, priorità, modifiche e assegnazioni | Tre percorsi guidati, scadenza semplice | Proposta di lavoro unica e modificabile, chat del compito |
-| Dashboard oggi, calendario, Kanban trascinabile | Assenti nella nuova versione | Viste del lavoro apribili nello spazio destro/ampio, stesso stato della chat |
-| Dipendenze, contributi, solleciti tra persone e agenti | Contributo locale a un lavoro, senza grafo tra lavori | Richiesta assegnata, notifica e consegna; chiusura della sola dipendenza pertinente |
-| Conversazioni, allegati e riferimenti a compiti/progetti | Chat e allegati; note team/progetto; riferimenti limitati | Composer comune, menzioni selezionabili, contesto esplicito e filtri |
-| Raccolta di file, cartelle, note e collegamenti multiprogetto | Allegati per lavoro e ricerca nomi; raccolta assente | Materiali nel contesto e raccolta globale unica, niente duplicati per progetto |
-| Permessi di risorse, progetti e strumenti | Assenti; spazio demo unico | Accessi nella scheda, riepilogo prima della condivisione; ricerca filtrata dagli accessi |
-| Risultati, fonti, anteprime, versioni, feedback e approvazione | Anteprime testuali simulate e annotazioni di revisione | Risultato apribile nel pannello, visualizzatori per tipo; conferma distinta dall'invio |
-| Formazione per attività, supervisore e autonomia selettiva | Etichetta fissa “in formazione” | Politica per compito/attività, spiegabile e modificabile dalla scheda |
-| Automazioni manuali, orari, giorni, intervalli e trigger evento | Quattro frequenze predefinite e avvio simulato | Creazione dalla chat o dal lavoro; dettagli temporali/trigger quando necessari |
-| Pipeline, passaggi, responsabili, blocchi, prova e storico | Solo copia di scenario per simulare un'esecuzione | Piano generato in chat; mappa visiva opzionale; esecuzioni distinte e tracciate |
-| Plugin/marketplace, configurazione, abilitazione per agente e permessi | Assente | Collegamento proposto nel momento del bisogno; raccolta plugin e scheda connessione |
-| Modelli locali/remoti, preferenze per agente e scelta/escalation | Nessuna configurazione reale | Impostazioni e scheda agente; decisioni del motore ancora da completare |
-| Costi per agente/lavoro, stime, budget e limiti | €0 demo, nessuna contabilità | Indicatore discreto; stima/limite prima del lavoro; dettaglio in impostazioni |
-| Notifiche, elementi da verificare, attese | Badge da gestire per contributi e risultati | Centro attenzione condiviso tra chat e altre viste, apertura diretta dell'azione |
-| Impostazioni generali, dati/connessioni, notifiche, persone/accessi | Solo informazioni sulla demo | Accesso dal profilo, categorie dedicate senza ingombrare la chat |
-| Ricerca globale | Ricerca testuale di oggetti e messaggi della nuova bozza | Cmd/Ctrl-K; accesso al contesto esatto; comprensione semantica solo col motore |
+
+| Capacità presente o rappresentata nello Studio                             | Copertura della nuova bozza                                                  | Collocazione prevista                                                                    |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Creazione e personalizzazione agente, ruolo, curriculum, competenze e tono | Collaboratori dimostrativi fissi; profilo sintetico                          | Creazione in chat, scheda riutilizzabile di agente con dettagli modificabili             |
+| Persone reali, inviti e ruoli                                              | Persone dimostrative nel team                                                | Invito proposto in chat; identità e accessi in scheda/impostazioni                       |
+| Team, coordinatore, assegnazioni, filtri, drag and drop                    | Team e coordinatore; niente trascinamento o gestione completa membri salvati | Conversazione di team, membri nel pannello, selettore condiviso e ricercabile            |
+| Progetti, obiettivi, squadra, responsabilità                               | Collegamento team/progetto/lavori basilare                                   | Conversazione di progetto, contesto e attività nel pannello                              |
+| Compiti, scadenze, priorità, modifiche e assegnazioni                      | Tre percorsi guidati, scadenza semplice                                      | Proposta di lavoro unica e modificabile, chat del compito                                |
+| Dashboard oggi, calendario, Kanban trascinabile                            | Assenti nella nuova versione                                                 | Viste del lavoro apribili nello spazio destro/ampio, stesso stato della chat             |
+| Dipendenze, contributi, solleciti tra persone e agenti                     | Contributo locale a un lavoro, senza grafo tra lavori                        | Richiesta assegnata, notifica e consegna; chiusura della sola dipendenza pertinente      |
+| Conversazioni, allegati e riferimenti a compiti/progetti                   | Chat e allegati; note team/progetto; riferimenti limitati                    | Composer comune, menzioni selezionabili, contesto esplicito e filtri                     |
+| Raccolta di file, cartelle, note e collegamenti multiprogetto              | Allegati per lavoro e ricerca nomi; raccolta assente                         | Materiali nel contesto e raccolta globale unica, niente duplicati per progetto           |
+| Permessi di risorse, progetti e strumenti                                  | Assenti; spazio demo unico                                                   | Accessi nella scheda, riepilogo prima della condivisione; ricerca filtrata dagli accessi |
+| Risultati, fonti, anteprime, versioni, feedback e approvazione             | Anteprime testuali simulate e annotazioni di revisione                       | Risultato apribile nel pannello, visualizzatori per tipo; conferma distinta dall'invio   |
+| Formazione per attività, supervisore e autonomia selettiva                 | Etichetta fissa “in formazione”                                              | Politica per compito/attività, spiegabile e modificabile dalla scheda                    |
+| Automazioni manuali, orari, giorni, intervalli e trigger evento            | Quattro frequenze predefinite e avvio simulato                               | Creazione dalla chat o dal lavoro; dettagli temporali/trigger quando necessari           |
+| Pipeline, passaggi, responsabili, blocchi, prova e storico                 | Solo copia di scenario per simulare un'esecuzione                            | Piano generato in chat; mappa visiva opzionale; esecuzioni distinte e tracciate          |
+| Plugin/marketplace, configurazione, abilitazione per agente e permessi     | Assente                                                                      | Collegamento proposto nel momento del bisogno; raccolta plugin e scheda connessione      |
+| Modelli locali/remoti, preferenze per agente e scelta/escalation           | Nessuna configurazione reale                                                 | Impostazioni e scheda agente; decisioni del motore ancora da completare                  |
+| Costi per agente/lavoro, stime, budget e limiti                            | €0 demo, nessuna contabilità                                                 | Indicatore discreto; stima/limite prima del lavoro; dettaglio in impostazioni            |
+| Notifiche, elementi da verificare, attese                                  | Badge da gestire per contributi e risultati                                  | Centro attenzione condiviso tra chat e altre viste, apertura diretta dell'azione         |
+| Impostazioni generali, dati/connessioni, notifiche, persone/accessi        | Solo informazioni sulla demo                                                 | Accesso dal profilo, categorie dedicate senza ingombrare la chat                         |
+| Ricerca globale                                                            | Ricerca testuale di oggetti e messaggi della nuova bozza                     | Cmd/Ctrl-K; accesso al contesto esatto; comprensione semantica solo col motore           |
 
 Riferimenti principali: StudioWorkbench, StudioSettings, StudioAccess, StudioTraining, StudioSchedule, StudioDocuments, StudioMarketplace, StudioProcedures, StudioAutomationCanvas, StudioMemberPicker, StudioConversation, StudioContribution e lib/studio-pipelines. Nuova bozza: ConversationWorkspace, ConversationSpace, ConversationSearch.
 
 ## Ordine di completamento
+
 1. **Oggetti e componenti comuni**: persone/agenti, team, progetti, lavori, messaggi, materiali, richieste, risultati. Un'unica fonte dello stato; selettori e schede riutilizzati.
 2. **Lavoro quotidiano completo**: riferimenti in chat, compiti modificabili, contributi/dipendenze, notifiche, risultati e viste calendario/Kanban.
 3. **Condivisione e strumenti**: raccolta unica, accessi, clienti/utenti esterni, plugin e connessioni.
@@ -43,6 +46,7 @@ Riferimenti principali: StudioWorkbench, StudioSettings, StudioAccess, StudioTra
 5. **Controllo operativo**: modelli, budget/costi, notifiche e dati. La specifica dei modelli può evolvere, il punto di accesso UX deve esserci.
 
 ## Criterio di accettazione per ogni capacità
+
 Non basta che ci sia un pulsante. Verificare: avvio dalla chat; proposta comprensibile; modifica senza perdere contesto; stato e responsabile chiari; gestione di dati mancanti/errori; risultato ritrovabile; coerenza fra chat, pannello, raccolte e ricerca; permessi non ampliati implicitamente. Includere un caso con molti elementi e uno con un contributo umano.
 
 Non riprodurre meccanicamente ogni schermata o avviso dello Studio: preservare la capacità e sostituire i passaggi inutili con un'interazione coerente. Le fixture catalogo/log/ricerca non devono limitare il modello del prodotto a tre settori.
@@ -50,6 +54,7 @@ Non riprodurre meccanicamente ogni schermata o avviso dello Studio: preservare l
 ## Primo incremento: gestione e profili — 17 settembre 2026
 
 Implementato nella nuova versione:
+
 - modifica e cancellazione di team, progetti e ricorrenze; annullamento senza salvataggio;
 - modifica membri e coordinatore, scioglimento team con scollegamento dei progetti;
 - eliminazione progetto con conservazione delle conversazioni senza progetto;

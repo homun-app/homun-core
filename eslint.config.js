@@ -1,11 +1,17 @@
+import { includeIgnoreFile } from "@eslint/compat";
+import { fileURLToPath } from "node:url";
 import js from "@eslint/js";
-import eslintPluginPrettier from "eslint-plugin-prettier/recommended";
+import eslintConfigPrettier from "eslint-config-prettier";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
+// Un'unica fonte di verità: ciò che git ignora è ignorato anche dal lint.
+const gitIgnored = includeIgnoreFile(fileURLToPath(new URL("./.gitignore", import.meta.url)));
+
 export default tseslint.config(
+  gitIgnored,
   {
     ignores: [
       "**/dist/**",
@@ -46,9 +52,15 @@ export default tseslint.config(
           ],
         },
       ],
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      // Le due regole d'avviso sono errori: il debito esistente sta nelle
+      // bulk suppressions (eslint-suppressions.json) e ogni violazione NUOVA
+      // fa fallire eslint . (le soppressioni si applicano solo agli errori).
+      "react-hooks/exhaustive-deps": "error",
+      "react-refresh/only-export-components": ["error", { allowConstantExport: true }],
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
-  eslintPluginPrettier,
+  // La formattazione è di Prettier (npm run format / format:check): qui resta
+  // solo la disattivazione delle regole ESLint in conflitto con Prettier.
+  eslintConfigPrettier,
 );

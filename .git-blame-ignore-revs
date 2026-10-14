@@ -1,0 +1,4 @@
+# Commit da ignorare in git blame (--ignore-revs-file):
+# passata unica di formattazione Prettier su tutto il repo.
+# Uso: git config blame.ignoreRevsFile .git-blame-ignore-revs
+b63f03ea4034314e4bf36bf8b6ca457f1a061896

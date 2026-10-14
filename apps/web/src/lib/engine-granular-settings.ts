@@ -66,10 +66,7 @@ export function setProviderGranularConfig(
   const current = getProviderGranularConfig(providerId);
   const updated = { ...current, ...cfg };
   try {
-    localStorage.setItem(
-      `${PROVIDER_CONFIG_KEY_PREFIX}${providerId}`,
-      JSON.stringify(updated),
-    );
+    localStorage.setItem(`${PROVIDER_CONFIG_KEY_PREFIX}${providerId}`, JSON.stringify(updated));
   } catch {
     // ignore quota errors in private browsing
   }

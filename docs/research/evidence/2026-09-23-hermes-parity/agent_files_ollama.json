@@ -20,9 +20,5 @@
     "recovery_and_sqlite_reopen_preserve_output": true,
     "final_artifact": true
   },
-  "tools": [
-    "terminal_execute",
-    "read_workspace_file",
-    "deliver_workspace_file"
-  ]
+  "tools": ["terminal_execute", "read_workspace_file", "deliver_workspace_file"]
 }

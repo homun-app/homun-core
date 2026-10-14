@@ -1,5 +1,13 @@
 import { useMemo, useState } from "react";
-import { Bot, CheckCircle2, Clock, XCircle, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Bot,
+  CheckCircle2,
+  Clock,
+  XCircle,
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 import { t } from "@/lib/i18n";
 import { extractDelegations, type DelegationItem } from "@/lib/engine-delegation-parser";
 import "./engine-delegation-list.css";
@@ -32,9 +40,7 @@ export function EngineDelegationList({
           <Bot size={16} />
           <span>{t("delegation.title")}</span>
         </div>
-        <span className="cw-delegation-badge">
-          {delegations.length}
-        </span>
+        <span className="cw-delegation-badge">{delegations.length}</span>
       </div>
 
       <div className="cw-delegation-items">
@@ -64,8 +70,15 @@ export function EngineDelegationList({
               )}
 
               {item.schemaError && (
-                <div className="cw-delegation-schema-error" role="alert" style={{ color: "#cf222e", marginTop: 4 }}>
-                  <AlertCircle size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+                <div
+                  className="cw-delegation-schema-error"
+                  role="alert"
+                  style={{ color: "#cf222e", marginTop: 4 }}
+                >
+                  <AlertCircle
+                    size={12}
+                    style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }}
+                  />
                   <strong>{t("delegation.schema_error")}:</strong> {item.schemaError}
                 </div>
               )}
@@ -90,12 +103,18 @@ export function EngineDelegationList({
                   >
                     {isExpanded ? (
                       <>
-                        <ChevronUp size={12} style={{ display: "inline", verticalAlign: "middle" }} />{" "}
+                        <ChevronUp
+                          size={12}
+                          style={{ display: "inline", verticalAlign: "middle" }}
+                        />{" "}
                         {t("delegation.hide_details")}
                       </>
                     ) : (
                       <>
-                        <ChevronDown size={12} style={{ display: "inline", verticalAlign: "middle" }} />{" "}
+                        <ChevronDown
+                          size={12}
+                          style={{ display: "inline", verticalAlign: "middle" }}
+                        />{" "}
                         {t("delegation.show_details")}
                       </>
                     )}

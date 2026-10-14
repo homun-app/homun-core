@@ -3,7 +3,7 @@
  * Membership is organizational only; AccessGrant is deny-by-default for projects.
  */
 
-import { ENGINE_DEFAULT_BASE_URL, EngineUnavailableError } from "./engine-client.ts";
+import { ENGINE_DEFAULT_BASE_URL, engineUnreachableError } from "./engine-client.ts";
 import {
   DEFAULT_WORKSPACE_ID,
   defaultLocalActor,
@@ -76,10 +76,7 @@ async function orgFetch(path: string, init: RequestInit, baseUrl: string): Promi
   try {
     return await fetch(`${baseUrl}${path}`, init);
   } catch (cause) {
-    throw new EngineUnavailableError(
-      `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
-      cause,
-    );
+    throw engineUnreachableError(baseUrl, cause);
   }
 }
 
@@ -211,17 +208,25 @@ export async function updateEngineProject(input: {
   actor?: EngineActor;
 }): Promise<{ version: number }> {
   const actor = input.actor ?? defaultLocalActor();
-  const payload: Record<string, unknown> = { project_id: input.projectId, expected_version: input.expectedVersion };
+  const payload: Record<string, unknown> = {
+    project_id: input.projectId,
+    expected_version: input.expectedVersion,
+  };
   if (input.name !== undefined) payload["name"] = input.name;
   if (input.description !== undefined) payload["description"] = input.description;
   if (input.memberIds !== undefined) payload["member_ids"] = input.memberIds;
   if (input.teamIds !== undefined) payload["team_ids"] = input.teamIds;
   if (input.status !== undefined) payload["status"] = input.status;
-  if (input.agentModelOverrides !== undefined) payload["agent_model_overrides"] = input.agentModelOverrides;
-  if (input.agentToolOverrides !== undefined) payload["agent_tool_overrides"] = input.agentToolOverrides;
+  if (input.agentModelOverrides !== undefined)
+    payload["agent_model_overrides"] = input.agentModelOverrides;
+  if (input.agentToolOverrides !== undefined)
+    payload["agent_tool_overrides"] = input.agentToolOverrides;
   const result = await postEngineCommand({ type: "project.update", payload, actor });
   return {
-    version: typeof result.result["version"] === "number" ? result.result["version"] : input.expectedVersion + 1,
+    version:
+      typeof result.result["version"] === "number"
+        ? result.result["version"]
+        : input.expectedVersion + 1,
   };
 }
 
@@ -486,4 +491,3 @@ export async function updateEngineTeam(input: {
         : input.expectedVersion + 1,
   };
 }
-

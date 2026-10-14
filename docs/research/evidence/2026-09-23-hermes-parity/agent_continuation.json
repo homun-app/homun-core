@@ -1,9 +1,6 @@
 {
   "fixture": "first HTTP reply intentionally truncated; subsequent replies from real Ollama; context restarted before continuation",
-  "statuses": [
-    "running",
-    "completed"
-  ],
+  "statuses": ["running", "completed"],
   "http_requests": 2,
   "run": {
     "id": "run",

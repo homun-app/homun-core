@@ -10,12 +10,12 @@
 
 ## Tabella delle differenze che contano
 
-| Tool | Hermes | Homun | Differenza |
-|---|---|---|---|
-| Continuità | Sessione persistente: turno N vede turni 1..N-1 | Lavoro nuovo per messaggio: turno N vede solo messaggio N | IL GAP #1 |
-| web_search | ddgs subprocess 30s cap | ddgs in-process senza timeout, fallback UA "Homun" | Homun può bloccarsi |
-| web_extract | API vendor (rendering, PDF) | stdlib http (testo grezzo, no PDF) | Bot-walled falliscono |
-| memoria | MEMORY.md iniettato sempre | Solo persona iniettata; progetto via substring tool | Hermes ricorda sempre |
-| session_search | FTS5/BM25 ranking | Scan lineare substring | Recall qualità |
-| prompt sistema | 3 tier + data/ora + platform | Flat + corpus Hermes | Manca data (risposte stantie) |
-| chiamata modello | Retry ×3 in-turn + backoff | Un POST, recovery durabile | Hermes auto-ripara nel turno |
+| Tool             | Hermes                                          | Homun                                                     | Differenza                    |
+| ---------------- | ----------------------------------------------- | --------------------------------------------------------- | ----------------------------- |
+| Continuità       | Sessione persistente: turno N vede turni 1..N-1 | Lavoro nuovo per messaggio: turno N vede solo messaggio N | IL GAP #1                     |
+| web_search       | ddgs subprocess 30s cap                         | ddgs in-process senza timeout, fallback UA "Homun"        | Homun può bloccarsi           |
+| web_extract      | API vendor (rendering, PDF)                     | stdlib http (testo grezzo, no PDF)                        | Bot-walled falliscono         |
+| memoria          | MEMORY.md iniettato sempre                      | Solo persona iniettata; progetto via substring tool       | Hermes ricorda sempre         |
+| session_search   | FTS5/BM25 ranking                               | Scan lineare substring                                    | Recall qualità                |
+| prompt sistema   | 3 tier + data/ora + platform                    | Flat + corpus Hermes                                      | Manca data (risposte stantie) |
+| chiamata modello | Retry ×3 in-turn + backoff                      | Un POST, recovery durabile                                | Hermes auto-ripara nel turno  |

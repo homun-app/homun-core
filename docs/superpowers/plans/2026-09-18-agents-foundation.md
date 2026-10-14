@@ -14,17 +14,17 @@
 
 ## File map
 
-| File | Role |
-|------|------|
-| `engine/src/homun/domain/models.py` | Extend `AgentProfile` fields |
-| `engine/src/homun/domain/roster.py` | Build roster from actor + agents |
-| `engine/src/homun/domain/service.py` | `agent.create`/`agent.update` + connection validation |
-| `engine/src/homun/context.py` | Inject known connection ids into service |
-| `engine/src/homun/routes/domain.py` | GET agent by id; enrich interpret roster |
-| `engine/tests/test_agents_foundation.py` | Domain + HTTP + roster tests |
-| `apps/web/src/lib/engine-agents-client.ts` | List/get/create/update client |
-| `apps/web/.../ConversationAgentsSettingsSection.tsx` | Settings → Agenti |
-| `apps/web/.../ConversationSettings.tsx` | Nav section |
+| File                                                 | Role                                                  |
+| ---------------------------------------------------- | ----------------------------------------------------- |
+| `engine/src/homun/domain/models.py`                  | Extend `AgentProfile` fields                          |
+| `engine/src/homun/domain/roster.py`                  | Build roster from actor + agents                      |
+| `engine/src/homun/domain/service.py`                 | `agent.create`/`agent.update` + connection validation |
+| `engine/src/homun/context.py`                        | Inject known connection ids into service              |
+| `engine/src/homun/routes/domain.py`                  | GET agent by id; enrich interpret roster              |
+| `engine/tests/test_agents_foundation.py`             | Domain + HTTP + roster tests                          |
+| `apps/web/src/lib/engine-agents-client.ts`           | List/get/create/update client                         |
+| `apps/web/.../ConversationAgentsSettingsSection.tsx` | Settings → Agenti                                     |
+| `apps/web/.../ConversationSettings.tsx`              | Nav section                                           |
 
 ---
 

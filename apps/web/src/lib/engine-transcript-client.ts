@@ -54,9 +54,12 @@ export async function loadEngineTranscript(
             reasoning: typeof item.reasoning === "string" ? item.reasoning : undefined,
             tools: Array.isArray(item.tools)
               ? item.tools
-                  .filter((t: unknown): t is { tool: string; message: string } =>
-                    typeof t === "object" && t !== null &&
-                    typeof (t as { tool?: unknown }).tool === "string")
+                  .filter(
+                    (t: unknown): t is { tool: string; message: string } =>
+                      typeof t === "object" &&
+                      t !== null &&
+                      typeof (t as { tool?: unknown }).tool === "string",
+                  )
                   .map((t: { tool: string; message?: unknown }) => ({
                     tool: t.tool,
                     message: typeof t.message === "string" ? t.message : "",

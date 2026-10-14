@@ -99,10 +99,7 @@ test("classification is stateless routing and surfaces typed failures", async ()
     });
   } finally {
     globalThis.fetch = async () =>
-      Response.json(
-        { detail: { code: "provider_unavailable", message: "down" } },
-        { status: 503 },
-      );
+      Response.json({ detail: { code: "provider_unavailable", message: "down" } }, { status: 503 });
     await assert.rejects(classifyWorkIntake("work1", "testo"), { code: "provider_unavailable" });
     globalThis.fetch = old;
   }

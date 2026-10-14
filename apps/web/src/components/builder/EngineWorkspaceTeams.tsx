@@ -34,11 +34,7 @@ export function EngineWorkspaceTeams({
           <span className="cw-squad-section-count">{teams.length}</span>
         </div>
         {editing !== "new" && active.length >= 2 && (
-          <button
-            type="button"
-            className="cw-squad-btn-subtle"
-            onClick={() => setEditing("new")}
-          >
+          <button type="button" className="cw-squad-btn-subtle" onClick={() => setEditing("new")}>
             <Plus size={13} />
             <span>Nuovo team</span>
           </button>

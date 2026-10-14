@@ -46,7 +46,10 @@ test("dictionary parity between Italian and English", () => {
 
     for (const key of Object.keys(itSection) as (keyof typeof itSection)[]) {
       assert.ok(key in enSection, `Key ${section}.${String(key)} missing from English dictionary`);
-      assert.ok(typeof enSection[key] === "string", `Key ${section}.${String(key)} is not a string`);
+      assert.ok(
+        typeof enSection[key] === "string",
+        `Key ${section}.${String(key)} is not a string`,
+      );
       assert.ok((enSection[key] as string).length > 0, `Key ${section}.${String(key)} is empty`);
     }
   }

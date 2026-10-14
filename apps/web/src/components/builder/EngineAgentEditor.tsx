@@ -55,7 +55,10 @@ export function EngineAgentEditor({
         role: role.trim(),
         instructions: instructions.trim(),
         responsibility: responsibility.trim(),
-        specializations: specializations.split(",").map((item) => item.trim()).filter(Boolean),
+        specializations: specializations
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
         method: method.trim(),
         tone: tone.trim(),
         autonomyMode: autonomy,
@@ -75,57 +78,98 @@ export function EngineAgentEditor({
     <form
       className="cw-agent-editor"
       aria-label={`Modifica ${agent.name}`}
-      onSubmit={(event) => { event.preventDefault(); void save(); }}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
     >
       <h4>{agent.name}</h4>
       <label>
         Ruolo
-        <input value={role} maxLength={180} disabled={saving} onChange={(e) => setRole(e.target.value)} />
+        <input
+          value={role}
+          maxLength={180}
+          disabled={saving}
+          onChange={(e) => setRole(e.target.value)}
+        />
       </label>
       <label>
         Istruzioni
-        <textarea className="cw-input" value={instructions} maxLength={2000} disabled={saving}
-          onChange={(e) => setInstructions(e.target.value)} />
+        <textarea
+          className="cw-input"
+          value={instructions}
+          maxLength={2000}
+          disabled={saving}
+          onChange={(e) => setInstructions(e.target.value)}
+        />
       </label>
       <label>
         Di cosa è responsabile
-        <input value={responsibility} maxLength={500} disabled={saving} onChange={(e) => setResponsibility(e.target.value)} />
+        <input
+          value={responsibility}
+          maxLength={500}
+          disabled={saving}
+          onChange={(e) => setResponsibility(e.target.value)}
+        />
       </label>
       <label>
         Specializzazioni (separate da virgola)
-        <input value={specializations} maxLength={300} disabled={saving} onChange={(e) => setSpecializations(e.target.value)} />
+        <input
+          value={specializations}
+          maxLength={300}
+          disabled={saving}
+          onChange={(e) => setSpecializations(e.target.value)}
+        />
       </label>
       <label>
         Metodo di lavoro
-        <input value={method} maxLength={500} disabled={saving} onChange={(e) => setMethod(e.target.value)} />
+        <input
+          value={method}
+          maxLength={500}
+          disabled={saving}
+          onChange={(e) => setMethod(e.target.value)}
+        />
       </label>
       <label>
         Tono
-        <input value={tone} maxLength={120} disabled={saving} onChange={(e) => setTone(e.target.value)} />
+        <input
+          value={tone}
+          maxLength={120}
+          disabled={saving}
+          onChange={(e) => setTone(e.target.value)}
+        />
       </label>
       <div className="cw-agent-editor__row">
         <label>
           Autonomia
-          <ConversationSelectField aria-label="Autonomia" value={autonomy} disabled={saving}
-            onChange={(e) => setAutonomy(e.target.value)}>
-            {AUTONOMY_CHOICES.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+          <ConversationSelectField
+            aria-label="Autonomia"
+            value={autonomy}
+            disabled={saving}
+            onChange={(e) => setAutonomy(e.target.value)}
+          >
+            {AUTONOMY_CHOICES.map((choice) => (
+              <option key={choice.id} value={choice.id}>
+                {choice.label}
+              </option>
+            ))}
           </ConversationSelectField>
         </label>
         <div className="cw-agent-editor__field">
           <span>Modello per questo collaboratore</span>
-          <AgentModelSelector
-            value={connectionId}
-            onChange={setConnectionId}
-            disabled={saving}
-          />
+          <AgentModelSelector value={connectionId} onChange={setConnectionId} disabled={saving} />
         </div>
       </div>
       <fieldset className="cw-agent-editor__capabilities">
         <legend>Capacità che sa usare</legend>
         {CAPABILITY_CHOICES.map((choice) => (
           <label key={choice.id}>
-            <input type="checkbox" checked={capabilities.includes(choice.id)} disabled={saving}
-              onChange={() => toggleCapability(choice.id)} />
+            <input
+              type="checkbox"
+              checked={capabilities.includes(choice.id)}
+              disabled={saving}
+              onChange={() => toggleCapability(choice.id)}
+            />
             {choice.label}
           </label>
         ))}

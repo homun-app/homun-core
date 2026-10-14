@@ -29,7 +29,10 @@ test("engine project navigation uses only authoritative inventory, including aft
   assert.deepEqual(actual.projects, [
     { id: "project_real", name: "Prezzi settembre", brief: "Confronto", teamId: "" },
   ]);
-  assert.equal(projectWorkspaceData("engine", simulated, { projects: [], teams: [] }).projects.length, 0);
+  assert.equal(
+    projectWorkspaceData("engine", simulated, { projects: [], teams: [] }).projects.length,
+    0,
+  );
   assert.equal(projectWorkspaceData("simulation", simulated, engine), simulated);
   assert.deepEqual(
     projectWorkspaceData("engine", simulated, {

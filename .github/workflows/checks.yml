@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13.12'
+          python-version: "3.13.12"
           cache: pip
           cache-dependency-path: engine/requirements.lock
       - name: Install hash-locked runtime, test, and build dependencies
@@ -28,7 +28,7 @@ jobs:
         run: python tools/export_openapi.py --check
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
       - name: Generated engine inventory and execstack hardening
         run: python -m pytest -q engine/packaging
       - name: Desktop boundary and owned engine tests
@@ -42,7 +42,7 @@ jobs:
         working-directory: engine
         run: python -m pytest -q
         env:
-          HOMUN_MEM0_LIVE: '0'
+          HOMUN_MEM0_LIVE: "0"
 
   frontend:
     runs-on: ubuntu-latest
@@ -51,10 +51,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
       - name: Install lockfile dependencies
         run: npm ci
+      - name: Lint (existing debt suppressed, new violations fail)
+        run: npm run lint
+      - name: Prettier check
+        run: npm run format:check
       - name: Typecheck, tests, and application builds
         timeout-minutes: 10
         run: npm run check

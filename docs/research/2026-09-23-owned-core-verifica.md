@@ -32,11 +32,11 @@ Un endpoint o modello OpenAI-compatible deve supportare tool calling per i nuovi
 Riferimento: NousResearch/hermes-agent commit
 `c9dca726514b709cf6e677d236a79fc8d0627f37`.
 
-| Riferimento Hermes | Homun | Tipo di riuso |
-| --- | --- | --- |
-| `agent/conversation_loop.py`, `agent/turn_tool_round.py` | `application/agent_native.py`, `agent_run_execution.py` | Reimplementazione del ciclo e della persistenza prima degli strumenti |
-| `agent/turn_request_assembly.py` | `models/native_turn.py`, `native_transport.py` | Separazione fra storia canonica e payload del provider |
-| `agent/prompt_builder.py` | `models/native_prompt.py` | Estratti adattati delle istruzioni su prerequisiti, fatti verificati, identificativi, informazioni mancanti e consegna |
+| Riferimento Hermes                                       | Homun                                                   | Tipo di riuso                                                                                                          |
+| -------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `agent/conversation_loop.py`, `agent/turn_tool_round.py` | `application/agent_native.py`, `agent_run_execution.py` | Reimplementazione del ciclo e della persistenza prima degli strumenti                                                  |
+| `agent/turn_request_assembly.py`                         | `models/native_turn.py`, `native_transport.py`          | Separazione fra storia canonica e payload del provider                                                                 |
+| `agent/prompt_builder.py`                                | `models/native_prompt.py`                               | Estratti adattati delle istruzioni su prerequisiti, fatti verificati, identificativi, informazioni mancanti e consegna |
 
 Prompt adattato al catalogo realmente disponibile in Homun, senza istruzioni su
 strumenti non presenti. Il prompt è fissato per run; non è una copia completa del

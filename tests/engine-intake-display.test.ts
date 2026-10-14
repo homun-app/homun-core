@@ -67,7 +67,9 @@ test("brief changes are rendered as compact Italian lines", () => {
 });
 
 test("missing values and long text stay readable", () => {
-  const [line] = briefChangeLines([{ field: "staffing", from_value: null, to_value: "Analista Prezzi" }]);
+  const [line] = briefChangeLines([
+    { field: "staffing", from_value: null, to_value: "Analista Prezzi" },
+  ]);
   assert.equal(line, "Collaboratore: — → Analista Prezzi");
   const [long] = briefChangeLines([
     {
@@ -107,7 +109,11 @@ test("preserved fields are everything the engine did not change", () => {
 test("an agreement is revisable only on an idle engine draft", () => {
   assert.equal(isAgreementRevisable({ engineStatus: "draft" }), true);
   assert.equal(
-    isAgreementRevisable({ engineStatus: "draft", enginePlanRevision: 0, engineArtifactVersion: 0 }),
+    isAgreementRevisable({
+      engineStatus: "draft",
+      enginePlanRevision: 0,
+      engineArtifactVersion: 0,
+    }),
     true,
   );
   assert.equal(isAgreementRevisable({ engineStatus: "draft", enginePlanRevision: 2 }), false);
@@ -119,19 +125,29 @@ test("an agreement is revisable only on an idle engine draft", () => {
 test("a pending brief drives the work display until it is confirmed", () => {
   const next = applyIntakePreview(draftWork(), proposal());
   assert.equal(next.title, "Confronto listini marzo e aprile");
-  assert.equal(next.engineObjective, "Confrontare i prezzi dei due listini e riportare le differenze");
+  assert.equal(
+    next.engineObjective,
+    "Confrontare i prezzi dei due listini e riportare le differenze",
+  );
   assert.equal(next.engineIntakePending, true);
   assert.equal(next.engineObjectiveProposed, true);
   assert.equal(next.engineProposedAgentName, "Aurora");
 });
 
 test("manual renames and agreed values are never overwritten by the preview", () => {
-  const renamed = { ...draftWork(), title: "Il mio titolo", engineObjective: "Obiettivo concordato" };
+  const renamed = {
+    ...draftWork(),
+    title: "Il mio titolo",
+    engineObjective: "Obiettivo concordato",
+  };
   const next = applyIntakePreview(renamed, proposal());
   assert.equal(next.title, "Il mio titolo");
   assert.equal(next.engineObjective, "Obiettivo concordato");
   assert.equal(next.engineObjectiveProposed, undefined);
-  const confirmed = applyIntakePreview({ ...draftWork(), engineStatus: "draft" }, proposal({ status: "confirmed" }));
+  const confirmed = applyIntakePreview(
+    { ...draftWork(), engineStatus: "draft" },
+    proposal({ status: "confirmed" }),
+  );
   assert.equal(confirmed.title, PLACEHOLDER_WORK_TITLE);
   assert.equal(confirmed.engineIntakePending, undefined);
   // An agreed draft is preparation, not a stale proposal: the status chip
@@ -142,7 +158,12 @@ test("manual renames and agreed values are never overwritten by the preview", ()
 test("confirm label names the decision the person is making", () => {
   assert.equal(intakeConfirmLabel(proposal()), "Crea il collaboratore e affida");
   assert.equal(
-    intakeConfirmLabel(proposal({ new_agent: null, suggested_agent: { id: "a", name: "Ada", role: "R", revision: 1 } })),
+    intakeConfirmLabel(
+      proposal({
+        new_agent: null,
+        suggested_agent: { id: "a", name: "Ada", role: "R", revision: 1 },
+      }),
+    ),
     "Conferma e affida",
   );
   assert.equal(intakeConfirmLabel(proposal({ new_agent: null })), "Conferma il lavoro con Homun");
@@ -152,8 +173,10 @@ test("confirm label names the decision the person is making", () => {
   assert.equal(isIntakeAwaitingUser(null), false);
 });
 
-
 test("direct intake names Homun even after a delegated preview", () => {
-  const next = applyIntakePreview({ ...draftWork(), engineProposedAgentName: "Ada" }, proposal({ new_agent: null, suggested_agent: null }));
+  const next = applyIntakePreview(
+    { ...draftWork(), engineProposedAgentName: "Ada" },
+    proposal({ new_agent: null, suggested_agent: null }),
+  );
   assert.equal(next.engineProposedAgentName, "Homun");
 });

@@ -8,17 +8,17 @@ Sostituire il modulo in tre pagine con bisogno → proposta → squadra/prima pr
 Mantenere i bot agnostici e il core senza chiamate AI o servizi esterni.
 
 - [x] Definire tre esempi dichiarati (preventivi, rassegna, manutenzione), con
-  responsabilità, metodo, frequenza, materiali e risultato dimostrativo.
+      responsabilità, metodo, frequenza, materiali e risultato dimostrativo.
 - [x] Separare l'esempio scelto esplicitamente dalla richiesta libera: nessuna
-  interpretazione automatica finta. La richiesta libera resta personalizzabile.
+      interpretazione automatica finta. La richiesta libera resta personalizzabile.
 - [x] Proposta compatta con nome, metodo e risultato già presenti. Impostazioni
-  AI e autonomia su richiesta; riepilogo budget sempre leggibile.
+      AI e autonomia su richiesta; riepilogo budget sempre leggibile.
 - [x] Dopo accettazione, mostrare collaboratore e lavoro nello stesso spazio,
-  con richiesta concreta di materiali e azione per avviare una prova simulata.
+      con richiesta concreta di materiali e azione per avviare una prova simulata.
 - [x] Una prova guidata usa solo i materiali di esempio mostrati; una modifica
-  ai materiali impedisce di presentare il risultato precompilato come elaborato.
+      ai materiali impedisce di presentare il risultato precompilato come elaborato.
 - [x] Consentire revisione del risultato, chiusura della prova, ritorno al metodo
-  e nuova prova. Frequenza visibile; nessuna routine viene attivata realmente.
+      e nuova prova. Frequenza visibile; nessuna routine viene attivata realmente.
 - [x] Verificare test di stato, tipi/build, desktop/mobile e frizione del percorso.
 
 ## File

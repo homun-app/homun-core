@@ -6,21 +6,21 @@ Tranche eseguita in autonomia dopo l'approvazione della proposta. **Il motore è
 
 ## Modifiche effettive
 
-| Prima | Adesso | Evidenza principale |
-|---|---|---|
-| Riutilizzo di `command_id` anche con payload o attore diversi | Fingerprint versionato di workspace, attore, tipo e JSON canonico; replay solo identico | `test_command_identity.py`, incluso riavvio SQLite |
-| Salvataggio con cancellazione e reinserimento di tutte le righe | Delta, transazione, rollback, lettura coerente e generazione contro aggiornamenti obsoleti | 16 regressioni storage, doppio handle, fallimento anche al commit |
-| `DomainService` di 1.712 righe | Facciata di 188 righe; 12 moduli funzionali da 64–216 righe più contesto condiviso | Suite dominio esistente e controllo dipendenze |
-| Route dominio di 718 righe, interpretazione nel trasporto | Route di 335 righe; materiali e supporto HTTP separati; use case applicativo comune | HTTP e SSE passano dallo stesso ingresso transazionale |
-| Modello chiamato prima del commit del messaggio | Messaggio e claim persistiti prima del modello; finalizzazione separata, con token che invalida tentativi superati | Errore provider, retry senza duplicati, scritture concorrenti, lease scaduta |
-| Streaming poteva perdere la risposta alla disconnessione | Nessuna sospensione fra claim e completamento; risposta salvata prima dei token di presentazione | Chiusura del generatore al primo evento `persisted` |
-| Avvio/invio DBOS prima del salvataggio del comando | Intenzioni persistite nella stessa transazione, consegna successiva con ID stabili e deduplica | Rollback, retry, deduplica DBOS e recovery in due processi |
-| Attesa sincrona bloccava l'uscita Python | Workflow asincrono su coda DBOS, loop posseduto dal runtime e chiusura coordinata | Processo realmente terminato e riavviato con workflow pendente |
-| Consegna pendente anche dopo annullamento | Claim transazionale, lease e verifica di annullamento/pausa; ordine per run | Annullamento prima del claim, durante invio, isolamento tra lavori |
-| Memoria e dominio committavano la stessa connessione | Connessione dedicata alla memoria, scritture serializzate e transazionali | Scrittura memoria durante interpretazione senza interferire col dominio |
-| Import poteva accettare percorsi fuori archivio | Manifest v1 con un solo database atteso; rifiuto di traversal, symlink e inventari ambigui; contenimento dei blob | `test_storage_paths.py` |
-| Versioni Python risolte liberamente | Lock con hash, installazione solo wheel e build editable senza download di dipendenze | Ambiente nuovo, versioni preesistenti mantenute, controllo metadati |
-| Regola «no monoliti» solo descrittiva | Controlli su cicli, dipendenze vietate, dimensioni e budget legacy decrescenti; CI backend/frontend | 15 test del checker; nessun errore architetturale |
+| Prima                                                           | Adesso                                                                                                             | Evidenza principale                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Riutilizzo di `command_id` anche con payload o attore diversi   | Fingerprint versionato di workspace, attore, tipo e JSON canonico; replay solo identico                            | `test_command_identity.py`, incluso riavvio SQLite                           |
+| Salvataggio con cancellazione e reinserimento di tutte le righe | Delta, transazione, rollback, lettura coerente e generazione contro aggiornamenti obsoleti                         | 16 regressioni storage, doppio handle, fallimento anche al commit            |
+| `DomainService` di 1.712 righe                                  | Facciata di 188 righe; 12 moduli funzionali da 64–216 righe più contesto condiviso                                 | Suite dominio esistente e controllo dipendenze                               |
+| Route dominio di 718 righe, interpretazione nel trasporto       | Route di 335 righe; materiali e supporto HTTP separati; use case applicativo comune                                | HTTP e SSE passano dallo stesso ingresso transazionale                       |
+| Modello chiamato prima del commit del messaggio                 | Messaggio e claim persistiti prima del modello; finalizzazione separata, con token che invalida tentativi superati | Errore provider, retry senza duplicati, scritture concorrenti, lease scaduta |
+| Streaming poteva perdere la risposta alla disconnessione        | Nessuna sospensione fra claim e completamento; risposta salvata prima dei token di presentazione                   | Chiusura del generatore al primo evento `persisted`                          |
+| Avvio/invio DBOS prima del salvataggio del comando              | Intenzioni persistite nella stessa transazione, consegna successiva con ID stabili e deduplica                     | Rollback, retry, deduplica DBOS e recovery in due processi                   |
+| Attesa sincrona bloccava l'uscita Python                        | Workflow asincrono su coda DBOS, loop posseduto dal runtime e chiusura coordinata                                  | Processo realmente terminato e riavviato con workflow pendente               |
+| Consegna pendente anche dopo annullamento                       | Claim transazionale, lease e verifica di annullamento/pausa; ordine per run                                        | Annullamento prima del claim, durante invio, isolamento tra lavori           |
+| Memoria e dominio committavano la stessa connessione            | Connessione dedicata alla memoria, scritture serializzate e transazionali                                          | Scrittura memoria durante interpretazione senza interferire col dominio      |
+| Import poteva accettare percorsi fuori archivio                 | Manifest v1 con un solo database atteso; rifiuto di traversal, symlink e inventari ambigui; contenimento dei blob  | `test_storage_paths.py`                                                      |
+| Versioni Python risolte liberamente                             | Lock con hash, installazione solo wheel e build editable senza download di dipendenze                              | Ambiente nuovo, versioni preesistenti mantenute, controllo metadati          |
+| Regola «no monoliti» solo descrittiva                           | Controlli su cicli, dipendenze vietate, dimensioni e budget legacy decrescenti; CI backend/frontend                | 15 test del checker; nessun errore architetturale                            |
 
 Gli errori `command_in_progress`, `storage_unavailable` e `provider_unavailable` restano distinti anche nel client. La capability runtime dipende dall'avvio effettivo; un errore di startup DBOS interrompe l'avvio invece di nascondersi dietro capability positive.
 
@@ -37,16 +37,16 @@ Gli errori `command_in_progress`, `storage_unavailable` e `provider_unavailable`
 
 ## Verifiche
 
-| Verifica finale | Risultato |
-|---|---|
-| Suite backend nel virtualenv esistente | **181 passati, 1 saltato**, 43,95 s; uscita normale |
-| Suite backend in ambiente nuovo, wheel e hash del lock | **181 passati, 1 saltato**, 54,43 s; exit 0, nessun processo residuo nel gruppo di test |
-| `npm run check` | **120 test passati**, TypeScript e build app/prototipo riusciti |
-| `npm run architecture:check` | **0 errori**, 30 segnalazioni dimensionali legacy congelate |
-| Motore HTTP reale su loopback | Creazione e risposta persistite; arresto, riavvio, replay identico e richiesta modificata rifiutata |
-| Runtime DBOS in due processi | Workflow pendente ripreso, messaggio deduplicato, effetto/ricevuta riconciliati, arresto pulito |
-| Review indipendenti | Controllo perimetro e correttezza; corretti difetti SSE e consegna dopo annullamento; nessun P1 residuo rilevato nel controllo mirato |
-| `git diff --check` | Nessun errore |
+| Verifica finale                                        | Risultato                                                                                                                             |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Suite backend nel virtualenv esistente                 | **181 passati, 1 saltato**, 43,95 s; uscita normale                                                                                   |
+| Suite backend in ambiente nuovo, wheel e hash del lock | **181 passati, 1 saltato**, 54,43 s; exit 0, nessun processo residuo nel gruppo di test                                               |
+| `npm run check`                                        | **120 test passati**, TypeScript e build app/prototipo riusciti                                                                       |
+| `npm run architecture:check`                           | **0 errori**, 30 segnalazioni dimensionali legacy congelate                                                                           |
+| Motore HTTP reale su loopback                          | Creazione e risposta persistite; arresto, riavvio, replay identico e richiesta modificata rifiutata                                   |
+| Runtime DBOS in due processi                           | Workflow pendente ripreso, messaggio deduplicato, effetto/ricevuta riconciliati, arresto pulito                                       |
+| Review indipendenti                                    | Controllo perimetro e correttezza; corretti difetti SSE e consegna dopo annullamento; nessun P1 residuo rilevato nel controllo mirato |
+| `git diff --check`                                     | Nessun errore                                                                                                                         |
 
 Il test saltato richiede lo stack Mem0 live. Rimane un avviso di deprecazione Starlette/AnyIO; le build segnalano chunk legacy grandi. Python verificato 3.13.12; Node locale 25.9.0. CI configurata per Python 3.13.12 e Node 24, ma **non eseguita su GitHub** in questa tranche.
 

@@ -1,10 +1,10 @@
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const { mkdtemp, rm, readFile, writeFile } = require('node:fs/promises');
-const os = require('node:os');
-const path = require('node:path');
-const { setTimeout: delay } = require('node:timers/promises');
-const { startEngine } = require('../src/engine-process.cjs');
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const { mkdtemp, rm, readFile, writeFile } = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+const { setTimeout: delay } = require("node:timers/promises");
+const { startEngine } = require("../src/engine-process.cjs");
 
 // Real child/socket. Headers arrive immediately; body publication is controlled
 // through a file so cancellation happens at a known asynchronous boundary.
@@ -30,37 +30,58 @@ require('node:http').createServer((req, res) => {
 async function waitForFile(file) {
   const deadline = Date.now() + 3000;
   while (Date.now() < deadline) {
-    try { return await readFile(file, 'utf8'); } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+    try {
+      return await readFile(file, "utf8");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
     }
     await delay(10);
   }
-  throw new Error('Fixture did not reach health probe');
+  throw new Error("Fixture did not reach health probe");
 }
 
-for (const scenario of ['abort', 'deadline']) {
-  test(`health body arriving after ${scenario} cannot publish a ready engine`, { timeout: 10000 }, async () => {
-    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'homun-startup-race-'));
-    const controller = new AbortController();
-    let engine;
-    const pending = startEngine({ executable: process.execPath, args: ['-e', fixture],
-      dataDir, cwd: dataDir, signal: controller.signal, timeout: scenario === 'deadline' ? 500 : 5000,
-    }).then(value => { engine = value; return { engine: value }; }, error => ({ error }));
-    try {
-      await waitForFile(path.join(dataDir, 'requested'));
-      const pid = Number(await readFile(path.join(dataDir, 'pid'), 'utf8'));
-      if (scenario === 'abort') controller.abort();
-      else await delay(550);
-      await writeFile(path.join(dataDir, 'release'), 'yes');
-      const outcome = await pending;
-      assert.ok(outcome.error, 'Startup returned ready after cancellation/deadline');
-      assert.match(outcome.error.message, /did not become ready/);
-      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'Child must exit before rejection');
-    } finally {
-      controller.abort();
-      await pending;
-      await engine?.stop();
-      await rm(dataDir, { recursive: true, force: true });
-    }
-  });
+for (const scenario of ["abort", "deadline"]) {
+  test(
+    `health body arriving after ${scenario} cannot publish a ready engine`,
+    { timeout: 10000 },
+    async () => {
+      const dataDir = await mkdtemp(path.join(os.tmpdir(), "homun-startup-race-"));
+      const controller = new AbortController();
+      let engine;
+      const pending = startEngine({
+        executable: process.execPath,
+        args: ["-e", fixture],
+        dataDir,
+        cwd: dataDir,
+        signal: controller.signal,
+        timeout: scenario === "deadline" ? 500 : 5000,
+      }).then(
+        (value) => {
+          engine = value;
+          return { engine: value };
+        },
+        (error) => ({ error }),
+      );
+      try {
+        await waitForFile(path.join(dataDir, "requested"));
+        const pid = Number(await readFile(path.join(dataDir, "pid"), "utf8"));
+        if (scenario === "abort") controller.abort();
+        else await delay(550);
+        await writeFile(path.join(dataDir, "release"), "yes");
+        const outcome = await pending;
+        assert.ok(outcome.error, "Startup returned ready after cancellation/deadline");
+        assert.match(outcome.error.message, /did not become ready/);
+        assert.throws(
+          () => process.kill(pid, 0),
+          { code: "ESRCH" },
+          "Child must exit before rejection",
+        );
+      } finally {
+        controller.abort();
+        await pending;
+        await engine?.stop();
+        await rm(dataDir, { recursive: true, force: true });
+      }
+    },
+  );
 }

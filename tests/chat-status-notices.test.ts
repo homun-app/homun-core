@@ -17,8 +17,11 @@ import {
   type ChatStatusState,
 } from "../apps/web/src/lib/chat-status-notices.ts";
 import { nextResolvedEpisode } from "../apps/web/src/hooks/useTransientResolved.ts";
-import { homunErrorFromHttp, isHomunClientError } from "../apps/web/src/lib/homun-errors.ts";
-import { EngineUnavailableError } from "../apps/web/src/lib/engine-client.ts";
+import {
+  homunErrorFromHttp,
+  HomunClientError,
+  isHomunClientError,
+} from "../apps/web/src/lib/homun-errors.ts";
 
 const healthyEngine: ChatStatusState = {
   dataSource: "engine",
@@ -133,8 +136,11 @@ test("un solo guasto, un solo avviso: l'errore di connessione non raddoppia l'ir
     },
     "offline",
   );
-  // …sia dalla classe che avvolge i fetch caduti
-  const fromFetch = new EngineUnavailableError("Engine unreachable at http://127.0.0.1:8765");
+  // …sia dall'errore che avvolge i fetch caduti
+  const fromFetch = new HomunClientError(
+    "engine_unavailable",
+    "Engine unreachable at http://127.0.0.1:8765",
+  );
   const gateError = new Error("offline");
   for (const connectionLoss of [fromHttp, fromFetch]) {
     const notices = chatStatusNotices({

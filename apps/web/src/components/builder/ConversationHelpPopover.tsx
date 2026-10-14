@@ -127,8 +127,7 @@ export function ConversationHelpPopover({
             • Nuova interfaccia Linear-style con box curvo
             <br />
             • Agente sempre accessibile e history rapida
-            <br />
-            • Palette monochrome pulita
+            <br />• Palette monochrome pulita
           </div>
         </div>
       )}

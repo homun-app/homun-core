@@ -1,5 +1,14 @@
 import { useState } from "react";
-import { X, Check, RefreshCw, AlertCircle, Sparkles, Sliders, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  X,
+  Check,
+  RefreshCw,
+  AlertCircle,
+  Sparkles,
+  Sliders,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import {
   applyOllamaPreset,
   upsertModelConnection,
@@ -40,16 +49,17 @@ export function ConversationModelEditModal({
   );
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isCustomModel, setIsCustomModel] = useState(
-    !provider.availableModels.includes(provider.model) && Boolean(provider.model)
+    !provider.availableModels.includes(provider.model) && Boolean(provider.model),
   );
   const [busy, setBusy] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const modelOptions = provider.isLocal && ollamaTags.length > 0
-    ? [...new Set([...ollamaTags, ...provider.availableModels])]
-    : provider.availableModels;
+  const modelOptions =
+    provider.isLocal && ollamaTags.length > 0
+      ? [...new Set([...ollamaTags, ...provider.availableModels])]
+      : provider.availableModels;
 
   async function handleVerify() {
     setVerifying(true);
@@ -140,7 +150,12 @@ export function ConversationModelEditModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="cv-unified-modal" role="dialog" aria-modal="true" style={{ maxWidth: "560px" }}>
+      <div
+        className="cv-unified-modal"
+        role="dialog"
+        aria-modal="true"
+        style={{ maxWidth: "560px" }}
+      >
         <header className="cv-unified-modal__head">
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <Sparkles size={16} color="#8fe3d0" />
@@ -237,7 +252,12 @@ export function ConversationModelEditModal({
             <button
               type="button"
               className="cv-unified-btn is-subtle"
-              style={{ width: "100%", justifyContent: "space-between", fontSize: "12px", padding: "8px 12px" }}
+              style={{
+                width: "100%",
+                justifyContent: "space-between",
+                fontSize: "12px",
+                padding: "8px 12px",
+              }}
               onClick={() => setShowAdvanced(!showAdvanced)}
             >
               <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -262,9 +282,18 @@ export function ConversationModelEditModal({
             >
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                 <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: "12px",
+                      marginBottom: "4px",
+                    }}
+                  >
                     <label style={{ fontWeight: 500 }}>Temperatura</label>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px" }}>{granular.temperature.toFixed(2)}</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px" }}>
+                      {granular.temperature.toFixed(2)}
+                    </span>
                   </div>
                   <input
                     type="range"
@@ -272,19 +301,37 @@ export function ConversationModelEditModal({
                     max="1.5"
                     step="0.05"
                     value={granular.temperature}
-                    onChange={(e) => setGranular({ ...granular, temperature: parseFloat(e.target.value) })}
+                    onChange={(e) =>
+                      setGranular({ ...granular, temperature: parseFloat(e.target.value) })
+                    }
                     style={{ width: "100%" }}
                   />
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "var(--color-muted-foreground)" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: "10px",
+                      color: "var(--color-muted-foreground)",
+                    }}
+                  >
                     <span>Preciso (0.0)</span>
                     <span>Creativo (1.5)</span>
                   </div>
                 </div>
 
                 <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: "12px",
+                      marginBottom: "4px",
+                    }}
+                  >
                     <label style={{ fontWeight: 500 }}>Top P (Nucleus)</label>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px" }}>{granular.topP.toFixed(2)}</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px" }}>
+                      {granular.topP.toFixed(2)}
+                    </span>
                   </div>
                   <input
                     type="range"
@@ -306,7 +353,8 @@ export function ConversationModelEditModal({
                     onChange={(e) =>
                       setGranular({
                         ...granular,
-                        reasoningEffort: e.target.value as ProviderGranularConfig["reasoningEffort"],
+                        reasoningEffort: e.target
+                          .value as ProviderGranularConfig["reasoningEffort"],
                       })
                     }
                     style={{ padding: "6px 8px", fontSize: "12px" }}
@@ -322,7 +370,9 @@ export function ConversationModelEditModal({
                   <label style={{ fontSize: "12px" }}>Max Output Tokens</label>
                   <select
                     value={granular.maxTokens}
-                    onChange={(e) => setGranular({ ...granular, maxTokens: parseInt(e.target.value, 10) })}
+                    onChange={(e) =>
+                      setGranular({ ...granular, maxTokens: parseInt(e.target.value, 10) })
+                    }
                     style={{ padding: "6px 8px", fontSize: "12px" }}
                   >
                     <option value={4096}>4.096 token</option>
@@ -334,8 +384,23 @@ export function ConversationModelEditModal({
                 </div>
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "4px" }}>
-                <label style={{ fontSize: "12px", display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  paddingTop: "4px",
+                }}
+              >
+                <label
+                  style={{
+                    fontSize: "12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    cursor: "pointer",
+                  }}
+                >
                   <input
                     type="checkbox"
                     checked={granular.stream}
@@ -343,15 +408,27 @@ export function ConversationModelEditModal({
                   />
                   <span>Streaming token in tempo reale</span>
                 </label>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" }}>
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" }}
+                >
                   <span>Timeout:</span>
                   <input
                     type="number"
                     min="10"
                     max="300"
                     value={granular.timeoutSeconds}
-                    onChange={(e) => setGranular({ ...granular, timeoutSeconds: parseInt(e.target.value, 10) || 60 })}
-                    style={{ width: "60px", padding: "4px 6px", fontSize: "11px", textAlign: "center" }}
+                    onChange={(e) =>
+                      setGranular({
+                        ...granular,
+                        timeoutSeconds: parseInt(e.target.value, 10) || 60,
+                      })
+                    }
+                    style={{
+                      width: "60px",
+                      padding: "4px 6px",
+                      fontSize: "11px",
+                      textAlign: "center",
+                    }}
                   />
                   <span>s</span>
                 </div>
@@ -364,7 +441,9 @@ export function ConversationModelEditModal({
             <div
               className={`cv-unified-banner ${verifyMessage.ok ? "is-info" : ""}`}
               style={{
-                backgroundColor: verifyMessage.ok ? "rgba(21, 122, 110, 0.2)" : "rgba(239, 68, 68, 0.15)",
+                backgroundColor: verifyMessage.ok
+                  ? "rgba(21, 122, 110, 0.2)"
+                  : "rgba(239, 68, 68, 0.15)",
                 borderColor: verifyMessage.ok ? "#157a6e" : "#ef4444",
                 color: verifyMessage.ok ? "#8fe3d0" : "#fca5a5",
               }}

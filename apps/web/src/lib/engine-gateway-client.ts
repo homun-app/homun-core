@@ -40,7 +40,11 @@ export async function listGatewayPairings(
   );
   if (!response.ok) {
     const err = await response.json().catch(() => null);
-    throw homunErrorFromHttp(response.status, err, `Impossibile recuperare gli accoppiamenti: HTTP ${response.status}`);
+    throw homunErrorFromHttp(
+      response.status,
+      err,
+      `Impossibile recuperare gli accoppiamenti: HTTP ${response.status}`,
+    );
   }
   const body = (await response.json()) as { requests: GatewayPairingRequest[] };
   return body.requests ?? [];
@@ -55,7 +59,11 @@ export async function requestGatewayPairing(
     "/v1/gateway/pairing/request",
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", "X-Homun-Actor-Id": actor.id },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Homun-Actor-Id": actor.id,
+      },
       body: JSON.stringify({
         platform: input.platform,
         user_id: input.userId,
@@ -67,7 +75,11 @@ export async function requestGatewayPairing(
   );
   if (!response.ok) {
     const err = await response.json().catch(() => null);
-    throw homunErrorFromHttp(response.status, err, `Richiesta di accoppiamento fallita: HTTP ${response.status}`);
+    throw homunErrorFromHttp(
+      response.status,
+      err,
+      `Richiesta di accoppiamento fallita: HTTP ${response.status}`,
+    );
   }
   const body = (await response.json()) as { pairing: GatewayPairingRequest };
   return body.pairing;
@@ -82,7 +94,11 @@ export async function approveGatewayPairing(
     "/v1/gateway/pairing/approve",
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", "X-Homun-Actor-Id": actor.id },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Homun-Actor-Id": actor.id,
+      },
       body: JSON.stringify({ code: code.trim().toUpperCase() }),
     },
     baseUrl,
@@ -105,7 +121,11 @@ export async function declineGatewayPairing(
     "/v1/gateway/pairing/decline",
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", "X-Homun-Actor-Id": actor.id },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Homun-Actor-Id": actor.id,
+      },
       body: JSON.stringify({ code: code.trim().toUpperCase() }),
     },
     baseUrl,
@@ -128,7 +148,11 @@ export async function revokeGatewayPairing(
     "/v1/gateway/pairing/revoke",
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", "X-Homun-Actor-Id": actor.id },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Homun-Actor-Id": actor.id,
+      },
       body: JSON.stringify({ platform: input.platform, user_id: input.userId }),
     },
     baseUrl,

@@ -71,11 +71,15 @@ test("chain approval binds digest and revision; list is typed", async () => {
     return Response.json({ items: [{ id: "ch", status: "completed" }] });
   };
   try {
-    const approved = await approveToolChain("work_1", {
-      id: "ch",
-      digest: "bound",
-      expected_version: 4,
-    } as never, "ok1");
+    const approved = await approveToolChain(
+      "work_1",
+      {
+        id: "ch",
+        digest: "bound",
+        expected_version: 4,
+      } as never,
+      "ok1",
+    );
     assert.equal(approved.status, "queued");
     const items = await listToolChains("work_1");
     assert.equal(items[0].status, "completed");

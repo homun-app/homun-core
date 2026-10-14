@@ -17,10 +17,7 @@
   "max_iterations_per_run": 10,
   "max_seconds_per_process": 240,
   "business_tool": "workspace",
-  "additional_openhands_control_tools": [
-    "think",
-    "finish"
-  ],
+  "additional_openhands_control_tools": ["think", "finish"],
   "hermes_tool_search_enabled": false,
   "credentials": "only dummy key local-ollama to loopback; no cloud inference",
   "external_reference": "https://www.iana.org/help/example-domains",

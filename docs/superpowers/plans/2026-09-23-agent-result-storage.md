@@ -7,7 +7,7 @@ observations. Preserve top-level error/status flags. Register a run-scoped paged
 read tool with optional literal search. No shared arbitrary filesystem paths.
 
 - [x] Tests: lossless reconstruction, status preservation, corruption, unknown
-  reference, restart, source revocation, native MCP continuation with large data.
+      reference, restart, source revocation, native MCP continuation with large data.
 - [x] Result storage helper and new-run contract version; original runs unchanged.
 - [x] Integrate once into native append_result and all persisted observations.
 - [x] Review, real model/server fixture, full checks, documentation and local merge.

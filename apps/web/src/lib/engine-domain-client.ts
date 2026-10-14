@@ -3,7 +3,7 @@
  * Explicit engine path only — never falls back to IndexedDB simulation.
  */
 
-import { ENGINE_DEFAULT_BASE_URL, EngineUnavailableError } from "./engine-client.ts";
+import { ENGINE_DEFAULT_BASE_URL, engineUnreachableError } from "./engine-client.ts";
 import { HomunClientError, homunErrorFromEngineEvent, homunErrorFromHttp } from "./homun-errors.ts";
 
 export const DEFAULT_WORKSPACE_ID = "ws_local";
@@ -70,10 +70,7 @@ export async function domainFetch(
         { retryable: true, cause },
       );
     }
-    throw new EngineUnavailableError(
-      `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
-      cause,
-    );
+    throw engineUnreachableError(baseUrl, cause);
   } finally {
     clearTimeout(timer);
     external?.removeEventListener("abort", onExternalAbort);

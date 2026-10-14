@@ -33,8 +33,7 @@ export function usePriceComparison(work: Work, onChanged: () => Promise<void>) {
       try {
         const items = await listPriceComparisons(work.id);
         if (!live) return;
-        const next =
-          items.filter((item) => !conflict.isRejected(item.id)).at(-1) ?? null;
+        const next = items.filter((item) => !conflict.isRejected(item.id)).at(-1) ?? null;
         setProposal(next);
         if (next?.status === "completed" && finished.current !== next.id) {
           finished.current = next.id;

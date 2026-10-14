@@ -74,12 +74,7 @@ export function ProjectHubOverviewTab({ works, onOpenWork, onNewWork }: Props) {
 
   return (
     <div className="ph-overview">
-      <WorkGroup
-        label="Da fare"
-        works={proposal}
-        onOpen={onOpenWork}
-        icon={<Circle size={11} />}
-      />
+      <WorkGroup label="Da fare" works={proposal} onOpen={onOpenWork} icon={<Circle size={11} />} />
       <WorkGroup
         label="In lavorazione"
         works={inProgress}
@@ -100,12 +95,7 @@ export function ProjectHubOverviewTab({ works, onOpenWork, onNewWork }: Props) {
         muted
       />
       {archived.length > 0 && (
-        <WorkGroup
-          label="Archiviati"
-          works={archived}
-          onOpen={onOpenWork}
-          muted
-        />
+        <WorkGroup label="Archiviati" works={archived} onOpen={onOpenWork} muted />
       )}
     </div>
   );

@@ -73,7 +73,8 @@ export function EngineChatStage({
       onAutonomyLevelChange={(level) => setPreferences((p) => ({ ...p, autonomyLevel: level }))}
       modelConnectionId={preferences.preferredModelConnectionId || undefined}
       onModelConnectionIdChange={(connId) =>
-        setPreferences((p) => ({ ...p, preferredModelConnectionId: connId }))}
+        setPreferences((p) => ({ ...p, preferredModelConnectionId: connId }))
+      }
       references={buildMentionRefs(scenarios, spaceData, engine.agents)}
       onRefreshEngine={engine.refresh}
       onOpenSpace={onOpenSpace}

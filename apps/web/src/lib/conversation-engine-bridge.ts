@@ -98,7 +98,7 @@ export function parseEngineWorkRecord(raw: Record<string, unknown>): EngineWorkR
     record.pending_contribution = {
       id: String(p["id"] ?? ""),
       to_actor_id: String(p["to_actor_id"] ?? ""),
-      ...(typeof p["recipient_name"] === "string" ? {recipient_name: p["recipient_name"]} : {}),
+      ...(typeof p["recipient_name"] === "string" ? { recipient_name: p["recipient_name"] } : {}),
       need: String(p["need"] ?? ""),
       status: String(p["status"] ?? "pending"),
       step_id: String(p["step_id"] ?? ""),
@@ -243,8 +243,9 @@ export function engineWorkToUiWork(
   if (record.pending_contribution) {
     work.engineContributionRequestId = record.pending_contribution.id;
     work.request = {
-      to: record.pending_contribution.recipient_name ?? (
-        record.pending_contribution.to_actor_id === "person_fabio"
+      to:
+        record.pending_contribution.recipient_name ??
+        (record.pending_contribution.to_actor_id === "person_fabio"
           ? "Fabio"
           : record.pending_contribution.to_actor_id),
       viaInvitation: Boolean(record.pending_contribution.recipient_name),
@@ -403,7 +404,10 @@ export async function applyEngineWorkPatch(input: {
     ...(input.signal ? { signal: input.signal } : {}),
   });
   return {
-    version: typeof result.result["version"] === "number" ? result.result["version"] : input.expectedVersion + 1,
+    version:
+      typeof result.result["version"] === "number"
+        ? result.result["version"]
+        : input.expectedVersion + 1,
   };
 }
 
@@ -434,4 +438,3 @@ export function assistantFromPosted(posted: {
       : {}),
   };
 }
-

@@ -43,13 +43,13 @@ export type ActionOption = {
 
 export function triggerOptions(installedIds: string[]): TriggerOption[] {
   return PLUGINS.filter((p) => installedIds.includes(p.id)).flatMap((p) =>
-    p.triggers.map((t) => ({ pluginId: p.id, pluginName: p.name, key: t.key, label: t.label }))
+    p.triggers.map((t) => ({ pluginId: p.id, pluginName: p.name, key: t.key, label: t.label })),
   );
 }
 
 export function actionOptions(installedIds: string[]): ActionOption[] {
   return PLUGINS.filter((p) => installedIds.includes(p.id)).flatMap((p) =>
-    p.actions.map((a) => ({ pluginId: p.id, pluginName: p.name, key: a.key, label: a.label }))
+    p.actions.map((a) => ({ pluginId: p.id, pluginName: p.name, key: a.key, label: a.label })),
   );
 }
 

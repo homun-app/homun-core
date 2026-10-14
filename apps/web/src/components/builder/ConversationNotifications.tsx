@@ -31,11 +31,7 @@ export function ConversationNotifications({
     <section className="cw-notifications" aria-label="Pannello notifiche">
       <header>
         <strong>Notifiche</strong>
-        <button
-          className="cw-icon"
-          aria-label="Chiudi notifiche"
-          onClick={onClose}
-        >
+        <button className="cw-icon" aria-label="Chiudi notifiche" onClick={onClose}>
           <X size={15} />
         </button>
       </header>
@@ -78,9 +74,7 @@ export function ConversationNotifications({
                 onClose();
               }}
             >
-              <strong>
-                {w.autoDelivered ? "Consegnato in autonomia" : "Risultato approvato"}
-              </strong>
+              <strong>{w.autoDelivered ? "Consegnato in autonomia" : "Risultato approvato"}</strong>
               <small>
                 {w.title} · {scenarioForWork(w, scenarios).agent}
               </small>

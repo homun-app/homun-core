@@ -211,7 +211,10 @@
   background: #ffffff;
   border: 1px solid #dce4d5;
   border-radius: 11px;
-  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .cv-unified-row:hover {
@@ -654,7 +657,6 @@
   border-color: #8fe3d0;
   color: #f4f1ee;
 }
-
 
 /* Review queues — Braun-minimal: white surfaces, hairlines, mono readouts. */
 

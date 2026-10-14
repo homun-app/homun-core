@@ -79,9 +79,9 @@ curl -s -X POST $H/v1/workspaces/ws_local/commands -H "$A" -H "Content-Type: app
 ## Passo 4 — Giulia lavora
 
 - Sidebar → **Spazi remoti** → apre «Catalogo condiviso» (sync automatica
-  all'apertura, badge *Fonte: motore remoto · sola lettura*).
+  all'apertura, badge _Fonte: motore remoto · sola lettura_).
 - Contributo: da terminale `homun peer message --host … --conversation …
-  --text 'Listino tradotto'` oppure Impostazioni → Spazi remoti → sync.
+--text 'Listino tradotto'` oppure Impostazioni → Spazi remoti → sync.
 - Delega: Fabio offre (comando `delegation.offer`), Giulia vede
   `/remote/assignments`, `accept` e `return` — da interfaccia quando la
   UI la esporrà, oggi da `homun peer`.

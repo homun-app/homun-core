@@ -6,3 +6,19 @@ pnpm-lock.yaml
 package-lock.json
 bun.lock
 routeTree.gen.ts
+# snapshot canonico generato da tools/export_openapi.py: la sua formattazione
+# è quella del generatore (json.dumps sort_keys), verificata byte per byte in CI
+contracts/openapi/v1-engine.json
+# generato da eslint --suppress-all / --prune-suppressions: formattazione di ESLint
+eslint-suppressions.json
+# File legacy con budget di righe congelati (tools/architecture-baseline.json,
+# "Never increase budgets"): la riformattazione Prettier li porterebbe oltre il
+# budget (ConversationWorkspace 1350 -> 1541). Si sbloccano solo riducendoli,
+# poi si tolgono da qui e dal baseline.
+apps/web/src/components/ai-elements/code-block.tsx
+apps/web/src/components/ai-elements/prompt-input.tsx
+apps/web/src/components/builder/ConversationSpace.tsx
+apps/web/src/components/builder/ConversationWorkspace.tsx
+apps/web/src/components/builder/messaging/ChannelQrModal.tsx
+apps/web/src/hooks/useEngineWorkspace.ts
+packages/ui/src/components/sidebar.tsx

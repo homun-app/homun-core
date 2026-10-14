@@ -5,13 +5,13 @@ host/peer per pubblicare e riprendere i transfer (grant + wrap).
 
 ## Protocollo `homun-object-transfer/v1`
 
-| Elemento | Scelta | Note |
-|---|---|---|
-| Chiave oggetto | 32 byte casuali / oggetto+versione | Mai riusata tra versioni |
-| Wrap destinatario | libsodium SealedBox su X25519 | Chiave dispositivo Ed25519 convertita (libsodium) |
-| Payload | `crypto_secretstream_xchacha20poly1305` | Chunk autenticati, tag FINAL obbligatorio |
-| Manifest | JSON con hash plaintext + hash per chunk ciphertext | Ripresa dopo disconnessione |
-| Credenziali | Escluse | Schema allowlist + assert: secret store / workspace key mai nei transfer |
+| Elemento          | Scelta                                              | Note                                                                     |
+| ----------------- | --------------------------------------------------- | ------------------------------------------------------------------------ |
+| Chiave oggetto    | 32 byte casuali / oggetto+versione                  | Mai riusata tra versioni                                                 |
+| Wrap destinatario | libsodium SealedBox su X25519                       | Chiave dispositivo Ed25519 convertita (libsodium)                        |
+| Payload           | `crypto_secretstream_xchacha20poly1305`             | Chunk autenticati, tag FINAL obbligatorio                                |
+| Manifest          | JSON con hash plaintext + hash per chunk ciphertext | Ripresa dopo disconnessione                                              |
+| Credenziali       | Escluse                                             | Schema allowlist + assert: secret store / workspace key mai nei transfer |
 
 Il relay (o un peer senza wrap) vede solo ciphertext + metadati del
 manifest: non ottiene la chiave oggetto.
@@ -33,13 +33,13 @@ Test libreria: `engine/tests/test_object_crypto_f55.py`.
 Modulo store: `engine/src/homun/identity/object_transfer.py`  
 Router: `engine/src/homun/routes/object_transfer_api.py`
 
-| Metodo | Path | Auth |
-|---|---|---|
-| POST | `/v1/workspaces/{ws}/remote/objects` | grant **write** sul `project_id` |
-| PUT | `…/remote/objects/{id}/versions/{v}/chunks/{i}` | grant **write** |
-| GET | `…/remote/objects/{id}/versions/{v}` | grant **read** + wrap destinatario |
-| GET | `…/remote/objects/{id}/versions/{v}/chunks/{i}` | grant **read** + wrap (octet-stream) |
-| GET | `…/remote/objects?project_id=` | grant **read** + wrap (elenco) |
+| Metodo | Path                                            | Auth                                 |
+| ------ | ----------------------------------------------- | ------------------------------------ |
+| POST   | `/v1/workspaces/{ws}/remote/objects`            | grant **write** sul `project_id`     |
+| PUT    | `…/remote/objects/{id}/versions/{v}/chunks/{i}` | grant **write**                      |
+| GET    | `…/remote/objects/{id}/versions/{v}`            | grant **read** + wrap destinatario   |
+| GET    | `…/remote/objects/{id}/versions/{v}/chunks/{i}` | grant **read** + wrap (octet-stream) |
+| GET    | `…/remote/objects?project_id=`                  | grant **read** + wrap (elenco)       |
 
 Lo snapshot replica (`GET …/remote/snapshot`) include `object_transfers`
 filtrato allo stesso modo (grant + wrap). Nessun fallback in simulazione.

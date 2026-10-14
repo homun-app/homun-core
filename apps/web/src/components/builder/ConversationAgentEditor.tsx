@@ -164,7 +164,11 @@ export function ConversationAgentEditor({
             <Bot size={22} className="text-[#8fe3d0]" />
           </div>
           <div>
-            <h3>{isCreating ? "Nuovo Collaboratore AI" : `Modifica Agente: ${formName || "Senza Nome"}`}</h3>
+            <h3>
+              {isCreating
+                ? "Nuovo Collaboratore AI"
+                : `Modifica Agente: ${formName || "Senza Nome"}`}
+            </h3>
             <p className="text-xs text-[#9db3ad]">
               Assegna un modello LLM specializzato, parametri di pensiero e strumenti operativi.
             </p>
@@ -239,7 +243,9 @@ export function ConversationAgentEditor({
             </span>
           </div>
           <p className="cv-agent-editor__card-desc">
-            Ogni agente può sfruttare un modello specializzato per le proprie mansioni (es. Claude 3.7 per logica e codice, GPT-4o per multimodale, Ollama locale per elaborazione a costo zero).
+            Ogni agente può sfruttare un modello specializzato per le proprie mansioni (es. Claude
+            3.7 per logica e codice, GPT-4o per multimodale, Ollama locale per elaborazione a costo
+            zero).
           </p>
 
           {/* Modello Primario */}
@@ -287,7 +293,8 @@ export function ConversationAgentEditor({
               <span>Cervello di Riserva (Fallback Resilience)</span>
             </label>
             <p className="text-xs text-[#9db3ad] mb-2">
-              Se il provider primario subisce errori 429 (rate-limit) o è irraggiungibile offline, l'agente esegue il fallback automatico su questo modello.
+              Se il provider primario subisce errori 429 (rate-limit) o è irraggiungibile offline,
+              l'agente esegue il fallback automatico su questo modello.
             </p>
             <SettingsCustomSelect
               value={fallbackConnectionId}
@@ -316,7 +323,8 @@ export function ConversationAgentEditor({
                   Ragionamento Esteso (Extended Thinking / Deep Reasoner)
                 </strong>
                 <span className="text-[11px] text-[#9db3ad]">
-                  Attiva la catena di riflessione passo-passo prima di formulare la risposta finale (ottimale per architettura e codice).
+                  Attiva la catena di riflessione passo-passo prima di formulare la risposta finale
+                  (ottimale per architettura e codice).
                 </span>
               </div>
               <SettingsToggleSwitch
@@ -488,7 +496,8 @@ export function ConversationAgentEditor({
             <span>Istruzioni Operative & Metodologia (System Prompt)</span>
           </h4>
           <p className="cv-agent-editor__card-desc">
-            Definisci la personalità, il tono di voce e le regole di convalida che l'agente deve applicare.
+            Definisci la personalità, il tono di voce e le regole di convalida che l'agente deve
+            applicare.
           </p>
           <textarea
             rows={5}
@@ -504,11 +513,13 @@ export function ConversationAgentEditor({
           <div className="flex items-center justify-between">
             <strong>Collaudo Agente in Tempo Reale</strong>
             <span className="text-[11px] text-[#8fe3d0]">
-              Test con modello {formConnectionId ? `assegnato (${formConnectionId})` : "predefinito"}
+              Test con modello{" "}
+              {formConnectionId ? `assegnato (${formConnectionId})` : "predefinito"}
             </span>
           </div>
           <p>
-            Invia un messaggio per verificare come risponde l'agente con il modello e le istruzioni attuali.
+            Invia un messaggio per verificare come risponde l'agente con il modello e le istruzioni
+            attuali.
           </p>
           <div className="flex gap-2">
             <input

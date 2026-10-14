@@ -5,10 +5,10 @@ Non è uno stack temporaneo: da qui si integra nel motore Homun e si migliora.
 
 Scenario verificato:
 
-1. output tipizzato (piano) da un file di prova  
-2. attesa contributo umano durable (`DBOS.recv`)  
-3. kill del processo e ripresa dallo stato checkpointato  
-4. effetto esterno incerto con rifiuto del doppio apply cieco  
+1. output tipizzato (piano) da un file di prova
+2. attesa contributo umano durable (`DBOS.recv`)
+3. kill del processo e ripresa dallo stato checkpointato
+4. effetto esterno incerto con rifiuto del doppio apply cieco
 
 Provider LLM: **nessuno** in questo spike (`TestModel` deterministico).
 
@@ -46,10 +46,10 @@ Dati locali in `.data/` (sqlite DBOS, piano, ricevute). Non sono dati di prodott
 
 ## Fuori scope di questo spike
 
-- Secondo profilo agente / inserimento passo a caldo  
-- MCP dinamico  
-- Cifratura checkpoint  
-- Packaging Electron / Mac pulito  
-- Integrazione con `apps/web` o `engine/` di produzione  
+- Secondo profilo agente / inserimento passo a caldo
+- MCP dinamico
+- Cifratura checkpoint
+- Packaging Electron / Mac pulito
+- Integrazione con `apps/web` o `engine/` di produzione
 
 Questi restano gate F0 successivi o criteri di chiusura D-RUN-01.

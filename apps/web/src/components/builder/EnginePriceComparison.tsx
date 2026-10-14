@@ -76,9 +76,7 @@ export function EnginePriceComparison({
               type="button"
               className="cw-secondary"
               disabled={tool.busy || selected.length !== 2}
-              onClick={() =>
-                void tool.prepareFromMaterials(selected[0] ?? "", selected[1] ?? "")
-              }
+              onClick={() => void tool.prepareFromMaterials(selected[0] ?? "", selected[1] ?? "")}
             >
               Prepara il confronto
             </button>
@@ -145,10 +143,17 @@ export function EnginePriceComparison({
                     <MessageResponse>{p.report_markdown ?? ""}</MessageResponse>
                   </div>
                 </details>
-                {(!work.engineLatestArtifact || work.engineLatestArtifact.id === p.artifact_id) ? (
-                  <EngineResultReview key={p.artifact_id} work={work} artifactId={p.artifact_id} onChanged={onChanged} />
+                {!work.engineLatestArtifact || work.engineLatestArtifact.id === p.artifact_id ? (
+                  <EngineResultReview
+                    key={p.artifact_id}
+                    work={work}
+                    artifactId={p.artifact_id}
+                    onChanged={onChanged}
+                  />
                 ) : (
-                  <p className="cw-hint">Questo report è stato sostituito da una consegna più recente del lavoro.</p>
+                  <p className="cw-hint">
+                    Questo report è stato sostituito da una consegna più recente del lavoro.
+                  </p>
                 )}
               </>
             )}

@@ -124,9 +124,33 @@
 }
 
 /* Legacy compatibility */
-.cw-documents { display: grid; gap: 12px; }
-.cw-documents__filters { display: flex; gap: 8px; align-items: center; }
-.cw-documents__filters label { display: flex; align-items: center; gap: 6px; }
-.cw-documents__filters input { height: 26px; font-size: 12px; border: 1px solid rgba(0,0,0,0.08); border-radius: 6px; padding: 0 8px; background: transparent; }
-.cw-documents__list { display: grid; gap: 8px; }
-.cw-document { display: grid; gap: 6px; }
+.cw-documents {
+  display: grid;
+  gap: 12px;
+}
+.cw-documents__filters {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.cw-documents__filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cw-documents__filters input {
+  height: 26px;
+  font-size: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: transparent;
+}
+.cw-documents__list {
+  display: grid;
+  gap: 8px;
+}
+.cw-document {
+  display: grid;
+  gap: 6px;
+}

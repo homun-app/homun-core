@@ -1,9 +1,7 @@
 {
   "fixture": "real source reads with scripted choices; real local summary/final model",
   "model": "qwen3.5:4b",
-  "statuses": [
-    "completed"
-  ],
+  "statuses": ["completed"],
   "run": {
     "id": "run",
     "work_id": "work_uVCqUGs9ZjhONA",

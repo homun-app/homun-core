@@ -30,7 +30,11 @@ export function useEngineStatus(baseUrl: string = ENGINE_DEFAULT_BASE_URL): Engi
   const [health, setHealth] = useState<EngineHealth | null>(null);
   const [capabilities, setCapabilities] = useState<EngineCapabilities | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const dataSource = useSyncExternalStore(subscribeEngineDataSource, readEngineDataSource, () => "engine" as const);
+  const dataSource = useSyncExternalStore(
+    subscribeEngineDataSource,
+    readEngineDataSource,
+    () => "engine" as const,
+  );
   const [tick, setTick] = useState(0);
 
   useEffect(() => {

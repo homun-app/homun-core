@@ -38,7 +38,11 @@ Esempio proposto:
   "type": "plan.revise",
   "target_id": "work_456",
   "expected_version": 7,
-  "payload": {"insert_after_step_id": "step_2", "title": "Traduci il catalogo", "agent_id": "agent_9"}
+  "payload": {
+    "insert_after_step_id": "step_2",
+    "title": "Traduci il catalogo",
+    "agent_id": "agent_9"
+  }
 }
 ```
 
@@ -48,30 +52,30 @@ Risposta accettata contiene command_id, status, entity_id, version ed eventualme
 
 Base delle risorse `/v1/workspaces/{workspace_id}` salvo endpoint host/personali.
 
-| Route proposta | Responsabilità |
-|---|---|
-| `GET /v1/health`, `/v1/capabilities` | Stato minimo; dettagli diagnostici richiedono autorizzazione |
-| `POST /v1/pairing/invitations`, `/accept` | Invito/pairing con prova identità e token monouso, rate limit |
-| `POST /v1/sessions`, `DELETE /v1/sessions/{id}` | Apertura/revoca sessione secondo metodo scelto |
-| `GET /conversations`, `/conversations/{id}/messages` | Chat e cronologia paginate |
-| `POST /conversations/{id}/messages` | Testo, material_ids e riferimenti tipizzati; command_id |
-| `GET /works`, `/works/{id}` | Proiezioni lavoro, criteri e stato |
-| `POST /commands` | Creazione/modifica/avvio/pausa/annullamento/archivio con autorizzazione per tipo |
-| `GET /works/{id}/plan`, `/runs/{id}` | Revisione e avanzamento effettivi |
-| `GET /requests`, `POST /requests/{id}/responses` | Contributi e validazione |
-| `GET /artifacts/{id}/versions`, `POST /reviews` | Risultati versionati e decisioni |
-| `POST /action-approvals/{id}/decision` | Autorizzazione su action_hash/versione corrente |
-| `GET /projects`, `/teams`, `/members`, `/agents` | Ricerca e selettori con identità/ruolo/capacità |
-| `GET /materials`, `/materials/{id}` | Metadati, accesso e disponibilità nodo |
-| `POST /uploads`, `PUT /uploads/{id}/parts/{part}`, `POST /uploads/{id}/complete` | Trasferimento riprendibile e validazione |
-| `GET /materials/{id}/versions/{version}/content` | Download autorizzato con supporto range |
-| `GET /plugins`, `/connections`, `/tool-grants` | Catalogo e capacità effettive; nessun segreto |
-| `GET /automations`, `/automations/{id}/runs` | Regole/versioni/esecuzioni |
-| `GET /memory`, `POST /memory/search` | Consultazione autorizzata con fonti; mutation via comandi |
-| `GET /search`, `/notifications` | Risultati filtrati per ACL e inbox persistente |
-| `GET/PATCH /settings/{scope}` | Configurazione con versione e permessi sullo scope |
-| `GET /usage`, `/budgets`, `/audit` | Rendiconti e storico nei limiti del ruolo |
-| `GET /events?cursor=...` | Stream eventi autorizzati |
+| Route proposta                                                                   | Responsabilità                                                                   |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `GET /v1/health`, `/v1/capabilities`                                             | Stato minimo; dettagli diagnostici richiedono autorizzazione                     |
+| `POST /v1/pairing/invitations`, `/accept`                                        | Invito/pairing con prova identità e token monouso, rate limit                    |
+| `POST /v1/sessions`, `DELETE /v1/sessions/{id}`                                  | Apertura/revoca sessione secondo metodo scelto                                   |
+| `GET /conversations`, `/conversations/{id}/messages`                             | Chat e cronologia paginate                                                       |
+| `POST /conversations/{id}/messages`                                              | Testo, material_ids e riferimenti tipizzati; command_id                          |
+| `GET /works`, `/works/{id}`                                                      | Proiezioni lavoro, criteri e stato                                               |
+| `POST /commands`                                                                 | Creazione/modifica/avvio/pausa/annullamento/archivio con autorizzazione per tipo |
+| `GET /works/{id}/plan`, `/runs/{id}`                                             | Revisione e avanzamento effettivi                                                |
+| `GET /requests`, `POST /requests/{id}/responses`                                 | Contributi e validazione                                                         |
+| `GET /artifacts/{id}/versions`, `POST /reviews`                                  | Risultati versionati e decisioni                                                 |
+| `POST /action-approvals/{id}/decision`                                           | Autorizzazione su action_hash/versione corrente                                  |
+| `GET /projects`, `/teams`, `/members`, `/agents`                                 | Ricerca e selettori con identità/ruolo/capacità                                  |
+| `GET /materials`, `/materials/{id}`                                              | Metadati, accesso e disponibilità nodo                                           |
+| `POST /uploads`, `PUT /uploads/{id}/parts/{part}`, `POST /uploads/{id}/complete` | Trasferimento riprendibile e validazione                                         |
+| `GET /materials/{id}/versions/{version}/content`                                 | Download autorizzato con supporto range                                          |
+| `GET /plugins`, `/connections`, `/tool-grants`                                   | Catalogo e capacità effettive; nessun segreto                                    |
+| `GET /automations`, `/automations/{id}/runs`                                     | Regole/versioni/esecuzioni                                                       |
+| `GET /memory`, `POST /memory/search`                                             | Consultazione autorizzata con fonti; mutation via comandi                        |
+| `GET /search`, `/notifications`                                                  | Risultati filtrati per ACL e inbox persistente                                   |
+| `GET/PATCH /settings/{scope}`                                                    | Configurazione con versione e permessi sullo scope                               |
+| `GET /usage`, `/budgets`, `/audit`                                               | Rendiconti e storico nei limiti del ruolo                                        |
+| `GET /events?cursor=...`                                                         | Stream eventi autorizzati                                                        |
 
 Operazioni complesse come backup/export restituiscono operation_id e artifact scaricabile. Password/chiavi via endpoint dedicato del secret store, mai nei normali settings esportabili. Il catalogo comandi tipizzato è parte del contratto, non dispatch arbitrario di funzioni Python.
 

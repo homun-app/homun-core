@@ -72,7 +72,8 @@ export function EngineMaterialSelection({
     if (eligibleIds.length === 1) parts.push("1 file selezionato.");
     if (eligibleIds.length > 1) parts.push(`${eligibleIds.length} file selezionati.`);
     if (stored === 1) parts.push("1 archiviato nel progetto ma non usato da questo strumento.");
-    if (stored > 1) parts.push(`${stored} archiviati nel progetto ma non usati da questo strumento.`);
+    if (stored > 1)
+      parts.push(`${stored} archiviati nel progetto ma non usati da questo strumento.`);
     if (failed === 1) parts.push("1 non caricato per un errore.");
     if (failed > 1) parts.push(`${failed} non caricati per un errore.`);
     setNotice(parts.join(" "));
@@ -97,7 +98,11 @@ export function EngineMaterialSelection({
           const role = checked && orderedRoles?.[index] ? orderedRoles[index] : undefined;
           const name = material.origin_name ?? material.title;
           return (
-            <li key={material.id} className="cw-material-row" title={`SHA-256: ${material.content_hash}`}>
+            <li
+              key={material.id}
+              className="cw-material-row"
+              title={`SHA-256: ${material.content_hash}`}
+            >
               <label>
                 <input
                   type="checkbox"

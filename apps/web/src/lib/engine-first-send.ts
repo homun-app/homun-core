@@ -2,8 +2,19 @@ import type { Work } from "@/components/builder/conversation-types";
 import type { AutonomyLevel } from "@/components/builder/conversation-preferences";
 
 type FirstSendEngine = {
-  createWork: (title: string, objective: string, draftOnly?: boolean, projectId?: string) => Promise<Work | null>;
-  postMessage: (work: Work, text: string, attachments?: File[], autonomyLevel?: AutonomyLevel, modelConnectionId?: string) => Promise<void>;
+  createWork: (
+    title: string,
+    objective: string,
+    draftOnly?: boolean,
+    projectId?: string,
+  ) => Promise<Work | null>;
+  postMessage: (
+    work: Work,
+    text: string,
+    attachments?: File[],
+    autonomyLevel?: AutonomyLevel,
+    modelConnectionId?: string,
+  ) => Promise<void>;
 };
 
 /**

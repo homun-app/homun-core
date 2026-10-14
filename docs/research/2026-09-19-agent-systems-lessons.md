@@ -70,14 +70,14 @@ I checkpoint catturano stato degli executor, messaggi pendenti, richieste/rispos
 
 ## Scelte trasversali: adottare, evitare, rinviare
 
-| Tema | Adottare come pattern | Evitare | Rinviare |
-|---|---|---|---|
-| Contesto | Vista per richiesta, sezioni nominate, fonti/versioni, limiti espliciti | Riscrivere il transcript con la sintesi; selezionare prima di autorizzare | Sintesi automatica complessa finché i casi base non sono affidabili |
-| Approvazione | Request ID, azione/argomenti/versione, risposta tipizzata, recupero dopo riavvio | Un semplice `approved=true` riutilizzabile dopo cambi di piano | Interfacce di approvazione nuove; basta il contratto motore |
-| Tool | Schema, effetto, capability, esecutore e ricevuta separati | Scambiare disponibilità o stima del rischio per permesso | Shell arbitraria e nuovi sandbox prima del contratto di isolamento |
-| Budget | Limite per lavoro e tentativi identificati, comprese sintesi e retry | Equiparare contatore iterazioni e costo; registrare solo il modello principale | Ottimizzazioni di routing non misurate |
-| Memoria | Ledger approvato con ambito e provenienza, indice ricostruibile | Promuovere testo agent-written a istruzione autorevole | Un nuovo servizio memoria come fonte primaria |
-| Moduli | Policy comune, compositore, adattatori runtime/tool e API sottili | Ampliare un god-file o aggiungere un secondo orchestratore | Plugin general-purpose prima di contratti stabili |
+| Tema         | Adottare come pattern                                                            | Evitare                                                                        | Rinviare                                                            |
+| ------------ | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| Contesto     | Vista per richiesta, sezioni nominate, fonti/versioni, limiti espliciti          | Riscrivere il transcript con la sintesi; selezionare prima di autorizzare      | Sintesi automatica complessa finché i casi base non sono affidabili |
+| Approvazione | Request ID, azione/argomenti/versione, risposta tipizzata, recupero dopo riavvio | Un semplice `approved=true` riutilizzabile dopo cambi di piano                 | Interfacce di approvazione nuove; basta il contratto motore         |
+| Tool         | Schema, effetto, capability, esecutore e ricevuta separati                       | Scambiare disponibilità o stima del rischio per permesso                       | Shell arbitraria e nuovi sandbox prima del contratto di isolamento  |
+| Budget       | Limite per lavoro e tentativi identificati, comprese sintesi e retry             | Equiparare contatore iterazioni e costo; registrare solo il modello principale | Ottimizzazioni di routing non misurate                              |
+| Memoria      | Ledger approvato con ambito e provenienza, indice ricostruibile                  | Promuovere testo agent-written a istruzione autorevole                         | Un nuovo servizio memoria come fonte primaria                       |
+| Moduli       | Policy comune, compositore, adattatori runtime/tool e API sottili                | Ampliare un god-file o aggiungere un secondo orchestratore                     | Plugin general-purpose prima di contratti stabili                   |
 
 ## Tre prossimi passi concreti e a rischio contenuto
 

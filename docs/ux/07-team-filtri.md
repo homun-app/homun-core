@@ -1,4 +1,5 @@
 # Squadra scalabile
+
 - Sidebar richiudibile con conteggio, ricerca e filtro per progetto/team.
 - Elenco con altezza limitata e scorrimento proprio.
 - Team riutilizzabili con persone e agenti: creazione, modifica e scioglimento, senza eliminare incarichi o cambiare permessi.

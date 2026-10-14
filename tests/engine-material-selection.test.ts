@@ -36,7 +36,10 @@ test("read eligibility follows format, size and extract status", () => {
   assert.equal(eligibleForRead(material({ extract_status: "unsupported" })), false);
   assert.equal(eligibleForRead(material({ status: "archived" })), false);
   assert.equal(eligibleForRead(material({ content_hash: null, storage_relpath: null })), false);
-  assert.equal(eligibleForRead(material({ origin_name: "nota.pdf", mime_type: "application/pdf" })), true);
+  assert.equal(
+    eligibleForRead(material({ origin_name: "nota.pdf", mime_type: "application/pdf" })),
+    true,
+  );
 });
 
 test("comparison eligibility accepts only managed active CSV files", () => {
@@ -47,7 +50,10 @@ test("comparison eligibility accepts only managed active CSV files", () => {
 });
 
 test("option labels show name, version and size", () => {
-  assert.equal(materialOptionLabel(material({ version: 3, byte_size: 42 })), "listino.csv · v3 · 42 B");
+  assert.equal(
+    materialOptionLabel(material({ version: 3, byte_size: 42 })),
+    "listino.csv · v3 · 42 B",
+  );
   assert.equal(
     materialOptionLabel(material({ origin_name: null, byte_size: null, title: "Nota" })),
     "Nota · v1 · dimensione n/d",
@@ -55,12 +61,10 @@ test("option labels show name, version and size", () => {
 });
 
 test("prepare from existing materials never uploads", async () => {
-  const { prepareComparisonFromMaterials } = await import(
-    "../apps/web/src/lib/engine-price-comparison-client.ts"
-  );
-  const { prepareReadFromMaterial } = await import(
-    "../apps/web/src/lib/engine-material-read-client.ts"
-  );
+  const { prepareComparisonFromMaterials } =
+    await import("../apps/web/src/lib/engine-price-comparison-client.ts");
+  const { prepareReadFromMaterial } =
+    await import("../apps/web/src/lib/engine-material-read-client.ts");
   const old = globalThis.fetch;
   const calls: Array<{ url: string; method: string; body?: unknown }> = [];
   globalThis.fetch = async (url, init) => {

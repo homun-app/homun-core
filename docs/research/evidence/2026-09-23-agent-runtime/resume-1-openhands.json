@@ -113,12 +113,7 @@
                   "security_risk": {
                     "type": "string",
                     "description": "Security risk levels for actions.\n\nBased on OpenHands security risk levels but adapted for agent-sdk.\nInteger values allow for easy comparison and ordering.",
-                    "enum": [
-                      "UNKNOWN",
-                      "LOW",
-                      "MEDIUM",
-                      "HIGH"
-                    ]
+                    "enum": ["UNKNOWN", "LOW", "MEDIUM", "HIGH"]
                   },
                   "summary": {
                     "type": "string",
@@ -126,11 +121,7 @@
                   },
                   "operation": {
                     "type": "string",
-                    "enum": [
-                      "read",
-                      "write",
-                      "fetch"
-                    ]
+                    "enum": ["read", "write", "fetch"]
                   },
                   "path": {
                     "type": "string"
@@ -140,10 +131,7 @@
                     "description": "Content for write; empty string otherwise."
                   }
                 },
-                "required": [
-                  "operation",
-                  "path"
-                ]
+                "required": ["operation", "path"]
               }
             }
           },
@@ -164,9 +152,7 @@
                     "description": "Final message to send to the user."
                   }
                 },
-                "required": [
-                  "message"
-                ]
+                "required": ["message"]
               }
             }
           },
@@ -187,9 +173,7 @@
                     "description": "The thought to log."
                   }
                 },
-                "required": [
-                  "thought"
-                ]
+                "required": ["thought"]
               }
             }
           }
@@ -304,12 +288,7 @@
                   "security_risk": {
                     "type": "string",
                     "description": "Security risk levels for actions.\n\nBased on OpenHands security risk levels but adapted for agent-sdk.\nInteger values allow for easy comparison and ordering.",
-                    "enum": [
-                      "UNKNOWN",
-                      "LOW",
-                      "MEDIUM",
-                      "HIGH"
-                    ]
+                    "enum": ["UNKNOWN", "LOW", "MEDIUM", "HIGH"]
                   },
                   "summary": {
                     "type": "string",
@@ -317,11 +296,7 @@
                   },
                   "operation": {
                     "type": "string",
-                    "enum": [
-                      "read",
-                      "write",
-                      "fetch"
-                    ]
+                    "enum": ["read", "write", "fetch"]
                   },
                   "path": {
                     "type": "string"
@@ -331,10 +306,7 @@
                     "description": "Content for write; empty string otherwise."
                   }
                 },
-                "required": [
-                  "operation",
-                  "path"
-                ]
+                "required": ["operation", "path"]
               }
             }
           },
@@ -355,9 +327,7 @@
                     "description": "Final message to send to the user."
                   }
                 },
-                "required": [
-                  "message"
-                ]
+                "required": ["message"]
               }
             }
           },
@@ -378,9 +348,7 @@
                     "description": "The thought to log."
                   }
                 },
-                "required": [
-                  "thought"
-                ]
+                "required": ["thought"]
               }
             }
           }
@@ -519,12 +487,7 @@
                   "security_risk": {
                     "type": "string",
                     "description": "Security risk levels for actions.\n\nBased on OpenHands security risk levels but adapted for agent-sdk.\nInteger values allow for easy comparison and ordering.",
-                    "enum": [
-                      "UNKNOWN",
-                      "LOW",
-                      "MEDIUM",
-                      "HIGH"
-                    ]
+                    "enum": ["UNKNOWN", "LOW", "MEDIUM", "HIGH"]
                   },
                   "summary": {
                     "type": "string",
@@ -532,11 +495,7 @@
                   },
                   "operation": {
                     "type": "string",
-                    "enum": [
-                      "read",
-                      "write",
-                      "fetch"
-                    ]
+                    "enum": ["read", "write", "fetch"]
                   },
                   "path": {
                     "type": "string"
@@ -546,10 +505,7 @@
                     "description": "Content for write; empty string otherwise."
                   }
                 },
-                "required": [
-                  "operation",
-                  "path"
-                ]
+                "required": ["operation", "path"]
               }
             }
           },
@@ -570,9 +526,7 @@
                     "description": "Final message to send to the user."
                   }
                 },
-                "required": [
-                  "message"
-                ]
+                "required": ["message"]
               }
             }
           },
@@ -593,9 +547,7 @@
                     "description": "The thought to log."
                   }
                 },
-                "required": [
-                  "thought"
-                ]
+                "required": ["thought"]
               }
             }
           }
@@ -762,12 +714,7 @@
                   "security_risk": {
                     "type": "string",
                     "description": "Security risk levels for actions.\n\nBased on OpenHands security risk levels but adapted for agent-sdk.\nInteger values allow for easy comparison and ordering.",
-                    "enum": [
-                      "UNKNOWN",
-                      "LOW",
-                      "MEDIUM",
-                      "HIGH"
-                    ]
+                    "enum": ["UNKNOWN", "LOW", "MEDIUM", "HIGH"]
                   },
                   "summary": {
                     "type": "string",
@@ -775,11 +722,7 @@
                   },
                   "operation": {
                     "type": "string",
-                    "enum": [
-                      "read",
-                      "write",
-                      "fetch"
-                    ]
+                    "enum": ["read", "write", "fetch"]
                   },
                   "path": {
                     "type": "string"
@@ -789,10 +732,7 @@
                     "description": "Content for write; empty string otherwise."
                   }
                 },
-                "required": [
-                  "operation",
-                  "path"
-                ]
+                "required": ["operation", "path"]
               }
             }
           },
@@ -813,9 +753,7 @@
                     "description": "Final message to send to the user."
                   }
                 },
-                "required": [
-                  "message"
-                ]
+                "required": ["message"]
               }
             }
           },
@@ -836,9 +774,7 @@
                     "description": "The thought to log."
                   }
                 },
-                "required": [
-                  "thought"
-                ]
+                "required": ["thought"]
               }
             }
           }
@@ -1029,12 +965,7 @@
                   "security_risk": {
                     "type": "string",
                     "description": "Security risk levels for actions.\n\nBased on OpenHands security risk levels but adapted for agent-sdk.\nInteger values allow for easy comparison and ordering.",
-                    "enum": [
-                      "UNKNOWN",
-                      "LOW",
-                      "MEDIUM",
-                      "HIGH"
-                    ]
+                    "enum": ["UNKNOWN", "LOW", "MEDIUM", "HIGH"]
                   },
                   "summary": {
                     "type": "string",
@@ -1042,11 +973,7 @@
                   },
                   "operation": {
                     "type": "string",
-                    "enum": [
-                      "read",
-                      "write",
-                      "fetch"
-                    ]
+                    "enum": ["read", "write", "fetch"]
                   },
                   "path": {
                     "type": "string"
@@ -1056,10 +983,7 @@
                     "description": "Content for write; empty string otherwise."
                   }
                 },
-                "required": [
-                  "operation",
-                  "path"
-                ]
+                "required": ["operation", "path"]
               }
             }
           },
@@ -1080,9 +1004,7 @@
                     "description": "Final message to send to the user."
                   }
                 },
-                "required": [
-                  "message"
-                ]
+                "required": ["message"]
               }
             }
           },
@@ -1103,9 +1025,7 @@
                     "description": "The thought to log."
                   }
                 },
-                "required": [
-                  "thought"
-                ]
+                "required": ["thought"]
               }
             }
           }
@@ -1320,12 +1240,7 @@
                   "security_risk": {
                     "type": "string",
                     "description": "Security risk levels for actions.\n\nBased on OpenHands security risk levels but adapted for agent-sdk.\nInteger values allow for easy comparison and ordering.",
-                    "enum": [
-                      "UNKNOWN",
-                      "LOW",
-                      "MEDIUM",
-                      "HIGH"
-                    ]
+                    "enum": ["UNKNOWN", "LOW", "MEDIUM", "HIGH"]
                   },
                   "summary": {
                     "type": "string",
@@ -1333,11 +1248,7 @@
                   },
                   "operation": {
                     "type": "string",
-                    "enum": [
-                      "read",
-                      "write",
-                      "fetch"
-                    ]
+                    "enum": ["read", "write", "fetch"]
                   },
                   "path": {
                     "type": "string"
@@ -1347,10 +1258,7 @@
                     "description": "Content for write; empty string otherwise."
                   }
                 },
-                "required": [
-                  "operation",
-                  "path"
-                ]
+                "required": ["operation", "path"]
               }
             }
           },
@@ -1371,9 +1279,7 @@
                     "description": "Final message to send to the user."
                   }
                 },
-                "required": [
-                  "message"
-                ]
+                "required": ["message"]
               }
             }
           },
@@ -1394,9 +1300,7 @@
                     "description": "The thought to log."
                   }
                 },
-                "required": [
-                  "thought"
-                ]
+                "required": ["thought"]
               }
             }
           }

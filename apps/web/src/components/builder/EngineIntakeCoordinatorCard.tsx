@@ -22,7 +22,10 @@ export function EngineIntakeCoordinatorCard({
   const hasVaultReq = reqs.some((r) => /vault|material|dataset|report preesistent/i.test(r));
 
   return (
-    <article className="cw-intake-coordinator-card" aria-label="Proposta di lavoro e coordinamento Homun">
+    <article
+      className="cw-intake-coordinator-card"
+      aria-label="Proposta di lavoro e coordinamento Homun"
+    >
       <div className="cw-intake-coordinator-card__head" id="cw-intake-head">
         <span className="cw-intake-coordinator-card__badge">PROPOSTA DI LAVORO</span>
         <h3 className="cw-intake-coordinator-card__title">{proposal.title}</h3>
@@ -60,7 +63,12 @@ export function EngineIntakeCoordinatorCard({
                         <strong>{step.assignee || "Homun"}</strong>
                       )}
                     </span>
-                    {step.output_expected && <span> · Consegna: <em>{step.output_expected}</em></span>}
+                    {step.output_expected && (
+                      <span>
+                        {" "}
+                        · Consegna: <em>{step.output_expected}</em>
+                      </span>
+                    )}
                   </div>
                 </div>
               </li>
@@ -95,7 +103,7 @@ export function EngineIntakeCoordinatorCard({
                     disabled={isBusy}
                     onClick={() =>
                       void intake.refine(
-                        "Crea un agente specializzato 'Ricercatore di Mercato' con l'istruzione di scandagliare il web per identificare i 3 competitor chiave e assegnagli la fase di ricerca iniziale."
+                        "Crea un agente specializzato 'Ricercatore di Mercato' con l'istruzione di scandagliare il web per identificare i 3 competitor chiave e assegnagli la fase di ricerca iniziale.",
                       )
                     }
                   >
@@ -108,7 +116,7 @@ export function EngineIntakeCoordinatorCard({
                     disabled={isBusy}
                     onClick={() =>
                       void intake.refine(
-                        "Seleziona tu autonomamente i 3 principali competitor di riferimento nel settore dell'orchestrazione agenti e avvia l'analisi."
+                        "Seleziona tu autonomamente i 3 principali competitor di riferimento nel settore dell'orchestrazione agenti e avvia l'analisi.",
                       )
                     }
                   >
@@ -123,7 +131,9 @@ export function EngineIntakeCoordinatorCard({
                   className="cw-coordinator-chip"
                   disabled={isBusy}
                   onClick={() =>
-                    void intake.refine("Procedi partendo da zero senza file o dataset pregressi nel Vault.")
+                    void intake.refine(
+                      "Procedi partendo da zero senza file o dataset pregressi nel Vault.",
+                    )
                   }
                 >
                   <ArrowRight size={13} />
@@ -136,7 +146,9 @@ export function EngineIntakeCoordinatorCard({
                   className="cw-coordinator-chip"
                   disabled={isBusy}
                   onClick={() =>
-                    void intake.refine("Procedi autonomamente raccogliendo tutte le informazioni necessarie.")
+                    void intake.refine(
+                      "Procedi autonomamente raccogliendo tutte le informazioni necessarie.",
+                    )
                   }
                 >
                   <Sparkles size={13} />
@@ -191,7 +203,8 @@ export function EngineIntakeCoordinatorCard({
                 Scegli una modalità per avviare la staffetta
               </button>
               <span className="cw-intake-coordinator-card__note">
-                Risolvi i nodi aperti per impostare correttamente gli esecutori e i dati di partenza.
+                Risolvi i nodi aperti per impostare correttamente gli esecutori e i dati di
+                partenza.
               </span>
             </div>
             <button
@@ -221,7 +234,11 @@ export function EngineIntakeCoordinatorCard({
         )}
       </div>
 
-      {isBusy && <p className="cw-intake-note" role="status">Aggiornamento proposta in corso…</p>}
+      {isBusy && (
+        <p className="cw-intake-note" role="status">
+          Aggiornamento proposta in corso…
+        </p>
+      )}
       <HomunErrorNotice error={intake.error} />
     </article>
   );

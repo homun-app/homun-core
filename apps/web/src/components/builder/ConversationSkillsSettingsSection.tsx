@@ -65,12 +65,15 @@ export function ConversationSkillsSettingsSection({ actorId }: { actorId?: strin
     });
   }, [skills, query, statusFilter]);
 
-  const counts = useMemo(() => ({
-    all: skills.length,
-    approved: skills.filter((s) => s.status === "approved").length,
-    staged: skills.filter((s) => s.status === "staged").length,
-    archived: skills.filter((s) => s.status === "archived").length,
-  }), [skills]);
+  const counts = useMemo(
+    () => ({
+      all: skills.length,
+      approved: skills.filter((s) => s.status === "approved").length,
+      staged: skills.filter((s) => s.status === "staged").length,
+      archived: skills.filter((s) => s.status === "archived").length,
+    }),
+    [skills],
+  );
 
   return (
     <div className="space-y-5">
@@ -78,7 +81,8 @@ export function ConversationSkillsSettingsSection({ actorId }: { actorId?: strin
         <div>
           <h3 className="text-sm font-semibold text-[#1c2d22]">Catalogo skill</h3>
           <p className="mt-0.5 text-xs text-[#647a6d]">
-            Procedure approvate che guidano i run · quarantena per le proposte · sync dal repository homun-skills.
+            Procedure approvate che guidano i run · quarantena per le proposte · sync dal repository
+            homun-skills.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -86,15 +90,17 @@ export function ConversationSkillsSettingsSection({ actorId }: { actorId?: strin
             type="button"
             className="cv-unified-btn is-subtle text-xs"
             disabled={busy}
-            onClick={() => void act(async () => {
-              const result = await syncEngineSkills();
-              const parts = [
-                result.created?.length ? `+${result.created.length} nuove` : null,
-                result.updated?.length ? `${result.updated.length} aggiornate` : null,
-                result.kept_human?.length ? `${result.kept_human.length} umane preservate` : null,
-              ].filter(Boolean);
-              setSyncNote(parts.length ? `Sync: ${parts.join(" · ")}` : "Sync: già allineato");
-            })}
+            onClick={() =>
+              void act(async () => {
+                const result = await syncEngineSkills();
+                const parts = [
+                  result.created?.length ? `+${result.created.length} nuove` : null,
+                  result.updated?.length ? `${result.updated.length} aggiornate` : null,
+                  result.kept_human?.length ? `${result.kept_human.length} umane preservate` : null,
+                ].filter(Boolean);
+                setSyncNote(parts.length ? `Sync: ${parts.join(" · ")}` : "Sync: già allineato");
+              })
+            }
           >
             Sincronizza da repository
           </button>
@@ -103,7 +109,9 @@ export function ConversationSkillsSettingsSection({ actorId }: { actorId?: strin
 
       <HomunErrorNotice error={error} />
       {syncNote && (
-        <p role="status" className="text-xs text-[#235940]">{syncNote}</p>
+        <p role="status" className="text-xs text-[#235940]">
+          {syncNote}
+        </p>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -126,8 +134,13 @@ export function ConversationSkillsSettingsSection({ actorId }: { actorId?: strin
                   : "border-transparent text-[#647a6d] hover:text-[#1c2d22]"
               }`}
             >
-              {status === "all" ? "Tutte" : status === "approved" ? "Approvate" : status === "staged" ? "In quarantena" : "Archiviate"}
-              {" "}
+              {status === "all"
+                ? "Tutte"
+                : status === "approved"
+                  ? "Approvate"
+                  : status === "staged"
+                    ? "In quarantena"
+                    : "Archiviate"}{" "}
               <span className="tabular-nums text-[#9db3ad]">{counts[status]}</span>
             </button>
           ))}
@@ -137,13 +150,35 @@ export function ConversationSkillsSettingsSection({ actorId }: { actorId?: strin
       {loading ? (
         <p className="text-xs text-[#9db3ad]">Caricamento…</p>
       ) : filtered.length === 0 ? (
-        <p className="text-xs text-[#647a6d]">Nessuna skill {query ? "corrisponde alla ricerca" : "in questo stato"}.</p>
+        <p className="text-xs text-[#647a6d]">
+          Nessuna skill {query ? "corrisponde alla ricerca" : "in questo stato"}.
+        </p>
       ) : (
         <div className="space-y-2">
           {filtered.map((skill) => (
-            <SkillRow key={skill.id} skill={skill} busy={busy}
-              approve={() => void act(() => skillEngineAction({ skillId: skill.id, action: "approve", expectedVersion: skill.revision }))}
-              reject={() => void act(() => skillEngineAction({ skillId: skill.id, action: "reject", expectedVersion: skill.revision }))} />
+            <SkillRow
+              key={skill.id}
+              skill={skill}
+              busy={busy}
+              approve={() =>
+                void act(() =>
+                  skillEngineAction({
+                    skillId: skill.id,
+                    action: "approve",
+                    expectedVersion: skill.revision,
+                  }),
+                )
+              }
+              reject={() =>
+                void act(() =>
+                  skillEngineAction({
+                    skillId: skill.id,
+                    action: "reject",
+                    expectedVersion: skill.revision,
+                  }),
+                )
+              }
+            />
           ))}
         </div>
       )}
@@ -156,7 +191,10 @@ export function ConversationSkillsSettingsSection({ actorId }: { actorId?: strin
 }
 
 function SkillRow({
-  skill, busy, approve, reject,
+  skill,
+  busy,
+  approve,
+  reject,
 }: {
   skill: Skill;
   busy: boolean;
@@ -164,9 +202,7 @@ function SkillRow({
   reject: () => void;
 }) {
   const author = skill.author_type === "agent" ? "agente" : "persona";
-  const usage = skill.usage_count > 0
-    ? `usata ${skill.usage_count}×`
-    : "mai usata";
+  const usage = skill.usage_count > 0 ? `usata ${skill.usage_count}×` : "mai usata";
   return (
     <article className="rq-card">
       <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -182,9 +218,7 @@ function SkillRow({
           <span className="ml-auto text-[11px] text-[#9db3ad]">archiviata</span>
         )}
       </p>
-      {skill.description && (
-        <p className="mt-1 text-xs text-[#263832]">{skill.description}</p>
-      )}
+      {skill.description && <p className="mt-1 text-xs text-[#263832]">{skill.description}</p>}
       {skill.body && (
         <details className="mt-1.5">
           <summary className="cursor-pointer text-[11px] text-[#647a6d] hover:text-[#1c2d22]">
@@ -199,12 +233,20 @@ function SkillRow({
         <div className="rq-footer">
           <span className="rq-hint">Non guida nessun run finché non la approvi.</span>
           <div className="flex gap-1.5">
-            <button type="button" className="cv-unified-btn is-subtle text-xs text-red-500 hover:text-red-600"
-              disabled={busy} onClick={reject}>
+            <button
+              type="button"
+              className="cv-unified-btn is-subtle text-xs text-red-500 hover:text-red-600"
+              disabled={busy}
+              onClick={reject}
+            >
               Respingi
             </button>
-            <button type="button" className="cv-unified-btn is-primary text-xs"
-              disabled={busy} onClick={approve}>
+            <button
+              type="button"
+              className="cv-unified-btn is-primary text-xs"
+              disabled={busy}
+              onClick={approve}
+            >
               Approva
             </button>
           </div>

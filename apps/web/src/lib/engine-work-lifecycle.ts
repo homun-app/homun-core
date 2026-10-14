@@ -4,10 +4,7 @@ import { defaultLocalActor, postEngineCommand } from "./engine-domain-client.ts"
  * Closes an agreed work without executing it (engine transition to CANCELLED).
  * The agreement and the conversation stay in the archive; nothing is deleted.
  */
-export async function closeEngineWork(
-  workId: string,
-  expectedVersion: number,
-): Promise<void> {
+export async function closeEngineWork(workId: string, expectedVersion: number): Promise<void> {
   await postEngineCommand({
     type: "work.cancel",
     payload: { work_id: workId, expected_version: expectedVersion },
@@ -29,7 +26,10 @@ export async function startEngineWork(
     actor: defaultLocalActor(),
   });
   const result = response.result as { status?: unknown; version?: unknown };
-  return { status: String(result.status ?? ""), version: Number(result.version ?? expectedVersion) };
+  return {
+    status: String(result.status ?? ""),
+    version: Number(result.version ?? expectedVersion),
+  };
 }
 
 /**
@@ -85,7 +85,9 @@ export async function reviseEnginePlan(input: {
               title: input.newStep.title,
               assignee_id: input.newStep.assigneeId,
               ...(input.newStep.capability ? { capability: input.newStep.capability } : {}),
-              ...(input.newStep.outputExpected ? { output_expected: input.newStep.outputExpected } : {}),
+              ...(input.newStep.outputExpected
+                ? { output_expected: input.newStep.outputExpected }
+                : {}),
             },
             ...(input.insertAfterStepId ? { insert_after_step_id: input.insertAfterStepId } : {}),
           }
@@ -121,4 +123,3 @@ export async function setEngineWorkProject(
     actor: defaultLocalActor(),
   });
 }
-

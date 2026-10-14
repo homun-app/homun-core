@@ -13,17 +13,17 @@ lavori singoli.
 
 ## 2. Cosa riusiamo così com'è (non si inventa nulla)
 
-| Pezzo | Dove esiste già | Note |
-|---|---|---|
-| Scheduler cron persistito | **DBOS** (`create_schedule` / pause / resume / trigger / backfill) nel runtime già adottato | sopravvive ai riavvii; il fuso è per-schedule |
-| Il lavoro da ripetere | lavori motore con **fasi** (piani multi-fase §9–11), materiali di progetto, budget | la routine è un *modello* di lavoro, non un nuovo tipo di esecuzione |
-| Supervisione | conferma accordo → avvio fase → revisione esito → chiusura con esito | identica per ogni ricorrenza |
-| «Il lavoro propone» | annuncio materiali pronti (plan_readiness) | la routine eredita l'attesa esplicita |
-| Budget | `WorkBudget` per lavoro | ogni ricorrenza ha il proprio; la routine può avere un tetto mensile |
-| Notifica | messaggi onesti in chat + centro notifiche | la scadenza vera (§7b) fa il resto |
+| Pezzo                     | Dove esiste già                                                                             | Note                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Scheduler cron persistito | **DBOS** (`create_schedule` / pause / resume / trigger / backfill) nel runtime già adottato | sopravvive ai riavvii; il fuso è per-schedule                        |
+| Il lavoro da ripetere     | lavori motore con **fasi** (piani multi-fase §9–11), materiali di progetto, budget          | la routine è un _modello_ di lavoro, non un nuovo tipo di esecuzione |
+| Supervisione              | conferma accordo → avvio fase → revisione esito → chiusura con esito                        | identica per ogni ricorrenza                                         |
+| «Il lavoro propone»       | annuncio materiali pronti (plan_readiness)                                                  | la routine eredita l'attesa esplicita                                |
+| Budget                    | `WorkBudget` per lavoro                                                                     | ogni ricorrenza ha il proprio; la routine può avere un tetto mensile |
+| Notifica                  | messaggi onesti in chat + centro notifiche                                                  | la scadenza vera (§7b) fa il resto                                   |
 
-**Principio guida invariato**: l'automazione ripete *l'affidamento*, mai
-*l'approvazione*. Ogni ricorrenza produce un lavoro che aspetta le stesse
+**Principio guida invariato**: l'automazione ripete _l'affidamento_, mai
+_l'approvazione_. Ogni ricorrenza produce un lavoro che aspetta le stesse
 conferme esplicite dell'originale — a meno che la persona abbia dichiarato,
 fase per fase, autonomia di consegna (già campo del profilo).
 
@@ -98,7 +98,7 @@ pausa / prossima esecuzione), ultima ricorrenza, link alla chat. La sidebar
    recuperata («lunedì è stato saltato: la preparo ora?»), mai una coda di
    settimane. (default sicuro, dichiarato; backfill esplicito in seguito)
 4. **Collegamento routine ↔ lavoro**: campo `origin_routine_id` sul lavoro +
-  conversazione dedicata della routine; letture: routine con ultime ricorrenze.
+   conversazione dedicata della routine; letture: routine con ultime ricorrenze.
 
 Niente di nuovo per: esecuzione fasi, revisioni, budget, scadenze (già fatte).
 
@@ -155,8 +155,9 @@ bacheca cronologia ricorrenze.
 ## 8. Fetta 1: com'è stata realizzata (2026-09-22)
 
 Motore:
+
 - `Routine` (entità persistita) + comandi versionati `routine.create/pause/
-  resume/stop`; template validato (titolo, obiettivo, fasi con assegnatari
+resume/stop`; template validato (titolo, obiettivo, fasi con assegnatari
   attivi); transizioni active↔paused→stopped.
 - Ricorrenza: workflow DBOS `routine_recurrence_workflow` + schedule cron per
   routine (`create_schedule`, fuso esplicito). `run_recurrence` crea il lavoro
@@ -177,6 +178,7 @@ Motore:
   preview.
 
 Web:
+
 - Pannello del lavoro **completato**: «**Rendi ripetibile**» con cadenza in
   linguaggio naturale («ogni lunedì alle 9») tradotta in cron
   (`cadence-language.ts`), anteprima delle prossime 3 esecuzioni dal motore,

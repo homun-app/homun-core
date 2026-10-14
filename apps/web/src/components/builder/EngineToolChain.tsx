@@ -57,9 +57,9 @@ export function EngineToolChain({
       <details open={chain != null || initiallyOpen || undefined}>
         <summary>Leggi più materiali in una volta</summary>
         <p>
-          Una sola approvazione per tutte le letture: ogni documento produce il proprio artifact
-          con estratto e provenienza, in revisione umana. Se un passo fallisce, i già completati
-          restano e i successivi si fermano.
+          Una sola approvazione per tutte le letture: ogni documento produce il proprio artifact con
+          estratto e provenienza, in revisione umana. Se un passo fallisce, i già completati restano
+          e i successivi si fermano.
         </p>
         {idle && (
           <>
@@ -118,7 +118,8 @@ export function EngineToolChain({
             </ol>
             <p className="cw-hint">
               L’approvazione copre esattamente questi documenti con queste versioni (passa il mouse
-              per l’impronta digitale): se uno cambia prima dell’avvio, la proposta non è più valida.
+              per l’impronta digitale): se uno cambia prima dell’avvio, la proposta non è più
+              valida.
             </p>
             <button className="cw-primary" disabled={tool.busy} onClick={() => void tool.approve()}>
               Approva le {chain.steps.length} letture
@@ -140,14 +141,12 @@ export function EngineToolChain({
         {chain && chain.status === "completed" && (
           <>
             <p role="status">
-              <strong>{chain.steps.length} letture completate.</strong> Ogni artifact è in
-              revisione umana; gli estratti sono nelle singole schede di lettura.
+              <strong>{chain.steps.length} letture completate.</strong> Ogni artifact è in revisione
+              umana; gli estratti sono nelle singole schede di lettura.
             </p>
             <ol className="cw-chain-steps cw-chain-done">
               {chain.steps.map((step, index) => (
-                <li key={step.proposal_id ?? index}>
-                  ✓ {step.materials[0]?.title}
-                </li>
+                <li key={step.proposal_id ?? index}>✓ {step.materials[0]?.title}</li>
               ))}
             </ol>
           </>

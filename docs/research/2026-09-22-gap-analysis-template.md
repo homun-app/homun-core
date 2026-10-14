@@ -24,26 +24,26 @@
 
 ## 1. Superfici del template non collegate al motore (o irraggiungibili)
 
-| Superficie (template) | Stato attuale | Supporto motore | Gap |
-|---|---|---|---|
-| **Squadra + Team** (StudioSquad, StudioTeamMembers: composizione team, coordinatore) | In modalità motore si vede solo `EngineWorkspaceAgents`: schede in sola lettura. Le UI di composizione team esistono nel codice ma non sono montate sul percorso motore | `team.create/update/archive` ✓ **già pronti e testati** | UI team + modifica agenti (categoria 2 sotto) |
-| **Persone e accessi** (StudioAccess: persone, inviti, ruoli) | Non raggiungibile dal nav; in impostazioni esiste solo «Invita una persona… simulato» | `grant.issue/revoke` ✓ con UI impostazioni; identità esterne = rinviate | Sezione persone «lite» (gestione attori locali) |
-| **Automazioni** (StudioProcedures, StudioAutomation*, routine ricorrenti) | Spazio «Automazioni» in nav ma **solo simulazione**: nessuna persistenza motore | **Nessuno** (voce roadmap «loop multi-tool» aperta) | Motore delle ricorrenze + UI |
-| **Plugin / MCP** (StudioMarketplace, ConversationPlugins) | Catalogo plugin solo demo | **Nessuno**: il motore non ha concetto di plugin/MCP/skill | Design + motore (i «plugin» oggi sono le capability del registro) |
-| **Documenti** (StudioDocuments: raccolta, ricerca, condivisione; StudioArtifactPreview) | Non raggiungibile | Artefatti per lavoro ✓; nessuna libreria trasversale | Libreria risultati/artefatti del motore |
-| **Oggi / Agenda** (StudioToday, StudioSchedule: bacheca, avanzamento, scadenze) | Non raggiungibile; «Compiti» (elenco/kanban/calendario) esiste ed è collegato ai lavori motore | Lavori/fasi ✓ (scadenze: campo `due` solo simulazione) | Vista «Oggi» motore + scadenze vere |
-| **Formazione/autonomia** (StudioTraining), **mappa strumenti** (FlowMap), **hub Studio** (StudioWorkbench) | Codice presente, irraggiungibile dal percorso attuale | Parziale (autonomia esiste come campo lavoro) | Da riposizionare o ritirare |
-| **Percorsi prototipo** (FirstWorkJourney, ChatWorkJourney) | Sotto `/prototypes` | — | Volontariamente fuori prodotto |
+| Superficie (template)                                                                                      | Stato attuale                                                                                                                                                           | Supporto motore                                                         | Gap                                                               |
+| ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **Squadra + Team** (StudioSquad, StudioTeamMembers: composizione team, coordinatore)                       | In modalità motore si vede solo `EngineWorkspaceAgents`: schede in sola lettura. Le UI di composizione team esistono nel codice ma non sono montate sul percorso motore | `team.create/update/archive` ✓ **già pronti e testati**                 | UI team + modifica agenti (categoria 2 sotto)                     |
+| **Persone e accessi** (StudioAccess: persone, inviti, ruoli)                                               | Non raggiungibile dal nav; in impostazioni esiste solo «Invita una persona… simulato»                                                                                   | `grant.issue/revoke` ✓ con UI impostazioni; identità esterne = rinviate | Sezione persone «lite» (gestione attori locali)                   |
+| **Automazioni** (StudioProcedures, StudioAutomation*, routine ricorrenti)                                  | Spazio «Automazioni» in nav ma **solo simulazione**: nessuna persistenza motore                                                                                         | **Nessuno** (voce roadmap «loop multi-tool» aperta)                     | Motore delle ricorrenze + UI                                      |
+| **Plugin / MCP** (StudioMarketplace, ConversationPlugins)                                                  | Catalogo plugin solo demo                                                                                                                                               | **Nessuno**: il motore non ha concetto di plugin/MCP/skill              | Design + motore (i «plugin» oggi sono le capability del registro) |
+| **Documenti** (StudioDocuments: raccolta, ricerca, condivisione; StudioArtifactPreview)                    | Non raggiungibile                                                                                                                                                       | Artefatti per lavoro ✓; nessuna libreria trasversale                    | Libreria risultati/artefatti del motore                           |
+| **Oggi / Agenda** (StudioToday, StudioSchedule: bacheca, avanzamento, scadenze)                            | Non raggiungibile; «Compiti» (elenco/kanban/calendario) esiste ed è collegato ai lavori motore                                                                          | Lavori/fasi ✓ (scadenze: campo `due` solo simulazione)                  | Vista «Oggi» motore + scadenze vere                               |
+| **Formazione/autonomia** (StudioTraining), **mappa strumenti** (FlowMap), **hub Studio** (StudioWorkbench) | Codice presente, irraggiungibile dal percorso attuale                                                                                                                   | Parziale (autonomia esiste come campo lavoro)                           | Da riposizionare o ritirare                                       |
+| **Percorsi prototipo** (FirstWorkJourney, ChatWorkJourney)                                                 | Sotto `/prototypes`                                                                                                                                                     | —                                                                       | Volontariamente fuori prodotto                                    |
 
 ## 2. Comandi motore pronti ma senza UI (recupero a basso rischio)
 
-| Comando | Stato motore | UI attuale |
-|---|---|---|
-| `agent.update` / `agent.rename` | ✓ (istruzioni, connessione preferita, stato; revisione) | Nessuna modifica agente dall'app (solo creazione da intake) |
-| `team.create/update/archive` | ✓ (membri, coordinatore) | Nessuna |
-| `plan.revise` | ✓ (inserisci/togli passi, mai riscrivi i completati) | Nessuna (già segnalato nel piano multi-fase) |
-| `work.set_budget` | ✓ (budget per lavoro, riserve atomiche) | Le preferenze in Impostazioni NON lo usano: sono solo indicative |
-| `grant.issue/revoke` | ✓ | UI impostazioni presente ✓ (progetti) |
+| Comando                         | Stato motore                                            | UI attuale                                                       |
+| ------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------- |
+| `agent.update` / `agent.rename` | ✓ (istruzioni, connessione preferita, stato; revisione) | Nessuna modifica agente dall'app (solo creazione da intake)      |
+| `team.create/update/archive`    | ✓ (membri, coordinatore)                                | Nessuna                                                          |
+| `plan.revise`                   | ✓ (inserisci/togli passi, mai riscrivi i completati)    | Nessuna (già segnalato nel piano multi-fase)                     |
+| `work.set_budget`               | ✓ (budget per lavoro, riserve atomiche)                 | Le preferenze in Impostazioni NON lo usano: sono solo indicative |
+| `grant.issue/revoke`            | ✓                                                       | UI impostazioni presente ✓ (progetti)                            |
 
 ## 3. Funzionalità da progettare (non esistono da nessuna parte)
 

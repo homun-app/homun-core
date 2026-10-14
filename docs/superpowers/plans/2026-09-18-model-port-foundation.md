@@ -14,25 +14,26 @@
 
 ## File map
 
-| File | Role |
-|------|------|
-| `engine/src/homun/models/port.py` | `ModelPort` Protocol + `Connection` model |
-| `engine/src/homun/models/types.py` | Extend `ProviderInfo.kind` / connection DTOs |
-| `engine/src/homun/models/adapters/__init__.py` | Package marker |
-| `engine/src/homun/models/adapters/fake.py` | Thin wrap of `FakeProvider` |
-| `engine/src/homun/models/adapters/openai_compat.py` | Thin wrap of existing provider |
-| `engine/src/homun/models/adapters/pydantic_ai.py` | Pydantic AI complete/stream |
-| `engine/src/homun/models/registry.py` | Implement ModelPort; migrate config → connections |
-| `engine/src/homun/routes/models.py` | Chat + connection CRUD via port |
-| `engine/tests/test_model_port_f1.py` | Port + adapter isolation tests |
-| `apps/web/src/lib/engine-models-client.ts` | Client for chat/connections |
-| `apps/web/.../ConversationModelsSettingsSection.tsx` | Prova chat + clearer connections |
+| File                                                 | Role                                              |
+| ---------------------------------------------------- | ------------------------------------------------- |
+| `engine/src/homun/models/port.py`                    | `ModelPort` Protocol + `Connection` model         |
+| `engine/src/homun/models/types.py`                   | Extend `ProviderInfo.kind` / connection DTOs      |
+| `engine/src/homun/models/adapters/__init__.py`       | Package marker                                    |
+| `engine/src/homun/models/adapters/fake.py`           | Thin wrap of `FakeProvider`                       |
+| `engine/src/homun/models/adapters/openai_compat.py`  | Thin wrap of existing provider                    |
+| `engine/src/homun/models/adapters/pydantic_ai.py`    | Pydantic AI complete/stream                       |
+| `engine/src/homun/models/registry.py`                | Implement ModelPort; migrate config → connections |
+| `engine/src/homun/routes/models.py`                  | Chat + connection CRUD via port                   |
+| `engine/tests/test_model_port_f1.py`                 | Port + adapter isolation tests                    |
+| `apps/web/src/lib/engine-models-client.ts`           | Client for chat/connections                       |
+| `apps/web/.../ConversationModelsSettingsSection.tsx` | Prova chat + clearer connections                  |
 
 ---
 
 ### Task 1: ModelPort types and failing test
 
 **Files:**
+
 - Create: `engine/src/homun/models/port.py`
 - Create: `engine/tests/test_model_port_f1.py`
 - Modify: `engine/src/homun/models/types.py` (kind union)
@@ -48,6 +49,7 @@
 ### Task 2: Registry implements ModelPort
 
 **Files:**
+
 - Modify: `engine/src/homun/models/registry.py`
 - Create: `engine/src/homun/models/adapters/*.py`
 
@@ -61,12 +63,13 @@
 ### Task 3: PydanticAIAdapter (openai + ollama)
 
 **Files:**
+
 - Create: `engine/src/homun/models/adapters/pydantic_ai.py`
 - Modify: `engine/pyproject.toml` optional extras if needed
 
 - [x] **Step 1: `complete` via Pydantic AI model for `openai` and `ollama` providers**
 - [x] **Step 2: Missing dependency → RuntimeError with clear message**
-- [x] **Step 3: Wire `kind=pydantic_ai` connections in registry** *(ConnectionKind + adapter helpers; registry upsert still rejects until Slice B)*
+- [x] **Step 3: Wire `kind=pydantic_ai` connections in registry** _(ConnectionKind + adapter helpers; registry upsert still rejects until Slice B)_
 - [x] **Step 4: Unit test with TestModel or fake if available without network**
 
 ---
@@ -74,6 +77,7 @@
 ### Task 4: HTTP chat endpoint
 
 **Files:**
+
 - Modify: `engine/src/homun/routes/models.py`
 - Modify: `engine/tests/test_models_f31.py` or new test
 
@@ -86,6 +90,7 @@
 ### Task 5: Web client + Settings prova chat
 
 **Files:**
+
 - Modify: `apps/web/src/lib/engine-models-client.ts`
 - Modify: `ConversationModelsSettingsSection.tsx`
 
@@ -98,6 +103,7 @@
 ### Task 6: Docs + roadmap
 
 **Files:**
+
 - Modify: `engine/README.md`, `roadmap.md`, `docs/development/2026-09-17-piano-sviluppo.md`
 
 - [x] **Step 1: Document ModelPort + how to add an adapter**

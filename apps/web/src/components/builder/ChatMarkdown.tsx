@@ -67,7 +67,7 @@ function parseBlocks(text: string): BlockNode[] {
   let i = 0;
 
   while (i < lines.length) {
-    const line = (lines[i] ?? "") ?? "";
+    const line = lines[i] ?? "";
 
     // Fenced code block
     const fenceMatch = line.match(/^```(\w*)/);
@@ -75,8 +75,8 @@ function parseBlocks(text: string): BlockNode[] {
       const lang = fenceMatch[1] || "";
       const codeLines: string[] = [];
       i++;
-      while (i < lines.length && !((lines[i] ?? "") ?? "").startsWith("```")) {
-        codeLines.push((lines[i] ?? "") ?? "");
+      while (i < lines.length && !(lines[i] ?? "").startsWith("```")) {
+        codeLines.push(lines[i] ?? "");
         i++;
       }
       i++; // skip closing ```
@@ -90,7 +90,7 @@ function parseBlocks(text: string): BlockNode[] {
       blocks.push({
         type: "heading",
         level: (headingMatch[1] ?? "").length,
-        content: (headingMatch[2] ?? ""),
+        content: headingMatch[2] ?? "",
       });
       i++;
       continue;
@@ -106,7 +106,7 @@ function parseBlocks(text: string): BlockNode[] {
     // Unordered list
     if (/^[-*+]\s/.test(line)) {
       const items: string[] = [];
-      while (i < lines.length && /^[-*+]\s/.test((lines[i] ?? ""))) {
+      while (i < lines.length && /^[-*+]\s/.test(lines[i] ?? "")) {
         items.push((lines[i] ?? "").replace(/^[-*+]\s/, ""));
         i++;
       }
@@ -117,7 +117,7 @@ function parseBlocks(text: string): BlockNode[] {
     // Ordered list
     if (/^\d+[.)]\s/.test(line)) {
       const items: string[] = [];
-      while (i < lines.length && /^\d+[.)]\s/.test((lines[i] ?? ""))) {
+      while (i < lines.length && /^\d+[.)]\s/.test(lines[i] ?? "")) {
         items.push((lines[i] ?? "").replace(/^\d+[.)]\s/, ""));
         i++;
       }
@@ -142,7 +142,7 @@ function parseBlocks(text: string): BlockNode[] {
       !(lines[i] ?? "").match(/^\d+[.)]\s/) &&
       !(lines[i] ?? "").match(/^[-*_]{3,}\s*$/)
     ) {
-      paraLines.push((lines[i] ?? ""));
+      paraLines.push(lines[i] ?? "");
       i++;
     }
     if (paraLines.length > 0) {
@@ -205,9 +205,7 @@ function Block({
       const Tag = block.ordered ? "ol" : "ul";
       const last = block.items.length - 1;
       return (
-        <Tag
-          className={`space-y-0.5 ${block.ordered ? "list-decimal" : "list-disc"} pl-5 text-sm`}
-        >
+        <Tag className={`space-y-0.5 ${block.ordered ? "list-decimal" : "list-disc"} pl-5 text-sm`}>
           {block.items.map((item, i) => (
             <li key={i}>
               <InlineContent text={item} highlightTerms={highlightTerms} />
@@ -253,21 +251,21 @@ function parseInline(text: string): InlineNode[] {
       nodes.push({ type: "text", content: text.slice(lastIndex, match.index) });
     }
 
-    if ((match[1] ?? "")) {
+    if (match[1] ?? "") {
       // Inline code
       nodes.push({ type: "code", content: (match[1] ?? "").slice(1, -1) });
-    } else if ((match[2] ?? "")) {
+    } else if (match[2] ?? "") {
       // [text](url) link
-      nodes.push({ type: "link", text: (match[3] ?? ""), href: (match[4] ?? "") });
-    } else if ((match[5] ?? "")) {
+      nodes.push({ type: "link", text: match[3] ?? "", href: match[4] ?? "" });
+    } else if (match[5] ?? "") {
       // **bold**
-      nodes.push({ type: "bold", content: (match[6] ?? "") });
-    } else if ((match[7] ?? "")) {
+      nodes.push({ type: "bold", content: match[6] ?? "" });
+    } else if (match[7] ?? "") {
       // *italic*
-      nodes.push({ type: "italic", content: (match[8] ?? "") });
-    } else if ((match[9] ?? "")) {
+      nodes.push({ type: "italic", content: match[8] ?? "" });
+    } else if (match[9] ?? "") {
       // Bare URL
-      nodes.push({ type: "link", text: (match[9] ?? ""), href: (match[9] ?? "") });
+      nodes.push({ type: "link", text: match[9] ?? "", href: match[9] ?? "" });
     } else if (match[10]) {
       // Line break within paragraph
       nodes.push({ type: "br" });
@@ -297,13 +295,7 @@ function InlineContent({
       {nodes.map((node, i) => {
         switch (node.type) {
           case "text":
-            return (
-              <HighlightedText
-                key={i}
-                text={node.content}
-                terms={highlightTerms}
-              />
-            );
+            return <HighlightedText key={i} text={node.content} terms={highlightTerms} />;
           case "code":
             return (
               <code
@@ -331,13 +323,7 @@ function InlineContent({
             // crafted link in agent/message content can't execute on click.
             const href = node.href.trim();
             if (!/^(https?:|mailto:)/i.test(href)) {
-              return (
-                <HighlightedText
-                  key={i}
-                  text={node.text}
-                  terms={highlightTerms}
-                />
-              );
+              return <HighlightedText key={i} text={node.text} terms={highlightTerms} />;
             }
             return (
               <a

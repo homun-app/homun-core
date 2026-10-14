@@ -5,10 +5,7 @@ import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { HomunGuidanceNotice } from "@/components/HomunGuidanceNotice";
 import { useMaterialRead } from "@/hooks/useMaterialRead";
 import { useToolChain } from "@/hooks/useToolChain";
-import {
-  eligibleForRead,
-  READ_UPLOAD_EXTENSIONS,
-} from "@/lib/engine-material-selection";
+import { eligibleForRead, READ_UPLOAD_EXTENSIONS } from "@/lib/engine-material-selection";
 import { EngineMaterialSelection } from "./EngineMaterialSelection";
 import "./engine-material-read.css";
 
@@ -36,9 +33,7 @@ export function EngineMaterialRead({
     <section className="cw-price-tool" aria-label="Lettura materiali">
       <details open={!idle || initiallyOpen || undefined}>
         <summary>
-          {c && c.steps.length > 1
-            ? `Letture multiple (${c.steps.length})`
-            : "Leggi i materiali"}
+          {c && c.steps.length > 1 ? `Letture multiple (${c.steps.length})` : "Leggi i materiali"}
         </summary>
         <p>
           Lettura locale con estratto limitato e provenienza. Seleziona uno o più documenti già nel
@@ -69,7 +64,9 @@ export function EngineMaterialRead({
                   ? `${selected.length} documenti selezionati: un'unica approvazione copre tutte le letture.`
                   : "1 documento selezionato."}
             </p>
-            <p className="cw-hint">Testo, CSV o PDF fino a 2 MB. Estratto limitato ai primi 8.000 caratteri.</p>
+            <p className="cw-hint">
+              Testo, CSV o PDF fino a 2 MB. Estratto limitato ai primi 8.000 caratteri.
+            </p>
             {multi ? (
               <button
                 type="button"
@@ -118,7 +115,8 @@ export function EngineMaterialRead({
             )}
             {["failed", "blocked"].includes(p.status) && (
               <p role="alert">
-                Lettura non completata: {p.error_code ?? p.status}. Nessun artifact dichiarato pronto.
+                Lettura non completata: {p.error_code ?? p.status}. Nessun artifact dichiarato
+                pronto.
               </p>
             )}
             {p.status === "completed" && <ReadResult extract={p.extract ?? ""} />}
@@ -133,7 +131,10 @@ export function EngineMaterialRead({
                 <strong>Propongo {c.steps.length} letture</strong>
                 <ol className="cw-chain-steps">
                   {c.steps.map((step, index) => (
-                    <li key={step.proposal_id ?? index} title={`SHA-256: ${step.materials[0]?.sha256}`}>
+                    <li
+                      key={step.proposal_id ?? index}
+                      title={`SHA-256: ${step.materials[0]?.sha256}`}
+                    >
                       {step.materials[0]?.title} · v{step.materials[0]?.version}
                     </li>
                   ))}
@@ -142,7 +143,11 @@ export function EngineMaterialRead({
                   Un'unica approvazione copre esattamente queste versioni (passa il mouse per
                   l'impronta): se un documento cambia, la proposta non è più valida.
                 </p>
-                <button className="cw-primary" disabled={chain.busy} onClick={() => void chain.approve()}>
+                <button
+                  className="cw-primary"
+                  disabled={chain.busy}
+                  onClick={() => void chain.approve()}
+                >
                   Approva le {c.steps.length} letture
                 </button>
               </>

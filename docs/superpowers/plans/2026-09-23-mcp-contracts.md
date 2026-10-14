@@ -8,7 +8,7 @@ without network reference resolution. Rediscover and compare within the executio
 session before tools/call. Preflight rejection is not an uncertain external effect.
 
 - [x] Tests: malformed arguments, missing/duplicate tool, contract drift,
-  configuration race, replay without rediscovery, same-session preflight refusal.
+      configuration race, replay without rediscovery, same-session preflight refusal.
 - [x] Descriptor helper, proposal binding and SDK preflight; direct pinned deps.
 - [x] Review, regressions and local protocol evidence; update documents and merge.
 

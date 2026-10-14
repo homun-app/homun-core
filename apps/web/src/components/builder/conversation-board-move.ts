@@ -43,11 +43,7 @@ export function boardMoveSuccessMessage(phase: string): string {
     : "Risultato riaperto per la verifica.";
 }
 
-export function applyBoardMove(
-  work: Work,
-  phase: Phase,
-  viewer: string,
-): Work {
+export function applyBoardMove(work: Work, phase: Phase, viewer: string): Work {
   return {
     ...work,
     phase,

@@ -46,7 +46,9 @@ export function ConversationChannelQueueStatusCard() {
     }
   }
 
-  const pendingCount = items.filter((i) => i.status === "pending" || i.status === "processing").length;
+  const pendingCount = items.filter(
+    (i) => i.status === "pending" || i.status === "processing",
+  ).length;
   const failedCount = items.filter((i) => i.status === "failed").length;
 
   return (
@@ -92,15 +94,22 @@ export function ConversationChannelQueueStatusCard() {
       <div className="mt-3 flex items-center gap-4 text-neutral-600 dark:text-neutral-400">
         <div className="flex items-center gap-1.5">
           <Clock className="h-3.5 w-3.5 text-blue-500" />
-          <span>In elaborazione / In attesa: <strong>{pendingCount}</strong></span>
+          <span>
+            In elaborazione / In attesa: <strong>{pendingCount}</strong>
+          </span>
         </div>
         <div className="flex items-center gap-1.5">
           <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
-          <span>Falliti / Retry: <strong>{failedCount}</strong></span>
+          <span>
+            Falliti / Retry: <strong>{failedCount}</strong>
+          </span>
         </div>
         <div className="flex items-center gap-1.5">
           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-          <span>Completati recenti: <strong>{items.filter((i) => i.status === "completed").length}</strong></span>
+          <span>
+            Completati recenti:{" "}
+            <strong>{items.filter((i) => i.status === "completed").length}</strong>
+          </span>
         </div>
       </div>
 
@@ -121,13 +130,15 @@ export function ConversationChannelQueueStatusCard() {
                     item.status === "completed"
                       ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                       : item.status === "failed"
-                      ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
-                      : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                        ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
+                        : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
                   }`}
                 >
                   {item.status}
                 </span>
-                <span className="text-neutral-400 text-[10px]">{new Date(item.created_at).toLocaleTimeString()}</span>
+                <span className="text-neutral-400 text-[10px]">
+                  {new Date(item.created_at).toLocaleTimeString()}
+                </span>
               </div>
             </div>
           ))}

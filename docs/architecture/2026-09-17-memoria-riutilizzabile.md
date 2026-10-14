@@ -12,11 +12,11 @@ Per partire: Qdrant locale come archivio vettoriale candidato, Ollama per estraz
 
 ## Confronto
 
-| Componente | Vantaggio per noi | Scelta |
-|---|---|---|
-| Mem0 OSS | Livello memoria integrabile nel runtime scelto | Primo candidato da adottare |
-| Letta | Agenti persistenti con gestione della memoria integrata | Alternativa di architettura, non libreria da aggiungere automaticamente a Pydantic/DBOS |
-| Graphiti | Relazioni tra entità e fatti nel tempo | Successivo, se i casi reali richiedono grafo e storia temporale |
+| Componente | Vantaggio per noi                                       | Scelta                                                                                  |
+| ---------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Mem0 OSS   | Livello memoria integrabile nel runtime scelto          | Primo candidato da adottare                                                             |
+| Letta      | Agenti persistenti con gestione della memoria integrata | Alternativa di architettura, non libreria da aggiungere automaticamente a Pydantic/DBOS |
+| Graphiti   | Relazioni tra entità e fatti nel tempo                  | Successivo, se i casi reali richiedono grafo e storia temporale                         |
 
 Licenze dei tre repository verificate: Apache-2.0. Non estendere questa conclusione ai servizi cloud, alle dipendenze o ai modelli. Conservare licenza/NOTICE e controllare la versione effettivamente distribuita.
 

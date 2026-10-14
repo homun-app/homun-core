@@ -62,11 +62,18 @@ type Props = {
   onCreateRoutine?: ((input: { name: string; cron: string }) => Promise<void>) | undefined;
   onSetBudget?: ((modelAttempts: number) => Promise<void>) | undefined;
   onSetDue?: ((dueDate: string | null) => Promise<void>) | undefined;
-  onRevisePlan?: ((action: {
-    insertAfterStepId?: string | null;
-    newStep?: { title: string; assigneeId: string; capability?: string; outputExpected?: string };
-    removeStepId?: string;
-  }) => Promise<void>) | undefined;
+  onRevisePlan?:
+    | ((action: {
+        insertAfterStepId?: string | null;
+        newStep?: {
+          title: string;
+          assigneeId: string;
+          capability?: string;
+          outputExpected?: string;
+        };
+        removeStepId?: string;
+      }) => Promise<void>)
+    | undefined;
   agents?: Array<{ id: string; name: string; status: string }> | undefined;
   agentNames?: Record<string, string> | undefined;
 };
@@ -98,8 +105,18 @@ export function ConversationWorkspaceWorkPanel({
   directoryRef,
   engineBusy = false,
   engineIntake,
-  onApplyObjectivePatch, onRename, onCloseWork, onStartWork, onSubmitArtifact,
-  onRefreshEngine, onCreateRoutine, onSetBudget, onSetDue, onRevisePlan, agents, agentNames,
+  onApplyObjectivePatch,
+  onRename,
+  onCloseWork,
+  onStartWork,
+  onSubmitArtifact,
+  onRefreshEngine,
+  onCreateRoutine,
+  onSetBudget,
+  onSetDue,
+  onRevisePlan,
+  agents,
+  agentNames,
 }: Props) {
   if (work.source === "engine")
     return (
@@ -187,7 +204,11 @@ export function ConversationWorkspaceWorkPanel({
           Progetto: {spaceData.projects.find((p) => p.id === work.projectId)?.name} ↗
         </button>
       ) : (
-        <button className="cs-link" style={{ color: "#8a9a86" }} onClick={() => onOpenSpace("Progetti")}>
+        <button
+          className="cs-link"
+          style={{ color: "#8a9a86" }}
+          onClick={() => onOpenSpace("Progetti")}
+        >
           Nessun progetto · Assegna ↗
         </button>
       )}
@@ -220,9 +241,7 @@ export function ConversationWorkspaceWorkPanel({
               work.phase === "approved" ||
               viewer !== (work.requester || "Fabio")
             }
-            onChange={(e) =>
-              onPatch({ autonomy: e.target.value as "supervised" | "autonomous" })
-            }
+            onChange={(e) => onPatch({ autonomy: e.target.value as "supervised" | "autonomous" })}
           >
             <option value="supervised">Risultato da verificare</option>
             <option value="autonomous">Consegna autonoma</option>
@@ -464,8 +483,7 @@ export function ConversationWorkspaceWorkPanel({
       )}
       {work.due && (
         <p className="cw-due">
-          <Clock3 size={14} /> Entro{" "}
-          {new Date(work.due + "T12:00:00").toLocaleDateString("it-IT")}
+          <Clock3 size={14} /> Entro {new Date(work.due + "T12:00:00").toLocaleDateString("it-IT")}
         </p>
       )}
       <button className="cs-link" onClick={() => onOpenSpace("Materiali", work.id)}>
@@ -516,7 +534,13 @@ export function registerPlanAgent(
   name: string,
   role: string,
   spaceData: SpaceData,
-): { ok: false } | { ok: true; scenario: ConversationScenario & { custom: true }; profile: NonNullable<SpaceData["profiles"]>[string] } {
+):
+  | { ok: false }
+  | {
+      ok: true;
+      scenario: ConversationScenario & { custom: true };
+      profile: NonNullable<SpaceData["profiles"]>[string];
+    } {
   if (
     [...spacePeople, ...Object.keys(spaceData.profiles || {})].some(
       (n) => n.toLowerCase() === name.toLowerCase(),

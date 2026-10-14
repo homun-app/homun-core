@@ -2,7 +2,7 @@
  * Client for Channel Inbound Queue and Recovery (H32/H33/D1).
  */
 
-import { ENGINE_DEFAULT_BASE_URL, EngineUnavailableError } from "./engine-client.ts";
+import { ENGINE_DEFAULT_BASE_URL, engineUnreachableError } from "./engine-client.ts";
 import { homunErrorFromHttp } from "./homun-errors.ts";
 
 export type InboundQueueItem = {
@@ -26,14 +26,15 @@ export type RecoverQueueResponse = {
   recovered_count: number;
 };
 
-async function queueFetch(path: string, init?: RequestInit, baseUrl = ENGINE_DEFAULT_BASE_URL): Promise<Response> {
+async function queueFetch(
+  path: string,
+  init?: RequestInit,
+  baseUrl = ENGINE_DEFAULT_BASE_URL,
+): Promise<Response> {
   try {
     return await fetch(`${baseUrl}${path}`, init);
   } catch (cause) {
-    throw new EngineUnavailableError(
-      `Engine unreachable at ${baseUrl}. Start it with: npm run engine:dev`,
-      cause,
-    );
+    throw engineUnreachableError(baseUrl, cause);
   }
 }
 
@@ -57,7 +58,10 @@ export async function fetchInboundQueue(params?: {
   return (await response.json()) as InboundQueueResponse;
 }
 
-export async function recoverInboundQueue(maxAgeSeconds = 60.0, baseUrl = ENGINE_DEFAULT_BASE_URL): Promise<RecoverQueueResponse> {
+export async function recoverInboundQueue(
+  maxAgeSeconds = 60.0,
+  baseUrl = ENGINE_DEFAULT_BASE_URL,
+): Promise<RecoverQueueResponse> {
   const path = `/v1/gateway/channels/queue/recover?max_age_seconds=${maxAgeSeconds}`;
   const response = await queueFetch(path, { method: "POST" }, baseUrl);
   if (!response.ok) {
@@ -67,7 +71,11 @@ export async function recoverInboundQueue(maxAgeSeconds = 60.0, baseUrl = ENGINE
   return (await response.json()) as RecoverQueueResponse;
 }
 
-export async function pollChannelOnce(platform: string, timeout = 5, baseUrl = ENGINE_DEFAULT_BASE_URL): Promise<Record<string, unknown>> {
+export async function pollChannelOnce(
+  platform: string,
+  timeout = 5,
+  baseUrl = ENGINE_DEFAULT_BASE_URL,
+): Promise<Record<string, unknown>> {
   const path = `/v1/gateway/channels/${encodeURIComponent(platform)}/poll-once?timeout=${timeout}`;
   const response = await queueFetch(path, { method: "POST" }, baseUrl);
   if (!response.ok) {

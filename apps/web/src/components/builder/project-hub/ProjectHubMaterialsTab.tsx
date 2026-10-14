@@ -1,5 +1,15 @@
 import { useState, useRef } from "react";
-import { FileText, Plus, Upload, Trash2, Eye, ExternalLink, CheckCircle2, AlertCircle, FileCode } from "lucide-react";
+import {
+  FileText,
+  Plus,
+  Upload,
+  Trash2,
+  Eye,
+  ExternalLink,
+  CheckCircle2,
+  AlertCircle,
+  FileCode,
+} from "lucide-react";
 import type { EngineMaterial } from "@/lib/engine-projects-client";
 
 type Props = {
@@ -56,9 +66,7 @@ export function ProjectHubMaterialsTab({
     <div className="ph-tab-content">
       <div className="ph-card">
         <div className="ph-card-header">
-          <div className="section-label">
-            Documenti & Materiali ({materials.length})
-          </div>
+          <div className="section-label">Documenti & Materiali ({materials.length})</div>
           <div style={{ display: "flex", gap: 8 }}>
             <input
               type="file"
@@ -100,7 +108,9 @@ export function ProjectHubMaterialsTab({
               gap: 10,
             }}
           >
-            <strong style={{ fontSize: 13, color: "#1c2d22" }}>Aggiungi materiale di testo o linea guida</strong>
+            <strong style={{ fontSize: 13, color: "#1c2d22" }}>
+              Aggiungi materiale di testo o linea guida
+            </strong>
             <input
               type="text"
               placeholder="Titolo del documento (es. Brief di progetto o Condizioni commerciali)"
@@ -156,7 +166,8 @@ export function ProjectHubMaterialsTab({
             <FileText className="ph-empty-icon" />
             <h4 className="ph-empty-title">Nessun documento caricato nel progetto</h4>
             <p className="ph-empty-desc">
-              Carica PDF, specifiche o contratti per dare contesto operativo ai task di questo progetto.
+              Carica PDF, specifiche o contratti per dare contesto operativo ai task di questo
+              progetto.
             </p>
           </div>
         ) : (

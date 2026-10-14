@@ -68,8 +68,13 @@ async function machOFiles(engineDir) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const full = path.join(directory, entry.name);
       if (entry.isDirectory()) await walk(full);
-      else if (entry.isFile() && (entry.name.endsWith(".dylib") || entry.name.endsWith(".so")
-        || entry.name === "homun-engine")) out.push(full);
+      else if (
+        entry.isFile() &&
+        (entry.name.endsWith(".dylib") ||
+          entry.name.endsWith(".so") ||
+          entry.name === "homun-engine")
+      )
+        out.push(full);
     }
   }
   await walk(engineDir);
@@ -81,7 +86,7 @@ async function copyEngine(context) {
   const stagedHash = await verifyEngineInputs(repoRoot, stagedEngine);
   const target = path.join(packagedResourcesPath(context), "engine");
   await cp(stagedEngine, target, { recursive: true, verbatimSymlinks: true });
-  if (await verifyEngineInputs(repoRoot, target) !== stagedHash) {
+  if ((await verifyEngineInputs(repoRoot, target)) !== stagedHash) {
     throw new Error("Final application engine differs from staged engine");
   }
   await stat(path.join(target, "homun-engine"));
@@ -89,12 +94,17 @@ async function copyEngine(context) {
 }
 
 async function signEngine(context, engineDir) {
-  if (context.electronPlatformName !== "darwin" || process.env.CSC_IDENTITY_AUTO_DISCOVERY === "false") return;
+  if (
+    context.electronPlatformName !== "darwin" ||
+    process.env.CSC_IDENTITY_AUTO_DISCOVERY === "false"
+  )
+    return;
   // Force electron-builder to import CSC_LINK into its temporary keychain before
   // asking `security` for the resolved Developer ID identity.
   await context.packager.codeSigningInfo?.value;
-  const identity = process.env.CSC_NAME
-    || parseDeveloperIdIdentity(run("security", ["find-identity", "-v", "-p", "codesigning"]));
+  const identity =
+    process.env.CSC_NAME ||
+    parseDeveloperIdIdentity(run("security", ["find-identity", "-v", "-p", "codesigning"]));
   if (!identity) {
     // Non-release local builds often have no signing certificate. The signed
     // release CI refuses to publish before reaching this hook when credentials
@@ -107,11 +117,22 @@ async function signEngine(context, engineDir) {
     throw new Error("Engine executable missing before signing");
   }
   // Leaves first (dylibs/so), main executable last.
-  const ordered = [...binaries.filter((f) => path.basename(f) !== "homun-engine"),
-                   ...binaries.filter((f) => path.basename(f) === "homun-engine")];
+  const ordered = [
+    ...binaries.filter((f) => path.basename(f) !== "homun-engine"),
+    ...binaries.filter((f) => path.basename(f) === "homun-engine"),
+  ];
   for (const file of ordered) {
-    run("codesign", ["--force", "--sign", identity, "--options", "runtime", "--timestamp",
-                     "--entitlements", entitlements, file]);
+    run("codesign", [
+      "--force",
+      "--sign",
+      identity,
+      "--options",
+      "runtime",
+      "--timestamp",
+      "--entitlements",
+      entitlements,
+      file,
+    ]);
   }
 }
 

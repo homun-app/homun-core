@@ -55,7 +55,10 @@ export function EngineWorkIntake({
   if (!confirmed) {
     if (failed) {
       return (
-        <section className="cw-intake-card cw-intake-card--failed" aria-label="Proposta da riprendere">
+        <section
+          className="cw-intake-card cw-intake-card--failed"
+          aria-label="Proposta da riprendere"
+        >
           <div className="cw-intake-eyebrow">DA RIPRENDERE</div>
           <h3>
             {p.error_code === "intake_interrupted"
@@ -90,15 +93,18 @@ export function EngineWorkIntake({
         </section>
       );
     }
-    return <EngineIntakeCoordinatorCard proposal={p} intake={intake} onInspectAgent={onInspectAgent} />;
+    return (
+      <EngineIntakeCoordinatorCard proposal={p} intake={intake} onInspectAgent={onInspectAgent} />
+    );
   }
 
   return (
     <>
-      {work.engineStatus === "review" && work.engineLatestArtifact
-        && ["general", "agent_run"].includes(lastSucceededCapability(work) ?? "") && (
-        <EngineArtifactReview variant="inline" work={work} onChanged={onChanged} />
-      )}
+      {work.engineStatus === "review" &&
+        work.engineLatestArtifact &&
+        ["general", "agent_run"].includes(lastSucceededCapability(work) ?? "") && (
+          <EngineArtifactReview variant="inline" work={work} onChanged={onChanged} />
+        )}
       {!work.enginePlan?.length && <PhaseTool work={work} onChanged={onChanged} />}
       <HomunErrorNotice error={intake.error} />
     </>
@@ -106,7 +112,9 @@ export function EngineWorkIntake({
 }
 
 /** Capability of the phase that produced the current artifact: its review owner. */
-function lastSucceededCapability(work: Parameters<typeof EngineWorkIntake>[0]["work"]): string | null {
+function lastSucceededCapability(
+  work: Parameters<typeof EngineWorkIntake>[0]["work"],
+): string | null {
   const succeeded = work.enginePlan?.filter((step) => step.status === "succeeded") ?? [];
   return succeeded.length ? succeeded[succeeded.length - 1]!.capability : null;
 }
@@ -114,15 +122,28 @@ function lastSucceededCapability(work: Parameters<typeof EngineWorkIntake>[0]["w
 /** Capability of the phase in play: the running one, else the first waiting. */
 function currentPhaseCapability(work: Parameters<typeof EngineWorkIntake>[0]["work"]): string {
   const steps = work.enginePlan;
-  if (work.engineStatus === "ready" && work.engineRevisionRequested && lastSucceededCapability(work) === "agent_run") return "agent_run";
+  if (
+    work.engineStatus === "ready" &&
+    work.engineRevisionRequested &&
+    lastSucceededCapability(work) === "agent_run"
+  )
+    return "agent_run";
   if (!steps?.length) return "general";
   const running = steps.find((step) => step.status === "running");
   const current = running ?? steps.find((step) => step.status === "pending");
-  return current?.capability ?? (work.engineStatus === "ready" && lastSucceededCapability(work) === "agent_run" ? "agent_run" : "general");
+  return (
+    current?.capability ??
+    (work.engineStatus === "ready" && lastSucceededCapability(work) === "agent_run"
+      ? "agent_run"
+      : "general")
+  );
 }
 
 /** The dedicated tool flow drives its phase: comparison or authorized read. */
-function PhaseTool({ work, onChanged }: {
+function PhaseTool({
+  work,
+  onChanged,
+}: {
   work: Parameters<typeof EngineWorkIntake>[0]["work"];
   onChanged: () => Promise<void>;
 }) {
@@ -131,9 +152,7 @@ function PhaseTool({ work, onChanged }: {
     return <EnginePriceComparison work={work} onChanged={onChanged} />;
   if (capability === "read_material")
     return <EngineMaterialRead work={work} onChanged={onChanged} />;
-  if (capability === "agent_run")
-    return <EngineAgentRun work={work} onChanged={onChanged} />;
-  if (capability === "synthesize")
-    return <EngineSynthesis work={work} onChanged={onChanged} />;
+  if (capability === "agent_run") return <EngineAgentRun work={work} onChanged={onChanged} />;
+  if (capability === "synthesize") return <EngineSynthesis work={work} onChanged={onChanged} />;
   return null;
 }

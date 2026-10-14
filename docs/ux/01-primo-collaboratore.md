@@ -116,18 +116,18 @@ sottoincarico collegato, con responsabile e risultato propri.
 
 ## 5. Gestire attese, approvazioni e problemi
 
-| Situazione | Informazione e azione visibili |
-| --- | --- |
-| Informazione mancante | Domanda precisa, fonte mancante, azione «Rispondi» |
-| Attesa esterna | Interlocutore, richiesta inviata, eventuale data di ricontrollo |
-| Attesa di un altro bot | Sottoincarico collegato e chi lo sta svolgendo |
-| Bozza da approvare | Contenuto esatto e destinazione; «Approva e invia», «Chiedi modifiche» |
-| Collegamento non disponibile | Passaggio bloccato; «Ricollega», con bozza e lavoro conservati |
-| Verifica fallita | Cosa non soddisfa il criterio e proposta di correzione |
-| Cambio modello | Motivo, modello impiegato, elaborazione locale/remota nei dettagli |
-| Budget insufficiente | Spesa e limite; «Modifica limite» oppure «Lascia in pausa» |
-| Lavoro interrotto | Ultimo passaggio verificato e cosa va controllato prima di riprendere |
-| Esito di invio incerto | «Verifica in corso» o richiesta d'intervento; nessun reinvio automatico alla cieca |
+| Situazione                   | Informazione e azione visibili                                                     |
+| ---------------------------- | ---------------------------------------------------------------------------------- |
+| Informazione mancante        | Domanda precisa, fonte mancante, azione «Rispondi»                                 |
+| Attesa esterna               | Interlocutore, richiesta inviata, eventuale data di ricontrollo                    |
+| Attesa di un altro bot       | Sottoincarico collegato e chi lo sta svolgendo                                     |
+| Bozza da approvare           | Contenuto esatto e destinazione; «Approva e invia», «Chiedi modifiche»             |
+| Collegamento non disponibile | Passaggio bloccato; «Ricollega», con bozza e lavoro conservati                     |
+| Verifica fallita             | Cosa non soddisfa il criterio e proposta di correzione                             |
+| Cambio modello               | Motivo, modello impiegato, elaborazione locale/remota nei dettagli                 |
+| Budget insufficiente         | Spesa e limite; «Modifica limite» oppure «Lascia in pausa»                         |
+| Lavoro interrotto            | Ultimo passaggio verificato e cosa va controllato prima di riprendere              |
+| Esito di invio incerto       | «Verifica in corso» o richiesta d'intervento; nessun reinvio automatico alla cieca |
 
 Una correzione della bozza richiede la verifica della nuova versione. Un consenso
 all'invio vale per il contenuto e la destinazione mostrati, non per modifiche successive.

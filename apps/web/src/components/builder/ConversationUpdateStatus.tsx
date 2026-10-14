@@ -18,8 +18,8 @@ export function ConversationUpdateStatus() {
 
   useEffect(() => {
     let live = true;
-    desktop?.updateStatus
-      ?.()
+    desktop
+      ?.updateStatus?.()
       .then((status) => {
         if (live) setCurrent(status.current);
       })
@@ -67,7 +67,12 @@ export function ConversationUpdateStatus() {
         )}
       </p>
       <div className="cs-actions">
-        <button type="button" className="cw-secondary" disabled={checking} onClick={() => void check()}>
+        <button
+          type="button"
+          className="cw-secondary"
+          disabled={checking}
+          onClick={() => void check()}
+        >
           {checking ? "Controllo…" : "Controlla aggiornamenti adesso"}
         </button>
       </div>

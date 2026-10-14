@@ -12,7 +12,7 @@ not evidence that the action failed. Human owner/reviewer can resume publication
 of an existing receipt without repeating the effect. Retain error receipts too.
 
 - [x] Regression fixtures: replay approval, configuration drift, command collision,
-  transport uncertainty, publication failure, interrupted process, changed work.
+      transport uncertainty, publication failure, interrupted process, changed work.
 - [x] Separate publication from transport; persist results before publication.
 - [x] Show pending publication and uncertain outcomes in the existing UI.
 - [x] Independent review and full regression.

@@ -43,9 +43,9 @@ export function EngineSynthesis({
       <details open={!idle || initiallyOpen || undefined}>
         <summary>Scrivi la sintesi</summary>
         <p>
-          Homun, o il collaboratore scelto, scriverà la bozza a partire da obiettivo,
-          vincoli, procedure approvate e i documenti che scegli. La bozza arriva in revisione:
-          nessun invio esterno, nessuna approvazione automatica.
+          Homun, o il collaboratore scelto, scriverà la bozza a partire da obiettivo, vincoli,
+          procedure approvate e i documenti che scegli. La bozza arriva in revisione: nessun invio
+          esterno, nessuna approvazione automatica.
         </p>
 
         {idle && (
@@ -92,8 +92,8 @@ export function EngineSynthesis({
                   </label>
                 ))}
                 <p className="cw-hint">
-                  Il corpo della procedura selezionata entra nel contesto del modello e resta
-                  citato nella provenienza della bozza.
+                  Il corpo della procedura selezionata entra nel contesto del modello e resta citato
+                  nella provenienza della bozza.
                 </p>
               </fieldset>
             )}
@@ -111,17 +111,22 @@ export function EngineSynthesis({
         {p && p.status === "pending_approval" && (
           <>
             <p>
-              <strong>{p.step_title}</strong> · {p.materials.length === 0
+              <strong>{p.step_title}</strong> ·{" "}
+              {p.materials.length === 0
                 ? "nessun materiale: obiettivo e vincoli"
                 : p.materials.map((m) => m.title).join(", ")}
               {p.skills?.length ? ` · procedure: ${p.skills.map((s) => s.name).join(", ")}` : ""}
             </p>
             <p className="cw-hint">
               Homun usa la connessione attiva dello spazio. Un collaboratore scelto usa la propria
-              connessione dedicata, quando disponibile. La bozza dichiara il modello usato. Approvando,
-              autorizzi questa esecuzione e questa fase.
+              connessione dedicata, quando disponibile. La bozza dichiara il modello usato.
+              Approvando, autorizzi questa esecuzione e questa fase.
             </p>
-            <button className="cw-primary" disabled={synth.busy} onClick={() => void synth.approve()}>
+            <button
+              className="cw-primary"
+              disabled={synth.busy}
+              onClick={() => void synth.approve()}
+            >
               Approva ed esegui sintesi
             </button>
           </>
@@ -131,16 +136,19 @@ export function EngineSynthesis({
         )}
         {p && p.status === "completed" && p.summary && (
           <p role="status">
-            <strong>Bozza pronta per la tua verifica.</strong> Modello {p.summary.model_id ?? "dello spazio"},{" "}
-            connessione {p.summary.connection === "collaboratore" ? "dedicata del collaboratore" : "attiva dello spazio"}
-            {p.summary.truncated ? ", bozza troncata al limite di caratteri" : ""}. Il risultato è in
-            revisione nella conversazione.
+            <strong>Bozza pronta per la tua verifica.</strong> Modello{" "}
+            {p.summary.model_id ?? "dello spazio"}, connessione{" "}
+            {p.summary.connection === "collaboratore"
+              ? "dedicata del collaboratore"
+              : "attiva dello spazio"}
+            {p.summary.truncated ? ", bozza troncata al limite di caratteri" : ""}. Il risultato è
+            in revisione nella conversazione.
           </p>
         )}
         {p && ["failed", "blocked"].includes(p.status) && (
           <p role="alert">
-            Sintesi non completata: {p.error_code ?? p.status}. Nessuna bozza dichiarata pronta; puoi
-            preparare una nuova proposta.
+            Sintesi non completata: {p.error_code ?? p.status}. Nessuna bozza dichiarata pronta;
+            puoi preparare una nuova proposta.
           </p>
         )}
         {synth.busy && <p role="status">Preparazione in corso…</p>}

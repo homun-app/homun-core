@@ -42,7 +42,7 @@ export async function listEngineGoals(): Promise<GoalState[]> {
       headers: { Accept: "application/json" },
     },
     ENGINE_DEFAULT_BASE_URL,
-    30000
+    30000,
   );
   const result = await response.json();
   if (!response.ok) {
@@ -58,7 +58,7 @@ export async function getEngineGoal(sessionId: string): Promise<GoalState> {
       headers: { Accept: "application/json" },
     },
     ENGINE_DEFAULT_BASE_URL,
-    30000
+    30000,
   );
   const result = await response.json();
   if (!response.ok) {
@@ -75,7 +75,7 @@ export async function deleteEngineGoal(sessionId: string): Promise<void> {
       headers: { Accept: "application/json" },
     },
     ENGINE_DEFAULT_BASE_URL,
-    30000
+    30000,
   );
   if (!response.ok) {
     const result = await response.json().catch(() => ({}));

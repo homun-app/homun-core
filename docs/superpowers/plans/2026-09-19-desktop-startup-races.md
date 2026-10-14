@@ -11,7 +11,7 @@ A shell-only check leaves the reusable process owner unsafe; redesigning lifecyc
 is unnecessary for this bounded defect. No API, database or UI behavior expansion.
 
 - [x] Reproduce abort while real child HTTP response body is delayed; assert rejection
-  and actual child exit. Also reproduce health arriving after startup deadline.
+      and actual child exit. Also reproduce health arriving after startup deadline.
 - [x] Add remaining-budget probe cancellation and post-await readiness checks.
 - [x] Run desktop suite and build an updated app using the unchanged engine bundle.
 - [x] Compare packaged owner module to source and record artifact plus native UI limit.

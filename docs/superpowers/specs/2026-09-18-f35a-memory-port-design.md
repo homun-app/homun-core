@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-18  
 **Status:** accepted (slices A–C + gate UI shipped)  
-**Depends on:** F2 storage, F3.2 interpret  
+**Depends on:** F2 storage, F3.2 interpret
 
 ## Goal
 
@@ -10,12 +10,12 @@ MemoryPort + optional Mem0 OSS locale: ricordo approvato, persistenza, isolament
 
 ## Shipped
 
-| Slice | Content |
-|-------|---------|
-| A | `MemoryPort` SQLite ledger: list / add_approved / rectify / delete / export |
-| B | Recall + Salva in memoria from chat; dual-write hook |
-| C | Local Mem0 (Ollama+Qdrant) via `build_local_mem0_config`; `/v1/memory/status` |
-| Gate | Settings: rectify + export JSON; HTTP test isolates two projects on list/recall/export |
+| Slice | Content                                                                                |
+| ----- | -------------------------------------------------------------------------------------- |
+| A     | `MemoryPort` SQLite ledger: list / add_approved / rectify / delete / export            |
+| B     | Recall + Salva in memoria from chat; dual-write hook                                   |
+| C     | Local Mem0 (Ollama+Qdrant) via `build_local_mem0_config`; `/v1/memory/status`          |
+| Gate  | Settings: rectify + export JSON; HTTP test isolates two projects on list/recall/export |
 
 ## Rules
 

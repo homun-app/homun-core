@@ -1,6 +1,6 @@
 // Small always-on-top window showing the update download progress.
 // Self-contained inline HTML: no app assets, no Node in the renderer.
-const { BrowserWindow } = require('electron');
+const { BrowserWindow } = require("electron");
 
 const PAGE = (version) => `<!doctype html>
 <html lang="it"><head><meta charset="utf-8"><title>Aggiornamento Homun</title>
@@ -33,13 +33,21 @@ function mb(bytes) {
 
 function createUpdateProgressWindow(version) {
   const win = new BrowserWindow({
-    width: 400, height: 170, show: false, resizable: false, minimizable: false,
-    maximizable: false, fullscreenable: false, alwaysOnTop: true, skipTaskbar: false,
-    title: 'Aggiornamento Homun', autoHideMenuBar: true,
+    width: 400,
+    height: 170,
+    show: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    skipTaskbar: false,
+    title: "Aggiornamento Homun",
+    autoHideMenuBar: true,
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
-  win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(PAGE(version)));
-  win.once('ready-to-show', () => win.show());
+  win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(PAGE(version)));
+  win.once("ready-to-show", () => win.show());
   return {
     update(info) {
       if (win.isDestroyed()) return;

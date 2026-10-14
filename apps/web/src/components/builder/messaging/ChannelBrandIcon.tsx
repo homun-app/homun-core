@@ -154,10 +154,7 @@ export function ChannelBrandIcon({
             d="M12 4.5a3.5 3.5 0 00-3.5 3.5c0 1.1.5 2.1 1.3 2.7l-3.3 3.3a5.5 5.5 0 008.2 6.5l.8.8a6.5 6.5 0 00-9.2-9.2l3.4-3.4a3.5 3.5 0 012.3-.7z"
             fill="#ffffff"
           />
-          <path
-            d="M12 6a2 2 0 100 4 2 2 0 000-4z"
-            fill="#1CE6D6"
-          />
+          <path d="M12 6a2 2 0 100 4 2 2 0 000-4z" fill="#1CE6D6" />
         </svg>
       );
 
@@ -191,10 +188,7 @@ export function ChannelBrandIcon({
           {...props}
         >
           <rect width="24" height="24" rx="5" fill="#18BCF2" />
-          <path
-            d="M12 5l-7 6.5V19h14v-7.5L12 5zm0 2.4l4.5 4.2V17h-9v-5.4L12 7.4z"
-            fill="#ffffff"
-          />
+          <path d="M12 5l-7 6.5V19h14v-7.5L12 5zm0 2.4l4.5 4.2V17h-9v-5.4L12 7.4z" fill="#ffffff" />
           <circle cx="12" cy="11.5" r="1.3" fill="#ffffff" />
           <circle cx="10" cy="14.5" r="1" fill="#ffffff" />
           <circle cx="14" cy="14.5" r="1" fill="#ffffff" />
@@ -295,14 +289,8 @@ export function ChannelBrandIcon({
           {...props}
         >
           <rect width="24" height="24" rx="5" fill="#00D6B9" />
-          <path
-            d="M6 15l5.5-8.5L18 10l-6.5 6.5L6 15z"
-            fill="#ffffff"
-          />
-          <path
-            d="M11.5 6.5L7 16l8-1-3.5-8.5z"
-            fill="#0A66C2"
-          />
+          <path d="M6 15l5.5-8.5L18 10l-6.5 6.5L6 15z" fill="#ffffff" />
+          <path d="M11.5 6.5L7 16l8-1-3.5-8.5z" fill="#0A66C2" />
         </svg>
       );
 
@@ -361,10 +349,7 @@ export function ChannelBrandIcon({
           {...props}
         >
           <rect width="24" height="24" rx="5" fill="#FF5353" />
-          <path
-            d="M6 14c2-4 10-4 12 0l-2 3H8l-2-3z"
-            fill="#FFE066"
-          />
+          <path d="M6 14c2-4 10-4 12 0l-2 3H8l-2-3z" fill="#FFE066" />
           <circle cx="12" cy="11" r="2.5" fill="#FFE066" />
         </svg>
       );

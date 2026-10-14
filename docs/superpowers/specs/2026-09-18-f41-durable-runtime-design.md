@@ -1,7 +1,7 @@
 # F4.1 — Durable work runtime (DBOS in engine)
 
 **Date:** 2026-09-18  
-**Status:** accepted (C+B: DBOS in engine + receipts + HTTP run status)  
+**Status:** accepted (C+B: DBOS in engine + receipts + HTTP run status)
 
 **Depends on:** D-RUN-01 (Pydantic AI + DBOS), F1–F3 domain, F0.2 spike  
 **Slice intent:** “quasi produzione” = spike proofs **inside** `engine/` + HTTP status + Homun receipts (C+B)
@@ -55,12 +55,12 @@ Domain `Work.status` stays the product truth; Run mirrors execution. On wait →
 
 New package under `engine/src/homun/runtime/` (replace thin capabilities stub or split):
 
-| Module | Job |
-|--------|-----|
-| `dbos_app.py` | Configure/launch DBOS (SQLite under data dir); lifecycle with FastAPI |
+| Module                  | Job                                                                              |
+| ----------------------- | -------------------------------------------------------------------------------- |
+| `dbos_app.py`           | Configure/launch DBOS (SQLite under data dir); lifecycle with FastAPI            |
 | `workflows/work_run.py` | Durable workflow: load work snapshot → wait contribution → uncertain effect step |
-| `receipts.py` | Homun idempotent apply/reconcile (port of F0.2 `side_effects`) |
-| `bridge.py` | Map domain commands ↔ start/send/status |
+| `receipts.py`           | Homun idempotent apply/reconcile (port of F0.2 `side_effects`)                   |
+| `bridge.py`             | Map domain commands ↔ start/send/status                                          |
 
 Rules from ADR:
 
@@ -70,12 +70,12 @@ Rules from ADR:
 
 ## Commands / HTTP
 
-| Surface | Behavior |
-|---------|----------|
-| `work.start` | Creates Run, starts DBOS workflow, sets Work `running` then quickly `waiting_input` when recv arms |
-| `work.provide_contribution` | Domain acceptance + `DBOS.send` to workflow topic |
-| `GET /v1/workspaces/{id}/runs/{run_id}` | Homun Run + DBOS status string |
-| `GET /v1/workspaces/{id}/works/{work_id}/run` | Current run for work (if any) |
+| Surface                                       | Behavior                                                                                           |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `work.start`                                  | Creates Run, starts DBOS workflow, sets Work `running` then quickly `waiting_input` when recv arms |
+| `work.provide_contribution`                   | Domain acceptance + `DBOS.send` to workflow topic                                                  |
+| `GET /v1/workspaces/{id}/runs/{run_id}`       | Homun Run + DBOS status string                                                                     |
+| `GET /v1/workspaces/{id}/works/{work_id}/run` | Current run for work (if any)                                                                      |
 
 Optional thin UI: Engine domain / work panel shows run status when Fonte=motore (no simulation fallback).
 

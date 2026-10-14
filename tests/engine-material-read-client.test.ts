@@ -56,16 +56,19 @@ test("unreadable or oversized files never reach the engine", async () => {
     return Response.json({});
   };
   try {
-    await assert.rejects(
-      prepareMaterialRead(work(), new File(["x"], "archivio.zip"), "op"),
-      { code: "validation_error" },
-    );
+    await assert.rejects(prepareMaterialRead(work(), new File(["x"], "archivio.zip"), "op"), {
+      code: "validation_error",
+    });
     await assert.rejects(
       prepareMaterialRead(work(), new File(["x".repeat(3 * 1024 * 1024)], "notes.txt"), "op"),
       { code: "validation_error" },
     );
     await assert.rejects(
-      prepareMaterialRead({ ...work(), engineConversationId: undefined }, new File(["x"], "n.txt"), "op"),
+      prepareMaterialRead(
+        { ...work(), engineConversationId: undefined },
+        new File(["x"], "n.txt"),
+        "op",
+      ),
       { code: "validation_error" },
     );
     assert.equal(called, 0);

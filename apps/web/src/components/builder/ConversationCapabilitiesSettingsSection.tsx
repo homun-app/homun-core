@@ -46,8 +46,8 @@ export function ConversationCapabilitiesSettingsSection() {
       <ConversationMcpSettingsSection />
       <h3>Capacità disponibili</h3>
       <p>
-        Ciò che la tua squadra sa fare davvero: le capacità elencate qui
-        sono le uniche che i collaboratori possono eseguire. Nessuno può prometterti altro.
+        Ciò che la tua squadra sa fare davvero: le capacità elencate qui sono le uniche che i
+        collaboratori possono eseguire. Nessuno può prometterti altro.
       </p>
       {items === null && !error && <p role="status">Caricamento del catalogo…</p>}
       {items?.map((item) => (

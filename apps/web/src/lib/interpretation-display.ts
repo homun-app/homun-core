@@ -139,9 +139,7 @@ export function parseWorkPatchProposal(raw: unknown): WorkPatchProposal | null {
       })
     : [];
   const summaryRaw = record["summary_lines"];
-  const summary_lines = Array.isArray(summaryRaw)
-    ? summaryRaw.map((line) => String(line))
-    : [];
+  const summary_lines = Array.isArray(summaryRaw) ? summaryRaw.map((line) => String(line)) : [];
   const missingRaw = record["missing_or_ambiguous"];
   const missing_or_ambiguous = Array.isArray(missingRaw)
     ? missingRaw.map((line) => String(line))

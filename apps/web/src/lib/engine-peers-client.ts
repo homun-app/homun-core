@@ -23,51 +23,65 @@ export type PeerProjection = {
 async function peersFetch(path: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(`${ENGINE_DEFAULT_BASE_URL}${path}`, {
     ...init,
-    headers: { Accept: "application/json",
-               "X-Homun-Actor-Id": "person_fabio",
-               ...(init?.body ? { "Content-Type": "application/json" } : {}),
-               ...(init?.headers ?? {}) },
+    headers: {
+      Accept: "application/json",
+      "X-Homun-Actor-Id": "person_fabio",
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers ?? {}),
+    },
   });
   const body = await response.json().catch(() => null);
-  if (!response.ok) throw homunErrorFromHttp(response.status, body, "Richiesta spazi remoti fallita");
+  if (!response.ok)
+    throw homunErrorFromHttp(response.status, body, "Richiesta spazi remoti fallita");
   return body;
 }
 
 export async function listEnginePeerConnections(): Promise<PeerConnection[]> {
   const body = await peersFetch("/v1/peers/connections");
   const items = (body as { items?: unknown }).items;
-  if (!Array.isArray(items)) throw new HomunClientError("validation_error", "Elenco connessioni non valido");
+  if (!Array.isArray(items))
+    throw new HomunClientError("validation_error", "Elenco connessioni non valido");
   return items as PeerConnection[];
 }
 
 export async function listEnginePeerProjections(): Promise<PeerProjection[]> {
   const body = await peersFetch("/v1/peers/projections");
   const items = (body as { items?: unknown }).items;
-  if (!Array.isArray(items)) throw new HomunClientError("validation_error", "Elenco proiezioni non valido");
+  if (!Array.isArray(items))
+    throw new HomunClientError("validation_error", "Elenco proiezioni non valido");
   return items as PeerProjection[];
 }
 
 export async function connectEnginePeer(input: {
-  host: string; inviteToken: string; displayName: string; deviceName?: string;
+  host: string;
+  inviteToken: string;
+  displayName: string;
+  deviceName?: string;
 }): Promise<{ host: string; person_id: string; key_fingerprint: string }> {
   const body = await peersFetch("/v1/peers/connect", {
     method: "POST",
     body: JSON.stringify({
-      host: input.host, invite_token: input.inviteToken,
-      display_name: input.displayName, device_name: input.deviceName ?? "",
+      host: input.host,
+      invite_token: input.inviteToken,
+      display_name: input.displayName,
+      device_name: input.deviceName ?? "",
     }),
   });
   const record = body as { host?: unknown; person_id?: unknown; key_fingerprint?: unknown };
   if (typeof record.host !== "string" || typeof record.person_id !== "string") {
     throw new HomunClientError("validation_error", "Connessione remota non valida");
   }
-  return { host: record.host, person_id: record.person_id,
-           key_fingerprint: String(record.key_fingerprint ?? "") };
+  return {
+    host: record.host,
+    person_id: record.person_id,
+    key_fingerprint: String(record.key_fingerprint ?? ""),
+  };
 }
 
 export async function syncEnginePeerProject(host: string, projectId: string): Promise<void> {
   await peersFetch(`/v1/peers/connections/${encodeURIComponent(host)}/sync`, {
-    method: "POST", body: JSON.stringify({ project_id: projectId }),
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId }),
   });
 }
 
@@ -79,16 +93,22 @@ export type PeerProjectionContent = {
   snapshot: {
     project: { id: string; name: string; status: string };
     conversations: Array<{
-      id: string; title: string; archived: boolean;
+      id: string;
+      title: string;
+      archived: boolean;
       messages: Array<{ id: string; author_id: string; text: string; created_at: string }>;
     }>;
     works: Array<{ id: string; title: string; objective: string; status: string }>;
   };
 };
 
-export async function fetchEnginePeerProjection(host: string, projectId: string): Promise<PeerProjectionContent> {
+export async function fetchEnginePeerProjection(
+  host: string,
+  projectId: string,
+): Promise<PeerProjectionContent> {
   const body = await peersFetch(
-    `/v1/peers/projection?host=${encodeURIComponent(host)}&project_id=${encodeURIComponent(projectId)}`);
+    `/v1/peers/projection?host=${encodeURIComponent(host)}&project_id=${encodeURIComponent(projectId)}`,
+  );
   const view = body as PeerProjectionContent;
   if (!view?.snapshot?.project) {
     throw new HomunClientError("validation_error", "Proiezione remota non valida");

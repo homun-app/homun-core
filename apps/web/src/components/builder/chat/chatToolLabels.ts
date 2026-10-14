@@ -24,8 +24,5 @@ const TOOL_LABELS: Record<string, string> = {
 };
 
 export function chatToolLabel(tool: string): string {
-  return (
-    TOOL_LABELS[tool] ??
-    tool.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())
-  );
+  return TOOL_LABELS[tool] ?? tool.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }

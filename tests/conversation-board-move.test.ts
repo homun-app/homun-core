@@ -62,6 +62,9 @@ describe("applyBoardMove", () => {
     assert.equal(next.phase, "approved");
     assert.equal(next.autoDelivered, false);
     assert.equal(next.approvedBy, "Fabio");
-    assert.equal(boardMoveSuccessMessage("approved"), "Risultato approvato. Nessuna azione esterna.");
+    assert.equal(
+      boardMoveSuccessMessage("approved"),
+      "Risultato approvato. Nessuna azione esterna.",
+    );
   });
 });

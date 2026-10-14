@@ -96,7 +96,16 @@ export function ProjectCreateModal({ isOpen, onClose, onCreateProject }: Props) 
         </div>
 
         <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#556c5e", fontWeight: 600 }}>
+          <label
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              fontSize: 12,
+              color: "#556c5e",
+              fontWeight: 600,
+            }}
+          >
             Nome del Progetto
             <input
               type="text"
@@ -117,7 +126,16 @@ export function ProjectCreateModal({ isOpen, onClose, onCreateProject }: Props) 
             />
           </label>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#556c5e", fontWeight: 600 }}>
+          <label
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              fontSize: 12,
+              color: "#556c5e",
+              fontWeight: 600,
+            }}
+          >
             Obiettivo / Brief Contestuale
             <textarea
               placeholder="Descrivi il perimetro e le istruzioni salienti per gli agenti e il team..."
@@ -138,12 +156,7 @@ export function ProjectCreateModal({ isOpen, onClose, onCreateProject }: Props) 
           </label>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
-            <button
-              type="button"
-              className="ph-btn-secondary"
-              onClick={onClose}
-              disabled={busy}
-            >
+            <button type="button" className="ph-btn-secondary" onClick={onClose} disabled={busy}>
               Annulla
             </button>
             <button

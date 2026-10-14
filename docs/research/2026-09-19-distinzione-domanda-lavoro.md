@@ -18,16 +18,16 @@ Nessun nuovo stato del contratto intake, nessuna generazione di risposte dentro 
 
 ## Moduli
 
-| Modulo | Ruolo |
-| --- | --- |
-| `engine/src/homun/models/intake.py` | `RequestClassification` + `classify_request` (prompt di routing) |
-| `engine/src/homun/application/intake.py` | `classify_message`: gate persona/scrittura, contesto proposta in attesa, modello fuori transazione |
-| `engine/src/homun/routes/intake.py`, `contracts/openapi/v1-engine.json` | `POST /intake/classify`, errori tipizzati 503 (`intake_invalid_response`, `provider_unavailable`) |
-| `apps/web/src/lib/engine-first-message-routing.ts` | nuovo: decisione pura + instradamento con ricaduta sicura |
-| `apps/web/src/lib/engine-intake-creation.ts` | la prima richiesta da nuova conversazione passa dal routing |
-| `apps/web/src/lib/engine-intake-client.ts` | `classifyWorkIntake` + `resolveFirstMessageRoute` |
-| `apps/web/src/hooks/useEngineWorkspace.ts` | `postMessage` classifica prima di forzare la proposta |
-| `apps/web/src/components/builder/EngineWorkIntake.tsx` | scheda «solo conversazione» in assenza di proposta |
+| Modulo                                                                  | Ruolo                                                                                              |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `engine/src/homun/models/intake.py`                                     | `RequestClassification` + `classify_request` (prompt di routing)                                   |
+| `engine/src/homun/application/intake.py`                                | `classify_message`: gate persona/scrittura, contesto proposta in attesa, modello fuori transazione |
+| `engine/src/homun/routes/intake.py`, `contracts/openapi/v1-engine.json` | `POST /intake/classify`, errori tipizzati 503 (`intake_invalid_response`, `provider_unavailable`)  |
+| `apps/web/src/lib/engine-first-message-routing.ts`                      | nuovo: decisione pura + instradamento con ricaduta sicura                                          |
+| `apps/web/src/lib/engine-intake-creation.ts`                            | la prima richiesta da nuova conversazione passa dal routing                                        |
+| `apps/web/src/lib/engine-intake-client.ts`                              | `classifyWorkIntake` + `resolveFirstMessageRoute`                                                  |
+| `apps/web/src/hooks/useEngineWorkspace.ts`                              | `postMessage` classifica prima di forzare la proposta                                              |
+| `apps/web/src/components/builder/EngineWorkIntake.tsx`                  | scheda «solo conversazione» in assenza di proposta                                                 |
 
 ## Prove eseguite (distinte per tipo)
 

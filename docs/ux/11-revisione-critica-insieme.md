@@ -210,6 +210,7 @@ multiutente o esecuzioni reali. Nessun cambiamento applicativo in questa revisio
 ## Intervento successivo — 16 settembre 2026
 
 Implementato nel prototipo:
+
 - Discussione condivisa del compito, accessibile anche dalla scheda del collaboratore.
   Le chat private restano separate; condivisione esplicita con anteprima dei destinatari.
 - Conversione messaggio/incarico per persone e agenti con file e riferimento alla

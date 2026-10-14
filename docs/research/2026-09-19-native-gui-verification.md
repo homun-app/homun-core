@@ -10,22 +10,22 @@ era Ollama locale, `qwen3.5:4b`; non è stato sostituito con il fake.
 
 ## Inventario e risultati osservati
 
-| Controllo | Esito |
-|---|---|
-| Avvio del bundle, finestra iniziale, stato motore | Finestra aperta, motore pronto, composer e navigazione visibili |
-| Impostazioni → Modelli → Verifica connessione | Connessione locale confermata; dialogo scorrevole con chiusura accessibile |
-| Primo messaggio di prova sul colore blu | Risposta reale: «Conferma: il colore scelto per il catalogo di prova è blu.» |
-| Domanda successiva senza ripetere il colore | Risposta reale: «Blu.» |
-| Chiusura completa e riapertura, prima della correzione | Lavoro presente, storico non caricato: appariva un riepilogo tecnico |
-| Riapertura del pacchetto corretto | Messaggi originali ripristinati in ordine; nessun riepilogo artificiale |
-| Nuova domanda dopo riapertura | Risposta reale: «Blu.»; continuità del contesto osservata |
-| Due ricariche consecutive | Nessun duplicato o perdita dei sei messaggi |
-| Seconda chiusura completa e riapertura | Conversazione selezionata e sei messaggi ripristinati automaticamente |
-| Elenco, Kanban, calendario | Il lavoro di prova è presente; calendario lo elenca senza scadenza |
-| Ricerca senza corrispondenze | Stato vuoto esplicito |
-| Pannello dettagli | Chiusura e riapertura funzionanti |
-| Raccolta materiali vuota | Navigazione e stato vuoto visibili; ingestione non esercitata in questa prova |
-| Provenienza chat | «Fonte: motore · archivio locale», identità «Sessione locale · Fabio» |
+| Controllo                                              | Esito                                                                         |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| Avvio del bundle, finestra iniziale, stato motore      | Finestra aperta, motore pronto, composer e navigazione visibili               |
+| Impostazioni → Modelli → Verifica connessione          | Connessione locale confermata; dialogo scorrevole con chiusura accessibile    |
+| Primo messaggio di prova sul colore blu                | Risposta reale: «Conferma: il colore scelto per il catalogo di prova è blu.»  |
+| Domanda successiva senza ripetere il colore            | Risposta reale: «Blu.»                                                        |
+| Chiusura completa e riapertura, prima della correzione | Lavoro presente, storico non caricato: appariva un riepilogo tecnico          |
+| Riapertura del pacchetto corretto                      | Messaggi originali ripristinati in ordine; nessun riepilogo artificiale       |
+| Nuova domanda dopo riapertura                          | Risposta reale: «Blu.»; continuità del contesto osservata                     |
+| Due ricariche consecutive                              | Nessun duplicato o perdita dei sei messaggi                                   |
+| Seconda chiusura completa e riapertura                 | Conversazione selezionata e sei messaggi ripristinati automaticamente         |
+| Elenco, Kanban, calendario                             | Il lavoro di prova è presente; calendario lo elenca senza scadenza            |
+| Ricerca senza corrispondenze                           | Stato vuoto esplicito                                                         |
+| Pannello dettagli                                      | Chiusura e riapertura funzionanti                                             |
+| Raccolta materiali vuota                               | Navigazione e stato vuoto visibili; ingestione non esercitata in questa prova |
+| Provenienza chat                                       | «Fonte: motore · archivio locale», identità «Sessione locale · Fabio»         |
 
 Le schermate sono state ispezionate tramite acquisizione nativa, alla dimensione
 iniziale della finestra; non sono prove di accettazione su altre risoluzioni.

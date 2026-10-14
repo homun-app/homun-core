@@ -10,9 +10,7 @@
  */
 import { isHomunClientError } from "./homun-errors.ts";
 
-export type ConflictRecoveryPlan =
-  | { kind: "none" }
-  | { kind: "refreshed"; message: string };
+export type ConflictRecoveryPlan = { kind: "none" } | { kind: "refreshed"; message: string };
 
 /** Preparing re-reads the current version: repeating it is enough. */
 export const PREPARE_CONFLICT_MESSAGE =

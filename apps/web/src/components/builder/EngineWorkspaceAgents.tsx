@@ -38,7 +38,12 @@ export function EngineWorkspaceAgents({
     return "all";
   });
 
-  if (initialFilter && (initialFilter === "agents" || initialFilter === "humans" || initialFilter === "all") && filter !== initialFilter && !search) {
+  if (
+    initialFilter &&
+    (initialFilter === "agents" || initialFilter === "humans" || initialFilter === "all") &&
+    filter !== initialFilter &&
+    !search
+  ) {
     setFilter(initialFilter);
   }
   const [selectedTarget, setSelectedTarget] = useState<DetailTarget | null>(() => {
@@ -77,16 +82,15 @@ export function EngineWorkspaceAgents({
         a.responsibility ?? "",
         ...(a.capabilities ?? []),
         ...(a.specializations ?? []),
-      ].join(" ").toLowerCase();
+      ]
+        .join(" ")
+        .toLowerCase();
       return haystack.includes(q);
     } else {
       const h = item;
-      const haystack = [
-        h.name,
-        h.profile.role,
-        h.profile.bio,
-        ...(h.profile.skills || []),
-      ].join(" ").toLowerCase();
+      const haystack = [h.name, h.profile.role, h.profile.bio, ...(h.profile.skills || [])]
+        .join(" ")
+        .toLowerCase();
       return haystack.includes(q);
     }
   });

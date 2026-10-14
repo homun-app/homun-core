@@ -5,8 +5,12 @@ import { Markdown as ChatMarkdown } from "./ChatMarkdown";
 import type { ConversationStreamState } from "@/hooks/useConversationEventStream";
 
 export function ConversationAgentLive({
-  stream, hiddenWhenAnswered = false,
-}: { stream: ConversationStreamState; hiddenWhenAnswered?: boolean }) {
+  stream,
+  hiddenWhenAnswered = false,
+}: {
+  stream: ConversationStreamState;
+  hiddenWhenAnswered?: boolean;
+}) {
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -88,9 +92,7 @@ export function ConversationAgentLive({
         </div>
       )}
 
-      {visible && (
-        <ChatMarkdown content={visible} streaming={stream.runActive} />
-      )}
+      {visible && <ChatMarkdown content={visible} streaming={stream.runActive} />}
     </article>
   );
 }

@@ -6,13 +6,14 @@ pipeline, i segreti e come verificare una build.
 ## Come funziona
 
 `.github/workflows/build.yml` ("Build installers"):
+
 - **Push di un tag `v*`** → il tag (senza la `v`) viene stampato in
   `apps/desktop/package.json` (fonte unica della versione), l'installer macOS
   arm64 viene firmato + notarizzato e pubblicato con i metadati di
   auto-aggiornamento (`latest-mac.yml`) in una **release draft sul repo
   pubblico `homun-app/homun-releases`** — che è anche il feed di
   electron-updater. La draft non è visibile finché non la pubblichi.
-- **Esecuzione manuale** (Actions → *Build installers* → *Run workflow*)
+- **Esecuzione manuale** (Actions → _Build installers_ → _Run workflow_)
   → build **non firmata** solo artifact: serve a provare la pipeline senza
   taggare.
 - **PR su main** → come il manuale: validazione di build non pubblicante.
@@ -28,14 +29,14 @@ minimi, firmati in `after-pack` prima della firma dell'app).
 
 ## Segreti richiesti dalla pipeline
 
-| Secret | Usato come | Scopo |
-|---|---|---|
-| `MAC_CSC_LINK` | `CSC_LINK` | Certificato Developer ID Application (`.p12` base64) |
-| `MAC_CSC_KEY_PASSWORD` | `CSC_KEY_PASSWORD` | Password del `.p12` |
-| `APPLE_ID` | `APPLE_ID` | Notarizzazione (Apple ID) |
-| `APPLE_APP_SPECIFIC_PASSWORD` | `APPLE_APP_SPECIFIC_PASSWORD` | Notarizzazione |
-| `APPLE_TEAM_ID` | `APPLE_TEAM_ID` | Notarizzazione |
-| `RELEASES_TOKEN` | `GH_TOKEN` (solo passo di publish) | Pubblicazione su `homun-app/homun-releases` |
+| Secret                        | Usato come                         | Scopo                                                |
+| ----------------------------- | ---------------------------------- | ---------------------------------------------------- |
+| `MAC_CSC_LINK`                | `CSC_LINK`                         | Certificato Developer ID Application (`.p12` base64) |
+| `MAC_CSC_KEY_PASSWORD`        | `CSC_KEY_PASSWORD`                 | Password del `.p12`                                  |
+| `APPLE_ID`                    | `APPLE_ID`                         | Notarizzazione (Apple ID)                            |
+| `APPLE_APP_SPECIFIC_PASSWORD` | `APPLE_APP_SPECIFIC_PASSWORD`      | Notarizzazione                                       |
+| `APPLE_TEAM_ID`               | `APPLE_TEAM_ID`                    | Notarizzazione                                       |
+| `RELEASES_TOKEN`              | `GH_TOKEN` (solo passo di publish) | Pubblicazione su `homun-app/homun-releases`          |
 
 Linux x64 (AppImage + `.deb`) è in pipeline sul **tag** (`build.yml` job
 `Publish (Linux x64)`): pubblica gli installer e `latest-linux.yml` sulla

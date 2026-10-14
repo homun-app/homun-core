@@ -1,12 +1,15 @@
 # Simulazione UX: commessa con eventi e intervalli
 
 ## Metodo
+
 Navigazione reale del prototipo il 15 settembre 2026, impersonando il titolare di una piccola azienda. Nessun motore o evento esterno attivo. Le transizioni dello stato sono state effettuate manualmente. Gli scenari temporali sotto sono una simulazione ragionata, non esecuzioni osservate.
 
 ## Scenario
+
 Progetto Fornitura Rossi: Marta prepara il preventivo entro venerdì alle 15. Giulia carica il listino. Vera verifica i prezzi ogni due ore, lunedì-venerdì, tra le 09 e le 17. Marta usa il risultato valido, Fabio approva, poi avviene l'invio. Se cambia il listino, la bozza va rivalutata.
 
 ## Prove effettuate e risultati
+
 1. Scritta la richiesta completa nella chat di Marta, convertita in incarico: tutto il testo diventa titolo, scadenza vuota; intervallo, condizioni e approvazione non sono strutturabili.
 2. Creato progetto con Marta e Vera: possibile scegliere squadra e responsabilità; manca una sequenza operativa condivisa.
 3. Creati incarichi per Vera e Marta nello stesso progetto: presenti nel Kanban, nell'agenda e nel progetto.
@@ -17,6 +20,7 @@ Progetto Fornitura Rossi: Marta prepara il preventivo entro venerdì alle 15. Gi
 8. Home: un'attività di Marta apriva l'incarico ma riportava “Preparazione del collaboratore”: corretto il testo del collegamento.
 
 ## Cosa manca all'esperienza
+
 - Una scheda di conferma dell'intento: obiettivo, responsabile, materiali, avvio, scadenza, approvazione. Le informazioni dedotte dalla chat devono essere verificabili; quelle mancanti vanno chieste.
 - Separazione tra regola ricorrente e singola esecuzione: finire un controllo non significa disattivare il monitoraggio.
 - Dipendenza da un risultato concreto e dalla sua versione, anziché dal solo nome di un agente.
@@ -27,23 +31,26 @@ Progetto Fornitura Rossi: Marta prepara il preventivo entro venerdì alle 15. Gi
 - Azioni di approvazione esplicite (approva, chiedi modifiche), legate alla versione del risultato.
 
 ## Simulazione temporale proposta
-| Momento | Evento | Comportamento da rendere visibile |
-|---|---|---|
-| Lunedì 09:00 | Routine attivata | Vera controlla i prezzi; prossimo controllo 11:00; costo del controllo e della routine distinti |
-| 09:10 | Listino ancora assente | Marta aspetta Giulia; nessun tentativo ripetuto di produrre il preventivo |
-| 10:20 | Listino caricato | Identificare il documento e la versione; verificare requisiti prima di dichiarare sbloccato il lavoro |
-| 11:00 | Nuovo controllo prezzi | Se il precedente è ancora in corso, mostrare la politica di sovrapposizione; proposta iniziale: saltare il doppione |
-| 11:05 | Vera consegna prezzi | Marta riceve quel risultato e procede se anche il listino è valido |
-| 12:00 | Arriva di nuovo lo stesso evento | Nessun preventivo duplicato; mostrare l'evento riconosciuto come già gestito |
-| Giovedì 16:00 | Nuovo listino dopo approvazione | Segnalare modifica dei materiali; rivalutare la bozza e richiedere nuova approvazione se cambia |
-| Venerdì 12:00 | Manca approvazione | Richiesta a Fabio con scadenza alle 15 e risultato da leggere |
-| Venerdì 15:00 | Scadenza superata | Esporre ritardo e causa; nessun invio implicito |
-| Sabato | Fuori finestra lavorativa | Routine in attesa fino a lunedì, non “bloccata” |
-| In qualsiasi momento | Budget esaurito | Pausa esplicita, importo e azione per riprendere; nessuna escalation di costo nascosta |
-| Riavvio dopo stop | Esecuzioni perse | Rendere chiaro se recuperare una sola esecuzione o saltare; nessun recupero incontrollato |
+
+| Momento              | Evento                           | Comportamento da rendere visibile                                                                                   |
+| -------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Lunedì 09:00         | Routine attivata                 | Vera controlla i prezzi; prossimo controllo 11:00; costo del controllo e della routine distinti                     |
+| 09:10                | Listino ancora assente           | Marta aspetta Giulia; nessun tentativo ripetuto di produrre il preventivo                                           |
+| 10:20                | Listino caricato                 | Identificare il documento e la versione; verificare requisiti prima di dichiarare sbloccato il lavoro               |
+| 11:00                | Nuovo controllo prezzi           | Se il precedente è ancora in corso, mostrare la politica di sovrapposizione; proposta iniziale: saltare il doppione |
+| 11:05                | Vera consegna prezzi             | Marta riceve quel risultato e procede se anche il listino è valido                                                  |
+| 12:00                | Arriva di nuovo lo stesso evento | Nessun preventivo duplicato; mostrare l'evento riconosciuto come già gestito                                        |
+| Giovedì 16:00        | Nuovo listino dopo approvazione  | Segnalare modifica dei materiali; rivalutare la bozza e richiedere nuova approvazione se cambia                     |
+| Venerdì 12:00        | Manca approvazione               | Richiesta a Fabio con scadenza alle 15 e risultato da leggere                                                       |
+| Venerdì 15:00        | Scadenza superata                | Esporre ritardo e causa; nessun invio implicito                                                                     |
+| Sabato               | Fuori finestra lavorativa        | Routine in attesa fino a lunedì, non “bloccata”                                                                     |
+| In qualsiasi momento | Budget esaurito                  | Pausa esplicita, importo e azione per riprendere; nessuna escalation di costo nascosta                              |
+| Riavvio dopo stop    | Esecuzioni perse                 | Rendere chiaro se recuperare una sola esecuzione o saltare; nessun recupero incontrollato                           |
 
 ## Proposta UX prioritaria
+
 Nel pannello incarico usare sezioni progressive:
+
 1. Obiettivo e risultato atteso.
 2. “Quando parte”: appena possibile, a una data, a intervalli, quando accade qualcosa.
 3. “Di cosa ha bisogno”: file, accessi e risultati di altri incarichi.
@@ -56,9 +63,11 @@ Esempio di sintesi, con valori da confermare:
 Home: decisioni dell'utente e rischi concreti; Kanban: singoli incarichi/esecuzioni; calendario: scadenze e prossime esecuzioni con legenda e filtro, evitando centinaia di schede future.
 
 ## Prossimo esperimento
+
 Prototipare una sola catena completa con regole configurabili e comandi esplicitamente dimostrativi: “simula arrivo file”, “avanza di 2 ore”, “simula consegna di Vera”, “approva”. Verificare prima il comportamento con eventi ripetuti, materiali mancanti, esecuzione lenta e limite di costo. Mantenere il dominio agnostico: il preventivo è un caso di prova, non un tipo rigido di bot.
 
 ## Iterazione autonoma successiva
+
 Implementato un laboratorio di comportamento nel dettaglio incarico, sotto “Quando e come parte” → “Prova il comportamento”. Le regole sono configurabili; gli eventi e l'orologio sono simulati e il diario spiega attese, duplicati, sovrapposizioni, errori, approvazione e budget. La scheda di lavoro rimane distinta dalla singola prova.
 
 Preparati i Settings con cinque aree: spazio, modelli, costi/limiti, notifiche, dati/connessioni. I modelli possono essere registrati come riferimenti locali/remoti e associati come principale/alternativo ai collaboratori. Nessuna credenziale o connessione reale.

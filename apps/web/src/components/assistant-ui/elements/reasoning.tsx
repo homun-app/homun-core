@@ -11,11 +11,7 @@ import {
 } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
 export const ANIMATION_DURATION = 200;
@@ -72,9 +68,7 @@ function ReasoningRoot({
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
 
   const isControlled = controlledOpen !== undefined;
-  const isOpen = isControlled
-    ? controlledOpen
-    : (userOpen ?? (streaming || initialOpen));
+  const isOpen = isControlled ? controlledOpen : (userOpen ?? (streaming || initialOpen));
   const isPreview = streaming === true && isOpen;
 
   const prevStreamingRef = useRef(streaming);
@@ -105,10 +99,7 @@ function ReasoningRoot({
       data-variant={variant}
       open={isOpen}
       onOpenChange={handleOpenChange}
-      className={cn(
-        "group/reasoning-root",
-        reasoningVariants({ variant, className }),
-      )}
+      className={cn("group/reasoning-root", reasoningVariants({ variant, className }))}
       style={
         {
           "--animation-duration": `${ANIMATION_DURATION}ms`,
@@ -237,11 +228,7 @@ function ReasoningContent({
   );
 }
 
-function ReasoningText({
-  className,
-  children,
-  ...props
-}: React.ComponentProps<"div">) {
+function ReasoningText({ className, children, ...props }: React.ComponentProps<"div">) {
   const isPreview = useContext(ReasoningPreviewContext);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -256,9 +243,8 @@ function ReasoningText({
     let lastScrollTop = scrollEl.scrollTop;
     let lastScrollHeight = scrollEl.scrollHeight;
     const isAtBottom = () =>
-      Math.abs(
-        scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight,
-      ) <= 1 || scrollEl.scrollHeight <= scrollEl.clientHeight;
+      Math.abs(scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight) <= 1 ||
+      scrollEl.scrollHeight <= scrollEl.clientHeight;
 
     const pin = () => {
       if (!pinned) return;
@@ -270,10 +256,7 @@ function ReasoningText({
     const onScroll = () => {
       if (isAtBottom()) {
         pinned = true;
-      } else if (
-        scrollEl.scrollTop < lastScrollTop &&
-        scrollEl.scrollHeight === lastScrollHeight
-      ) {
+      } else if (scrollEl.scrollTop < lastScrollTop && scrollEl.scrollHeight === lastScrollHeight) {
         pinned = false;
       }
       lastScrollTop = scrollEl.scrollTop;

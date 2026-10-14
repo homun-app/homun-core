@@ -139,18 +139,18 @@ sfruttabile solo in presenza di una prototype pollution già esistente
 nell'applicazione. Effetto collaterale possibile: il CSS caricato è quello di
 KaTeX 0.18 (`@streamdown/math` → `katex/dist/katex.min.css`), mentre mermaid
 produce markup 0.16; poiché la 0.18 ha rinominato alcune classi interne, le
-formule *dentro* i diagrammi mermaid possono avere difetti di stile.
+formule _dentro_ i diagrammi mermaid possono avere difetti di stile.
 
 Da rivedere quando `mermaid` passerà a KaTeX ≥ 0.18.2: a quel punto l'override
 diventa superfluo e va rimosso.
 
 ## Riepilogo
 
-| Gruppo | Avvisi | Azione |
-| --- | --- | --- |
-| A | 131–147 (17) | dismiss `not_used` (evidenza archiviata, non installata) |
-| B | 126, 127, 153–158 (8) | dismiss `inaccurate` (uv.lock assente su main) |
-| C | 128, 148–152 (6) | risolti dalla PR (lockfile radice aggiornato) |
-| D | 129 | risolto dalla PR (electron-builder 26.17.0) |
-| D | 130 | dismiss `tolerable_risk` (solo-build, no fix disponibile) |
-| E (nuovo) | — | 4 vulnerabilità reali nei lock del motore trovate da pip-audit e corrette dalla PR (pydantic-ai 2.53.0, pyjwt 2.15.0) |
+| Gruppo    | Avvisi                | Azione                                                                                                                |
+| --------- | --------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| A         | 131–147 (17)          | dismiss `not_used` (evidenza archiviata, non installata)                                                              |
+| B         | 126, 127, 153–158 (8) | dismiss `inaccurate` (uv.lock assente su main)                                                                        |
+| C         | 128, 148–152 (6)      | risolti dalla PR (lockfile radice aggiornato)                                                                         |
+| D         | 129                   | risolto dalla PR (electron-builder 26.17.0)                                                                           |
+| D         | 130                   | dismiss `tolerable_risk` (solo-build, no fix disponibile)                                                             |
+| E (nuovo) | —                     | 4 vulnerabilità reali nei lock del motore trovate da pip-audit e corrette dalla PR (pydantic-ai 2.53.0, pyjwt 2.15.0) |

@@ -14,7 +14,7 @@ blocca l'avvio; dopo l'avvio registra l'incertezza e conserva la gestione del jo
 
 - [x] Test RED consenso separato, ripresa singola, cancellazione, assenza opt-in.
 - [x] Modulo agent_terminal: contratto, binding e receipt; integrazione registro,
-  proposta, dispatch, runtime e API; nessuna modifica ai manifest di run precedenti.
+      proposta, dispatch, runtime e API; nessuna modifica ai manifest di run precedenti.
 - [x] UI per immagine opzionale e consenso comando; errore motore esplicito.
 - [x] Verifica con modello/Docker se disponibile, restart, test/contratti/revisione.
 - [x] Documenti, commit e merge locale; parità completa ancora aperta.

@@ -17,7 +17,7 @@ transazioni, correzioni che sopravvivono al backoff) deriva da
 
 - `models/native_errors.py`: `NativeModelError` tipizzata e sanitizzata (codici
   `agent_model_network/timeout/rate_limited/server_error/auth/quota/
-  invalid_request/tls/overflow/empty_response/truncated/malformed`),
+invalid_request/tls/overflow/empty_response/truncated/malformed`),
   Retry-After numerico/data con tetto 600 secondi, testi di reset analizzati ma
   mai conservati, messaggi ridotti a una riga e troncati. Corpi grezzi dei
   provider non vengono persistiti: solo codice, fase, contatore e tempi.
@@ -102,7 +102,6 @@ immediato e visibile, lavoro failed, nessun recovery schedulato.
   tre per fase di recovery, il tetto globale resta 12.
 - Lo stato di recupero è ora reso anche nel pannello di controllo del lavoro;
   l'app installata e il remoto non sono aggiornati.
-
 
 ## Rafforzamento dopo interruzione del processo
 

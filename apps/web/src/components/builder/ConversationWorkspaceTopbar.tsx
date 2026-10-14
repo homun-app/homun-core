@@ -4,7 +4,18 @@
  */
 
 import type { ReactNode } from "react";
-import { PanelRightClose, FileText, Layers, Users, Bot, User, Plus, List, Columns3, Calendar } from "lucide-react";
+import {
+  PanelRightClose,
+  FileText,
+  Layers,
+  Users,
+  Bot,
+  User,
+  Plus,
+  List,
+  Columns3,
+  Calendar,
+} from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@homun/ui/components/popover";
 import { ConversationSelectField } from "./ConversationSelect";
 import { isHumanMember, memberProfile } from "./conversation-members";
@@ -42,20 +53,26 @@ function getWorkAgents(
   profiles?: Record<string, { role?: string; responsibilities?: string; specialization?: string }>,
 ) {
   if (!work) return [];
-  const map = new Map<string, {
-    name: string;
-    isCoordinator: boolean;
-    role: string;
-    description: string;
-    steps: string[];
-  }>();
+  const map = new Map<
+    string,
+    {
+      name: string;
+      isCoordinator: boolean;
+      role: string;
+      description: string;
+      steps: string[];
+    }
+  >();
 
   if (scenario?.agent) {
     map.set(scenario.agent, {
       name: scenario.agent,
       isCoordinator: true,
       role: scenario.role || "Coordinatore del lavoro",
-      description: scenario.outcome || scenario.help || "Coordina l'esecuzione del lavoro e supervisiona i passaggi.",
+      description:
+        scenario.outcome ||
+        scenario.help ||
+        "Coordina l'esecuzione del lavoro e supervisiona i passaggi.",
       steps: [],
     });
   }
@@ -73,7 +90,12 @@ function getWorkAgents(
             name: step.agent,
             isCoordinator: false,
             role: sc?.role || prof?.role || "Specialista",
-            description: sc?.outcome || sc?.help || prof?.responsibilities || prof?.specialization || "Esegue passaggi specifici del piano di lavoro.",
+            description:
+              sc?.outcome ||
+              sc?.help ||
+              prof?.responsibilities ||
+              prof?.specialization ||
+              "Esegue passaggi specifici del piano di lavoro.",
             steps: [step.title],
           });
         }
@@ -95,7 +117,12 @@ function getWorkAgents(
             name,
             isCoordinator: false,
             role: sc?.role || prof?.role || step.capability || "Specialista",
-            description: sc?.outcome || sc?.help || prof?.responsibilities || prof?.specialization || "Esegue passaggi specifici del piano di lavoro.",
+            description:
+              sc?.outcome ||
+              sc?.help ||
+              prof?.responsibilities ||
+              prof?.specialization ||
+              "Esegue passaggi specifici del piano di lavoro.",
             steps: [step.title],
           });
         }
@@ -126,13 +153,14 @@ export function ConversationWorkspaceTopbar({
   workActions,
 }: Props) {
   const involvedAgents = getWorkAgents(work, scenario, scenarios, spaceData.profiles);
-  const humanViewers = [...new Set([...spacePeople, ...Object.keys(spaceData.profiles || {})])]
-    .filter(
-      (n) =>
-        isHumanMember(n, spaceData.profiles) &&
-        !spaceData.removedPeople?.includes(n) &&
-        memberProfile(n, spaceData.profiles).invitation !== "pending",
-    );
+  const humanViewers = [
+    ...new Set([...spacePeople, ...Object.keys(spaceData.profiles || {})]),
+  ].filter(
+    (n) =>
+      isHumanMember(n, spaceData.profiles) &&
+      !spaceData.removedPeople?.includes(n) &&
+      memberProfile(n, spaceData.profiles).invitation !== "pending",
+  );
 
   return (
     <header className="cw-topbar">
@@ -272,7 +300,10 @@ export function ConversationWorkspaceTopbar({
                   >
                     <ConversationAvatar
                       name={scenario?.agent || involvedAgents[0]?.name || "Homun"}
-                      human={isHumanMember(scenario?.agent || involvedAgents[0]?.name || "Homun", spaceData.profiles)}
+                      human={isHumanMember(
+                        scenario?.agent || involvedAgents[0]?.name || "Homun",
+                        spaceData.profiles,
+                      )}
                     />
                     {involvedAgents.length > 1 && (
                       <span className="ph-agent-count-badge">+{involvedAgents.length - 1}</span>
@@ -298,7 +329,9 @@ export function ConversationWorkspaceTopbar({
                         <div className="cw-agent-popover-info">
                           <div className="cw-agent-popover-name-row">
                             <strong>{ag.name}</strong>
-                            <span className={`cw-agent-popover-badge ${ag.isCoordinator ? "is-coord" : ""}`}>
+                            <span
+                              className={`cw-agent-popover-badge ${ag.isCoordinator ? "is-coord" : ""}`}
+                            >
                               {ag.isCoordinator ? "Coordinatore" : "Specialista"}
                             </span>
                           </div>

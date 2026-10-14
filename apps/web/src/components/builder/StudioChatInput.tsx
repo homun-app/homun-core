@@ -325,15 +325,11 @@ function Composer({
           )}
           <PromptInputSubmit
             aria-label={engineBusy && onCancel ? "Annulla" : "Invia messaggio"}
-            {...(engineBusy && onCancel
-              ? { status: "streaming" as const, onStop: onCancel }
-              : {})}
+            {...(engineBusy && onCancel ? { status: "streaming" as const, onStop: onCancel } : {})}
             disabled={
               disabled ||
               busy ||
-              (!(engineBusy && onCancel) &&
-                !textInput.value.trim() &&
-                !attachments.files.length)
+              (!(engineBusy && onCancel) && !textInput.value.trim() && !attachments.files.length)
             }
           >
             {engineBusy && onCancel ? (

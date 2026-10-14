@@ -31,8 +31,8 @@ registro delle capacità, l'approvazione per effetto e l'esecuzione DBOS esisten
    - chi la porta avanti (collaboratore con capacità collegata dal registro;
      fasi di raccolta e decisioni assegnate a te),
    - cosa produce e da quale fase dipende.
-   La conferma del piano (`plan.accept`) è un gesto esplicito separato dalla
-   conferma dell'accordo: approvare il contratto non preautorizza la sequenza.
+     La conferma del piano (`plan.accept`) è un gesto esplicito separato dalla
+     conferma dell'accordo: approvare il contratto non preautorizza la sequenza.
 3. **Fase corrente visibile** — la scheda «Cosa serve ora» (già esistente per
    `general`) diventa la vista della fase attiva: elenco di ciò che manca con
    stato per riga, caricamento contestuale, nessuna caccia ai menu. Il riepilogo

@@ -19,9 +19,15 @@ export function EngineDocuments({ projects }: { projects: ProjectOption[] }) {
   useEffect(() => {
     let active = true;
     listEngineArtifacts()
-      .then((items) => { if (active) setDocs(items); })
-      .catch((cause) => { if (active) setError(cause); });
-    return () => { active = false; };
+      .then((items) => {
+        if (active) setDocs(items);
+      })
+      .catch((cause) => {
+        if (active) setError(cause);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -100,10 +106,7 @@ export function EngineDocuments({ projects }: { projects: ProjectOption[] }) {
             const isOpen = openId === doc.id;
             return (
               <div key={doc.id} className="ph-doc-item">
-                <div
-                  className="ph-work-row"
-                  onClick={() => setOpenId(isOpen ? null : doc.id)}
-                >
+                <div className="ph-work-row" onClick={() => setOpenId(isOpen ? null : doc.id)}>
                   <div className="ph-work-row__left">
                     <span className="ph-work-row__dot" />
                     <div>
@@ -121,7 +124,7 @@ export function EngineDocuments({ projects }: { projects: ProjectOption[] }) {
                       onClick={(e) => {
                         e.stopPropagation();
                         const url = URL.createObjectURL(
-                          new Blob([doc.content], { type: "text/markdown;charset=utf-8" })
+                          new Blob([doc.content], { type: "text/markdown;charset=utf-8" }),
                         );
                         const anchor = document.createElement("a");
                         anchor.href = url;

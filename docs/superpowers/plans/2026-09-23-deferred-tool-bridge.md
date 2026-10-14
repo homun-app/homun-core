@@ -6,14 +6,14 @@ search/describe/call routing in Homun, preserving supervised external effects.
 No Hermes runtime. New native proposals pin bridge version; old runs unchanged.
 
 - [x] RED: model surface excludes MCP schemas; describe returns exact pinned
-  schema; unknown/direct/recursive targets fail without IO. Same round search
-  and bridge call retains native IDs. External approval validates resolved target.
+      schema; unknown/direct/recursive targets fail without IO. Same round search
+      and bridge call retains native IDs. External approval validates resolved target.
 - [x] application/agent_tool_bridge.py owns strict contracts, names, visible
-  definitions and pure call resolution. Registry owns discover/describe metadata.
-  Execution resolves before MCP staging, link validator re-resolves current call.
+      definitions and pure call resolution. Registry owns discover/describe metadata.
+      Execution resolves before MCP staging, link validator re-resolves current call.
 - [x] Tests: approved wrapper result survives restart once, invalid args,
-  cancellation, direct-name calls still requiring approval, tampered target, sequential multiple calls,
-  legacy surface. No fake result or re-execution from search/describe.
+      cancellation, direct-name calls still requiring approval, tampered target, sequential multiple calls,
+      legacy surface. No fake result or re-execution from search/describe.
 - [x] Real Ollama + stdio search/describe/call, approval and restart evidence.
 - [x] Review; engine regression/architecture; docs and MIT provenance; local merge.
 
