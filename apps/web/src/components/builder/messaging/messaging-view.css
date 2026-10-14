@@ -669,3 +669,11 @@
   background: rgba(185, 28, 28, 0.06);
   border-color: rgba(185, 28, 28, 0.5);
 }
+
+/* La notice tipizzata dentro il banner d'errore del modale QR: eredita tono
+   e corpo del banner, senza il peso dell'avviso standard. */
+.msg-qr-modal-error {
+  margin: 0;
+  font-weight: 400;
+  min-width: 0;
+}

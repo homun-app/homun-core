@@ -11,3 +11,6 @@ routeTree.gen.ts
 contracts/openapi/v1-engine.json
 # generato da eslint --suppress-all / --prune-suppressions: formattazione di ESLint
 eslint-suppressions.json
+
+# artefatti dei run Playwright
+test-results

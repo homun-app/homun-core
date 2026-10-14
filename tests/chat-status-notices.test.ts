@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { componentRenderer } from "./helpers/render-component.ts";
+import { detailsBlock, detailsIsClosed, outsideDetailsBlock } from "./helpers/markup.ts";
 import {
   chatStatusLayout,
   chatStatusNotices,
@@ -407,8 +408,13 @@ test("nessun testo grezzo all'utente: i motivi passano dal mapping di prodotto",
     const notice = chatStatusNotices({ ...healthyEngine, error: rawException })[0]!;
     const markup = ui.render({ notice });
     assert.match(markup, /Errore imprevisto\./);
-    assert.doesNotMatch(markup, /Errno/);
-    assert.doesNotMatch(markup, /Local model interpret/);
+    // il grezzo vive solo nel blocco richiudibile «Dettagli tecnici», chiuso
+    const details = detailsBlock(markup);
+    assert.ok(details);
+    assert.ok(detailsIsClosed(details));
+    assert.match(details, /\[Errno 61\]/);
+    assert.doesNotMatch(outsideDetailsBlock(markup), /Errno/);
+    assert.doesNotMatch(outsideDetailsBlock(markup), /Local model interpret/);
 
     // lo stesso testo grezzo con il codice vero del motore: la copia di
     // prodotto del codice vince sul messaggio grezzo
@@ -419,7 +425,8 @@ test("nessun testo grezzo all'utente: i motivi passano dal mapping di prodotto",
     const providerNotice = chatStatusNotices({ ...healthyEngine, error: providerDown })[0]!;
     const providerMarkup = ui.render({ notice: providerNotice });
     assert.match(providerMarkup, /Il modello non è disponibile\./);
-    assert.doesNotMatch(providerMarkup, /Errno/);
+    assert.match(detailsBlock(providerMarkup) ?? "", /\[Errno 61\]/);
+    assert.doesNotMatch(outsideDetailsBlock(providerMarkup), /Errno/);
   } finally {
     await ui.close();
   }

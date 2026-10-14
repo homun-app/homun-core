@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useRef, useState } from "react";
+import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import {
   AlertCircleIcon,
   CheckIcon,
@@ -480,7 +481,7 @@ function ToolFallbackApproval({
   const locked = submitted || voiceActive;
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [answer, setAnswer] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   if (approval != null && isSettled(approval))
     return <ToolFallbackApprovalReceipt approval={approval} className={className} {...props} />;
@@ -523,7 +524,9 @@ function ToolFallbackApproval({
         await send();
       } catch (sendError) {
         setSubmitted(false);
-        setError(sendError instanceof Error ? sendError.message : String(sendError));
+        // L'errore resta tipizzato: copia di prodotto in primo piano,
+        // testo originale solo nel blocco richiudibile di HomunErrorNotice.
+        setError(sendError);
       }
     })();
   };
@@ -592,12 +595,10 @@ function ToolFallbackApproval({
   ) : null;
 
   const errorText = error ? (
-    <p
-      role="alert"
-      className="aui-tool-fallback-approval-error text-destructive text-xs whitespace-pre-line"
-    >
-      {error}
-    </p>
+    <HomunErrorNotice
+      error={error}
+      className="aui-tool-fallback-approval-error text-destructive text-xs"
+    />
   ) : null;
 
   const answerField = acceptsText ? (

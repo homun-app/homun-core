@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { ChannelBrandIcon } from "./ChannelBrandIcon";
 import { ChannelQrBox } from "./ChannelQrBox";
+import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import {
   testEngineChannelPlatform,
   startTelegramOnboarding,
@@ -36,6 +37,13 @@ export interface ChannelQrModalProps {
   onSaveTokenAndFields: (fields: Record<string, string>) => Promise<void>;
 }
 
+/**
+ * L'avviso del modale: una frase di prodotto, oppure un errore tipizzato che
+ * `HomunErrorNotice` racconta in copia di prodotto con i dettagli tecnici
+ * richiudibili — mai il messaggio originale in primo piano.
+ */
+type BannerError = { text?: string; cause?: unknown };
+
 export function ChannelQrModal({
   isOpen,
   onClose,
@@ -48,7 +56,7 @@ export function ChannelQrModal({
   const [activeTab, setActiveTab] = useState<"homun_custom" | "quick_qr">(initialTab);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<BannerError | null>(null);
   const [deepLink, setDeepLink] = useState<string | null>(null);
   const [pairingId, setPairingId] = useState<string | null>(null);
   const [onboardingPhase, setOnboardingPhase] = useState<"idle" | "waiting" | "ready" | "applied">(
@@ -86,7 +94,7 @@ export function ChannelQrModal({
       const qr = await generateQr(res.qr_payload || res.deep_link);
       setQrDataUrl(qr);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError({ cause: err });
       setOnboardingPhase("idle");
       setDeepLink(null);
       setQrDataUrl(null);
@@ -115,7 +123,7 @@ export function ChannelQrModal({
         setQrDataUrl(qr);
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError({ cause: err });
       setOnboardingPhase("idle");
       setQrDataUrl(null);
     } finally {
@@ -192,7 +200,7 @@ export function ChannelQrModal({
           const qr = await generateQr(link);
           setQrDataUrl(qr);
         } catch (err: unknown) {
-          setError(err instanceof Error ? err.message : String(err));
+          setError({ cause: err });
         } finally {
           setLoading(false);
         }
@@ -232,14 +240,13 @@ export function ChannelQrModal({
                 await onSaveTokenAndFields(applied.fields || { ...currentFields });
               }
             } catch (applyErr: unknown) {
-              if (isMounted)
-                setError(applyErr instanceof Error ? applyErr.message : String(applyErr));
+              if (isMounted) setError({ cause: applyErr });
             }
             return;
           }
           if (res.status === "expired") {
             if (isMounted) {
-              setError("Sessione WhatsApp scaduta. Clicca Rigenera per riprovare.");
+              setError({ text: "Sessione WhatsApp scaduta. Clicca Rigenera per riprovare." });
               setOnboardingPhase("idle");
             }
             return;
@@ -254,7 +261,7 @@ export function ChannelQrModal({
             }
           }
           if (res.pair_error && isMounted) {
-            setError(`WhatsApp ha rifiutato il collegamento: ${res.pair_error}`);
+            setError({ text: `WhatsApp ha rifiutato il collegamento: ${res.pair_error}` });
           }
           timer = window.setTimeout(() => void poll(), 2000);
           return;
@@ -283,15 +290,14 @@ export function ChannelQrModal({
               await onSaveTokenAndFields(fieldsToSave);
             }
           } catch (applyErr: unknown) {
-            if (isMounted)
-              setError(applyErr instanceof Error ? applyErr.message : String(applyErr));
+            if (isMounted) setError({ cause: applyErr });
           }
           return;
         }
 
         if (res.status === "expired") {
           if (isMounted) {
-            setError("Sessione scaduta. Clicca Rigenera per riprovare.");
+            setError({ text: "Sessione scaduta. Clicca Rigenera per riprovare." });
             setOnboardingPhase("idle");
           }
           return;
@@ -333,7 +339,7 @@ export function ChannelQrModal({
     try {
       const res = await testEngineChannelPlatform("telegram", { bot_token: token });
       if (!res.ok) {
-        setError(res.message || "Token Telegram non valido.");
+        setError({ text: res.message || "Token Telegram non valido." });
         setIsVerifyingManual(false);
         return;
       }
@@ -349,7 +355,7 @@ export function ChannelQrModal({
       setQrDataUrl(qr);
       setOnboardingPhase("applied");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError({ cause: err });
     } finally {
       setIsVerifyingManual(false);
     }
@@ -727,7 +733,11 @@ export function ChannelQrModal({
         {error && (
           <div className="msg-test-banner is-error" style={{ width: "100%", fontSize: 12 }}>
             <AlertCircle size={14} />
-            <span>{error}</span>
+            {error.cause != null ? (
+              <HomunErrorNotice error={error.cause} className="msg-qr-modal-error" />
+            ) : (
+              <span>{error.text}</span>
+            )}
           </div>
         )}
 

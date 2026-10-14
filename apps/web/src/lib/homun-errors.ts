@@ -23,12 +23,19 @@ export class HomunClientError extends Error {
   readonly code: HomunErrorCode;
   readonly httpStatus: number | null;
   readonly retryable: boolean;
+  /** Codice riportato dal motore prima della mappatura, quando c'era. */
+  readonly engineCode: string | null;
   override readonly cause?: unknown;
 
   constructor(
     code: HomunErrorCode,
     message: string,
-    options?: { httpStatus?: number; retryable?: boolean; cause?: unknown },
+    options?: {
+      httpStatus?: number;
+      retryable?: boolean;
+      cause?: unknown;
+      engineCode?: string | undefined;
+    },
   ) {
     super(message);
     this.name = "HomunClientError";
@@ -36,6 +43,7 @@ export class HomunClientError extends Error {
     this.httpStatus = options?.httpStatus ?? null;
     this.retryable =
       options?.retryable ?? (code === "engine_unavailable" || code === "request_timeout");
+    this.engineCode = options?.engineCode ?? null;
     if (options?.cause !== undefined) {
       this.cause = options.cause;
     }
@@ -68,6 +76,7 @@ export function homunErrorFromHttp(
   return new HomunClientError(code, message, {
     httpStatus: status,
     retryable: status === 503 || status === 429 || code === "request_timeout",
+    engineCode: rawCode ?? undefined,
   });
 }
 
@@ -84,6 +93,7 @@ export function homunErrorFromEngineEvent(
   const mapped = mapEngineCode(code, 0);
   return new HomunClientError(mapped, message.trim() || fallbackMessage, {
     retryable: code === "provider_unavailable" || mapped === "engine_unavailable",
+    engineCode: code ?? undefined,
   });
 }
 
@@ -115,6 +125,31 @@ function mapEngineCode(raw: string | null, status: number): HomunErrorCode {
   return "unknown";
 }
 
+/**
+ * Riconosce il testo che sembra un'eccezione grezza del motore (Python o
+ * interno), invece di una frase scritta per l'utente. Il motore scrive in
+ * italiano i messaggi di `validation_error`/`invalid_transition`; quando al
+ * loro posto arriva un'eccezione, la copia di prodotto deve vincere e il
+ * testo grezzo restare nei dettagli tecnici.
+ */
+export function looksLikeRawException(message: string): boolean {
+  if (!message) return false;
+  return (
+    // ValueError, KeyError, ValidationError, … (ma non «Errore», che continua
+    // con lettere e non chiude il confine di parola dopo «Error»)
+    /[A-Za-z]+Error\b/.test(message) ||
+    /\bException\b/.test(message) ||
+    /\bTraceback\b/.test(message) ||
+    /\[Errno \d+\]/.test(message) ||
+    // percorsi di modulo puntati: homun.core.interpret, pydantic.v1
+    /\b[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)+/.test(message)
+  );
+}
+
+/** Copia di prodotto quando il messaggio del motore non è una frase per l'utente. */
+const VALIDATION_FALLBACK = "La richiesta non è valida. Verifica i dati e riprova.";
+const TRANSITION_FALLBACK = "L'azione non è possibile nello stato attuale. Ricarica e riprova.";
+
 /** Short Italian copy for status strips and inline notices. */
 export function homunErrorUserMessage(error: unknown): string {
   if (isHomunClientError(error)) {
@@ -141,8 +176,15 @@ export function homunErrorUserMessage(error: unknown): string {
       case "not_found":
         return "Oggetto non trovato sul motore.";
       case "validation_error":
-      case "invalid_transition":
-        return error.message;
+      case "invalid_transition": {
+        // Il motore scrive queste frasi in italiano per l'utente: passano.
+        // Un'eccezione grezza al posto della frase vince la copia di prodotto.
+        const message = error.message.trim();
+        if (message && !looksLikeRawException(message)) {
+          return message;
+        }
+        return error.code === "validation_error" ? VALIDATION_FALLBACK : TRANSITION_FALLBACK;
+      }
       case "unknown":
         // Nessun testo grezzo di eccezione all'utente: il codice senza copia
         // di prodotto parla con la sola copia generica.
@@ -156,4 +198,45 @@ export function homunErrorUserMessage(error: unknown): string {
   // Gli errori non tipizzati non hanno mapping: resta la copia generica, mai
   // il messaggio interno (trace, [Errno …], nomi di modulo).
   return "Errore imprevisto.";
+}
+
+/** Il dettaglio tecnico di un errore: disponibile, ma solo su richiesta. */
+export type HomunErrorTechnicalDetails = {
+  /** Codice mappato del client; `unknown` per gli errori non tipizzati. */
+  code: HomunErrorCode;
+  /** Messaggio originale; null quando coincide col testo di prodotto. */
+  message: string | null;
+  /** Codice riportato dal motore prima della mappatura, se diverso dal nostro. */
+  engineCode: string | null;
+};
+
+/**
+ * Il blocco «Dettagli tecnici» di `HomunErrorNotice`, deciso qui per essere
+ * testato senza DOM: codice, messaggio originale e codice del motore. Il
+ * messaggio non si ripete quando è già il testo principale mostrato.
+ */
+export function homunErrorTechnicalDetails(error: unknown): HomunErrorTechnicalDetails | null {
+  if (error == null) {
+    return null;
+  }
+  const code = isHomunClientError(error) ? error.code : "unknown";
+  const engineCode =
+    isHomunClientError(error) && error.engineCode && error.engineCode !== code
+      ? error.engineCode
+      : null;
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const message = rawMessage && rawMessage !== homunErrorUserMessage(error) ? rawMessage : null;
+  return { code, message, engineCode };
+}
+
+/** I dettagli tecnici come testo semplice, per il pulsante «Copia». */
+export function homunErrorDetailsText(details: HomunErrorTechnicalDetails): string {
+  const lines = [`codice: ${details.code}`];
+  if (details.message) {
+    lines.push(`messaggio: ${details.message}`);
+  }
+  if (details.engineCode) {
+    lines.push(`codice motore: ${details.engineCode}`);
+  }
+  return lines.join("\n");
 }

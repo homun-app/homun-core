@@ -289,3 +289,44 @@ test("P5: la caduta del motore durante un invio produce UN solo avviso, senza te
   await expect(page.locator("body")).not.toContainText("Errno");
   await expect(page.locator("body")).not.toContainText("L'ultima operazione verso il motore");
 });
+
+test("P6: a motore fermo i dettagli tecnici dell'avviso sono chiusi e si aprono su richiesta", async ({
+  page,
+}) => {
+  await page.route("**/v1/**", (route) => route.abort());
+  await page.goto("/");
+
+  const notice = page.locator('[data-chat-status="engine-unreachable"]');
+  await expect(notice).toBeVisible();
+
+  // un solo blocco dettagli, chiuso di default
+  const details = notice.locator("details[data-homun-error-details]");
+  await expect(details).toHaveCount(1);
+  await expect(details).not.toHaveAttribute("open");
+  await expect(details.locator("summary")).toHaveText("Dettagli tecnici");
+  await expect(details.locator('[data-homun-error-detail="code"]')).toBeHidden();
+  await expect(details.locator('[data-homun-error-detail="message"]')).toBeHidden();
+
+  // il testo principale è copia di prodotto, senza il messaggio originale
+  const mainText = notice.locator(".cw-chat-status__error p");
+  await expect(mainText).toContainText("App locale non raggiungibile");
+  await expect(mainText).not.toContainText("Engine");
+
+  // il blocco non allarga l'avviso: resta nel limite del contenitore chat
+  const box = await notice.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.width).toBeLessThanOrEqual(461);
+
+  // aprendo il blocco: codice e messaggio originale, con copia disponibile
+  await details.locator("summary").click();
+  await expect(details).toHaveAttribute("open");
+  await expect(details.locator('[data-homun-error-detail="code"]')).toHaveText(
+    "engine_unavailable",
+  );
+  const message = details.locator('[data-homun-error-detail="message"]');
+  await expect(message).toBeVisible();
+  await expect(message).not.toHaveText("");
+  await expect(details.getByRole("button", { name: "Copia" })).toBeVisible();
+  // e il messaggio originale resta confinato nel blocco, non nel testo principale
+  await expect(mainText).not.toContainText(await message.textContent().then((text) => text ?? ""));
+});

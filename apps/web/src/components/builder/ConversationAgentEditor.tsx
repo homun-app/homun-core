@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { EngineAgentProfile } from "@/lib/engine-agents-client";
 import { postModelChat } from "@/lib/engine-models-client";
+import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { SettingsToggleSwitch } from "./SettingsToggleSwitch";
 import { SettingsCustomSelect } from "./SettingsCustomSelect";
 import {
@@ -90,6 +91,7 @@ export function ConversationAgentEditor({
     "Ciao, presentati brevemente e spiegami in cosa puoi aiutarmi.",
   );
   const [testReply, setTestReply] = useState<string | null>(null);
+  const [testError, setTestError] = useState<unknown>(null);
   const [testingModel, setTestingModel] = useState(false);
 
   function toggleCapability(capId: string) {
@@ -102,6 +104,7 @@ export function ConversationAgentEditor({
     if (!testPrompt.trim() || testingModel) return;
     setTestingModel(true);
     setTestReply(null);
+    setTestError(null);
     try {
       const messages: Array<{ role: "system" | "user"; content: string }> = [];
       if (formInstructions.trim()) {
@@ -118,8 +121,9 @@ export function ConversationAgentEditor({
       );
       setTestReply(res.text || "(Nessuna risposta generata)");
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setTestReply(`Errore nel test del modello: ${msg}`);
+      // Nessun testo grezzo in primo piano: l'errore tipizzato porta la
+      // copia di prodotto e i dettagli restano nel blocco richiudibile.
+      setTestError(err);
     } finally {
       setTestingModel(false);
     }
@@ -557,6 +561,8 @@ export function ConversationAgentEditor({
               <p>{testReply}</p>
             </div>
           )}
+
+          <HomunErrorNotice error={testError} label="Errore nel test del modello:" />
         </div>
 
         {/* Pulsanti di Salvataggio */}

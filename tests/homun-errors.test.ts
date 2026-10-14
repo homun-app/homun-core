@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   HomunClientError,
+  homunErrorDetailsText,
   homunErrorFromEngineEvent,
   homunErrorFromHttp,
+  homunErrorTechnicalDetails,
   homunErrorUserMessage,
+  looksLikeRawException,
 } from "../apps/web/src/lib/homun-errors.ts";
 
 describe("homunErrorFromHttp", () => {
@@ -82,4 +85,126 @@ it("preserves command, provider and storage error codes with actionable copy", (
     assert.equal(error.code, code);
     assert.notEqual(homunErrorUserMessage(error), "detail");
   }
+});
+
+describe("looksLikeRawException", () => {
+  it("riconosce il testo grezzo di eccezione del motore", () => {
+    const rawMessages = [
+      "Local model interpret failed: [Errno 61] Connection refused",
+      "ValueError: invalid literal for int() with base 10: 'x'",
+      "Traceback (most recent call last)",
+      "TypeError: 'NoneType' object is not iterable",
+      "homun.core.interpret failed while parsing the objective",
+      "pydantic.v1.ValidationError: field required",
+      "RuntimeError: worker died",
+    ];
+    for (const message of rawMessages) {
+      assert.equal(looksLikeRawException(message), true, message);
+    }
+  });
+
+  it("lascia passare le frasi di prodotto scritte dal motore", () => {
+    const productPhrases = [
+      "Il campo scadenza non può essere nel passato.",
+      "Errore di validazione: manca il titolo del lavoro.",
+      "Non puoi chiudere un lavoro mai avviato.",
+      "La risposta non può essere recuperata automaticamente.",
+      "Riprova tra poco.",
+    ];
+    for (const message of productPhrases) {
+      assert.equal(looksLikeRawException(message), false, message);
+    }
+  });
+});
+
+describe("homunErrorUserMessage: validation_error e invalid_transition", () => {
+  it("una frase di prodotto del motore resta il testo principale", () => {
+    const phrase = "Il campo scadenza non può essere nel passato.";
+    const validation = new HomunClientError("validation_error", phrase);
+    assert.equal(homunErrorUserMessage(validation), phrase);
+    const transition = new HomunClientError(
+      "invalid_transition",
+      "Non puoi chiudere un lavoro mai avviato.",
+    );
+    assert.equal(homunErrorUserMessage(transition), "Non puoi chiudere un lavoro mai avviato.");
+  });
+
+  it("un'eccezione grezza diventa copia di prodotto, mai testo grezzo", () => {
+    const raw = "ValueError: invalid literal for int() with base 10: 'x'";
+    const validation = homunErrorFromEngineEvent("validation_error", raw, "fallback");
+    assert.equal(
+      homunErrorUserMessage(validation),
+      "La richiesta non è valida. Verifica i dati e riprova.",
+    );
+    const transition = homunErrorFromEngineEvent("invalid_transition", raw, "fallback");
+    assert.equal(
+      homunErrorUserMessage(transition),
+      "L'azione non è possibile nello stato attuale. Ricarica e riprova.",
+    );
+  });
+});
+
+describe("homunErrorTechnicalDetails", () => {
+  it("errore senza testo di prodotto: dettagli con codice e messaggio originale", () => {
+    const raw = "Local model interpret failed: [Errno 61] Connection refused";
+    const error = new HomunClientError("unknown", raw);
+    assert.equal(homunErrorUserMessage(error), "Errore imprevisto.");
+    const details = homunErrorTechnicalDetails(error);
+    assert.equal(details?.code, "unknown");
+    assert.equal(details?.message, raw);
+    assert.equal(details?.engineCode, null);
+  });
+
+  it("errore con testo di prodotto: il messaggio originale resta nei dettagli", () => {
+    const raw = "Local model interpret failed: [Errno 61] Connection refused";
+    const error = homunErrorFromEngineEvent("provider_unavailable", raw, "fallback");
+    assert.equal(
+      homunErrorUserMessage(error),
+      "Il modello non è disponibile. Il messaggio resta salvato: puoi riprovare.",
+    );
+    const details = homunErrorTechnicalDetails(error);
+    assert.equal(details?.code, "provider_unavailable");
+    assert.equal(details?.message, raw);
+  });
+
+  it("se il messaggio coincide col testo di prodotto, il blocco mostra solo il codice", () => {
+    const phrase = "Il campo scadenza non può essere nel passato.";
+    const error = new HomunClientError("validation_error", phrase);
+    const details = homunErrorTechnicalDetails(error);
+    assert.ok(details);
+    assert.equal(details.message, null);
+    assert.equal(homunErrorDetailsText(details), "codice: validation_error");
+  });
+
+  it("porta il codice del motore quando differisce da quello mappato", () => {
+    const error = homunErrorFromEngineEvent("stream_error", "boom", "fallback");
+    const details = homunErrorTechnicalDetails(error);
+    assert.ok(details);
+    assert.equal(details.code, "unknown");
+    assert.equal(details.engineCode, "stream_error");
+    const text = homunErrorDetailsText(details);
+    assert.match(text, /codice: unknown/);
+    assert.match(text, /codice motore: stream_error/);
+  });
+
+  it("errori non tipizzati: codice unknown, messaggio originale disponibile", () => {
+    const details = homunErrorTechnicalDetails(new Error("Failed to fetch"));
+    assert.equal(details?.code, "unknown");
+    assert.equal(details?.message, "Failed to fetch");
+  });
+
+  it("il testo grezzo non finisce mai nel testo principale, solo nei dettagli", () => {
+    const raw = "homun.core.interpret failed: [Errno 61] Connection refused";
+    const errors = [
+      new HomunClientError("unknown", raw),
+      new HomunClientError("validation_error", raw),
+      new HomunClientError("invalid_transition", raw),
+      homunErrorFromEngineEvent("stream_error", raw, "fallback"),
+    ];
+    for (const error of errors) {
+      const main = homunErrorUserMessage(error);
+      assert.ok(!main.includes(raw), `testo principale contaminato: ${main}`);
+      assert.equal(homunErrorTechnicalDetails(error)?.message, raw);
+    }
+  });
 });
