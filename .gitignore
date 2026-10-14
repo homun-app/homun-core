@@ -74,3 +74,6 @@ wa-bridge.db-wal
 engine/uv.lock
 # configurazione locale dell'ambiente di sviluppo
 .zcodeignore
+
+# artefatti dei run Playwright
+test-results
