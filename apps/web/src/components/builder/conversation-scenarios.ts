@@ -85,6 +85,22 @@ export const phaseText: Record<"proposal" | "waiting" | "ready" | "review" | "ap
   approved: "Approvato",
 };
 
+/** Esempi guidati per le schede dello spazio (demo, nessuna azione esterna). */
+export const spaceExamples: Record<"Squadra" | "Progetti" | "Automazioni" | "Documenti", string> = {
+  Squadra: "Crea il team “Commerciale” con Marta, Vera e Giulia. Marta coordina.",
+  Progetti: "Crea il progetto “Lancio catalogo”: preparare il catalogo e studiare il mercato.",
+  Automazioni: "Ripeti questo lavoro ogni lunedì alle 9 e chiedimi di verificare il risultato.",
+  Documenti: "Raccogli i risultati verificati dei lavori e ritrovali quando servono.",
+};
+
+/** Ritmi demo selezionabili per le routine dello spazio (nessun timer reale). */
+export const spaceScheduleOptions = [
+  "Ogni lunedì alle 09:00 · Europe/Rome",
+  "Ogni giorno alle 08:00 · Europe/Rome",
+  "Lunedì–venerdì alle 09:00 · Europe/Rome",
+  "Ogni 2 ore · Europe/Rome",
+];
+
 /** Chrome for Fonte=motore works — never reuse Marta/Vera demo scenarios. */
 export const engineHomunScenario: ConversationScenario = {
   title: "Lavoro versionato",

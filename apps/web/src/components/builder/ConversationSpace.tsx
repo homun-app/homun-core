@@ -3,6 +3,7 @@ import { ConversationMemberPicker } from "./ConversationMemberPicker";
 import { ConversationProjectChats, type ProjectChat } from "./ConversationProjectChats";
 import { ConversationMember } from "./ConversationMember";
 import { memberProfile, isHumanMember, type MemberProfile } from "./conversation-members";
+import { spaceExamples, spaceScheduleOptions } from "./conversation-scenarios";
 import { useState } from "react";
 import { StudioChatInput } from "./StudioChatInput";
 import { ArrowUpRight, Plus, Check, Pause, Play } from "lucide-react";
@@ -48,7 +49,8 @@ export type SpaceView =
   | "Plugin"
   | "Materiali"
   | "Documenti"
-  | "Compiti" | "Canali"
+  | "Compiti"
+  | "Canali"
   | "Nuovo collaboratore";
 export type SpaceWork = {
   routineId?: string;
@@ -284,10 +286,6 @@ export function ConversationSpace({
     setDraft("");
     setFeedback("Confermato. Lo ritrovi qui e nella ricerca globale.");
   }
-  const examples: Record<"Squadra" | "Progetti" | "Automazioni" | "Documenti", string> = {
-    Squadra: "Crea il team “Commerciale” con Marta, Vera e Giulia. Marta coordina.", Progetti: "Crea il progetto “Lancio catalogo”: preparare il catalogo e studiare il mercato.",
-    Automazioni: "Ripeti questo lavoro ogni lunedì alle 9 e chiedimi di verificare il risultato.",
-    Documenti: "Raccogli i risultati verificati dei lavori e ritrovali quando servono."};
   return (
     <div className="cw-stage with-panel cs-stage">
       <section className="cw-conversation">
@@ -343,8 +341,8 @@ export function ConversationSpace({
                 </div>
               )}
               {!hasDraft && !selected && (
-                <button className="cs-example" onClick={() => propose(examples[view])}>
-                  {examples[view]}
+                <button className="cs-example" onClick={() => propose(spaceExamples[view])}>
+                  {spaceExamples[view]}
                   <ArrowUpRight size={17} />
                 </button>
               )}
@@ -668,35 +666,16 @@ export function ConversationSpace({
                   Quando
                   <ConversationSelectField
                     aria-label="Frequenza"
-                    value={
-                      [
-                        "Ogni lunedì alle 09:00 · Europe/Rome",
-                        "Ogni giorno alle 08:00 · Europe/Rome",
-                        "Lunedì–venerdì alle 09:00 · Europe/Rome",
-                        "Ogni 2 ore · Europe/Rome",
-                      ].includes(schedule)
-                        ? schedule
-                        : "custom"
-                    }
+                    value={spaceScheduleOptions.includes(schedule) ? schedule : "custom"}
                     onChange={(e) => setSchedule(e.target.value === "custom" ? "" : e.target.value)}
                   >
-                    {[
-                      "Ogni lunedì alle 09:00 · Europe/Rome",
-                      "Ogni giorno alle 08:00 · Europe/Rome",
-                      "Lunedì–venerdì alle 09:00 · Europe/Rome",
-                      "Ogni 2 ore · Europe/Rome",
-                    ].map((s) => (
+                    {spaceScheduleOptions.map((s) => (
                       <option key={s}>{s}</option>
                     ))}
                     <option value="custom">Scrivi una regola personalizzata</option>
                   </ConversationSelectField>
                 </label>
-                {![
-                  "Ogni lunedì alle 09:00 · Europe/Rome",
-                  "Ogni giorno alle 08:00 · Europe/Rome",
-                  "Lunedì–venerdì alle 09:00 · Europe/Rome",
-                  "Ogni 2 ore · Europe/Rome",
-                ].includes(schedule) && (
+                {!spaceScheduleOptions.includes(schedule) && (
                   <label>
                     Quando deve partire?
                     <input
@@ -965,7 +944,7 @@ export function ConversationSpace({
             <p className="cw-hint">
               Descrivi quello che vuoi organizzare oppure apri un elemento esistente.
             </p>
-            <button className="cw-secondary" onClick={() => propose(examples[view])}>
+            <button className="cw-secondary" onClick={() => propose(spaceExamples[view])}>
               <Plus size={16} />
               Prova un esempio
             </button>
