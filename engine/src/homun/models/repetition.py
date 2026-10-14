@@ -20,13 +20,38 @@ MIN_REPEAT_COUNT = 5
 DOMINANCE_RATIO = .5
 
 
+def asked_copies_cap(copies: int) -> int:
+    """Live and turn-end cut for an explicit copy count: the asked count
+    with slack, ``max(copies * 1.5, copies + 10)``. Below it the asked
+    repetition is delivered; one unit past it the reply is a loop (live
+    observation: with «200 volte» the local model never stopped at 200)."""
+    return max(math.ceil(copies * 1.5), copies + 10)
+
+
 class RepetitionError(ValueError):
     def __init__(self):
         super().__init__('Model output entered a repetition loop')
 
 
-def is_runaway_repetition(text, *, min_chars=MIN_FRAGMENT_LENGTH):
-    if not isinstance(text, str) or len(text) < min_chars:
+def _unit_count_exceeds(text: str, cap: int) -> bool:
+    """True when one non-empty line repeats more than ``cap`` times.
+
+    The repeated unit is the LINE — the notion is_runaway_repetition already
+    judges and the shape of an asked repetition («una per riga»); repetition
+    with no newlines stays under the character criterion alone.
+    """
+    counts = Counter(line.strip() for line in text.splitlines() if line.strip())
+    return any(count > cap for count in counts.values())
+
+
+def is_runaway_repetition(text, *, min_chars=MIN_FRAGMENT_LENGTH, asked_copies=None):
+    if not isinstance(text, str):
+        return False
+    # The asked-copies cap is a COUNT, not a char floor: a 300+ repeat of a
+    # short unit stays under STOP_PATH_MIN_CHARS yet must be judged.
+    if asked_copies is not None and _unit_count_exceeds(text, asked_copies_cap(asked_copies)):
+        return True
+    if len(text) < min_chars:
         return False
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if len(lines) >= MIN_REPEAT_COUNT and len(set(lines)) > len(lines) * .5:
@@ -63,10 +88,20 @@ class RunawayStreamWatch:
     the next evaluation runs each time the channel doubles and only the
     bounded tail (``STREAM_TAIL_CHARS``) is judged, so total work stays
     linear in the output however long the reply grows.
+
+    With an explicit ``asked_copies`` the criterion also counts repeated
+    units — the unit being the line — on EVERY completed line, independent
+    of the char cadence, and cuts past ``asked_copies_cap(copies)``. The
+    counter is incremental (O(total chars)) and counts the pending partial
+    line too, so the live verdict equals the turn-end verdict at every
+    stream length.
     """
 
-    def __init__(self, *, min_chars: int = MIN_FRAGMENT_LENGTH):
+    def __init__(self, *, min_chars: int = MIN_FRAGMENT_LENGTH, asked_copies=None):
         self._min_chars = max(1, int(min_chars))
+        self._cap = None if not asked_copies else asked_copies_cap(int(asked_copies))
+        self._unit_counts: Counter = Counter()
+        self._unit_remainder = ''
         self._chars = 0
         self._parts: list[str] = []
         self._next_check = self._min_chars
@@ -76,6 +111,8 @@ class RunawayStreamWatch:
             return False
         self._parts.append(chunk)
         self._chars += len(chunk)
+        if self._cap is not None and self._unit_cap_exceeded(chunk):
+            return True
         if self._chars < self._next_check:
             return False
         self._next_check = 2 * self._chars
@@ -83,7 +120,19 @@ class RunawayStreamWatch:
         if len(text) > STREAM_TAIL_CHARS:
             text = text[-STREAM_TAIL_CHARS:]
         self._parts = [text]
-        return is_runaway_repetition(text, min_chars=self._min_chars)
+        return is_runaway_repetition(text, min_chars=self._min_chars, asked_copies=None)
+
+    def _unit_cap_exceeded(self, chunk: str) -> bool:
+        self._unit_remainder += chunk
+        while '\n' in self._unit_remainder:
+            line, _, self._unit_remainder = self._unit_remainder.partition('\n')
+            line = line.strip()
+            if line:
+                self._unit_counts[line] += 1
+                if self._unit_counts[line] > self._cap:
+                    return True
+        pending = self._unit_remainder.strip()
+        return bool(pending) and self._unit_counts[pending] + 1 > self._cap
 
 
 # ---------------------------------------------------------------------------
@@ -102,4 +151,12 @@ from homun.models.asked_repetition import (  # noqa: F401 — re-export
 
 def turn_runaway_floor(user_message) -> int:
     """The single criterion's floor for a turn, decided from the ask alone."""
-    return STOP_PATH_MIN_CHARS if repetition_requested(user_message) else MIN_FRAGMENT_LENGTH
+    return turn_runaway_policy(user_message)[0]
+
+
+def turn_runaway_policy(user_message) -> tuple[int, int | None]:
+    """(floor, asked copies) for a turn — one decision from the ask alone."""
+    request = repetition_request(user_message)
+    if request is None:
+        return MIN_FRAGMENT_LENGTH, None
+    return STOP_PATH_MIN_CHARS, request.copies

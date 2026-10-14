@@ -8,7 +8,7 @@ from homun.application.agent.moa.moa_coordinator import MoACoordinator
 from homun.domain.models import Actor
 
 
-def execute(ctx, run, messages, tools, *, runaway_floor=None):
+def execute(ctx, run, messages, tools, *, runaway_floor=None, runaway_copies=None):
     actor = Actor.model_validate(run['_actor'])
     config = run['moa']
     selected = run.get('_moa_models')
@@ -31,9 +31,12 @@ def execute(ctx, run, messages, tools, *, runaway_floor=None):
     def invoke(provider, model, inputs, call_tools, purpose):
         reservation = reserve_auxiliary(ctx, actor, run, purpose=purpose, connection_id=provider, model_id=model)
         try:
-            # The turn's runaway floor (from the person's ask) follows every
-            # physical call of the MoA turn, advisors and aggregator alike.
+            # The turn's runaway floor (and asked copy count, when explicit)
+            # follows every physical call of the MoA turn, advisors and
+            # aggregator alike.
             kwargs = {} if runaway_floor is None else {'runaway_floor': runaway_floor}
+            if runaway_copies is not None:
+                kwargs['runaway_copies'] = runaway_copies
             result = complete(ctx, run, inputs, tools=call_tools, connection_id=provider, model_id=model,
                               **provider_policy(run), **kwargs)
         except Exception as exc:

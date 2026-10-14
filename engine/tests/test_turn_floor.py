@@ -10,7 +10,7 @@ Rules pinned here (see docs/SVILUPPO.md):
 from homun.models.repetition import MIN_FRAGMENT_LENGTH, STOP_PATH_MIN_CHARS
 from homun.models.prompt_blocks import STEER_MARKER_CLOSE, STEER_MARKER_OPEN
 from homun.models.truncation import CONTINUE_PROMPT
-from homun.application.agent.runs.turn_floor import floor_for_run
+from homun.application.agent.runs.turn_floor import floor_and_copies_for_run, floor_for_run
 
 
 def _run(messages, **extra):
@@ -50,6 +50,14 @@ def test_chat_runs_json_envelope_still_raises_the_floor():
     plain = json.dumps({'objective': 'chi sei?', 'available_materials': []},
                        ensure_ascii=False)
     assert floor_for_run(_run([_system(), _user(plain)])) == MIN_FRAGMENT_LENGTH
+
+
+def test_floor_and_copies_come_from_one_decision():
+    assert floor_and_copies_for_run(_run([_system(), _user(ASK)])) == (STOP_PATH_MIN_CHARS, 200)
+    assert floor_and_copies_for_run(_run([_system(), _user('Scrivi la stessa frase per 30 righe')])) \
+        == (STOP_PATH_MIN_CHARS, 30)
+    assert floor_and_copies_for_run(_run([_system(), _user('chi sei?')])) == (MIN_FRAGMENT_LENGTH, None)
+    assert floor_and_copies_for_run(_run([_system()])) == (MIN_FRAGMENT_LENGTH, None)
 
 
 def test_normal_ask_keeps_the_fragment_floor():

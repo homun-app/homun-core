@@ -21,7 +21,8 @@ _REASONING_DELTA_KEYS = ('reasoning', 'reasoning_content', 'thinking')
 
 
 class NativeStream:
-    def __init__(self, *, ollama=False, on_delta=None, runaway_floor=MIN_FRAGMENT_LENGTH):
+    def __init__(self, *, ollama=False, on_delta=None, runaway_floor=MIN_FRAGMENT_LENGTH,
+                 runaway_copies=None):
         self.ollama, self.on_delta = ollama, on_delta
         self.buffer = b''
         self.event = []
@@ -34,9 +35,10 @@ class NativeStream:
         self.finish_reason_seen = False
         self.usage = {}
         # The turn's floor (400 normally, 16k when the ask requested
-        # repetition) is one criterion for BOTH channels and the turn end.
-        self.content_watch = RunawayStreamWatch(min_chars=runaway_floor)
-        self.reasoning_watch = RunawayStreamWatch(min_chars=runaway_floor)
+        # repetition) and the asked copy count (when explicit) are one
+        # criterion for BOTH channels and the turn end.
+        self.content_watch = RunawayStreamWatch(min_chars=runaway_floor, asked_copies=runaway_copies)
+        self.reasoning_watch = RunawayStreamWatch(min_chars=runaway_floor, asked_copies=runaway_copies)
 
     def fail(self, text='Malformed native stream'):
         raise NativeModelError(MALFORMED, text, retryable=False)
