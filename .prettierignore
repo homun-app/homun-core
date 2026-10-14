@@ -11,8 +11,3 @@ routeTree.gen.ts
 contracts/openapi/v1-engine.json
 # generato da eslint --suppress-all / --prune-suppressions: formattazione di ESLint
 eslint-suppressions.json
-# File legacy con budget di righe congelati (tools/architecture-baseline.json,
-# "Never increase budgets"): la riformattazione Prettier li porterebbe oltre il
-# budget (ConversationWorkspace 1350 -> 1541). Si sbloccano solo riducendoli,
-# poi si tolgono da qui e dal baseline.
-apps/web/src/components/builder/ConversationWorkspace.tsx

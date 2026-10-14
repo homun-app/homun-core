@@ -1,13 +1,14 @@
 import { createSimulationActions } from "./conversation-simulation-actions";
 import { defaultPreferences, type ConversationPreferences } from "./conversation-preferences";
 import { type CatalogPlan } from "./ConversationCatalogPlan";
-import { ConversationActions } from "./ConversationActions";
 import { ConversationContribution } from "./ConversationContribution";
 import { ConversationHumanWork } from "./ConversationHumanWork";
 import { type ConversationMaterial } from "./ConversationMaterials";
 import { memberProfile, isHumanMember } from "./conversation-members";
 import { type SpaceData, type SpaceView, spacePeople } from "./ConversationSpace";
 import { ConversationSearch } from "./ConversationSearch";
+import { createConversationSend } from "./conversation-send";
+import { createConversationWorkActions } from "./conversation-work-actions";
 import { ConversationWorkspaceChatStage } from "./ConversationWorkspaceChatStage";
 import { EngineChatStage } from "./chat/EngineChatStage";
 import { ConversationWorkspaceSettingsMount } from "./ConversationWorkspaceSettingsMount";
@@ -18,14 +19,25 @@ import { ConversationWorkspaceTopbar } from "./ConversationWorkspaceTopbar";
 import { ConversationNotifications } from "./ConversationNotifications";
 import { ConversationWorkspaceBottomDock } from "./ConversationWorkspaceBottomDock";
 import { ConversationFloatingAgentWidget } from "./ConversationFloatingAgentWidget";
-import { ConversationWorkspaceWorkPanel, registerPlanAgent } from "./ConversationWorkspaceWorkPanel";
+import {
+  ConversationWorkspaceWorkPanel,
+  registerPlanAgent,
+} from "./ConversationWorkspaceWorkPanel";
 import { initialScenarios, scenarioForWork } from "./conversation-scenarios";
-import { applyBoardMove, boardMoveSuccessMessage, validateBoardMove } from "./conversation-board-move";
+import {
+  applyBoardMove,
+  boardMoveSuccessMessage,
+  validateBoardMove,
+} from "./conversation-board-move";
 import { demoWorkspaceBootstrap } from "./conversation-demo-mode";
 import { downloadWorkResult } from "./conversation-export";
 import { buildMaterialLibrary } from "./conversation-material-library";
 import { useConversationSearchEntries } from "@/hooks/useConversationSearchEntries";
-import { isCompletedNoticeForViewer, isPendingForViewer, workspaceWorkStatus } from "./conversation-work-status";
+import {
+  isCompletedNoticeForViewer,
+  isPendingForViewer,
+  workspaceWorkStatus,
+} from "./conversation-work-status";
 import { useConversationPrototypeStorage } from "./useConversationPrototypeStorage";
 import { type Phase, type Work } from "./conversation-types";
 import { useEffect, useReducer, useRef, useState } from "react";
@@ -34,18 +46,8 @@ import { useConversationSettingsOpen } from "@/hooks/useConversationSettingsOpen
 import { useEngineWorkspace } from "@/hooks/useEngineWorkspace";
 import { useWorkDestinationScroll, type WorkDestination } from "@/hooks/useWorkDestinationScroll";
 import { isEngineBackedWork } from "@/lib/conversation-engine-bridge";
-import { handleEngineSend } from "@/lib/engine-send-handler";
 import { buildFreeWorkSpec } from "@/lib/conversation-freework";
-import { parseConversationNavigation } from "@/lib/conversation-navigation";
-import {
-  parsePlanInsert,
-  parsePlanReorder,
-  reorderPlanSteps,
-  stripTrailingMention,
-} from "@/lib/conversation-plan-commands";
 import { projectWorkspaceData } from "@/lib/engine-project-projection";
-import { repeatEngineWork } from "@/lib/engine-work-repeat";
-import { pausedRoutines } from "@/lib/conversation-routines";
 const { storageKey, bootstrap: demoBootstrap } = demoWorkspaceBootstrap();
 
 export function ConversationWorkspace() {
@@ -73,12 +75,16 @@ export function ConversationWorkspace() {
     const saved = localStorage.getItem("homun:sidebar-width");
     return saved ? Math.min(480, Math.max(180, parseInt(saved, 10))) : 250;
   });
-  const handleSidebarWidthChange = (w: number) => { setSidebarWidth(w); localStorage.setItem("homun:sidebar-width", String(w)); };
+  const handleSidebarWidthChange = (w: number) => {
+    setSidebarWidth(w);
+    localStorage.setItem("homun:sidebar-width", String(w));
+  };
   const [notifications, setNotifications] = useState(false);
   const [floatingAgentOpen, setFloatingAgentOpen] = useState(false);
   const [seenResults, setSeenResults] = useState<string[]>([]);
   const [preview, setPreview] = useState(false);
-  const { settingsOpen, settingsSection, openSettings, closeSettings } = useConversationSettingsOpen();
+  const { settingsOpen, settingsSection, openSettings, closeSettings } =
+    useConversationSettingsOpen();
   const [space, setSpace] = useState<SpaceView | null>(demoBootstrap.initialSpace);
   const [spaceInitial, setSpaceInitial] = useState("");
   const [spaceSelected, setSpaceSelected] = useState("");
@@ -87,11 +93,38 @@ export function ConversationWorkspace() {
   const displaySpaceData = projectWorkspaceData(engine.backend, spaceData, engine);
   const [searchOpen, setSearchOpen] = useState(false);
   const { resetting } = useConversationPrototypeStorage({
-    storageKey, loaded, setLoaded, storageEnabled, setStorageEnabled, setStorageStatus,
-    scenarios, setScenarios, works, setWorks, materials, setMaterials, spaceData, setSpaceData,
-    preferences, setPreferences, seenResults, setSeenResults, active, setActive,
-    space, setSpace, sidebarOpen, setSidebarOpen, panel, setPanel, viewer, setViewer,
-    spaceSelected, setSpaceSelected, attachmentIds, materialDates,
+    storageKey,
+    loaded,
+    setLoaded,
+    storageEnabled,
+    setStorageEnabled,
+    setStorageStatus,
+    scenarios,
+    setScenarios,
+    works,
+    setWorks,
+    materials,
+    setMaterials,
+    spaceData,
+    setSpaceData,
+    preferences,
+    setPreferences,
+    seenResults,
+    setSeenResults,
+    active,
+    setActive,
+    space,
+    setSpace,
+    sidebarOpen,
+    setSidebarOpen,
+    panel,
+    setPanel,
+    viewer,
+    setViewer,
+    spaceSelected,
+    setSpaceSelected,
+    attachmentIds,
+    materialDates,
   });
 
   useEffect(() => {
@@ -151,9 +184,7 @@ export function ConversationWorkspace() {
   const notificationCount = pending.length + completedNotices.length;
   function patch(change: Partial<Work>) {
     if (isEngineBackedWork(work)) {
-      setNotice(
-        "Le modifiche di simulazione non si applicano a questo lavoro. Usa la chat.",
-      );
+      setNotice("Le modifiche di simulazione non si applicano a questo lavoro. Usa la chat.");
       return;
     }
     if (change.phase === "review")
@@ -178,7 +209,9 @@ export function ConversationWorkspace() {
     setNotifications(false);
     setPreview(false);
     setContribution("");
-    setFiles([]); setNotice(""); setPanel(false);
+    setFiles([]);
+    setNotice("");
+    setPanel(false);
   }
   // Anchored follow while reading at the bottom; an own send always follows.
   const [ownSendSeq, bumpOwnSend] = useReducer((count: number) => count + 1, 0);
@@ -207,12 +240,14 @@ export function ConversationWorkspace() {
       // Never reuse demo scenario titles as identity — objective text is the work title.
       const title = (text || s.initial || s.title).trim().slice(0, 100) || "Lavoro motore";
       const objective = (text || s.initial).trim() || title;
-      void engine.createWork(title, objective, false, projectId ?? newChatProjectId ?? undefined).then((created) => {
-        if (created) {
-          open(created.id);
-          setNotice(`Lavoro creato · ${created.id}`);
-        }
-      });
+      void engine
+        .createWork(title, objective, false, projectId ?? newChatProjectId ?? undefined)
+        .then((created) => {
+          if (created) {
+            open(created.id);
+            setNotice(`Lavoro creato · ${created.id}`);
+          }
+        });
       return;
     }
     if (spaceData.removedPeople?.includes((override || scenarios[index]!).agent)) {
@@ -461,8 +496,17 @@ export function ConversationWorkspace() {
     });
   }
   const { simulateQuestion, simulate, runRoutine } = createSimulationActions({
-    work, scenario, works, scenarios, viewer, spaceData,
-    patch, setNotice, setWorks, setScenarios, open,
+    work,
+    scenario,
+    works,
+    scenarios,
+    viewer,
+    spaceData,
+    patch,
+    setNotice,
+    setWorks,
+    setScenarios,
+    open,
   });
   function startAssignment(name: string) {
     open(null);
@@ -471,127 +515,14 @@ export function ConversationWorkspace() {
   function moveConversation(id: string, projectId: string) {
     if (engine.backend === "engine") {
       const target = engine.works.find((w) => w.id === id);
-      if (target) void engine.setProject(target, projectId || null).catch(() => setNotice("Assegnazione progetto non riuscita."));
+      if (target)
+        void engine
+          .setProject(target, projectId || null)
+          .catch(() => setNotice("Assegnazione progetto non riuscita."));
       return;
     }
     if (projectId && !spaceData.projects.some((p) => p.id === projectId)) return;
     setWorks((current) => current.map((w) => (w.id === id ? { ...w, projectId } : w)));
-  }
-  function conversationActions(w: Work) {
-    if (isEngineBackedWork(w)) {
-      return (
-        <ConversationActions
-          title={w.title}
-          projects={displaySpaceData.projects}
-          current={w.projectId || ""}
-          onRename={() => setNotice("Rinomina non ancora disponibile.")}
-          onMove={(projId) => moveConversation(w.id, projId)}
-          onCreate={() => setNotice("Promozione a progetto non ancora collegata al motore.")}
-          onRepeat={() => repeatEngineWork(w, openSpace, setNotice)}
-        />
-      );
-    }
-    return (
-      <ConversationActions
-        title={w.title}
-        projects={spaceData.projects}
-        current={w.projectId || ""}
-        onRename={(name) =>
-          setWorks((current) =>
-            current.map((item) => (item.id === w.id ? { ...item, title: name } : item)),
-          )
-        }
-        {...(!w.coordinatedBy
-          ? {
-              onArchive: () => {
-                setWorks((current) =>
-                  current.map((item) =>
-                    item.id === w.id || item.coordinatedBy === w.id
-                      ? { ...item, archived: true }
-                      : item,
-                  ),
-                );
-                setSpaceData((current) => ({
-                  ...current,
-                  routines: pausedRoutines(current.routines, (r) => r.workId === w.id),
-                }));
-                if (active === w.id) {
-                  open(null);
-                  openSpace("Compiti");
-                }
-                setNotice("Conversazione archiviata. Puoi ripristinarla dalle impostazioni.");
-              },
-              onDelete: () => {
-                const removed = new Set(
-                  works
-                    .filter((item) => item.id === w.id || item.coordinatedBy === w.id)
-                    .map((item) => item.id),
-                );
-                setMaterials([...library]);
-                setWorks((current) =>
-                  current
-                    .filter((item) => !removed.has(item.id))
-                    .map((item) =>
-                      item.request?.childId && removed.has(item.request.childId)
-                        ? {
-                            ...item,
-                            phase: "waiting",
-                            request: {
-                              to: item.requester || "Fabio",
-                              need:
-                                "Il contributo collegato è stato eliminato. Fornisci nuovamente: " +
-                                item.request.need,
-                              status: "pending",
-                            },
-                          }
-                        : item,
-                    ),
-                );
-                setSpaceData((current) => ({
-                  ...current,
-                  routines: pausedRoutines(current.routines, (r) => removed.has(r.workId)),
-                }));
-                if (active && removed.has(active)) {
-                  open(null);
-                  openSpace("Compiti");
-                }
-              },
-            }
-          : {})}
-        onMove={(id) => moveConversation(w.id, id)}
-        onCreate={() => promoteWork(w)}
-        onRepeat={() => {
-          open(w.id);
-          openSpace("Automazioni", "Ripeti questo lavoro ogni lunedì alle 9");
-        }}
-      />
-    );
-  }
-  function promoteWork(target = work) {
-    const work = target;
-    if (!work) return;
-    const id = crypto.randomUUID();
-    setSpaceData((current) => ({
-      ...current,
-      projects: [
-        ...current.projects,
-        {
-          id,
-          name: work.title,
-          brief: work.messages[0]?.text || work.title,
-          teamId: "",
-        },
-      ],
-    }));
-    setWorks((current) => current.map((w) => (w.id === work.id ? { ...w, projectId: id } : w)));
-    setMaterials((current) =>
-      current.map((m) =>
-        work.materialIds?.includes(m.id)
-          ? { ...m, projectIds: [...new Set([...m.projectIds, id])] }
-          : m,
-      ),
-    );
-    openSpace("Progetti", "", id);
   }
   function createFreeWork(name: string, text: string, attachments: File[], projectId?: string) {
     if (engine.backend === "engine") {
@@ -608,239 +539,55 @@ export function ConversationWorkspace() {
     setScenarios((current) => [...current, spec]);
     return create(index, text, attachments, projectId, spec);
   }
-  function send(text: string, attachments: File[]) {
-    const navigation = !attachments.length ? parseConversationNavigation(text) : null;
-    if (navigation) {
-      if (navigation.target === "settings") openSettings();
-      else openSpace(navigation.view);
-      return;
-    }
+  const send = createConversationSend({
+    engine,
+    work,
+    scenario,
+    scenarios,
+    viewer,
+    assignee,
+    spaceData,
+    preferences,
+    newChatProjectId,
+    open,
+    openSpace,
+    openSettings,
+    create,
+    createFreeWork,
+    deliver,
+    fulfillContribution,
+    updatePlan,
+    patch,
+    setWorks,
+    setNotice,
+    setPlanEdit,
+    setPanel,
+    bumpOwnSend,
+  });
 
-    if (handleEngineSend({
-      engine,
-      work: work ?? null,
-      text,
-      attachments,
-      open,
-      setNotice,
-      bumpOwnSend,
-      autonomyLevel: preferences.autonomyLevel,
-      modelConnectionId: preferences.preferredModelConnectionId || undefined,
-      projectId: newChatProjectId ?? undefined,
-    })) {
-      return;
-    }
-
-    if (work?.catalogPlan && work.phase !== "approved" && /^sposta\s/i.test(text)) {
-      const plan = work.catalogPlan;
-      const reorder = parsePlanReorder(text);
-      const steps = reorder ? reorderPlanSteps(plan.steps, plan.completed, reorder) : null;
-      if (steps) {
-        setPlanEdit({ workId: work.id, plan: { ...plan, steps } });
-        patch({
-          messages: [
-            ...work.messages,
-            { who: "you", text },
-            {
-              who: "agent",
-              text: "Ti propongo questo ordine. I passaggi già conclusi rimangono invariati.",
-            },
-          ],
-        });
-        setPanel(true);
-        return;
-      }
-      setNotice(
-        "Per riordinare indica i titoli di due passaggi futuri: Sposta Tradurre il catalogo dopo Preparare la bozza.",
-      );
-      return;
-    }
-
-    if (
-      work?.catalogPlan &&
-      work.phase !== "approved" &&
-      /^(aggiungi|inserisci)\b/i.test(text.trim())
-    ) {
-      const insert = parsePlanInsert(text);
-      if (insert) {
-        const names = [...new Set([...spacePeople, ...Object.keys(spaceData.profiles || {})])];
-        const agent = names.find((n) => text.toLowerCase().includes("@" + n.toLowerCase())) || "";
-        const title = stripTrailingMention(insert.rawTitle);
-        const anchor = insert.rawAnchor ? stripTrailingMention(insert.rawAnchor).toLowerCase() : "";
-        const index = anchor
-          ? work.catalogPlan.steps.findIndex((s) => s.title.toLowerCase().includes(anchor))
-          : work.catalogPlan.steps.length;
-        const position = index + (insert.relation === "dopo" ? 1 : 0);
-        if (index < 0 || position < work.catalogPlan.completed) {
-          setNotice(
-            "Indica un passaggio futuro usando il suo titolo, oppure inseriscilo con + nel piano.",
-          );
-          return;
-        }
-        const steps = [...work.catalogPlan.steps];
-        steps.splice(position, 0, { id: crypto.randomUUID(), title, agent });
-        setPlanEdit({ workId: work.id, plan: { ...work.catalogPlan, steps } });
-        patch({
-          messages: [
-            ...work.messages,
-            { who: "you", text },
-            {
-              who: "agent",
-              text: "Ecco la modifica proposta al piano. Controlla la posizione e applicala; puoi scegliere il collaboratore dal passaggio.",
-            },
-          ],
-        });
-        setPanel(true);
-        return;
-      }
-    }
-
-    if (scenario && spaceData.removedPeople?.includes(scenario.agent)) {
-      setNotice("Agente eliminato: conversazione in sola consultazione.");
-      return;
-    }
-    if (/crea.*(agente|collaboratore)/i.test(text) && !work) {
-      openSpace("Nuovo collaboratore", text);
-      return;
-    }
-    if (
-      !attachments.length &&
-      /crea.*(team|squadra)|crea.*progett|ripet|ogni luned|automatizza/i.test(text)
-    ) {
-      openSpace(
-        /team|squadra/i.test(text) ? "Squadra" : /progett/i.test(text) ? "Progetti" : "Automazioni",
-        text,
-      );
-      return;
-    }
-    if (!work) {
-      if (
-        /catalog/i.test(text) &&
-        /\bmarta\b/i.test(text) &&
-        /\bvera\b/i.test(text) &&
-        /prezz/i.test(text)
-      ) {
-        create(0, text, attachments);
-        return;
-      }
-      const mentioned = scenarios.find(
-        (s) =>
-          memberProfile(s.agent, spaceData.profiles).invitation !== "pending" &&
-          text.toLowerCase().includes("@" + s.agent.toLowerCase()) &&
-          !spaceData.removedPeople?.includes(s.agent),
-      );
-      if (assignee || mentioned) {
-        createFreeWork(assignee || mentioned!.agent, text, attachments);
-        return;
-      }
-      const index = /catalog|listin/i.test(text)
-        ? 0
-        : /ricerca|mercato|concorrent/i.test(text)
-          ? 1
-          : /log|error/i.test(text)
-            ? 2
-            : -1;
-      if (index < 0) {
-        setNotice(
-          "Scegli a chi affidarlo: scrivi @ e seleziona un collaboratore, oppure apri la sua scheda e premi Affida un lavoro.",
-        );
-        return;
-      }
-      create(index, text, attachments);
-      return;
-    }
-    if (work.request?.status === "pending") {
-      if (work.request.to === viewer && !work.request.childId)
-        fulfillContribution(text, attachments, []);
-      else
-        setNotice(
-          `La richiesta è assegnata a ${work.request.to}. Apri il contributo nel pannello.`,
-        );
-      return;
-    }
-    if (work.phase === "waiting") {
-      deliver(text, attachments);
-      return;
-    }
-    if (work.phase === "review" && work.catalogPlan && text.trim()) {
-      const next = {
-        ...work.catalogPlan,
-        steps: [
-          ...work.catalogPlan.steps,
-          {
-            id: crypto.randomUUID(),
-            title: "Revisione: " + text.trim(),
-            agent: work.catalogPlan.steps.at(-1)?.agent || scenario!.agent,
-          },
-        ],
-      };
-      updatePlan(next);
-      setWorks((current) =>
-        current.map((w) =>
-          w.id === work.id
-            ? {
-                ...w,
-                feedback: text,
-                revision: w.revision + 1,
-                files: [...w.files, ...attachments],
-                messages: [
-                  ...w.messages,
-                  { who: "you", text },
-                  {
-                    who: "agent",
-                    text: "Ho aggiunto un passaggio di revisione. Il risultato precedente è conservato; nella demo puoi simulare la nuova consegna.",
-                  },
-                ],
-              }
-            : w,
-        ),
-      );
-      return;
-    }
-    if (work.phase === "review") {
-      if (!text.trim()) {
-        setNotice("Scrivi cosa vorresti cambiare nella bozza.");
-        return;
-      }
-      patch({
-        feedback: text,
-        revision: work.revision + 1,
-        files: [...work.files, ...attachments],
-        messages: [
-          ...work.messages,
-          { who: "you", text },
-          {
-            who: "agent",
-            text: "Ho registrato la correzione nella bozza, nella sezione Indicazioni di revisione. Puoi riaprirla per verificarla. Il contenuto non viene riscritto da un modello in questa prova.",
-          },
-        ],
-      });
-      return;
-    }
-    patch({
-      ...(work.catalogPlan && work.phase === "proposal" && text.trim()
-        ? { contribution: [work.contribution, text].filter(Boolean).join("\n") }
-        : {}),
-      files: [...work.files, ...attachments],
-      messages: [
-        ...work.messages,
-        { who: "you", text: text || `${attachments.length} file allegati.` },
-        {
-          who: "agent",
-          text:
-            work.phase === "proposal"
-              ? "Indicazione conservata per il lavoro. Controlla i passaggi nel piano a destra e avvia quando sei pronto."
-              : "Messaggio conservato nel lavoro. Questa prova non interpreta ulteriori istruzioni: usa l’azione a destra per continuare.",
-        },
-      ],
-    });
-  }
   const library = buildMaterialLibrary(
     materials,
     works,
     attachmentIds.current,
     materialDates.current,
   );
+
+  const conversationActions = createConversationWorkActions({
+    work,
+    displaySpaceData,
+    spaceData,
+    works,
+    active,
+    library,
+    setWorks,
+    setMaterials,
+    setSpaceData,
+    setNotice,
+    open,
+    openSpace,
+    moveConversation,
+  });
+
   function updateMaterial(item: ConversationMaterial) {
     setMaterials((current) =>
       current.some((m) => m.id === item.id)
@@ -889,9 +636,7 @@ export function ConversationWorkspace() {
     if (phase === "review")
       setSeenResults((current) => current.filter((key) => !key.endsWith(`:${id}`)));
     setWorks((current) =>
-      current.map((w) =>
-        w.id === id ? applyBoardMove(w, phase as Phase, viewer) : w,
-      ),
+      current.map((w) => (w.id === id ? applyBoardMove(w, phase as Phase, viewer) : w)),
     );
     return boardMoveSuccessMessage(phase);
   }
@@ -1057,9 +802,7 @@ export function ConversationWorkspace() {
         storageKey={storageKey}
         resetting={resetting}
       />
-      {searchOpen && (
-        <ConversationSearch search={search} onClose={closeSearch} />
-      )}
+      {searchOpen && <ConversationSearch search={search} onClose={closeSearch} />}
       {sidebarOpen && (
         <button
           className="cw-mobile-backdrop"
@@ -1067,7 +810,8 @@ export function ConversationWorkspace() {
           onClick={closeSidebar}
         />
       )}
-      <ConversationWorkspaceSidebar engineAgents={engine.backend === "engine" ? engine.agents : undefined}
+      <ConversationWorkspaceSidebar
+        engineAgents={engine.backend === "engine" ? engine.agents : undefined}
         sidebarOpen={sidebarOpen}
         searchShortcut={searchShortcut}
         onSearchOpen={() => setSearchOpen(true)}
@@ -1081,7 +825,12 @@ export function ConversationWorkspace() {
         onOpenSpace={openSpace}
         engineMode={engine.backend === "engine"}
         spaceData={displaySpaceData}
-        libraryCount={engine.backend === "engine" ? null : library.length} routineCount={engine.backend === "engine" ? engine.routines.filter((r) => r.status === "active").length : null}
+        libraryCount={engine.backend === "engine" ? null : library.length}
+        routineCount={
+          engine.backend === "engine"
+            ? engine.routines.filter((r) => r.status === "active").length
+            : null
+        }
         visibleWorks={visibleWorks}
         works={engine.backend === "engine" ? engine.works : works}
         scenarios={scenarios}
@@ -1105,28 +854,63 @@ export function ConversationWorkspace() {
         {space !== "Progetti" && (
           <ConversationWorkspaceTopbar
             engineMode={engine.backend === "engine"}
-            sidebarOpen={sidebarOpen} onOpenSidebar={() => setSidebarOpen(true)}
-            space={space} work={work} preferences={preferences}
-            viewer={viewer} onViewerChange={(next) => { setViewer(next); setNotifications(false); }}
+            sidebarOpen={sidebarOpen}
+            onOpenSidebar={() => setSidebarOpen(true)}
+            space={space}
+            work={work}
+            preferences={preferences}
+            viewer={viewer}
+            onViewerChange={(next) => {
+              setViewer(next);
+              setNotifications(false);
+            }}
             spaceData={displaySpaceData}
             works={engine.backend === "engine" ? engine.works : works}
-            onOpenWork={open} onNewConversation={() => {
+            onOpenWork={open}
+            onNewConversation={() => {
               const inProjects = (space as string | null) === "Progetti";
               setNewChatProjectId(inProjects && spaceSelected ? spaceSelected : null);
               open(null);
             }}
-            spaceInitial={spaceInitial} onOpenSpace={openSpace} scenario={scenario} scenarios={scenarios} workActions={work ? conversationActions(work) : undefined}
+            spaceInitial={spaceInitial}
+            onOpenSpace={openSpace}
+            scenario={scenario}
+            scenarios={scenarios}
+            workActions={work ? conversationActions(work) : undefined}
           />
         )}
         <ConversationNotifications
-          isOpen={notifications} onClose={() => setNotifications(false)}
-          pending={pending} completedNotices={completedNotices}
-          scenarios={scenarios} spaceData={displaySpaceData} onOpenWork={open}
+          isOpen={notifications}
+          onClose={() => setNotifications(false)}
+          pending={pending}
+          completedNotices={completedNotices}
+          scenarios={scenarios}
+          spaceData={displaySpaceData}
+          onOpenWork={open}
         />
         {space ? (
-          <ConversationWorkspaceSpaceHost engineAgents={engine.backend === "engine" ? engine.agents : undefined} engineTeams={engine.backend === "engine" ? engine.teams : undefined} engineRoutines={engine.backend === "engine" ? engine.routines : undefined} onUpdateRoutine={engine.backend === "engine" ? (r, ch) => engine.updateRoutine(r.id, r.revision, ch) : undefined} onSkipNextRoutine={engine.backend === "engine" ? (r) => engine.routineAction(r.id, "skip_next", r.revision) : undefined} onCreateRoutineFromWork={engine.backend === "engine" ? (workId, input) => engine.createRoutineFromWork(workId, input) : undefined}
+          <ConversationWorkspaceSpaceHost
+            engineAgents={engine.backend === "engine" ? engine.agents : undefined}
+            engineTeams={engine.backend === "engine" ? engine.teams : undefined}
+            engineRoutines={engine.backend === "engine" ? engine.routines : undefined}
+            onUpdateRoutine={
+              engine.backend === "engine"
+                ? (r, ch) => engine.updateRoutine(r.id, r.revision, ch)
+                : undefined
+            }
+            onSkipNextRoutine={
+              engine.backend === "engine"
+                ? (r) => engine.routineAction(r.id, "skip_next", r.revision)
+                : undefined
+            }
+            onCreateRoutineFromWork={
+              engine.backend === "engine"
+                ? (workId, input) => engine.createRoutineFromWork(workId, input)
+                : undefined
+            }
             onSetEngineDue={engine.backend === "engine" ? engine.setDue : undefined}
-            engineMode={engine.backend === "engine"} onRefreshEngine={engine.backend === "engine" ? engine.refresh : undefined}
+            engineMode={engine.backend === "engine"}
+            onRefreshEngine={engine.backend === "engine" ? engine.refresh : undefined}
             space={space}
             spaceInitial={spaceInitial}
             spaceSelected={spaceSelected}
@@ -1158,7 +942,10 @@ export function ConversationWorkspace() {
             onRemoveMaterial={removeMaterial}
             onLinkMaterial={linkMaterial}
           />
-        ) : work && scenario && isHumanMember(scenario.agent, spaceData.profiles) && !isEngineBackedWork(work) ? (
+        ) : work &&
+          scenario &&
+          isHumanMember(scenario.agent, spaceData.profiles) &&
+          !isEngineBackedWork(work) ? (
           <ConversationHumanWork
             key={work.id + viewer}
             work={work}
@@ -1209,10 +996,16 @@ export function ConversationWorkspace() {
             onOpenModels={() => openSettings("models")}
             onCreateExample={create}
             onSend={send}
-            newChatProject={newChatProjectId ? {
-              id: newChatProjectId,
-              name: displaySpaceData.projects.find((p) => p.id === newChatProjectId)?.name ?? newChatProjectId,
-            } : null}
+            newChatProject={
+              newChatProjectId
+                ? {
+                    id: newChatProjectId,
+                    name:
+                      displaySpaceData.projects.find((p) => p.id === newChatProjectId)?.name ??
+                      newChatProjectId,
+                  }
+                : null
+            }
           />
         ) : (
           <ConversationWorkspaceChatStage
@@ -1237,15 +1030,25 @@ export function ConversationWorkspace() {
             onApprovePlan={approvePlan}
             onApplyPlanEdit={(plan) => updatePlan(plan)}
             onCancelPlanEdit={() => setPlanEdit(null)}
-            onSend={send} onOpenSpace={openSpace}
+            onSend={send}
+            onOpenSpace={openSpace}
             autonomyLevel={preferences.autonomyLevel}
-            onAutonomyLevelChange={(level) => setPreferences((p) => ({ ...p, autonomyLevel: level }))}
+            onAutonomyLevelChange={(level) =>
+              setPreferences((p) => ({ ...p, autonomyLevel: level }))
+            }
             modelConnectionId={preferences.preferredModelConnectionId ?? ""}
-            onModelConnectionIdChange={(connId) => setPreferences((p) => ({ ...p, preferredModelConnectionId: connId }))}
+            onModelConnectionIdChange={(connId) =>
+              setPreferences((p) => ({ ...p, preferredModelConnectionId: connId }))
+            }
             onClearNotice={() => setNotice("")}
-            engineMode={false} engineIntake={undefined} onRefreshEngine={engine.refresh}
-            engineAgents={undefined} agentNames={undefined}
-            onStartWork={undefined} engineBusy={engine.busy} historyLoading={engine.historyLoading}
+            engineMode={false}
+            engineIntake={undefined}
+            onRefreshEngine={engine.refresh}
+            engineAgents={undefined}
+            agentNames={undefined}
+            onStartWork={undefined}
+            engineBusy={engine.busy}
+            historyLoading={engine.historyLoading}
             onConfirmPatch={(messageIndex) => {
               if (!work) return;
               void engine.confirmPatch(work, messageIndex).catch(() => {
@@ -1256,12 +1059,36 @@ export function ConversationWorkspace() {
               if (!work) return;
               engine.discardPatch(work, messageIndex);
             }}
-            onSaveMemory={work ? (i) => void engine.saveMemoryFromMessage(work, i).catch(() => setNotice("Salvataggio memoria non riuscito. Controlla il banner errori.")) : undefined}
-            onSaveSkill={work ? (i) => void engine.saveSkillFromMessage(work, i).then(() => setNotice("Procedura salvata: approvala in Impostazioni → Skill.")).catch(() => setNotice("Salvataggio procedura non riuscito. Controlla il banner errori.")) : undefined}
+            onSaveMemory={
+              work
+                ? (i) =>
+                    void engine
+                      .saveMemoryFromMessage(work, i)
+                      .catch(() =>
+                        setNotice("Salvataggio memoria non riuscito. Controlla il banner errori."),
+                      )
+                : undefined
+            }
+            onSaveSkill={
+              work
+                ? (i) =>
+                    void engine
+                      .saveSkillFromMessage(work, i)
+                      .then(() =>
+                        setNotice("Procedura salvata: approvala in Impostazioni → Skill."),
+                      )
+                      .catch(() =>
+                        setNotice(
+                          "Salvataggio procedura non riuscito. Controlla il banner errori.",
+                        ),
+                      )
+                : undefined
+            }
             onCancelInFlight={() => engine.cancelInFlight()}
             details={
               work && scenario ? (
-                <ConversationWorkspaceWorkPanel onRefreshEngine={engine.refresh}
+                <ConversationWorkspaceWorkPanel
+                  onRefreshEngine={engine.refresh}
                   work={work}
                   scenario={scenario}
                   viewer={viewer}
@@ -1283,15 +1110,42 @@ export function ConversationWorkspace() {
                   onContributionChange={setContribution}
                   onFilesChange={setFiles}
                   onPreview={() => setPreview(true)}
-                  engineBusy={engine.busy} onRename={work.source === "engine" ? (title) => engine.renameWork(work, title) : undefined}
-                  engineIntake={engine.intake} onCloseWork={work.source === "engine" ? () => engine.closeWork(work) : undefined} onStartWork={work.source === "engine" ? () => engine.startWork(work) : undefined} onSubmitArtifact={work.source === "engine" ? (title, content) => engine.submitArtifact(work, title, content) : undefined}
-                  onSetBudget={work.source === "engine" ? (n) => engine.setWorkBudget(work, n) : undefined} onSetDue={work.source === "engine" ? (d) => engine.setDue(work, d) : undefined} onCreateRoutine={engine.routineCreatorFor(work)} onRevisePlan={work.source === "engine" ? (action) => engine.revisePlan(work, action) : undefined}
-                  agents={engine.agents.map((agent) => ({ id: agent.id, name: agent.name, status: agent.status }))} agentNames={Object.fromEntries(engine.agents.map((agent) => [agent.id, agent.name]))}
+                  engineBusy={engine.busy}
+                  onRename={
+                    work.source === "engine" ? (title) => engine.renameWork(work, title) : undefined
+                  }
+                  engineIntake={engine.intake}
+                  onCloseWork={work.source === "engine" ? () => engine.closeWork(work) : undefined}
+                  onStartWork={work.source === "engine" ? () => engine.startWork(work) : undefined}
+                  onSubmitArtifact={
+                    work.source === "engine"
+                      ? (title, content) => engine.submitArtifact(work, title, content)
+                      : undefined
+                  }
+                  onSetBudget={
+                    work.source === "engine" ? (n) => engine.setWorkBudget(work, n) : undefined
+                  }
+                  onSetDue={work.source === "engine" ? (d) => engine.setDue(work, d) : undefined}
+                  onCreateRoutine={engine.routineCreatorFor(work)}
+                  onRevisePlan={
+                    work.source === "engine"
+                      ? (action) => engine.revisePlan(work, action)
+                      : undefined
+                  }
+                  agents={engine.agents.map((agent) => ({
+                    id: agent.id,
+                    name: agent.name,
+                    status: agent.status,
+                  }))}
+                  agentNames={Object.fromEntries(
+                    engine.agents.map((agent) => [agent.id, agent.name]),
+                  )}
                   {...(work.source === "engine"
                     ? {
                         onApplyObjectivePatch: (next: string) =>
                           engine.applyObjectivePatch(work, next).catch((cause) => {
-                            setNotice("Aggiornamento obiettivo non riuscito."); throw cause;
+                            setNotice("Aggiornamento obiettivo non riuscito.");
+                            throw cause;
                           }),
                       }
                     : {})}
@@ -1328,21 +1182,47 @@ export function ConversationWorkspace() {
         <ConversationFloatingAgentWidget
           isOpen={floatingAgentOpen}
           onClose={() => setFloatingAgentOpen(false)}
-          onExpand={() => { setFloatingAgentOpen(false); setSpace(null); }}
-          onSend={(text) => { send(text, []); }}
+          onExpand={() => {
+            setFloatingAgentOpen(false);
+            setSpace(null);
+          }}
+          onSend={(text) => {
+            send(text, []);
+          }}
           work={work}
           engineMode={engine.backend === "engine"}
         />
       )}
-      <input ref={upload} hidden type="file" multiple onChange={(e) => { setFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = ""; }} />
-      <input ref={directory} hidden type="file" multiple {...{ webkitdirectory: "" }} onChange={(e) => { setFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = ""; }} />
+      <input
+        ref={upload}
+        hidden
+        type="file"
+        multiple
+        onChange={(e) => {
+          setFiles([...files, ...Array.from(e.target.files || [])]);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={directory}
+        hidden
+        type="file"
+        multiple
+        {...{ webkitdirectory: "" }}
+        onChange={(e) => {
+          setFiles([...files, ...Array.from(e.target.files || [])]);
+          e.target.value = "";
+        }}
+      />
       {preview && work && scenario && (
         <ConversationWorkspacePreview
           work={work}
           scenario={scenario}
           modalRef={modal}
           onClose={() => setPreview(false)}
-          onDownload={() => { if (scenario && work) downloadWorkResult({ scenario, work }); }}
+          onDownload={() => {
+            if (scenario && work) downloadWorkResult({ scenario, work });
+          }}
         />
       )}
     </div>
