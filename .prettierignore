@@ -18,4 +18,3 @@ eslint-suppressions.json
 apps/web/src/components/builder/ConversationWorkspace.tsx
 apps/web/src/components/builder/messaging/ChannelQrModal.tsx
 apps/web/src/hooks/useEngineWorkspace.ts
-packages/ui/src/components/sidebar.tsx
