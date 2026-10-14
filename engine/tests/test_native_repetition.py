@@ -58,6 +58,55 @@ def test_asked_repetition_without_the_ask_is_still_rejected():
     assert caught.value.code=='agent_model_repetition'
 
 
+def test_asked_copies_cap_formula():
+    from homun.models.repetition import asked_copies_cap
+    assert asked_copies_cap(200)==300  # 1.5x dominates
+    assert asked_copies_cap(1000)==1500
+    assert asked_copies_cap(4)==14  # copies+10 dominates
+    assert asked_copies_cap(3)==13
+
+
+def test_asked_copies_cap_delivers_200_and_rejects_400():
+    """200 asked → 200 delivered whole (cap 300 slack); the model that
+    keeps producing to 400 is rejected at turn end with the typed code —
+    the reply stays under the 16k char ceiling, so ONLY the count fires."""
+    from homun.models.repetition import STOP_PATH_MIN_CHARS
+    delivered='Ciao mondo!\n'*200
+    looped='Ciao mondo!\n'*400
+    assert len(looped)<STOP_PATH_MIN_CHARS
+    result=complete_tools(provider(delivered),[],tools=[],
+                          runaway_floor=STOP_PATH_MIN_CHARS,runaway_copies=200)
+    assert result.message.content==delivered
+    with pytest.raises(NativeModelError) as caught:
+        complete_tools(provider(looped),[],tools=[],
+                       runaway_floor=STOP_PATH_MIN_CHARS,runaway_copies=200)
+    assert caught.value.code=='agent_model_repetition'
+    assert not caught.value.retryable
+
+
+def test_without_explicit_copies_only_the_16k_cap_applies():
+    """No explicit count in the ask → no count cap: a sub-16k repetition is
+    delivered under the raised floor, and only the char ceiling judges."""
+    from homun.models.repetition import STOP_PATH_MIN_CHARS
+    text='Ciao mondo!\n'*400
+    assert len(text)<STOP_PATH_MIN_CHARS
+    result=complete_tools(provider(text),[],tools=[],
+                          runaway_floor=STOP_PATH_MIN_CHARS)
+    assert result.message.content==text
+
+
+def test_live_watch_cuts_at_the_exact_unit_past_the_cap():
+    """The live cut lands on the repetition that crosses the cap — the 301st
+    of 200 asked (cap 300) — not at the next char-cadence doubling and not
+    at any timeout: 300 delivered units all return False."""
+    from homun.models.repetition import STOP_PATH_MIN_CHARS, RunawayStreamWatch
+    watch=RunawayStreamWatch(min_chars=STOP_PATH_MIN_CHARS,asked_copies=200)
+    unit='Ciao mondo!\n'
+    for _ in range(300):
+        assert watch.feed(unit) is False
+    assert watch.feed(unit) is True
+
+
 from test_agent_runs import setup
 
 

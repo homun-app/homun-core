@@ -60,17 +60,19 @@ def project_messages(messages, *, ollama=False):
     return rows
 
 
-def parse_response(response, *, ollama=False, runaway_floor=MIN_FRAGMENT_LENGTH):
+def parse_response(response, *, ollama=False, runaway_floor=MIN_FRAGMENT_LENGTH, runaway_copies=None):
     try:
-        return _parse_response(response, ollama=ollama, runaway_floor=runaway_floor)
+        return _parse_response(response, ollama=ollama, runaway_floor=runaway_floor,
+                               runaway_copies=runaway_copies)
     except (KeyError, IndexError, AttributeError, TypeError) as exc:
         raise ValueError('Malformed native agent response') from exc
 
 
-def _parse_response(response, *, ollama=False, runaway_floor=MIN_FRAGMENT_LENGTH):
+def _parse_response(response, *, ollama=False, runaway_floor=MIN_FRAGMENT_LENGTH, runaway_copies=None):
     choice = response if ollama else response['choices'][0]
     from homun.models.repetition import is_runaway_repetition, RepetitionError
-    if is_runaway_repetition(choice['message'].get('content'), min_chars=runaway_floor):
+    if is_runaway_repetition(choice['message'].get('content'), min_chars=runaway_floor,
+                             asked_copies=runaway_copies):
         raise RepetitionError()
     reason = choice.get('done_reason' if ollama else 'finish_reason')
     if reason == 'length':

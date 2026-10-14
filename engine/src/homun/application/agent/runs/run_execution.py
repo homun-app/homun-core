@@ -148,20 +148,23 @@ def _decision(ctx, run):
         if agent_native.enabled(run):
             if moa_enabled:
                 from homun.application.agent.moa.moa_runtime import execute as execute_moa
-                from homun.application.agent.runs.turn_floor import floor_for_run
+                from homun.application.agent.runs.turn_floor import floor_and_copies_for_run
+                runaway_floor, runaway_copies = floor_and_copies_for_run(run)
                 result = execute_moa(ctx, run, messages, tools,
-                                     runaway_floor=floor_for_run(run))
+                                     runaway_floor=runaway_floor, runaway_copies=runaway_copies)
             else:
                 # The turn's runaway floor (16k iff the person asked for
-                # repetition) is decided from the ask, before the model call,
-                # and is the same criterion for the live watches and the
-                # turn-end check — including the fallback connection.
-                from homun.application.agent.runs.turn_floor import floor_for_run
-                runaway_floor = floor_for_run(run)
+                # repetition) and the asked copy count are decided from the
+                # ask, before the model call, and are the same criterion for
+                # the live watches and the turn-end check — including the
+                # fallback connection.
+                from homun.application.agent.runs.turn_floor import floor_and_copies_for_run
+                runaway_floor, runaway_copies = floor_and_copies_for_run(run)
                 conn_id = run['connection_id']
                 try:
                     result = complete_native(ctx, run, messages, tools=tools,
                                                        connection_id=conn_id, runaway_floor=runaway_floor,
+                                                       runaway_copies=runaway_copies,
                                                        **provider_policy(run))
                 except NativeModelError as exc:
                     fallback_id = run.get('fallback_connection_id')
@@ -185,6 +188,7 @@ def _decision(ctx, run):
                         }
                         result = complete_native(ctx, run, messages, tools=tools,
                                                            connection_id=fallback_id, runaway_floor=runaway_floor,
+                                                           runaway_copies=runaway_copies,
                                                            **provider_policy(run))
                     else:
                         raise

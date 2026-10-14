@@ -15,11 +15,11 @@ from homun.models.port import ContextLimits
 
 
 def complete_tools(provider, messages, *, tools, model_id=None, context_window=None, max_output_tokens=8192, stream=False,
-                   cancel_check=None, on_delta=None, runaway_floor=MIN_FRAGMENT_LENGTH):
+                   cancel_check=None, on_delta=None, runaway_floor=MIN_FRAGMENT_LENGTH, runaway_copies=None):
     return _complete(provider, messages, tools=tools, model_id=model_id,
                      context_window=context_window, max_output_tokens=max_output_tokens,
                      stream=stream, cancel_check=cancel_check, on_delta=on_delta,
-                     runaway_floor=runaway_floor)
+                     runaway_floor=runaway_floor, runaway_copies=runaway_copies)
 
 
 def complete_summary(provider, messages, *, model_id=None, context_window=None, max_output_tokens=8192):
@@ -55,7 +55,8 @@ def usage_from_response(response, *, provider_id, model_id, ollama) -> UsageEntr
 
 
 def _complete(provider, messages, *, tools, model_id, context_window, max_output_tokens,
-              stream=False, cancel_check=None, on_delta=None, runaway_floor=MIN_FRAGMENT_LENGTH):
+              stream=False, cancel_check=None, on_delta=None, runaway_floor=MIN_FRAGMENT_LENGTH,
+              runaway_copies=None):
     limits = ContextLimits(context_window=context_window, max_output_tokens=max_output_tokens)
     key = provider._api_key()
     if not key:
@@ -83,11 +84,13 @@ def _complete(provider, messages, *, tools, model_id, context_window, max_output
             payload['stream_options'] = {'include_usage': True}
         response = stream_response(provider, payload, api_key=key, ollama=ollama,
             cancel_check=cancel_check, on_delta=on_delta, runaway_floor=runaway_floor,
+            runaway_copies=runaway_copies,
             usage_factory=lambda body: usage_from_response(body, provider_id=provider.provider_id,
                                                            model_id=model, ollama=ollama))
     usage = usage_from_response(response, provider_id=provider.provider_id, model_id=model, ollama=ollama)
     try:
-        message = parse_response(response, ollama=ollama, runaway_floor=runaway_floor)
+        message = parse_response(response, ollama=ollama, runaway_floor=runaway_floor,
+                                 runaway_copies=runaway_copies)
     except ValueError as exc:
         error = classify_response(exc, usage=usage)
         if stream:

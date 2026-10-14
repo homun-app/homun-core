@@ -13,8 +13,9 @@ POLL_SECONDS = 0.05
 
 
 def stream_response(provider, payload, *, api_key, ollama, cancel_check=None, on_delta=None, usage_factory,
-                    runaway_floor=MIN_FRAGMENT_LENGTH):
-    parser = NativeStream(ollama=ollama, on_delta=on_delta, runaway_floor=runaway_floor)
+                    runaway_floor=MIN_FRAGMENT_LENGTH, runaway_copies=None):
+    parser = NativeStream(ollama=ollama, on_delta=on_delta, runaway_floor=runaway_floor,
+                          runaway_copies=runaway_copies)
     url = (provider._ollama_native_root() + '/api/chat' if ollama else provider.base_url + '/chat/completions')
     async def consume():
         async with httpx2.AsyncClient(timeout=provider.timeout_seconds, follow_redirects=False) as client:

@@ -102,9 +102,9 @@ def test_p0_asked_floor_raises_both_channels_first_check_to_16k(field):
     assert finished["choices"][0]["message"]["content"] == (asked if field == "content" else "")
 
 
-def _live_verdict(text, *, floor=MIN_FRAGMENT_LENGTH, chunk_chars=64):
+def _live_verdict(text, *, floor=MIN_FRAGMENT_LENGTH, copies=None, chunk_chars=64):
     """Replay ``text`` through the live watch the way NativeStream feeds it."""
-    watch = RunawayStreamWatch(min_chars=floor)
+    watch = RunawayStreamWatch(min_chars=floor, asked_copies=copies)
     for offset in range(0, len(text), chunk_chars):
         if watch.feed(text[offset:offset + chunk_chars]):
             return True
@@ -125,24 +125,31 @@ _NORMAL_LONG_TEXT = "\n".join(
     pytest.param(_RUNAWAY_LINE * 30, id="short-loop-2.6k"),
     pytest.param(_RUNAWAY_LINE * 280, id="long-loop-24k"),
     pytest.param("Ciao mondo!\n" * 200, id="asked-repetition-2.4k"),
+    pytest.param("Ciao mondo!\n" * 250, id="capped-within-slack"),
+    pytest.param("Ciao mondo!\n" * 301, id="capped-one-past-cap"),
+    pytest.param("Ciao mondo!\n" * 400, id="capped-observed-400"),
     pytest.param(_NORMAL_LONG_TEXT, id="normal-long-32k"),
     pytest.param(_SIMILAR_ROWS_TABLE, id="similar-rows-table"),
 ])
-@pytest.mark.parametrize("mode,floor", [
-    pytest.param("normal", MIN_FRAGMENT_LENGTH, id="normal-400"),
-    pytest.param("asked", STOP_PATH_MIN_CHARS, id="asked-16k"),
+@pytest.mark.parametrize("mode,floor,copies", [
+    pytest.param("normal", MIN_FRAGMENT_LENGTH, None, id="normal-400"),
+    pytest.param("asked", STOP_PATH_MIN_CHARS, None, id="asked-16k"),
+    pytest.param("asked-capped", STOP_PATH_MIN_CHARS, 200, id="asked-16k-cap-200"),
 ])
-def test_p0_live_watch_verdict_at_end_of_stream_matches_turn_end(text, mode, floor):
+def test_p0_live_watch_verdict_at_end_of_stream_matches_turn_end(text, mode, floor, copies):
     """INVARIANT — the live watch and the turn-end check are ONE criterion,
-    in BOTH modes. Whatever ``is_runaway_repetition`` says about the complete
-    message at the turn's floor, the live watch must say the same by the time
-    the stream ends: a reply the turn end would reject is cut as soon as the
-    live cadence can prove it, and a reply the turn end would accept (asked
-    repetition below 16k, long distinct text, tables with similar rows) is
-    never cut live.
+    in EVERY mode. Whatever ``is_runaway_repetition`` says about the complete
+    message at the turn's floor (and asked-copies cap), the live watch must
+    say the same by the time the stream ends: a reply the turn end would
+    reject is cut as soon as the live cadence can prove it, and a reply the
+    turn end would accept (asked repetition below 16k, long distinct text,
+    tables with similar rows) is never cut live. With an explicit count the
+    cap is a repetition COUNT, judged live at the exact unit that crosses
+    max(copies*1.5, copies+10) — 200 asked keeps 300 slack, so the observed
+    400-unit loop is cut at the 301st.
     """
-    live = _live_verdict(text, floor=floor)
-    turn_end = is_runaway_repetition(text, min_chars=floor)
+    live = _live_verdict(text, floor=floor, copies=copies)
+    turn_end = is_runaway_repetition(text, min_chars=floor, asked_copies=copies)
     assert live == turn_end, (
         f"live verdict {live} != turn-end verdict {turn_end} "
         f"({mode} mode, {len(text)} chars)"
@@ -200,7 +207,8 @@ def _streaming_chat_model(text, *, chunk_chars=256, deliver=False):
         assert stream is True
         assert kwargs.get("runaway_floor") is not None
         parser = NativeStream(on_delta=on_delta,
-                              runaway_floor=kwargs["runaway_floor"])
+                              runaway_floor=kwargs["runaway_floor"],
+                              runaway_copies=kwargs.get("runaway_copies"))
         for offset in range(0, len(text), chunk_chars):
             parser.feed(sse(chunk({"content": text[offset:offset + chunk_chars]})))
         if deliver:
@@ -282,6 +290,19 @@ def test_p0_asked_repetition_looping_past_16k_is_cut_typed_and_visible(setup_cha
     _streamed_repetition_fails_turn_typed_and_visible(
         setup_chat, runaway_text(len(_RUNAWAY_LINE) * 280),
         chunk_chars=256, ask='Scrivi "Ciao mondo" 200 volte, una per riga')
+
+
+def test_p0_model_looping_past_the_asked_count_is_cut_live_typed_and_visible(setup_chat):
+    """Live-observed failure this cap closes: with «200 volte» the local
+    model did not stop at 200 lines and looped until the 120s timeout. When
+    the ask carries an explicit count, the live watch interrupts the stream
+    past max(copies*1.5, copies+10) repetitions of the same unit — the
+    400-unit reply (still under the 16k char ceiling) is cut at the 301st,
+    the run fails ``agent_model_repetition`` and a notice reaches the chat.
+    """
+    _streamed_repetition_fails_turn_typed_and_visible(
+        setup_chat, "Ciao mondo!\n" * 400,
+        chunk_chars=64, ask='Scrivi "Ciao mondo" 200 volte, una per riga')
 
 
 def test_p0_runaway_cut_ends_turn_typed_and_visible(setup_chat):

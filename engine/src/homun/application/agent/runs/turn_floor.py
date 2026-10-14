@@ -13,7 +13,7 @@ Delegation children carry no person message at all: normal floor.
 """
 import json
 
-from homun.models.repetition import turn_runaway_floor
+from homun.models.repetition import turn_runaway_floor, turn_runaway_policy
 from homun.models.truncation import CONTINUE_PROMPT
 
 _ENGINE_USER_PREFIX = '[SYSTEM]'
@@ -58,3 +58,9 @@ def user_message_for_floor(run) -> str | None:
 def floor_for_run(run) -> int:
     """400 normally; 16k only when the person asked for repetition."""
     return turn_runaway_floor(user_message_for_floor(run))
+
+
+def floor_and_copies_for_run(run) -> tuple[int, int | None]:
+    """(floor, asked copies) from ONE decision on the person's message, so
+    every model call of the turn guards at the same floor and cap."""
+    return turn_runaway_policy(user_message_for_floor(run))
