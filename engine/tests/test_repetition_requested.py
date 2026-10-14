@@ -4,48 +4,59 @@
 whether the runaway guards judge at the normal floor (400) or at the
 asked-repetition floor (16_000, Hermes's stop-path scale). The generated
 text never decides the mode.
+
+Two case tables:
+- ``DEVELOPMENT_CASES`` — the detector is developed against these; the
+  invariants are the source of truth (production verb AND multiplicity,
+  quoted text is data, in doubt False);
+- ``HELD_OUT_CASES`` — written BEFORE the rewrite and never used to tune
+  the detector; both tables must stay at 100%.
 """
 import pytest
 
 from homun.models.repetition import (
     MIN_FRAGMENT_LENGTH,
     STOP_PATH_MIN_CHARS,
+    repetition_request,
     repetition_requested,
     turn_runaway_floor,
 )
 
-# (id, message, expected). Few clear patterns, pinned by this table: an
-# explicit copy count (>= 3), an unnegated repetition verb, or identical-rows
-# phrasing — with negation / meta-question / hypothetical guards.
-TABLE = [
+# (id, message, expected). The detector fires ONLY on a clause that carries
+# BOTH a production verb directed at the assistant AND a multiplicity signal
+# (copy count >= 3, or «la stessa riga/frase» + a row count), with the
+# negation / meta-question / hypothetical / explainer guards applied to the
+# NON-quoted text. A dozen cases the FIRST detector accepted are now False
+# by invariant (marked «flip»): counts without a production verb are
+# narration, and «ripeti» without multiplicity means «say it again once».
+DEVELOPMENT_CASES = [
     # — chiede ripetizioni, IT —
     pytest.param('Scrivi "Ciao mondo" 200 volte, una per riga', True, id='it-count-verb'),
     pytest.param('ripeti questa frase 100 volte', True, id='it-imperative-count'),
     pytest.param('ripetere la riga 50 volte', True, id='it-infinitive-count'),
-    pytest.param('ripetilo due volte', True, id='it-bare-imperative'),
-    pytest.param('puoi ripetere il comando?', True, id='it-bare-ask'),
+    pytest.param('ripetilo 3 volte', True, id='it-bare-imperative-with-count'),
+    pytest.param('puoi ripetere il comando 10 volte?', True, id='it-bare-ask-with-count'),
     pytest.param('copia questa riga 30 volte', True, id='it-copy-count'),
-    pytest.param('30 righe uguali', True, id='it-identical-rows'),
-    pytest.param('trenta righe identiche', True, id='it-identical-rows-word-number'),
-    pytest.param('la stessa riga 5 volte', True, id='it-same-line-count'),
-    pytest.param('trenta volte la stessa frase', True, id='it-word-count'),
+    pytest.param('30 righe uguali', False, id='it-identical-rows'),  # flip: no production verb
+    pytest.param('trenta righe identiche', False, id='it-identical-rows-word-number'),  # flip
+    pytest.param('la stessa riga 5 volte', False, id='it-same-line-count'),  # flip: no verb
+    pytest.param('trenta volte la stessa frase', False, id='it-word-count'),  # flip: no verb
     pytest.param('scrivi ciao mille volte', True, id='it-mille'),
-    pytest.param('1.000 volte la stessa frase', True, id='it-thousands-separator'),
+    pytest.param('1.000 volte la stessa frase', False, id='it-thousands-separator'),  # flip
     # — chiede ripetizioni, EN —
     pytest.param('Say the word "go" 50 times', True, id='en-say-times'),
     pytest.param('write "loading" 100x', True, id='en-write-100x'),
-    pytest.param('x50', True, id='en-bare-x50'),
-    pytest.param('50 times', True, id='en-bare-times'),
-    pytest.param('100x', True, id='en-bare-100x'),
-    pytest.param('please repeat the list', True, id='en-bare-repeat'),
+    pytest.param('x50', False, id='en-bare-x50'),  # flip: count without a verb
+    pytest.param('50 times', False, id='en-bare-times'),  # flip
+    pytest.param('100x', False, id='en-bare-100x'),  # flip
+    pytest.param('please repeat the list', False, id='en-bare-repeat'),  # flip: no multiplicity
     pytest.param('copy this line 50 times', True, id='en-copy-times'),
-    # — costi accettati e documentati: la narrazione al passato col conteggio
-    #   alza solo la soglia (16k): un loop vero resta tagliato, dopo —
-    pytest.param('te l\'ho già detto 100 volte', True, id='it-narration-accepted-true'),
+    # — narrazione al passato col conteggio: NIENTE verbo di produzione —
+    pytest.param("te l'ho già detto 100 volte", False, id='it-narration-with-count'),
     # — cita la parola senza chiedere ripetizioni —
     pytest.param('non ripetere quello che hai detto', False, id='it-negated-imperative'),
     pytest.param('smetti di ripetere la riga', False, id='it-stop-gerund'),
-    pytest.param('non voglio ripetere l\'errore', False, id='it-negated-intent'),
+    pytest.param("non voglio ripetere l'errore", False, id='it-negated-intent'),
     pytest.param('perché ti ripeti sempre?', False, id='it-why-meta-question'),
     pytest.param('cosa significa ripetere una stringa?', False, id='it-explanation-request'),
     pytest.param('cosa vuol dire repeat?', False, id='it-explanation-request-en-word'),
@@ -63,20 +74,25 @@ TABLE = [
     pytest.param('ciao, come stai?', False, id='plain-greeting'),
     pytest.param('scrivi ciao due volte', False, id='two-copies-below-minimum'),
     pytest.param('', False, id='empty'),
+    # — i dieci casi che hanno rotto il primo rilevatore —
+    pytest.param("l'ho chiesto 3 volte", False, id='it-asked-3-times-past'),
+    pytest.param('ho già provato 5 volte, non funziona', False, id='it-tried-5-times'),
+    pytest.param('Controlla 3 volte i conti', False, id='it-check-3-times-not-production'),
+    pytest.param('Rifai il calcolo 3 volte per sicurezza', False, id='it-redo-3-times-not-production'),
+    pytest.param('ti ho scritto 4 volte la stessa cosa', False, id='it-wrote-4-times-past'),
+    pytest.param('Ripeti la domanda, non ho capito', False, id='it-repeat-once-no-multiplicity'),
+    pytest.param('Puoi ripetere l\'ultimo passaggio?', False, id='it-can-you-repeat-once'),
+    pytest.param('Repeat after me: ciao', False, id='en-repeat-after-me-once'),
+    pytest.param("Write 'I will not talk in class' 100 times", True, id='en-quote-negation-count'),
+    pytest.param('Scrivi la stessa frase per 30 righe', True, id='it-same-sentence-30-righe'),
 ]
-
-
-@pytest.mark.parametrize('message,expected', TABLE)
-def test_repetition_requested_table(message, expected):
-    assert repetition_requested(message) is expected
-
 
 # Held-out cases, written BEFORE the detector rewrite and never used to tune
 # it: realistic work messages that cite counts («volte»/«times») without
 # asking the assistant to PRODUCE copies, repetition asks whose quoted
 # content carries negations or questions, and word numbers. The expectations
 # follow the invariants (production verb AND multiplicity; quoted text is
-# data; in doubt False) — the cases above are not consulted when they fail.
+# data; in doubt False) — these cases are not consulted when they fail.
 HELD_OUT_CASES = [
     # — lavoro reale con numeri e «volte», NON chiede ripetizioni —
     pytest.param("Ho chiamato il cliente 6 volte oggi, non risponde", False, id='it-called-6-times'),
@@ -120,15 +136,42 @@ HELD_OUT_CASES = [
     pytest.param("Write the same line for 30 rows", True, id='en-same-line-30-rows'),
 ]
 
+ALL_CASES = DEVELOPMENT_CASES + HELD_OUT_CASES
 
-@pytest.mark.parametrize('message,expected', HELD_OUT_CASES)
-def test_repetition_requested_held_out(message, expected):
+
+@pytest.mark.parametrize('message,expected', ALL_CASES)
+def test_repetition_requested_table(message, expected):
     assert repetition_requested(message) is expected
+
+
+@pytest.mark.parametrize('message,expected', DEVELOPMENT_CASES)
+def test_repetition_requested_development_only(message, expected):
+    """Same verdicts through the full API entry point."""
+    assert (repetition_request(message) is not None) is expected
+
+
+@pytest.mark.parametrize('message,copies', [
+    ('Scrivi "Ciao mondo" 200 volte, una per riga', 200),
+    ('ripeti questa frase 100 volte', 100),
+    ('ripetere la riga 50 volte', 50),
+    ('copia questa riga 30 volte', 30),
+    ('scrivi ciao mille volte', 1000),
+    ('Say the word "go" 50 times', 50),
+    ('write "loading" 100x', 100),
+    ('copy this line 50 times', 50),
+    ("Write 'I will not talk in class' 100 times", 100),
+    ('Scrivi la stessa frase per 30 righe', 30),
+    ('scrivi questa riga 5 volte, anzi 20 volte', 20),  # l'ultima correzione vince
+])
+def test_repetition_request_carries_the_explicit_copies(message, copies):
+    assert repetition_request(message) is not None
+    assert repetition_request(message).copies == copies
 
 
 def test_non_text_input_is_not_a_request():
     assert repetition_requested(None) is False
     assert repetition_requested(123) is False
+    assert repetition_request(None) is None
 
 
 def test_floor_never_exceeds_the_asked_cap():
