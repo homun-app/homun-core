@@ -141,8 +141,13 @@ export function looksLikeRawException(message: string): boolean {
     /\bException\b/.test(message) ||
     /\bTraceback\b/.test(message) ||
     /\[Errno \d+\]/.test(message) ||
-    // percorsi di modulo puntati: homun.core.interpret, pydantic.v1
-    /\b[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)+/.test(message)
+    // percorsi puntati dei soli moduli che il motore può riportare in
+    // un'eccezione (`homun.`, `pydantic.`, `sqlite3.`, `httpx.`, verificati in
+    // `engine/src`), con almeno due segmenti dopo il prefisso: nomi di file e
+    // domini hanno un solo punto (`report.pdf`, `homun.app`) e passano.
+    /\b(?:homun|pydantic|sqlite3|httpx)\.[a-z_][a-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+/.test(
+      message,
+    )
   );
 }
 

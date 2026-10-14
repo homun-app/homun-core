@@ -115,6 +115,33 @@ describe("looksLikeRawException", () => {
       assert.equal(looksLikeRawException(message), false, message);
     }
   });
+
+  it("i nomi di file e i domini non sono eccezioni grezze", () => {
+    const productPhrases = [
+      "Il file report.pdf supera la dimensione massima.",
+      "Il materiale listino_ottobre.csv è già nel progetto",
+      "Il dominio homun.app non è raggiungibile",
+      "Usa un file .csv o .xlsx",
+      "Scrivi a supporto@homun.app",
+    ];
+    for (const message of productPhrases) {
+      assert.equal(looksLikeRawException(message), false, message);
+    }
+  });
+
+  it("riconosce i percorsi di modulo dei moduli reali del motore", () => {
+    const rawMessages = [
+      "ValueError: invalid literal for int()",
+      "[Errno 61] Connection refused",
+      "Traceback (most recent call last)",
+      "KeyError: 'step_id'",
+      "pydantic.error_wrappers.ValidationError: 1 validation error",
+      "homun.models.native_turn failed",
+    ];
+    for (const message of rawMessages) {
+      assert.equal(looksLikeRawException(message), true, message);
+    }
+  });
 });
 
 describe("homunErrorUserMessage: validation_error e invalid_transition", () => {
@@ -141,6 +168,12 @@ describe("homunErrorUserMessage: validation_error e invalid_transition", () => {
       homunErrorUserMessage(transition),
       "L'azione non è possibile nello stato attuale. Ricarica e riprova.",
     );
+  });
+
+  it("un messaggio col nome di un file resta il testo principale", () => {
+    const phrase = "Il file report.pdf supera la dimensione massima.";
+    const error = homunErrorFromEngineEvent("validation_error", phrase, "fallback");
+    assert.equal(homunErrorUserMessage(error), phrase);
   });
 });
 
