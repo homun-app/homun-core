@@ -11,10 +11,31 @@ they are skipped, so a continuation KEEPS the floor of the turn that asked.
 Steering rows ARE the person's words and can raise the floor mid-turn.
 Delegation children carry no person message at all: normal floor.
 """
+import json
+
 from homun.models.repetition import turn_runaway_floor
 from homun.models.truncation import CONTINUE_PROMPT
 
 _ENGINE_USER_PREFIX = '[SYSTEM]'
+
+
+def _person_text(content: str) -> str:
+    """The person's words inside a user row.
+
+    Engine chat runs deliver the ask wrapped in the ``_objective`` JSON
+    envelope (``runs.propose``): the detector must read the objective's
+    unescaped text, not the envelope's quote characters.
+    """
+    stripped = content.strip()
+    if stripped.startswith('{'):
+        try:
+            payload = json.loads(stripped)
+        except ValueError:
+            return content
+        if isinstance(payload, dict) and 'available_materials' in payload \
+                and isinstance(payload.get('objective'), str):
+            return payload['objective'] or content
+    return content
 
 
 def user_message_for_floor(run) -> str | None:
@@ -30,7 +51,7 @@ def user_message_for_floor(run) -> str | None:
         stripped = content.strip()
         if stripped == CONTINUE_PROMPT or stripped.startswith(_ENGINE_USER_PREFIX):
             continue
-        return content
+        return _person_text(content)
     return None
 
 

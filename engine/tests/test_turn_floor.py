@@ -38,6 +38,20 @@ def test_the_turns_user_message_raises_the_floor():
     assert floor_for_run(_run([_system(), _user(ASK)])) == STOP_PATH_MIN_CHARS
 
 
+def test_chat_runs_json_envelope_still_raises_the_floor():
+    # Engine chat runs wrap the ask in the _objective JSON envelope: the
+    # floor must read the person's unescaped words, not the envelope's
+    # quote characters (the quote-aware detector would otherwise mask the
+    # whole ask inside the envelope's string quotes).
+    import json
+    envelope = json.dumps({'objective': ASK, 'available_materials': []},
+                          ensure_ascii=False)
+    assert floor_for_run(_run([_system(), _user(envelope)])) == STOP_PATH_MIN_CHARS
+    plain = json.dumps({'objective': 'chi sei?', 'available_materials': []},
+                       ensure_ascii=False)
+    assert floor_for_run(_run([_system(), _user(plain)])) == MIN_FRAGMENT_LENGTH
+
+
 def test_normal_ask_keeps_the_fragment_floor():
     assert floor_for_run(_run([_system(), _user('chi sei?')])) == MIN_FRAGMENT_LENGTH
 
