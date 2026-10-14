@@ -1,0 +1,32 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "apps/web/src/main.tsx",
+    "tests/*.test.ts",
+    "tests/browser/*.spec.ts",
+    "tests/helpers/*.ts",
+    "tests/helpers/*.cjs",
+    "playwright.config.ts",
+    "apps/desktop/src/main.cjs",
+    "apps/desktop/src/preload.cjs",
+    "apps/desktop/scripts/*.mjs",
+    "apps/desktop/tests/*.test.cjs",
+    "vite.config.ts",
+    "apps/web/vite.config.ts",
+    "eslint.config.js"
+  ],
+  "project": [
+    "apps/web/src/**/*.{ts,tsx,css}",
+    "packages/ui/src/**/*.{ts,tsx}",
+    "apps/desktop/{src,scripts,tests}/**/*.{cjs,mjs}",
+    "tests/**/*.{ts,cjs}",
+    "playwright.config.ts",
+    "vite.config.ts",
+    "apps/web/vite.config.ts",
+    "eslint.config.js"
+  ],
+  "paths": {
+    "@/*": ["apps/web/src/*"],
+    "@homun/ui/*": ["packages/ui/src/*"]
+  }
+}
