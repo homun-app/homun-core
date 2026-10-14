@@ -71,6 +71,61 @@ def test_repetition_requested_table(message, expected):
     assert repetition_requested(message) is expected
 
 
+# Held-out cases, written BEFORE the detector rewrite and never used to tune
+# it: realistic work messages that cite counts («volte»/«times») without
+# asking the assistant to PRODUCE copies, repetition asks whose quoted
+# content carries negations or questions, and word numbers. The expectations
+# follow the invariants (production verb AND multiplicity; quoted text is
+# data; in doubt False) — the cases above are not consulted when they fail.
+HELD_OUT_CASES = [
+    # — lavoro reale con numeri e «volte», NON chiede ripetizioni —
+    pytest.param("Ho chiamato il cliente 6 volte oggi, non risponde", False, id='it-called-6-times'),
+    pytest.param("Il backup deve girare 3 volte al giorno", False, id='it-frequency-per-day'),
+    pytest.param("Ho già inviato la fattura 4 volte all'indirizzo sbagliato", False, id='it-invoice-sent-4-times'),
+    pytest.param("Ho provato a riavviare il servizio 5 volte, stesso errore", False, id='it-retried-5-times'),
+    pytest.param("Il server è caduto 3 volte questa settimana", False, id='it-server-crashed-3-times'),
+    pytest.param("Te l'ho ripetuto 10 volte, adesso basta", False, id='it-repeated-to-you-10-times'),
+    pytest.param("Leggi il contratto 2 volte prima di firmare", False, id='it-read-twice'),
+    pytest.param("Verifica le righe della fattura 3 volte", False, id='it-verify-invoice-3-times'),
+    pytest.param("Rileggi la mail 3 volte prima di inviarla", False, id='it-reread-mail-3-times'),
+    pytest.param("Ci siamo sentiti 3 volte questa settimana", False, id='it-met-3-times'),
+    pytest.param("Il test fallisce 3 volte su 10", False, id='it-flaky-test-3-of-10'),
+    pytest.param("Ho riletto il documento 5 volte e non trovo l'errore", False, id='it-reread-5-times'),
+    pytest.param("Il campanello suona 3 volte quando la lavatrice finisce", False, id='it-doorbell-3-times'),
+    pytest.param("Controlla i totali 4 volte, devo essere sicuro", False, id='it-check-totals-4-times'),
+    pytest.param("I've emailed support 5 times about this bug", False, id='en-emailed-5-times'),
+    pytest.param("The build failed 4 times today", False, id='en-build-failed-4-times'),
+    pytest.param("I've told you 100 times: don't touch that config", False, id='en-told-100-times'),
+    pytest.param("Check the numbers 3 times before sending the report", False, id='en-check-3-times'),
+    pytest.param("We retry the request 5 times with backoff", False, id='en-retry-5-times'),
+    pytest.param("The alarm rings three times every morning", False, id='en-alarm-three-times'),
+    pytest.param("I've repeated the question twice already", False, id='en-repeated-twice'),
+    pytest.param("Run the suite 3 times to check for flakiness", False, id='en-run-suite-3-times'),
+    pytest.param("I wrote three essays this week", False, id='en-wrote-three-essays'),
+    pytest.param("Elenca i materiali del progetto con i prezzi", False, id='it-list-materials-no-count'),
+    # — ripetizioni chieste, con citazioni che contengono negazioni/domande —
+    pytest.param("Scrivi 'Non parlerò in classe' 100 volte", True, id='it-quote-with-negation'),
+    pytest.param('Ripeti la riga "perché no?" 30 volte', True, id='it-quote-with-question'),
+    pytest.param("Scrivi la stessa frase «non posso ora» per 40 righe", True, id='it-guillemet-quote-negation-40-righe'),
+    pytest.param("Copia questa riga cento volte", True, id='it-copy-word-number-cento'),
+    pytest.param("Genera la riga 'test superato' venti volte", True, id='it-genera-word-number-venti'),
+    pytest.param("Scrivi questa parola dieci volte, una per riga", True, id='it-scrivi-word-number-dieci'),
+    pytest.param("Stampa la riga 'PAGATO' tre volte", True, id='it-stampa-tre-volte'),
+    pytest.param("Dimmi la parola 'stop' 3 volte", True, id='it-dimmi-3-volte'),
+    pytest.param('Print "I will not complain" 50 times, one per line', True, id='en-print-quote-negation'),
+    pytest.param("Write 'why me?' 25 times", True, id='en-write-quote-question'),
+    pytest.param("Say the word 'never' a hundred times", True, id='en-say-word-number-hundred'),
+    pytest.param("Output the line 'error: not found' 30 times", True, id='en-output-quote-negation'),
+    pytest.param('Repeat the sentence "don\'t stop" 15 times', True, id='en-repeat-quote-negation'),
+    pytest.param("Write the same line for 30 rows", True, id='en-same-line-30-rows'),
+]
+
+
+@pytest.mark.parametrize('message,expected', HELD_OUT_CASES)
+def test_repetition_requested_held_out(message, expected):
+    assert repetition_requested(message) is expected
+
+
 def test_non_text_input_is_not_a_request():
     assert repetition_requested(None) is False
     assert repetition_requested(123) is False
