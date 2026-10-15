@@ -39,7 +39,7 @@
     "comparison.csv.not_utf8": "“{source}”: the CSV must be saved as UTF-8.",
     "comparison.csv.nul_not_allowed": "“{source}”: the NUL character is not allowed.",
     "comparison.csv.rows_limit": "Row limit exceeded: the limit counts all data rows of both files.",
-    "comparison.csv.invalid_structure": "“{source}”: invalid CSV structure ({detail}).",
+    "comparison.csv.invalid_structure": "“{source}”: invalid CSV structure.",
     "comparison.csv.max_rows_invalid": "max_rows must be an integer between {min} and {max}, total across both files.",
     "budget.exhausted.work": "The work budget is exhausted: raise it to continue.",
     "budget.exhausted.delegate": "The budget delegated to {delegate} is exhausted: raise its allocation to continue.",
