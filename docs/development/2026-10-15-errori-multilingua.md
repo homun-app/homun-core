@@ -15,17 +15,17 @@ stabile + campi strutturati, testo leggibile separato.
 Censimento con parser AST di tutti i `raise` di classi `DomainError`
 (`tools` di analisi riutilizzabili in `tools/census_domain_raises.py`):
 
-| Classe | raise |
-|---|---|
-| `ValidationError` | 581 |
-| `ConflictError` | 199 |
-| `PermissionDeniedError` | 91 |
-| `NotFoundError` | 84 |
-| `BackendUnavailableError` | 6 |
-| `BudgetExhaustedError` | 3 |
-| `CommandInProgressError` | 2 |
-| `DomainError`/`InvalidTransitionError` | 3 |
-| **Totale** | **969** |
+| Classe                                 | raise   |
+| -------------------------------------- | ------- |
+| `ValidationError`                      | 581     |
+| `ConflictError`                        | 199     |
+| `PermissionDeniedError`                | 91      |
+| `NotFoundError`                        | 84      |
+| `BackendUnavailableError`              | 6       |
+| `BudgetExhaustedError`                 | 3       |
+| `CommandInProgressError`               | 2       |
+| `DomainError`/`InvalidTransitionError` | 3       |
+| **Totale**                             | **969** |
 
 Più **100** `raise HTTPException(..., detail={"code", "message"})` letterali nelle
 rotte → **1.069 corpi d'errore strutturati** complessivi (il «~1.370» del compito
@@ -41,6 +41,7 @@ raise su 969 (89%)**. Le differenze restanti sono canali in ingresso, tool
 esterni e percorsi desktop.
 
 Chokepoint già esistenti (nessuna nuova ghiacciaia da inventare):
+
 - `routes/domain_support.py:27` `_http_error` mappa `code` → HTTP e compone
   `detail={"code","message"}`: **l'unico punto** dove le rotte serializzano
   `DomainError` (usato da quasi tutte le rotte; `routes/memory.py` ha un
@@ -183,13 +184,13 @@ Criterio: ondate per modulo, dimensione ~60–150 raise ciascuna, partendo dai
 percorsi che l'utente vede più spesso. Universo raggiungibile dalle rotte web:
 869 raise.
 
-| Onda | Moduli | raise | Note |
-|---|---|---|---|
-| **1 (questa PR)** | sotto, 61 voci / ~74 siti | 60 DomainError + 14 HTTPException | materiali+CSV, budget, permessi, conversazioni, piano |
-| 2 | `application/sessions/*` (143), `domain/clarification.py` (12), `domain/command_context.py` (10), testi motore monolingue (recovery narrator, interpretation notices) | ~165 | sessioni native e conversazioni |
-| 3 | `application/agent/*` (175) | 175 | run degli agenti |
-| 4 | `domain/commands/*` restanti (137), resto `domain/*` | ~145 | delegation, routines, identity, external |
-| 5 | `application/work/*` restante (113), `execution/*` (~61), `computer` (52), `automation` (23), `channels` (21), `models`/`tools`/`policy` residui, `HTTPException` letterali restanti (~86) | ~360 | due sotto-ondate 5a/5b |
+| Onda              | Moduli                                                                                                                                                                                     | raise                             | Note                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------- | ----------------------------------------------------- |
+| **1 (questa PR)** | sotto, 61 voci / ~74 siti                                                                                                                                                                  | 60 DomainError + 14 HTTPException | materiali+CSV, budget, permessi, conversazioni, piano |
+| 2                 | `application/sessions/*` (143), `domain/clarification.py` (12), `domain/command_context.py` (10), testi motore monolingue (recovery narrator, interpretation notices)                      | ~165                              | sessioni native e conversazioni                       |
+| 3                 | `application/agent/*` (175)                                                                                                                                                                | 175                               | run degli agenti                                      |
+| 4                 | `domain/commands/*` restanti (137), resto `domain/*`                                                                                                                                       | ~145                              | delegation, routines, identity, external              |
+| 5                 | `application/work/*` restante (113), `execution/*` (~61), `computer` (52), `automation` (23), `channels` (21), `models`/`tools`/`policy` residui, `HTTPException` letterali restanti (~86) | ~360                              | due sotto-ondate 5a/5b                                |
 
 ### Prima ondata — 61 voci (≈74 siti di raise)
 
@@ -200,110 +201,110 @@ approvazioni di lettura) e i cinque domini richiesti. Ogni voce: `reason`
 
 **Materiali — rotta (`routes/materials.py`, HTTPException)**
 
-| reason | params | sito attuale |
-|---|---|---|
-| `materials.workspace_unknown` (`not_found`) | — | 26, 56, 84, 115, 149 (5 siti) |
-| `materials.upload.too_large` (`validation_error`, HTTP 413) | `max_bytes` | 88 |
-| `materials.blob.absent` (`not_found`) | — | 164 |
-| `materials.blob.missing_on_disk` (`not_found`) | — | 171 |
-| `materials.blob.integrity_failed` (`version_conflict`) | — | 174 |
+| reason                                                      | params      | sito attuale                  |
+| ----------------------------------------------------------- | ----------- | ----------------------------- |
+| `materials.workspace_unknown` (`not_found`)                 | —           | 26, 56, 84, 115, 149 (5 siti) |
+| `materials.upload.too_large` (`validation_error`, HTTP 413) | `max_bytes` | 88                            |
+| `materials.blob.absent` (`not_found`)                       | —           | 164                           |
+| `materials.blob.missing_on_disk` (`not_found`)              | —           | 171                           |
+| `materials.blob.integrity_failed` (`version_conflict`)      | —           | 174                           |
 
 **Materiali — ingest e sorgenti**
 
-| reason | params | sito attuale |
-|---|---|---|
-| `materials.not_found` (`not_found`) | `material_id` | `materials/source.py:18` (+ inoltro nelle rotte 33, 64, 123, 157) |
-| `materials.managed_required` (`validation_error`) | — | `materials/source.py:21` |
-| `materials.size_out_of_range` (`validation_error`) | `max_bytes` | `materials/source.py:23` |
-| `materials.source_unavailable` (`version_conflict`) | — | `materials/source.py:27` |
-| `materials.source_integrity_failed` (`version_conflict`) | — | `materials/source.py:30` |
-| `materials.command_identity_invalid` (`validation_error`) | — | `application/work/material_ingest.py:33` |
+| reason                                                    | params        | sito attuale                                                      |
+| --------------------------------------------------------- | ------------- | ----------------------------------------------------------------- |
+| `materials.not_found` (`not_found`)                       | `material_id` | `materials/source.py:18` (+ inoltro nelle rotte 33, 64, 123, 157) |
+| `materials.managed_required` (`validation_error`)         | —             | `materials/source.py:21`                                          |
+| `materials.size_out_of_range` (`validation_error`)        | `max_bytes`   | `materials/source.py:23`                                          |
+| `materials.source_unavailable` (`version_conflict`)       | —             | `materials/source.py:27`                                          |
+| `materials.source_integrity_failed` (`version_conflict`)  | —             | `materials/source.py:30`                                          |
+| `materials.command_identity_invalid` (`validation_error`) | —             | `application/work/material_ingest.py:33`                          |
 
 **Materiali — comandi di dominio (`domain/commands/materials.py`)**
 
-| reason | params | sito |
-|---|---|---|
-| `materials.project_required` | — | 21 |
-| `materials.title_required` | — | 25, 80 |
-| `materials.kind_invalid` | `kind` | 28, 85 |
-| `materials.source_uri_required` | `kind` | 32, 104 |
-| `materials.status_invalid` | `status` | 101 |
-| `materials.content_hash_invalid` | — | 145 |
-| `materials.managed_path_invalid` | — | 147 |
-| `materials.prepared_metadata_invalid` | — | 149 |
-| `materials.extraction_status_invalid` | — | 151 |
+| reason                                | params   | sito    |
+| ------------------------------------- | -------- | ------- |
+| `materials.project_required`          | —        | 21      |
+| `materials.title_required`            | —        | 25, 80  |
+| `materials.kind_invalid`              | `kind`   | 28, 85  |
+| `materials.source_uri_required`       | `kind`   | 32, 104 |
+| `materials.status_invalid`            | `status` | 101     |
+| `materials.content_hash_invalid`      | —        | 145     |
+| `materials.managed_path_invalid`      | —        | 147     |
+| `materials.prepared_metadata_invalid` | —        | 149     |
+| `materials.extraction_status_invalid` | —        | 151     |
 
 **Approvazioni di lettura materiali (`application/work/material_reads.py`)**
 
-| reason | params | sito |
-|---|---|---|
-| `reads.proposal_not_found` | — | 26 |
-| `reads.material_not_found` | — | 34 |
-| `reads.approval.persons_only` | — | 40 |
-| `reads.approval.not_owner_or_reviewer` | — | 42 |
-| `reads.no_text_extract` | — | 68 |
-| `reads.already_active` | — | 84 |
-| `reads.approval.mismatch` | — | 114 |
-| `reads.source_changed` | — | 117 |
-| `reads.already_closed` | — | 121 |
-| `reads.work_changed` | — | 123 |
+| reason                                 | params | sito |
+| -------------------------------------- | ------ | ---- |
+| `reads.proposal_not_found`             | —      | 26   |
+| `reads.material_not_found`             | —      | 34   |
+| `reads.approval.persons_only`          | —      | 40   |
+| `reads.approval.not_owner_or_reviewer` | —      | 42   |
+| `reads.no_text_extract`                | —      | 68   |
+| `reads.already_active`                 | —      | 84   |
+| `reads.approval.mismatch`              | —      | 114  |
+| `reads.source_changed`                 | —      | 117  |
+| `reads.already_closed`                 | —      | 121  |
+| `reads.work_changed`                   | —      | 123  |
 
 **Confronto prezzi CSV (`tools/price_comparison.py` — gli unici messaggi oggi in italiano visibili all'utente)**
 
-| reason | params | sito |
-|---|---|---|
-| `comparison.csv.payload_invalid` | `source`, `max_mib` | 27 |
-| `comparison.csv.not_utf8` | `source` | 31 |
-| `comparison.csv.nul_not_allowed` | `source` | 33 |
-| `comparison.csv.rows_limit` | — | 57 |
-| `comparison.csv.invalid_structure` | `source`, `detail` | 90 |
-| `comparison.csv.max_rows_invalid` | `min`, `max` | 187 |
+| reason                             | params              | sito |
+| ---------------------------------- | ------------------- | ---- |
+| `comparison.csv.payload_invalid`   | `source`, `max_mib` | 27   |
+| `comparison.csv.not_utf8`          | `source`            | 31   |
+| `comparison.csv.nul_not_allowed`   | `source`            | 33   |
+| `comparison.csv.rows_limit`        | —                   | 57   |
+| `comparison.csv.invalid_structure` | `source`, `detail`  | 90   |
+| `comparison.csv.max_rows_invalid`  | `min`, `max`        | 187  |
 
 **Budget (`domain/budget_ops.py`)**
 
-| reason | params | sito |
-|---|---|---|
-| `budget.exhausted.work` | — | 45 |
+| reason                      | params     | sito   |
+| --------------------------- | ---------- | ------ |
+| `budget.exhausted.work`     | —          | 45     |
 | `budget.exhausted.delegate` | `delegate` | 64, 72 |
 
 **Permessi (`policy/*`, `routes/domain_support.py`)**
 
-| reason | params | sito |
-|---|---|---|
-| `permission.actor_header_missing` (`unauthorized`) | — | `routes/domain_support.py:12` |
-| `policy.conversation_not_found` | — | `policy/work.py:10` |
-| `policy.work_not_found` | — | `policy/work.py:31` |
-| `permission.persons_only.mcp_lifecycle` | — | `policy/work.py:56` |
-| `policy.contribution_not_found` | — | `policy/work.py:63` |
-| `policy.entity_not_found` | `kind` | `policy/commands.py:10` |
-| `policy.intake_unconfirmed` | — | `policy/intake.py:26` |
+| reason                                             | params | sito                          |
+| -------------------------------------------------- | ------ | ----------------------------- |
+| `permission.actor_header_missing` (`unauthorized`) | —      | `routes/domain_support.py:12` |
+| `policy.conversation_not_found`                    | —      | `policy/work.py:10`           |
+| `policy.work_not_found`                            | —      | `policy/work.py:31`           |
+| `permission.persons_only.mcp_lifecycle`            | —      | `policy/work.py:56`           |
+| `policy.contribution_not_found`                    | —      | `policy/work.py:63`           |
+| `policy.entity_not_found`                          | `kind` | `policy/commands.py:10`       |
+| `policy.intake_unconfirmed`                        | —      | `policy/intake.py:26`         |
 
 **Messaggi e conversazioni**
 
-| reason | params | sito |
-|---|---|---|
-| `message.in_progress.same` (`command_in_progress`) | — | `application/sessions/command_delivery.py:102` |
-| `message.in_progress.other` (`command_in_progress`) | — | `application/sessions/command_delivery.py:104` |
-| `message.superseded` (`version_conflict`) | — | `application/sessions/command_delivery.py:168` |
-| `work.transition_invalid` (`invalid_transition`) | `from`, `to` | `domain/states.py:66` |
+| reason                                              | params       | sito                                           |
+| --------------------------------------------------- | ------------ | ---------------------------------------------- |
+| `message.in_progress.same` (`command_in_progress`)  | —            | `application/sessions/command_delivery.py:102` |
+| `message.in_progress.other` (`command_in_progress`) | —            | `application/sessions/command_delivery.py:104` |
+| `message.superseded` (`version_conflict`)           | —            | `application/sessions/command_delivery.py:168` |
+| `work.transition_invalid` (`invalid_transition`)    | `from`, `to` | `domain/states.py:66`                          |
 
 **Piano (`domain/commands/plans.py` — 13 voci)**
 
-| reason | params | sito |
-|---|---|---|
-| `plan.propose.state_invalid` | — | 17 |
-| `plan.propose.needs_steps` | — | 20 |
-| `plan.step.not_object` | — | 24 |
-| `plan.step.fields_missing` | — | 29 |
-| `plan.accept.missing` | — | 79 |
-| `plan.accept.incomplete` | — | 81 |
-| `plan.revise.missing` | — | 104 |
-| `plan.revise.new_step_not_object` | — | 116 |
-| `plan.revise.new_step_fields_missing` | — | 120 |
-| `plan.revise.insert_after_unknown` | `step_id` | 132 |
-| `plan.revise.step_remove_unknown` | — | 146 |
-| `plan.revise.step_succeeded_locked` | — | 148 |
-| `plan.revise.empty` | — | 152 |
+| reason                                | params    | sito |
+| ------------------------------------- | --------- | ---- |
+| `plan.propose.state_invalid`          | —         | 17   |
+| `plan.propose.needs_steps`            | —         | 20   |
+| `plan.step.not_object`                | —         | 24   |
+| `plan.step.fields_missing`            | —         | 29   |
+| `plan.accept.missing`                 | —         | 79   |
+| `plan.accept.incomplete`              | —         | 81   |
+| `plan.revise.missing`                 | —         | 104  |
+| `plan.revise.new_step_not_object`     | —         | 116  |
+| `plan.revise.new_step_fields_missing` | —         | 120  |
+| `plan.revise.insert_after_unknown`    | `step_id` | 132  |
+| `plan.revise.step_remove_unknown`     | —         | 146  |
+| `plan.revise.step_succeeded_locked`   | —         | 148  |
+| `plan.revise.empty`                   | —         | 152  |
 
 Esclusioni motivate (valutate e rinviate a onda 2+): `policy.event.*` (letture
 dello stream eventi, rare), `budget.reservation_*` (riconciliazione interna),
@@ -339,6 +340,7 @@ lo sono già; cambiano i 14 italiani, di cui 7 di price-comparison).
 ## Test (TDD, rossi prima dell'implementazione)
 
 Motore:
+
 - `DomainError(msg, reason=…, params=…)` produce `detail` con tutti e quattro i
   campi via `_http_error`; senza `reason` il corpo resta `{code, message}` (un
   errore vecchio non cambia forma);
@@ -347,6 +349,7 @@ Motore:
   euristico sui letterali + allowlist delle chiavi).
 
 Catalogo:
+
 - ogni chiave di `errors`/`codes` esiste in **tutte** le lingue (parità, come
   `tests/ui-i18n.test.ts`);
 - ogni segnaposto `{x}` usato nelle frasi è dichiarato nei `params` dei raise
@@ -355,6 +358,7 @@ Catalogo:
 - `errors.schema.json` valida i file.
 
 Client (`tests/`, node):
+
 - stesso errore (`reason`+`params`) reso in italiano e in inglese;
 - `reason` sconosciuta → frase `codes.<code>`; lingua mancante → inglese;
 - `homun-errors.ts` non contiene più stringhe per l'utente;
@@ -365,14 +369,14 @@ cambio lingua in Impostazioni → lo stesso avviso è in inglese.
 
 ## Inventario dei testi del motore generati da sé (fuori dagli errori HTTP)
 
-| Testo | Oggi | Piano |
-|---|---|---|
-| `models/intake.py` `_CATALOG_LABELS` (5 voci) | già it+en nel codice | **migrato al catalogo in questa PR** (unica serie già bilingue) |
-| `application/agent/runs/recovery_narrator.py` (titolo + rapporto, ~10 frasi) | solo italiano | onda 2 |
-| `application/sessions/interpretation.py:125,174` (2 notice) | solo italiano | onda 2 |
-| `application/channels/conversation_bridge.py:153` | solo italiano | onda 2 |
-| `homun/prompts/*.{it,en}.txt` | template di modello, non frasi deterministiche | **fuori dal catalogo** (input ai prompt, non testo motore) |
-| `app.py` `HOMUN_STARTUP_FAILED` | già neutro (reason codes sullo stdout) | già conforme, nessun cambiamento |
+| Testo                                                                        | Oggi                                           | Piano                                                           |
+| ---------------------------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------- |
+| `models/intake.py` `_CATALOG_LABELS` (5 voci)                                | già it+en nel codice                           | **migrato al catalogo in questa PR** (unica serie già bilingue) |
+| `application/agent/runs/recovery_narrator.py` (titolo + rapporto, ~10 frasi) | solo italiano                                  | onda 2                                                          |
+| `application/sessions/interpretation.py:125,174` (2 notice)                  | solo italiano                                  | onda 2                                                          |
+| `application/channels/conversation_bridge.py:153`                            | solo italiano                                  | onda 2                                                          |
+| `homun/prompts/*.{it,en}.txt`                                                | template di modello, non frasi deterministiche | **fuori dal catalogo** (input ai prompt, non testo motore)      |
+| `app.py` `HOMUN_STARTUP_FAILED`                                              | già neutro (reason codes sullo stdout)         | già conforme, nessun cambiamento                                |
 
 ## Rischi e note di implementazione
 
@@ -385,3 +389,16 @@ cambio lingua in Impostazioni → lo stesso avviso è in inglese.
   web rimosso.
 - `tools/export_openapi.py --write` dopo la nuova rotta `language`; snapshot
   committato.
+
+## Esito implementazione (stessa data, PR di Fase 1)
+
+- Il census finale scopre anche le **sottoclassi** di `DomainError` (17 classi
+  custom, es. `MaterialTooLargeError`): i numeri veri con questo metodo sono
+  **1150** raise senza reason prima dell'onda e **1088** dopo (62 siti
+  migrati); i dettagli `HTTPException` letterali passano da **100** a **86**
+  (14 siti). Il ratchet (`tools/error-reasons-baseline.json`) parte da lì.
+- La prima ondata conta **63 voci** (le 62 delle tabelle + una settima del
+  confronto CSV non elencata: `comparison.csv.header_missing`); il catalogo
+  include anche `workspace.unknown`, `preferences.language_invalid` (nuova
+  rotta) e le 5 voci `intake.catalog.*` portate dal codice: 70 frasi + 17
+  generiche per `code`, per lingua.
