@@ -9,6 +9,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@homun/ui": fileURLToPath(new URL("../../packages/ui/src", import.meta.url)),
+      "@homun/contracts": fileURLToPath(new URL("../../contracts", import.meta.url)),
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },

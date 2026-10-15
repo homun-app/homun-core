@@ -155,6 +155,13 @@ export const it = {
     disable: "Disabilita",
     no_plugins: "Nessun plugin configurato.",
   },
+  errorDetails: {
+    title: "Dettagli tecnici",
+    code: "codice",
+    reason: "reason",
+    message: "messaggio",
+    engineCode: "codice motore",
+  },
 } as const;
 
 type DeepStringRecord<T> = {

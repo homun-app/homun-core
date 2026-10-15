@@ -155,4 +155,11 @@ export const en: TranslationDictionary = {
     disable: "Disable",
     no_plugins: "No plugins configured.",
   },
+  errorDetails: {
+    title: "Technical details",
+    code: "code",
+    reason: "reason",
+    message: "message",
+    engineCode: "engine code",
+  },
 };
