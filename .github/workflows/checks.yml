@@ -59,6 +59,8 @@ jobs:
         run: npm run lint
       - name: Prettier check
         run: npm run format:check
+      - name: Dead code check (knip, unused files)
+        run: npm run deadcode
       - name: Typecheck, tests, and application builds
         timeout-minutes: 10
         run: npm run check
