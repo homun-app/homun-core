@@ -3,6 +3,13 @@
 9 ottobre 2026. Fette verticali di F5.3: libreria crypto, poi rotte HTTP
 host/peer per pubblicare e riprendere i transfer (grant + wrap).
 
+> **Sostituito dal protocollo v2** (review indipendente di sicurezza,
+> 2026-10-15): leggere `2026-10-15-f5-object-crypto-v2.md`. Il formato v1
+> descritto qui è rifiutato dal motore (`object_transfer.protocol_unsupported`);
+> nessun dato v1 è mai esistito su disco. Questo documento resta come
+> cronologia delle scelte di base (chiave per oggetto/versione, wrap
+> SealedBox, secretstream) che v2 eredita.
+
 ## Protocollo `homun-object-transfer/v1`
 
 | Elemento          | Scelta                                              | Note                                                                     |
