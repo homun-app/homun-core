@@ -685,7 +685,9 @@ def test_publish_announces_transfer_on_remote_event_cursor(host):
         assert announce["sequence"] == body["event_sequence"]
         assert announce["payload"]["object_id"] == "obj_listino"
         assert announce["payload"]["version"] == 1
-        assert announce["payload"]["plaintext_sha256"] == sealed.manifest.plaintext_sha256
+        assert announce["payload"]["approx_size_bytes"] % 65_536 == 0
+        assert "plaintext_sha256" not in announce["payload"]
+        assert "plaintext_size" not in announce["payload"]
         assert "wrapped_key" not in json.dumps(announce["payload"])
         assert "recipients" not in announce["payload"]
 
@@ -828,3 +830,60 @@ def test_v1_manifest_is_rejected_with_typed_error(host):
         assert denied.status_code == 400, denied.text
         detail = denied.json()["detail"]
         assert detail["reason"] == "object_transfer.protocol_unsupported"
+
+
+def test_announce_and_manifest_do_not_leak_plaintext_hash(host):
+    """Security review P4: plaintext_sha256 (and the exact size) must not
+    travel in the object_transfer.published event — visible to every peer
+    with a read grant, even without a wrap — nor in the cleartext manifest.
+    The announce only carries a size rounded up to 64 KiB."""
+    app, ctx, tmp_path = host
+    shared, _private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+        giulia_confirm, giulia = _pair_giulia(client, tmp_path)
+        _grant(ctx, "g1", giulia_confirm["person_id"], shared, "read")
+        peer = {"Authorization": f"Bearer {giulia_confirm['device_token']}"}
+
+        plaintext = b"file noto\n" + b"z" * 200_000
+        sealed = _seal_for(marta, giulia, shared, plaintext)
+        published = _publish(client, marta_peer, shared, sealed)
+        assert published.status_code == 200, published.text
+
+        page = client.get(
+            f"/v1/workspaces/ws_local/remote/events?project_id={shared}&cursor=0",
+            headers=peer,
+        )
+        announce = next(
+            item
+            for item in page.json()["items"]
+            if item["type"] == "object_transfer.published"
+        )
+        assert "plaintext_sha256" not in announce["payload"]
+        assert "plaintext_size" not in announce["payload"]
+        assert announce["payload"]["approx_size_bytes"] % 65_536 == 0
+        assert announce["payload"]["approx_size_bytes"] >= len(plaintext)
+        assert announce["payload"]["approx_size_bytes"] - len(plaintext) <= 65_536
+
+        manifest_resp = client.get(
+            "/v1/workspaces/ws_local/remote/objects/obj_listino/versions/1",
+            headers=peer,
+        )
+        assert manifest_resp.status_code == 200, manifest_resp.text
+        assert "plaintext_sha256" not in manifest_resp.text
+        assert "plaintext_size" not in manifest_resp.text
+
+        snap = client.get(
+            f"/v1/workspaces/ws_local/remote/snapshot?project_id={shared}",
+            headers=peer,
+        )
+        assert "plaintext_sha256" not in snap.text
+        assert "plaintext_size" not in snap.text
+
+        meta_on_disk = (
+            tmp_path / "object-transfers" / "obj_listino" / "v1" / "meta.json"
+        ).read_text()
+        assert "plaintext_sha256" not in meta_on_disk
+        assert "plaintext_size" not in meta_on_disk

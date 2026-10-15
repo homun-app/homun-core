@@ -48,14 +48,15 @@ from homun.peers.device_identity import DeviceIdentity, key_fingerprint
 PROTOCOL_ID = "homun-object-transfer/v2"
 DEFAULT_CHUNK_SIZE = 65_536
 OBJECT_KEY_BYTES = crypto_secretstream_xchacha20poly1305_KEYBYTES
+# Review P4: announce events only carry a size rounded up to this granularity,
+# so peers with a read grant cannot confirm an exact known-file size.
+ANNOUNCE_SIZE_GRANULARITY = 64 * 1024
 
 MANIFEST_ALLOWED_KEYS = frozenset({
     "protocol",
     "project_id",
     "object_id",
     "version",
-    "plaintext_sha256",
-    "plaintext_size",
     "chunk_size",
     "header_b64",
     "chunks",
@@ -69,8 +70,7 @@ ANNOUNCE_ALLOWED_KEYS = frozenset({
     "project_id",
     "object_id",
     "version",
-    "plaintext_size",
-    "plaintext_sha256",
+    "approx_size_bytes",
     "chunk_count",
 })
 TRANSFER_META_ALLOWED_KEYS = frozenset({
@@ -196,8 +196,6 @@ class TransferManifest:
     project_id: str
     object_id: str
     version: int
-    plaintext_sha256: str
-    plaintext_size: int
     chunk_size: int
     header_b64: str
     chunks: tuple[ChunkDescriptor, ...]
@@ -205,14 +203,19 @@ class TransferManifest:
     publisher_fingerprint: str
     publisher_signature_b64: str
 
+    def ciphertext_size(self) -> int:
+        return sum(chunk.size for chunk in self.chunks)
+
+    def approx_size_bytes(self) -> int:
+        """Announce-safe size: ciphertext total rounded up to 64 KiB."""
+        return rounded_size_bytes(self.ciphertext_size())
+
     def to_dict(self) -> dict:
         return {
             "protocol": self.protocol,
             "project_id": self.project_id,
             "object_id": self.object_id,
             "version": self.version,
-            "plaintext_sha256": self.plaintext_sha256,
-            "plaintext_size": self.plaintext_size,
             "chunk_size": self.chunk_size,
             "header_b64": self.header_b64,
             "chunks": [chunk.to_dict() for chunk in self.chunks],
@@ -240,8 +243,6 @@ class TransferManifest:
             project_id=str(_required(data, "project_id", "manifest")),
             object_id=str(_required(data, "object_id", "manifest")),
             version=int(_required(data, "version", "manifest")),
-            plaintext_sha256=str(_required(data, "plaintext_sha256", "manifest")),
-            plaintext_size=int(_required(data, "plaintext_size", "manifest")),
             chunk_size=int(_required(data, "chunk_size", "manifest")),
             header_b64=str(_required(data, "header_b64", "manifest")),
             chunks=chunks,
@@ -249,6 +250,13 @@ class TransferManifest:
             publisher_fingerprint=str(_required(data, "publisher_fingerprint", "manifest")),
             publisher_signature_b64=str(_required(data, "publisher_signature_b64", "manifest")),
         )
+
+
+def rounded_size_bytes(total: int, granularity: int = ANNOUNCE_SIZE_GRANULARITY) -> int:
+    """Round a byte size up to a multiple of granularity (review P4)."""
+    if granularity < 1:
+        raise ObjectCryptoError("Size granularity must be positive")
+    return ((total + granularity - 1) // granularity) * granularity
 
 
 def canonical_manifest_bytes(unsigned_manifest: Mapping) -> bytes:
@@ -515,8 +523,6 @@ def seal_object(
         project_id=project_id,
         object_id=object_id,
         version=version,
-        plaintext_sha256=_sha256_hex(plaintext),
-        plaintext_size=len(plaintext),
         chunk_size=chunk_size,
         header_b64=base64.b64encode(header).decode("ascii"),
         chunks=descriptors,
@@ -636,8 +642,8 @@ def open_object(
     plaintext = decrypt_payload(
         header, ciphertext_chunks, object_key, aad_context=aad_context
     )
-    if len(plaintext) != parsed.plaintext_size or _sha256_hex(plaintext) != parsed.plaintext_sha256:
-        raise ObjectCryptoError("Plaintext integrity check failed")
+    # Integrity is guaranteed by AEAD (secretstream) + the publisher signature
+    # over the chunk ciphertext hashes; the plaintext hash never travels.
     return OpenedObject(
         plaintext=plaintext, publisher_fingerprint=parsed.publisher_fingerprint
     )

@@ -213,8 +213,9 @@ def _announce_published(
                 "project_id": project_id,
                 "object_id": manifest.object_id,
                 "version": manifest.version,
-                "plaintext_size": manifest.plaintext_size,
-                "plaintext_sha256": manifest.plaintext_sha256,
+                # Review P4: no plaintext hash, size rounded up to 64 KiB —
+                # the event is visible to peers with only a read grant.
+                "approx_size_bytes": manifest.approx_size_bytes(),
                 "chunk_count": len(manifest.chunks),
             }
             assert_no_credentials_in_transfer(
@@ -468,8 +469,7 @@ def list_project_transfers(ctx, actor: Actor, project_id: str) -> list[dict[str,
             items.append({
                 "object_id": meta["object_id"],
                 "version": meta["version"],
-                "plaintext_size": manifest.plaintext_size,
-                "plaintext_sha256": manifest.plaintext_sha256,
+                "approx_size_bytes": manifest.approx_size_bytes(),
                 **status,
             })
     return items

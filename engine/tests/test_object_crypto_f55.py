@@ -487,3 +487,15 @@ def test_rollback_to_previously_opened_version_is_rejected(tmp_path):
     log.record("obj_rb", 2)
     with pytest.raises(ObjectCryptoError, match="rollback|older|previous"):
         _open(v1, log.last_version("obj_rb"))
+
+
+def test_manifest_does_not_carry_plaintext_hash_or_exact_size():
+    """Review P4: the cleartext manifest must not leak the plaintext hash or
+    the exact plaintext size — integrity comes from AEAD + signature."""
+    owner, _, _ = _devices()
+    sealed = _seal(owner, b"x" * 100_003, object_id="obj_privacy", chunk_size=1024)
+    data = sealed.manifest.to_dict()
+    assert "plaintext_sha256" not in data
+    assert "plaintext_size" not in data
+    # The roundtrip must not depend on those fields.
+    assert _open(sealed, owner, trusted=owner).plaintext == b"x" * 100_003
