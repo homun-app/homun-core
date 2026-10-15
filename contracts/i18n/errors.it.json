@@ -2,6 +2,7 @@
   "$schema": "./errors.schema.json",
   "language": "it",
   "errors": {
+    "object_transfer.object_id_invalid": "Identificativo dell'oggetto non valido.",
     "workspace.unknown": "Spazio di lavoro sconosciuto su questo motore.",
     "preferences.language_invalid": "Lingua non supportata: {language}.",
     "preferences.person_unknown": "Persona sconosciuta in questo spazio di lavoro.",
@@ -73,7 +74,10 @@
     "intake.catalog.preparation": "(solo preparazione, nessuna esecuzione automatica)",
     "intake.catalog.limits": "Limiti",
     "intake.catalog.none": "nessuno",
-    "intake.catalog.note": "I materiali si caricano dopo la conferma dell'accordo: la loro assenza ora non cambia la scelta della capability."
+    "intake.catalog.note": "I materiali si caricano dopo la conferma dell'accordo: la loro assenza ora non cambia la scelta della capability.",
+    "object_transfer.project_mismatch": "L'oggetto appartiene a un altro progetto e non può essere ripubblicato altrove.",
+    "object_transfer.version_immutable": "Questa versione dell'oggetto esiste già e non può essere sostituita: pubblica una versione successiva.",
+    "object_transfer.version_not_increasing": "La nuova versione deve essere successiva all'ultima già pubblicata."
   },
   "labels": {
     "comparison.previous": "listino precedente",

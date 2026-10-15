@@ -2,6 +2,7 @@
   "$schema": "./errors.schema.json",
   "language": "en",
   "errors": {
+    "object_transfer.object_id_invalid": "Invalid object identifier.",
     "workspace.unknown": "Unknown workspace on this engine.",
     "preferences.language_invalid": "Unsupported language: {language}.",
     "preferences.person_unknown": "Unknown person in this workspace.",
@@ -73,7 +74,10 @@
     "intake.catalog.preparation": "(preparation only, no automatic execution)",
     "intake.catalog.limits": "Limits",
     "intake.catalog.none": "none",
-    "intake.catalog.note": "Materials are uploaded after the agreement is confirmed: their absence now does not change the capability choice."
+    "intake.catalog.note": "Materials are uploaded after the agreement is confirmed: their absence now does not change the capability choice.",
+    "object_transfer.project_mismatch": "The object belongs to another project and cannot be republished elsewhere.",
+    "object_transfer.version_immutable": "This object version already exists and cannot be replaced: publish a later version.",
+    "object_transfer.version_not_increasing": "The new version must be greater than the latest published one."
   },
   "labels": {
     "comparison.previous": "previous price list",

@@ -19,7 +19,13 @@ import re
 from pathlib import Path
 from typing import Any
 
-from homun.domain.errors import DomainError, NotFoundError, PermissionDeniedError, ValidationError
+from homun.domain.errors import (
+    ConflictError,
+    DomainError,
+    NotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
 from homun.domain.ids import new_id
 from homun.domain.models import Actor, DomainEvent
 from homun.peers.object_crypto import (
@@ -33,6 +39,7 @@ from homun.peers.object_crypto import (
 from homun.policy import require_project_capability
 
 _OBJECT_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
+_VERSION_DIR_RE = re.compile(r"^v(\d+)$")
 
 EVENT_PUBLISHED = "object_transfer.published"
 
@@ -66,6 +73,42 @@ def _read_meta(version_dir: Path) -> dict[str, Any]:
     if not path.is_file():
         raise NotFoundError("Object version not found")
     return json.loads(path.read_text())
+
+
+def _canonical_json(data: Any) -> str:
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _object_versions(data_dir: Path, object_id: str) -> dict[int, dict[str, Any]]:
+    """Published versions of an object_id, from the on-disk metas.
+
+    Ownership of an object_id is derived from its FIRST publication: every
+    existing version meta declares the same project (enforced on publish).
+    """
+    if not _OBJECT_ID_RE.fullmatch(object_id):
+        raise ValidationError(
+            "Invalid object_id", reason="object_transfer.object_id_invalid"
+        )
+    object_dir = _root(data_dir) / object_id
+    if not object_dir.is_dir():
+        return {}
+    versions: dict[int, dict[str, Any]] = {}
+    for version_dir in object_dir.iterdir():
+        match = _VERSION_DIR_RE.match(version_dir.name)
+        if not match or not version_dir.is_dir():
+            continue
+        if not _meta_path(version_dir).is_file():
+            continue
+        meta = json.loads(_meta_path(version_dir).read_text())
+        if isinstance(meta.get("version"), int):
+            versions[meta["version"]] = meta
+    return versions
+
+
+def _record_event_sequence(version_dir: Path, event_sequence: int) -> None:
+    meta = _read_meta(version_dir)
+    meta["event_sequence"] = event_sequence
+    _write_meta(version_dir, meta)
 
 
 def _write_meta(version_dir: Path, meta: dict[str, Any]) -> None:
@@ -193,6 +236,50 @@ def _announce_published(
     return sequence
 
 
+def _assert_object_ownership(
+    data_dir: Path,
+    *,
+    project_id: str,
+    manifest: TransferManifest,
+) -> tuple[bool, int | None]:
+    """Enforce review-P1 rules on an already-published object_id.
+
+    - an object_id belongs to the project of its FIRST publication: any later
+      publish must declare that same project;
+    - published versions are immutable: republishing an existing version is
+      only allowed as a byte-identical repetition (idempotent; the stored
+      event sequence is reused when the first publish already announced);
+    - a new version must be greater than the latest published one.
+
+    Returns (idempotent_repetition, stored_event_sequence).
+    """
+    existing = _object_versions(data_dir, manifest.object_id)
+    if not existing:
+        return False, None
+    owner_projects = {str(meta.get("project_id")) for meta in existing.values()}
+    if owner_projects != {project_id}:
+        raise PermissionDeniedError(
+            f"Object {manifest.object_id} belongs to another project",
+            reason="object_transfer.project_mismatch",
+        )
+    latest = max(existing)
+    if manifest.version in existing:
+        stored = existing[manifest.version]
+        if _canonical_json(stored.get("manifest")) != _canonical_json(manifest.to_dict()):
+            raise ConflictError(
+                f"Version {manifest.version} of {manifest.object_id} is immutable",
+                reason="object_transfer.version_immutable",
+            )
+        return True, stored.get("event_sequence")
+    if manifest.version <= latest:
+        raise ConflictError(
+            f"Version {manifest.version} of {manifest.object_id} must be greater"
+            f" than the latest published {latest}",
+            reason="object_transfer.version_not_increasing",
+        )
+    return False, None
+
+
 def publish_object(
     ctx,
     actor: Actor,
@@ -201,22 +288,31 @@ def publish_object(
     manifest: dict[str, Any],
     chunks_b64: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Create or replace a sealed object version; optional bulk chunk upload."""
+    """Publish a sealed object version; optional bulk chunk upload.
+
+    First publication registers the object_id to the declaring project; later
+    publishes must keep the same project, existing versions are immutable
+    (identical repetition is idempotent) and new versions must increase.
+    """
     store = ctx.repository.snapshot()
     require_project_capability(store, actor, project_id, "write")
     parsed = TransferManifest.from_dict(manifest)
     _assert_no_revoked_recipient_wraps(store, parsed)
-    version_dir = _version_dir(ctx.data_dir, parsed.object_id, parsed.version)
-    meta = {
-        "project_id": project_id,
-        "object_id": parsed.object_id,
-        "version": parsed.version,
-        "manifest": parsed.to_dict(),
-    }
-    assert_no_credentials_in_transfer(
-        meta, allowed_keys=TRANSFER_META_ALLOWED_KEYS, label="transfer meta"
+    idempotent, stored_sequence = _assert_object_ownership(
+        ctx.data_dir, project_id=project_id, manifest=parsed
     )
-    _write_meta(version_dir, meta)
+    version_dir = _version_dir(ctx.data_dir, parsed.object_id, parsed.version)
+    if not idempotent:
+        meta = {
+            "project_id": project_id,
+            "object_id": parsed.object_id,
+            "version": parsed.version,
+            "manifest": parsed.to_dict(),
+        }
+        assert_no_credentials_in_transfer(
+            meta, allowed_keys=TRANSFER_META_ALLOWED_KEYS, label="transfer meta"
+        )
+        _write_meta(version_dir, meta)
     uploaded = 0
     if chunks_b64 is not None:
         if len(chunks_b64) != len(parsed.chunks):
@@ -228,9 +324,13 @@ def publish_object(
                 raise ValidationError(f"Invalid base64 for chunk {index}") from exc
             put_chunk(ctx, actor, parsed.object_id, parsed.version, index, blob)
             uploaded += 1
-    event_sequence = _announce_published(
-        ctx, actor, project_id=project_id, manifest=parsed
-    )
+    if stored_sequence is None:
+        event_sequence = _announce_published(
+            ctx, actor, project_id=project_id, manifest=parsed
+        )
+        _record_event_sequence(version_dir, event_sequence)
+    else:
+        event_sequence = stored_sequence
     status = _transfer_status(version_dir, parsed)
     return {
         "object_id": parsed.object_id,

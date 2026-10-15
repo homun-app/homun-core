@@ -50,8 +50,8 @@ def _setup_shared(ctx):
     return shared, private
 
 
-def _pair_giulia(client: TestClient, tmp_path):
-    identity = load_device_identity(tmp_path / "giulia_key.json")
+def _pair_person(client: TestClient, tmp_path, name: str):
+    identity = load_device_identity(tmp_path / f"{name.lower()}_key.json")
     invite = client.post(
         "/v1/workspaces/ws_local/people/invites",
         headers=OWNER,
@@ -61,8 +61,8 @@ def _pair_giulia(client: TestClient, tmp_path):
         "/v1/remote/pair",
         json={
             "invite_token": invite,
-            "display_name": "Giulia",
-            "device_name": "MacBook di Giulia",
+            "display_name": name,
+            "device_name": f"MacBook di {name}",
             "public_key": identity.public_b64,
             "protocol_version": 1,
         },
@@ -77,6 +77,10 @@ def _pair_giulia(client: TestClient, tmp_path):
     ).json()
     assert confirm["person_id"]
     return confirm, identity
+
+
+def _pair_giulia(client: TestClient, tmp_path):
+    return _pair_person(client, tmp_path, "Giulia")
 
 
 def _grant(ctx, command_id, person_id, project_id, capability="read"):
@@ -456,6 +460,133 @@ def test_secret_store_values_never_appear_in_transfer_artifacts(host):
         assert marker not in joined
         assert "openai_api_key" not in joined
         assert "secret_store" not in joined
+
+
+def _publish(client, headers, project_id, sealed):
+    return client.post(
+        "/v1/workspaces/ws_local/remote/objects",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "manifest": sealed.manifest.to_dict(),
+            "chunks_b64": [
+                base64.b64encode(chunk).decode("ascii") for chunk in sealed.ciphertext_chunks
+            ],
+        },
+    )
+
+
+def _published_event_count(ctx) -> int:
+    return sum(
+        1
+        for event in ctx.repository.snapshot().events
+        if event.type == "object_transfer.published"
+    )
+
+
+def test_cross_project_object_hijack_is_rejected(host):
+    """Security review P1: an object_id belongs to the project of its first
+    publication. A member with write only on «Condiviso» cannot overwrite or
+    supersede an object of «Privato» by redeclaring the project."""
+    app, ctx, tmp_path = host
+    shared, private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        giulia_confirm, giulia = _pair_giulia(client, tmp_path)
+        _grant(ctx, "g1", giulia_confirm["person_id"], shared, "write")
+        giulia_peer = {"Authorization": f"Bearer {giulia_confirm['device_token']}"}
+
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "g2", marta_confirm["person_id"], private, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+
+        original = _seal_for(marta, b"contratto privato", object_id="obj_contratto", version=1)
+        published = _publish(client, marta_peer, private, original)
+        assert published.status_code == 200, published.text
+        meta_path = tmp_path / "object-transfers" / "obj_contratto" / "v1" / "meta.json"
+        original_meta = meta_path.read_text()
+
+        # Same version, same object_id, different declared project.
+        attack = _seal_for(giulia, b"contratto rubato", object_id="obj_contratto", version=1)
+        denied = _publish(client, giulia_peer, shared, attack)
+        assert denied.status_code == 403, denied.text
+        assert denied.json()["detail"]["code"] == "permission_denied"
+        assert meta_path.read_text() == original_meta
+
+        # A higher version of someone else's object is equally rejected.
+        attack_v2 = _seal_for(giulia, b"contratto rubato v2", object_id="obj_contratto", version=2)
+        denied_v2 = _publish(client, giulia_peer, shared, attack_v2)
+        assert denied_v2.status_code == 403, denied_v2.text
+        v2_meta = tmp_path / "object-transfers" / "obj_contratto" / "v2" / "meta.json"
+        assert not v2_meta.exists()
+
+
+def test_published_versions_are_immutable(host):
+    """Security review P1: an existing version is never replaced; identical
+    republication is idempotent (no duplicate announce), anything else is a
+    typed version conflict."""
+    app, ctx, tmp_path = host
+    shared, _private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        giulia_confirm, giulia = _pair_giulia(client, tmp_path)
+        _grant(ctx, "g1", giulia_confirm["person_id"], shared, "write")
+        giulia_peer = {"Authorization": f"Bearer {giulia_confirm['device_token']}"}
+
+        v1 = _seal_for(giulia, b"prima stesura", object_id="obj_listino", version=1)
+        first = _publish(client, giulia_peer, shared, v1)
+        assert first.status_code == 200, first.text
+        events_after_first = _published_event_count(ctx)
+
+        # Different content for the same version → version conflict.
+        v1_changed = _seal_for(giulia, b"prima stesura RISCRITTA", object_id="obj_listino", version=1)
+        conflict = _publish(client, giulia_peer, shared, v1_changed)
+        assert conflict.status_code == 409, conflict.text
+        assert conflict.json()["detail"]["code"] == "version_conflict"
+
+        # Byte-identical republication → idempotent 200, no duplicate announce.
+        again = _publish(client, giulia_peer, shared, v1)
+        assert again.status_code == 200, again.text
+        assert again.json()["event_sequence"] == first.json()["event_sequence"]
+        assert _published_event_count(ctx) == events_after_first
+
+        # A new lower/equal version after a higher one exists → conflict.
+        v2 = _seal_for(giulia, b"seconda stesura", object_id="obj_listino", version=2)
+        assert _publish(client, giulia_peer, shared, v2).status_code == 200
+        v2_changed = _seal_for(giulia, b"seconda stesura alt", object_id="obj_listino", version=2)
+        assert _publish(client, giulia_peer, shared, v2_changed).status_code == 409
+
+
+def test_put_chunk_checks_permission_on_the_object_project(host):
+    """Security review P1 verification: put_chunk authorizes on the project of
+    the stored object (from meta), not on anything the caller declares."""
+    app, ctx, tmp_path = host
+    shared, private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        giulia_confirm, giulia = _pair_giulia(client, tmp_path)
+        _grant(ctx, "g1", giulia_confirm["person_id"], shared, "write")
+        giulia_peer = {"Authorization": f"Bearer {giulia_confirm['device_token']}"}
+
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "g2", marta_confirm["person_id"], private, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+
+        sealed = _seal_for(marta, b"documento privato", object_id="obj_riservato", version=1)
+        published = client.post(
+            "/v1/workspaces/ws_local/remote/objects",
+            headers=marta_peer,
+            json={"project_id": private, "manifest": sealed.manifest.to_dict()},
+        )
+        assert published.status_code == 200, published.text
+
+        denied = client.put(
+            "/v1/workspaces/ws_local/remote/objects/obj_riservato/versions/1/chunks/0",
+            headers=giulia_peer,
+            content=sealed.ciphertext_chunks[0],
+        )
+        assert denied.status_code == 403, denied.text
+        assert denied.json()["detail"]["code"] == "permission_denied"
+        assert not (
+            tmp_path / "object-transfers" / "obj_riservato" / "v1" / "chunks" / "0.bin"
+        ).exists()
 
 
 def test_publish_announces_transfer_on_remote_event_cursor(host):

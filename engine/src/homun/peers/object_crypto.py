@@ -71,6 +71,7 @@ TRANSFER_META_ALLOWED_KEYS = frozenset({
     "object_id",
     "version",
     "manifest",
+    "event_sequence",
 })
 
 # Defense in depth: refuse credential / secret-store field names even if a
