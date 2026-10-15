@@ -264,6 +264,26 @@ l'inventario di **37 componenti/hook `packages/ui` non usati** (inclusi
 dopo l'eliminazione anche `badge` e `collapsible` restano senza
 consumatori.
 
+### Componenti shadcn rimossi da `packages/ui` (2026-10-15)
+
+L'inventario dei 37 componenti/hook shadcn inutilizzati è stato
+eliminato (**36 file, 3.616 righe**; ramo `chore/remove-unused-ui-components`,
+recuperabili dal commit `fe526dd8`): resta `label.tsx` — importato dai
+percorsi assistiti `FirstWork*` ancora in sospeso — insieme ai vivi
+`button`, `button-group`, `command`, `dialog`, `dropdown-menu`,
+`hover-card`, `input`, `input-group`, `popover`, `select`, `separator`,
+`spinner`, `textarea`, `tooltip` e `lib/utils`. Con i file se ne sono
+andate 28 dipendenze npm (radix dei componenti rimossi, `recharts`,
+`embla-carousel-react`, `react-day-picker`, `react-hook-form`, `vaul`,
+`sonner`, `shiki`, `motion`, …); `@radix-ui/react-label` resta per
+`label.tsx`. Bundle JS identico a `main` (stessa prova di invarianza di
+cui sopra), CSS −33,1 kB con classi usate solo dai file rimossi.
+
+I componenti shadcn si aggiungono **solo quando servono**, con
+`npx shadcn@latest add <componente>`: con il `components.json` attuale
+la CLI scrive in `packages/ui/src/components/` e installa la dipendenza
+necessaria (verificato sul campo con `toggle` e poi ripristinato).
+
 ---
 
 ## 4. Archivio e fonti
