@@ -113,7 +113,7 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   Crypto + HTTP + annuncio eventi + revoca wrap/UX limiti copie +
   assert credenziali fuori dai transfer ✅.
   Review indipendente del protocollo: **fatta**, sei rilievi corretti in
-  PR fix/object-transfer-security (protocollo v2 firmato, AAD anti-swap,
+  PR #449 (protocollo v2 firmato, AAD anti-swap,
   ownership/immutabilità versioni, niente hash in chiaro, limiti/quota) —
   doc `development/2026-10-15-f5-object-crypto-v2.md`. **Pilot sbloccato
   dopo l'unione**.

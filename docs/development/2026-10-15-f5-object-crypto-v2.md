@@ -2,7 +2,7 @@
 
 15 ottobre 2026. Riformulazione del protocollo di trasferimento oggetti dopo
 la **review indipendente di sicurezza** (pre-pilot): sei rilievi, tutti
-trattati in `fix/object-transfer-security`. Il formato v1 non è mai stato
+trattati nella PR #449. Il formato v1 non è mai stato
 usato da dati reali (nessuna directory `object-transfers` esisteva al
 momento del cambio) ed è **rifiutato** con errore tipizzato
 `object_transfer.protocol_unsupported`.
