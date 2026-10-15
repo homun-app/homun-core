@@ -505,16 +505,15 @@ def _publish(client, headers, project_id, sealed):
 
 
 def _publish_manifest(client, headers, project_id, manifest_dict, chunks=()):
+    body = {"project_id": project_id, "manifest": manifest_dict}
+    if chunks:
+        body["chunks_b64"] = [
+            base64.b64encode(chunk).decode("ascii") for chunk in chunks
+        ]
     return client.post(
         "/v1/workspaces/ws_local/remote/objects",
         headers=headers,
-        json={
-            "project_id": project_id,
-            "manifest": manifest_dict,
-            "chunks_b64": [
-                base64.b64encode(chunk).decode("ascii") for chunk in chunks
-            ],
-        },
+        json=body,
     )
 
 
@@ -887,3 +886,124 @@ def test_announce_and_manifest_do_not_leak_plaintext_hash(host):
         ).read_text()
         assert "plaintext_sha256" not in meta_on_disk
         assert "plaintext_size" not in meta_on_disk
+
+
+def _set_limits(monkeypatch, **overrides):
+    """Set HOMUN_OBJECT_TRANSFER_* env overrides; None deletes the variable."""
+    for name in (
+        "MAX_CHUNK_BYTES",
+        "MAX_CHUNKS_PER_OBJECT",
+        "MAX_OBJECT_BYTES",
+        "MAX_PROJECT_BYTES",
+    ):
+        if name not in overrides:
+            monkeypatch.delenv(f"HOMUN_OBJECT_TRANSFER_{name}", raising=False)
+    for name, value in overrides.items():
+        if value is None:
+            monkeypatch.delenv(f"HOMUN_OBJECT_TRANSFER_{name}", raising=False)
+        else:
+            monkeypatch.setenv(f"HOMUN_OBJECT_TRANSFER_{name}", str(value))
+
+
+def test_manifest_size_limits_are_enforced_before_writing(host, monkeypatch):
+    """Security review P5: chunk count, chunk size and object size limits are
+    validated on the manifest BEFORE anything is written to disk."""
+    app, ctx, tmp_path = host
+    shared, _private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+        _confirm, giulia = _pair_giulia(client, tmp_path)
+
+        # Too many chunks.
+        _set_limits(monkeypatch, MAX_CHUNKS_PER_OBJECT=3)
+        sealed = _seal_for(marta, giulia, shared, b"x" * 4_096, object_id="obj_lim1")
+        denied = _publish(client, marta_peer, shared, sealed)
+        assert denied.status_code == 400, denied.text
+        assert denied.json()["detail"]["reason"] == "object_transfer.too_many_chunks"
+        assert not (tmp_path / "object-transfers" / "obj_lim1").exists()
+
+        # Single chunk larger than the ceiling.
+        _set_limits(monkeypatch, MAX_CHUNK_BYTES=1024, MAX_CHUNKS_PER_OBJECT=10_000)
+        sealed = _seal_for(marta, giulia, shared, b"y" * 4_096, object_id="obj_lim2")
+        denied = _publish(client, marta_peer, shared, sealed)
+        assert denied.status_code == 400, denied.text
+        assert denied.json()["detail"]["reason"] == "object_transfer.chunk_too_large"
+        assert not (tmp_path / "object-transfers" / "obj_lim2").exists()
+
+        # Whole object over the ceiling.
+        _set_limits(
+            monkeypatch,
+            MAX_CHUNKS_PER_OBJECT=10_000,
+            MAX_CHUNK_BYTES=1_048_576,
+            MAX_OBJECT_BYTES=4_096,
+        )
+        sealed = _seal_for(marta, giulia, shared, b"z" * 8_192, object_id="obj_lim3")
+        denied = _publish(client, marta_peer, shared, sealed)
+        assert denied.status_code == 400, denied.text
+        assert denied.json()["detail"]["reason"] == "object_transfer.object_too_large"
+        assert not (tmp_path / "object-transfers" / "obj_lim3").exists()
+
+
+def test_project_quota_is_enforced(host, monkeypatch):
+    """Security review P5: per-project quota refuses transfers that would
+    exhaust the host disk, without writing files."""
+    app, ctx, tmp_path = host
+    shared, _private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+        _confirm, giulia = _pair_giulia(client, tmp_path)
+
+        _set_limits(monkeypatch, MAX_PROJECT_BYTES=8_192, MAX_CHUNKS_PER_OBJECT=10_000)
+        first = _seal_for(marta, giulia, shared, b"a" * 2_048, object_id="obj_q1")
+        assert _publish(client, marta_peer, shared, first).status_code == 200
+        second = _seal_for(marta, giulia, shared, b"b" * 8_192, object_id="obj_q2")
+        denied = _publish(client, marta_peer, shared, second)
+        assert denied.status_code == 400, denied.text
+        assert denied.json()["detail"]["reason"] == "object_transfer.project_quota_exceeded"
+        assert not (tmp_path / "object-transfers" / "obj_q2").exists()
+
+
+def test_chunk_body_limit_is_enforced_before_reading(host, monkeypatch):
+    """Security review P5: an oversized chunk body is refused on
+    Content-Length / while streaming, before it is stored."""
+    app, ctx, tmp_path = host
+    shared, _private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+        _confirm, giulia = _pair_giulia(client, tmp_path)
+
+        _set_limits(monkeypatch, MAX_CHUNK_BYTES=None)
+        sealed = _seal_for(marta, giulia, shared, b"payload", object_id="obj_body")
+        assert _publish_manifest(
+            client, marta_peer, shared, sealed.manifest.to_dict()
+        ).status_code == 200
+
+        _set_limits(monkeypatch, MAX_CHUNK_BYTES=64)
+        denied = client.put(
+            "/v1/workspaces/ws_local/remote/objects/obj_body/versions/1/chunks/0",
+            headers={**marta_peer, "Content-Type": "application/octet-stream"},
+            content=b"Q" * 2_048,
+        )
+        assert denied.status_code == 400, denied.text
+        assert denied.json()["detail"]["reason"] == "object_transfer.chunk_too_large"
+        assert not (
+            tmp_path / "object-transfers" / "obj_body" / "v1" / "chunks" / "0.bin"
+        ).exists()
+
+        # JSON transport is capped too.
+        denied_json = client.put(
+            "/v1/workspaces/ws_local/remote/objects/obj_body/versions/1/chunks/0",
+            headers={**marta_peer, "Content-Type": "application/json"},
+            json={"ciphertext_b64": base64.b64encode(b"R" * 2_048).decode("ascii")},
+        )
+        assert denied_json.status_code == 400, denied_json.text
+        assert denied_json.json()["detail"]["reason"] == "object_transfer.chunk_too_large"
+        assert not (
+            tmp_path / "object-transfers" / "obj_body" / "v1" / "chunks" / "0.bin"
+        ).exists()

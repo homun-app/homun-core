@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import base64
+import json
 
 from fastapi import APIRouter, Header, Request, Response
 from pydantic import BaseModel, Field
 
 from homun.domain.errors import DomainError, ValidationError
 from homun.identity import object_transfer
+from homun.identity.transfer_limits import current_transfer_limits
 from homun.routes.domain_support import _http_error
 from homun.routes.price_comparisons import request_context
 
@@ -22,6 +24,34 @@ class PublishObjectRequest(BaseModel):
 
 class PutChunkRequest(BaseModel):
     ciphertext_b64: str = Field(min_length=1)
+
+
+async def _read_capped_body(request: Request, max_bytes: int) -> bytes:
+    """Read the chunk body without trusting an unbounded upload (review P5).
+
+    Content-Length is checked first; the stream is then read block by block
+    and aborted as soon as the ceiling is crossed, so an oversized body never
+    lands in memory whole.
+    """
+    declared = request.headers.get("content-length")
+    if declared:
+        try:
+            if int(declared) > max_bytes:
+                raise ValidationError(
+                    f"Chunk body exceeds {max_bytes} bytes",
+                    reason="object_transfer.chunk_too_large",
+                )
+        except ValueError:
+            pass
+    buffer = bytearray()
+    async for block in request.stream():
+        buffer.extend(block)
+        if len(buffer) > max_bytes:
+            raise ValidationError(
+                f"Chunk body exceeds {max_bytes} bytes",
+                reason="object_transfer.chunk_too_large",
+            )
+    return bytes(buffer)
 
 
 @router.post("/workspaces/{workspace_id}/remote/objects")
@@ -60,15 +90,26 @@ async def put_remote_object_chunk(
     """Upload one ciphertext chunk (raw body or JSON ciphertext_b64)."""
     ctx, actor = request_context(workspace_id, x_homun_actor_id, x_homun_actor_name)
     content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    limits = current_transfer_limits()
     try:
         if content_type == "application/json":
-            payload = PutChunkRequest.model_validate(await request.json())
+            # Refuse the base64 payload itself before parsing it whole.
+            b64_ceiling = (limits.max_chunk_bytes * 4 + 3) // 3 + 4
+            raw = await _read_capped_body(request, b64_ceiling)
+            try:
+                body = json.loads(raw)
+            except ValueError as exc:
+                raise ValidationError(
+                    "Invalid JSON body",
+                    reason="object_transfer.chunk_body_invalid",
+                ) from exc
+            payload = PutChunkRequest.model_validate(body)
             try:
                 ciphertext = base64.b64decode(payload.ciphertext_b64, validate=True)
             except (ValueError, TypeError) as exc:
                 raise ValidationError("Invalid ciphertext_b64") from exc
         else:
-            ciphertext = await request.body()
+            ciphertext = await _read_capped_body(request, limits.max_chunk_bytes)
             if not ciphertext:
                 raise ValidationError("Empty chunk body")
         return object_transfer.put_chunk(

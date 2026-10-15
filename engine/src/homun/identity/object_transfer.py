@@ -29,6 +29,12 @@ from homun.domain.errors import (
 from homun.domain.ids import new_id
 from homun.domain.models import Actor, DomainEvent
 from homun.identity.devices import device_public_pem
+from homun.identity.transfer_limits import (
+    TransferLimits,
+    assert_chunk_size,
+    current_transfer_limits,
+    validate_manifest_limits,
+)
 from homun.peers.object_crypto import (
     ANNOUNCE_ALLOWED_KEYS,
     TRANSFER_META_ALLOWED_KEYS,
@@ -239,6 +245,46 @@ def _announce_published(
     return sequence
 
 
+def _project_stored_bytes(
+    data_dir: Path, project_id: str, *, exclude: tuple[str, int] | None = None
+) -> int:
+    """Bytes already stored for a project across all its transfers.
+
+    Excludes one (object_id, version) so an idempotent republication does not
+    count its own chunks twice against the quota. Scan cost is proportional
+    to the number of stored versions — acceptable at pilot scale.
+    """
+    root = _root(data_dir)
+    if not root.is_dir():
+        return 0
+    total = 0
+    for object_dir in sorted(root.iterdir()):
+        if not object_dir.is_dir():
+            continue
+        for version_dir in sorted(object_dir.iterdir()):
+            if not version_dir.is_dir() or not _VERSION_DIR_RE.match(version_dir.name):
+                continue
+            if exclude is not None and (
+                object_dir.name, int(version_dir.name[1:])
+            ) == exclude:
+                continue
+            meta_path = _meta_path(version_dir)
+            if not meta_path.is_file():
+                continue
+            try:
+                meta = json.loads(meta_path.read_text())
+            except (ValueError, OSError):
+                continue
+            if meta.get("project_id") != project_id:
+                continue
+            chunks_dir = version_dir / "chunks"
+            if not chunks_dir.is_dir():
+                continue
+            for chunk_file in chunks_dir.glob("*.bin"):
+                total += chunk_file.stat().st_size
+    return total
+
+
 def _assert_object_ownership(
     data_dir: Path,
     *,
@@ -332,9 +378,20 @@ def publish_object(
     parsed = TransferManifest.from_dict(manifest)
     _assert_publisher(store, actor, project_id, parsed)
     _assert_no_revoked_recipient_wraps(store, parsed)
+    limits = current_transfer_limits()
+    validate_manifest_limits(parsed, limits)
     idempotent, stored_sequence = _assert_object_ownership(
         ctx.data_dir, project_id=project_id, manifest=parsed
     )
+    if not idempotent:
+        stored_bytes = _project_stored_bytes(
+            ctx.data_dir, project_id, exclude=(parsed.object_id, parsed.version)
+        )
+        if stored_bytes + parsed.ciphertext_size() > limits.max_project_bytes:
+            raise ValidationError(
+                f"Project transfer storage would exceed {limits.max_project_bytes} bytes",
+                reason="object_transfer.project_quota_exceeded",
+            )
     version_dir = _version_dir(ctx.data_dir, parsed.object_id, parsed.version)
     if not idempotent:
         meta = {
@@ -386,6 +443,8 @@ def put_chunk(
     ciphertext: bytes,
 ) -> dict[str, Any]:
     store = ctx.repository.snapshot()
+    limits: TransferLimits = current_transfer_limits()
+    assert_chunk_size(len(ciphertext), limits)
     version_dir = _version_dir(ctx.data_dir, object_id, version)
     meta = _read_meta(version_dir)
     require_project_capability(store, actor, meta["project_id"], "write")

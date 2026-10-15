@@ -2,6 +2,11 @@
   "$schema": "./errors.schema.json",
   "language": "it",
   "errors": {
+    "object_transfer.chunk_body_invalid": "Il corpo del chunk non è valido.",
+    "object_transfer.too_many_chunks": "Il numero di chunk del trasferimento supera il limite configurato.",
+    "object_transfer.chunk_too_large": "Il chunk supera la dimensione massima configurata.",
+    "object_transfer.object_too_large": "L'oggetto supera la dimensione massima configurata.",
+    "object_transfer.project_quota_exceeded": "Lo spazio di trasferimento del progetto è esaurito.",
     "object_transfer.manifest_mismatch": "Il manifest non corrisponde all'oggetto, alla versione o al progetto richiesto.",
     "object_transfer.version_rollback": "È stata ricevuta una versione più vecchia di quella già aperta: possibile rollback.",
     "object_transfer.manifest_field_missing": "Manca un campo obbligatorio nel manifest del trasferimento.",
