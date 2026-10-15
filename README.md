@@ -16,7 +16,7 @@ Nuova base di Homun: interfaccia React, applicazione installabile Electron e mot
 
 ## Avvio locale
 
-Usare npm e Node 24 o successivo. Installare con `npm ci`. `.npmrc` conserva la compatibilità con i peer dependency del template storico; riallinearli prima della fase release.
+Usare npm e Node 24 LTS. La versione è fissata in `.nvmrc` (`nvm use` o `fnm use` la selezionano); se manca, Node 24 si installa con `nvm install 24` o `fnm install 24`. `package.json` dichiara `engines` e `.npmrc` attiva `engine-strict`: Node 25 (non LTS) e versioni precedenti alla 24 fanno fallire `npm ci`. Installare con `npm ci`.
 
 - `npm run dev`: applicazione web su http://127.0.0.1:4183.
 - `npm run check`: TypeScript, suite di test e build web.

@@ -34,7 +34,7 @@ jobs:
       - name: Setup Node (root web build)
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Setup Python
@@ -59,7 +59,7 @@ jobs:
       - name: Setup Node (desktop builder)
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
 
@@ -195,7 +195,7 @@ jobs:
       - name: Setup Node (root web build)
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Setup Python
@@ -228,7 +228,7 @@ jobs:
       - name: Setup Node (desktop builder)
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
 

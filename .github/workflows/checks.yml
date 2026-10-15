@@ -28,7 +28,7 @@ jobs:
         run: python tools/export_openapi.py --check
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .nvmrc
       - name: Generated engine inventory and execstack hardening
         run: python -m pytest -q engine/packaging
       - name: Desktop boundary and owned engine tests
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .nvmrc
           cache: npm
       - name: Install lockfile dependencies
         run: npm ci
