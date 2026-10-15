@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "errors.schema.json",
+  "title": "Homun shared error catalog",
+  "description": "One entry per stable error `reason` plus one generic sentence per `code`; `{param}` placeholders, mirrored by formatString on the client and format_message in the engine. Keys must match across languages and every placeholder must be provided by the matching raise (both enforced by tests).",
+  "type": "object",
+  "required": ["language", "errors", "codes"],
+  "properties": {
+    "language": { "type": "string", "enum": ["it", "en"] },
+    "errors": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/phrase" }
+    },
+    "codes": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/phrase" }
+    }
+  },
+  "$defs": {
+    "phrase": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
