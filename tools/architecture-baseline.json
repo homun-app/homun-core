@@ -5,8 +5,7 @@
     "apps/web/src/components/builder/ConversationMaterials.tsx": 959,
     "apps/web/src/components/builder/ConversationSpace.tsx": 989,
     "apps/web/src/components/builder/ConversationWorkspace.tsx": 1230,
-    "apps/web/src/components/builder/StudioDocuments.tsx": 541,
-    "packages/ui/src/components/sidebar.tsx": 739
+    "apps/web/src/components/builder/StudioDocuments.tsx": 541
   },
   "import_exceptions": []
 }
