@@ -5,6 +5,8 @@ Uses existing primitives only (libsodium via PyNaCl):
 - Sealed-box wrap of that key for each authorized device (Ed25519 → X25519)
 - XChaCha20-Poly1305 secretstream for authenticated payload chunks
 - Manifest with per-chunk ciphertext hashes for resume after disconnect
+- v2: publisher-bound manifest — Ed25519 detached signature by the publishing
+  device over the canonical (JCS-equivalent) unsigned manifest form
 
 Credentials and workspace keys are never placed in a transfer. A relay that
 sees ciphertext + manifest cannot decrypt without a recipient wrap.
@@ -13,8 +15,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping, Sequence
 
 from cryptography.hazmat.primitives import serialization
@@ -39,14 +42,15 @@ from nacl.exceptions import CryptoError
 from nacl.public import PrivateKey, PublicKey, SealedBox
 
 from homun.domain.errors import DomainError
-from homun.peers.device_identity import key_fingerprint
+from homun.peers.device_identity import DeviceIdentity, key_fingerprint
 
-PROTOCOL_ID = "homun-object-transfer/v1"
+PROTOCOL_ID = "homun-object-transfer/v2"
 DEFAULT_CHUNK_SIZE = 65_536
 OBJECT_KEY_BYTES = crypto_secretstream_xchacha20poly1305_KEYBYTES
 
 MANIFEST_ALLOWED_KEYS = frozenset({
     "protocol",
+    "project_id",
     "object_id",
     "version",
     "plaintext_sha256",
@@ -55,6 +59,8 @@ MANIFEST_ALLOWED_KEYS = frozenset({
     "header_b64",
     "chunks",
     "recipients",
+    "publisher_fingerprint",
+    "publisher_signature_b64",
 })
 CHUNK_ALLOWED_KEYS = frozenset({"index", "sha256", "size"})
 RECIPIENT_ALLOWED_KEYS = frozenset({"device_fingerprint", "wrapped_key_b64"})
@@ -167,11 +173,26 @@ class RecipientWrap:
         )
 
 
+def _required(data: Mapping, key: str, label: str) -> object:
+    if key not in data:
+        raise ObjectCryptoError(
+            f"{label} field is required: {key}",
+            reason="object_transfer.manifest_field_missing",
+        )
+    return data[key]
+
+
 @dataclass(frozen=True)
 class TransferManifest:
-    """Resumable transfer description. Ciphertext lives beside the manifest."""
+    """Resumable transfer description. Ciphertext lives beside the manifest.
+
+    v2 binds the manifest to one publisher: `publisher_fingerprint` names the
+    signing device and `publisher_signature_b64` is its detached Ed25519
+    signature over the canonical form of the manifest without the signature.
+    """
 
     protocol: str
+    project_id: str
     object_id: str
     version: int
     plaintext_sha256: str
@@ -180,10 +201,13 @@ class TransferManifest:
     header_b64: str
     chunks: tuple[ChunkDescriptor, ...]
     recipients: tuple[RecipientWrap, ...]
+    publisher_fingerprint: str
+    publisher_signature_b64: str
 
     def to_dict(self) -> dict:
         return {
             "protocol": self.protocol,
+            "project_id": self.project_id,
             "object_id": self.object_id,
             "version": self.version,
             "plaintext_sha256": self.plaintext_sha256,
@@ -192,6 +216,8 @@ class TransferManifest:
             "header_b64": self.header_b64,
             "chunks": [chunk.to_dict() for chunk in self.chunks],
             "recipients": [wrap.to_dict() for wrap in self.recipients],
+            "publisher_fingerprint": self.publisher_fingerprint,
+            "publisher_signature_b64": self.publisher_signature_b64,
         }
 
     @classmethod
@@ -200,28 +226,89 @@ class TransferManifest:
             data, allowed_keys=MANIFEST_ALLOWED_KEYS, label="manifest"
         )
         if data.get("protocol") != PROTOCOL_ID:
-            raise ObjectCryptoError("Unsupported object-transfer protocol")
+            raise ObjectCryptoError(
+                f"Unsupported object-transfer protocol: {data.get('protocol')!r}",
+                reason="object_transfer.protocol_unsupported",
+            )
         chunks = tuple(ChunkDescriptor.from_dict(item) for item in data.get("chunks", []))
         recipients = tuple(
             RecipientWrap.from_dict(item) for item in data.get("recipients", [])
         )
         return cls(
             protocol=PROTOCOL_ID,
-            object_id=str(data["object_id"]),
-            version=int(data["version"]),
-            plaintext_sha256=str(data["plaintext_sha256"]),
-            plaintext_size=int(data["plaintext_size"]),
-            chunk_size=int(data["chunk_size"]),
-            header_b64=str(data["header_b64"]),
+            project_id=str(_required(data, "project_id", "manifest")),
+            object_id=str(_required(data, "object_id", "manifest")),
+            version=int(_required(data, "version", "manifest")),
+            plaintext_sha256=str(_required(data, "plaintext_sha256", "manifest")),
+            plaintext_size=int(_required(data, "plaintext_size", "manifest")),
+            chunk_size=int(_required(data, "chunk_size", "manifest")),
+            header_b64=str(_required(data, "header_b64", "manifest")),
             chunks=chunks,
             recipients=recipients,
+            publisher_fingerprint=str(_required(data, "publisher_fingerprint", "manifest")),
+            publisher_signature_b64=str(_required(data, "publisher_signature_b64", "manifest")),
         )
+
+
+def canonical_manifest_bytes(unsigned_manifest: Mapping) -> bytes:
+    """Canonical encoding of the unsigned manifest (JCS-equivalent subset).
+
+    UTF-8 JSON with lexicographically sorted object keys, no whitespace and
+    Python-default integer formatting (decimal digits, no leading zeros —
+    Python never emits them). Strings keep their characters; JSON escaping is
+    the minimal one of json.dumps with ensure_ascii=False. The same function
+    runs on both sides, so sender and verifier agree byte for byte.
+    """
+    return json.dumps(
+        unsigned_manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+
+
+def unsigned_manifest_dict(manifest: TransferManifest | Mapping) -> dict:
+    """The manifest form covered by the publisher signature."""
+    data = manifest.to_dict() if isinstance(manifest, TransferManifest) else dict(manifest)
+    data.pop("publisher_signature_b64", None)
+    return data
+
+
+def sign_manifest(unsigned_manifest: Mapping, publisher: DeviceIdentity) -> str:
+    return publisher.sign(canonical_manifest_bytes(unsigned_manifest))
+
+
+def verify_manifest_signature(
+    manifest: TransferManifest, publisher_public_pem: bytes
+) -> None:
+    """Fail closed unless the manifest signature comes from the device named
+    by publisher_fingerprint (the PEM must be that device's registered key)."""
+    try:
+        if key_fingerprint(publisher_public_pem) != manifest.publisher_fingerprint:
+            raise ValueError("public key does not match publisher_fingerprint")
+        signature = base64.b64decode(manifest.publisher_signature_b64, validate=True)
+        public = serialization.load_pem_public_key(publisher_public_pem)
+        if not isinstance(public, Ed25519PublicKey):
+            raise ValueError("publisher key must be Ed25519")
+        public.verify(signature, canonical_manifest_bytes(unsigned_manifest_dict(manifest)))
+    except ObjectCryptoError:
+        raise
+    except Exception as exc:
+        raise ObjectCryptoError(
+            "Manifest publisher signature is not valid",
+            reason="object_transfer.publisher_signature_invalid",
+        ) from exc
 
 
 @dataclass(frozen=True)
 class SealedObject:
     manifest: TransferManifest
     ciphertext_chunks: tuple[bytes, ...]
+
+
+@dataclass(frozen=True)
+class OpenedObject:
+    """Decrypted payload plus the verified identity of who published it."""
+
+    plaintext: bytes
+    publisher_fingerprint: str
 
 
 def generate_object_key() -> bytes:
@@ -344,13 +431,18 @@ def decrypt_payload(header: bytes, ciphertext_chunks: Sequence[bytes], object_ke
 def seal_object(
     plaintext: bytes,
     *,
+    project_id: str,
     object_id: str,
     version: int,
     recipient_public_pems: Mapping[str, bytes],
+    publisher_identity: DeviceIdentity,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     object_key: bytes | None = None,
 ) -> SealedObject:
-    """Encrypt plaintext for the given device fingerprints (public PEMs)."""
+    """Encrypt plaintext for the given device fingerprints and sign the
+    manifest with the publishing device's key (protocol v2)."""
+    if not project_id:
+        raise ObjectCryptoError("project_id is required")
     if not object_id:
         raise ObjectCryptoError("object_id is required")
     if version < 1:
@@ -377,6 +469,7 @@ def seal_object(
     )
     manifest = TransferManifest(
         protocol=PROTOCOL_ID,
+        project_id=project_id,
         object_id=object_id,
         version=version,
         plaintext_sha256=_sha256_hex(plaintext),
@@ -385,7 +478,11 @@ def seal_object(
         header_b64=base64.b64encode(header).decode("ascii"),
         chunks=descriptors,
         recipients=tuple(wraps),
+        publisher_fingerprint=publisher_identity.fingerprint,
+        publisher_signature_b64="",
     )
+    signature = sign_manifest(unsigned_manifest_dict(manifest), publisher_identity)
+    manifest = replace(manifest, publisher_signature_b64=signature)
     return SealedObject(manifest=manifest, ciphertext_chunks=tuple(cipher_chunks))
 
 
@@ -421,13 +518,26 @@ def open_object(
     *,
     recipient_private_pem: bytes,
     recipient_fingerprint: str,
-) -> bytes:
-    """Decrypt a sealed object for one authorized device."""
+    trusted_publisher_pems: Mapping[str, bytes],
+) -> OpenedObject:
+    """Decrypt a sealed object for one authorized device.
+
+    The recipient only trusts publisher keys it knows from its replica
+    snapshot: the manifest signature must verify against the key registered
+    for `publisher_fingerprint`, otherwise the transfer is refused.
+    """
     parsed = (
         manifest
         if isinstance(manifest, TransferManifest)
         else TransferManifest.from_dict(manifest)
     )
+    publisher_pem = trusted_publisher_pems.get(parsed.publisher_fingerprint)
+    if publisher_pem is None:
+        raise ObjectCryptoError(
+            "Publisher device is not known or not active in the replica snapshot",
+            reason="object_transfer.publisher_not_trusted",
+        )
+    verify_manifest_signature(parsed, publisher_pem)
     wrap = next(
         (
             item
@@ -451,4 +561,6 @@ def open_object(
     plaintext = decrypt_payload(header, ciphertext_chunks, object_key)
     if len(plaintext) != parsed.plaintext_size or _sha256_hex(plaintext) != parsed.plaintext_sha256:
         raise ObjectCryptoError("Plaintext integrity check failed")
-    return plaintext
+    return OpenedObject(
+        plaintext=plaintext, publisher_fingerprint=parsed.publisher_fingerprint
+    )

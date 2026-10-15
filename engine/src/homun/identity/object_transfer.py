@@ -28,6 +28,7 @@ from homun.domain.errors import (
 )
 from homun.domain.ids import new_id
 from homun.domain.models import Actor, DomainEvent
+from homun.identity.devices import device_public_pem
 from homun.peers.object_crypto import (
     ANNOUNCE_ALLOWED_KEYS,
     TRANSFER_META_ALLOWED_KEYS,
@@ -35,6 +36,7 @@ from homun.peers.object_crypto import (
     assert_no_credentials_in_transfer,
     missing_chunk_indices,
     verify_chunk,
+    verify_manifest_signature,
 )
 from homun.policy import require_project_capability
 
@@ -280,6 +282,36 @@ def _assert_object_ownership(
     return False, None
 
 
+def _assert_publisher(store, actor: Actor, project_id: str, manifest: TransferManifest) -> None:
+    """Review P2: the manifest must be signed by an ACTIVE device of the
+    person making the request, and must declare the same project."""
+    if manifest.project_id != project_id:
+        raise ValidationError(
+            "Manifest project does not match the declared project",
+            reason="object_transfer.declared_project_mismatch",
+        )
+    device = next(
+        (
+            item
+            for item in store.person_devices.values()
+            if item.key_fingerprint == manifest.publisher_fingerprint
+        ),
+        None,
+    )
+    if device is None or device.status != "confirmed" or device.person_id != actor.id:
+        raise PermissionDeniedError(
+            "Publisher device is not an active device of the requesting person",
+            reason="object_transfer.publisher_device_mismatch",
+        )
+    publisher_pem = device_public_pem(store, manifest.publisher_fingerprint)
+    if publisher_pem is None:
+        raise PermissionDeniedError(
+            "Publisher device public key is not registered",
+            reason="object_transfer.publisher_device_mismatch",
+        )
+    verify_manifest_signature(manifest, publisher_pem)
+
+
 def publish_object(
     ctx,
     actor: Actor,
@@ -297,6 +329,7 @@ def publish_object(
     store = ctx.repository.snapshot()
     require_project_capability(store, actor, project_id, "write")
     parsed = TransferManifest.from_dict(manifest)
+    _assert_publisher(store, actor, project_id, parsed)
     _assert_no_revoked_recipient_wraps(store, parsed)
     idempotent, stored_sequence = _assert_object_ownership(
         ctx.data_dir, project_id=project_id, manifest=parsed

@@ -2,6 +2,12 @@
   "$schema": "./errors.schema.json",
   "language": "en",
   "errors": {
+    "object_transfer.manifest_field_missing": "A required field is missing from the transfer manifest.",
+    "object_transfer.protocol_unsupported": "The object-transfer protocol version is not supported.",
+    "object_transfer.declared_project_mismatch": "The declared project does not match the project signed in the manifest.",
+    "object_transfer.publisher_device_mismatch": "The signing device is not active for the person publishing.",
+    "object_transfer.publisher_signature_invalid": "The manifest signature is not valid.",
+    "object_transfer.publisher_not_trusted": "The publishing device is not known or is no longer active.",
     "object_transfer.object_id_invalid": "Invalid object identifier.",
     "workspace.unknown": "Unknown workspace on this engine.",
     "preferences.language_invalid": "Unsupported language: {language}.",
