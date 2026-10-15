@@ -2,6 +2,8 @@
   "$schema": "./errors.schema.json",
   "language": "en",
   "errors": {
+    "object_transfer.manifest_mismatch": "The manifest does not match the requested object, version or project.",
+    "object_transfer.version_rollback": "An older version than the one already opened was received: possible rollback.",
     "object_transfer.manifest_field_missing": "A required field is missing from the transfer manifest.",
     "object_transfer.protocol_unsupported": "The object-transfer protocol version is not supported.",
     "object_transfer.declared_project_mismatch": "The declared project does not match the project signed in the manifest.",

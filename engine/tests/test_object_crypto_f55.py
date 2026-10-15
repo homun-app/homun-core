@@ -30,7 +30,7 @@ def _devices():
 
 
 def _seal(publisher, plaintext, *, project_id="proj_x", object_id="obj_s", version=1,
-          recipients=None, chunk_size=4096):
+          recipients=None, chunk_size=4096, object_key=None):
     from homun.peers.object_crypto import seal_object
 
     wraps = recipients if recipients is not None else {
@@ -44,10 +44,11 @@ def _seal(publisher, plaintext, *, project_id="proj_x", object_id="obj_s", versi
         recipient_public_pems=wraps,
         publisher_identity=publisher,
         chunk_size=chunk_size,
+        object_key=object_key,
     )
 
 
-def _open(sealed, recipient, *, trusted):
+def _open(sealed, recipient, *, trusted, last_opened_version=None):
     """Open with the publisher identities the recipient trusts (replica snapshot)."""
     from homun.peers.object_crypto import open_object
 
@@ -62,6 +63,10 @@ def _open(sealed, recipient, *, trusted):
         recipient_private_pem=recipient.private_pem,
         recipient_fingerprint=recipient.fingerprint,
         trusted_publisher_pems=publishers,
+        expected_object_id=sealed.manifest.object_id,
+        expected_version=sealed.manifest.version,
+        expected_project_id=sealed.manifest.project_id,
+        last_opened_version=last_opened_version,
     )
 
 
@@ -126,6 +131,9 @@ def test_relay_material_alone_cannot_decrypt():
             recipient_private_pem=stranger.private_pem,
             recipient_fingerprint=stranger.fingerprint,
             trusted_publisher_pems={peer.fingerprint: peer.public_pem},
+            expected_object_id="obj_b",
+            expected_version=1,
+            expected_project_id="proj_x",
         )
 
 
@@ -152,6 +160,9 @@ def test_corrupt_or_truncated_ciphertext_rejected(mutate):
             recipient_private_pem=owner.private_pem,
             recipient_fingerprint=owner.fingerprint,
             trusted_publisher_pems={owner.fingerprint: owner.public_pem},
+            expected_object_id="obj_c",
+            expected_version=1,
+            expected_project_id="proj_x",
         )
 
 
@@ -306,6 +317,9 @@ def test_open_object_rejects_unknown_publisher_and_bad_signature():
             recipient_private_pem=peer.private_pem,
             recipient_fingerprint=peer.fingerprint,
             trusted_publisher_pems={owner.fingerprint: owner.public_pem},
+            expected_object_id="obj_trust",
+            expected_version=1,
+            expected_project_id="proj_x",
         )
 
 
@@ -319,3 +333,157 @@ def test_v1_protocol_is_rejected_with_typed_error():
 
     with pytest.raises(Exception, match="protocol"):
         TransferManifest.from_dict(legacy)
+
+
+def _resign(publisher, manifest_dict):
+    from homun.peers.object_crypto import canonical_manifest_bytes, unsigned_manifest_dict
+
+    manifest_dict["publisher_signature_b64"] = publisher.sign(
+        canonical_manifest_bytes(unsigned_manifest_dict(manifest_dict))
+    )
+    return manifest_dict
+
+
+def test_chunks_cannot_be_relabelled_across_objects_or_versions():
+    """Review P3: ciphertext chunks are bound to (protocol, project, object,
+    version, chunk index) via secretstream additional data. A publisher or
+    host cannot serve object A's chunks under object B's manifest — even with
+    coherent hashes and a valid signature."""
+    owner, peer, _ = _devices()
+    from homun.peers.object_crypto import generate_object_key
+
+    key = generate_object_key()
+    sealed_a = _seal(
+        owner,
+        b"contenuto dell'oggetto A",
+        project_id="proj_p",
+        object_id="obj_a",
+        version=1,
+        recipients={peer.fingerprint: peer.public_pem},
+        chunk_size=64,
+        object_key=key,
+    )
+    sealed_v2 = _seal(
+        owner,
+        b"contenuto della versione 2",
+        project_id="proj_p",
+        object_id="obj_a",
+        version=2,
+        recipients={peer.fingerprint: peer.public_pem},
+        chunk_size=64,
+        object_key=key,
+    )
+
+    def _open_expect(manifest_dict, chunks, expected_object_id, expected_version):
+        from homun.peers.object_crypto import open_object
+
+        return open_object(
+            manifest_dict,
+            chunks,
+            recipient_private_pem=peer.private_pem,
+            recipient_fingerprint=peer.fingerprint,
+            trusted_publisher_pems={owner.fingerprint: owner.public_pem},
+            expected_object_id=expected_object_id,
+            expected_version=expected_version,
+            expected_project_id="proj_p",
+        )
+
+    # Same key, same recipients: only the AAD context (object_id) differs.
+    forged = sealed_a.manifest.to_dict()
+    forged["object_id"] = "obj_b"
+    _resign(owner, forged)
+    with pytest.raises(ObjectCryptoError, match="rejected|Ciphertext|AAD|additional"):
+        _open_expect(forged, sealed_a.ciphertext_chunks, "obj_b", 1)
+
+    # Chunks of v1 relabelled as v2 of the same object.
+    forged_v2 = sealed_a.manifest.to_dict()
+    forged_v2["version"] = 2
+    _resign(owner, forged_v2)
+    with pytest.raises(ObjectCryptoError, match="rejected|Ciphertext|AAD|additional"):
+        _open_expect(forged_v2, sealed_a.ciphertext_chunks, "obj_a", 2)
+
+    # Sanity: the honest v2 opens with the same expected values.
+    honest = _open_expect(
+        sealed_v2.manifest.to_dict(), sealed_v2.ciphertext_chunks, "obj_a", 2
+    )
+    assert honest.plaintext == b"contenuto della versione 2"
+
+
+def test_manifest_must_match_requested_object_and_version():
+    """Review P3: the recipient opens with the values it ASKED for; a host
+    serving a different object or an older manifest is refused."""
+    owner, peer, _ = _devices()
+    sealed = _seal(
+        owner,
+        b"documento v1",
+        project_id="proj_p",
+        object_id="obj_doc",
+        version=1,
+        recipients={peer.fingerprint: peer.public_pem},
+    )
+
+    def _open_expect(expected_object_id, expected_version, expected_project_id="proj_p"):
+        from homun.peers.object_crypto import open_object
+
+        return open_object(
+            sealed.manifest,
+            sealed.ciphertext_chunks,
+            recipient_private_pem=peer.private_pem,
+            recipient_fingerprint=peer.fingerprint,
+            trusted_publisher_pems={owner.fingerprint: owner.public_pem},
+            expected_object_id=expected_object_id,
+            expected_version=expected_version,
+            expected_project_id=expected_project_id,
+        )
+
+    with pytest.raises(ObjectCryptoError, match="requested|expected|manifest"):
+        _open_expect("obj_other", 1)
+    with pytest.raises(ObjectCryptoError, match="requested|expected|manifest"):
+        _open_expect("obj_doc", 2)
+    with pytest.raises(ObjectCryptoError, match="requested|expected|manifest"):
+        _open_expect("obj_doc", 1, expected_project_id="proj_altro")
+    assert _open_expect("obj_doc", 1).plaintext == b"documento v1"
+
+
+def test_rollback_to_previously_opened_version_is_rejected(tmp_path):
+    """Review P3: the recipient remembers the highest version opened per
+    object and refuses anything older (typed rollback error)."""
+    owner, peer, _ = _devices()
+    v1 = _seal(
+        owner, b"v1", project_id="proj_p", object_id="obj_rb", version=1,
+        recipients={peer.fingerprint: peer.public_pem},
+    )
+    v2 = _seal(
+        owner, b"v2", project_id="proj_p", object_id="obj_rb", version=2,
+        recipients={peer.fingerprint: peer.public_pem},
+    )
+
+    def _open(sealed, last_opened):
+        from homun.peers.object_crypto import open_object
+
+        return open_object(
+            sealed.manifest,
+            sealed.ciphertext_chunks,
+            recipient_private_pem=peer.private_pem,
+            recipient_fingerprint=peer.fingerprint,
+            trusted_publisher_pems={owner.fingerprint: owner.public_pem},
+            expected_object_id="obj_rb",
+            expected_version=sealed.manifest.version,
+            expected_project_id="proj_p",
+            last_opened_version=last_opened,
+        )
+
+    assert _open(v1, None).plaintext == b"v1"
+    assert _open(v2, 1).plaintext == b"v2"
+    with pytest.raises(ObjectCryptoError, match="rollback|older|previous"):
+        _open(v1, 2)
+
+    # The persistent log the peer keeps behaves the same way.
+    from homun.peers.object_crypto import ReceivedVersionLog
+
+    log = ReceivedVersionLog(tmp_path / "received-versions.json")
+    assert log.last_version("obj_rb") is None
+    assert _open(v2, log.last_version("obj_rb")).plaintext == b"v2"
+    log.record("obj_rb", 2)
+    with pytest.raises(ObjectCryptoError, match="rollback|older|previous"):
+        _open(v1, log.last_version("obj_rb"))

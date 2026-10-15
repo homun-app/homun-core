@@ -18,6 +18,7 @@ import hashlib
 import json
 import secrets
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Mapping, Sequence
 
 from cryptography.hazmat.primitives import serialization
@@ -369,24 +370,49 @@ def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+@dataclass(frozen=True)
+class ChunkAadContext:
+    """Values bound into every secretstream chunk (review P3).
+
+    The AAD is rebuilt on the recipient side from the values it EXPECTS (the
+    ones it asked for), never from the received manifest, so ciphertext
+    cannot be replayed under another object, project or version.
+    """
+
+    protocol: str
+    project_id: str
+    object_id: str
+    version: int
+
+    def for_chunk(self, index: int) -> bytes:
+        return (
+            f"{self.protocol}|{self.project_id}|{self.object_id}"
+            f"|v{self.version}|chunk:{index}"
+        ).encode("utf-8")
+
+
 def encrypt_payload(
     plaintext: bytes,
     object_key: bytes,
     *,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
+    aad_context: ChunkAadContext | None = None,
 ) -> tuple[bytes, list[bytes]]:
     if len(object_key) != OBJECT_KEY_BYTES:
         raise ObjectCryptoError("Object key must be 32 bytes")
     if chunk_size < 1:
         raise ObjectCryptoError("Chunk size must be positive")
+
+    def _push(state, piece: bytes, tag: int, index: int) -> bytes:
+        ad = aad_context.for_chunk(index) if aad_context is not None else None
+        return crypto_secretstream_xchacha20poly1305_push(state, piece, ad, tag)
+
     state = crypto_secretstream_xchacha20poly1305_state()
     header = crypto_secretstream_xchacha20poly1305_init_push(state, object_key)
     if len(header) != crypto_secretstream_xchacha20poly1305_HEADERBYTES:
         raise ObjectCryptoError("Unexpected secretstream header size")
     if not plaintext:
-        final = crypto_secretstream_xchacha20poly1305_push(
-            state, b"", None, crypto_secretstream_xchacha20poly1305_TAG_FINAL
-        )
+        final = _push(state, b"", crypto_secretstream_xchacha20poly1305_TAG_FINAL, 0)
         return header, [final]
     chunks: list[bytes] = []
     offset = 0
@@ -399,11 +425,17 @@ def encrypt_payload(
             if offset >= len(plaintext)
             else crypto_secretstream_xchacha20poly1305_TAG_MESSAGE
         )
-        chunks.append(crypto_secretstream_xchacha20poly1305_push(state, piece, None, tag))
+        chunks.append(_push(state, piece, tag, len(chunks)))
     return header, chunks
 
 
-def decrypt_payload(header: bytes, ciphertext_chunks: Sequence[bytes], object_key: bytes) -> bytes:
+def decrypt_payload(
+    header: bytes,
+    ciphertext_chunks: Sequence[bytes],
+    object_key: bytes,
+    *,
+    aad_context: ChunkAadContext | None = None,
+) -> bytes:
     if len(object_key) != OBJECT_KEY_BYTES:
         raise ObjectCryptoError("Object key must be 32 bytes")
     if not ciphertext_chunks:
@@ -415,10 +447,13 @@ def decrypt_payload(header: bytes, ciphertext_chunks: Sequence[bytes], object_ke
         raise ObjectCryptoError("Invalid secretstream header or key") from exc
     parts: list[bytes] = []
     for index, chunk in enumerate(ciphertext_chunks):
+        ad = aad_context.for_chunk(index) if aad_context is not None else None
         try:
-            message, tag = crypto_secretstream_xchacha20poly1305_pull(state, chunk, None)
+            message, tag = crypto_secretstream_xchacha20poly1305_pull(state, chunk, ad)
         except (TypeError, ValueError, CryptoError) as exc:
-            raise ObjectCryptoError("Ciphertext rejected (corrupt or truncated)") from exc
+            raise ObjectCryptoError(
+                "Ciphertext rejected (corrupt, truncated or bound to another object)"
+            ) from exc
         parts.append(message)
         is_last = index == len(ciphertext_chunks) - 1
         if is_last and tag != crypto_secretstream_xchacha20poly1305_TAG_FINAL:
@@ -450,7 +485,15 @@ def seal_object(
     if not recipient_public_pems:
         raise ObjectCryptoError("At least one recipient is required")
     key = object_key if object_key is not None else generate_object_key()
-    header, cipher_chunks = encrypt_payload(plaintext, key, chunk_size=chunk_size)
+    aad_context = ChunkAadContext(
+        protocol=PROTOCOL_ID,
+        project_id=project_id,
+        object_id=object_id,
+        version=version,
+    )
+    header, cipher_chunks = encrypt_payload(
+        plaintext, key, chunk_size=chunk_size, aad_context=aad_context
+    )
     wraps: list[RecipientWrap] = []
     for fingerprint, public_pem in recipient_public_pems.items():
         expected = key_fingerprint(public_pem)
@@ -519,8 +562,19 @@ def open_object(
     recipient_private_pem: bytes,
     recipient_fingerprint: str,
     trusted_publisher_pems: Mapping[str, bytes],
+    expected_object_id: str,
+    expected_version: int,
+    expected_project_id: str,
+    last_opened_version: int | None = None,
 ) -> OpenedObject:
     """Decrypt a sealed object for one authorized device.
+
+    Security review P3: the recipient states the values it asked for
+    (object, version, project); the manifest must match them and the
+    secretstream additional data is rebuilt from THOSE values, so chunks
+    cannot be replayed across objects or versions. `last_opened_version`
+    (the recipient's own record, see ReceivedVersionLog) refuses anything
+    older than what was already opened.
 
     The recipient only trusts publisher keys it knows from its replica
     snapshot: the manifest signature must verify against the key registered
@@ -531,6 +585,21 @@ def open_object(
         if isinstance(manifest, TransferManifest)
         else TransferManifest.from_dict(manifest)
     )
+    if (
+        parsed.object_id != expected_object_id
+        or parsed.version != expected_version
+        or parsed.project_id != expected_project_id
+    ):
+        raise ObjectCryptoError(
+            "Manifest does not match the requested object, version or project",
+            reason="object_transfer.manifest_mismatch",
+        )
+    if last_opened_version is not None and expected_version < last_opened_version:
+        raise ObjectCryptoError(
+            f"Version {expected_version} is older than the already opened"
+            f" {last_opened_version} (possible rollback)",
+            reason="object_transfer.version_rollback",
+        )
     publisher_pem = trusted_publisher_pems.get(parsed.publisher_fingerprint)
     if publisher_pem is None:
         raise ObjectCryptoError(
@@ -558,9 +627,54 @@ def open_object(
     except (ValueError, TypeError) as exc:
         raise ObjectCryptoError("Manifest encoding is invalid") from exc
     object_key = unwrap_object_key(wrapped, recipient_private_pem)
-    plaintext = decrypt_payload(header, ciphertext_chunks, object_key)
+    aad_context = ChunkAadContext(
+        protocol=PROTOCOL_ID,
+        project_id=expected_project_id,
+        object_id=expected_object_id,
+        version=expected_version,
+    )
+    plaintext = decrypt_payload(
+        header, ciphertext_chunks, object_key, aad_context=aad_context
+    )
     if len(plaintext) != parsed.plaintext_size or _sha256_hex(plaintext) != parsed.plaintext_sha256:
         raise ObjectCryptoError("Plaintext integrity check failed")
     return OpenedObject(
         plaintext=plaintext, publisher_fingerprint=parsed.publisher_fingerprint
     )
+
+
+class ReceivedVersionLog:
+    """Recipient-side record of the highest version opened per object.
+
+    Feed `last_version` into open_object's last_opened_version and call
+    `record` after a successful open: a host serving an older manifest is
+    then refused (review P3 rollback protection).
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = Path(path)
+        self._versions: dict[str, int] = {}
+        if self._path.is_file():
+            try:
+                loaded = json.loads(self._path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    self._versions = {
+                        str(key): int(value) for key, value in loaded.items()
+                    }
+            except (ValueError, OSError):
+                self._versions = {}
+
+    def last_version(self, object_id: str) -> int | None:
+        return self._versions.get(object_id)
+
+    def record(self, object_id: str, version: int) -> None:
+        current = self._versions.get(object_id)
+        if current is not None and version <= current:
+            return
+        self._versions[object_id] = version
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.with_suffix(".tmp")
+        tmp.write_text(
+            json.dumps(self._versions, sort_keys=True, indent=2), encoding="utf-8"
+        )
+        tmp.replace(self._path)

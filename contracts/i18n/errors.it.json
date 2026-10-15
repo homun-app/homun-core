@@ -2,6 +2,8 @@
   "$schema": "./errors.schema.json",
   "language": "it",
   "errors": {
+    "object_transfer.manifest_mismatch": "Il manifest non corrisponde all'oggetto, alla versione o al progetto richiesto.",
+    "object_transfer.version_rollback": "È stata ricevuta una versione più vecchia di quella già aperta: possibile rollback.",
     "object_transfer.manifest_field_missing": "Manca un campo obbligatorio nel manifest del trasferimento.",
     "object_transfer.protocol_unsupported": "La versione del protocollo di trasferimento oggetti non è supportata.",
     "object_transfer.declared_project_mismatch": "Il progetto dichiarato non corrisponde a quello firmato nel manifest.",

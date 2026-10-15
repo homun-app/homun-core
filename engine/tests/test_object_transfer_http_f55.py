@@ -204,6 +204,9 @@ def test_peer_resumes_sealed_transfer_after_partial_download(host):
             recipient_private_pem=giulia.private_pem,
             recipient_fingerprint=giulia.fingerprint,
             trusted_publisher_pems=trusted,
+            expected_object_id="obj_listino",
+            expected_version=1,
+            expected_project_id=shared,
         )
         assert opened.plaintext == plaintext
         assert opened.publisher_fingerprint == marta.fingerprint
