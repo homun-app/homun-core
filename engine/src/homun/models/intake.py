@@ -3,6 +3,7 @@ import json
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from homun.domain.capabilities import REGISTRY, require_capability
+from homun.i18n import user_text
 from homun.models.prompt_store import prompts_for
 from homun.models.types import ChatMessage
 
@@ -88,19 +89,17 @@ decline executable work before the files were uploaded. IO detail stays: it
 anchors the output language and never caused the downgrade."""
 
 
-_CATALOG_LABELS = {
-    'it': {'executable': '(eseguibile dal motore)', 'preparation': '(solo preparazione, nessuna esecuzione automatica)',
-           'limits': 'Limiti', 'none': 'nessuno',
-           'note': 'I materiali si caricano dopo la conferma dell\'accordo: la loro assenza ora non cambia la scelta della capability.'},
-    'en': {'executable': '(executable by the engine)', 'preparation': '(preparation only, no automatic execution)',
-           'limits': 'Limits', 'none': 'none',
-           'note': 'Materials are uploaded after the agreement is confirmed: their absence now does not change the capability choice.'},
-}
-
-
 def _capability_catalog_lines(capabilities, language='it'):
-    """Registry-grounded capability descriptions for the model."""
-    labels = _CATALOG_LABELS.get(language, _CATALOG_LABELS['it'])
+    """Registry-grounded capability descriptions for the model.
+
+    Labels come from the shared catalog (contracts/i18n): the only texts the
+    engine used to keep in two languages inside the code.
+    """
+    labels = {
+        name: (user_text(f"intake.catalog.{name}", language=language)
+               or user_text(f"intake.catalog.{name}", language='it'))
+        for name in ('executable', 'preparation', 'limits', 'none', 'note')
+    }
     if not capabilities:
         capabilities = [spec.public() for spec in REGISTRY.values()]
     lines = []
