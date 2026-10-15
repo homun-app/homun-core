@@ -65,4 +65,5 @@ def assert_work_transition(current: WorkStatus, target: WorkStatus) -> None:
     if target not in allowed:
         raise InvalidTransitionError(f"Cannot transition work from {current} to {target}",
                                  reason="work.transition_invalid",
-                                 params={"from": current, "to": target})
+                                 params={"from": f"work.status.{getattr(current, 'value', current)}",
+                                         "to": f"work.status.{getattr(target, 'value', target)}"})
