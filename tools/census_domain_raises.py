@@ -84,6 +84,73 @@ def domain_raises_without_reason(src_root: Path = ENGINE_SRC) -> list[dict]:
     return rows
 
 
+def _embeds_exception_text(node: ast.AST, aliases: frozenset[str]) -> bool:
+    """A param expression that references an active `except ... as X` alias,
+    or calls repr(): both leak technical exception text into user-facing params."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and sub.id in aliases:
+            return True
+        if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
+                and sub.func.id == "repr"):
+            return True
+    return False
+
+
+def params_with_raw_exception_text(src_root: Path = ENGINE_SRC) -> list[dict]:
+    """Raises whose `params` interpolate raw exception text (str(exc), f'{exc}',
+    repr(...)). Those values would surface untranslated library messages in the
+    user-facing sentence; the exception text belongs to `message` only
+    (docs/development/2026-10-15-errori-multilingua.md, invariant of the fixes).
+    """
+    class_names = _domain_error_class_names(src_root)
+    rows: list[dict] = []
+    try_nodes = (ast.Try, ast.TryStar) if hasattr(ast, "TryStar") else (ast.Try,)
+
+    def check_raise(node: ast.Raise, aliases: frozenset[str]) -> None:
+        if not isinstance(node.exc, ast.Call):
+            return
+        func = node.exc.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if name not in class_names or not any(kw.arg == "reason" for kw in node.exc.keywords):
+            return
+        for kw in node.exc.keywords:
+            if kw.arg != "params" or not isinstance(kw.value, ast.Dict):
+                continue
+            for key, value in zip(kw.value.keys, kw.value.values):
+                if _embeds_exception_text(value, aliases):
+                    rows.append({
+                        "file": str(_current_file.relative_to(src_root)),
+                        "line": node.lineno,
+                        "param": key.value if isinstance(key, ast.Constant) else "?",
+                    })
+
+    def visit(node: ast.AST, aliases: frozenset[str]) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            # New scope: except aliases from the enclosing function are not
+            # visible here, so the nested body starts with no aliases.
+            for stmt in node.body:
+                visit(stmt, frozenset())
+            return
+        if isinstance(node, try_nodes):
+            for stmt in node.body + node.orelse + node.finalbody:
+                visit(stmt, aliases)
+            for handler in node.handlers:
+                inner = aliases | {handler.name} if handler.name else aliases
+                for stmt in handler.body:
+                    visit(stmt, inner)
+            return
+        if isinstance(node, ast.Raise):
+            check_raise(node, aliases)
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.stmt):
+                visit(child, aliases)
+
+    for path, tree in _iter_files(src_root):
+        _current_file = path
+        visit(tree, frozenset())
+    return rows
+
+
 def http_details_without_reason(src_root: Path = ENGINE_SRC) -> list[dict]:
     rows: list[dict] = []
     for path, tree in _iter_files(src_root):

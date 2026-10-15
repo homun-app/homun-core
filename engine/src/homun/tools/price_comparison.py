@@ -98,7 +98,7 @@ def _parse(blob: bytes, source: str, budget: list[int], issues: list[dict]):
     except csv.Error as exc:
         raise ValidationError(f'{source}: invalid CSV structure ({exc})',
                               reason='comparison.csv.invalid_structure',
-                              params={'source': source, 'detail': str(exc)}) from exc
+                              params={'source': source}) from exc
 
 
 def _money(value):
