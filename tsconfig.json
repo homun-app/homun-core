@@ -17,6 +17,7 @@
     "verbatimModuleSyntax": false,
     "noEmit": true,
     "skipLibCheck": true,
+    "resolveJsonModule": true,
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
@@ -29,7 +30,8 @@
     "noUncheckedSideEffectImports": true,
     "paths": {
       "@/*": ["./apps/web/src/*"],
-      "@homun/ui/*": ["./packages/ui/src/*"]
+      "@homun/ui/*": ["./packages/ui/src/*"],
+      "@homun/contracts/*": ["./contracts/*"]
     }
   }
 }

@@ -1,12 +1,15 @@
 /**
  * Shared inline error notice for Homun UI.
  * Always show engine/domain failures; never hide them behind demo data.
- * Il testo principale è copia di prodotto; il dettaglio tecnico (codice,
- * messaggio originale, codice del motore) vive in un blocco richiudibile,
- * chiuso di default, con copia come testo semplice.
+ * Il testo principale è copia di prodotto dal catalogo condiviso, nella lingua
+ * corrente (cambia lingua → cambia l'errore già mostrato); il dettaglio
+ * tecnico (codice, reason, messaggio originale, codice del motore) vive in un
+ * blocco richiudibile, chiuso di default, con copia come testo semplice.
  */
 
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { useLanguage } from "@/hooks/use-language";
+import { t } from "@/lib/i18n";
 import {
   homunErrorDetailsText,
   homunErrorTechnicalDetails,
@@ -24,6 +27,8 @@ type Props = {
 
 export function HomunErrorNotice({ error, className, label }: Props) {
   const { isCopied, copyToClipboard } = useCopyToClipboard();
+  // Lingua come dipendenza di rendering: gli errori già a schermo si aggiornano.
+  useLanguage();
   if (error == null) {
     return null;
   }
@@ -41,22 +46,28 @@ export function HomunErrorNotice({ error, className, label }: Props) {
       </p>
       {details && (
         <details className="homun-error-notice__details" data-homun-error-details="">
-          <summary>Dettagli tecnici</summary>
+          <summary>{t("errorDetails.title")}</summary>
           <div className="homun-error-notice__detail-body">
             <dl className="homun-error-notice__detail-list">
               <div>
-                <dt>codice</dt>
+                <dt>{t("errorDetails.code")}</dt>
                 <dd data-homun-error-detail="code">{details.code}</dd>
               </div>
+              {details.reason != null && (
+                <div>
+                  <dt>{t("errorDetails.reason")}</dt>
+                  <dd data-homun-error-detail="reason">{details.reason}</dd>
+                </div>
+              )}
               {details.message != null && (
                 <div>
-                  <dt>messaggio</dt>
+                  <dt>{t("errorDetails.message")}</dt>
                   <dd data-homun-error-detail="message">{details.message}</dd>
                 </div>
               )}
               {details.engineCode != null && (
                 <div>
-                  <dt>codice motore</dt>
+                  <dt>{t("errorDetails.engineCode")}</dt>
                   <dd data-homun-error-detail="engine-code">{details.engineCode}</dd>
                 </div>
               )}
@@ -66,7 +77,7 @@ export function HomunErrorNotice({ error, className, label }: Props) {
               className="homun-error-notice__copy"
               onClick={() => copyToClipboard(homunErrorDetailsText(details))}
             >
-              {isCopied ? "Copiato" : "Copia"}
+              {isCopied ? t("common.copied") : t("common.copy")}
             </button>
           </div>
         </details>

@@ -215,9 +215,20 @@ export async function postEngineCommandStream(
         const code = typeof data["code"] === "string" ? data["code"] : null;
         const message =
           typeof data["message"] === "string" ? data["message"] : "Engine stream error";
-        // il codice del motore sopravvive: la copia di prodotto del mapping
-        // vince sul testo grezzo dell'eccezione che il motore incapsula
-        streamError = homunErrorFromEngineEvent(code, message, "Engine stream error");
+        const reason = typeof data["reason"] === "string" ? data["reason"] : null;
+        const params =
+          data["params"] && typeof data["params"] === "object" && !Array.isArray(data["params"])
+            ? (data["params"] as Record<string, string | number>)
+            : null;
+        // il codice e la reason del motore sopravvivono: la copia di prodotto
+        // del catalogo vince sul testo grezzo dell'eccezione incapsulata
+        streamError = homunErrorFromEngineEvent(
+          code,
+          message,
+          "Engine stream error",
+          reason,
+          params,
+        );
       }
     }
   }

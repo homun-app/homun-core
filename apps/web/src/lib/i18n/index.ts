@@ -30,6 +30,10 @@ export function setLanguage(lang: SupportedLanguage): void {
   currentLanguage = lang;
   if (typeof window !== "undefined" && window.localStorage) {
     window.localStorage.setItem("homun_language", lang);
+    // La preferenza va anche al motore (testi che genera da sé): best-effort,
+    // mai bloccante. Solo nel browser, così i test node non toccano un motore
+    // reale; import dinamico per non creare cicli con i client del motore.
+    void import("../engine-preferences-client.ts").then((m) => m.setEngineLanguage(lang));
   }
   for (const listener of listeners) {
     listener(lang);
