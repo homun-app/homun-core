@@ -15,6 +15,9 @@ _REQUIRED = ('sku', 'name', 'price', 'currency')
 _STATUSES = ('new', 'removed', 'increased', 'decreased', 'unchanged', 'excluded')
 _LABELS = dict(new='Nuovi', removed='Rimossi', increased='Aumenti', decreased='Ribassi',
                unchanged='Invariati', excluded='Esclusi')
+# The user-facing sentence names the side through a shared-catalog label key
+# (resolved via `{side@label}`); 'left'/'right' stay in the technical message.
+_SIDE_LABEL_KEYS = dict(left='comparison.previous', right='comparison.updated')
 _PRICE = re.compile(r'[0-9]+(?:\.[0-9]{1,2})?\Z')
 
 
@@ -26,17 +29,18 @@ def _parse(blob: bytes, source: str, budget: list[int], issues: list[dict]):
     if not isinstance(blob, bytes) or len(blob) > MAX_BYTES:
         raise ValidationError(f'{source}: CSV required as bytes, at most {MAX_BYTES // (1024 * 1024)} MiB per file',
                               reason='comparison.csv.payload_invalid',
-                              params={'source': source, 'max_mib': MAX_BYTES // (1024 * 1024)})
+                              params={'side': _SIDE_LABEL_KEYS[source],
+                                      'max_mib': MAX_BYTES // (1024 * 1024)})
     try:
         text = blob.decode('utf-8-sig')
     except UnicodeError as exc:
         raise ValidationError(f'{source}: CSV must be UTF-8',
                               reason='comparison.csv.not_utf8',
-                              params={'source': source}) from exc
+                              params={'side': _SIDE_LABEL_KEYS[source]}) from exc
     if '\x00' in text:
         raise ValidationError(f'{source}: NUL character not allowed',
                               reason='comparison.csv.nul_not_allowed',
-                              params={'source': source})
+                              params={'side': _SIDE_LABEL_KEYS[source]})
     # Select by the required header, avoiding data-dependent delimiter guesses.
     selected = None
     try:
@@ -50,7 +54,7 @@ def _parse(blob: bytes, source: str, budget: list[int], issues: list[dict]):
         if selected is None:
             raise ValidationError(f'{source}: required header: sku,name,price,currency, no duplicates',
                                   reason='comparison.csv.header_missing',
-                                  params={'source': source})
+                                  params={'side': _SIDE_LABEL_KEYS[source]})
         reader, header = selected
         records: dict[str, list[dict]] = {}
         count = 0
@@ -98,7 +102,7 @@ def _parse(blob: bytes, source: str, budget: list[int], issues: list[dict]):
     except csv.Error as exc:
         raise ValidationError(f'{source}: invalid CSV structure ({exc})',
                               reason='comparison.csv.invalid_structure',
-                              params={'source': source}) from exc
+                              params={'side': _SIDE_LABEL_KEYS[source]}) from exc
 
 
 def _money(value):

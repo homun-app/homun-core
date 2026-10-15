@@ -9,6 +9,7 @@ import enCatalog from "../../../../../contracts/i18n/errors.en.json" with { type
 export type ErrorCatalog = {
   language: string;
   errors: Record<string, string>;
+  labels: Record<string, string>;
   codes: Record<string, string>;
 };
 
@@ -23,15 +24,28 @@ export function errorCatalog(language: string): ErrorCatalog {
   return catalogs[language] ?? catalogs[FALLBACK_LANGUAGE]!;
 }
 
-/** Riempie i segnaposto `{param}`; i mancanti restano visibili come `{param}`. */
+/** Etichetta tradotta per una chiave della sezione `labels` (fallback inglese). */
+export function errorLabelText(key: string, language: string): string {
+  return errorCatalog(language).labels[key] ?? errorCatalog(FALLBACK_LANGUAGE).labels[key] ?? key;
+}
+
+/**
+ * Riempie i segnaposto `{param}`; i mancanti restano visibili come `{param}`.
+ * `{param@label}` risolve il valore (chiave della sezione `labels`) nella
+ * lingua corrente: stesso meccanismo del motore (format_message), così i
+ * valori di enum interni non finiscono mai nella frase.
+ */
 export function formatErrorPlaceholders(
   template: string,
-  params?: Readonly<Record<string, string | number>> | null,
+  params: Readonly<Record<string, string | number>> | null | undefined,
+  language: string,
 ): string {
   if (!params) return template;
-  return template.replace(/\{(\w+)\}/g, (whole, key: string) =>
-    key in params ? String(params[key]) : whole,
-  );
+  return template.replace(/\{(\w+)(?:@(\w+))?\}/g, (whole, key: string, mode?: string) => {
+    if (!(key in params)) return whole;
+    const value = String(params[key]);
+    return mode === "label" ? errorLabelText(value, language) : value;
+  });
 }
 
 /** Frase per una `reason` stabile; null se assente in lingua e fallback. */
@@ -42,7 +56,7 @@ export function errorUserText(
 ): string | null {
   const entry =
     errorCatalog(language).errors[reason] ?? errorCatalog(FALLBACK_LANGUAGE).errors[reason];
-  return entry == null ? null : formatErrorPlaceholders(entry, params);
+  return entry == null ? null : formatErrorPlaceholders(entry, params, language);
 }
 
 /** Frase generica per un `code`; l'ultima spiaggia è `codes.unknown`. */

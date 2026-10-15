@@ -18,16 +18,16 @@ CONTRACTS = Path(__file__).resolve().parents[2] / "contracts" / "i18n"
 
 
 def test_user_text_renders_params_in_both_languages():
-    it = user_text("comparison.csv.not_utf8", {"source": "listino.csv"}, language="it")
-    en = user_text("comparison.csv.not_utf8", {"source": "listino.csv"}, language="en")
-    assert "listino.csv" in it
+    it = user_text("comparison.csv.not_utf8", {"side": "comparison.previous"}, language="it")
+    en = user_text("comparison.csv.not_utf8", {"side": "comparison.previous"}, language="en")
+    assert "listino precedente" in it
     assert "UTF-8" in it
-    assert "listino.csv" in en and en != it
+    assert "previous price list" in en and en != it
 
 
 def test_unknown_language_falls_back_to_english():
-    text = user_text("comparison.csv.not_utf8", {"source": "a.csv"}, language="fr")
-    assert text == user_text("comparison.csv.not_utf8", {"source": "a.csv"}, language="en")
+    text = user_text("comparison.csv.not_utf8", {"side": "comparison.previous"}, language="fr")
+    assert text == user_text("comparison.csv.not_utf8", {"side": "comparison.previous"}, language="en")
 
 
 def test_missing_reason_returns_none_and_every_code_has_copy():
@@ -140,3 +140,74 @@ def test_catalog_entries_are_sentences_with_known_params_only(language):
         )
         for name in re.findall(r"\{(\w+)\}", value):
             assert re.fullmatch(r"\w+", name)
+
+
+def _sample_params() -> dict:
+    return json.loads((CONTRACTS / "errors.samples.json").read_text(encoding="utf-8"))["params"]
+
+
+# A user-facing sentence is entirely in the user's language: no internal enum
+# values, no 'left'/'right' sides, no engine-generated actor ids, no raw
+# catalog keys left unresolved (docs/development/2026-10-15-errori-multilingua.md).
+_FORBIDDEN_IN_ITALIAN = [
+    "left", "right", "Material", "Grant",
+    "note", "link", "file_ref", "active", "archived",
+    "draft", "ready", "running", "waiting_input", "waiting_approval", "paused",
+    "review", "completed", "failed", "cancelled",
+]
+_FORBIDDEN_PATTERNS = [
+    re.compile(r"\b(person|agent)_[A-Za-z0-9_-]+\b"),   # internal actor ids
+    re.compile(r"\b(comparison|materials\.kind|work\.status|policy\.entity)\.\w"),  # raw label keys
+    re.compile(r"\{\w+"),                                # unresolved placeholder
+]
+
+
+def test_label_placeholders_resolve_from_the_shared_labels_section():
+    """`{param@label}`: the param value is a key of the catalog `labels`
+    section, resolved in the current language by the same mechanism the
+    client uses (formatErrorPlaceholders)."""
+    it = user_text("comparison.csv.not_utf8",
+                   {"side": "comparison.previous"}, language="it")
+    en = user_text("comparison.csv.not_utf8",
+                   {"side": "comparison.previous"}, language="en")
+    assert it == "«listino precedente»: il CSV deve essere salvato in UTF-8."
+    assert en == "“previous price list”: the CSV must be saved as UTF-8."
+
+
+def test_labels_section_has_matching_keys_in_every_language():
+    sections = {}
+    for language in SUPPORTED_LANGUAGES:
+        data = json.loads((CONTRACTS / f"errors.{language}.json").read_text(encoding="utf-8"))
+        assert isinstance(data.get("labels"), dict) and data["labels"], (
+            f"{language}: missing labels section"
+        )
+        sections[language] = data["labels"]
+    assert set(sections["it"]) == set(sections["en"]), "label keys must match across languages"
+
+
+def test_every_italian_sentence_composes_without_internal_labels_or_ids():
+    samples = _sample_params()
+    data = json.loads((CONTRACTS / "errors.it.json").read_text(encoding="utf-8"))
+    assert data["errors"], "catalog is empty"
+    for reason in data["errors"]:
+        params = samples.get(reason, {})
+        sentence = user_text(reason, params, language="it")
+        assert sentence is not None, f"{reason}: missing from it catalog"
+        for token in _FORBIDDEN_IN_ITALIAN:
+            assert not re.search(rf"\b{re.escape(token)}\b", sentence), (
+                f"{reason}: internal label `{token}` leaked into the italian sentence: {sentence}"
+            )
+        for pattern in _FORBIDDEN_PATTERNS:
+            assert not pattern.search(sentence), (
+                f"{reason}: pattern {pattern.pattern} leaked into: {sentence}"
+            )
+
+
+def test_every_english_sentence_composes_with_translated_labels():
+    samples = _sample_params()
+    data = json.loads((CONTRACTS / "errors.en.json").read_text(encoding="utf-8"))
+    for reason in data["errors"]:
+        sentence = user_text(reason, samples.get(reason, {}), language="en")
+        assert sentence is not None and "{" not in sentence, (
+            f"{reason}: unresolved placeholder in: {sentence}"
+        )

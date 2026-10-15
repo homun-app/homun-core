@@ -20,12 +20,12 @@ def test_domain_error_without_reason_stays_compatible():
 
 def test_domain_error_carries_reason_and_params():
     exc = ValidationError(
-        "listino.csv: CSV must be UTF-8",
+        "left: CSV must be UTF-8",
         reason="comparison.csv.not_utf8",
-        params={"source": "listino.csv"},
+        params={"side": "comparison.previous"},
     )
     assert exc.reason == "comparison.csv.not_utf8"
-    assert exc.params == {"source": "listino.csv"}
+    assert exc.params == {"side": "comparison.previous"}
 
 
 def test_error_payload_without_reason_unchanged():
@@ -35,15 +35,15 @@ def test_error_payload_without_reason_unchanged():
 
 def test_error_payload_includes_reason_and_params():
     exc = BudgetExhaustedError(
-        "Delegate budget exhausted for agent_x",
-        reason="budget.exhausted.delegate",
-        params={"delegate": "agent_x"},
+        "Cannot transition work from draft to running",
+        reason="work.transition_invalid",
+        params={"from": "work.status.draft", "to": "work.status.running"},
     )
     assert error_payload(exc) == {
         "code": "budget_exhausted",
-        "reason": "budget.exhausted.delegate",
-        "params": {"delegate": "agent_x"},
-        "message": "Delegate budget exhausted for agent_x",
+        "reason": "work.transition_invalid",
+        "params": {"from": "work.status.draft", "to": "work.status.running"},
+        "message": "Cannot transition work from draft to running",
     }
 
 

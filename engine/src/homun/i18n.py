@@ -13,6 +13,7 @@ first-class failure, never a silent fallback to raw messages.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -21,6 +22,7 @@ from typing import Any
 SUPPORTED_LANGUAGES = ("it", "en")
 DEFAULT_LANGUAGE = "it"
 _CONTRACT_DIR = Path("contracts") / "i18n"
+_PLACEHOLDER = re.compile(r"\{(\w+)(?:@(\w+))?\}")
 
 
 class CatalogUnavailableError(RuntimeError):
@@ -62,13 +64,35 @@ def _catalog(language: str) -> dict[str, Any]:
     return _load(language)
 
 
-def format_message(template: str, params: dict[str, Any] | None) -> str:
-    """Fill ``{param}`` placeholders; missing params stay visible as ``{param}``."""
+def format_message(template: str, params: dict[str, Any] | None,
+                   *, language: str = DEFAULT_LANGUAGE) -> str:
+    """Fill ``{param}`` placeholders; missing params stay visible as ``{param}``.
+
+    ``{param@label}`` resolves the param value (a key of the catalog ``labels``
+    section) in ``language`` — the single label mechanism shared with the client
+    (``formatErrorPlaceholders``), so internal enum values never reach a sentence.
+    """
     if not params:
         return template
-    for key, value in params.items():
-        template = template.replace("{" + key + "}", str(value))
-    return template
+
+    def _sub(match: re.Match[str]) -> str:
+        name, mode = match.group(1), match.group(2)
+        if name not in params:
+            return match.group(0)
+        value = str(params[name])
+        return label_text(value, language=language) if mode == "label" else value
+
+    return _PLACEHOLDER.sub(_sub, template)
+
+
+def label_text(key: str, *, language: str = DEFAULT_LANGUAGE) -> str:
+    """The translated label for a catalog ``labels`` key (English fallback,
+    then the key itself so a missing entry stays visible and reportable)."""
+    labels = _catalog(language).get("labels", {})
+    entry = labels.get(key)
+    if entry is None and language != "en":
+        entry = _catalog("en").get("labels", {}).get(key)
+    return entry if entry is not None else key
 
 
 def user_text(reason: str, params: dict[str, Any] | None = None,
@@ -77,7 +101,7 @@ def user_text(reason: str, params: dict[str, Any] | None = None,
     entry = _catalog(language)["errors"].get(reason)
     if entry is None and language != "en":
         entry = _catalog("en")["errors"].get(reason)
-    return format_message(entry, params) if entry is not None else None
+    return format_message(entry, params, language=language) if entry is not None else None
 
 
 def code_text(code: str, *, language: str = DEFAULT_LANGUAGE) -> str | None:

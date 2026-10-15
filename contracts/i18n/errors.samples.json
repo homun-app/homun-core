@@ -1,0 +1,21 @@
+{
+  "description": "Sample params per error reason: realistic values the way the engine raises them (label params carry catalog keys, user input params carry raw echoes). Shared by the engine and client tests that compose every catalog sentence (docs/development/2026-10-15-errori-multilingua.md).",
+  "params": {
+    "preferences.language_invalid": { "language": "fr" },
+    "materials.upload.too_large": { "max_bytes": 52428800 },
+    "materials.not_found": { "material_id": "mat_7f3kq2" },
+    "materials.size_out_of_range": { "max_bytes": 26214400 },
+    "materials.kind_invalid": { "kind": "video" },
+    "materials.source_uri_required": { "kind": "materials.kind.link" },
+    "materials.status_invalid": { "status": "deleted" },
+    "comparison.csv.payload_invalid": { "side": "comparison.previous", "max_mib": 2 },
+    "comparison.csv.not_utf8": { "side": "comparison.updated" },
+    "comparison.csv.nul_not_allowed": { "side": "comparison.previous" },
+    "comparison.csv.header_missing": { "side": "comparison.updated" },
+    "comparison.csv.invalid_structure": { "side": "comparison.previous" },
+    "comparison.csv.max_rows_invalid": { "min": 1, "max": 10000 },
+    "work.transition_invalid": { "from": "work.status.draft", "to": "work.status.running" },
+    "policy.entity_not_found": { "kind": "policy.entity.grant" },
+    "plan.revise.insert_after_unknown": { "step_id": "step-3" }
+  }
+}

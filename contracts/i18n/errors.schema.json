@@ -2,12 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "errors.schema.json",
   "title": "Homun shared error catalog",
-  "description": "One entry per stable error `reason` plus one generic sentence per `code`; `{param}` placeholders, mirrored by formatString on the client and format_message in the engine. Keys must match across languages and every placeholder must be provided by the matching raise (both enforced by tests).",
+  "description": "One entry per stable error `reason` plus one generic sentence per `code`; `{param}` placeholders, mirrored by formatString on the client and format_message in the engine. Keys must match across languages and every placeholder must be provided by the matching raise (both enforced by tests). A param that names an internal label (a side, a status, an entity kind — never user input) carries a key of the `labels` section and is interpolated as `{param@label}`: both sides resolve it in the current language (formatErrorPlaceholders on the client, format_message in the engine), so internal enum values never surface in a user-facing sentence.",
   "type": "object",
-  "required": ["language", "errors", "codes"],
+  "required": ["language", "errors", "labels", "codes"],
   "properties": {
     "language": { "type": "string", "enum": ["it", "en"] },
     "errors": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/phrase" }
+    },
+    "labels": {
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/phrase" }
     },

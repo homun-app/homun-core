@@ -29,7 +29,8 @@ def _material_create(ctx: CommandContext, actor: Actor, command_id: str, payload
     source_uri = payload.get("source_uri")
     source_uri_s = str(source_uri).strip() if source_uri not in (None, "") else None
     if kind in {"link", "file_ref"} and not source_uri_s:
-        raise ValidationError(f"{kind} requires source_uri", reason="materials.source_uri_required", params={"kind": kind})
+        raise ValidationError(f"{kind} requires source_uri", reason="materials.source_uri_required",
+                              params={"kind": f"materials.kind.{kind}"})
     material = MaterialVersion(
         id=new_id("mat"),
         workspace_id=ctx.store.workspace_id,
@@ -101,7 +102,8 @@ def _material_update(ctx: CommandContext, actor: Actor, command_id: str, payload
             raise ValidationError(f"Invalid material status: {status}", reason="materials.status_invalid", params={"status": status})
         material.status = status
     if material.kind in {"link", "file_ref"} and not material.source_uri:
-        raise ValidationError(f"{material.kind} requires source_uri", reason="materials.source_uri_required", params={"kind": material.kind})
+        raise ValidationError(f"{material.kind} requires source_uri", reason="materials.source_uri_required",
+                              params={"kind": f"materials.kind.{material.kind}"})
     material.version += 1
     material.updated_at = utc_now()
     ctx.store.materials[material.id] = material

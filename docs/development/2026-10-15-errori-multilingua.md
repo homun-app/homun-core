@@ -113,11 +113,18 @@ contracts/i18n/errors.en.json
 
 - `errors.*`: una voce per `reason`; segnaposto `{param}`, stessa sintassi di
   `formatString` nel client (`apps/web/src/lib/i18n/index.ts:51`).
+- `labels.*`: le etichette tradotte dei valori interni (lati del confronto,
+  stati del lavoro, tipi di materiale, entità policy). Un `params` che nomina
+  un'etichetta interna — mai un dato inserito dall'utente — trasporta la
+  **chiave** di questa sezione e la frase la interpola come `{param@label}`:
+  **un solo meccanismo** (`formatErrorPlaceholders` nel client,
+  `format_message` nel motore) risolve la chiave nella lingua corrente. Così
+  l'utente non legge mai `left`/`right`, `draft`/`running` né `Material`.
 - `codes.*`: la frase generica per ogni `code` (sostituisce le stringhe hardcoded
   in `homun-errors.ts`). Comprende anche i codici solo-client
   (`engine_unavailable`, `request_timeout`, …): una sola fonte.
-- `errors.schema.json`: JSON Schema del catalogo (chiavi, segnaposto, lingua) per
-  validare i file nel test di parità.
+- `errors.schema.json`: JSON Schema del catalogo (chiavi, segnaposto, lingua,
+  convenzione `{param@label}`) per validare i file nel test di parità.
 
 **Come lo legge il motore.** Nuovo modulo `engine/src/homun/i18n.py` con un
 loader che risolve il catalogo in quest'ordine: `sys._MEIPASS/contracts/i18n`
@@ -222,17 +229,22 @@ approvazioni di lettura) e i cinque domini richiesti. Ogni voce: `reason`
 
 **Materiali — comandi di dominio (`domain/commands/materials.py`)**
 
-| reason                                | params   | sito    |
-| ------------------------------------- | -------- | ------- |
-| `materials.project_required`          | —        | 21      |
-| `materials.title_required`            | —        | 25, 80  |
-| `materials.kind_invalid`              | `kind`   | 28, 85  |
-| `materials.source_uri_required`       | `kind`   | 32, 104 |
-| `materials.status_invalid`            | `status` | 101     |
-| `materials.content_hash_invalid`      | —        | 145     |
-| `materials.managed_path_invalid`      | —        | 147     |
-| `materials.prepared_metadata_invalid` | —        | 149     |
-| `materials.extraction_status_invalid` | —        | 151     |
+| reason                                | params                | sito    |
+| ------------------------------------- | --------------------- | ------- |
+| `materials.project_required`          | —                     | 21      |
+| `materials.title_required`            | —                     | 25, 80  |
+| `materials.kind_invalid`              | `kind` (eco utente)   | 28, 85  |
+| `materials.source_uri_required`       | `kind@label`          | 32, 104 |
+| `materials.status_invalid`            | `status` (eco utente) | 101     |
+| `materials.content_hash_invalid`      | —                     | 145     |
+| `materials.managed_path_invalid`      | —                     | 147     |
+| `materials.prepared_metadata_invalid` | —                     | 149     |
+| `materials.extraction_status_invalid` | —                     | 151     |
+
+`kind_invalid`/`status_invalid` mostrano l'eco dell'input utente non valido
+(il raise scatta solo fuori dall'enum, quindi il valore non è mai un'etichetta
+interna); `source_uri_required` interpola la chiave
+`materials.kind.note|link|file_ref` tramite `{kind@label}`.
 
 **Approvazioni di lettura materiali (`application/work/material_reads.py`)**
 
@@ -251,42 +263,54 @@ approvazioni di lettura) e i cinque domini richiesti. Ogni voce: `reason`
 
 **Confronto prezzi CSV (`tools/price_comparison.py` — gli unici messaggi oggi in italiano visibili all'utente)**
 
-| reason                             | params              | sito |
-| ---------------------------------- | ------------------- | ---- |
-| `comparison.csv.payload_invalid`   | `source`, `max_mib` | 27   |
-| `comparison.csv.not_utf8`          | `source`            | 31   |
-| `comparison.csv.nul_not_allowed`   | `source`            | 33   |
-| `comparison.csv.rows_limit`        | —                   | 57   |
-| `comparison.csv.invalid_structure` | `source`, `detail`  | 90   |
-| `comparison.csv.max_rows_invalid`  | `min`, `max`        | 187  |
+| reason                             | params                  | sito |
+| ---------------------------------- | ----------------------- | ---- |
+| `comparison.csv.payload_invalid`   | `side@label`, `max_mib` | 27   |
+| `comparison.csv.not_utf8`          | `side@label`            | 31   |
+| `comparison.csv.nul_not_allowed`   | `side@label`            | 33   |
+| `comparison.csv.rows_limit`        | —                       | 57   |
+| `comparison.csv.invalid_structure` | `side@label`            | 90   |
+| `comparison.csv.max_rows_invalid`  | `min`, `max`            | 187  |
+
+`side` vale la chiave `comparison.previous`/`comparison.updated` (label:
+«listino precedente»/«listino aggiornato»); il testo dell'eccezione `csv`
+non entra nei `params`, resta nel `message` tecnico.
 
 **Budget (`domain/budget_ops.py`)**
 
-| reason                      | params     | sito   |
-| --------------------------- | ---------- | ------ |
-| `budget.exhausted.work`     | —          | 45     |
-| `budget.exhausted.delegate` | `delegate` | 64, 72 |
+| reason                      | params | sito   |
+| --------------------------- | ------ | ------ |
+| `budget.exhausted.work`     | —      | 45     |
+| `budget.exhausted.delegate` | —      | 64, 72 |
+
+`budget.exhausted.delegate` non porta `delegate`: sarebbe un id interno
+(`person_…`/`agent_…`) non traducibile; l'id resta nel `message` tecnico e la
+frase dice «un partecipante».
 
 **Permessi (`policy/*`, `routes/domain_support.py`)**
 
-| reason                                             | params | sito                          |
-| -------------------------------------------------- | ------ | ----------------------------- |
-| `permission.actor_header_missing` (`unauthorized`) | —      | `routes/domain_support.py:12` |
-| `policy.conversation_not_found`                    | —      | `policy/work.py:10`           |
-| `policy.work_not_found`                            | —      | `policy/work.py:31`           |
-| `permission.persons_only.mcp_lifecycle`            | —      | `policy/work.py:56`           |
-| `policy.contribution_not_found`                    | —      | `policy/work.py:63`           |
-| `policy.entity_not_found`                          | `kind` | `policy/commands.py:10`       |
-| `policy.intake_unconfirmed`                        | —      | `policy/intake.py:26`         |
+| reason                                             | params       | sito                          |
+| -------------------------------------------------- | ------------ | ----------------------------- |
+| `permission.actor_header_missing` (`unauthorized`) | —            | `routes/domain_support.py:12` |
+| `policy.conversation_not_found`                    | —            | `policy/work.py:10`           |
+| `policy.work_not_found`                            | —            | `policy/work.py:31`           |
+| `permission.persons_only.mcp_lifecycle`            | —            | `policy/work.py:56`           |
+| `policy.contribution_not_found`                    | —            | `policy/work.py:63`           |
+| `policy.entity_not_found`                          | `kind@label` | `policy/commands.py:10`       |
+| `policy.intake_unconfirmed`                        | —            | `policy/intake.py:26`         |
 
 **Messaggi e conversazioni**
 
-| reason                                              | params       | sito                                           |
-| --------------------------------------------------- | ------------ | ---------------------------------------------- |
-| `message.in_progress.same` (`command_in_progress`)  | —            | `application/sessions/command_delivery.py:102` |
-| `message.in_progress.other` (`command_in_progress`) | —            | `application/sessions/command_delivery.py:104` |
-| `message.superseded` (`version_conflict`)           | —            | `application/sessions/command_delivery.py:168` |
-| `work.transition_invalid` (`invalid_transition`)    | `from`, `to` | `domain/states.py:66`                          |
+| reason                                              | params                   | sito                                           |
+| --------------------------------------------------- | ------------------------ | ---------------------------------------------- |
+| `message.in_progress.same` (`command_in_progress`)  | —                        | `application/sessions/command_delivery.py:102` |
+| `message.in_progress.other` (`command_in_progress`) | —                        | `application/sessions/command_delivery.py:104` |
+| `message.superseded` (`version_conflict`)           | —                        | `application/sessions/command_delivery.py:168` |
+| `work.transition_invalid` (`invalid_transition`)    | `from@label`, `to@label` | `domain/states.py:66`                          |
+
+`from`/`to` valgono le chiavi `work.status.<stato>` (label della sezione
+`labels`): la frase italiana dice «da “bozza” a “in esecuzione”», mai
+`draft`/`running`.
 
 **Piano (`domain/commands/plans.py` — 13 voci)**
 

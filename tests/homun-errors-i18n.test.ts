@@ -8,7 +8,11 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { setLanguage } from "../apps/web/src/lib/i18n/index.ts";
-import { errorUserText } from "../apps/web/src/lib/i18n/error-catalog.ts";
+import {
+  errorLabelText,
+  errorUserText,
+  formatErrorPlaceholders,
+} from "../apps/web/src/lib/i18n/error-catalog.ts";
 import {
   HomunClientError,
   homunErrorDetailsText,
@@ -21,18 +25,19 @@ import {
 test.beforeEach(() => setLanguage("it"));
 
 test("lo stesso errore si compone in italiano e in inglese dal catalogo", () => {
-  const error = new HomunClientError("validation_error", "listino.csv: CSV must be UTF-8", {
+  const error = new HomunClientError("validation_error", "left: CSV must be UTF-8", {
     reason: "comparison.csv.not_utf8",
-    params: { source: "listino.csv" },
+    params: { side: "comparison.previous" },
   });
   const it = homunErrorUserMessage(error);
-  assert.ok(it.includes("listino.csv"));
+  assert.ok(it.includes("listino precedente"));
   assert.ok(it.includes("UTF-8"));
   assert.ok(it.startsWith("«"));
+  assert.ok(!it.includes("left"));
 
   setLanguage("en");
   const en = homunErrorUserMessage(error);
-  assert.ok(en.includes("listino.csv"));
+  assert.ok(en.includes("previous price list"));
   assert.ok(en.includes("UTF-8"));
   assert.notEqual(en, it);
 });
@@ -54,8 +59,8 @@ test("reason sconosciuta → frase generica del code nella lingua corrente", () 
 
 test("lingua non supportata → inglese (catena di fallback del catalogo)", () => {
   assert.equal(
-    errorUserText("comparison.csv.not_utf8", { source: "x.csv" }, "fr"),
-    errorUserText("comparison.csv.not_utf8", { source: "x.csv" }, "en"),
+    errorUserText("comparison.csv.not_utf8", { side: "comparison.previous" }, "fr"),
+    errorUserText("comparison.csv.not_utf8", { side: "comparison.previous" }, "en"),
   );
 });
 
@@ -73,30 +78,37 @@ test("homunErrorFromHttp porta reason e params dal corpo del motore", () => {
     {
       detail: {
         code: "validation_error",
-        reason: "budget.exhausted.delegate",
-        params: { delegate: "agent_analyst" },
-        message: "Delegate budget exhausted for agent_analyst",
+        reason: "work.transition_invalid",
+        params: { from: "work.status.draft", to: "work.status.running" },
+        message: "Cannot transition work from draft to running",
       },
     },
     "fallback",
   );
   assert.equal(error.code, "validation_error");
-  assert.equal(error.reason, "budget.exhausted.delegate");
-  assert.deepEqual(error.params, { delegate: "agent_analyst" });
+  assert.equal(error.reason, "work.transition_invalid");
+  assert.deepEqual(error.params, { from: "work.status.draft", to: "work.status.running" });
+  assert.equal(
+    homunErrorUserMessage(error),
+    "Il lavoro non può passare da «bozza» a «in esecuzione».",
+  );
   setLanguage("en");
-  assert.ok(homunErrorUserMessage(error).includes("agent_analyst"));
+  assert.equal(homunErrorUserMessage(error), "The work cannot move from “draft” to “running”.");
 });
 
 test("homunErrorFromEngineEvent porta reason e params dall'evento SSE", () => {
   const error = homunErrorFromEngineEvent(
     "validation_error",
-    "listino.csv: CSV must be UTF-8",
+    "right: CSV must be UTF-8",
     "fallback",
     "comparison.csv.not_utf8",
-    { source: "listino.csv" },
+    { side: "comparison.updated" },
   );
   assert.equal(error.reason, "comparison.csv.not_utf8");
-  assert.equal(homunErrorUserMessage(error), "«listino.csv»: il CSV deve essere salvato in UTF-8.");
+  assert.equal(
+    homunErrorUserMessage(error),
+    "«listino aggiornato»: il CSV deve essere salvato in UTF-8.",
+  );
 });
 
 test("i dettagli tecnici mostrano anche reason e restano copiabili", () => {
@@ -106,8 +118,8 @@ test("i dettagli tecnici mostrano anche reason e restano copiabili", () => {
       detail: {
         code: "validation_error",
         reason: "comparison.csv.not_utf8",
-        params: { source: "listino.csv" },
-        message: "listino.csv: CSV must be UTF-8",
+        params: { side: "comparison.previous" },
+        message: "left: CSV must be UTF-8",
       },
     },
     "fallback",
@@ -151,5 +163,90 @@ test("il catalogo errori ha le stesse chiavi in italiano e inglese", async () =>
     en: m.errorCatalog("en"),
   }));
   assert.deepEqual(Object.keys(it.errors).sort(), Object.keys(en.errors).sort());
+  assert.deepEqual(Object.keys(it.labels).sort(), Object.keys(en.labels).sort());
   assert.deepEqual(Object.keys(it.codes).sort(), Object.keys(en.codes).sort());
+});
+
+test("il meccanismo {param@label} è unico: il client risolve le chiavi come il motore", () => {
+  assert.equal(errorLabelText("comparison.previous", "it"), "listino precedente");
+  assert.equal(errorLabelText("comparison.previous", "en"), "previous price list");
+  assert.equal(
+    formatErrorPlaceholders("Lato: {side@label}", { side: "comparison.updated" }, "it"),
+    "Lato: listino aggiornato",
+  );
+  assert.equal(
+    formatErrorPlaceholders("Lato: {side@label}", { side: "comparison.updated" }, "en"),
+    "Lato: updated price list",
+  );
+});
+
+// Stessa garanzia del test motore: la frase italiana non contiene valori di
+// enum interni, left/right, id di attori, né chiavi di catalogo non risolte.
+const FORBIDDEN_IN_ITALIAN = [
+  "left",
+  "right",
+  "Material",
+  "Grant",
+  "note",
+  "link",
+  "file_ref",
+  "active",
+  "archived",
+  "draft",
+  "ready",
+  "running",
+  "waiting_input",
+  "waiting_approval",
+  "paused",
+  "review",
+  "completed",
+  "failed",
+  "cancelled",
+];
+const FORBIDDEN_PATTERNS = [
+  /\b(person|agent)_[A-Za-z0-9_-]+\b/,
+  /\b(comparison|materials\.kind|work\.status|policy\.entity)\.\w/,
+  /\{\w+/,
+];
+
+test("ogni frase italiana si compone senza etichette interne né id", async () => {
+  const { errorCatalog } = await import("../apps/web/src/lib/i18n/error-catalog.ts");
+  const samples: Record<string, Record<string, string | number>> = JSON.parse(
+    readFileSync(
+      fileURLToPath(new URL("../contracts/i18n/errors.samples.json", import.meta.url)),
+      "utf-8",
+    ),
+  ).params;
+  const reasons = Object.keys(errorCatalog("it").errors);
+  assert.ok(reasons.length > 0, "catalogo vuoto");
+  for (const reason of reasons) {
+    const sentence = errorUserText(reason, samples[reason] ?? {}, "it");
+    assert.ok(sentence, `${reason}: frase mancante nel catalogo it`);
+    for (const token of FORBIDDEN_IN_ITALIAN) {
+      assert.ok(
+        !new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(sentence!),
+        `${reason}: etichetta interna \`${token}\` nella frase italiana: ${sentence}`,
+      );
+    }
+    for (const pattern of FORBIDDEN_PATTERNS) {
+      assert.ok(!pattern.test(sentence!), `${reason}: pattern ${pattern} nella frase: ${sentence}`);
+    }
+  }
+});
+
+test("ogni frase inglese si compone con le etichette tradotte", async () => {
+  const { errorCatalog } = await import("../apps/web/src/lib/i18n/error-catalog.ts");
+  const samples: Record<string, Record<string, string | number>> = JSON.parse(
+    readFileSync(
+      fileURLToPath(new URL("../contracts/i18n/errors.samples.json", import.meta.url)),
+      "utf-8",
+    ),
+  ).params;
+  for (const reason of Object.keys(errorCatalog("en").errors)) {
+    const sentence = errorUserText(reason, samples[reason] ?? {}, "en");
+    assert.ok(
+      sentence && !sentence.includes("{"),
+      `${reason}: segnaposto non risolto: ${sentence}`,
+    );
+  }
 });

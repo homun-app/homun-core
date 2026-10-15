@@ -3,11 +3,16 @@ from homun.domain.errors import NotFoundError
 from homun.policy import require_project_capability
 from homun.policy.work import require_work_command_authority, require_work_access, require_conversation_access
 
+# `kind` in the user-facing sentence is a shared-catalog label key ({kind@label}),
+# never the internal English entity name.
+_ENTITY_LABEL_KEYS = dict(Material='policy.entity.material', Grant='policy.entity.grant')
+
 
 def _lookup(collection, identity, label):
     resource = collection.get(str(identity))
     if resource is None:
-        raise NotFoundError(f'{label} not found', reason='policy.entity_not_found', params={'kind': label})
+        raise NotFoundError(f'{label} not found', reason='policy.entity_not_found',
+                            params={'kind': _ENTITY_LABEL_KEYS.get(label, label)})
     return resource
 
 
