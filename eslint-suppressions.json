@@ -4,21 +4,6 @@
       "count": 1
     }
   },
-  "apps/web/src/components/EngineDomainPanel.tsx": {
-    "react-hooks/exhaustive-deps": {
-      "count": 1
-    }
-  },
-  "apps/web/src/components/ai-elements/code-block.tsx": {
-    "react-refresh/only-export-components": {
-      "count": 1
-    }
-  },
-  "apps/web/src/components/ai-elements/conversation.tsx": {
-    "react-refresh/only-export-components": {
-      "count": 1
-    }
-  },
   "apps/web/src/components/ai-elements/message.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
@@ -27,11 +12,6 @@
   "apps/web/src/components/ai-elements/prompt-input.tsx": {
     "react-refresh/only-export-components": {
       "count": 5
-    }
-  },
-  "apps/web/src/components/ai-elements/tool.tsx": {
-    "react-refresh/only-export-components": {
-      "count": 1
     }
   },
   "apps/web/src/components/assistant-ui/elements/file.tsx": {
@@ -89,11 +69,6 @@
       "count": 1
     }
   },
-  "apps/web/src/components/builder/ConversationPeopleSettingsSection.tsx": {
-    "react-hooks/exhaustive-deps": {
-      "count": 1
-    }
-  },
   "apps/web/src/components/builder/ConversationSpace.tsx": {
     "react-refresh/only-export-components": {
       "count": 1
@@ -135,21 +110,6 @@
     }
   },
   "apps/web/src/components/builder/EngineDelegationList.tsx": {
-    "react-refresh/only-export-components": {
-      "count": 1
-    }
-  },
-  "apps/web/src/components/builder/EngineToolChain.tsx": {
-    "react-hooks/exhaustive-deps": {
-      "count": 1
-    }
-  },
-  "apps/web/src/components/builder/StudioAccess.tsx": {
-    "react-refresh/only-export-components": {
-      "count": 2
-    }
-  },
-  "apps/web/src/components/builder/StudioRoutineActivity.tsx": {
     "react-refresh/only-export-components": {
       "count": 1
     }
