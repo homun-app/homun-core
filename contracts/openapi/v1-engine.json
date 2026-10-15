@@ -4263,6 +4263,19 @@
         "title": "KanbanCard",
         "type": "object"
       },
+      "LanguageRequest": {
+        "properties": {
+          "language": {
+            "title": "Language",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language"
+        ],
+        "title": "LanguageRequest",
+        "type": "object"
+      },
       "MeetJoinRequest": {
         "properties": {
           "duration": {
@@ -20422,6 +20435,106 @@
         "summary": "List Grants",
         "tags": [
           "domain"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/language": {
+      "get": {
+        "operationId": "read_language_v1_workspaces__workspace_id__language_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Read Language V1 Workspaces  Workspace Id  Language Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Language",
+        "tags": [
+          "preferences"
+        ]
+      },
+      "put": {
+        "operationId": "write_language_v1_workspaces__workspace_id__language_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LanguageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Write Language V1 Workspaces  Workspace Id  Language Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Write Language",
+        "tags": [
+          "preferences"
         ]
       }
     },

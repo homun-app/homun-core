@@ -121,8 +121,12 @@ def propose(ctx, actor, work_id, body):
             capabilities=capability_catalog(store,actor)
         ctx.service.store=store
     requested_language = body.get('language')
-    language = (requested_language.strip().lower()[:8] or None
-                if isinstance(requested_language, str) else None)
+    requested_language = (requested_language.strip().lower()[:8] or None
+                          if isinstance(requested_language, str) else None)
+    # A per-request language wins (routing aid); the workspace preference
+    # grounds the engine-generated texts (intake catalog labels).
+    from homun.application.ops.preferences import resolve_language
+    language = resolve_language(ctx, requested_language)
     from homun.application.work import budgets as work_budgets
     from homun.domain.models import BudgetCounters
     # Reserve before the provider call: exhaustion is durable and typed, and a

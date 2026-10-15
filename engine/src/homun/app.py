@@ -175,6 +175,8 @@ def create_app(*, session_token: str | None = None, allowed_origins: list[str] |
     app.include_router(identity_api.router)
     app.include_router(object_transfer_api.router)
     app.include_router(domain.router)
+    from homun.routes import preferences
+    app.include_router(preferences.router)
     app.include_router(price_comparisons.router)
     app.include_router(material_reads.router)
     app.include_router(synthesis.router)
