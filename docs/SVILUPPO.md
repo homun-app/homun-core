@@ -229,6 +229,41 @@ La formattazione è separata (`npm run format` / `npm run format:check`,
 Prettier). Chi corregge violazioni soppresse esegue `npm run lint:prune`
 e committa il file aggiornato: la soglia può solo scendere, mai salire.
 
+### Pulizia codice morto (2026-10-15)
+
+Eliminati **55 file irraggiungibili in `apps/web/src`** (componenti
+Studio, ai-elements inusati, sezioni impostazioni con i loro CSS,
+pannelli engine/builder, moduli lib) per **23.607 righe**: ogni file è
+stato confermato con grep (nessun import statico, dinamico, CSS,
+riferimento da test con percorso stringa via `ssrLoadModule`,
+`index.html`, desktop, docs). Ripristinate invece le voci di
+`tools/architecture-baseline.json` (6) e `eslint-suppressions.json` (8)
+dei soli file eliminati. I file restano recuperabili dal commit
+**`d9e0ca18`** (tip di main precedente all'eliminazione, ramo
+`chore/remove-dead-web-code`).
+
+**Prova di invarianza del bundle**: i 394 chunk JS prodotti da
+`npm run build` sono identici prima/dopo a meno dei nomi dei chunk
+(0 differenze residue neutralizzando i suffissi hash); i 57 chunk con
+byte diversi lo sono solo perché il nome di un chunk referenziato è
+cambiato. Radice della rinomina: `index.css` (−11,2 kB) — Tailwind
+genera le utility scansionando i sorgenti anche fuori dal grafo degli
+import, quindi le classi usate solo dai file rimossi non vengono più
+emesse. Nessun file eliminato era raggiungibile dal bundle JS.
+
+**Codice morto bloccato in CI**: `npm run deadcode`
+(`knip --include files`, config `knip.json` con tutti i punti d'ingresso
+e gli alias) gira nel job `frontend` accanto a lint e format check; un
+nuovo file non raggiunto da alcun entry point fallisce la build. Gli
+esclusioni sono motivati in `knip.json`: i percorsi assistiti citati
+dai piani storici 2026-09-15 (`FirstWorkJourney`, `FirstWorkSpace`,
+`WorkProposal` + `FirstWorkFields`, loro dipendenza diretta) e
+l'inventario di **37 componenti/hook `packages/ui` non usati** (inclusi
+`sidebar.tsx` e `use-sidebar-shortcut.tsx`; i vivi sono solo `button`,
+`button-group`, `tooltip`, `lib/utils`) — decisione dedicata pendente;
+dopo l'eliminazione anche `badge` e `collapsible` restano senza
+consumatori.
+
 ---
 
 ## 4. Archivio e fonti
