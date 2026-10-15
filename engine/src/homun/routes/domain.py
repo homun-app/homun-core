@@ -28,7 +28,7 @@ from homun.policy import (
 from homun.policy.grants import can_read_grant
 from homun.routes.sse import sse_event
 from homun.routes.errors import storage_error_payload
-from homun.routes.domain_support import _actor_from_headers, _http_error
+from homun.routes.domain_support import _actor_from_headers, _http_error, error_payload
 from homun.routes.materials import router as materials_router
 from homun.routes.reads import router as reads_router
 
@@ -104,9 +104,9 @@ def post_command_stream(
             ).model_dump(mode="json")
             yield sse_event("result", payload)
         except (ValidationError, InvalidTransitionError, ConflictError, PermissionDeniedError, NotFoundError) as exc:
-            yield sse_event("error", {"code": exc.code, "message": exc.message})
+            yield sse_event("error", error_payload(exc))
         except DomainError as exc:
-            yield sse_event("error", {"code": exc.code, "message": exc.message})
+            yield sse_event("error", error_payload(exc))
         except StorageError:
             yield sse_event("error", storage_error_payload())
         except RuntimeError as exc:
