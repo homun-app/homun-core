@@ -7,7 +7,7 @@ from homun.policy.work import require_work_command_authority, require_work_acces
 def _lookup(collection, identity, label):
     resource = collection.get(str(identity))
     if resource is None:
-        raise NotFoundError(f'{label} not found')
+        raise NotFoundError(f'{label} not found', reason='policy.entity_not_found', params={'kind': label})
     return resource
 
 

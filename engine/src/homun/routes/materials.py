@@ -9,7 +9,7 @@ from homun.application.work.material_ingest import ingest_file, MAX_UPLOAD_BYTES
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from homun.materials.blob import read_material_blob
 from homun.policy import require_project_capability
-from homun.routes.domain_support import _actor_from_headers, _http_error
+from homun.routes.domain_support import _actor_from_headers, _http_error, error_payload
 
 router = APIRouter(tags=["materials"])
 
@@ -23,15 +23,12 @@ def list_project_materials(
 ) -> dict[str, Any]:
     ctx = get_context().snapshot()
     if workspace_id != ctx.workspace_id:
-        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Unknown workspace"})
+        raise HTTPException(status_code=404, detail={"code": "not_found", "reason": "materials.workspace_unknown", "message": "Unknown workspace"})
     actor = _actor_from_headers(workspace_id, x_homun_actor_id, x_homun_actor_name)
     try:
         require_project_capability(ctx.service.store, actor, project_id, "read")
     except NotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": str(exc)},
-        ) from exc
+        raise HTTPException(status_code=404, detail=error_payload(exc)) from exc
     except PermissionDeniedError as exc:
         raise _http_error(exc) from exc
     items = []
@@ -53,16 +50,13 @@ def get_material(
 ) -> dict[str, Any]:
     ctx = get_context().snapshot()
     if workspace_id != ctx.workspace_id:
-        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Unknown workspace"})
+        raise HTTPException(status_code=404, detail={"code": "not_found", "reason": "materials.workspace_unknown", "message": "Unknown workspace"})
     actor = _actor_from_headers(workspace_id, x_homun_actor_id, x_homun_actor_name)
     try:
         material = ctx.service.get_material(material_id)
         require_project_capability(ctx.service.store, actor, material.project_id, "read")
     except NotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": str(exc)},
-        ) from exc
+        raise HTTPException(status_code=404, detail=error_payload(exc)) from exc
     except PermissionDeniedError as exc:
         raise _http_error(exc) from exc
     return material.model_dump(mode="json")
@@ -81,11 +75,11 @@ async def ingest_project_material(
 ) -> dict[str, Any]:
     ctx = get_context()
     if workspace_id != ctx.workspace_id:
-        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Unknown workspace"})
+        raise HTTPException(status_code=404, detail={"code": "not_found", "reason": "materials.workspace_unknown", "message": "Unknown workspace"})
     actor = _actor_from_headers(workspace_id, x_homun_actor_id, x_homun_actor_name)
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail={"code": "material_too_large", "message": f"Material exceeds {MAX_UPLOAD_BYTES} bytes"})
+        raise HTTPException(status_code=413, detail={"code": "material_too_large", "reason": "materials.upload.too_large", "params": {"max_bytes": MAX_UPLOAD_BYTES}, "message": f"Material exceeds {MAX_UPLOAD_BYTES} bytes"})
     filename = file.filename or relative_path or "upload"
     try:
         result = ingest_file(
@@ -112,16 +106,13 @@ def get_material_content(
 ) -> dict[str, Any]:
     ctx = get_context().snapshot()
     if workspace_id != ctx.workspace_id:
-        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Unknown workspace"})
+        raise HTTPException(status_code=404, detail={"code": "not_found", "reason": "materials.workspace_unknown", "message": "Unknown workspace"})
     actor = _actor_from_headers(workspace_id, x_homun_actor_id, x_homun_actor_name)
     try:
         material = ctx.service.get_material(material_id)
         require_project_capability(ctx.service.store, actor, material.project_id, "read")
     except NotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": str(exc)},
-        ) from exc
+        raise HTTPException(status_code=404, detail=error_payload(exc)) from exc
     except PermissionDeniedError as exc:
         raise _http_error(exc) from exc
     return {
@@ -146,32 +137,29 @@ def get_material_blob(
 ) -> Response:
     ctx = get_context().snapshot()
     if workspace_id != ctx.workspace_id:
-        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Unknown workspace"})
+        raise HTTPException(status_code=404, detail={"code": "not_found", "reason": "materials.workspace_unknown", "message": "Unknown workspace"})
     actor = _actor_from_headers(workspace_id, x_homun_actor_id, x_homun_actor_name)
     try:
         material = ctx.service.get_material(material_id)
         require_project_capability(ctx.service.store, actor, material.project_id, "read")
     except NotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": str(exc)},
-        ) from exc
+        raise HTTPException(status_code=404, detail=error_payload(exc)) from exc
     except PermissionDeniedError as exc:
         raise _http_error(exc) from exc
     if not material.storage_relpath:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": "Material has no stored blob"},
+            detail={"code": "not_found", "reason": "materials.blob.absent", "message": "Material has no stored blob"},
         )
     try:
         data = read_material_blob(ctx.data_dir, material.storage_relpath)
     except (OSError, ValueError) as exc:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": "Blob missing on disk"},
+            detail={"code": "not_found", "reason": "materials.blob.missing_on_disk", "message": "Blob missing on disk"},
         ) from exc
     if material.content_hash and hashlib.sha256(data).hexdigest() != material.content_hash:
-        raise HTTPException(status_code=409, detail={"code": "material_integrity_error", "message": "Stored material failed content integrity verification"})
+        raise HTTPException(status_code=409, detail={"code": "material_integrity_error", "reason": "materials.blob.integrity_failed", "message": "Stored material failed content integrity verification"})
     media = material.mime_type or "application/octet-stream"
     filename = material.origin_name or material.title or "download"
     return Response(

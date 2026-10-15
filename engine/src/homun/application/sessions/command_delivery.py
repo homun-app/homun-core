@@ -99,9 +99,11 @@ def admit(ctx: EngineContext, actor: Actor, body: CommandRequest) -> Delivery:
                 now = utc_now()
                 if (record.followup_status == 'processing' and record.followup_expires_at
                         and record.followup_expires_at > now):
-                    raise CommandInProgressError('This message is already being processed; retry after completion')
+                    raise CommandInProgressError('This message is already being processed; retry after completion',
+                                         reason='message.in_progress.same')
                 if conversation_busy(store, body, now):
-                    raise CommandInProgressError('Another message in this conversation is being processed')
+                    raise CommandInProgressError('Another message in this conversation is being processed',
+                                         reason='message.in_progress.other')
                 # An explicit retry starts a fresh bounded recovery budget.
                 record.followup_attempts = 0
                 token = claim(record, actor, body, now)
@@ -165,7 +167,8 @@ def complete(ctx: EngineContext, delivery: Delivery) -> dict:
             with ctx.repository.transaction() as store:
                 record = store.commands[delivery.body.command_id]
                 if record.followup_token != delivery.token or record.followup_status != 'processing':
-                    raise ConflictError('Model attempt superseded; its result was not applied')
+                    raise ConflictError('Model attempt superseded; its result was not applied',
+                            reason='message.superseded')
                 if record.followup_expires_at is None or record.followup_expires_at <= utc_now():
                     raise FollowupLeaseExpiredError('Model attempt lease expired; recovery will retry within its attempt budget')
                 require_followup_authority(store, delivery.actor, delivery.body)

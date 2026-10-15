@@ -7,7 +7,7 @@ def require_conversation_access(store, actor, conversation_id, needed='write'):
     require_workspace_actor(actor, store.workspace_id)
     conversation = store.conversations.get(str(conversation_id))
     if conversation is None:
-        raise NotFoundError('Conversation not found')
+        raise NotFoundError('Conversation not found', reason='policy.conversation_not_found')
     if conversation.project_id:
         require_project_capability(store, actor, conversation.project_id, needed)
     return conversation
@@ -28,7 +28,7 @@ def require_work_access(store, actor, work_id, needed='write'):
     require_workspace_actor(actor, store.workspace_id)
     work = store.works.get(str(work_id))
     if work is None:
-        raise NotFoundError('Work not found')
+        raise NotFoundError('Work not found', reason='policy.work_not_found')
     for project_id in sorted(work_project_ids(store, work)):
         require_project_capability(store, actor, project_id, needed)
     return work
@@ -53,14 +53,15 @@ def require_work_command_authority(store, actor, command_type, payload):
     elif command_type.startswith(('routine.', 'external.', 'skill.')):
         if str(actor.kind) != 'person' and command_type != 'skill.create':
             from homun.domain.errors import PermissionDeniedError
-            raise PermissionDeniedError('Only a person may manage MCP servers and skill lifecycle')
+            raise PermissionDeniedError('Only a person may manage MCP servers and skill lifecycle',
+                                    reason='permission.persons_only.mcp_lifecycle')
         require_workspace_actor(actor, store.workspace_id)
     elif command_type.startswith(('work.', 'plan.')):
         work_id = payload.get('work_id', '')
         if command_type in {'work.provide_contribution', 'work.save_contribution_draft'}:
             request = store.contributions.get(str(payload.get('request_id', '')))
             if request is None:
-                raise NotFoundError('Contribution request not found')
+                raise NotFoundError('Contribution request not found', reason='policy.contribution_not_found')
             work_id = request.work_id
             # The invitation application authenticated a one-request, text-only
             # capability. It never supplies general project access.

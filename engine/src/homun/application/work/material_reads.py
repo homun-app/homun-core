@@ -23,7 +23,7 @@ def public(proposal):
 def lookup(store, proposal_id, work_id):
     record = store.commands.get(proposal_id)
     if not record or record.type != PROPOSAL_TYPE or record.result['work_id'] != work_id:
-        raise NotFoundError('Read proposal not found')
+        raise NotFoundError('Read proposal not found', reason='reads.proposal_not_found')
     return record.result
 
 
@@ -31,15 +31,17 @@ def authority(store, actor, proposal, *, approval=False, needed='write'):
     work = require_work_access(store, actor, proposal['work_id'], needed)
     material = store.materials.get(proposal['material']['id'])
     if not material:
-        raise NotFoundError('Read material not found')
+        raise NotFoundError('Read material not found', reason='reads.material_not_found')
     require_project_capability(store, actor, material.project_id, 'read')
     if approval:
         # Same delegation boundary as the comparison: a delegated agent owner
         # never approves the execution of a concrete action.
         if actor.kind != 'person':
-            raise PermissionDeniedError('Only a person may approve the execution of a concrete action')
+            raise PermissionDeniedError('Only a person may approve the execution of a concrete action',
+                                    reason='reads.approval.persons_only')
         if actor.id not in {work.owner_id, work.reviewer_id}:
-            raise PermissionDeniedError('Only the current work owner or reviewer may approve')
+            raise PermissionDeniedError('Only the current work owner or reviewer may approve',
+                                    reason='reads.approval.not_owner_or_reviewer')
     return work
 
 
@@ -65,7 +67,7 @@ def propose(ctx, actor, work_id, body):
             require_confirmed_intake_for_tool(store, work_id, capability='read_material')
             material, _ = _source(ctx, store, actor, body['material_id'])
             if store.materials[material['id']].extract_status not in {'extracted', 'none'}:
-                raise ValidationError('Material has no readable text extract')
+                raise ValidationError('Material has no readable text extract', reason='reads.no_text_extract')
             record, fingerprint = cached(store, actor, body['command_id'], PROPOSAL_TYPE, payload)
             if record:
                 authority(store, actor, record.result)
@@ -81,7 +83,7 @@ def propose(ctx, actor, work_id, body):
                     except DomainError:
                         stale = True
                 if not stale:
-                    raise ConflictError('This work already has an active material read')
+                    raise ConflictError('This work already has an active material read', reason='reads.already_active')
                 prior.update(status='blocked', error_code='read_proposal_obsolete')
             service = ctx.service.for_store(store)
             pinned = propose_pin_version(
@@ -111,16 +113,17 @@ def approve(ctx, actor, work_id, proposal_id, body):
             work = authority(store, actor, proposal, approval=True)
             record, fingerprint = cached(store, actor, body['command_id'], 'material_read.approve', payload)
             if body['digest'] != proposal['digest'] or body['expected_version'] != proposal['expected_version']:
-                raise ConflictError('Approval does not match the proposed action and revision')
+                raise ConflictError('Approval does not match the proposed action and revision',
+                                reason='reads.approval.mismatch')
             current, _ = _source(ctx, store, actor, proposal['material']['id'])
             if current != proposal['material']:
-                raise ConflictError('Read source changed; create a new proposal')
+                raise ConflictError('Read source changed; create a new proposal', reason='reads.source_changed')
             if record:
                 return deepcopy(public(proposal))
             if proposal['status'] != 'pending_approval':
-                raise ConflictError('Read already approved or closed')
+                raise ConflictError('Read already approved or closed', reason='reads.already_closed')
             if work.version != proposal['expected_version']:
-                raise ConflictError('Work changed; create a new proposal')
+                raise ConflictError('Work changed; create a new proposal', reason='reads.work_changed')
             service = ctx.service.for_store(store)
             from homun.application.work.phase_execution import approve_starts_phase
             approve_starts_phase(service, store, actor, work, 'read_material', body['command_id'])

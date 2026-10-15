@@ -18,18 +18,18 @@ from homun.domain.command_context import CommandContext
 def _material_create(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     project_id = str(payload.get("project_id", "")).strip()
     if not project_id:
-        raise ValidationError("project_id is required")
+        raise ValidationError("project_id is required", reason="materials.project_required")
     require_project_capability(ctx.store, actor, project_id, "write")
     title = str(payload.get("title", "")).strip()
     if not title:
-        raise ValidationError("Material title is required")
+        raise ValidationError("Material title is required", reason="materials.title_required")
     kind = str(payload.get("kind", "note") or "note").strip()
     if kind not in MATERIAL_KINDS:
-        raise ValidationError(f"Invalid material kind: {kind}")
+        raise ValidationError(f"Invalid material kind: {kind}", reason="materials.kind_invalid", params={"kind": kind})
     source_uri = payload.get("source_uri")
     source_uri_s = str(source_uri).strip() if source_uri not in (None, "") else None
     if kind in {"link", "file_ref"} and not source_uri_s:
-        raise ValidationError(f"{kind} requires source_uri")
+        raise ValidationError(f"{kind} requires source_uri", reason="materials.source_uri_required", params={"kind": kind})
     material = MaterialVersion(
         id=new_id("mat"),
         workspace_id=ctx.store.workspace_id,
@@ -77,12 +77,12 @@ def _material_update(ctx: CommandContext, actor: Actor, command_id: str, payload
     if "title" in payload:
         title = str(payload.get("title", "")).strip()
         if not title:
-            raise ValidationError("Material title is required")
+            raise ValidationError("Material title is required", reason="materials.title_required")
         material.title = title
     if "kind" in payload:
         kind = str(payload.get("kind") or "").strip()
         if kind not in MATERIAL_KINDS:
-            raise ValidationError(f"Invalid material kind: {kind}")
+            raise ValidationError(f"Invalid material kind: {kind}", reason="materials.kind_invalid", params={"kind": kind})
         material.kind = kind
     if "text" in payload:
         material.text = str(payload.get("text") or "")
@@ -98,10 +98,10 @@ def _material_update(ctx: CommandContext, actor: Actor, command_id: str, payload
     if "status" in payload:
         status = str(payload.get("status") or "").strip()
         if status not in MATERIAL_STATUSES:
-            raise ValidationError(f"Invalid material status: {status}")
+            raise ValidationError(f"Invalid material status: {status}", reason="materials.status_invalid", params={"status": status})
         material.status = status
     if material.kind in {"link", "file_ref"} and not material.source_uri:
-        raise ValidationError(f"{material.kind} requires source_uri")
+        raise ValidationError(f"{material.kind} requires source_uri", reason="materials.source_uri_required", params={"kind": material.kind})
     material.version += 1
     material.updated_at = utc_now()
     ctx.store.materials[material.id] = material
@@ -142,13 +142,13 @@ def register_prepared_material(ctx: CommandContext, actor: Actor, command_id: st
     require_project_capability(ctx.store, actor, project_id, "write")
     content_hash = payload["content_hash"]
     if not re.fullmatch(r"[0-9a-f]{64}", content_hash):
-        raise ValidationError("Invalid material content hash")
+        raise ValidationError("Invalid material content hash", reason="materials.content_hash_invalid")
     if payload["storage_relpath"] != f"materials/content/{content_hash}/original":
-        raise ValidationError("Invalid managed material path")
+        raise ValidationError("Invalid managed material path", reason="materials.managed_path_invalid")
     if not payload["title"] or payload["byte_size"] < 0:
-        raise ValidationError("Invalid prepared material metadata")
+        raise ValidationError("Invalid prepared material metadata", reason="materials.prepared_metadata_invalid")
     if payload["extract_status"] not in {"extracted", "unsupported", "failed"}:
-        raise ValidationError("Invalid extraction status")
+        raise ValidationError("Invalid extraction status", reason="materials.extraction_status_invalid")
     # Same bytes in the same project are one material: re-ingesting an
     # unchanged file is idempotent, so a project never lists twins and a
     # comparison can never select one document as both of its sources.

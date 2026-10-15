@@ -24,13 +24,19 @@ def _issue(issues, source, row, sku, code, message):
 
 def _parse(blob: bytes, source: str, budget: list[int], issues: list[dict]):
     if not isinstance(blob, bytes) or len(blob) > MAX_BYTES:
-        raise ValidationError(f'{source}: CSV richiesto in bytes, massimo 2 MiB per file')
+        raise ValidationError(f'{source}: CSV required as bytes, at most {MAX_BYTES // (1024 * 1024)} MiB per file',
+                              reason='comparison.csv.payload_invalid',
+                              params={'source': source, 'max_mib': MAX_BYTES // (1024 * 1024)})
     try:
         text = blob.decode('utf-8-sig')
     except UnicodeError as exc:
-        raise ValidationError(f'{source}: il CSV deve essere UTF-8') from exc
+        raise ValidationError(f'{source}: CSV must be UTF-8',
+                              reason='comparison.csv.not_utf8',
+                              params={'source': source}) from exc
     if '\x00' in text:
-        raise ValidationError(f'{source}: carattere NUL non consentito')
+        raise ValidationError(f'{source}: NUL character not allowed',
+                              reason='comparison.csv.nul_not_allowed',
+                              params={'source': source})
     # Select by the required header, avoiding data-dependent delimiter guesses.
     selected = None
     try:
@@ -42,7 +48,9 @@ def _parse(blob: bytes, source: str, budget: list[int], issues: list[dict]):
                 selected = reader, header
                 break
         if selected is None:
-            raise ValidationError(f'{source}: intestazione richiesta: sku,name,price,currency; senza duplicati')
+            raise ValidationError(f'{source}: required header: sku,name,price,currency, no duplicates',
+                                  reason='comparison.csv.header_missing',
+                                  params={'source': source})
         reader, header = selected
         records: dict[str, list[dict]] = {}
         count = 0
@@ -54,7 +62,8 @@ def _parse(blob: bytes, source: str, budget: list[int], issues: list[dict]):
             count += 1
             budget[0] -= 1
             if budget[0] < 0:
-                raise ValidationError('Limite righe superato: il limite conta tutte le righe dati di entrambi i file')
+                raise ValidationError('Row limit exceeded: the limit counts all data rows of both files',
+                                      reason='comparison.csv.rows_limit')
             values = dict(zip(header, (cell.strip() for cell in cells)))
             sku = values.get('sku', '')
             valid = True
@@ -87,7 +96,9 @@ def _parse(blob: bytes, source: str, budget: list[int], issues: list[dict]):
                     _issue(issues, source, entry['row'], sku, 'duplicate_sku', 'SKU duplicato; tutte le occorrenze escluse')
         return records, count
     except csv.Error as exc:
-        raise ValidationError(f'{source}: struttura CSV non valida ({exc})') from exc
+        raise ValidationError(f'{source}: invalid CSV structure ({exc})',
+                              reason='comparison.csv.invalid_structure',
+                              params={'source': source, 'detail': str(exc)}) from exc
 
 
 def _money(value):
@@ -184,7 +195,9 @@ def compare_csv(left: bytes, right: bytes, *, max_rows: int = 10000) -> dict:
     Source row references are the physical start lines (header starts at line 1).
     """
     if not isinstance(max_rows, int) or isinstance(max_rows, bool) or not 1 <= max_rows <= 10000:
-        raise ValidationError('max_rows deve essere un intero fra 1 e 10000, totale sui due file')
+        raise ValidationError('max_rows must be an integer between 1 and 10000, total across both files',
+                              reason='comparison.csv.max_rows_invalid',
+                              params={'min': 1, 'max': 10000})
     issues: list[dict] = []
     budget = [max_rows]
     previous, left_count = _parse(left, 'left', budget, issues)
