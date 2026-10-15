@@ -4,6 +4,8 @@
   "errors": {
     "workspace.unknown": "Unknown workspace on this engine.",
     "preferences.language_invalid": "Unsupported language: {language}.",
+    "preferences.person_unknown": "Unknown person in this workspace.",
+    "permission.workspace_authority_required": "This action requires workspace authority: only an owner or an admin can do it.",
     "materials.workspace_unknown": "Unknown workspace on this engine.",
     "materials.upload.too_large": "The file exceeds the upload limit ({max_bytes} bytes).",
     "materials.blob.absent": "The material has no stored content.",

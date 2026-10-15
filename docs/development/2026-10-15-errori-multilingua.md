@@ -152,22 +152,34 @@ infrastruttura ICU ora.
 
 ## 3. La lingua dell'utente lato motore
 
-- **Preferenza persistente del workspace**: chiave `language` nella tabella
-  `meta` dello storage (`storage/schema.py` — key/value già libere, **schema v1
-  invariato**, nessuna migrazione). Valori `it` | `en`, default `it`.
-- **Rotta**: `PUT /v1/workspaces/{workspace_id}/language` con corpo
-  `{"language": "it"|"en"}` e `GET` omonimo. Il client la chiama dentro
-  `setLanguage` (best-effort: se il motore è giù, il cambio lingua UI riesce
-  comunque e la preferenza verrà rispedita al prossimo avvio — l'errore motore
-  non deve bloccare l'interfaccia). Snapshot OpenAPI rigenerato e committato.
-- **Uso**: solo per i testi che il motore genera da sé (canali, chat, intake).
+- **La lingua è una preferenza della PERSONA, con la lingua del workspace come
+  valore predefinito.** Il motore ha già più persone per workspace (F5:
+  `Person`, `PersonDevice`, sessioni persona) e i messaggi sui canali vanno a
+  una persona precisa. Catena di risoluzione, applicata da
+  `application/ops/preferences.py::resolve_language`: **persona → workspace →
+  inglese** (una richiesta esplicita per-request, campo `language` di intake,
+  vince sulla catena perché serve al routing).
+- **Persistenza**: chiavi nella tabella `meta` dello storage (`storage/schema.py`
+  — key/value già libere, **schema v1 invariato**, nessuna migrazione):
+  `language` per il workspace, `language:person:<person_id>` per ogni persona.
+- **Rotte**: `GET/PUT /v1/workspaces/{workspace_id}/people/{person_id}/language`
+  per la persona (la propria lingua la imposta la persona stessa; quella di un
+  altro serve l'autorità del workspace) e `GET/PUT
+/v1/workspaces/{workspace_id}/language` per il default del workspace. Il PUT
+  del workspace usa il controllo esistente `require_owner_or_admin`
+  (`identity/invites.py`), nessun controllo scritto a mano: senza autorità,
+  `permission_denied` con `reason=permission.workspace_authority_required`.
+  Il client chiama la rotta persona dentro `setLanguage` con l'attore della
+  sessione corrente (best-effort: se il motore è giù, il cambio lingua UI
+  riesce comunque e la preferenza verrà rispedita al prossimo avvio). Snapshot
+  OpenAPI rigenerato e committato.
+- **Uso**: solo per i testi che il motore genera per quella persona (canali,
+  chat, intake — `application/work/intake.py` risolve con `person_id=actor.id`).
   Le risposte d'errore HTTP restano **neutrali**: codici, mai frasi; traduce il
   client nella sua lingua corrente.
-- **`Accept-Language`: valutato e rinviato.** Il motore è locale e monoutente per
-  design; la preferenza esplicita del workspace è più forte e più semplice da
-  diagnosticare di un header che può arrivare da proxy/desktop. Il campo
-  `language` per-richiesta di intake (`models/intake.py:31`) resta per il
-  routing. Da rivalutare solo con gateway multi-persona.
+- **`Accept-Language`: valutato e rinviato.** La preferenza esplicita della
+  persona è più forte e più semplice da diagnosticare di un header che può
+  arrivare da proxy/desktop.
 
 ## 4. Regola di fallback
 
@@ -426,3 +438,41 @@ cambio lingua in Impostazioni → lo stesso avviso è in inglese.
   include anche `workspace.unknown`, `preferences.language_invalid` (nuova
   rotta) e le 5 voci `intake.catalog.*` portate dal codice: 70 frasi + 17
   generiche per `code`, per lingua.
+
+## Correzioni post-review (stessa PR)
+
+Invariant: **una frase mostrata all'utente è interamente nella sua lingua** —
+nessun testo tecnico, nessuna etichetta interna, nessun messaggio di eccezione
+nei `params`; il dettaglio tecnico sta solo in `message` («Dettagli tecnici»).
+
+1. **Niente eccezioni grezze nei params.** `comparison.csv.invalid_structure`
+   interpolava `str(exc)` della libreria csv: il param `detail` esce dai
+   `params` e dalle frasi; l'eccezione resta nel `message`. Il ratchet lo
+   impedisce per sempre: `tools/census_domain_raises.py::
+params_with_raw_exception_text` segnala i params che referenziano un alias
+   di `except` o chiamano `repr()` (test nel baseline).
+2. **Le etichette interne sono chiavi del catalogo, non parole.** Nuova
+   sezione `labels` del catalogo e UN solo meccanismo `{param@label}` risolto
+   dalla lingua corrente, identico nei due lati (`format_message` nel motore,
+   `formatErrorPlaceholders` nel client). Migrati: `side` del confronto
+   (`comparison.previous`/`comparison.updated` → «listino precedente»/
+   «listino aggiornato»), `kind` di `materials.source_uri_required`
+   (`materials.kind.*`), `from`/`to` di `work.transition_invalid`
+   (`work.status.*`), `kind` di `policy.entity_not_found` (`policy.entity.*`).
+   `budget.exhausted.delegate` perde il param `delegate` (id attore interno,
+   non traducibile). `kind_invalid`/`status_invalid` restano eco dell'input
+   utente non valido (il raise scatta solo fuori enum). Test da entrambi i
+   lati con param di esempio condivisi (`contracts/i18n/errors.samples.json`):
+   ogni frase italiana composta non contiene enum noti, `left`/`right`, id di
+   attori né chiavi di catalogo non risolte.
+3. **La lingua è della persona.** §3 riscritto: catena persona → workspace →
+   inglese (`resolve_language`), chiavi `language:person:<id>` in `meta`
+   (schema invariato), rotte `people/{person_id}/language` (propria lingua:
+   la persona; altrui: autorità workspace) e `language` del workspace riservata
+   a `require_owner_or_admin` — che ora alza `permission_denied` con
+   `reason=permission.workspace_authority_required` (voce di catalogo). Il
+   ratchet scende di 1: 1088 → **1087**. Screenshot dell'errore confronto it/en
+   in `docs/development/assets/confronto-errore-{it,en}.png` (notifica reale
+   dell'app, corpo reale del motore; il pannello confronto non è raggiungibile
+   dai mock engine perché `EngineWorkIntake` è montato solo dalla ChatStage
+   in modalità simulazione).

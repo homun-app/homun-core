@@ -64,6 +64,28 @@ export async function mockEngine(page: Page): Promise<void> {
         ],
       });
     }
+    if (path.endsWith(`/works/${WORK_ID}/intake`)) {
+      // Nessuna proposta: il lavoro mostra direttamente il pannello confronto.
+      return json({ items: [] });
+    }
+    if (path.includes("/price-comparisons") && route.request().method() === "POST") {
+      // Il corpo vero del motore: reason stabile + params con chiave di
+      // etichetta (side@label → «listino precedente»), mai left/right.
+      return json(
+        {
+          detail: {
+            code: "validation_error",
+            reason: "comparison.csv.not_utf8",
+            params: { side: "comparison.previous" },
+            message: "left: CSV must be UTF-8",
+          },
+        },
+        400,
+      );
+    }
+    if (path.endsWith("/price-comparisons")) {
+      return json({ items: [] });
+    }
     if (path.endsWith("/works")) {
       return json({
         items: [
@@ -74,6 +96,15 @@ export async function mockEngine(page: Page): Promise<void> {
             status: "running",
             version: 1,
             primary_conversation_id: CONVERSATION_ID,
+            plan: [
+              {
+                id: "step-compare",
+                title: "Confronto dei listini",
+                capability: "compare_csv",
+                status: "pending",
+                assignee_id: "person_fabio",
+              },
+            ],
           },
         ],
       });
@@ -112,7 +143,36 @@ export async function mockEngine(page: Page): Promise<void> {
       });
     }
     if (path.endsWith(`/projects/${PROJECT_ID}/materials`) && route.request().method() === "GET") {
-      return json({ items: [] });
+      return json({
+        items: [
+          {
+            id: "mat_prev",
+            project_id: PROJECT_ID,
+            title: "listino-precedente.csv",
+            kind: "file_ref",
+            status: "active",
+            version: 1,
+            origin_name: "listino-precedente.csv",
+            storage_relpath: "managed/mat_prev.csv",
+            content_hash: "abc000",
+            byte_size: 512,
+            extract_status: "extracted",
+          },
+          {
+            id: "mat_next",
+            project_id: PROJECT_ID,
+            title: "listino-aggiornato.csv",
+            kind: "file_ref",
+            status: "active",
+            version: 1,
+            origin_name: "listino-aggiornato.csv",
+            storage_relpath: "managed/mat_next.csv",
+            content_hash: "abc001",
+            byte_size: 512,
+            extract_status: "extracted",
+          },
+        ],
+      });
     }
     if (path.endsWith(`/projects/${PROJECT_ID}/materials/ingest`)) {
       return json(

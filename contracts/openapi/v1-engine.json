@@ -20440,7 +20440,7 @@
     },
     "/v1/workspaces/{workspace_id}/language": {
       "get": {
-        "operationId": "read_language_v1_workspaces__workspace_id__language_get",
+        "operationId": "read_workspace_language_v1_workspaces__workspace_id__language_get",
         "parameters": [
           {
             "in": "path",
@@ -20460,7 +20460,7 @@
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "title": "Response Read Language V1 Workspaces  Workspace Id  Language Get",
+                  "title": "Response Read Workspace Language V1 Workspaces  Workspace Id  Language Get",
                   "type": "object"
                 }
               }
@@ -20478,13 +20478,13 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Read Language",
+        "summary": "Read Workspace Language",
         "tags": [
           "preferences"
         ]
       },
       "put": {
-        "operationId": "write_language_v1_workspaces__workspace_id__language_put",
+        "operationId": "write_workspace_language_v1_workspaces__workspace_id__language_put",
         "parameters": [
           {
             "in": "path",
@@ -20493,6 +20493,38 @@
             "schema": {
               "title": "Workspace Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
             }
           }
         ],
@@ -20514,7 +20546,7 @@
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "title": "Response Write Language V1 Workspaces  Workspace Id  Language Put",
+                  "title": "Response Write Workspace Language V1 Workspaces  Workspace Id  Language Put",
                   "type": "object"
                 }
               }
@@ -20532,7 +20564,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Write Language",
+        "summary": "Write Workspace Language",
         "tags": [
           "preferences"
         ]
@@ -23384,6 +23416,156 @@
         "summary": "Revoke Invite",
         "tags": [
           "identity"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/people/{person_id}/language": {
+      "get": {
+        "operationId": "read_person_language_v1_workspaces__workspace_id__people__person_id__language_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "person_id",
+            "required": true,
+            "schema": {
+              "title": "Person Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Read Person Language V1 Workspaces  Workspace Id  People  Person Id  Language Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Person Language",
+        "tags": [
+          "preferences"
+        ]
+      },
+      "put": {
+        "operationId": "write_person_language_v1_workspaces__workspace_id__people__person_id__language_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "person_id",
+            "required": true,
+            "schema": {
+              "title": "Person Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LanguageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Write Person Language V1 Workspaces  Workspace Id  People  Person Id  Language Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Write Person Language",
+        "tags": [
+          "preferences"
         ]
       }
     },

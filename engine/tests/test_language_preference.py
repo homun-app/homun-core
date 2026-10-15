@@ -1,17 +1,24 @@
-"""Persistent workspace language preference.
+"""Language as a person preference, with the workspace language as default.
 
-The client sets it when the user changes language; the engine uses it ONLY
-for texts it generates by itself (intake labels, channels, chat). HTTP error
-bodies stay neutral (docs/development/2026-10-15-errori-multilingua.md §3).
+Resolution chain: person → workspace → English
+(docs/development/2026-10-15-errori-multilingua.md §3). The engine uses the
+resolved language ONLY for texts it generates by itself (intake catalog
+labels, channels, chat); HTTP error bodies stay neutral.
 """
 import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
-from homun.application.ops.preferences import get_language, resolve_language, set_language
+from homun.application.ops.preferences import (
+    person_language,
+    resolve_language,
+    set_person_language,
+    set_workspace_language,
+    workspace_language,
+)
 from homun.context import create_context
 from homun.domain.errors import ValidationError
-from homun.i18n import SUPPORTED_LANGUAGES
+from homun.i18n import SUPPORTED_LANGUAGES, user_text
 
 
 @pytest.fixture
@@ -21,58 +28,184 @@ def ctx(tmp_path):
     ctx.close()
 
 
-def test_default_language_is_italian_and_set_persists(ctx):
-    assert get_language(ctx) == "it"
-    set_language(ctx, "en")
-    assert get_language(ctx) == "en"
+@pytest.fixture
+def people(ctx):
+    """An owner and two members of the same workspace."""
+    from homun.domain.models import Actor, Person, utc_now
+
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            service = ctx.service.for_store(store)
+            service.apply(Actor(id="person_owner", workspace_id=ctx.workspace_id,
+                                display_name="Owner"), "bootstrap:cmd1", "person.bootstrap", {})
+            for person_id, name in (("person_a", "Anna"), ("person_b", "Bruno")):
+                store.persons[person_id] = Person(
+                    id=person_id, workspace_id=ctx.workspace_id, display_name=name,
+                    role="member", status="active", created_at=utc_now(),
+                )
+        ctx.service.store = store
+    return ("person_owner", "person_a", "person_b")
 
 
-def test_preference_survives_repository_reload(ctx, tmp_path):
-    set_language(ctx, "en")
+def test_no_preference_anywhere_resolves_to_english(ctx):
+    assert workspace_language(ctx) is None
+    assert resolve_language(ctx) == "en"
+
+
+def test_workspace_preference_persists_and_survives_reload(ctx, tmp_path):
+    set_workspace_language(ctx, "it")
+    assert workspace_language(ctx) == "it"
     db_path = ctx.repository.path
     ctx.close()
 
     reopened = create_context(db_path=db_path, data_dir=tmp_path, for_tests=True)
     try:
-        assert get_language(reopened) == "en"
+        assert workspace_language(reopened) == "it"
     finally:
         reopened.close()
 
 
-def test_set_language_rejects_unknown_language_with_reason(ctx):
-    with pytest.raises(ValidationError) as excinfo:
-        set_language(ctx, "klingon")
-    assert excinfo.value.reason == "preferences.language_invalid"
-    assert excinfo.value.params == {"language": "klingon"}
+def test_unknown_language_is_rejected_with_reason_for_person_and_workspace(ctx):
+    with pytest.raises(ValidationError) as workspace_error:
+        set_workspace_language(ctx, "klingon")
+    assert workspace_error.value.reason == "preferences.language_invalid"
+    assert workspace_error.value.params == {"language": "klingon"}
+
+    with pytest.raises(ValidationError) as person_error:
+        set_person_language(ctx, "person_a", "klingon")
+    assert person_error.value.reason == "preferences.language_invalid"
 
 
-def test_resolve_language_prefers_request_then_workspace(ctx):
-    set_language(ctx, "en")
-    assert resolve_language(ctx, None) == "en"
-    assert resolve_language(ctx, "it") == "it"
+def test_two_people_same_workspace_each_get_engine_texts_in_their_language(ctx, people):
+    """Same engine-generated message, each person in their own language."""
+    _owner, anna, bruno = people
+    set_person_language(ctx, anna, "en")
+    set_person_language(ctx, bruno, "it")
+
+    anna_message = user_text("intake.catalog.limits",
+                             language=resolve_language(ctx, person_id=anna))
+    bruno_message = user_text("intake.catalog.limits",
+                              language=resolve_language(ctx, person_id=bruno))
+    assert anna_message == "Limits"
+    assert bruno_message == "Limiti"
 
 
-def test_language_route_roundtrip_and_validation(ctx, monkeypatch):
-    from homun.routes import preferences
+def test_person_without_preference_gets_workspace_language(ctx, people):
+    set_workspace_language(ctx, "en")
+    assert person_language(ctx, "person_a") is None
+    assert resolve_language(ctx, person_id="person_a") == "en"
 
-    monkeypatch.setattr(preferences, "get_context", lambda: ctx)
-    client = TestClient(create_app(session_token="t" * 32, session_actor_id="person_owner"))
-    headers = {"Authorization": "Bearer " + "t" * 32}
-    base = f"/v1/workspaces/{ctx.workspace_id}/language"
+    set_workspace_language(ctx, "it")
+    assert resolve_language(ctx, person_id="person_a") == "it"
 
-    assert client.get(base, headers=headers).json() == {"language": "it"}
-    response = client.put(base, headers=headers, json={"language": "en"})
-    assert response.status_code == 200, response.text
-    assert response.json() == {"language": "en"}
-    assert client.get(base, headers=headers).json() == {"language": "en"}
 
-    invalid = client.put(base, headers=headers, json={"language": "fr"})
-    assert invalid.status_code == 400
-    assert invalid.json()["detail"]["reason"] == "preferences.language_invalid"
+def test_person_preference_wins_over_workspace_and_request_over_all(ctx, people):
+    set_workspace_language(ctx, "en")
+    set_person_language(ctx, "person_a", "it")
+    assert resolve_language(ctx, person_id="person_a") == "it"
+    assert resolve_language(ctx, "en", person_id="person_a") == "en"
 
-    unknown_ws = client.get(f"/v1/workspaces/other/language", headers=headers)
-    assert unknown_ws.status_code == 404
-    assert unknown_ws.json()["detail"]["reason"] == "workspace.unknown"
+
+def _session_client(ctx, people):
+    """App with real person sessions: each Bearer is one workspace person."""
+    from homun.context import reset_context_for_tests
+    from homun.identity.sessions import PersonSessionStore
+
+    owner, anna, bruno = people
+    sessions = PersonSessionStore(ctx.repository.connection(), ctx.repository.lock)
+    tokens = {}
+    for person_id in (owner, anna, bruno):
+        token = f"session-token-{person_id}"
+        sessions.create(person_id=person_id, device_id=f"device-{person_id}", token=token)
+        tokens[person_id] = token
+    reset_context_for_tests(ctx)
+    client = TestClient(create_app(session_token="t" * 32, session_actor_id=owner))
+    return client, tokens
+
+
+def _teardown_global_context():
+    """Detach the test context from the process-wide slot (the fixture closes it)."""
+    from homun.context import reset_context_for_tests
+
+    reset_context_for_tests(None)
+
+
+def test_person_routes_roundtrip_and_authority(ctx, people):
+    owner, anna, bruno = people
+    try:
+        client, tokens = _session_client(ctx, people)
+        base = f"/v1/workspaces/{ctx.workspace_id}"
+        anna_headers = {"Authorization": f"Bearer {tokens[anna]}"}
+        owner_headers = {"Authorization": f"Bearer {tokens[owner]}"}
+
+        # A person sets their own language.
+        own = client.put(f"{base}/people/{anna}/language",
+                         headers=anna_headers, json={"language": "en"})
+        assert own.status_code == 200, own.text
+        assert own.json() == {"language": "en"}
+        assert person_language(ctx, anna) == "en"
+
+        # Someone else's language needs workspace authority.
+        forbidden = client.put(f"{base}/people/{bruno}/language",
+                               headers=anna_headers, json={"language": "en"})
+        assert forbidden.status_code == 403
+        detail = forbidden.json()["detail"]
+        assert detail["code"] == "permission_denied"
+        assert detail["reason"] == "permission.workspace_authority_required"
+
+        # The owner can set another person's language.
+        granted = client.put(f"{base}/people/{bruno}/language",
+                             headers=owner_headers, json={"language": "it"})
+        assert granted.status_code == 200, granted.text
+        assert person_language(ctx, bruno) == "it"
+
+        # Unknown person: typed not_found with reason.
+        unknown = client.put(f"{base}/people/person_ghost/language",
+                             headers=owner_headers, json={"language": "it"})
+        assert unknown.status_code == 404
+        assert unknown.json()["detail"]["reason"] == "preferences.person_unknown"
+
+        # Reading falls back person → workspace → English.
+        assert client.get(f"{base}/people/{anna}/language",
+                          headers=anna_headers).json() == {"language": "en"}
+        set_workspace_language(ctx, "it")
+        ghost_headers = {"Authorization": "Bearer " + "t" * 32}
+        assert client.get(f"{base}/people/{bruno}/language",
+                          headers=ghost_headers).json() == {"language": "it"}
+    finally:
+        _teardown_global_context()
+
+
+def test_workspace_language_change_requires_authority(ctx, people):
+    owner, anna, _bruno = people
+    try:
+        client, tokens = _session_client(ctx, people)
+        base = f"/v1/workspaces/{ctx.workspace_id}/language"
+        anna_headers = {"Authorization": f"Bearer {tokens[anna]}"}
+        owner_headers = {"Authorization": "Bearer " + "t" * 32}
+
+        # A plain member cannot change the workspace default.
+        denied = client.put(base, headers=anna_headers, json={"language": "en"})
+        assert denied.status_code == 403
+        detail = denied.json()["detail"]
+        assert detail["code"] == "permission_denied"
+        assert detail["reason"] == "permission.workspace_authority_required"
+        assert workspace_language(ctx) is None
+
+        # The owner can, and the value round-trips.
+        allowed = client.put(base, headers=owner_headers, json={"language": "it"})
+        assert allowed.status_code == 200, allowed.text
+        assert client.get(base, headers=owner_headers).json() == {"language": "it"}
+
+        invalid = client.put(base, headers=owner_headers, json={"language": "fr"})
+        assert invalid.status_code == 400
+        assert invalid.json()["detail"]["reason"] == "preferences.language_invalid"
+
+        unknown_ws = client.get("/v1/workspaces/other/language", headers=owner_headers)
+        assert unknown_ws.status_code == 404
+        assert unknown_ws.json()["detail"]["reason"] == "workspace.unknown"
+    finally:
+        _teardown_global_context()
 
 
 def test_supported_languages_are_it_and_en():

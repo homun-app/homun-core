@@ -55,7 +55,7 @@ def require_owner_or_admin(
     person = store.persons.get(actor.id)
     if person is None or person.status != "active" or person.role not in ("owner", "admin"):
         from homun.domain.errors import PermissionDeniedError
-        raise PermissionDeniedError(message)
+        raise PermissionDeniedError(message, reason="permission.workspace_authority_required")
     return person
 
 
