@@ -123,10 +123,10 @@ def propose(ctx, actor, work_id, body):
     requested_language = body.get('language')
     requested_language = (requested_language.strip().lower()[:8] or None
                           if isinstance(requested_language, str) else None)
-    # A per-request language wins (routing aid); the workspace preference
-    # grounds the engine-generated texts (intake catalog labels).
+    # A per-request language wins (routing aid); otherwise the texts this
+    # engine generates for THIS person follow the person → workspace → en chain.
     from homun.application.ops.preferences import resolve_language
-    language = resolve_language(ctx, requested_language)
+    language = resolve_language(ctx, requested_language, person_id=actor.id)
     from homun.application.work import budgets as work_budgets
     from homun.domain.models import BudgetCounters
     # Reserve before the provider call: exhaustion is durable and typed, and a

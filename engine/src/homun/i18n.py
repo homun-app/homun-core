@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Any
 
 SUPPORTED_LANGUAGES = ("it", "en")
-DEFAULT_LANGUAGE = "it"
+# Last step of the documented resolution chain: person → workspace → English
+# (docs/development/2026-10-15-errori-multilingua.md §3).
+DEFAULT_LANGUAGE = "en"
 _CONTRACT_DIR = Path("contracts") / "i18n"
 _PLACEHOLDER = re.compile(r"\{(\w+)(?:@(\w+))?\}")
 

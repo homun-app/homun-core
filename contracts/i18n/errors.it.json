@@ -4,6 +4,8 @@
   "errors": {
     "workspace.unknown": "Spazio di lavoro sconosciuto su questo motore.",
     "preferences.language_invalid": "Lingua non supportata: {language}.",
+    "preferences.person_unknown": "Persona sconosciuta in questo spazio di lavoro.",
+    "permission.workspace_authority_required": "Questa azione richiede l'autorità dello spazio di lavoro: solo un proprietario o un amministratore può compierla.",
     "materials.workspace_unknown": "Spazio di lavoro sconosciuto su questo motore.",
     "materials.upload.too_large": "Il file supera il limite di caricamento ({max_bytes} byte).",
     "materials.blob.absent": "Il materiale non ha contenuto memorizzato.",
