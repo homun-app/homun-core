@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from homun.context import get_context
 from homun.domain.errors import DomainError, NotFoundError, ValidationError
 from homun.memory.types import MemoryNote
+from homun.routes.domain_support import _http_error
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/memories", tags=["memory"])
 
@@ -52,16 +53,6 @@ def _require_workspace(workspace_id: str) -> None:
 def _actor_id(x_homun_actor_id: str | None) -> str:
     return (x_homun_actor_id or "person_local").strip() or "person_local"
 
-
-def _http_error(exc: DomainError) -> HTTPException:
-    status = {
-        "validation_error": 400,
-        "not_found": 404,
-    }.get(exc.code, 400)
-    return HTTPException(
-        status_code=status,
-        detail={"code": exc.code, "message": exc.message},
-    )
 
 
 @router.get("", response_model=MemoryListResponse)

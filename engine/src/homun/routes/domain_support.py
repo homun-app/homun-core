@@ -13,6 +13,7 @@ def _actor_from_headers(
             status_code=401,
             detail={
                 "code": "unauthorized",
+                "reason": "permission.actor_header_missing",
                 "message": "Missing X-Homun-Actor-Id header",
             },
         )
@@ -22,6 +23,16 @@ def _actor_from_headers(
         display_name=actor_name or actor_id,
         kind="agent" if actor_id.startswith("agent_") else "person",
     )
+
+
+def error_payload(exc: DomainError) -> dict:
+    """Stable machine-readable body: `reason`/`params` only when migrated."""
+    payload: dict = {"code": exc.code, "message": exc.message}
+    if exc.reason is not None:
+        payload["reason"] = exc.reason
+    if exc.params is not None:
+        payload["params"] = exc.params
+    return payload
 
 
 def _http_error(exc: DomainError) -> HTTPException:
@@ -36,7 +47,7 @@ def _http_error(exc: DomainError) -> HTTPException:
     }.get(exc.code, 400)
     return HTTPException(
         status_code=status,
-        detail={"code": exc.code, "message": exc.message},
+        detail=error_payload(exc),
     )
 
 

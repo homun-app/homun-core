@@ -4,13 +4,22 @@ from __future__ import annotations
 
 
 class DomainError(Exception):
-    """Base domain failure."""
+    """Base domain failure.
+
+    `message` is technical English for logs and the client's «Dettagli tecnici»;
+    the user-facing sentence is composed from `reason` via the shared catalog
+    (docs/development/2026-10-15-errori-multilingua.md). Both are optional so
+    pre-migration call sites keep working unchanged.
+    """
 
     code: str = "domain_error"
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, *, reason: str | None = None,
+                 params: dict[str, str | int | float] | None = None) -> None:
         super().__init__(message)
         self.message = message
+        self.reason = reason
+        self.params = params
 
 
 class ValidationError(DomainError):
