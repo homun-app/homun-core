@@ -199,37 +199,12 @@
       "count": 1
     }
   },
-  "packages/ui/src/components/badge.tsx": {
-    "react-refresh/only-export-components": {
-      "count": 1
-    }
-  },
   "packages/ui/src/components/button-group.tsx": {
     "react-refresh/only-export-components": {
       "count": 1
     }
   },
   "packages/ui/src/components/button.tsx": {
-    "react-refresh/only-export-components": {
-      "count": 1
-    }
-  },
-  "packages/ui/src/components/form.tsx": {
-    "react-refresh/only-export-components": {
-      "count": 1
-    }
-  },
-  "packages/ui/src/components/navigation-menu.tsx": {
-    "react-refresh/only-export-components": {
-      "count": 1
-    }
-  },
-  "packages/ui/src/components/sidebar.tsx": {
-    "react-refresh/only-export-components": {
-      "count": 1
-    }
-  },
-  "packages/ui/src/components/toggle.tsx": {
     "react-refresh/only-export-components": {
       "count": 1
     }

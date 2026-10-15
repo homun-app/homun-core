@@ -38,45 +38,8 @@
     // Dipendenza diretta dei due file sopra (Choice, JourneyField): eliminabile
     // solo insieme a loro.
     "apps/web/src/components/builder/FirstWorkFields.tsx",
-    // Componenti shadcn-ui in packages/ui non (più) usati dall'app web:
-    // inventario completo pronto per una decisione dedicata, vedi
-    // docs/SVILUPPO.md "Pulizia codice morto".
-    "packages/ui/src/components/accordion.tsx",
-    "packages/ui/src/components/alert-dialog.tsx",
-    "packages/ui/src/components/alert.tsx",
-    "packages/ui/src/components/aspect-ratio.tsx",
-    "packages/ui/src/components/avatar.tsx",
-    "packages/ui/src/components/badge.tsx",
-    "packages/ui/src/components/breadcrumb.tsx",
-    "packages/ui/src/components/calendar.tsx",
-    "packages/ui/src/components/card.tsx",
-    "packages/ui/src/components/carousel.tsx",
-    "packages/ui/src/components/chart.tsx",
-    "packages/ui/src/components/checkbox.tsx",
-    "packages/ui/src/components/collapsible.tsx",
-    "packages/ui/src/components/context-menu.tsx",
-    "packages/ui/src/components/drawer.tsx",
-    "packages/ui/src/components/form.tsx",
-    "packages/ui/src/components/input-otp.tsx",
-    "packages/ui/src/components/label.tsx",
-    "packages/ui/src/components/menubar.tsx",
-    "packages/ui/src/components/navigation-menu.tsx",
-    "packages/ui/src/components/pagination.tsx",
-    "packages/ui/src/components/progress.tsx",
-    "packages/ui/src/components/radio-group.tsx",
-    "packages/ui/src/components/resizable.tsx",
-    "packages/ui/src/components/scroll-area.tsx",
-    "packages/ui/src/components/sheet.tsx",
-    "packages/ui/src/components/sidebar.tsx",
-    "packages/ui/src/components/skeleton.tsx",
-    "packages/ui/src/components/slider.tsx",
-    "packages/ui/src/components/sonner.tsx",
-    "packages/ui/src/components/switch.tsx",
-    "packages/ui/src/components/table.tsx",
-    "packages/ui/src/components/tabs.tsx",
-    "packages/ui/src/components/toggle-group.tsx",
-    "packages/ui/src/components/toggle.tsx",
-    "packages/ui/src/hooks/use-mobile.tsx",
-    "packages/ui/src/hooks/use-sidebar-shortcut.tsx"
+    // Importato da FirstWorkFields/FirstWorkJourney (sopra): eliminabile solo
+    // insieme a loro.
+    "packages/ui/src/components/label.tsx"
   ]
 }
