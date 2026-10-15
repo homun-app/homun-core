@@ -21,8 +21,8 @@ SealedBox Ed25519→X25519, secretstream XChaCha20-Poly1305).
   "version": 2,
   "chunk_size": 65536,
   "header_b64": "…secretstream header…",
-  "chunks": [{"index": 0, "sha256": "…ciphertext…", "size": 65553}],
-  "recipients": [{"device_fingerprint": "sha256:…", "wrapped_key_b64": "…"}],
+  "chunks": [{ "index": 0, "sha256": "…ciphertext…", "size": 65553 }],
+  "recipients": [{ "device_fingerprint": "sha256:…", "wrapped_key_b64": "…" }],
   "publisher_fingerprint": "sha256:…",
   "publisher_signature_b64": "…Ed25519 detached…"
 }
@@ -131,13 +131,13 @@ affiancata (fingerprint separato nel pairing), con migrazione dei wrap.
 
 Avversari considerati:
 
-| Avversario | Protezione |
-| --- | --- |
-| **Relay/rete** (vede tutto il traffico) | Ciphertext opaco senza wrap; manifest firmato (alterazioni → firma invalida); chunk legati a oggetto/versione via AAD; niente hash in chiaro da confermare. |
-| **Host compromesso** (serve dati falsi/vecchi) | Manifest servito al posto di un altro → `manifest_mismatch` (valori attesi); versione vecchia al posto di nuova → AAD + `version_rollback`; contenuto sostituito → firma publisher + hash chunk + AEAD. Un host può comunque **rifiutarsi di servire** (DoS): non protetto. |
-| **Host curioso** (legge il disco) | Vede solo ciphertext, wrap e hash ciphertext; la chiave oggetto è nei wrap SealedBox. |
-| **Membro malevolo con `write`** | Puà pubblicare solo: nel proprio progetto di appartenenza dell'oggetto (P1), con manifest firmato dal proprio dispositivo attivo (P2), entro i limiti/quota (P5). Può creare contenuti per un destinatario, ma il destinatario vede **chi** ha pubblicato (`publisher_fingerprint`) e la firma è verificata contro i dispositivi attivi dello snapshot (revoca → `publisher_not_trusted`). Può dichiarare destinatari arbitrari (wrap verso chiunque) — limite noto: l'annuncio non equivale a consenso. |
-| **Peer con grant di lettura ma senza wrap** | Vede evento di annuncio (senza hash/dimensione esatta) e listing; manifest e chunk richiedono grant + wrap per un proprio dispositivo. |
+| Avversario                                     | Protezione                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Relay/rete** (vede tutto il traffico)        | Ciphertext opaco senza wrap; manifest firmato (alterazioni → firma invalida); chunk legati a oggetto/versione via AAD; niente hash in chiaro da confermare.                                                                                                                                                                                                                                                                                                                                              |
+| **Host compromesso** (serve dati falsi/vecchi) | Manifest servito al posto di un altro → `manifest_mismatch` (valori attesi); versione vecchia al posto di nuova → AAD + `version_rollback`; contenuto sostituito → firma publisher + hash chunk + AEAD. Un host può comunque **rifiutarsi di servire** (DoS): non protetto.                                                                                                                                                                                                                              |
+| **Host curioso** (legge il disco)              | Vede solo ciphertext, wrap e hash ciphertext; la chiave oggetto è nei wrap SealedBox.                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Membro malevolo con `write`**                | Puà pubblicare solo: nel proprio progetto di appartenenza dell'oggetto (P1), con manifest firmato dal proprio dispositivo attivo (P2), entro i limiti/quota (P5). Può creare contenuti per un destinatario, ma il destinatario vede **chi** ha pubblicato (`publisher_fingerprint`) e la firma è verificata contro i dispositivi attivi dello snapshot (revoca → `publisher_not_trusted`). Può dichiarare destinatari arbitrari (wrap verso chiunque) — limite noto: l'annuncio non equivale a consenso. |
+| **Peer con grant di lettura ma senza wrap**    | Vede evento di annuncio (senza hash/dimensione esatta) e listing; manifest e chunk richiedono grant + wrap per un proprio dispositivo.                                                                                                                                                                                                                                                                                                                                                                   |
 
 Cosa questo protocollo **NON** protegge:
 
