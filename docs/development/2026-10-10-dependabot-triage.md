@@ -122,10 +122,25 @@ gh api -X PATCH "repos/homun-app/homun-core/dependabot/alerts/130" \
 
 ## Nota — copertura parziale dell'override `katex` (alert 151)
 
-L'override `katex: ^0.18.11` in `package.json` chiude l'alert 151 e porta a
-0.18.11 la copia di KaTeX risolta da npm, usata dalla strada principale:
-formule nei messaggi della chat (`@streamdown/math` → `rehype-katex`), cioè
-dove arriva testo esterno (output del modello, messaggi dei collaboratori).
+L'override `katex` in `package.json` chiude l'alert 151 e porta a
+0.19.0 la copia di KaTeX risolta da npm, usata dal rendering delle formule di
+`MessageResponse` (`@streamdown/math` → `rehype-katex`), cioè dove arriva
+testo esterno (output del modello, messaggi dei collaboratori).
+La versione è stata portata da `^0.18.11` a `^0.19.0` (2026-10-15): la 0.18.11
+era stata pubblicata per errore con cambiamenti incompatibili e npm avvisa di
+usare la 0.19.0, che li ripubblica come release regolare (le note di rilascio
+documentano come unica rottura la segnalazione dei glifi mancanti via strict
+con codice `symbolNotInFont`; `rehype-katex` passa `strict: 'ignore'`, quindi
+non ci tocca).
+
+Verifica del rendering con la 0.19.0 (2026-10-15, dev server + componente
+reale): inline `$$e^{i\pi}+1=0$$` e blocco con recinto `$$` su più righe sono
+resi correttamente. Tre precisazioni emerse: il singolo dollaro `$...$` è
+disattivato dal default di `@streamdown/math`
+(`singleDollarTextMath: false`) e `\(...\)` non è supportato da remark-math;
+il blocco display richiede il recinto su righe separate; il CSS
+`katex/dist/katex.min.css` restituito da `getStyles()` oggi non è incluso da
+nessuna pagina dell'app, quindi le formule arrivano senza foglio di stile.
 
 La correzione **non copre** le formule dentro i diagrammi mermaid: `mermaid`
 11.17.2 incorpora nella propria distribuzione una copia di **KaTeX 0.16.47**
@@ -137,7 +152,7 @@ nell'app per quella strada, anche se l'alert risulterà chiuso.
 Rischio residuo basso: l'advisory (GHSA-238p-pmpm-9mq7, severità low) è
 sfruttabile solo in presenza di una prototype pollution già esistente
 nell'applicazione. Effetto collaterale possibile: il CSS caricato è quello di
-KaTeX 0.18 (`@streamdown/math` → `katex/dist/katex.min.css`), mentre mermaid
+KaTeX 0.19 (`@streamdown/math` → `katex/dist/katex.min.css`), mentre mermaid
 produce markup 0.16; poiché la 0.18 ha rinominato alcune classi interne, le
 formule _dentro_ i diagrammi mermaid possono avere difetti di stile.
 
