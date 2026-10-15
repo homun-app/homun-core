@@ -63,4 +63,6 @@ _WORK_TRANSITIONS: dict[WorkStatus, frozenset[WorkStatus]] = {
 def assert_work_transition(current: WorkStatus, target: WorkStatus) -> None:
     allowed = _WORK_TRANSITIONS.get(current, frozenset())
     if target not in allowed:
-        raise InvalidTransitionError(f"Cannot transition work from {current} to {target}")
+        raise InvalidTransitionError(f"Cannot transition work from {current} to {target}",
+                                 reason="work.transition_invalid",
+                                 params={"from": current, "to": target})

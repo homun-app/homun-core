@@ -23,7 +23,8 @@ def require_confirmed_intake(store, work_id, capability=None):
     proposal = latest_intake(store, work_id)
     if proposal and (proposal['status'] != 'confirmed'
                      or (capability is not None and proposal['capability'] != capability)):
-        raise ConflictError('Confirm the intake before assigning or executing this work')
+        raise ConflictError('Confirm the intake before assigning or executing this work',
+                            reason='policy.intake_unconfirmed')
 
 
 def require_intake_command_admission(store, command_type, payload):

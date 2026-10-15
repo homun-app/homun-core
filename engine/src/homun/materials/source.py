@@ -15,18 +15,23 @@ from homun.policy import require_project_capability
 def verify_material(ctx, store, actor, material_id, *, max_bytes):
     material = store.materials.get(material_id)
     if not material:
-        raise NotFoundError('Material not found')
+        raise NotFoundError('Material not found', reason='materials.not_found',
+                            params={'material_id': material_id})
     require_project_capability(store, actor, material.project_id, 'read')
     if material.status != 'active' or not material.storage_relpath or not material.content_hash:
-        raise ValidationError('The tool requires active managed file materials')
+        raise ValidationError('The tool requires active managed file materials',
+                              reason='materials.managed_required')
     if not material.byte_size or material.byte_size > max_bytes:
-        raise ValidationError(f'Material must be between 1 byte and {max_bytes} bytes')
+        raise ValidationError(f'Material must be between 1 byte and {max_bytes} bytes',
+                              reason='materials.size_out_of_range', params={'max_bytes': max_bytes})
     try:
         data = read_material_blob(ctx.data_dir, material.storage_relpath, max_bytes=max_bytes)
     except (OSError, ValueError) as exc:
-        raise ConflictError('Material source is unavailable') from exc
+        raise ConflictError('Material source is unavailable',
+                            reason='materials.source_unavailable') from exc
     digest = hashlib.sha256(data).hexdigest()
     if digest != material.content_hash or len(data) != material.byte_size:
-        raise ConflictError('Material source integrity verification failed')
+        raise ConflictError('Material source integrity verification failed',
+                            reason='materials.source_integrity_failed')
     return {'id': material.id, 'title': material.title, 'sha256': digest,
             'version': material.version}, data

@@ -28,9 +28,12 @@ def recover_materials(ctx) -> list[str]:
 def ingest_file(ctx, actor, *, command_id, project_id, filename, data,
                 title=None, relative_path=None, mime_type=None):
     if len(data) > MAX_UPLOAD_BYTES:
-        raise MaterialTooLargeError(f'Material exceeds {MAX_UPLOAD_BYTES} bytes')
+        raise MaterialTooLargeError(f'Material exceeds {MAX_UPLOAD_BYTES} bytes',
+                                  reason='materials.upload.too_large',
+                                  params={'max_bytes': MAX_UPLOAD_BYTES})
     if not command_id.strip() or len(command_id) > 200:
-        raise ValidationError('Invalid material command identity')
+        raise ValidationError('Invalid material command identity',
+                              reason='materials.command_identity_invalid')
     require_project_capability(ctx.repository.load(), actor, project_id, 'write')
     rel = relative_path.strip() if relative_path and relative_path.strip() else None
     fname = (filename or rel or 'upload').strip()

@@ -62,7 +62,8 @@ def _admit_allocation(budget, actor_id, estimate: BudgetCounters):
                         + allocation.unknown.attempts + estimate.attempts)
     if charged_attempts > allocation.model_attempts:
         raise BudgetExhaustedError(
-            f'Delegate budget exhausted for {actor_id}; raise its allocation with work.set_budget')
+            f'Delegate budget exhausted for {actor_id}; raise its allocation with work.set_budget',
+            reason='budget.exhausted.delegate', params={'delegate': actor_id})
     for cap, axis in ((allocation.input_tokens, 'input_tokens'), (allocation.output_tokens, 'output_tokens')):
         if cap is None:
             continue
@@ -70,7 +71,8 @@ def _admit_allocation(budget, actor_id, estimate: BudgetCounters):
                    + getattr(allocation.unknown, axis))
         if _token_cap_exhausted(cap, charged, getattr(estimate, axis), estimate.attempts):
             raise BudgetExhaustedError(
-                f'Delegate budget exhausted for {actor_id}; raise its allocation with work.set_budget')
+                f'Delegate budget exhausted for {actor_id}; raise its allocation with work.set_budget',
+                reason='budget.exhausted.delegate', params={'delegate': actor_id})
 
 
 def check_capacity(store, actor, work_id, estimate, *, accounting_actor_id=None):

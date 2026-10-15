@@ -14,19 +14,23 @@ def _plan_propose(ctx: CommandContext, actor: Actor, command_id: str, payload: d
     work = ctx.get_work(str(payload.get("work_id", "")))
     ctx._require_expected_version(work.version, payload.get("expected_version"))
     if work.status not in {WorkStatus.DRAFT, WorkStatus.READY}:
-        raise ValidationError("Plan can only be proposed while draft or ready")
+        raise ValidationError("Plan can only be proposed while draft or ready",
+                           reason="plan.propose.state_invalid")
     steps_raw = payload.get("steps")
     if not isinstance(steps_raw, list) or not steps_raw:
-        raise ValidationError("Plan requires at least one step")
+        raise ValidationError("Plan requires at least one step",
+                           reason="plan.propose.needs_steps")
     steps: list[PlanStep] = []
     for item in steps_raw:
         if not isinstance(item, dict):
-            raise ValidationError("Each step must be an object")
+            raise ValidationError("Each step must be an object",
+                               reason="plan.step.not_object")
         step_id = str(item.get("id") or new_id("step"))
         title = str(item.get("title", "")).strip()
         assignee_id = str(item.get("assignee_id", "")).strip()
         if not title or not assignee_id:
-            raise ValidationError("Each step needs title and assignee_id")
+            raise ValidationError("Each step needs title and assignee_id",
+                               reason="plan.step.fields_missing")
         steps.append(
             PlanStep(
                 id=step_id,
@@ -76,9 +80,9 @@ def _plan_accept(ctx: CommandContext, actor: Actor, command_id: str, payload: di
     ctx._require_expected_version(work.version, payload.get("expected_version"))
     plan = ctx.current_plan(work)
     if plan is None:
-        raise ValidationError("No plan to accept")
+        raise ValidationError("No plan to accept", reason="plan.accept.missing")
     if not all(step.assignee_id and step.title for step in plan.steps):
-        raise ValidationError("Plan incomplete")
+        raise ValidationError("Plan incomplete", reason="plan.accept.incomplete")
     assert_work_transition(work.status, WorkStatus.READY)
     work.status = WorkStatus.READY
     work.version += 1
@@ -101,7 +105,7 @@ def _plan_revise(ctx: CommandContext, actor: Actor, command_id: str, payload: di
     ctx._require_expected_version(work.version, payload.get("expected_version"))
     current = ctx.current_plan(work)
     if current is None:
-        raise ValidationError("No plan to revise")
+        raise ValidationError("No plan to revise", reason="plan.revise.missing")
 
     # Copy previous steps; succeeded ones stay historical with same ids/status.
     new_steps: list[PlanStep] = [step.model_copy(deep=True) for step in current.steps]
@@ -113,11 +117,13 @@ def _plan_revise(ctx: CommandContext, actor: Actor, command_id: str, payload: di
     new_step_payload = payload.get("new_step")
     if new_step_payload is not None:
         if not isinstance(new_step_payload, dict):
-            raise ValidationError("new_step must be an object")
+            raise ValidationError("new_step must be an object",
+                               reason="plan.revise.new_step_not_object")
         title = str(new_step_payload.get("title", "")).strip()
         assignee_id = str(new_step_payload.get("assignee_id", "")).strip()
         if not title or not assignee_id:
-            raise ValidationError("new_step needs title and assignee_id")
+            raise ValidationError("new_step needs title and assignee_id",
+                               reason="plan.revise.new_step_fields_missing")
         step = PlanStep(
             id=str(new_step_payload.get("id") or new_id("step")),
             title=title,
@@ -129,7 +135,9 @@ def _plan_revise(ctx: CommandContext, actor: Actor, command_id: str, payload: di
         if insert_after:
             index = next((i for i, s in enumerate(new_steps) if s.id == insert_after), None)
             if index is None:
-                raise ValidationError(f"Unknown insert_after_step_id: {insert_after}")
+                raise ValidationError(f"Unknown insert_after_step_id: {insert_after}",
+                                   reason="plan.revise.insert_after_unknown",
+                                   params={"step_id": insert_after})
             # Cannot insert "into" a succeeded step's identity; append after it.
             if new_steps[index].status == StepStatus.SUCCEEDED:
                 new_steps.insert(index + 1, step)
@@ -143,13 +151,16 @@ def _plan_revise(ctx: CommandContext, actor: Actor, command_id: str, payload: di
         remove_step_id = str(remove_step_id)
         target = next((s for s in new_steps if s.id == remove_step_id), None)
         if target is None:
-            raise ValidationError("Step to remove not found")
+            raise ValidationError("Step to remove not found",
+                                   reason="plan.revise.step_remove_unknown")
         if target.status == StepStatus.SUCCEEDED:
-            raise ValidationError("Cannot remove a succeeded step; supersede via new revision only")
+            raise ValidationError("Cannot remove a succeeded step; supersede via new revision only",
+                                   reason="plan.revise.step_succeeded_locked")
         new_steps = [s for s in new_steps if s.id != remove_step_id]
 
     if not new_steps:
-        raise ValidationError("Revised plan would be empty")
+        raise ValidationError("Revised plan would be empty",
+                        reason="plan.revise.empty")
 
     revision_number = work.current_plan_revision + 1
     plan = PlanRevision(
