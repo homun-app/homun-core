@@ -18,6 +18,9 @@ hiddenimports += collect_submodules('pydantic_ai.models')
 hiddenimports += collect_submodules('pydantic_ai.providers')
 for distribution in ('homun-engine', 'dbos', 'pydantic-ai-slim', 'uvicorn'):
     datas += copy_metadata(distribution, recursive=True)
+# Shared error catalog (contracts/i18n): read at runtime by homun.i18n from
+# <bundle>/contracts/i18n — the same files the web client imports.
+datas += [(str(root.parent.parent / 'contracts' / 'i18n'), 'contracts/i18n')]
 a = Analysis([str(root / 'entrypoint.py')], pathex=[], binaries=binaries, datas=datas,
              hiddenimports=hiddenimports, hookspath=[], runtime_hooks=[],
              excludes=['mem0', 'qdrant_client', 'pytest', 'tkinter'], noarchive=False)

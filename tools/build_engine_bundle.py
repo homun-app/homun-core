@@ -144,10 +144,12 @@ def main():
     def engine_inputs():
         sources = sorted((ROOT / 'engine/src/homun').rglob('*.py'))
         prompts = sorted((ROOT / 'engine/src/homun').rglob('*.txt'))
-        return sources, prompts
+        # the spec bundles contracts/i18n into the engine: it is a build input
+        catalogs = sorted((ROOT / 'contracts/i18n').glob('*.json'))
+        return sources, prompts, catalogs
 
-    sources, prompt_files = engine_inputs()
-    input_paths = sources + prompt_files + [
+    sources, prompt_files, catalog_files = engine_inputs()
+    input_paths = sources + prompt_files + catalog_files + [
         ROOT / name for name in ('engine/requirements.lock', 'engine/requirements-packaging.lock',
                                   'engine/packaging/homun-engine.spec', 'engine/packaging/entrypoint.py',
                                   'engine/pyproject.toml', 'tools/build_engine_bundle.py')]
