@@ -489,6 +489,37 @@ def test_rollback_to_previously_opened_version_is_rejected(tmp_path):
         _open(v1, log.last_version("obj_rb"))
 
 
+def test_received_version_log_fails_closed_on_corrupt_file(tmp_path):
+    """Verifica E: un log delle versioni ricevute corrotto NON riparte in
+    silenzio da {} — la protezione dal rollback si spegnerebbe. Errore
+    tipizzato version_log_corrupt; niente decifra finché il file non è
+    ripristinato."""
+    from homun.peers.object_crypto import ReceivedVersionLog
+
+    path = tmp_path / "received-versions.json"
+    path.write_text("{corrupted!", encoding="utf-8")
+    with pytest.raises(ObjectCryptoError) as excinfo:
+        ReceivedVersionLog(path)
+    assert excinfo.value.reason == "object_transfer.version_log_corrupt"
+
+    # JSON valido ma non un oggetto → comunque corrotto.
+    path.write_text("[1, 2]", encoding="utf-8")
+    with pytest.raises(ObjectCryptoError):
+        ReceivedVersionLog(path)
+
+    # Valori di versione non interi → corrotto.
+    path.write_text('{"obj_a": "due"}', encoding="utf-8")
+    with pytest.raises(ObjectCryptoError):
+        ReceivedVersionLog(path)
+
+    # Ripristinato il file (rimosso dall'operatore), il log torna a funzionare.
+    path.unlink()
+    log = ReceivedVersionLog(path)
+    assert log.last_version("obj_a") is None
+    log.record("obj_a", 3)
+    assert ReceivedVersionLog(path).last_version("obj_a") == 3
+
+
 def test_manifest_does_not_carry_plaintext_hash_or_exact_size():
     """Review P4: the cleartext manifest must not leak the plaintext hash or
     the exact plaintext size — integrity comes from AEAD + signature."""

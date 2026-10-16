@@ -91,7 +91,8 @@
     "object_transfer.project_mismatch": "The object belongs to another project and cannot be republished elsewhere.",
     "object_transfer.version_immutable": "This object version already exists and cannot be replaced: publish a later version.",
     "object_transfer.version_not_increasing": "The new version must be greater than the latest published one.",
-    "object_transfer.version_dir_stale": "The version folder already exists without a manifest: a previous publish was left incomplete. Check the folder before publishing again."
+    "object_transfer.version_dir_stale": "The version folder already exists without a manifest: a previous publish was left incomplete. Check the folder before publishing again.",
+    "object_transfer.version_log_corrupt": "The received-versions log is damaged: no object is decrypted until it is restored."
   },
   "labels": {
     "comparison.previous": "previous price list",

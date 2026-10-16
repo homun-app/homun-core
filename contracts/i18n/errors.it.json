@@ -91,7 +91,8 @@
     "object_transfer.project_mismatch": "L'oggetto appartiene a un altro progetto e non può essere ripubblicato altrove.",
     "object_transfer.version_immutable": "Questa versione dell'oggetto esiste già e non può essere sostituita: pubblica una versione successiva.",
     "object_transfer.version_not_increasing": "La nuova versione deve essere successiva all'ultima già pubblicata.",
-    "object_transfer.version_dir_stale": "La cartella della versione esiste già senza manifest: una pubblicazione precedente è rimasta interrotta. Controlla la cartella prima di ripubblicare."
+    "object_transfer.version_dir_stale": "La cartella della versione esiste già senza manifest: una pubblicazione precedente è rimasta interrotta. Controlla la cartella prima di ripubblicare.",
+    "object_transfer.version_log_corrupt": "Il registro delle versioni ricevute è danneggiato: nessun oggetto viene decifrato finché non viene ripristinato."
   },
   "labels": {
     "comparison.previous": "listino precedente",

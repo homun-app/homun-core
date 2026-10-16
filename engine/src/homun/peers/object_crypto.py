@@ -655,20 +655,33 @@ class ReceivedVersionLog:
     Feed `last_version` into open_object's last_opened_version and call
     `record` after a successful open: a host serving an older manifest is
     then refused (review P3 rollback protection).
+
+    Fail-closed (verifica E): a corrupt or malformed log raises a typed
+    `object_transfer.version_log_corrupt` — restarting silently from `{}`
+    would disable rollback protection, so nothing is decrypted until the
+    operator restores or removes the file.
     """
 
     def __init__(self, path: Path) -> None:
         self._path = Path(path)
         self._versions: dict[str, int] = {}
-        if self._path.is_file():
-            try:
-                loaded = json.loads(self._path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    self._versions = {
-                        str(key): int(value) for key, value in loaded.items()
-                    }
-            except (ValueError, OSError):
-                self._versions = {}
+        if not self._path.is_file():
+            return
+        corrupt = ObjectCryptoError(
+            "Received-version log is corrupt; refusing to decrypt until"
+            " it is restored or removed",
+            reason="object_transfer.version_log_corrupt",
+        )
+        try:
+            loaded = json.loads(self._path.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as exc:
+            raise corrupt from exc
+        if not isinstance(loaded, dict):
+            raise corrupt
+        try:
+            self._versions = {str(key): int(value) for key, value in loaded.items()}
+        except (TypeError, ValueError) as exc:
+            raise corrupt from exc
 
     def last_version(self, object_id: str) -> int | None:
         return self._versions.get(object_id)
