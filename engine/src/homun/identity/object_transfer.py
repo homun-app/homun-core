@@ -16,6 +16,9 @@ from __future__ import annotations
 import base64
 import json
 import re
+import threading
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +52,18 @@ from homun.policy import require_project_capability
 _OBJECT_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
 _VERSION_DIR_RE = re.compile(r"^v(\d+)$")
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows: no flock. The exclusive
+    fcntl = None  # version-dir mkdir still arbitrates cross-process races.
+
 EVENT_PUBLISHED = "object_transfer.published"
+
+# Verifica A: un unico lock dello store transfer serializza la decisione
+# (proprietà + quota) con la scrittura del meta, fra thread e — via flock,
+# dove disponibile — fra processi che condividono la data dir.
+_PUBLISH_LOCK = threading.RLock()
+_VERSION_DIR_WAIT_SECONDS = 2.5
 
 
 class ObjectTransferError(DomainError):
@@ -125,6 +139,67 @@ def _write_meta(version_dir: Path, meta: dict[str, Any]) -> None:
     tmp = _meta_path(version_dir).with_suffix(".tmp")
     tmp.write_text(json.dumps(meta, indent=2, sort_keys=True))
     tmp.replace(_meta_path(version_dir))
+
+
+@contextmanager
+def _publish_section(data_dir: Path):
+    """Sezione critica del publish (verifica A): nessun'altra pubblicazione
+    — thread o processo — può intercalare la verifica di proprietà/quota con
+    la scrittura del meta. Non annidare: put_chunk e le letture non la
+    acquisiscono."""
+    with _PUBLISH_LOCK:
+        lock_handle = None
+        if fcntl is not None:
+            lock_path = Path(data_dir) / "object-transfers.publish.lock"
+            lock_handle = open(lock_path, "a+b")
+            try:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            except OSError:
+                lock_handle.close()
+                lock_handle = None
+        try:
+            yield
+        finally:
+            if lock_handle is not None:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                lock_handle.close()
+
+
+def _create_version_dir(version_dir: Path) -> bool:
+    """Crea la directory di versione in modo ESCLUSIVO (verifica A): chi vince
+    il mkdir è l'unico autore del meta di quella versione, anche fra processi
+    che non condividono il lock."""
+    try:
+        version_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        return False
+    (version_dir / "chunks").mkdir(parents=True, exist_ok=True)
+    return True
+
+
+def _await_existing_version(
+    data_dir: Path,
+    version_dir: Path,
+    *,
+    project_id: str,
+    manifest: TransferManifest,
+) -> tuple[bool, int | None]:
+    """La directory di versione esiste già senza che l'abbiamo creata noi: un
+    altro processo è arrivato primo (o una pubblicazione è rimasta a metà).
+    Attende brevemente il suo meta e ri-applica le regole P1: ripetizione
+    idempotente oppure conflitto tipizzato — mai un secondo vincitore."""
+    deadline = time.monotonic() + _VERSION_DIR_WAIT_SECONDS
+    while not _meta_path(version_dir).is_file():
+        if time.monotonic() >= deadline:
+            raise ConflictError(
+                f"Version directory of {manifest.object_id}"
+                f" v{manifest.version} exists without a manifest",
+                reason="object_transfer.version_dir_stale",
+            )
+        time.sleep(0.02)
+    return _assert_object_ownership(
+        data_dir, project_id=project_id, manifest=manifest
+    )
 
 
 def _person_device_fingerprints(store, person_id: str) -> set[str]:
@@ -372,6 +447,10 @@ def publish_object(
     First publication registers the object_id to the declaring project; later
     publishes must keep the same project, existing versions are immutable
     (identical repetition is idempotent) and new versions must increase.
+    Ownership decision, quota and the meta write run in ONE critical section
+    (verifica A): concurrent publishes of the same object_id have exactly one
+    winner, and the version directory is created exclusively so the guarantee
+    holds even between processes sharing the data dir.
     """
     store = ctx.repository.snapshot()
     require_project_capability(store, actor, project_id, "write")
@@ -380,48 +459,61 @@ def publish_object(
     _assert_no_revoked_recipient_wraps(store, parsed)
     limits = current_transfer_limits()
     validate_manifest_limits(parsed, limits)
-    idempotent, stored_sequence = _assert_object_ownership(
-        ctx.data_dir, project_id=project_id, manifest=parsed
-    )
-    if not idempotent:
-        stored_bytes = _project_stored_bytes(
-            ctx.data_dir, project_id, exclude=(parsed.object_id, parsed.version)
-        )
-        if stored_bytes + parsed.ciphertext_size() > limits.max_project_bytes:
-            raise ValidationError(
-                f"Project transfer storage would exceed {limits.max_project_bytes} bytes",
-                reason="object_transfer.project_quota_exceeded",
-            )
     version_dir = _version_dir(ctx.data_dir, parsed.object_id, parsed.version)
-    if not idempotent:
-        meta = {
-            "project_id": project_id,
-            "object_id": parsed.object_id,
-            "version": parsed.version,
-            "manifest": parsed.to_dict(),
-        }
-        assert_no_credentials_in_transfer(
-            meta, allowed_keys=TRANSFER_META_ALLOWED_KEYS, label="transfer meta"
+    with _publish_section(ctx.data_dir):
+        idempotent, stored_sequence = _assert_object_ownership(
+            ctx.data_dir, project_id=project_id, manifest=parsed
         )
-        _write_meta(version_dir, meta)
-    uploaded = 0
-    if chunks_b64 is not None:
-        if len(chunks_b64) != len(parsed.chunks):
-            raise ValidationError("chunks_b64 length must match manifest.chunks")
-        for index, encoded in enumerate(chunks_b64):
-            try:
-                blob = base64.b64decode(encoded, validate=True)
-            except (ValueError, TypeError) as exc:
-                raise ValidationError(f"Invalid base64 for chunk {index}") from exc
-            put_chunk(ctx, actor, parsed.object_id, parsed.version, index, blob)
-            uploaded += 1
-    if stored_sequence is None:
-        event_sequence = _announce_published(
-            ctx, actor, project_id=project_id, manifest=parsed
-        )
-        _record_event_sequence(version_dir, event_sequence)
-    else:
-        event_sequence = stored_sequence
+        if not idempotent:
+            stored_bytes = _project_stored_bytes(
+                ctx.data_dir, project_id, exclude=(parsed.object_id, parsed.version)
+            )
+            if stored_bytes + parsed.ciphertext_size() > limits.max_project_bytes:
+                raise ValidationError(
+                    f"Project transfer storage would exceed {limits.max_project_bytes} bytes",
+                    reason="object_transfer.project_quota_exceeded",
+                )
+            meta = {
+                "project_id": project_id,
+                "object_id": parsed.object_id,
+                "version": parsed.version,
+                "manifest": parsed.to_dict(),
+            }
+            assert_no_credentials_in_transfer(
+                meta, allowed_keys=TRANSFER_META_ALLOWED_KEYS, label="transfer meta"
+            )
+            if not _create_version_dir(version_dir):
+                idempotent, stored_sequence = _await_existing_version(
+                    ctx.data_dir,
+                    version_dir,
+                    project_id=project_id,
+                    manifest=parsed,
+                )
+                if not idempotent:
+                    raise ConflictError(
+                        f"Version {parsed.version} of {parsed.object_id} already exists",
+                        reason="object_transfer.version_immutable",
+                    )
+            if not idempotent:
+                _write_meta(version_dir, meta)
+        uploaded = 0
+        if chunks_b64 is not None:
+            if len(chunks_b64) != len(parsed.chunks):
+                raise ValidationError("chunks_b64 length must match manifest.chunks")
+            for index, encoded in enumerate(chunks_b64):
+                try:
+                    blob = base64.b64decode(encoded, validate=True)
+                except (ValueError, TypeError) as exc:
+                    raise ValidationError(f"Invalid base64 for chunk {index}") from exc
+                put_chunk(ctx, actor, parsed.object_id, parsed.version, index, blob)
+                uploaded += 1
+        if stored_sequence is None:
+            event_sequence = _announce_published(
+                ctx, actor, project_id=project_id, manifest=parsed
+            )
+            _record_event_sequence(version_dir, event_sequence)
+        else:
+            event_sequence = stored_sequence
     status = _transfer_status(version_dir, parsed)
     return {
         "object_id": parsed.object_id,

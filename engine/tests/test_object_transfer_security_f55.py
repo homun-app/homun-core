@@ -1,15 +1,20 @@
 """F5 review di sicurezza — attacchi al protocollo object-transfer v2.
 
-Ogni test corrisponde a un rilievo della review indipendente (P1-P5) ed è
-entrato rosso sul codice pre-correzione. Shared helpers in
-tests/object_transfer_f55_support.py.
+Ogni test corrisponde a un rilievo della review indipendente (P1-P5, e A-F
+della seconda verifica) ed è entrato rosso sul codice pre-correzione.
+Shared helpers in tests/object_transfer_f55_support.py.
 """
 from __future__ import annotations
 
 import base64
+import json
+import threading
 
 from fastapi.testclient import TestClient
 
+from homun.domain.errors import DomainError
+from homun.domain.models import Actor
+from homun.identity import object_transfer
 from homun.peers.object_crypto import canonical_manifest_bytes, unsigned_manifest_dict
 from object_transfer_f55_support import (
     OWNER,
@@ -421,3 +426,103 @@ def test_chunk_body_limit_is_enforced_before_reading(host, monkeypatch):
         assert not (
             tmp_path / "object-transfers" / "obj_body" / "v1" / "chunks" / "0.bin"
         ).exists()
+
+
+def test_concurrent_publish_of_same_object_has_exactly_one_winner(host):
+    """Verifica A: la decisione «di chi è l'oggetto / quale versione è
+    ammessa» e la scrittura del meta devono essere un'unica sezione atomica.
+    Due publish dello stesso object_id (v1) sincronizzati con una Barrier —
+    Marta nel progetto privato, Giulia nel condiviso — non possono essere
+    accettati entrambi: esattamente un vincitore, l'altro rifiutato con
+    project_mismatch o version_immutable, e il meta finale appartiene al
+    vincitore."""
+    app, ctx, tmp_path = host
+    shared, private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "g2", marta_confirm["person_id"], private, "write")
+        giulia_confirm, giulia = _pair_giulia(client, tmp_path)
+        _grant(ctx, "g1", giulia_confirm["person_id"], shared, "write")
+        marta_actor = Actor(
+            id=marta_confirm["person_id"],
+            workspace_id=ctx.workspace_id,
+            display_name="Marta",
+        )
+        giulia_actor = Actor(
+            id=giulia_confirm["person_id"],
+            workspace_id=ctx.workspace_id,
+            display_name="Giulia",
+        )
+
+        for round_index in range(24):
+            object_id = f"obj_race_{round_index}"
+            private_sealed = _seal_for(
+                marta, marta, private, b"documento privato",
+                object_id=object_id, version=1,
+            )
+            shared_sealed = _seal_for(
+                giulia, giulia, shared, b"documento condiviso",
+                object_id=object_id, version=1,
+            )
+            barrier = threading.Barrier(2)
+            outcomes: dict[str, tuple[str, str | None]] = {}
+
+            def _run(actor, project_id, sealed, key):
+                barrier.wait()
+                try:
+                    object_transfer.publish_object(
+                        ctx,
+                        actor,
+                        project_id=project_id,
+                        manifest=sealed.manifest.to_dict(),
+                    )
+                    outcomes[key] = ("ok", None)
+                except DomainError as exc:
+                    outcomes[key] = ("rejected", getattr(exc, "reason", None))
+
+            threads = [
+                threading.Thread(
+                    target=_run,
+                    args=(marta_actor, private, private_sealed, "marta"),
+                ),
+                threading.Thread(
+                    target=_run,
+                    args=(giulia_actor, shared, shared_sealed, "giulia"),
+                ),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30)
+            assert not any(thread.is_alive() for thread in threads)
+
+            statuses = sorted(status for status, _ in outcomes.values())
+            assert statuses == ["ok", "rejected"], (
+                f"iterazione {round_index}: attesi un vincitore e un rifiuto,"
+                f" ottenuti {outcomes}"
+            )
+            rejected_reason = next(
+                reason for status, reason in outcomes.values() if status == "rejected"
+            )
+            assert rejected_reason in {
+                "object_transfer.project_mismatch",
+                "object_transfer.version_immutable",
+            }
+            winner_key = next(
+                key for key, (status, _) in outcomes.items() if status == "ok"
+            )
+            winner_project = private if winner_key == "marta" else shared
+
+            object_root = tmp_path / "object-transfers" / object_id
+            version_dirs = sorted(
+                path.name for path in object_root.iterdir() if path.is_dir()
+            )
+            assert version_dirs == ["v1"], (
+                f"iterazione {round_index}: versioni a disco {version_dirs}"
+            )
+            meta = json.loads((object_root / "v1" / "meta.json").read_text())
+            assert meta["project_id"] == winner_project, (
+                f"iterazione {round_index}: il meta appartiene a"
+                f" {meta['project_id']}, il vincitore era {winner_key}"
+            )
+            assert meta["manifest"]["project_id"] == winner_project

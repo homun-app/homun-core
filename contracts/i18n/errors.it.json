@@ -90,7 +90,8 @@
     "intake.catalog.note": "I materiali si caricano dopo la conferma dell'accordo: la loro assenza ora non cambia la scelta della capability.",
     "object_transfer.project_mismatch": "L'oggetto appartiene a un altro progetto e non può essere ripubblicato altrove.",
     "object_transfer.version_immutable": "Questa versione dell'oggetto esiste già e non può essere sostituita: pubblica una versione successiva.",
-    "object_transfer.version_not_increasing": "La nuova versione deve essere successiva all'ultima già pubblicata."
+    "object_transfer.version_not_increasing": "La nuova versione deve essere successiva all'ultima già pubblicata.",
+    "object_transfer.version_dir_stale": "La cartella della versione esiste già senza manifest: una pubblicazione precedente è rimasta interrotta. Controlla la cartella prima di ripubblicare."
   },
   "labels": {
     "comparison.previous": "listino precedente",
