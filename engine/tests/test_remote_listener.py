@@ -164,21 +164,20 @@ def test_request_without_token_is_unauthorized(remote_host):
 
 
 def test_route_outside_allowlist_is_denied(remote_host, tmp_path):
-    """Rotte montate ma fuori elenco → 403 di ambito; rotte non montate → 404.
-    In nessun caso il gestore viene raggiunto."""
+    """Rotte fuori elenco → 403 di ambito PRIMA del routing, montate o no che
+    siano (il 403 uniforme non rivela nemmeno quali rotte esistono)."""
     app, _ctx, _ = remote_host
     member, _confirm = _member(remote_host, tmp_path)
     with TestClient(app, raise_server_exceptions=False) as client:
-        denied = client.get(f"{WS}/people", headers=member)          # montata, non remota
-        assert _scope_denied(denied), denied.text
+        for path in (f"{WS}/people",                                   # montata, non remota
+                     f"{WS}/memories",                                 # mai montata
+                     f"{WS}/mcp/servers"):                             # mai montata
+            denied = client.get(path, headers=member)
+            assert _scope_denied(denied), f"{path}: {denied.text}"
         denied = client.post(f"{WS}/commands", headers=member, json={
             "command_id": "p_intruso", "type": "project.create",
-            "payload": {"name": "Intruso"}})                          # montata, non remota
+            "payload": {"name": "Intruso"}})
         assert _scope_denied(denied), denied.text
-        missing = client.get(f"{WS}/memories", headers=member)        # mai montata
-        assert missing.status_code == 404, missing.text
-        missing = client.get(f"{WS}/mcp/servers", headers=member)     # mai montata
-        assert missing.status_code == 404, missing.text
         docs = client.get("/openapi.json")                            # niente superficie docs
         assert docs.status_code in (401, 403, 404), docs.text
 
@@ -253,7 +252,7 @@ def test_every_remote_route_outside_allowlist_is_closed(remote_host, tmp_path):
                     assert response.status_code == 418, (method.upper(), path)
                 else:
                     assert _scope_denied(response), (method.upper(), path, response.text)
-        assert checked > 50, "la passeggiata deve coprire le rotte montate sul remoto"
+        assert checked > 40, "la passeggiata deve coprire le rotte montate sul remoto"
 
 
 def test_main_listener_still_binds_loopback_only(tmp_path, monkeypatch, capsys):
