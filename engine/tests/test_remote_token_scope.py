@@ -9,12 +9,16 @@ chiusa per impostazione predefinita.
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 from fastapi.responses import JSONResponse
+from starlette.middleware import Middleware
 
 from homun.app import create_app
 from homun.context import create_context, reset_context_for_tests
+from homun.routes.remote_scope import is_remote_scope_allowed
 from object_transfer_f55_support import (
     OWNER,
     _apply_host,
@@ -140,6 +144,110 @@ def test_dev_insecure_person_bearer_is_scope_limited(tmp_path):
     finally:
         reset_context_for_tests(None)
         ctx.close()
+
+
+# --- L'allowlist: i modelli di metodo e percorso -----------------------------
+
+
+def test_allowlist_matches_exactly_the_remote_routes():
+    """I modelli coprono le rotte dei client reali (peers/*) e null'altro."""
+    allowed = [
+        ("GET", "/v1/workspaces/ws_local/remote/snapshot"),
+        ("GET", "/v1/workspaces/altro-spazio/remote/events"),
+        ("POST", "/v1/workspaces/ws_local/remote/commands"),
+        ("GET", "/v1/workspaces/ws_local/projects"),
+        ("GET", "/v1/workspaces/ws_local/remote/assignments"),
+        ("GET", "/v1/workspaces/ws_local/remote/assignments/asg_1"),
+        ("POST", "/v1/workspaces/ws_local/remote/assignments/asg_1/accept"),
+        ("POST", "/v1/workspaces/ws_local/remote/assignments/asg_1/return"),
+        ("POST", "/v1/workspaces/ws_local/remote/assignments/asg_1/reconcile"),
+        ("POST", "/v1/workspaces/ws_local/remote/objects"),
+        ("GET", "/v1/workspaces/ws_local/remote/objects"),
+        ("GET", "/v1/workspaces/ws_local/remote/objects/obj_1/versions/2"),
+        ("PUT", "/v1/workspaces/ws_local/remote/objects/obj_1/versions/2/chunks/0"),
+        ("GET", "/v1/workspaces/ws_local/remote/objects/obj_1/versions/2/chunks/0"),
+    ]
+    for method, path in allowed:
+        assert is_remote_scope_allowed(method, path), (method, path)
+    denied = [
+        ("GET", "/v1/health"),
+        ("POST", "/v1/workspaces/ws_local/mcp/servers"),
+        ("GET", "/v1/workspaces/ws_local/memories"),
+        ("POST", "/v1/workspaces/ws_local/commands"),
+        ("POST", "/v1/workspaces/ws_local/backups"),
+        ("POST", "/v1/workspaces/ws_local/projects"),            # solo GET è remoto
+        ("GET", "/v1/workspaces/ws_local/remote/assignments/asg_1/accept"),  # solo POST
+        ("POST", "/v1/workspaces/ws_local/remote/commands/extra"),  # segmento in più
+        ("GET", "/v1/workspaces//remote/snapshot"),              # segmento vuoto
+        ("GET", "/v1/workspaces/ws_local/remote/../memories"),   # traversal: un
+        # placeholder è UN segmento, «..» non allarga il modello
+    ]
+    for method, path in denied:
+        assert not is_remote_scope_allowed(method, path), (method, path)
+
+
+# --- La passeggiata: OGNI rotta fuori dall'allowlist è chiusa -----------------
+
+# Rotte che si autenticano da sole con l'invito nel corpo: il middleware di
+# sessione le esclude prima di leggere il Bearer, non fanno parte della
+# superficie autenticata con token di persona.
+SELF_AUTHENTICATED = {
+    ("POST", "/v1/contribution-portal/read"),
+    ("POST", "/v1/contribution-portal/respond"),
+    ("POST", "/v1/session/redeem"),
+    ("POST", "/v1/remote/pair"),
+    ("POST", "/v1/remote/pair/confirm"),
+}
+
+
+class _InnerGuard:
+    """La middleware PIÙ INTERNA: risponde 418 quando la richiesta ha
+    superato la middleware di sessione. Così la passeggiata prova l'ambito
+    su ogni rotta senza mai eseguire un gestore (nessun processo, nessuna
+    rete, nessun effetto collaterale)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            await JSONResponse(status_code=418, content={"guard": True})(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
+def test_every_route_outside_allowlist_denies_member_and_keeps_owner(host, tmp_path):
+    app, _ctx, _ = host
+    # Il pairing avviene su un client senza guard (la guard 418 fermerebbe
+    # anche le chiamate launcher del flusso di invito).
+    with TestClient(app, raise_server_exceptions=False) as plain:
+        member, _confirm = _member(plain, tmp_path)
+    # La passeggiata gira su una seconda app (stesso contesto globale) con
+    # la guard come middleware più interna: ogni 418 prova che la richiesta
+    # ha superato la sessione, senza eseguire nessun gestore.
+    from object_transfer_f55_support import LAUNCHER_TOKEN
+
+    guarded = create_app(session_token=LAUNCHER_TOKEN)
+    guarded.user_middleware.append(Middleware(_InnerGuard))
+    with TestClient(guarded, raise_server_exceptions=False) as client:
+        checked = 0
+        for path, operations in sorted(guarded.openapi()["paths"].items()):
+            concrete = re.sub(r"\{[^/{}]+\}", "campione", path)
+            for method in sorted(operations):
+                if method not in {"get", "put", "post", "patch", "delete"}:
+                    continue
+                checked += 1
+                # invariante 1: il launcher non riceve MAI 403 di ambito
+                owner_response = client.request(method.upper(), concrete, headers=OWNER)
+                assert owner_response.status_code == 418, (method.upper(), path)
+                if (method.upper(), path) in SELF_AUTHENTICATED:
+                    continue
+                member_response = client.request(method.upper(), concrete, headers=member)
+                if is_remote_scope_allowed(method.upper(), concrete):
+                    assert member_response.status_code == 418, (method.upper(), path)
+                else:
+                    assert _scope_denied(member_response), (method.upper(), path)
+        assert checked > 250, "la passeggiata deve coprire tutte le rotte del motore"
 
 
 # --- Difesa in profondità sulle memorie (routes/memory.py) -------------------
