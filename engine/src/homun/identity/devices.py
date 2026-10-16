@@ -12,6 +12,7 @@ import base64
 from typing import Any
 
 from homun.identity.pairing import DEVICE_PAIRING_KIND
+from homun.policy import has_project_capability
 
 
 def device_public_pem(store, fingerprint: str) -> bytes | None:
@@ -33,21 +34,20 @@ def device_public_pem(store, fingerprint: str) -> bytes | None:
 
 
 def project_device_directory(store, project_id: str) -> list[dict[str, Any]]:
-    """Devices of the people holding an active grant on the project.
+    """Devices of the people with an ACTIVE WRITE grant on the project.
 
-    Only confirmed devices carry their public key: a revoked device stays
-    visible (status) so recipients can see it is no longer trusted.
+    Verifica C: recipients may trust as authors only the confirmed devices of
+    people who can actually publish (active write grant). A read-only member
+    cannot publish, so a compromised host must not be able to present their
+    key as a trusted publisher's. Only confirmed devices carry their public
+    key: a revoked device stays visible (status) so recipients can see it is
+    no longer trusted.
     """
-    subjects = {
-        grant.subject_id
-        for grant in store.grants.values()
-        if grant.resource_type == "project"
-        and grant.resource_id == project_id
-        and grant.status == "active"
-    }
     devices: list[dict[str, Any]] = []
     for device in sorted(store.person_devices.values(), key=lambda d: (d.person_id, d.id)):
-        if device.person_id not in subjects or not device.key_fingerprint:
+        if not device.key_fingerprint:
+            continue
+        if not has_project_capability(store, device.person_id, project_id, "write"):
             continue
         entry: dict[str, Any] = {
             "person_id": device.person_id,

@@ -578,3 +578,35 @@ def test_project_quota_counts_declared_manifest_sizes(host, monkeypatch):
             == "object_transfer.project_quota_exceeded"
         )
         assert not (tmp_path / "object-transfers" / "obj_res3").exists()
+
+
+def test_device_directory_lists_only_write_capable_authors(host):
+    """Verifica C: la directory dispositivi del progetto (nello snapshot di
+    replica) deve permettere al destinatario di fidarsi come autori SOLO i
+    dispositivi confermati di persone con grant write ATTIVO: chi ha solo
+    read non può pubblicare e non deve comparire tra gli autori fidati."""
+    app, ctx, tmp_path = host
+    shared, _private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        giulia_confirm, giulia = _pair_giulia(client, tmp_path)
+        _grant(ctx, "g1", giulia_confirm["person_id"], shared, "read")
+        peer = {"Authorization": f"Bearer {giulia_confirm['device_token']}"}
+
+        snap = client.get(
+            f"/v1/workspaces/ws_local/remote/snapshot?project_id={shared}",
+            headers=peer,
+        )
+        assert snap.status_code == 200, snap.text
+        devices = snap.json()["devices"]
+        fingerprints = {device["key_fingerprint"] for device in devices}
+        assert marta.fingerprint in fingerprints
+        assert giulia.fingerprint not in fingerprints
+        marta_entry = next(
+            device
+            for device in devices
+            if device["key_fingerprint"] == marta.fingerprint
+        )
+        assert marta_entry["status"] == "confirmed"
+        assert marta_entry["public_key"]

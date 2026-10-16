@@ -110,8 +110,9 @@ def remote_snapshot(ctx, actor: Actor, *, project_id: str) -> dict[str, Any]:
         "conversations": conversations,
         "works": works,
         "object_transfers": object_transfer.list_project_transfers(ctx, actor, project_id),
-        # Active devices with public keys: recipients verify publisher
-        # signatures against this directory (review P2).
+        # Confirmed devices of ACTIVE WRITE grant holders: recipients verify
+        # publisher signatures against this directory (review P2, verifica C:
+        # read-only members cannot publish and are not trusted authors).
         "devices": project_device_directory(store, project_id),
         "cursor": last_sequence,
     }
