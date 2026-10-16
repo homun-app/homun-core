@@ -274,7 +274,7 @@ def test_memories_never_return_another_persons_notes(host, tmp_path):
     app, ctx, _ = host
     shared, private = _setup_shared(ctx)
     with TestClient(app, raise_server_exceptions=False) as client:
-        _member, confirm = _member(client, tmp_path)
+        _headers, confirm = _member(client, tmp_path)
         _seed_memories(ctx, confirm["person_id"], shared, private)
         for path in (f"{WS}/memories", f"{WS}/memories/export"):
             got = client.get(path, headers=OWNER)
@@ -295,7 +295,7 @@ def test_memories_project_notes_require_read_grant(tmp_path):
     try:
         shared, private = _setup_shared(ctx)
         with TestClient(app, raise_server_exceptions=False) as client:
-            _member, confirm = _member(client, tmp_path)
+            _headers, confirm = _member(client, tmp_path)
             giulia = confirm["person_id"]
             _grant(ctx, "gr_giulia", giulia, shared, capability="read")
             _seed_memories(ctx, giulia, shared, private)

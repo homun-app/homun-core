@@ -54,6 +54,25 @@ def _actor_id(x_homun_actor_id: str | None) -> str:
     return (x_homun_actor_id or "person_local").strip() or "person_local"
 
 
+def _visible_to_actor(note: MemoryNote, *, actor_id: str,
+                      readable_projects: set[str]) -> bool:
+    """Difesa in profondità: le memorie scope=person di altri non si
+    restituiscono MAI, nemmeno al launcher; quelle di progetto solo con
+    grant read sul progetto REALE della nota (non quello dichiarato)."""
+    if note.scope == "person":
+        return note.subject_id == actor_id
+    if note.scope == "project":
+        return note.project_id is not None and note.project_id in readable_projects
+    return True  # agent/global: mestiere condiviso dello spazio di lavoro
+
+
+def _scoped_for_actor(ctx, notes: list[MemoryNote], actor_id: str) -> list[MemoryNote]:
+    from homun.policy import list_readable_project_ids
+    readable = list_readable_project_ids(ctx.repository.snapshot(), actor_id)
+    return [note for note in notes
+            if _visible_to_actor(note, actor_id=actor_id, readable_projects=readable)]
+
+
 
 @router.get("", response_model=MemoryListResponse)
 def list_memories(
@@ -63,6 +82,7 @@ def list_memories(
     scope: str | None = Query(default=None),
     subject_id: str | None = Query(default=None),
     include_deleted: bool = Query(default=False),
+    x_homun_actor_id: str | None = Header(default=None),
 ) -> MemoryListResponse:
     _require_workspace(workspace_id)
     ctx = get_context()
@@ -73,7 +93,8 @@ def list_memories(
         subject_id=subject_id,
         include_deleted=include_deleted,
     )
-    return MemoryListResponse(memories=notes)
+    return MemoryListResponse(
+        memories=_scoped_for_actor(ctx, notes, _actor_id(x_homun_actor_id)))
 
 
 @router.get("/recall", response_model=MemoryListResponse)
@@ -96,11 +117,14 @@ def export_memories(
     project_id: str | None = Query(default=None),
     scope: str | None = Query(default=None),
     subject_id: str | None = Query(default=None),
+    x_homun_actor_id: str | None = Header(default=None),
 ) -> MemoryListResponse:
     _require_workspace(workspace_id)
     ctx = get_context()
-    return MemoryListResponse(memories=ctx.memory.export(
-        project_id=project_id, scope=scope, subject_id=subject_id))
+    return MemoryListResponse(memories=_scoped_for_actor(
+        ctx,
+        ctx.memory.export(project_id=project_id, scope=scope, subject_id=subject_id),
+        _actor_id(x_homun_actor_id)))
 
 
 @router.post("", response_model=MemoryNote)

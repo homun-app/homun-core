@@ -95,15 +95,32 @@ def test_export_skips_deleted(memory_port: SqliteMemoryPort) -> None:
     assert [n.id for n in exported] == [keep.id]
 
 
+def _create_project(ctx, command_id: str, name: str) -> str:
+    """Un progetto REALE del dominio: le memorie di progetto seguono i grant
+    reali (il creatore riceve admin), non id inventati."""
+    from homun.domain.models import Actor
+
+    actor = Actor(id="person_fabio", workspace_id=ctx.workspace_id,
+                  display_name="Fabio")
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            project_id = ctx.service.for_store(store).apply(
+                actor, command_id, "project.create", {"name": name})["project_id"]
+        ctx.service.store = store
+    return project_id
+
+
 def test_memory_http_routes(tmp_path: Path) -> None:
     ctx = create_context(db_path=tmp_path / "ws.db", data_dir=tmp_path, for_tests=True)
     reset_context_for_tests(ctx)
+    headers = {"X-Homun-Actor-Id": "person_fabio"}
+    project_id = _create_project(ctx, "mem_p1", "Con progetto")
     client = TestClient(create_app())
     try:
         created = client.post(
             f"/v1/workspaces/{ctx.workspace_id}/memories",
-            json={"text": "Ricordo approvato", "project_id": "proj_x"},
-            headers={"X-Homun-Actor-Id": "person_fabio"},
+            json={"text": "Ricordo approvato", "project_id": project_id},
+            headers=headers,
         )
         assert created.status_code == 200, created.text
         body = created.json()
@@ -112,7 +129,8 @@ def test_memory_http_routes(tmp_path: Path) -> None:
 
         listed = client.get(
             f"/v1/workspaces/{ctx.workspace_id}/memories",
-            params={"project_id": "proj_x"},
+            params={"project_id": project_id},
+            headers=headers,
         )
         assert listed.status_code == 200
         assert len(listed.json()["memories"]) == 1
@@ -121,19 +139,20 @@ def test_memory_http_routes(tmp_path: Path) -> None:
         rectified = client.post(
             f"/v1/workspaces/{ctx.workspace_id}/memories/{mid}/rectify",
             json={"text": "Aggiornato"},
-            headers={"X-Homun-Actor-Id": "person_fabio"},
+            headers=headers,
         )
         assert rectified.status_code == 200
         assert rectified.json()["status"] == "rectified"
 
         deleted = client.delete(
             f"/v1/workspaces/{ctx.workspace_id}/memories/{mid}",
-            headers={"X-Homun-Actor-Id": "person_fabio"},
+            headers=headers,
         )
         assert deleted.status_code == 200
         assert deleted.json()["status"] == "deleted"
 
-        exported = client.get(f"/v1/workspaces/{ctx.workspace_id}/memories/export")
+        exported = client.get(f"/v1/workspaces/{ctx.workspace_id}/memories/export",
+                              headers=headers)
         assert exported.status_code == 200
         assert exported.json()["memories"] == []
     finally:
@@ -147,22 +166,25 @@ def test_http_two_projects_isolation_and_export(tmp_path: Path) -> None:
     reset_context_for_tests(ctx)
     client = TestClient(create_app())
     headers = {"X-Homun-Actor-Id": "person_fabio"}
+    acme = _create_project(ctx, "mem_acme", "Acme")
+    beta = _create_project(ctx, "mem_beta", "Beta")
     try:
         a = client.post(
             f"/v1/workspaces/{ctx.workspace_id}/memories",
-            json={"text": "Segreto Acme listino", "project_id": "proj_acme"},
+            json={"text": "Segreto Acme listino", "project_id": acme},
             headers=headers,
         )
         b = client.post(
             f"/v1/workspaces/{ctx.workspace_id}/memories",
-            json={"text": "Segreto Beta log", "project_id": "proj_beta"},
+            json={"text": "Segreto Beta log", "project_id": beta},
             headers=headers,
         )
         assert a.status_code == 200 and b.status_code == 200
 
         listed_a = client.get(
             f"/v1/workspaces/{ctx.workspace_id}/memories",
-            params={"project_id": "proj_acme"},
+            params={"project_id": acme},
+            headers=headers,
         )
         assert listed_a.status_code == 200
         texts_a = [m["text"] for m in listed_a.json()["memories"]]
@@ -170,14 +192,16 @@ def test_http_two_projects_isolation_and_export(tmp_path: Path) -> None:
 
         recall_a = client.get(
             f"/v1/workspaces/{ctx.workspace_id}/memories/recall",
-            params={"q": "Segreto", "project_id": "proj_acme"},
+            params={"q": "Segreto", "project_id": acme},
+            headers=headers,
         )
         assert recall_a.status_code == 200
         assert [m["text"] for m in recall_a.json()["memories"]] == ["Segreto Acme listino"]
 
         export_b = client.get(
             f"/v1/workspaces/{ctx.workspace_id}/memories/export",
-            params={"project_id": "proj_beta"},
+            params={"project_id": beta},
+            headers=headers,
         )
         assert export_b.status_code == 200
         assert [m["text"] for m in export_b.json()["memories"]] == ["Segreto Beta log"]
