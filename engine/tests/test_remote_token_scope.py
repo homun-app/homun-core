@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
 from fastapi.testclient import TestClient
 from fastapi.responses import JSONResponse
 from starlette.middleware import Middleware
@@ -21,7 +20,6 @@ from homun.context import create_context, reset_context_for_tests
 from homun.routes.remote_scope import is_remote_scope_allowed
 from object_transfer_f55_support import (
     OWNER,
-    _apply_host,
     _grant,
     _pair_giulia,
     _setup_shared,
