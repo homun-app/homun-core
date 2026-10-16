@@ -530,3 +530,43 @@ def test_manifest_does_not_carry_plaintext_hash_or_exact_size():
     assert "plaintext_size" not in data
     # The roundtrip must not depend on those fields.
     assert _open(sealed, owner, trusted=owner).plaintext == b"x" * 100_003
+
+
+def test_chunk_aad_context_encoding_is_unambiguous():
+    """Verifica F: l'additional data non usa separatori ambigui. Coppie di
+    (project_id, object_id) DIVERSE non possono produrre la stessa AAD,
+    quali che siano i caratteri nei valori (incluso il separatore stesso)."""
+    from homun.peers.object_crypto import PROTOCOL_ID, ChunkAadContext
+
+    left = ChunkAadContext(
+        protocol=PROTOCOL_ID, project_id="proj", object_id="a|b", version=1
+    )
+    right = ChunkAadContext(
+        protocol=PROTOCOL_ID, project_id="proj|a", object_id="b", version=1
+    )
+    assert left.for_chunk(0) != right.for_chunk(0)
+    # Ogni campo sposta il confine della codifica canonica, non solo il valore.
+    assert left.for_chunk(0) != left.for_chunk(1)
+
+
+def test_encrypt_decrypt_payload_require_aad_context():
+    """Verifica F: aad_context è OBBLIGATORIO — una chiamata futura non può
+    dimenticarlo e cifrare chunk senza legame a oggetto/versione."""
+    from homun.peers.object_crypto import (
+        PROTOCOL_ID,
+        ChunkAadContext,
+        decrypt_payload,
+        encrypt_payload,
+        generate_object_key,
+    )
+
+    key = generate_object_key()
+    context = ChunkAadContext(
+        protocol=PROTOCOL_ID, project_id="proj_p", object_id="obj_x", version=1
+    )
+    with pytest.raises(TypeError):
+        encrypt_payload(b"payload", key)  # pyright: ignore[reportCallIssue]
+    header, chunks = encrypt_payload(b"payload", key, aad_context=context)
+    with pytest.raises(TypeError):
+        decrypt_payload(header, chunks, key)  # pyright: ignore[reportCallIssue]
+    assert decrypt_payload(header, chunks, key, aad_context=context) == b"payload"

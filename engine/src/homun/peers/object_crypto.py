@@ -393,10 +393,17 @@ class ChunkAadContext:
     version: int
 
     def for_chunk(self, index: int) -> bytes:
-        return (
-            f"{self.protocol}|{self.project_id}|{self.object_id}"
-            f"|v{self.version}|chunk:{index}"
-        ).encode("utf-8")
+        """Canonical-JSON encoding of the binding — unambiguous (verifica F):
+        field values cannot inject a separator, whatever characters they
+        carry, so distinct (project, object, version, index) tuples always
+        produce distinct additional data."""
+        return canonical_manifest_bytes({
+            "protocol": self.protocol,
+            "project_id": self.project_id,
+            "object_id": self.object_id,
+            "version": self.version,
+            "chunk": index,
+        })
 
 
 def encrypt_payload(
@@ -404,7 +411,7 @@ def encrypt_payload(
     object_key: bytes,
     *,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
-    aad_context: ChunkAadContext | None = None,
+    aad_context: ChunkAadContext,
 ) -> tuple[bytes, list[bytes]]:
     if len(object_key) != OBJECT_KEY_BYTES:
         raise ObjectCryptoError("Object key must be 32 bytes")
@@ -412,8 +419,9 @@ def encrypt_payload(
         raise ObjectCryptoError("Chunk size must be positive")
 
     def _push(state, piece: bytes, tag: int, index: int) -> bytes:
-        ad = aad_context.for_chunk(index) if aad_context is not None else None
-        return crypto_secretstream_xchacha20poly1305_push(state, piece, ad, tag)
+        return crypto_secretstream_xchacha20poly1305_push(
+            state, piece, aad_context.for_chunk(index), tag
+        )
 
     state = crypto_secretstream_xchacha20poly1305_state()
     header = crypto_secretstream_xchacha20poly1305_init_push(state, object_key)
@@ -442,7 +450,7 @@ def decrypt_payload(
     ciphertext_chunks: Sequence[bytes],
     object_key: bytes,
     *,
-    aad_context: ChunkAadContext | None = None,
+    aad_context: ChunkAadContext,
 ) -> bytes:
     if len(object_key) != OBJECT_KEY_BYTES:
         raise ObjectCryptoError("Object key must be 32 bytes")
@@ -455,9 +463,10 @@ def decrypt_payload(
         raise ObjectCryptoError("Invalid secretstream header or key") from exc
     parts: list[bytes] = []
     for index, chunk in enumerate(ciphertext_chunks):
-        ad = aad_context.for_chunk(index) if aad_context is not None else None
         try:
-            message, tag = crypto_secretstream_xchacha20poly1305_pull(state, chunk, ad)
+            message, tag = crypto_secretstream_xchacha20poly1305_pull(
+                state, chunk, aad_context.for_chunk(index)
+            )
         except (TypeError, ValueError, CryptoError) as exc:
             raise ObjectCryptoError(
                 "Ciphertext rejected (corrupt, truncated or bound to another object)"

@@ -67,12 +67,17 @@ lati, quindi accordo byte per byte). Copre protocollo, `project_id`,
 ## Dati aggiuntivi del secretstream (review P3)
 
 Ogni `crypto_secretstream_xchacha20poly1305_push/pull` riceve come
-additional data la codifica canonica di
+additional data la codifica **canonica JSON** (stessa funzione della firma,
+`canonical_manifest_bytes`) di
 `(protocollo, project_id, object_id, versione, indice del chunk)`:
 
 ```
-homun-object-transfer/v2|proj_…|obj_…|v2|chunk:0
+{"chunk":0,"object_id":"obj_…","project_id":"proj_…","protocol":"homun-object-transfer/v2","version":2}
 ```
+
+(verifica F: niente separatori ambigui — valori di `project_id`/`object_id`
+contenenti il separatore non possono collidere con un'altra coppia di
+campi; `aad_context` è obbligatorio in `encrypt_payload`/`decrypt_payload`.)
 
 Il destinatario la ricostruisce dai valori che **ha chiesto**
 (`expected_object_id/version/project_id` in `open_object`), non da quelli
