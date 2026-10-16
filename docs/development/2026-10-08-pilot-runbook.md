@@ -3,6 +3,11 @@
 Ottenuto con: due Mac collegati da Tailscale (default D3), Fabio host e
 Giulia peer. Durata stimata: un'ora. I cinque criteri del gate in fondo.
 
+> **GATE**: il pilot in rete NON parte prima dell'unione della PR
+> «ambito dei token remoti» (`fix/remote-token-scope`, modello in
+> `2026-10-16-remote-token-scope.md`): il token del peer deve vedere solo
+> l'allowlist remota, tutto il resto 403 `session.scope_denied`.
+
 ## Prerequisiti
 
 - **Mac di Fabio (host)**: repository homun2 con venv engine pronto
@@ -38,9 +43,13 @@ curl -s -X POST $H/v1/workspaces/ws_local/people/invites -H "$A" -H "Content-Typ
 **Sicurezza del pilot (dichiarata)**: `--dev-insecure` su VPN significa che
 i dispositivi della tailnet sono fidati — limitare con una ACL Tailscale
 la porta 8765 al solo Mac di Giulia, oppure accettare esplicitamente il
-perimetro per la prova. Le permission interne del workspace restano quelle
-vere di F5 (grant, revoca, nessun accesso implicito). La produzione userà
-sessioni/token: già supportate dal motore, manca solo il client web.
+perimetro per la prova. I dispositivi abbinati comunque NON ereditano il
+desktop: il loro `device_token` raggiunge solo l'allowlist remota
+(`routes/remote_scope.py`, vale anche in dev-insecure), tutto il resto è
+403 `session.scope_denied` prima del gestore. Le permission interne del
+workspace restano quelle vere di F5 (grant, revoca, nessun accesso
+implicito). La produzione userà sessioni/token: già supportate dal
+motore, manca solo il client web.
 
 ## Passo 2 — Peer (Mac di Giulia)
 
