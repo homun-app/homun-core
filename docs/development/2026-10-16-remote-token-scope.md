@@ -24,6 +24,50 @@ Le rotte `POST /v1/remote/pair`, `/v1/remote/pair/confirm`,
 corpo: non accettano il token launcher e stanno fuori dal Bearer di
 sessione.
 
+## Il modello a due listener (aggiornato il 2026-10-16, PR `feat/remote-listener`)
+
+Fino a qui il modello presupponeva che il motore fosse raggiungibile SOLO
+da loopback, con i token di persona che arrivano da un client locale. Il
+pilot in rete (runbook) ha mostrato due buchi: `homun serve --host
+0.0.0.0` è rifiutato (il motore NON esce dal loopback, per contratto), e
+girarlo con `--dev-insecure` davanti a un proxy (`tailscale serve` su
+loopback) avrebbe fidato l'header `X-Homun-Actor-Id` della rete —
+annullando tutto ciò che sta sopra. La risposta NON è allentare il
+loopback: è un secondo listener.
+
+|                          | Listener principale                          | Listener remoto (`--remote-listen HOST:PORT`)                                     |
+| ------------------------ | -------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Bind                     | SOLO `127.0.0.1`/`::1`, immutabile           | Indirizzo ESPPLICITO della macchina (es. IP Tailscale `100.x.y.z`); `0.0.0.0`/`[::]` rifiutati |
+| App                      | `create_app` (tutte le rotte)                | `create_remote_app` in `homun/remote_listener.py`: pairing + router che contengono l'allowlist, niente docs |
+| Chi si autentica         | Token launcher (tutto) o sessione persona    | SOLO token di persona/dispositivo del registro sessioni                             |
+| Header attore dal client | Confrontati con la sessione (`session_actor_mismatch`) | RIFIUTATI sempre: 403 `remote.actor_header_forbidden`, anche «corretti»       |
+| Token launcher           | Vale (è il proprietario)                     | NON vale: non è nel registro sessioni → 401, non esiste modalità senza autenticazione |
+| Rotte                    | Tutte (persona: sola allowlist)              | Allowlist di `remote_scope.py` + `POST /v1/remote/pair[/confirm]`: tutto il resto 403 `session.scope_denied` PRIMA del routing |
+
+I due listener vivono nello STESSO processo (`run_linked_servers`: due
+server uvicorn su un event loop, spegnimento collegato): stesso contesto,
+stesso store, stesse rivolte di revoca. L'app remota non ha lifespan e
+risolve `get_context()` a ogni richiesta: non esiste una seconda copia
+dello stato. `--dev-insecure` e `--remote-listen` si escludono a vicenda
+(il motore esce con codice 2): una sessione senza autenticazione non può
+mai stare su un socket di rete.
+
+Ordine dei controlli sul listener remoto (come sul principale): header
+attore rifiutato → sessione valida (401 `session_required`) → ambito
+(403 `session.scope_denied`) → permessi della risorsa reale. Il 403 di
+ambito arriva prima del routing: anche un percorso non montato risponde
+403, senza rivelare quali rotte esistano.
+
+Nuova frase del catalogo condiviso: `remote.actor_header_forbidden`
+(`contracts/i18n/errors.{it,en}.json`).
+
+Test: `engine/tests/test_remote_listener.py` — header attore falsificato
+(con e senza token, anche col proprio id), token launcher rifiutato,
+nessuna modalità senza autenticazione, rotte fuori elenco, snapshot con
+grant, pairing completo sul listener remoto, passeggiata su tutte le
+rotte montate, politica di `serve` (mutua esclusione, jolly, formati) e
+pin del loopback del listener principale.
+
 ## L'allowlist: chiusa per impostazione predefinita
 
 `SessionAuthMiddleware` distingue launcher e persona. Per le sessioni di
@@ -99,12 +143,16 @@ note dei progetti leggibili + mestiere condiviso (`agent`/`global`).
 - `engine/tests/test_remote_token_scope.py` — i quattro casi riprodotti,
   sessione riscattata, dev-insecure, pattern dell'elenco, passeggiata su
   tutte le rotte OpenAPI, difesa sulle memorie.
+- `engine/tests/test_remote_listener.py` — il listener remoto separato
+  (vedi la sezione «Il modello a due listener» sopra).
 - La passeggiata usa una middleware guard interna (418): prova l'ambito su
   ogni rotta senza mai eseguire un gestore — nessun processo, nessuna rete.
 
 ## Collegamenti
 
-- Runbook del pilot: `2026-10-08-pilot-runbook.md` (il pilot in rete non
-  parte prima di questa PR).
+- Runbook del pilot: `2026-10-08-pilot-runbook.md` (parte con
+  `--remote-listen`, mai `--dev-insecure`).
 - Perimetro dei comandi remoti: `engine/src/homun/identity/remote_commands.py`.
 - Revisione object transfer: commit `0fdc75b1` (P1–P6).
+- Fabbrica e middleware del listener remoto:
+  `engine/src/homun/remote_listener.py`.
