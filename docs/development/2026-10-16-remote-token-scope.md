@@ -35,14 +35,14 @@ loopback) avrebbe fidato l'header `X-Homun-Actor-Id` della rete —
 annullando tutto ciò che sta sopra. La risposta NON è allentare il
 loopback: è un secondo listener.
 
-|                          | Listener principale                          | Listener remoto (`--remote-listen HOST:PORT`)                                     |
-| ------------------------ | -------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Bind                     | SOLO `127.0.0.1`/`::1`, immutabile           | Indirizzo ESPPLICITO della macchina (es. IP Tailscale `100.x.y.z`); `0.0.0.0`/`[::]` rifiutati |
-| App                      | `create_app` (tutte le rotte)                | `create_remote_app` in `homun/remote_listener.py`: pairing + router che contengono l'allowlist, niente docs |
-| Chi si autentica         | Token launcher (tutto) o sessione persona    | SOLO token di persona/dispositivo del registro sessioni                             |
-| Header attore dal client | Confrontati con la sessione (`session_actor_mismatch`) | RIFIUTATI sempre: 403 `remote.actor_header_forbidden`, anche «corretti»       |
-| Token launcher           | Vale (è il proprietario)                     | NON vale: non è nel registro sessioni → 401, non esiste modalità senza autenticazione |
-| Rotte                    | Tutte (persona: sola allowlist)              | Allowlist di `remote_scope.py` + `POST /v1/remote/pair[/confirm]`: tutto il resto 403 `session.scope_denied` PRIMA del routing |
+|                          | Listener principale                                    | Listener remoto (`--remote-listen HOST:PORT`)                                                                                  |
+| ------------------------ | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Bind                     | SOLO `127.0.0.1`/`::1`, immutabile                     | Indirizzo ESPPLICITO della macchina (es. IP Tailscale `100.x.y.z`); `0.0.0.0`/`[::]` rifiutati                                 |
+| App                      | `create_app` (tutte le rotte)                          | `create_remote_app` in `homun/remote_listener.py`: pairing + router che contengono l'allowlist, niente docs                    |
+| Chi si autentica         | Token launcher (tutto) o sessione persona              | SOLO token di persona/dispositivo del registro sessioni                                                                        |
+| Header attore dal client | Confrontati con la sessione (`session_actor_mismatch`) | RIFIUTATI sempre: 403 `remote.actor_header_forbidden`, anche «corretti»                                                        |
+| Token launcher           | Vale (è il proprietario)                               | NON vale: non è nel registro sessioni → 401, non esiste modalità senza autenticazione                                          |
+| Rotte                    | Tutte (persona: sola allowlist)                        | Allowlist di `remote_scope.py` + `POST /v1/remote/pair[/confirm]`: tutto il resto 403 `session.scope_denied` PRIMA del routing |
 
 I due listener vivono nello STESSO processo (`run_linked_servers`: due
 server uvicorn su un event loop, spegnimento collegato): stesso contesto,
