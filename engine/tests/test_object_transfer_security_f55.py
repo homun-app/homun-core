@@ -526,3 +526,55 @@ def test_concurrent_publish_of_same_object_has_exactly_one_winner(host):
                 f" {meta['project_id']}, il vincitore era {winner_key}"
             )
             assert meta["manifest"]["project_id"] == winner_project
+
+
+def test_project_quota_counts_declared_manifest_sizes(host, monkeypatch):
+    """Verifica B: la quota del progetto conta le dimensioni DICHIARATE nei
+    manifest (meta su disco), non i chunk già caricati. Un manifest riserva
+    il suo spazio alla pubblicazione: pubblicare manifest SENZA chunk non
+    aggira la quota (riprodotto: 4 manifest da ~6 KB accettati con quota
+    8.192, poi 24 KB di chunk su disco)."""
+    app, ctx, tmp_path = host
+    shared, _private = _setup_shared(ctx)
+    with TestClient(app) as client:
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+
+        _set_limits(monkeypatch, MAX_PROJECT_BYTES=8_192, MAX_CHUNKS_PER_OBJECT=10_000)
+        first = _seal_for(marta, marta, shared, b"a" * 5_800, object_id="obj_res1")
+        accepted = _publish_manifest(client, marta_peer, shared, first.manifest.to_dict())
+        assert accepted.status_code == 200, accepted.text
+        assert not any(
+            (tmp_path / "object-transfers" / "obj_res1" / "v1" / "chunks").glob("*.bin")
+        )
+
+        second = _seal_for(marta, marta, shared, b"b" * 5_800, object_id="obj_res2")
+        denied = _publish_manifest(client, marta_peer, shared, second.manifest.to_dict())
+        assert denied.status_code == 400, denied.text
+        assert denied.json()["detail"]["reason"] == "object_transfer.project_quota_exceeded"
+        assert not (tmp_path / "object-transfers" / "obj_res2").exists()
+
+        # put_chunk non ha bisogno di un controllo di quota ulteriore: i byte
+        # caricati non possono superare lo spazio già riservato dal manifest
+        # (size e hash di ogni chunk sono vincolati al manifest verificato).
+        for index, chunk in enumerate(first.ciphertext_chunks):
+            put = client.put(
+                f"/v1/workspaces/ws_local/remote/objects/obj_res1/versions/1/chunks/{index}",
+                headers=marta_peer,
+                content=chunk,
+            )
+            assert put.status_code == 200, put.text
+
+        # Dopo il caricamento la quota continua a bloccare pubblicazioni che
+        # superano lo spazio riservato del progetto.
+        third = _seal_for(marta, marta, shared, b"c" * 4_000, object_id="obj_res3")
+        denied_again = _publish_manifest(
+            client, marta_peer, shared, third.manifest.to_dict()
+        )
+        assert denied_again.status_code == 400, denied_again.text
+        assert (
+            denied_again.json()["detail"]["reason"]
+            == "object_transfer.project_quota_exceeded"
+        )
+        assert not (tmp_path / "object-transfers" / "obj_res3").exists()

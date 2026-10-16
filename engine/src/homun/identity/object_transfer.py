@@ -320,14 +320,27 @@ def _announce_published(
     return sequence
 
 
-def _project_stored_bytes(
-    data_dir: Path, project_id: str, *, exclude: tuple[str, int] | None = None
-) -> int:
-    """Bytes already stored for a project across all its transfers.
+def _declared_ciphertext_bytes(meta: dict[str, Any]) -> int:
+    """Ciphertext bytes a version's manifest DECLARES (chunk sizes)."""
+    chunks = meta.get("manifest", {}).get("chunks")
+    if not isinstance(chunks, list):
+        return 0
+    return sum(
+        item["size"]
+        for item in chunks
+        if isinstance(item, dict) and isinstance(item.get("size"), int)
+    )
 
-    Excludes one (object_id, version) so an idempotent republication does not
-    count its own chunks twice against the quota. Scan cost is proportional
-    to the number of stored versions — acceptable at pilot scale.
+
+def _project_stored_bytes(data_dir: Path, project_id: str) -> int:
+    """Bytes reserved by a project across all its transfers (verifica B).
+
+    Counts the DECLARED ciphertext sizes of the published versions (metas on
+    disk), not the uploaded `.bin` files: a manifest reserves its space at
+    publish time, so publishing without chunks cannot bypass the quota and
+    chunk uploads afterwards can never exceed what was reserved (each chunk's
+    size and hash are bound to the verified manifest). Scan cost is
+    proportional to the number of stored versions — acceptable at pilot scale.
     """
     root = _root(data_dir)
     if not root.is_dir():
@@ -339,10 +352,6 @@ def _project_stored_bytes(
         for version_dir in sorted(object_dir.iterdir()):
             if not version_dir.is_dir() or not _VERSION_DIR_RE.match(version_dir.name):
                 continue
-            if exclude is not None and (
-                object_dir.name, int(version_dir.name[1:])
-            ) == exclude:
-                continue
             meta_path = _meta_path(version_dir)
             if not meta_path.is_file():
                 continue
@@ -352,11 +361,7 @@ def _project_stored_bytes(
                 continue
             if meta.get("project_id") != project_id:
                 continue
-            chunks_dir = version_dir / "chunks"
-            if not chunks_dir.is_dir():
-                continue
-            for chunk_file in chunks_dir.glob("*.bin"):
-                total += chunk_file.stat().st_size
+            total += _declared_ciphertext_bytes(meta)
     return total
 
 
@@ -465,9 +470,7 @@ def publish_object(
             ctx.data_dir, project_id=project_id, manifest=parsed
         )
         if not idempotent:
-            stored_bytes = _project_stored_bytes(
-                ctx.data_dir, project_id, exclude=(parsed.object_id, parsed.version)
-            )
+            stored_bytes = _project_stored_bytes(ctx.data_dir, project_id)
             if stored_bytes + parsed.ciphertext_size() > limits.max_project_bytes:
                 raise ValidationError(
                     f"Project transfer storage would exceed {limits.max_project_bytes} bytes",
