@@ -112,8 +112,20 @@ Specifiche: `development/2026-10-07-f5-collaborazione-specifica.md`.
   `test_object_crypto_f55.py`, `test_object_transfer_http_f55.py`.
   Crypto + HTTP + annuncio eventi + revoca wrap/UX limiti copie +
   assert credenziali fuori dai transfer ✅.
-  Resta: review indipendente del protocollo. Il pilot VPN non dipende
-  da questa fetta.
+  Review indipendente del protocollo: **fatta**, sei rilievi corretti in
+  PR #449 (protocollo v2 firmato, AAD anti-swap,
+  ownership/immutabilità versioni, niente hash in chiaro, limiti/quota) —
+  doc `development/2026-10-15-f5-object-crypto-v2.md`. Seconda verifica
+  della PR #449: sei rilievi (A–F) corretti — publish come sezione atomica
+  (lock + creazione esclusiva della directory di versione), quota su
+  dimensioni dichiarate nei manifest, directory `devices` limitata ai
+  grant `write`, log versioni destinatario fail-closed, AAD non ambiguo.
+  **Verifiche lato destinatario (firma, valori attesi, anti-rollback) solo
+  in libreria**: il client di download non esiste ancora e DOVRA usare
+  `open_object` + `ReceivedVersionLog` + `trusted_publisher_pems` dalla
+  directory filtrata; **il pilot non trasferisce oggetti fra macchine**
+  finché quel client non c'è (gli scenari pair/grant/sync read-only restano
+  disponibili).
 - ✅ Collegamento delega↔ledger budget (2026-10-09) — `delegation.offer`
   riserva tentativi sul `WorkBudget` (`budget_reservation_id` sull'assignment);
   return riconcilia l'uso noto, revoke/scadenza rilasciano la hold; esaurimento

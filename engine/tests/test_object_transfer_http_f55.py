@@ -2,104 +2,25 @@
 
 Host publishes a sealed object; peer with grant + recipient wrap fetches
 chunks and resumes after a partial download. No grant / no wrap → typed 403.
+Security-review attack tests live in test_object_transfer_security_f55.py.
 """
 from __future__ import annotations
 
 import base64
 import json
 
-import pytest
 from fastapi.testclient import TestClient
 
-from homun.app import create_app
-from homun.context import create_context, reset_context_for_tests
-from homun.peers.device_identity import load_device_identity
 from homun.peers.object_crypto import open_object, seal_object
-
-LAUNCHER_TOKEN = "t" * 40
-OWNER = {
-    "X-Homun-Actor-Id": "person_fabio",
-    "Authorization": f"Bearer {LAUNCHER_TOKEN}",
-}
-
-
-@pytest.fixture
-def host(tmp_path):
-    ctx = create_context(db_path=tmp_path / "host.db", data_dir=tmp_path, for_tests=True)
-    reset_context_for_tests(ctx)
-    app = create_app(session_token=LAUNCHER_TOKEN)
-    yield app, ctx, tmp_path
-    reset_context_for_tests(None)
-    ctx.close()
-
-
-def _apply_host(ctx, command_id, kind, payload):
-    from homun.domain.models import Actor
-
-    actor = Actor(id="person_fabio", workspace_id=ctx.workspace_id, display_name="Fabio")
-    with ctx.repository.locked():
-        with ctx.repository.transaction() as store:
-            result = ctx.service.for_store(store).apply(actor, command_id, kind, payload)
-        ctx.service.store = store
-    return result
-
-
-def _setup_shared(ctx):
-    shared = _apply_host(ctx, "p1", "project.create", {"name": "Condiviso"})["project_id"]
-    private = _apply_host(ctx, "p2", "project.create", {"name": "Privato"})["project_id"]
-    return shared, private
-
-
-def _pair_giulia(client: TestClient, tmp_path):
-    identity = load_device_identity(tmp_path / "giulia_key.json")
-    invite = client.post(
-        "/v1/workspaces/ws_local/people/invites",
-        headers=OWNER,
-        json={"role": "member"},
-    ).json()["token"]
-    present = client.post(
-        "/v1/remote/pair",
-        json={
-            "invite_token": invite,
-            "display_name": "Giulia",
-            "device_name": "MacBook di Giulia",
-            "public_key": identity.public_b64,
-            "protocol_version": 1,
-        },
-    ).json()
-    confirm = client.post(
-        "/v1/remote/pair/confirm",
-        json={
-            "pairing_id": present["pairing_id"],
-            "invite_token": invite,
-            "signature": identity.sign(present["nonce"]),
-        },
-    ).json()
-    assert confirm["person_id"]
-    return confirm, identity
-
-
-def _grant(ctx, command_id, person_id, project_id, capability="read"):
-    _apply_host(
-        ctx,
-        command_id,
-        "grant.issue",
-        {
-            "project_id": project_id,
-            "subject_id": person_id,
-            "capability": capability,
-        },
-    )
-
-
-def _seal_for(identity, plaintext: bytes, *, object_id: str = "obj_listino", version: int = 1):
-    return seal_object(
-        plaintext,
-        object_id=object_id,
-        version=version,
-        recipient_public_pems={identity.fingerprint: identity.public_pem},
-        chunk_size=1024,
-    )
+from object_transfer_f55_support import (
+    OWNER,
+    _grant,
+    _pair_giulia,
+    _pair_person,
+    _seal_for,
+    _setup_shared,
+    host,  # noqa: F401 - fixture
+)
 
 
 def test_peer_resumes_sealed_transfer_after_partial_download(host):
@@ -107,15 +28,18 @@ def test_peer_resumes_sealed_transfer_after_partial_download(host):
     shared, _private = _setup_shared(ctx)
     plaintext = b"listino riservato\n" + b"row\n" * 800
     with TestClient(app) as client:
-        confirm, identity = _pair_giulia(client, tmp_path)
-        _grant(ctx, "g1", confirm["person_id"], shared, "read")
-        peer = {"Authorization": f"Bearer {confirm['device_token']}"}
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+        giulia_confirm, giulia = _pair_giulia(client, tmp_path)
+        _grant(ctx, "g1", giulia_confirm["person_id"], shared, "read")
+        peer = {"Authorization": f"Bearer {giulia_confirm['device_token']}"}
 
-        sealed = _seal_for(identity, plaintext)
+        sealed = _seal_for(marta, giulia, shared, plaintext)
         # Publish manifest first; upload all but the last chunk (host-side resume).
         published = client.post(
             "/v1/workspaces/ws_local/remote/objects",
-            headers=OWNER,
+            headers=marta_peer,
             json={
                 "project_id": shared,
                 "manifest": sealed.manifest.to_dict(),
@@ -128,7 +52,7 @@ def test_peer_resumes_sealed_transfer_after_partial_download(host):
             put = client.put(
                 f"/v1/workspaces/ws_local/remote/objects/{sealed.manifest.object_id}"
                 f"/versions/1/chunks/{index}",
-                headers=OWNER,
+                headers=marta_peer,
                 content=chunk,
             )
             assert put.status_code == 200, put.text
@@ -137,7 +61,7 @@ def test_peer_resumes_sealed_transfer_after_partial_download(host):
         put_last = client.put(
             f"/v1/workspaces/ws_local/remote/objects/{sealed.manifest.object_id}"
             f"/versions/1/chunks/{len(sealed.ciphertext_chunks) - 1}",
-            headers=OWNER,
+            headers=marta_peer,
             content=sealed.ciphertext_chunks[-1],
         )
         assert put_last.status_code == 200, put_last.text
@@ -159,6 +83,14 @@ def test_peer_resumes_sealed_transfer_after_partial_download(host):
             item["object_id"] == "obj_listino"
             for item in snap.json()["object_transfers"]
         )
+        # The replica snapshot carries the active devices of the project so
+        # the recipient can verify publisher signatures (review P2).
+        trusted = {
+            device["key_fingerprint"]: base64.b64decode(device["public_key"])
+            for device in snap.json()["devices"]
+            if device["status"] == "confirmed" and device.get("public_key")
+        }
+        assert marta.fingerprint in trusted
 
         # Simulate resume: peer already has chunk 0 locally; asks host for missing.
         manifest_resp = client.get(
@@ -181,29 +113,37 @@ def test_peer_resumes_sealed_transfer_after_partial_download(host):
             local_chunks[index] = chunk_resp.content
 
         ordered = [local_chunks[i] for i in range(len(sealed.ciphertext_chunks))]
-        recovered = open_object(
+        opened = open_object(
             manifest_body["manifest"],
             ordered,
-            recipient_private_pem=identity.private_pem,
-            recipient_fingerprint=identity.fingerprint,
+            recipient_private_pem=giulia.private_pem,
+            recipient_fingerprint=giulia.fingerprint,
+            trusted_publisher_pems=trusted,
+            expected_object_id="obj_listino",
+            expected_version=1,
+            expected_project_id=shared,
         )
-        assert recovered == plaintext
+        assert opened.plaintext == plaintext
+        assert opened.publisher_fingerprint == marta.fingerprint
 
 
 def test_no_grant_and_no_wrap_are_denied(host):
     app, ctx, tmp_path = host
     shared, private = _setup_shared(ctx)
     with TestClient(app) as client:
-        confirm, identity = _pair_giulia(client, tmp_path)
-        peer = {"Authorization": f"Bearer {confirm['device_token']}"}
-        sealed = _seal_for(identity, b"secret")
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+        giulia_confirm, giulia = _pair_giulia(client, tmp_path)
+        peer = {"Authorization": f"Bearer {giulia_confirm['device_token']}"}
+        sealed = _seal_for(marta, giulia, shared, b"secret")
         chunks_b64 = [
             base64.b64encode(chunk).decode("ascii") for chunk in sealed.ciphertext_chunks
         ]
         assert (
             client.post(
                 "/v1/workspaces/ws_local/remote/objects",
-                headers=OWNER,
+                headers=marta_peer,
                 json={
                     "project_id": shared,
                     "manifest": sealed.manifest.to_dict(),
@@ -220,7 +160,7 @@ def test_no_grant_and_no_wrap_are_denied(host):
         )
         assert denied.status_code == 403
 
-        _grant(ctx, "g1", confirm["person_id"], private, "read")
+        _grant(ctx, "g1", giulia_confirm["person_id"], private, "read")
         # Grant on a different project does not open the shared transfer.
         still = client.get(
             "/v1/workspaces/ws_local/remote/objects/obj_listino/versions/1",
@@ -228,7 +168,7 @@ def test_no_grant_and_no_wrap_are_denied(host):
         )
         assert still.status_code == 403
 
-        _grant(ctx, "g2", confirm["person_id"], shared, "read")
+        _grant(ctx, "g2", giulia_confirm["person_id"], shared, "read")
         # Stranger device: wrap is for Giulia only — publish a second object
         # sealed for a different key and grant Giulia read → no wrap.
         from homun.peers.device_identity import generate_device_keypair
@@ -236,9 +176,11 @@ def test_no_grant_and_no_wrap_are_denied(host):
         stranger = generate_device_keypair()
         foreign = seal_object(
             b"not for giulia",
+            project_id=shared,
             object_id="obj_foreign",
             version=1,
             recipient_public_pems={stranger.fingerprint: stranger.public_pem},
+            publisher_identity=marta,
         )
         foreign_b64 = [
             base64.b64encode(chunk).decode("ascii") for chunk in foreign.ciphertext_chunks
@@ -246,7 +188,7 @@ def test_no_grant_and_no_wrap_are_denied(host):
         assert (
             client.post(
                 "/v1/workspaces/ws_local/remote/objects",
-                headers=OWNER,
+                headers=marta_peer,
                 json={
                     "project_id": shared,
                     "manifest": foreign.manifest.to_dict(),
@@ -266,12 +208,15 @@ def test_corrupt_chunk_upload_rejected(host):
     app, ctx, tmp_path = host
     shared, _ = _setup_shared(ctx)
     with TestClient(app) as client:
-        _confirm, identity = _pair_giulia(client, tmp_path)
-        sealed = _seal_for(identity, b"payload")
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+        _confirm, giulia = _pair_giulia(client, tmp_path)
+        sealed = _seal_for(marta, giulia, shared, b"payload")
         assert (
             client.post(
                 "/v1/workspaces/ws_local/remote/objects",
-                headers=OWNER,
+                headers=marta_peer,
                 json={
                     "project_id": shared,
                     "manifest": sealed.manifest.to_dict(),
@@ -281,7 +226,7 @@ def test_corrupt_chunk_upload_rejected(host):
         )
         bad = client.put(
             "/v1/workspaces/ws_local/remote/objects/obj_listino/versions/1/chunks/0",
-            headers={**OWNER, "Content-Type": "application/octet-stream"},
+            headers={**marta_peer, "Content-Type": "application/octet-stream"},
             content=b"not-the-ciphertext",
         )
         assert bad.status_code == 400
@@ -292,14 +237,16 @@ def test_revoked_device_cannot_be_wrapped_on_new_versions(host):
     app, ctx, tmp_path = host
     shared, _private = _setup_shared(ctx)
     with TestClient(app) as client:
-        confirm, identity = _pair_giulia(client, tmp_path)
-        _grant(ctx, "g1", confirm["person_id"], shared, "read")
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+        giulia_confirm, giulia = _pair_giulia(client, tmp_path)
 
-        v1 = _seal_for(identity, b"pre-revoca", version=1)
+        v1 = _seal_for(marta, giulia, shared, b"pre-revoca", version=1)
         assert (
             client.post(
                 "/v1/workspaces/ws_local/remote/objects",
-                headers=OWNER,
+                headers=marta_peer,
                 json={
                     "project_id": shared,
                     "manifest": v1.manifest.to_dict(),
@@ -313,15 +260,15 @@ def test_revoked_device_cannot_be_wrapped_on_new_versions(host):
         )
 
         revoked = client.post(
-            f"/v1/workspaces/ws_local/devices/{confirm['device_id']}/revoke",
+            f"/v1/workspaces/ws_local/devices/{giulia_confirm['device_id']}/revoke",
             headers=OWNER,
         )
         assert revoked.status_code == 200, revoked.text
 
-        v2 = _seal_for(identity, b"post-revoca", version=2)
+        v2 = _seal_for(marta, giulia, shared, b"post-revoca", version=2)
         denied = client.post(
             "/v1/workspaces/ws_local/remote/objects",
-            headers=OWNER,
+            headers=marta_peer,
             json={
                 "project_id": shared,
                 "manifest": v2.manifest.to_dict(),
@@ -343,14 +290,16 @@ def test_revoked_device_cannot_be_wrapped_on_new_versions(host):
         other = generate_device_keypair()
         alternate = seal_object(
             b"altro destinatario",
+            project_id=shared,
             object_id="obj_listino",
             version=2,
             recipient_public_pems={other.fingerprint: other.public_pem},
+            publisher_identity=marta,
             chunk_size=1024,
         )
         ok = client.post(
             "/v1/workspaces/ws_local/remote/objects",
-            headers=OWNER,
+            headers=marta_peer,
             json={
                 "project_id": shared,
                 "manifest": alternate.manifest.to_dict(),
@@ -368,13 +317,16 @@ def test_publish_rejects_manifest_with_credential_fields(host):
     app, ctx, tmp_path = host
     shared, _private = _setup_shared(ctx)
     with TestClient(app) as client:
-        confirm, identity = _pair_giulia(client, tmp_path)
-        sealed = _seal_for(identity, b"benign payload")
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+        _confirm, giulia = _pair_giulia(client, tmp_path)
+        sealed = _seal_for(marta, giulia, shared, b"benign payload")
         tainted = sealed.manifest.to_dict()
         tainted["api_key"] = "sk-must-not-publish"
         denied = client.post(
             "/v1/workspaces/ws_local/remote/objects",
-            headers=OWNER,
+            headers=marta_peer,
             json={
                 "project_id": shared,
                 "manifest": tainted,
@@ -401,17 +353,20 @@ def test_secret_store_values_never_appear_in_transfer_artifacts(host):
 
     shared, _private = _setup_shared(ctx)
     with TestClient(app) as client:
-        confirm, identity = _pair_giulia(client, tmp_path)
-        _grant(ctx, "g1", confirm["person_id"], shared, "read")
-        peer = {"Authorization": f"Bearer {confirm['device_token']}"}
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+        giulia_confirm, giulia = _pair_giulia(client, tmp_path)
+        _grant(ctx, "g1", giulia_confirm["person_id"], shared, "read")
+        peer = {"Authorization": f"Bearer {giulia_confirm['device_token']}"}
 
-        sealed = _seal_for(identity, b"catalogo senza segreti")
+        sealed = _seal_for(marta, giulia, shared, b"catalogo senza segreti")
         chunks_b64 = [
             base64.b64encode(chunk).decode("ascii") for chunk in sealed.ciphertext_chunks
         ]
         published = client.post(
             "/v1/workspaces/ws_local/remote/objects",
-            headers=OWNER,
+            headers=marta_peer,
             json={
                 "project_id": shared,
                 "manifest": sealed.manifest.to_dict(),
@@ -463,9 +418,12 @@ def test_publish_announces_transfer_on_remote_event_cursor(host):
     app, ctx, tmp_path = host
     shared, private = _setup_shared(ctx)
     with TestClient(app) as client:
-        confirm, identity = _pair_giulia(client, tmp_path)
-        _grant(ctx, "g1", confirm["person_id"], shared, "read")
-        peer = {"Authorization": f"Bearer {confirm['device_token']}"}
+        marta_confirm, marta = _pair_person(client, tmp_path, "Marta")
+        _grant(ctx, "gm", marta_confirm["person_id"], shared, "write")
+        marta_peer = {"Authorization": f"Bearer {marta_confirm['device_token']}"}
+        giulia_confirm, giulia = _pair_giulia(client, tmp_path)
+        _grant(ctx, "g1", giulia_confirm["person_id"], shared, "read")
+        peer = {"Authorization": f"Bearer {giulia_confirm['device_token']}"}
 
         snap = client.get(
             f"/v1/workspaces/ws_local/remote/snapshot?project_id={shared}",
@@ -474,13 +432,13 @@ def test_publish_announces_transfer_on_remote_event_cursor(host):
         assert snap.status_code == 200
         cursor = snap.json()["cursor"]
 
-        sealed = _seal_for(identity, b"annuncio via eventi")
+        sealed = _seal_for(marta, giulia, shared, b"annuncio via eventi")
         chunks_b64 = [
             base64.b64encode(chunk).decode("ascii") for chunk in sealed.ciphertext_chunks
         ]
         published = client.post(
             "/v1/workspaces/ws_local/remote/objects",
-            headers=OWNER,
+            headers=marta_peer,
             json={
                 "project_id": shared,
                 "manifest": sealed.manifest.to_dict(),
@@ -509,7 +467,9 @@ def test_publish_announces_transfer_on_remote_event_cursor(host):
         assert announce["sequence"] == body["event_sequence"]
         assert announce["payload"]["object_id"] == "obj_listino"
         assert announce["payload"]["version"] == 1
-        assert announce["payload"]["plaintext_sha256"] == sealed.manifest.plaintext_sha256
+        assert announce["payload"]["approx_size_bytes"] % 65_536 == 0
+        assert "plaintext_sha256" not in announce["payload"]
+        assert "plaintext_size" not in announce["payload"]
         assert "wrapped_key" not in json.dumps(announce["payload"])
         assert "recipients" not in announce["payload"]
 
