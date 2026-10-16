@@ -7,6 +7,11 @@ usato da dati reali (nessuna directory `object-transfers` esisteva al
 momento del cambio) ed è **rifiutato** con errore tipizzato
 `object_transfer.protocol_unsupported`.
 
+16 ottobre 2026: la **verifica indipendente della PR #449** ha prodotto sei
+nuovi rilievi (A–F in questa pagina: sezione atomica di pubblicazione,
+quota su dimensioni dichiarate, directory autori, protezioni destinatario
+solo libreria, log versioni fail-closed, AAD non ambiguo).
+
 Sostituisce `2026-10-09-f5-object-crypto-v1.md` come riferimento del formato;
 le scelte crypto di base restano quelle (chiave per oggetto/versione, wrap
 SealedBox Ed25519→X25519, secretstream XChaCha20-Poly1305).
@@ -96,6 +101,17 @@ passa come `last_opened_version`; una versione minore è rifiutata con
 - `put_chunk` autorizza sul progetto dell'oggetto letto da `meta.json`
   (test di regressione dedicato).
 
+**Sezione atomica (verifica A)**: la decisione «di chi è l'oggetto / quale
+versione è ammessa» e la scrittura del meta sono un'unica operazione — un
+lock dello store transfer serializza verifica di proprietà + quota +
+scrittura fra thread (e via flock anche fra processi che condividono la
+data dir), e la directory di versione è creata in modo **esclusivo**
+(`mkdir` senza `exist_ok`): chi perde la creazione ri-applica le regole
+come ripetizione idempotente o conflitto (`version_immutable`;
+`version_dir_stale` se la directory resta senza manifest). Pubblicazioni
+concorrenti dello stesso `object_id` hanno quindi **esattamente un
+vincitore**, anche in parallelo.
+
 ## Limiti (review P5)
 
 `identity/transfer_limits.py`, configurabili via ambiente, letti a ogni
@@ -107,6 +123,13 @@ tetto (Content-Length controllato prima; anche il trasporto JSON è limitato).
 Reason: `too_many_chunks`, `chunk_too_large`, `object_too_large`,
 `project_quota_exceeded`.
 
+**Quota su dimensioni dichiarate (verifica B)**: la quota del progetto
+somma le dimensioni **dichiarate** nei manifest (meta su disco), valutata
+dentro la stessa sezione atomica del publish — un manifest **riserva** il
+suo spazio alla pubblicazione. Pubblicare manifest senza caricare i chunk
+non aggira la quota, e `put_chunk` non serve un controllo ulteriore: la
+dimensione di ogni chunk è già vincolata all'hash del manifest verificato.
+
 ## Annuncio senza hash in chiaro (review P4)
 
 L'evento `object_transfer.published` — visibile a chiunque abbia grant di
@@ -117,6 +140,31 @@ impedisce di confermare la dimensione esatta di un file noto; la granularità
 è un compromesso tra utilità informativa e oracle di conferma. Niente
 `plaintext_sha256`, niente dimensione esatta, né nell'evento né nel manifest
 in chiaro né in `meta.json`.
+
+## Verifiche lato destinatario: oggi SOLO libreria (verifica D)
+
+Firma del publisher, mismatch dei valori attesi e anti-rollback esistono
+**solo a livello di libreria** (`peers.object_crypto`): nessun codice in
+`engine/src` fuori dai test né nelle app chiama oggi `open_object` o
+`ReceivedVersionLog`. Il client che scarica gli oggetti **non esiste ancora**.
+
+Il futuro client di download (da costruire) **DEVE** usare, obbligatoriamente:
+
+- `open_object` con i **valori attesi** (`expected_object_id`,
+  `expected_version`, `expected_project_id`) richiesti dall'utente/UI,
+  mai i valori letti dal manifest ricevuto;
+- `trusted_publisher_pems` costruita dalla directory `devices` dello
+  snapshot **filtrata per grant `write` attivo** (verifica C), finché non
+  ci sarà il pinning TOFU delle chiavi (limite noto, vedi modello di
+  minaccia);
+- `ReceivedVersionLog` persistente per oggetto, con `last_opened_version`
+  passato a ogni `open_object` (anti-rollback; il log è fail-closed:
+  `version_log_corrupt` se il file è corrotto, verifica E).
+
+**Il pilot NON deve trasferire oggetti fra macchine** finché quel client
+non esiste: le protezioni lato destinatario non sono "collegate al
+prodotto" e un peer che scarica senza passare da `open_object` +
+`ReceivedVersionLog` non ha nessuna delle garanzie P2/P3.
 
 ## Stessa chiave per firmare e cifrare (review P6 — scelta documentata, NON cambiata)
 
@@ -166,9 +214,15 @@ Cosa questo protocollo **NON** protegge:
   cross-project, immutabilità, firma/revoca, progetti, limiti, quota,
   annuncio senza leak). Ogni fix è entrato con il test d'attacco rosso
   sul codice precedente.
+- Seconda verifica (A–F): `engine/tests/test_object_transfer_security_f55.py`
+  (publish concorrenti con un solo vincitore, quota su dimensioni
+  dichiarate, directory autori write-only, più i test P1–P5 della prima
+  review).
 
 ## Pilot
 
-Il pilot con utenti reali fra macchine diverse resta bloccato finché questa
-PR non è unita: **pilot sbloccato dopo l'unione** (aggiornare anche
-`docs/SVILUPPO.md`).
+Il pilot con utenti reali può riprendere gli scenari già dimostrati (pair,
+grant, sync read-only, contributi conversazione/delega), ma **NON deve
+trasferire oggetti fra macchine** finché non esiste il client di download
+che usa le verifiche lato destinatario (verifica D, sezione precedente).
+Aggiornare anche `docs/SVILUPPO.md` quando quel client sarà costruito.
