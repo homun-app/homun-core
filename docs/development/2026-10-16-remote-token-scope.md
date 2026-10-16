@@ -12,11 +12,11 @@ delle memorie personali del proprietario, backup dell'intero workspace e
 
 ## I tre tipi di token
 
-| Token | Chi lo ha | Cosa può fare |
-|---|---|---|
-| **Launcher** (`HOMUN_SESSION_TOKEN`, generato dal desktop) | Il processo del desktop sulla stessa macchina | Tutto: È il proprietario. L'attore è fisso (`person_fabio`) e non può essere impersonato (`session_actor_mismatch`) |
-| **Sessione persona** (riscattata con `/v1/session/redeem`, solo localhost) | Una persona invitata, da un processo locale | SOLO l'allowlist remota (sotto) |
-| **Sessione dispositivo** (emessa da `/v1/remote/pair/confirm`, nel `device_token` del peer) | Un dispositivo abbinato di una persona | SOLO l'allowlist remota: è una sessione persona legata al dispositivo (TTL 30 giorni, revocabile per persona o per dispositivo) |
+| Token                                                                                       | Chi lo ha                                     | Cosa può fare                                                                                                                   |
+| ------------------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Launcher** (`HOMUN_SESSION_TOKEN`, generato dal desktop)                                  | Il processo del desktop sulla stessa macchina | Tutto: È il proprietario. L'attore è fisso (`person_fabio`) e non può essere impersonato (`session_actor_mismatch`)             |
+| **Sessione persona** (riscattata con `/v1/session/redeem`, solo localhost)                  | Una persona invitata, da un processo locale   | SOLO l'allowlist remota (sotto)                                                                                                 |
+| **Sessione dispositivo** (emessa da `/v1/remote/pair/confirm`, nel `device_token` del peer) | Un dispositivo abbinato di una persona        | SOLO l'allowlist remota: è una sessione persona legata al dispositivo (TTL 30 giorni, revocabile per persona o per dispositivo) |
 
 Le rotte `POST /v1/remote/pair`, `/v1/remote/pair/confirm`,
 `/v1/session/redeem`, `/v1/contribution-portal/read` e
@@ -47,13 +47,13 @@ rotta**. Conseguenze volute:
 Ogni voce continua a controllare i permessi sulla risorsa REALE: l'elenco
 dice solo che la rotta fa parte del perimetro remoto, non che è fidata.
 
-| Rotte | Client reale | Permesso della risorsa |
-|---|---|---|
-| `GET …/remote/snapshot`, `GET …/remote/events` | `peers/replication.py` (`sync_remote_project`) | grant `read` sul progetto richiesto (`identity/remote_feed.py`), eventi filtrati dal perimetro del progetto e da `visible_event` |
-| `POST …/remote/commands` | `peers/outbox.py` (outbox del peer) | solo i tipi di `REMOTE_ALLOWED_COMMANDS` (`identity/remote_commands.py`: `conversation.post_message`, `conversation.rename`) + permessi del dominio |
-| `GET …/projects` | `peers/cli.py` (`homun peer projects`) | elenco filtrato da `list_readable_project_ids`: solo i progetti con grant |
-| `GET …/remote/assignments`, `GET …/remote/assignments/{id}`, `POST …/{id}/accept\|return\|reconcile` | `peers/cli.py` | solo le deleghe assegnate a quella persona (`list_assignments_for`, `get_assignment_for`) |
-| `POST …/remote/objects`, `GET …/remote/objects`, `GET …/remote/objects/{id}/versions/{v}`, `GET\|PUT …/versions/{v}/chunks/{i}` | trasporto degli oggetti cifrati fra peer (F5.5; il sealing è `peers/object_crypto.py`, il client di pubblicazione arriva col pilot) | grant + recipient wrap + firma del publisher verificate in `identity/object_transfer.py` (revisione P1–P6) |
+| Rotte                                                                                                                           | Client reale                                                                                                                        | Permesso della risorsa                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET …/remote/snapshot`, `GET …/remote/events`                                                                                  | `peers/replication.py` (`sync_remote_project`)                                                                                      | grant `read` sul progetto richiesto (`identity/remote_feed.py`), eventi filtrati dal perimetro del progetto e da `visible_event`                    |
+| `POST …/remote/commands`                                                                                                        | `peers/outbox.py` (outbox del peer)                                                                                                 | solo i tipi di `REMOTE_ALLOWED_COMMANDS` (`identity/remote_commands.py`: `conversation.post_message`, `conversation.rename`) + permessi del dominio |
+| `GET …/projects`                                                                                                                | `peers/cli.py` (`homun peer projects`)                                                                                              | elenco filtrato da `list_readable_project_ids`: solo i progetti con grant                                                                           |
+| `GET …/remote/assignments`, `GET …/remote/assignments/{id}`, `POST …/{id}/accept\|return\|reconcile`                            | `peers/cli.py`                                                                                                                      | solo le deleghe assegnate a quella persona (`list_assignments_for`, `get_assignment_for`)                                                           |
+| `POST …/remote/objects`, `GET …/remote/objects`, `GET …/remote/objects/{id}/versions/{v}`, `GET\|PUT …/versions/{v}/chunks/{i}` | trasporto degli oggetti cifrati fra peer (F5.5; il sealing è `peers/object_crypto.py`, il client di pubblicazione arriva col pilot) | grant + recipient wrap + firma del publisher verificate in `identity/object_transfer.py` (revisione P1–P6)                                          |
 
 Il portale contributi web usa solo `/v1/contribution-portal/*` con il
 token invito nel Bearer: rotte self-authenticate, fuori da questo elenco.
