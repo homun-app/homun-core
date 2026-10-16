@@ -17,6 +17,7 @@
     "object_transfer.publisher_not_trusted": "Il dispositivo che ha pubblicato non è noto o non è più attivo.",
     "object_transfer.object_id_invalid": "Identificativo dell'oggetto non valido.",
     "workspace.unknown": "Spazio di lavoro sconosciuto su questo motore.",
+    "session.scope_denied": "La sessione di questo dispositivo non dà accesso a quella parte del motore: sono disponibili solo le funzioni condivise per il lavoro remoto.",
     "preferences.language_invalid": "Lingua non supportata: {language}.",
     "preferences.person_unknown": "Persona sconosciuta in questo spazio di lavoro.",
     "permission.workspace_authority_required": "Questa azione richiede l'autorità dello spazio di lavoro: solo un proprietario o un amministratore può compierla.",

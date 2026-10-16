@@ -3,6 +3,8 @@ import secrets
 import re
 from starlette.responses import JSONResponse
 
+from homun.routes.remote_scope import is_remote_scope_allowed, scope_denied_response
+
 
 class SessionAuthMiddleware:
     def __init__(self, app, *, token: str, origins: list[str], actor_id: str):
@@ -45,14 +47,21 @@ class SessionAuthMiddleware:
         else:
             bearer = headers.get(b'authorization', b'')
             resolved_actor = None
+            person_session = False
             if secrets.compare_digest(bearer, ('Bearer ' + self.token).encode()):
                 resolved_actor = self.actor_id  # sessione locale del launcher (desktop/dev)
             else:
                 # F5: sessioni delle persone riscattate da invito — l'attore
                 # è la persona, non un id fisso del launcher
                 resolved_actor = self._resolve_registry_session(bearer)
+                person_session = resolved_actor is not None
             if resolved_actor is None:
                 response = JSONResponse(status_code=401, content={'detail': {'code': 'session_required', 'message': 'A valid local session is required'}})
+            elif person_session and not is_remote_scope_allowed(scope['method'], scope['path']):
+                # Un dispositivo abbinato non è il proprietario: la sessione
+                # di persona raggiunge solo l'allowlist remota, tutto il resto
+                # è chiuso PRIMA del gestore (rotte nuove incluse).
+                response = scope_denied_response()
             else:
                 actor_headers = [value for key, value in scope['headers'] if key.lower() == b'x-homun-actor-id']
                 if actor_headers and actor_headers != [resolved_actor.encode('ascii')]:
@@ -74,7 +83,10 @@ class PersonBearerHeaderMiddleware:
     Sempre attivo: con SessionAuthMiddleware è un no-op (l'attore è già
     stato iniettato e validato); in dev-insecure abilita le chiamate dei
     peer — il token del dispositivo identifica la persona anche senza il
-    middleware di sessione. Mai sovrascrive un actor header esistente."""
+    middleware di sessione. Mai sovrascrive un actor header esistente.
+    La sessione di persona qui riceve lo STESSO ambito remoto
+    (routes/remote_scope.py): anche in dev-insecure un dispositivo
+    abbinato non diventa il proprietario."""
 
     def __init__(self, app):
         self.app = app
@@ -88,6 +100,9 @@ class PersonBearerHeaderMiddleware:
                        if key.lower() == b'authorization'), b'')
         resolved = None if has_actor else self._resolve(bearer)
         if resolved:
+            if not is_remote_scope_allowed(scope['method'], scope['path']):
+                await scope_denied_response()(scope, receive, send)
+                return
             headers.append((b'x-homun-actor-id', resolved.encode('ascii')))
             headers.append((b'x-homun-actor-name', resolved.encode('ascii')))
             scope = {**scope, 'headers': headers}

@@ -106,21 +106,20 @@ def test_person_preference_wins_over_workspace_and_request_over_all(ctx, people)
     assert resolve_language(ctx, "en", person_id="person_a") == "en"
 
 
-def _session_client(ctx, people):
-    """App with real person sessions: each Bearer is one workspace person."""
+def _actor_client(ctx):
+    """App dev-insecure fidata sugli header attore: ogni chiamante è una
+    persona dello spazio di lavoro. Le stesse rotte NON sono raggiungibili
+    con un token di persona (solo allowlist remota, session.scope_denied):
+    qui si prova il contratto delle rotte, non il trasporto delle sessioni
+    (quello è in test_remote_token_scope.py)."""
     from homun.context import reset_context_for_tests
-    from homun.identity.sessions import PersonSessionStore
 
-    owner, anna, bruno = people
-    sessions = PersonSessionStore(ctx.repository.connection(), ctx.repository.lock)
-    tokens = {}
-    for person_id in (owner, anna, bruno):
-        token = f"session-token-{person_id}"
-        sessions.create(person_id=person_id, device_id=f"device-{person_id}", token=token)
-        tokens[person_id] = token
     reset_context_for_tests(ctx)
-    client = TestClient(create_app(session_token="t" * 32, session_actor_id=owner))
-    return client, tokens
+    return TestClient(create_app())
+
+
+def _actor_headers(person_id: str) -> dict[str, str]:
+    return {"X-Homun-Actor-Id": person_id}
 
 
 def _teardown_global_context():
@@ -133,10 +132,10 @@ def _teardown_global_context():
 def test_person_routes_roundtrip_and_authority(ctx, people):
     owner, anna, bruno = people
     try:
-        client, tokens = _session_client(ctx, people)
+        client = _actor_client(ctx)
         base = f"/v1/workspaces/{ctx.workspace_id}"
-        anna_headers = {"Authorization": f"Bearer {tokens[anna]}"}
-        owner_headers = {"Authorization": f"Bearer {tokens[owner]}"}
+        anna_headers = _actor_headers(anna)
+        owner_headers = _actor_headers(owner)
 
         # A person sets their own language.
         own = client.put(f"{base}/people/{anna}/language",
@@ -169,9 +168,8 @@ def test_person_routes_roundtrip_and_authority(ctx, people):
         assert client.get(f"{base}/people/{anna}/language",
                           headers=anna_headers).json() == {"language": "en"}
         set_workspace_language(ctx, "it")
-        ghost_headers = {"Authorization": "Bearer " + "t" * 32}
         assert client.get(f"{base}/people/{bruno}/language",
-                          headers=ghost_headers).json() == {"language": "it"}
+                          headers=_actor_headers(bruno)).json() == {"language": "it"}
     finally:
         _teardown_global_context()
 
@@ -179,10 +177,10 @@ def test_person_routes_roundtrip_and_authority(ctx, people):
 def test_workspace_language_change_requires_authority(ctx, people):
     owner, anna, _bruno = people
     try:
-        client, tokens = _session_client(ctx, people)
+        client = _actor_client(ctx)
         base = f"/v1/workspaces/{ctx.workspace_id}/language"
-        anna_headers = {"Authorization": f"Bearer {tokens[anna]}"}
-        owner_headers = {"Authorization": "Bearer " + "t" * 32}
+        anna_headers = _actor_headers(anna)
+        owner_headers = _actor_headers(owner)
 
         # A plain member cannot change the workspace default.
         denied = client.put(base, headers=anna_headers, json={"language": "en"})

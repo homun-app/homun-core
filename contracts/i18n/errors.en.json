@@ -17,6 +17,7 @@
     "object_transfer.publisher_not_trusted": "The publishing device is not known or is no longer active.",
     "object_transfer.object_id_invalid": "Invalid object identifier.",
     "workspace.unknown": "Unknown workspace on this engine.",
+    "session.scope_denied": "This device session does not grant access to that part of the engine; only the shared remote work functions are available.",
     "preferences.language_invalid": "Unsupported language: {language}.",
     "preferences.person_unknown": "Unknown person in this workspace.",
     "permission.workspace_authority_required": "This action requires workspace authority: only an owner or an admin can do it.",
