@@ -18,7 +18,7 @@ from typing import Any, Callable, Iterator
 import httpx
 
 from .defects import engine_defects_for
-from .harness import GOLDEN_DIR, SCENARIOS, GoldenError, now_iso, redact
+from .common import GOLDEN_DIR, SCENARIOS, GoldenError, now_iso, redact
 
 # Una prova parziale non deve sovrascrivere la storia committata: con
 # HOMUN_GOLDEN_REPORTS_DIR i rapporti vanno altrove.

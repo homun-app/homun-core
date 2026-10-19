@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 import pytest
 
 from . import harness
-from .harness import Engine, HomunClient, ProviderConfig
+from .client import HomunClient
+from .common import GOLDEN_DIR, run_count
+from .harness import Engine, ProviderConfig
 from .reporting import GoldenRun, Recorder, run_story
 
 _RECORDER: Recorder = Recorder()
@@ -42,7 +44,7 @@ def golden_recorder(golden_provider) -> Recorder:
     try:
         commit = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=harness.GOLDEN_DIR,
+            cwd=GOLDEN_DIR,
             capture_output=True,
             text=True,
             timeout=10,
@@ -55,7 +57,7 @@ def golden_recorder(golden_provider) -> Recorder:
             "provider": golden_provider.provider,
             "model": golden_provider.model_id,
             "base_url": golden_provider.base_url,
-            "runs": harness.run_count(),
+            "runs": run_count(),
             "commit": commit,
             "suite": "engine/tests/e2e_golden",
         }

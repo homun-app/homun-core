@@ -12,7 +12,7 @@ from datetime import datetime
 
 import pytest
 
-from .harness import ROUTINE_TICK_TIMEOUT, run_indices, wait_until
+from .common import ROUTINE_TICK_TIMEOUT, run_indices, wait_until
 from .reporting import GoldenRun
 
 pytestmark = pytest.mark.golden

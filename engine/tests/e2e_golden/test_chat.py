@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from .harness import CHAT_WORK_TITLE, describe, ensure_accepted, run_indices
+from .common import CHAT_WORK_TITLE, describe, ensure_accepted, run_indices
 from .reporting import GoldenRun
 
 pytestmark = pytest.mark.golden

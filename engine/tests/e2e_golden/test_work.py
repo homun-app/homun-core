@@ -18,7 +18,7 @@ from dataclasses import replace
 
 import pytest
 
-from .harness import WORKSPACE, GoldenError, ensure_accepted, normalize_for_match, run_indices
+from .common import WORKSPACE, GoldenError, ensure_accepted, normalize_for_match, run_indices
 from .reporting import GoldenRun
 
 pytestmark = pytest.mark.golden

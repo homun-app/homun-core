@@ -183,7 +183,9 @@ sistemata prima del merge.
 ```
 e2e_golden/
 ├── conftest.py         # provider, motori, facciata «golden», scrittura rapporti
-├── harness.py          # avvio `homun serve`, client HTTP del percorso d'oro
+├── common.py           # costanti UI/workspace, tempi, scenari, GoldenError, helper
+├── harness.py          # configurazione del provider, avvio reale `homun serve`
+├── client.py           # client HTTP del percorso d'oro (gli endpoint della UI)
 ├── reporting.py        # registrazione dei passi e rapporti (md + json)
 ├── defects.py          # fallimento → difetto del motore e punto del codice
 ├── fixtures/materials.py  # i due file di prova (.md e .pdf) generati dal test

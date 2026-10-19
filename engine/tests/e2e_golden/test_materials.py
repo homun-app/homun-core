@@ -14,7 +14,7 @@ import secrets
 import pytest
 
 from .fixtures.materials import MD_MARKERS, MD_NAME, MD_TEXT, PDF_MARKERS, PDF_NAME, make_pdf
-from .harness import normalize_for_match, run_indices
+from .common import normalize_for_match, run_indices
 from .reporting import GoldenRun
 
 pytestmark = pytest.mark.golden
