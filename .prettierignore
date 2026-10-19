@@ -12,5 +12,8 @@ contracts/openapi/v1-engine.json
 # generato da eslint --suppress-all / --prune-suppressions: formattazione di ESLint
 eslint-suppressions.json
 
+# rapporti del banco di prova golden: artefatti generati a fine sessione
+engine/tests/e2e_golden/reports
+
 # artefatti dei run Playwright
 test-results
