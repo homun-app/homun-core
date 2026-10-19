@@ -52,6 +52,11 @@ include = ["src/homun", "README.md", "pyproject.toml", "tests"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# «golden» = banco di prova con modelli veri (tests/e2e_golden): costa tempo e
+# denaro, quindi resta fuori dalla suite normale e dalla CI. Un `-m` esplicito
+# sulla riga di comando (es. `-m golden`) soprassiede questa addopts.
+addopts = "-m \"not golden\""
 markers = [
   "integration: live external services (Mem0/Ollama/Qdrant); requires HOMUN_MEM0_LIVE=1",
+  "golden: banco di prova end-to-end del percorso d'oro con modelli veri (tests/e2e_golden); si lancia solo esplicitamente con `-m golden`",
 ]

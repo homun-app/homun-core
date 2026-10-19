@@ -1,0 +1,234 @@
+{
+ "generated_at": "2026-10-19T12:38:25+00:00",
+ "meta": {
+  "date": "2026-10-19",
+  "provider": "local",
+  "model": "qwen3.5:4b",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "runs": 3,
+  "commit": "e0aedb02",
+  "suite": "engine/tests/e2e_golden",
+  "started_at": "2026-10-19T12:20:34+00:00",
+  "data_dirs": [
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-12/homun-golden-0",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-12/homun-golden-1",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-12/homun-golden-2",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-12/homun-golden-3",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-12/homun-golden-4",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-12/homun-golden-5",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-12/homun-golden-6"
+  ],
+  "duration": "18 min"
+ },
+ "scenarios": [
+  {
+   "title": "Connessione modello verificata (Impostazioni → Modelli)",
+   "runs": 1,
+   "successes": 1,
+   "attempted": 1,
+   "avg_duration": 2.3,
+   "failures": [],
+   "id": "M0"
+  },
+  {
+   "title": "Domanda semplice: risposta in chat, nessun lavoro creato",
+   "runs": 3,
+   "successes": 3,
+   "attempted": 3,
+   "avg_duration": 4.1,
+   "failures": [],
+   "id": "A1"
+  },
+  {
+   "title": "Tre messaggi di fila accettati, nell'ordine giusto",
+   "runs": 3,
+   "successes": 0,
+   "attempted": 3,
+   "avg_duration": 32.7,
+   "failures": [
+    {
+     "run": 1,
+     "step": "A2.messaggio-2",
+     "code": "asserzione",
+     "reason": "messaggio 2 rifiutato: provider_unavailable: Local model interpret failed: 1 validation error for MessageInterpretation\n  patch_changes\n    Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\n      For further information visit https://errors.pydantic.dev/2.13/v/list_type",
+     "excerpt": ""
+    },
+    {
+     "run": 2,
+     "step": "A2.messaggio-2",
+     "code": "asserzione",
+     "reason": "messaggio 2 rifiutato: provider_unavailable: Local model interpret failed: 1 validation error for MessageInterpretation\n  patch_changes\n    Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\n      For further information visit https://errors.pydantic.dev/2.13/v/list_type",
+     "excerpt": ""
+    },
+    {
+     "run": 3,
+     "step": "A2.messaggio-2",
+     "code": "asserzione",
+     "reason": "messaggio 2 rifiutato: provider_unavailable: Local model interpret failed: 1 validation error for MessageInterpretation\n  patch_changes\n    Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\n      For further information visit https://errors.pydantic.dev/2.13/v/list_type",
+     "excerpt": ""
+    }
+   ],
+   "id": "A2"
+  },
+  {
+   "title": "Dopo un errore provocato il messaggio successivo è accettato",
+   "runs": 3,
+   "successes": 3,
+   "attempted": 3,
+   "avg_duration": 45.6,
+   "failures": [],
+   "id": "A3"
+  },
+  {
+   "title": "La conversazione si ritrova e riprende dopo il riavvio",
+   "runs": 3,
+   "successes": 3,
+   "attempted": 3,
+   "avg_duration": 12.0,
+   "failures": [],
+   "id": "A4"
+  },
+  {
+   "title": "Progetto con 2 file caricati (.md e .pdf) leggibili",
+   "runs": 3,
+   "successes": 3,
+   "attempted": 3,
+   "avg_duration": 13.9,
+   "failures": [],
+   "id": "C1"
+  },
+  {
+   "title": "Ricerca nei materiali: il risultato cita i contenuti veri dei file",
+   "runs": 3,
+   "successes": 1,
+   "attempted": 3,
+   "avg_duration": 40.6,
+   "failures": [
+    {
+     "run": 1,
+     "step": "C2.contenuti",
+     "code": "asserzione",
+     "reason": "il riepilogo non cita nessun contenuto del pdf",
+     "excerpt": ""
+    },
+    {
+     "run": 2,
+     "step": "C2.contenuti",
+     "code": "asserzione",
+     "reason": "il riepilogo non cita nessun contenuto del pdf",
+     "excerpt": ""
+    }
+   ],
+   "id": "C2"
+  },
+  {
+   "title": "Riassunto di un file: il risultato ne presenta i punti chiave",
+   "runs": 3,
+   "successes": 1,
+   "attempted": 1,
+   "avg_duration": 176.7,
+   "failures": [],
+   "id": "C3"
+  },
+  {
+   "title": "Routine creata con la pianificazione giusta (lunedì alle 9)",
+   "runs": 3,
+   "successes": 0,
+   "attempted": 3,
+   "avg_duration": 0.0,
+   "failures": [
+    {
+     "run": 1,
+     "step": "D1.prossima-esecuzione",
+     "code": "asserzione",
+     "reason": "prossima occorrenza non è lunedì alle 9: 2026-10-26T10:00:00+01:00",
+     "excerpt": ""
+    },
+    {
+     "run": 2,
+     "step": "D1.prossima-esecuzione",
+     "code": "asserzione",
+     "reason": "prossima occorrenza non è lunedì alle 9: 2026-10-26T10:00:00+01:00",
+     "excerpt": ""
+    },
+    {
+     "run": 3,
+     "step": "D1.prossima-esecuzione",
+     "code": "asserzione",
+     "reason": "prossima occorrenza non è lunedì alle 9: 2026-10-26T10:00:00+01:00",
+     "excerpt": ""
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Esecuzione forzata della routine → lavoro ricorrente prodotto",
+   "runs": 3,
+   "successes": 3,
+   "attempted": 3,
+   "avg_duration": 48.2,
+   "failures": [],
+   "id": "D2"
+  },
+  {
+   "title": "La routine sopravvive al riavvio del motore ed è ancora attiva",
+   "runs": 3,
+   "successes": 3,
+   "attempted": 3,
+   "avg_duration": 5.4,
+   "failures": [],
+   "id": "D3"
+  },
+  {
+   "title": "Richiesta operativa → proposta di lavoro (intake)",
+   "runs": 3,
+   "successes": 3,
+   "attempted": 3,
+   "avg_duration": 26.5,
+   "failures": [],
+   "id": "B1"
+  },
+  {
+   "title": "Conferma → esecuzione → risultato prodotto",
+   "runs": 3,
+   "successes": 3,
+   "attempted": 3,
+   "avg_duration": 25.4,
+   "failures": [],
+   "id": "B2"
+  },
+  {
+   "title": "Il risultato contiene i fatti dati (Rossi, 30 novembre, 12.000)",
+   "runs": 3,
+   "successes": 3,
+   "attempted": 3,
+   "avg_duration": 0.0,
+   "failures": [],
+   "id": "B3"
+  },
+  {
+   "title": "Correzione motivata → nuova versione del risultato",
+   "runs": 3,
+   "successes": 3,
+   "attempted": 3,
+   "avg_duration": 32.5,
+   "failures": [],
+   "id": "B4"
+  },
+  {
+   "title": "Il lavoro sta in Compiti, il risultato approvato in Documenti",
+   "runs": 3,
+   "successes": 3,
+   "attempted": 3,
+   "avg_duration": 0.0,
+   "failures": [],
+   "id": "B5"
+  }
+ ],
+ "notes": [
+  "D2: non esiste un endpoint «esegui ora» per le routine; l'esecuzione forzata usa una routine con cadenza al minuto e attende l'occorrenza reale dello scheduler.",
+  "esecuzione tramite run agente (capability 'general'): nelle prove del 19/10/2026 i run adattivi con una connessione il cui id differisce dalla kind terminavano «blocked» con «Selected model transport differs from the approved runtime».",
+  "C2 run 3: citati dal md ['14 novembre', 'Marco Bianchi'], dal pdf ['15 gennaio', 'Luca Rossi', '20 dicembre']",
+  "D1: /routines/preview per «0 9 * * 1» (Europe/Rome) ha dato 2026-10-26T10:00:00+01:00: croniter slitta di un'ora quando la prossima occorrenza attraversa il cambio d'ora (25/10/2026); dopo il cambio l'ora torna corretta (verificato direttamente con croniter)."
+ ]
+}
