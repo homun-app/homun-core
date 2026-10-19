@@ -32,14 +32,15 @@ cd engine && \
 
 Variabili:
 
-| Variabile                     | Significato                          | Predefinito               |
-| ----------------------------- | ------------------------------------ | ------------------------- |
-| `HOMUN_GOLDEN_PROVIDER`       | `local` (Ollama) oppure `cloud`      | obbligatorio              |
-| `HOMUN_GOLDEN_LOCAL_MODEL`    | modello Ollama da usare              | `qwen3.5:4b`              |
-| `HOMUN_GOLDEN_CLOUD_BASE_URL` | endpoint OpenAI-compatibile          | Ollama locale (`…/v1`)    |
-| `HOMUN_GOLDEN_CLOUD_MODEL`    | modello cloud                        | obbligatorio per cloud    |
-| `HOMUN_GOLDEN_CLOUD_API_KEY`  | chiave (mai nei log né nei rapporti) | richiesta solo per remoto |
-| `HOMUN_GOLDEN_RUNS`           | ripetizioni per scenario             | `3`                       |
+| Variabile                     | Significato                               | Predefinito               |
+| ----------------------------- | ----------------------------------------- | ------------------------- |
+| `HOMUN_GOLDEN_PROVIDER`       | `local` (Ollama) oppure `cloud`           | obbligatorio              |
+| `HOMUN_GOLDEN_LOCAL_MODEL`    | modello Ollama da usare                   | `qwen3.5:4b`              |
+| `HOMUN_GOLDEN_CLOUD_BASE_URL` | endpoint OpenAI-compatibile               | Ollama locale (`…/v1`)    |
+| `HOMUN_GOLDEN_CLOUD_MODEL`    | modello cloud                             | obbligatorio per cloud    |
+| `HOMUN_GOLDEN_CLOUD_API_KEY`  | chiave (mai nei log né nei rapporti)      | richiesta solo per remoto |
+| `HOMUN_GOLDEN_RUNS`           | ripetizioni per scenario                  | `3`                       |
+| `HOMUN_GOLDEN_REPORTS_DIR`    | dove scrivere i rapporti (prove parziali) | `reports/`                |
 
 Se il provider scelto non è raggiungibile (Ollama spento, modello mancante,
 endpoint cloud irraggiungibile) la sessione **si salta** con un messaggio
@@ -63,10 +64,11 @@ Un modello mancante si registra al volo: `ollama pull gpt-oss:120b-cloud`.
 Con un endpoint remoto la chiave viaggia solo nella richiesta HTTP verso il
 motore, che la conserva nel suo archivio segreti dentro la data dir temporanea
 della sessione, distrutta a fine esecuzione. Non viene mai scritta dalla
-suite, nei log o nei rapporti. Attenzione: con una connessione il cui id
-differisce dalla kind i run adattivi del motore finiscono «blocked» (vedi le
-note del rapporto del 19/10/2026): con Ollama, modelli `:cloud` inclusi, si
-passa dal preset e il problema non si presenta.
+suite, nei log o nei rapporti. Lo scenario **B7** misura proprio il caso di una
+connessione creata dalla persona con un nome suo: finché resta rosso, con un
+endpoint remoto i run adattivi (agente) finiscono «blocked» anche negli altri
+scenari; con Ollama, modelli `:cloud` inclusi, la suite passa dal preset
+(connessione `openai_compatible`) e il percorso resta misurabile.
 
 ## Come lavora la suite
 
@@ -91,24 +93,26 @@ passa dal preset e il problema non si presenta.
 
 ## Cosa misura ogni scenario
 
-| Scenario | Cosa misura                                                                                       |
-| -------- | ------------------------------------------------------------------------------------------------- |
-| M0       | La connessione modello si configura e si verifica (Impostazioni → Modelli)                        |
-| A1       | Una domanda semplice («Cosa sai fare?») riceve risposta in chat e non crea lavori                 |
-| A2       | Tre messaggi di fila nella stessa conversazione: tutti accettati, nell'ordine giusto              |
-| A3       | Dopo un errore provocato (connessione modello rotta) il messaggio successivo è accettato          |
-| A4       | La conversazione si ritrova nell'elenco e si riprende dopo il riavvio del motore                  |
-| B1       | La richiesta operativa (nota «Rossi / 30 novembre / 12.000») produce la proposta di lavoro        |
-| B2       | La conferma della proposta porta il lavoro in esecuzione fino al risultato                        |
-| B3       | Il risultato contiene i fatti dati e non ne inventa altri                                         |
-| B4       | Una correzione motivata produce una nuova versione del risultato                                  |
-| B5       | Il lavoro sta fra i Compiti e il risultato approvato fra i Documenti                              |
-| C1       | Un progetto con 2 file di prova (`.md` e `.pdf` generati in `fixtures/`) diventa leggibile        |
-| C2       | «Trova scadenze e responsabili nei materiali»: il risultato cita i contenuti veri dei file        |
-| C3       | Il riassunto di un file ne presenta i punti chiave                                                |
-| D1       | «Ogni lunedì alle 9»: la routine si salva con la pianificazione giusta (`0 9 * * 1`, Europe/Rome) |
-| D2       | L'esecuzione della routine produce il suo lavoro ricorrente supervisionato                        |
-| D3       | Dopo il riavvio del motore la routine esiste ancora ed è attiva                                   |
+| Scenario | Cosa misura                                                                                                                                                                                                                              |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M0       | La connessione modello si configura e si verifica (Impostazioni → Modelli)                                                                                                                                                               |
+| A1       | Una domanda semplice («Cosa sai fare?») riceve risposta in chat e non crea lavori                                                                                                                                                        |
+| A2       | Tre messaggi di fila nella stessa conversazione: tutti accettati, nell'ordine giusto                                                                                                                                                     |
+| A3       | Dopo un errore provocato (connessione modello rotta) il messaggio successivo è accettato                                                                                                                                                 |
+| A4       | La conversazione si ritrova nell'elenco e si riprende dopo il riavvio del motore                                                                                                                                                         |
+| B1       | La richiesta operativa (nota «Rossi / 30 novembre / 12.000») produce la proposta di lavoro                                                                                                                                               |
+| B2       | La conferma della proposta porta il lavoro in esecuzione fino al risultato                                                                                                                                                               |
+| B3       | Il risultato contiene i fatti dati e non ne inventa altri                                                                                                                                                                                |
+| B4       | Una correzione motivata produce una nuova versione del risultato                                                                                                                                                                         |
+| B5       | Il lavoro sta fra i Compiti e il risultato approvato fra i Documenti                                                                                                                                                                     |
+| B6       | La stessa richiesta mandata come **messaggio successivo** di una conversazione esistente (dopo «Cosa sai fare?») è accettata e produce una proposta di lavoro o un chiarimento, non un errore; un terzo messaggio («grazie») è accettato |
+| B7       | Un lavoro eseguito con una **connessione creata dalla persona con un nome suo** (Impostazioni → Modelli) arriva al risultato; la chat con l'agente sulla stessa connessione risponde                                                     |
+| C1       | Un progetto con 2 file di prova (`.md` e `.pdf` generati in `fixtures/`) diventa leggibile                                                                                                                                               |
+| C2       | «Trova scadenze e responsabili nei materiali»: il risultato cita i contenuti veri dei file                                                                                                                                               |
+| C3       | Il riassunto di un file ne presenta i punti chiave                                                                                                                                                                                       |
+| D1       | «Ogni lunedì alle 9»: la routine si salva con la pianificazione giusta (`0 9 * * 1`, Europe/Rome)                                                                                                                                        |
+| D2       | L'esecuzione della routine produce il suo lavoro ricorrente supervisionato                                                                                                                                                               |
+| D3       | Dopo il riavvio del motore la routine esiste ancora ed è attiva                                                                                                                                                                          |
 
 Precisazioni oneste:
 
@@ -123,6 +127,22 @@ Precisazioni oneste:
 - **A3**: dopo l'errore la conversazione può restare occupata per la
   finestra di retry del motore (~40-60 s): la suite aspetta quella finestra
   prima di dichiarare la conversazione bloccata.
+- **B1 e B6** sono le due strade della richiesta di lavoro nella UI. Il primo
+  messaggio di una conversazione nuova passa da `engine-intake-creation.ts`
+  (classifica → proposta intake): è B1. Un messaggio successivo in una
+  conversazione esistente passa da `conversation.post_message`
+  (`useEngineWorkspace.postMessage` → `postEngineConversationMessage`, con il
+  roster) e viene interpretato dal motore (`models/interpret.py`): è B6, che
+  apre la conversazione come la UI (conversazione + lavoro «Nuova richiesta»).
+  Il passo «richiesta» è una sonda: se viene rifiutato, il rapporto ne registra
+  `code` e `reason` e «grazie» si misura comunque, aspettando la finestra di
+  retry come in A3.
+- **B7** crea la connessione come il modale Modelli (`POST /models/connections`
+  con id e nome scelti dalla persona, poi attivazione e verifica) e usa un
+  lavoro con un passo adattivo esplicito (`plan.propose` con capability
+  `agent_run`, come fa il motore per i lavori chat e le routine) perché la
+  capability scelta dall'intake non è deterministica. Esecuzione e chat sono
+  sonde: si misurano entrambe.
 
 ## Come si legge il rapporto
 
@@ -132,10 +152,20 @@ A fine sessione la suite scrive in `reports/`:
 - `<data>-<provider>.json` — gli stessi dati in forma strutturata.
 
 Ogni riga della tabella è uno scenario: **successo N/M**, tentati, durata
-media. Sotto, ogni fallimento riporta lo scenario, il run, il **passo** in
-cui è fallito, il `code` e il `reason` dell'errore e un estratto della
-risposta (senza dati sensibili). «Non tentato» significa che la storia si è
-interrotta prima: per quello scenario il run non è riuscito.
+media. Un run la cui storia si è fermata in uno scenario precedente (per
+esempio C3 quando C2 fallisce) conta come **tentato e fallito** per lo scenario
+mai raggiunto — la colonna «Tentati» dice quanti sono gli «interrotti prima» —
+e il suo fallimento riporta il passo che ha interrotto la storia. Se un run non
+è stato proprio eseguito (sessione interrotta), la riga lo dice («run non
+eseguiti»). La durata media considera solo i run che hanno eseguito passi dello
+scenario.
+
+Sotto la tabella, **«Difetti del motore»** riporta per ogni scenario fallito
+una riga con il punto del codice coinvolto (modulo `defects.py`): la suite gira
+con modelli locali e cloud, e **un fallimento con il modello locale è un difetto
+del motore da correggere**, non una debolezza del modello. Quando il punto del
+codice non è noto, la riga lo dice. Poi «Fallimenti» elenca scenario, run,
+**passo**, `code`, `reason` ed estratto della risposta (senza dati sensibili).
 
 I rapporti si committano: sono la storia della misura.
 
@@ -155,9 +185,10 @@ e2e_golden/
 ├── conftest.py         # provider, motori, facciata «golden», scrittura rapporti
 ├── harness.py          # avvio `homun serve`, client HTTP del percorso d'oro
 ├── reporting.py        # registrazione dei passi e rapporti (md + json)
+├── defects.py          # fallimento → difetto del motore e punto del codice
 ├── fixtures/materials.py  # i due file di prova (.md e .pdf) generati dal test
 ├── test_chat.py        # A1–A4
-├── test_work.py        # B1–B5
+├── test_work.py        # B1–B7
 ├── test_materials.py   # C1–C3
 ├── test_routines.py    # D1–D3
 └── reports/            # rapporti committati (md + json)

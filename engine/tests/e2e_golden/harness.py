@@ -23,6 +23,16 @@ import httpx
 
 GOLDEN_DIR = Path(__file__).resolve().parent
 WORKSPACE = "ws_local"
+# L'attore della UI web senza intestazioni esplicite (`defaultLocalActor()` in
+# engine-domain-client.ts): è lui che compare nel roster e in trascrizione.
+UI_ACTOR_ID = "person_fabio"
+UI_ACTOR_NAME = "Tu"
+# Titolo e obiettivo con cui la UI apre ogni conversazione nuova
+# (`createEngineConversationAndWork` in conversation-engine-bridge.ts).
+UI_NEW_REQUEST_TITLE = "Nuova richiesta"
+UI_NEW_REQUEST_OBJECTIVE = "Obiettivo da concordare"
+# Il lavoro interno dei turni di chat con agente (chat_agent.CHAT_WORK_TITLE).
+CHAT_WORK_TITLE = "Chat agente"
 
 # Tempi massimi di attesa in secondi: con modelli veri il percorso è lento
 # e la suite misura, non corre.
@@ -48,6 +58,8 @@ SCENARIOS: dict[str, str] = {
     "B3": "Il risultato contiene i fatti dati (Rossi, 30 novembre, 12.000)",
     "B4": "Correzione motivata → nuova versione del risultato",
     "B5": "Il lavoro sta in Compiti, il risultato approvato in Documenti",
+    "B6": "Richiesta di lavoro come messaggio successivo: accettata, proposta o chiarimento",
+    "B7": "Lavoro eseguito con una connessione creata dall'utente con un nome suo",
     "C1": "Progetto con 2 file caricati (.md e .pdf) leggibili",
     "C2": "Ricerca nei materiali: il risultato cita i contenuti veri dei file",
     "C3": "Riassunto di un file: il risultato ne presenta i punti chiave",
@@ -95,6 +107,12 @@ def excerpt_of(text: Any, limit: int = 400) -> str:
 def describe(error: GoldenError | None) -> str:
     """Rappresentazione compatta di un errore golden per le asserzioni."""
     return f"{error.code}: {error.reason}" if error else "nessun errore"
+
+
+def ensure_accepted(error: GoldenError | None, what: str) -> None:
+    """Un POST rifiutato fa fallire il passo con il `code` e il `reason` del motore."""
+    if error is not None:
+        raise GoldenError(error.code, f"{what}: {error.reason}", error.excerpt)
 
 
 def normalize_for_match(text: str) -> str:
@@ -319,6 +337,18 @@ class Engine:
         time.sleep(1.0)
         self.start()
 
+    def last_exception(self) -> str:
+        """L'ultima riga d'eccezione nel log del motore: spiega un run bloccato
+        quando l'API espone solo l'`error_code`."""
+        try:
+            lines = self.log_path.read_text(errors="replace").splitlines()
+        except OSError:
+            return ""
+        for line in reversed(lines[-400:]):
+            if re.match(r"^[\w.]+(Error|Exception): ", line):
+                return redact(line.strip())
+        return ""
+
 
 class HomunClient:
     """Client HTTP del percorso d'oro: gli stessi endpoint dei client della UI."""
@@ -379,13 +409,46 @@ class HomunClient:
         result = self.command("conversation.create", payload)
         return str(result["conversation_id"])
 
+    def create_conversation_and_work(self) -> tuple[str, str, int]:
+        """Una conversazione nuova come la apre la UI: conversazione + lavoro «Nuova richiesta».
+
+        È `createEngineConversationAndWork` (conversation-engine-bridge.ts): ogni
+        chat del motore nasce con un lavoro in bozza dall'obiettivo da concordare.
+        Restituisce (conversation_id, work_id, versione del lavoro).
+        """
+        conversation_id = self.create_conversation(UI_NEW_REQUEST_TITLE)
+        created = self.create_work(conversation_id, UI_NEW_REQUEST_TITLE, UI_NEW_REQUEST_OBJECTIVE)
+        return conversation_id, str(created["work_id"]), int(created["version"])
+
+    def ui_roster(self) -> list[dict[str, str]]:
+        """Il roster che la UI allega a ogni messaggio (`postEngineConversationMessage`):
+        la persona più gli agenti attivi o in bozza."""
+        roster = [{"id": UI_ACTOR_ID, "display_name": UI_ACTOR_NAME, "kind": "person"}]
+        for agent in self.list_agents():
+            if agent.get("status") in {"active", "draft"}:
+                roster.append(
+                    {"id": str(agent["id"]), "display_name": str(agent.get("name") or agent["id"]), "kind": "agent"}
+                )
+        return roster
+
     def post_message(
-        self, conversation_id: str, text: str, connection_id: str | None = None
+        self,
+        conversation_id: str,
+        text: str,
+        connection_id: str | None = None,
+        roster: list[dict[str, str]] | None = None,
     ) -> tuple[dict[str, Any], GoldenError | None]:
-        """Invia un messaggio; restituisce (risultato, errore) senza sollevare."""
+        """Invia un messaggio; restituisce (risultato, errore) senza sollevare.
+
+        È il POST di `conversation.post_message` che la UI fa per ogni messaggio
+        di una conversazione esistente (useEngineWorkspace.postMessage →
+        postEngineConversationMessage): `roster` e `connection_id` come li manda lei.
+        """
         payload: dict[str, Any] = {"conversation_id": conversation_id, "text": text}
         if connection_id:
             payload["connection_id"] = connection_id
+        if roster is not None:
+            payload["roster"] = roster
         body = {
             "command_id": f"golden-{secrets.token_hex(6)}",
             "type": "conversation.post_message",
@@ -397,6 +460,44 @@ class HomunClient:
         result = (response.json() or {}).get("result") or {}
         result["command_id"] = body["command_id"]
         return dict(result), None
+
+    def post_message_when_free(
+        self,
+        conversation_id: str,
+        text: str,
+        timeout: float = RECOVERY_WINDOW_TIMEOUT,
+        roster: list[dict[str, str]] | None = None,
+    ) -> tuple[dict[str, Any], GoldenError | None, int]:
+        """Invia un messaggio riprovando finché la conversazione è occupata.
+
+        Dopo un turno fallito il motore tiene la conversazione occupata per la
+        finestra di retry del followup (`command_in_progress`, ~40-60 s): qui si
+        riprova fino a `timeout`. Restituisce (risultato, errore, rifiuti): errore
+        è l'ultimo ricevuto se il messaggio non è stato accettato; i rifiuti sono
+        i `command_in_progress` incassati prima dell'accettazione.
+        """
+        deadline = time.monotonic() + timeout
+        rejections = 0
+        while True:
+            result, error = self.post_message(conversation_id, text, roster=roster)
+            if error is None:
+                return result, None, rejections
+            if error.code != "command_in_progress" or time.monotonic() >= deadline:
+                return {}, error, rejections
+            rejections += 1
+            time.sleep(5)
+
+    def message_persisted(self, conversation_id: str, message_id: str, text_part: str) -> bool:
+        """Il messaggio della persona è in trascrizione (per id o per testo): per la
+        UI è questo che vuol dire «accettato», anche quando la risposta arriva dopo."""
+        for _ in range(10):
+            messages = self.messages(conversation_id)
+            if message_id and any(m.get("id") == message_id for m in messages):
+                return True
+            if any(text_part in (m.get("text") or "") for m in messages):
+                return True
+            time.sleep(3)
+        return False
 
     def messages(self, conversation_id: str, after: int = 0) -> list[dict[str, Any]]:
         path = f"/v1/workspaces/{WORKSPACE}/conversations/{conversation_id}/messages"
@@ -497,6 +598,15 @@ class HomunClient:
             "work.create", {"conversation_id": conversation_id, "title": title, "objective": objective}
         )
 
+    def propose_plan(self, work_id: str, expected_version: int, steps: list[dict[str, Any]]) -> dict[str, Any]:
+        """Piano esplicito (`plan.propose`): è come il motore apre un lavoro chat o una routine."""
+        return self.command(
+            "plan.propose", {"work_id": work_id, "expected_version": expected_version, "steps": steps}
+        )
+
+    def accept_plan(self, work_id: str, expected_version: int) -> dict[str, Any]:
+        return self.command("plan.accept", {"work_id": work_id, "expected_version": expected_version})
+
     def classify_intake(self, work_id: str, text: str) -> dict[str, Any]:
         return self.post(
             f"/v1/workspaces/{WORKSPACE}/works/{work_id}/intake/classify", {"text": text}
@@ -570,6 +680,9 @@ class HomunClient:
         }
         return self.post(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/agent-runs/{run['id']}/approve", body)
 
+    def agent_runs(self, work_id: str) -> list[dict[str, Any]]:
+        return self.get(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/agent-runs").get("items") or []
+
     def wait_agent_run(
         self, work_id: str, run_id: str, timeout: float = WORK_RUN_TIMEOUT
     ) -> dict[str, Any]:
@@ -580,9 +693,23 @@ class HomunClient:
             label="run agente",
         )
 
+    def chat_run_work(self, conversation_id: str, run_id: str) -> str | None:
+        """Il lavoro «Chat agente» che ospita il run di un turno di chat.
+
+        Il percorso chat-agente (chat_agent.py) nasconde il turno in un lavoro
+        interno: per leggere lo stato del run bisogna ritrovarlo da lì.
+        """
+        for work in self.list_works():
+            if work.get("title") != CHAT_WORK_TITLE:
+                continue
+            if any(run.get("id") == run_id for run in self.agent_runs(str(work["id"]))):
+                return str(work["id"])
+        return None
+
     def _wait_item(self, path: str, item_id: str, timeout: float, label: str) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
         latest: dict[str, Any] = {}
+        slug = label.replace(" ", "_")
         while time.monotonic() < deadline:
             items = self.get(path).get("items") or []
             latest = next((item for item in items if item.get("id") == item_id), latest)
@@ -590,9 +717,10 @@ class HomunClient:
             if status == "completed":
                 return latest
             if status in {"failed", "cancelled", "blocked"}:
+                detail = f" (error_code {latest['error_code']})" if latest.get("error_code") else ""
                 raise GoldenError(
-                    f"{label}_{status}",
-                    f"{label} {item_id} è terminato in stato {status}",
+                    f"{slug}_{status}",
+                    f"{label} {item_id} è terminato in stato {status}{detail}",
                     excerpt_of(latest),
                 )
             if status == "waiting_input":

@@ -122,11 +122,12 @@ def golden_engine(golden_engines, golden_recorder) -> Engine:
 
 
 class Golden:
-    """Facciata per gli scenari: client HTTP, motore e registrazione dei passi."""
+    """Facciata per gli scenari: client HTTP, motore, provider e registrazione dei passi."""
 
-    def __init__(self, engine: Engine, recorder: Recorder):
+    def __init__(self, engine: Engine, recorder: Recorder, provider: ProviderConfig):
         self.engine = engine
         self.recorder = recorder
+        self.provider = provider
 
     @property
     def client(self) -> HomunClient:
@@ -139,16 +140,16 @@ class Golden:
 
 
 @pytest.fixture
-def golden(golden_engine, golden_recorder) -> Golden:
+def golden(golden_engine, golden_recorder, golden_provider) -> Golden:
     """Scenari sul motore condiviso della sessione."""
-    return Golden(golden_engine, golden_recorder)
+    return Golden(golden_engine, golden_recorder, golden_provider)
 
 
 @pytest.fixture
-def golden_solo(golden_engines, golden_recorder):
-    """Scenari con un motore proprio (per i riavvii: A4, D3), fermato a fine test."""
+def golden_solo(golden_engines, golden_recorder, golden_provider):
+    """Scenari con un motore proprio (riavvii: A4, D3; connessione propria: B7), fermato a fine test."""
     engine = golden_engines()
-    facade = Golden(engine, golden_recorder)
+    facade = Golden(engine, golden_recorder, golden_provider)
     yield facade
     engine.stop()
 

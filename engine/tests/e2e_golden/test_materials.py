@@ -14,7 +14,7 @@ import secrets
 import pytest
 
 from .fixtures.materials import MD_MARKERS, MD_NAME, MD_TEXT, PDF_MARKERS, PDF_NAME, make_pdf
-from .harness import describe, normalize_for_match, run_indices
+from .harness import normalize_for_match, run_indices
 from .reporting import GoldenRun
 
 pytestmark = pytest.mark.golden
@@ -38,7 +38,7 @@ def _run_intake_work(golden, conversation_id: str, text: str, material_ids: list
     work_id = str(created["work_id"])
     version = int(created["version"])
     proposal = client.propose_intake(work_id, text, version)
-    assert proposal.get("status") == "pending_confirmation", describe(proposal)
+    assert proposal.get("status") == "pending_confirmation", str(proposal.get("status"))
     client.confirm_intake(work_id, proposal)
     version = int(client.work_detail(work_id)["work"]["version"])
     return _execute_work(golden, work_id, version, material_ids, run)

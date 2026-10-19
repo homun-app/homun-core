@@ -7,6 +7,7 @@ rapporto in «reports/».
 from __future__ import annotations
 
 import json
+import os
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -16,9 +17,12 @@ from typing import Any, Callable, Iterator
 
 import httpx
 
+from .defects import engine_defects_for
 from .harness import GOLDEN_DIR, SCENARIOS, GoldenError, now_iso, redact
 
-REPORTS_DIR = GOLDEN_DIR / "reports"
+# Una prova parziale non deve sovrascrivere la storia committata: con
+# HOMUN_GOLDEN_REPORTS_DIR i rapporti vanno altrove.
+REPORTS_DIR = Path(os.environ.get("HOMUN_GOLDEN_REPORTS_DIR", "").strip() or GOLDEN_DIR / "reports")
 
 # -- registrazione e rapporti ------------------------------------------------
 
@@ -60,6 +64,15 @@ class Recorder:
     def _runs(self, scenario: str) -> list[int]:
         return sorted({record.run for record in self.steps if record.scenario == scenario})
 
+    def _expected_runs(self, scenario: str, runs: list[int]) -> int:
+        """Quanti run doveva avere lo scenario: quelli di sessione (run 0) uno solo."""
+        if runs == [0]:
+            return 1
+        try:
+            return max(int(self.meta.get("runs") or 0), len(runs))
+        except (TypeError, ValueError):
+            return len(runs)
+
     def _scenario_stats(self, scenario: str) -> dict[str, Any]:
         records = [record for record in self.steps if record.scenario == scenario]
         runs = self._runs(scenario)
@@ -69,31 +82,42 @@ class Recorder:
             for run in runs
             if records and all(r.status == "ok" for r in records if r.run == run)
         }
+        # eseguiti: almeno un passo proprio dello scenario è stato eseguito;
+        # interrotti prima: la storia si è fermata in uno scenario precedente.
+        # Entrambi contano come tentati, e gli interrotti come falliti.
+        executed = [run for run in runs if any(r.run == run and r.status in {"ok", "fail"} for r in records)]
+        interrupted = [run for run in runs if run not in executed]
         durations: dict[int, float] = {}
         for record in records:
             durations[record.run] = durations.get(record.run, 0.0) + record.duration
-        attempted = [run for run in runs if any(r.run == run and r.status in {"ok", "fail"} for r in records)]
+        expected = self._expected_runs(scenario, runs)
+        failures = [
+            {
+                "run": record.run,
+                "step": record.step,
+                "code": record.code,
+                "reason": record.reason,
+                "excerpt": record.excerpt,
+                "interrupted_before": record.status == "not_attempted",
+            }
+            for record in records
+            if record.status in {"fail", "not_attempted"}
+        ]
         return {
             "title": SCENARIOS.get(scenario, scenario),
             "runs": len(runs),
+            "expected_runs": expected,
+            "missing": expected - len(runs),
             "successes": len(successes),
-            "attempted": len(attempted),
+            "attempted": len(runs),
+            "interrupted": len(interrupted),
             "avg_duration": (
-                round(sum(durations.get(run, 0.0) for run in attempted) / len(attempted), 1)
-                if attempted
+                round(sum(durations.get(run, 0.0) for run in executed) / len(executed), 1)
+                if executed
                 else 0.0
             ),
-            "failures": [
-                {
-                    "run": record.run,
-                    "step": record.step,
-                    "code": record.code,
-                    "reason": record.reason,
-                    "excerpt": record.excerpt,
-                }
-                for record in records
-                if record.status == "fail"
-            ],
+            "failures": failures,
+            "engine_defects": engine_defects_for(failures),
         }
 
     def scenario_order(self) -> list[str]:
@@ -138,24 +162,51 @@ class Recorder:
             f"- Run per scenario: **{meta.get('runs', '?')}** · avvio reale `python -m homun serve`",
             f"- Commit: `{meta.get('commit', '?')}` · durata totale: {meta.get('duration', '?')}",
             "",
+            "Un run interrotto in uno scenario precedente conta come tentato e fallito "
+            "(«interrotti prima»); un fallimento con il modello locale è un difetto del motore.",
+            "",
             "| Scenario | Successo | Tentati | Durata media |",
             "|---|---|---|---|",
         ]
-        for scenario in self.scenario_order():
-            stats = self._scenario_stats(scenario)
+        all_stats = {scenario: self._scenario_stats(scenario) for scenario in self.scenario_order()}
+        for scenario, stats in all_stats.items():
             rate = f"{stats['successes']}/{stats['runs']}"
             pct = f" ({stats['successes'] * 100 // stats['runs']}%)" if stats["runs"] else ""
+            attempted = str(stats["attempted"])
+            if stats["interrupted"]:
+                attempted += f" ({stats['interrupted']} interrotti prima)"
+            if stats["missing"] > 0:
+                attempted += f" · {stats['missing']} run non eseguiti"
             lines.append(
-                f"| {scenario} · {stats['title']} | {rate}{pct} | {stats['attempted']} | {stats['avg_duration']}s |"
+                f"| {scenario} · {stats['title']} | {rate}{pct} | {attempted} | {stats['avg_duration']}s |"
             )
+        defects = [
+            (scenario, stats["engine_defects"])
+            for scenario, stats in all_stats.items()
+            if stats["failures"]
+        ]
+        if defects:
+            lines += ["", "## Difetti del motore", ""]
+            for scenario, descriptions in defects:
+                first, *others = descriptions
+                lines.append(f"- **{scenario}** — difetto del motore: {first}")
+                lines += [f"  - inoltre: {other}" for other in others]
         failures = [
             (scenario, failure)
-            for scenario in self.scenario_order()
-            for failure in self._scenario_stats(scenario)["failures"]
+            for scenario, stats in all_stats.items()
+            for failure in stats["failures"]
         ]
         if failures:
             lines += ["", "## Fallimenti", ""]
             for scenario, failure in failures:
+                if failure["interrupted_before"]:
+                    lines += [
+                        f"### {scenario} · run {failure['run']} — interrotto prima",
+                        f"- motivo: {failure['reason']}",
+                        f"- codice del passo che ha interrotto: `{failure['code']}`",
+                        "",
+                    ]
+                    continue
                 lines += [
                     f"### {scenario} · run {failure['run']} — passo «{failure['step']}»",
                     f"- codice: `{failure['code']}`",
@@ -216,26 +267,43 @@ class GoldenRun:
             record.reason, record.excerpt = f"{type(exc).__name__}: {exc}", ""
             self.recorder.add(record)
             raise
+        except Exception as exc:  # noqa: BLE001 — un'eccezione inattesa non deve far sparire il run dal rapporto
+            record.status = "fail"
+            record.duration = round(time.monotonic() - started, 1)
+            record.code = "eccezione_suite"
+            record.reason, record.excerpt = f"{type(exc).__name__}: {exc}", ""
+            self.recorder.add(record)
+            raise
         else:
             record.duration = round(time.monotonic() - started, 1)
             self.recorder.add(record)
         finally:
             self._current = None
 
-    def mark_not_attempted(self, scenarios: list[str]) -> None:
+    def mark_not_attempted(self, scenarios: list[str], interrupted_by: StepRecord | None = None) -> None:
+        """Gli scenari mai raggiunti in questo run: contano come tentati e falliti,
+        con il passo che ha interrotto la storia come motivo."""
         for scenario in scenarios:
-            if not any(
+            if any(
                 record.scenario == scenario and record.run == self.run_index
                 for record in self.recorder.steps
             ):
-                self.recorder.add(
-                    StepRecord(
-                        scenario=scenario,
-                        run=self.run_index,
-                        step=f"{scenario} (non tentato: storia interrotta prima)",
-                        status="not_attempted",
-                    )
+                continue
+            if interrupted_by is not None:
+                code = interrupted_by.code
+                reason = f"storia interrotta prima, al passo «{interrupted_by.step}»: {interrupted_by.reason}"
+            else:
+                code, reason = "", "storia interrotta prima (passo non registrato)"
+            self.recorder.add(
+                StepRecord(
+                    scenario=scenario,
+                    run=self.run_index,
+                    step=f"{scenario} (interrotto prima)",
+                    status="not_attempted",
+                    code=code,
+                    reason=reason,
                 )
+            )
 
     @contextmanager
     def probe(self, name: str) -> Iterator[None]:
@@ -244,8 +312,8 @@ class GoldenRun:
         try:
             with self.step(name):
                 yield
-        except (GoldenError, AssertionError, httpx.HTTPError):
-            pass  # già registrato dallo step interno
+        except Exception:  # noqa: BLE001 — già registrato dallo step interno
+            pass
 
 
 def run_story(
@@ -260,17 +328,20 @@ def run_story(
     «session» è la facciata golden (con .client HTTP e .engine per i riavvii).
     """
     run = GoldenRun(recorder, run_index)
+    interrupted_by: StepRecord | None = None
     try:
         story(session, run)
-    except (GoldenError, httpx.HTTPError, AssertionError):
-        pass  # già registrato dallo step che l'ha sollevata
-    run.mark_not_attempted(scenarios)
+    except Exception:  # noqa: BLE001 — già registrato dallo step che l'ha sollevata
+        interrupted_by = next(
+            (r for r in reversed(recorder.steps) if r.run == run_index and r.status == "fail"), None
+        )
+    run.mark_not_attempted(scenarios, interrupted_by)
     failed = [
         record
         for record in recorder.steps
         if record.run == run_index
         and record.scenario in scenarios
         and record.status in {"fail", "not_attempted"}
-        # «non tentato» conta come mancato successo dello scenario in quel run
+        # «interrotto prima» conta come mancato successo dello scenario in quel run
     ]
     return [f"{r.step} ({r.code})" for r in failed]
