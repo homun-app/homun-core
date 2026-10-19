@@ -26,7 +26,16 @@ ENGINE_DEFECTS: list[tuple[str, str]] = [
         "finisce in `provider_unavailable` (`command_delivery.complete`, riga 186).",
     ),
     (
-        r"(Local model|Model) interpret failed(?!.*Input should be a valid list)",
+        r"kind\s+Field required",
+        "interpretazione del messaggio: davanti a una richiesta di lavoro il modello risponde con "
+        "la struttura del lavoro (titolo, assegnatario) invece dell'involucro "
+        "`MessageInterpretation` (manca `kind`), e il secondo tentativo ripete lo stesso prompt "
+        "senza il feedback dello schema — `engine/src/homun/models/interpret.py:53-66` "
+        "(`_interpret_via_json_completion`, prompt `interpret/schema_hint`) e `:151-224` "
+        "(`run_interpret_with_retry`); il turno finisce in `provider_unavailable`.",
+    ),
+    (
+        r"(Local model|Model) interpret failed(?!.*(Input should be a valid list|Field required))",
         "interpretazione del messaggio fallita nel percorso JSON-in-prompt — "
         "`engine/src/homun/models/interpret.py:131-148` (`run_interpret`): ogni eccezione del "
         "parsing diventa `RuntimeError` → `provider_unavailable`, senza riparare il JSON.",
