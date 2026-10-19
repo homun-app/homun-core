@@ -15,7 +15,13 @@ il provider cloud anche denaro.
 # Locale: Ollama attivo su http://127.0.0.1:11434/v1
 cd engine && HOMUN_GOLDEN_PROVIDER=local .venv/bin/pytest -m golden -q
 
-# Cloud: connessione OpenAI-compatibile dalle variabili d'ambiente
+# Cloud via Ollama (modelli «:cloud», stesso demone locale, nessuna chiave):
+cd engine && \
+  HOMUN_GOLDEN_PROVIDER=cloud \
+  HOMUN_GOLDEN_CLOUD_MODEL="glm-5.3-flash:cloud" \
+  .venv/bin/pytest -m golden -q
+
+# Cloud con endpoint OpenAI-compatibile qualsiasi (serve la chiave):
 cd engine && \
   HOMUN_GOLDEN_PROVIDER=cloud \
   HOMUN_GOLDEN_CLOUD_BASE_URL="https://api.openai.com/v1" \
@@ -26,23 +32,41 @@ cd engine && \
 
 Variabili:
 
-| Variabile                     | Significato                          | Predefinito            |
-| ----------------------------- | ------------------------------------ | ---------------------- |
-| `HOMUN_GOLDEN_PROVIDER`       | `local` (Ollama) oppure `cloud`      | obbligatorio           |
-| `HOMUN_GOLDEN_LOCAL_MODEL`    | modello Ollama da usare              | `qwen3.5:4b`           |
-| `HOMUN_GOLDEN_CLOUD_BASE_URL` | endpoint OpenAI-compatibile          | obbligatorio per cloud |
-| `HOMUN_GOLDEN_CLOUD_MODEL`    | modello cloud                        | obbligatorio per cloud |
-| `HOMUN_GOLDEN_CLOUD_API_KEY`  | chiave (mai nei log né nei rapporti) | obbligatorio per cloud |
-| `HOMUN_GOLDEN_RUNS`           | ripetizioni per scenario             | `3`                    |
+| Variabile                     | Significato                          | Predefinito               |
+| ----------------------------- | ------------------------------------ | ------------------------- |
+| `HOMUN_GOLDEN_PROVIDER`       | `local` (Ollama) oppure `cloud`      | obbligatorio              |
+| `HOMUN_GOLDEN_LOCAL_MODEL`    | modello Ollama da usare              | `qwen3.5:4b`              |
+| `HOMUN_GOLDEN_CLOUD_BASE_URL` | endpoint OpenAI-compatibile          | Ollama locale (`…/v1`)    |
+| `HOMUN_GOLDEN_CLOUD_MODEL`    | modello cloud                        | obbligatorio per cloud    |
+| `HOMUN_GOLDEN_CLOUD_API_KEY`  | chiave (mai nei log né nei rapporti) | richiesta solo per remoto |
+| `HOMUN_GOLDEN_RUNS`           | ripetizioni per scenario             | `3`                       |
 
 Se il provider scelto non è raggiungibile (Ollama spento, modello mancante,
 endpoint cloud irraggiungibile) la sessione **si salta** con un messaggio
 chiaro: non è un fallimento.
 
-La chiave cloud viaggia solo nella richiesta HTTP verso il motore, che la
-conserva nel suo archivio segreti dentro la data dir temporanea della
-sessione, distrutta a fine esecuzione. Non viene mai scritta dalla suite,
-nei log o nei rapporti.
+### Quale modello cloud
+
+I modelli Ollama «:cloud» si usano dallo stesso demone locale e si pagano a
+token ([prezzi](https://ollama.com/pricing)). Per questa suite servono buon
+italiano e rigore nel JSON strutturato (l'interpretazione della chat); i più
+economici adatti (ottobre 2026, $ per milione di token in/out):
+
+- `glm-5.3-flash:cloud` — 0,15 / 0,50 — la scelta predefinita
+- `gpt-oss:120b-cloud` — 0,15 / 0,60 — alternativa altrettanto economica
+- `deepseek-v4.1-flash` — 0,30 / 1,20 (la metà fuori picco)
+
+Una sessione completa (3 run per scenario) consuma dell'ordine di 200–400 K
+token in entrata e 50–100 K in uscita: **~0,05–0,15 $** con i modelli sopra.
+Un modello mancante si registra al volo: `ollama pull gpt-oss:120b-cloud`.
+
+Con un endpoint remoto la chiave viaggia solo nella richiesta HTTP verso il
+motore, che la conserva nel suo archivio segreti dentro la data dir temporanea
+della sessione, distrutta a fine esecuzione. Non viene mai scritta dalla
+suite, nei log o nei rapporti. Attenzione: con una connessione il cui id
+differisce dalla kind i run adattivi del motore finiscono «blocked» (vedi le
+note del rapporto del 19/10/2026): con Ollama, modelli `:cloud` inclusi, si
+passa dal preset e il problema non si presenta.
 
 ## Come lavora la suite
 

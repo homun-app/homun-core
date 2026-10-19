@@ -122,10 +122,20 @@ class ProviderConfig:
     base_url: str
     model_id: str
     api_key: str | None = None
+    via_local_ollama: bool = False  # cloud «:cloud» instradato dal demone Ollama locale
 
     @property
     def safe_description(self) -> str:
         return f"provider={self.provider} modello={self.model_id} base_url={self.base_url}"
+
+
+LOCAL_OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1"
+
+
+def _is_loopback(base_url: str) -> bool:
+    from urllib.parse import urlsplit
+
+    return urlsplit(base_url).hostname in {"127.0.0.1", "localhost", "::1"}
 
 
 def build_provider_config() -> tuple[ProviderConfig | None, str]:
@@ -138,42 +148,43 @@ def build_provider_config() -> tuple[ProviderConfig | None, str]:
                 provider="local",
                 connection_id="golden_local",
                 display_name="Ollama locale (golden)",
-                base_url="http://127.0.0.1:11434/v1",
+                base_url=LOCAL_OLLAMA_BASE_URL,
                 model_id=model,
+                via_local_ollama=True,
             ),
             "",
         )
     if provider == "cloud":
-        missing = [
-            name
-            for name in (
-                "HOMUN_GOLDEN_CLOUD_BASE_URL",
-                "HOMUN_GOLDEN_CLOUD_MODEL",
-                "HOMUN_GOLDEN_CLOUD_API_KEY",
-            )
-            if not os.environ.get(name, "").strip()
-        ]
-        if missing:
-            return None, "variabili d'ambiente mancanti: " + ", ".join(missing)
+        # Senza BASE_URL il cloud passa dal demone Ollama locale (modelli
+        # «:cloud», stesso endpoint, nessuna chiave da gestire); con BASE_URL
+        # si usa un endpoint OpenAI-compatibile qualsiasi e serve la chiave.
+        base_url = os.environ.get("HOMUN_GOLDEN_CLOUD_BASE_URL", "").strip() or LOCAL_OLLAMA_BASE_URL
+        model = os.environ.get("HOMUN_GOLDEN_CLOUD_MODEL", "").strip()
+        api_key = os.environ.get("HOMUN_GOLDEN_CLOUD_API_KEY", "").strip() or None
+        if not model:
+            return None, "variabile d'ambiente mancante: HOMUN_GOLDEN_CLOUD_MODEL"
+        if not api_key and not _is_loopback(base_url):
+            return None, "HOMUN_GOLDEN_CLOUD_API_KEY richiesta per un endpoint remoto"
         return (
             ProviderConfig(
                 provider="cloud",
                 connection_id="golden_cloud",
                 display_name="Cloud (golden)",
-                base_url=os.environ["HOMUN_GOLDEN_CLOUD_BASE_URL"].strip(),
-                model_id=os.environ["HOMUN_GOLDEN_CLOUD_MODEL"].strip(),
-                api_key=os.environ["HOMUN_GOLDEN_CLOUD_API_KEY"],
+                base_url=base_url,
+                model_id=model,
+                api_key=api_key,
+                via_local_ollama=_is_loopback(base_url),
             ),
             "",
         )
-    return None, "imposta HOMUN_GOLDEN_PROVIDER=local (Ollama) oppure =cloud (OpenAI-compatibile)"
+    return None, "imposta HOMUN_GOLDEN_PROVIDER=local (Ollama) oppure =cloud (Ollama cloud o OpenAI-compatibile)"
 
 
 def probe_provider(config: ProviderConfig) -> str:
     """Motivo per cui il provider non è raggiungibile, o stringa vuota se lo è."""
     try:
-        if config.provider == "local":
-            response = httpx.get("http://127.0.0.1:11434/v1/models", timeout=5.0)
+        if config.via_local_ollama:
+            response = httpx.get(config.base_url.rstrip("/") + "/models", timeout=8.0)
             response.raise_for_status()
             ids = [item.get("id") for item in response.json().get("data", [])]
             if config.model_id not in ids:

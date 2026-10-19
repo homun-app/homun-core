@@ -70,11 +70,12 @@ def golden_recorder(golden_provider) -> Recorder:
 def configure_provider(client: HomunClient, config: ProviderConfig) -> None:
     """Configura la connessione modello come farebbe la persona nella UI.
 
-    Locale: «Applica preset Ollama» aggiorna la connessione predefinita
-    (`openai_compatible`) mantenendo coincidenti id e kind. Cloud: nuova
-    connessione OpenAI-compatibile più attivazione, come il modale Modelli.
+    Via demone Ollama (locale o modelli «:cloud»): «Applica preset Ollama»
+    aggiorna la connessione predefinita (`openai_compatible`) mantenendo
+    coincidenti id e kind. Endpoint remoto OpenAI-compatibile: nuova
+    connessione più attivazione, come il modale Modelli.
     """
-    if config.provider == "local":
+    if config.via_local_ollama:
         client.post(
             "/v1/models/providers/openai_compatible/ollama_preset",
             {"model": config.model_id},
