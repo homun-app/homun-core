@@ -7,6 +7,12 @@ import logging
 
 import uvicorn
 from homun.app import create_app
+from homun.remote_listener import (
+    RemoteListenError,
+    create_remote_app,
+    parse_remote_listen,
+    run_linked_servers,
+)
 
 
 def _configure_logging(dev: bool) -> None:
@@ -29,6 +35,7 @@ def _configure_logging(dev: bool) -> None:
 def serve(args):
     _configure_logging(getattr(args, 'dev_insecure', False))
     token = os.environ.get('HOMUN_SESSION_TOKEN')
+    remote_listen = getattr(args, 'remote_listen', None)
     if args.host not in {'127.0.0.1', '::1'}:
         print('The local engine only binds to loopback', file=sys.stderr)
         return 2
@@ -38,6 +45,16 @@ def serve(args):
     if token and len(token) < 32:
         print('Invalid local session configuration', file=sys.stderr)
         return 2
+    if remote_listen and args.dev_insecure:
+        print('The remote listener requires a real session; --dev-insecure stays loopback-only', file=sys.stderr)
+        return 2
+    remote_addr = None
+    if remote_listen:
+        try:
+            remote_addr = parse_remote_listen(remote_listen)
+        except RemoteListenError as exc:
+            print(f'Invalid --remote-listen {remote_listen!r}: {exc}', file=sys.stderr)
+            return 2
     if os.environ.get('HOMUN_PARENT_WATCHDOG') == '1':
         from threading import Thread
         import signal
@@ -66,7 +83,31 @@ def serve(args):
         set_listening_port(sock.getsockname()[1])
         # Reserved socket, not a readiness claim. Parent polls authenticated health.
         print('HOMUN_SOCKET '+json.dumps({'port': sock.getsockname()[1]}), flush=True)
-        uvicorn.Server(uvicorn.Config(app, log_level='warning', access_log=False)).run(sockets=[sock])
+        remote_sock = None
+        if remote_addr:
+            # Secondo socket dello stesso processo: stesso contesto, stesso
+            # store, ma SOLO l'app remota (pairing + allowlist).
+            remote_sock = socket.socket(
+                socket.AF_INET6 if ':' in remote_addr[0] else socket.AF_INET)
+            remote_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                remote_sock.bind(remote_addr)
+            except OSError as exc:
+                print(f'Cannot bind the remote listener on {remote_addr[0]}:{remote_addr[1]}: {exc}',
+                      file=sys.stderr)
+                remote_sock.close()
+                return 2
+            logging.getLogger(__name__).info(
+                'Remote listener on http://%s:%d (pairing + remote allowlist)',
+                remote_addr[0], remote_addr[1])
+        try:
+            if remote_sock is not None:
+                run_linked_servers([(app, sock), (create_remote_app(), remote_sock)])
+            else:
+                uvicorn.Server(uvicorn.Config(app, log_level='warning', access_log=False)).run(sockets=[sock])
+        finally:
+            if remote_sock is not None:
+                remote_sock.close()
     finally:
         sock.close()
     return 0

@@ -72,6 +72,10 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--host", default=DEFAULT_HOST)
     serve.add_argument("--port", type=int, default=DEFAULT_PORT)
     serve.add_argument("--dev-insecure", action="store_true", help="Explicit loopback-only browser development without session authentication")
+    serve.add_argument("--remote-listen", default=None, metavar="HOST:PORT",
+                       help="Second listener for the network (pairing + remote allowlist): "
+                            "an explicit address of this machine, e.g. the Tailscale IP; "
+                            "wildcards like 0.0.0.0 are rejected")
     serve.set_defaults(func=_cmd_serve)
 
     backup = sub.add_parser("backup", help="Backup and restore workspace SQLite")
@@ -99,7 +103,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command is None:
         # Backward compatible: `python -m homun` still starts the server.
-        return _cmd_serve(argparse.Namespace(host=DEFAULT_HOST, port=DEFAULT_PORT, dev_insecure=False))
+        return _cmd_serve(argparse.Namespace(host=DEFAULT_HOST, port=DEFAULT_PORT,
+                                             dev_insecure=False, remote_listen=None))
     return int(args.func(args))
 
 

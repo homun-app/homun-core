@@ -6,6 +6,26 @@ from starlette.responses import JSONResponse
 from homun.routes.remote_scope import is_remote_scope_allowed, scope_denied_response
 
 
+def resolve_person_bearer(bearer: bytes) -> str | None:
+    """La persona della sessione nel registro dietro un header Bearer, o None.
+
+    Un solo posto decide come si risolve una sessione di persona/dispositivo:
+    SessionAuthMiddleware, PersonBearerHeaderMiddleware e il listener remoto
+    (homun/remote_listener.py) usano tutti questa funzione."""
+    token = bearer.decode('latin1').removeprefix('Bearer ').strip()
+    if not token:
+        return None
+    try:
+        from homun.context import get_context
+        from homun.identity import PersonSessionStore
+        ctx = get_context()
+        store = PersonSessionStore(ctx.repository.connection(), ctx.repository.lock)
+        session = store.resolve(token)
+        return session['person_id'] if session else None
+    except Exception:
+        return None
+
+
 class SessionAuthMiddleware:
     def __init__(self, app, *, token: str, origins: list[str], actor_id: str):
         if len(token) < 32:
@@ -16,18 +36,7 @@ class SessionAuthMiddleware:
         self.app, self.token, self.origins = app, token, frozenset(origins)
 
     def _resolve_registry_session(self, bearer: bytes) -> str | None:
-        token = bearer.decode('latin1').removeprefix('Bearer ').strip()
-        if not token:
-            return None
-        try:
-            from homun.context import get_context
-            from homun.identity import PersonSessionStore
-            ctx = get_context()
-            store = PersonSessionStore(ctx.repository.connection(), ctx.repository.lock)
-            session = store.resolve(token)
-            return session['person_id'] if session else None
-        except Exception:
-            return None
+        return resolve_person_bearer(bearer)
 
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'http':
@@ -109,15 +118,4 @@ class PersonBearerHeaderMiddleware:
         return await self.app(scope, receive, send)
 
     def _resolve(self, bearer: bytes) -> str | None:
-        token = bearer.decode('latin1').removeprefix('Bearer ').strip()
-        if not token:
-            return None
-        try:
-            from homun.context import get_context
-            from homun.identity import PersonSessionStore
-            ctx = get_context()
-            store = PersonSessionStore(ctx.repository.connection(), ctx.repository.lock)
-            session = store.resolve(token)
-            return session['person_id'] if session else None
-        except Exception:
-            return None
+        return resolve_person_bearer(bearer)
