@@ -18,6 +18,7 @@ import {
   type MessageInterpretation,
   type WorkPatchProposal,
 } from "./interpretation-display.ts";
+import type { WorkIntake } from "./engine-intake-client.ts";
 
 export type EngineWorkRecord = {
   created_at?: string;
@@ -319,6 +320,8 @@ export async function postEngineConversationMessage(input: {
   interpretation: MessageInterpretation | null;
   assistantText: string;
   patchProposal: WorkPatchProposal | null;
+  /** Accordo proposto dal turno del motore su un messaggio successivo. */
+  intakeProposal: WorkIntake | null;
   chatAgent?: boolean;
 }> {
   const actor = input.actor ?? defaultLocalActor();
@@ -375,12 +378,18 @@ export async function postEngineConversationMessage(input: {
       : interpretation
         ? formatInterpretationForUi(interpretation)
         : "Interpretazione non disponibile dal motore.";
+  const rawIntake = result.result["intake_proposal"];
+  const intakeProposal =
+    rawIntake && typeof rawIntake === "object" && "work_id" in rawIntake && "status" in rawIntake
+      ? (rawIntake as unknown as WorkIntake)
+      : null;
   return {
     messageId: String(result.result["message_id"] ?? ""),
     assistantMessageId: String(result.result["assistant_message_id"] ?? ""),
     interpretation,
     assistantText,
     patchProposal,
+    intakeProposal,
     chatAgent,
   };
 }
