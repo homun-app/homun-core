@@ -296,7 +296,15 @@ def _decide(ctx, actor, body, conversation_context, roster, text, language,
     corrections = 0
     empty_retries = 0
     last_error = ''
+    rounds = 0
     while True:
+        if rounds:
+            # Grants may have changed while the model answered: the same
+            # context must still be authorized before it travels to the
+            # provider again (the rule the two-call path already enforced).
+            with ctx.repository.locked():
+                revalidate_context(ctx.repository.load(), actor, conversation_context.manifest)
+        rounds += 1
         try:
             message = call.message(messages, tool_catalog)
         except NativeModelError as exc:
