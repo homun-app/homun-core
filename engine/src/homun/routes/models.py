@@ -13,7 +13,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from homun.context import get_context
-from homun.models.interpretation import RosterEntry
 from homun.models.types import ChatMessage
 from homun.models.port import Connection, ConnectionKind
 from homun.domain.errors import ValidationError
@@ -55,12 +54,6 @@ class CompleteRequest(BaseModel):
     provider_id: str | None = None
     connection_id: str | None = None
     model_id: str | None = None
-
-
-class InterpretRequest(BaseModel):
-    text: str
-    roster: list[RosterEntry] = Field(default_factory=list)
-    provider_id: str | None = None
 
 
 class OllamaPresetRequest(BaseModel):
@@ -255,30 +248,6 @@ def list_usage_attempts(limit: int = 50) -> dict[str, Any]:
     ctx = get_context()
     items = ctx.models.list_attempts(limit=limit)
     return {"items": [a.model_dump(mode="json") for a in items]}
-
-
-@router.post("/interpret")
-def interpret_message(body: InterpretRequest) -> dict[str, Any]:
-    ctx = get_context()
-    text = body.text.strip()
-    if not text:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "validation_error", "message": "text required"},
-        )
-    try:
-        result = ctx.models.interpret(text, roster=body.roster, provider_id=body.provider_id)
-    except KeyError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": str(exc)},
-        ) from exc
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "provider_unavailable", "message": str(exc)},
-        ) from exc
-    return result.model_dump(mode="json")
 
 
 @router.post("/providers/openai_compatible/ollama_preset")
