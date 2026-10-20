@@ -153,9 +153,10 @@ def http_setup(tmp_path):
     reset_context_for_tests(None)
 
 
-def test_message_interpretation_reserves_work_budget_only_for_works(http_setup):
+def test_front_door_turn_reserves_work_budget_only_for_works(http_setup):
+    from homun.models.native_turn import NativeMessage, ToolCall
     ctx, client, headers, conv, wid, plain = http_setup
-    # Short text stays a reply in the fake provider: one interpret attempt.
+    # A short greeting is one native step: one attempt on the work budget.
     r1 = client.post('/v1/workspaces/ws_local/commands', headers=headers,
                      json={'command_id': 'm1', 'type': 'conversation.post_message',
                            'payload': {'conversation_id': conv, 'text': 'Ciao!'}})
@@ -163,7 +164,15 @@ def test_message_interpretation_reserves_work_budget_only_for_works(http_setup):
     budget = ctx.repository.load().work_budgets.get(wid)
     assert budget is not None
     assert budget.spent.attempts + budget.unknown.attempts == 1
-    # A longer ask becomes a command proposal: interpret + plan extraction.
+    # A correction round is a second provider call under the SAME reservation:
+    # the budget charges what the provider really answered, two attempts.
+    work = {'title': 'Piano', 'objective': 'Preparare il piano del lavoro', 'output': 'Piano'}
+    ctx.models._fake.native_script = [
+        NativeMessage(role='assistant', content='', tool_calls=[
+            ToolCall(id='c1', name='propose_work', arguments={**work, 'capability': 'inesistente'})]),
+        NativeMessage(role='assistant', content='', tool_calls=[
+            ToolCall(id='c2', name='propose_work', arguments=work)]),
+    ]
     r15 = client.post('/v1/workspaces/ws_local/commands', headers=headers,
                       json={'command_id': 'm15', 'type': 'conversation.post_message',
                             'payload': {'conversation_id': conv, 'text': 'Prepariamo il piano del lavoro'}})
@@ -248,35 +257,6 @@ def test_delegated_agent_chats_under_its_allocation(http_setup):
     assert r3.status_code == 200
     stored = ctx.repository.load().work_budgets[wid]
     assert stored.allocations[agent].spent.attempts + stored.allocations[agent].unknown.attempts == 1
-
-
-def test_plan_draft_extraction_is_budgeted(http_setup, monkeypatch):
-    import homun.application.sessions.interpretation as interpretation_mod
-    ctx, client, headers, conv, wid, plain = http_setup
-    from homun.planning.draft import PlanDraft, PlanStepDraft
-    from homun.planning.extract import validate_plan_draft
-    draft = validate_plan_draft(
-        PlanDraft(objective='Obiettivo di prova', expected_result='Risultato',
-                  steps=[PlanStepDraft(title='Passo', assignee_id='', output_expected='Out')]),
-        allowed_assignee_ids=set())
-    monkeypatch.setattr(interpretation_mod, 'extract_plan_draft', lambda *a, **k: draft)
-    from types import SimpleNamespace as NS
-    roster = []
-    conversation_context = None
-    body = NS(command_id='b')
-    out = interpretation_mod._budgeted_plan_draft(ctx, ctx.service._context if False else _actor(ctx), _work(ctx, wid), body, 'pianifica il lavoro', roster, conversation_context)
-    assert out.objective == draft.objective
-    budget = ctx.repository.load().work_budgets[wid]
-    assert budget.spent.attempts + budget.unknown.attempts == 1
-
-
-def _actor(ctx):
-    from homun.domain.models import Actor
-    return Actor(id='person_fabio', workspace_id=ctx.workspace_id, display_name='Fabio')
-
-
-def _work(ctx, wid):
-    return ctx.repository.load().works[wid]
 
 
 def test_delegate_allocation_is_its_own_cap(setup):

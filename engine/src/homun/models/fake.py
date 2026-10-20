@@ -72,6 +72,16 @@ class FakeProvider:
                 break
         lowered = last_user.lower()
         digest = hashlib.sha256(last_user.encode("utf-8")).hexdigest()[:8]
+        # An objective change is the more specific phrase: it wins over work keywords.
+        change = re.search(r"cambia\s+(?:l['’]\s*)?obiettivo(?:\s+(?:in|a))?[:\s]+(.+)$", last_user,
+                           flags=re.IGNORECASE)
+        if change and change.group(1).strip():
+            call = ToolCall(id="call_fake_patch", name="propose_plan_change", arguments={
+                "changes": [{"field": "objective",
+                             "to_value": change.group(1).strip().strip("«»\"'.")[:200]}]})
+            return NativeResult(
+                message=NativeMessage(role="assistant", content="", tool_calls=[call]),
+                usage=self._usage_for(model, input_text=last_user, output_text="patch"))
         if re.search(r"\b(prepara|nota|relazion|ricerca|catalogo|report)\b", lowered):
             call = ToolCall(id="call_fake_work", name="propose_work", arguments={
                 "title": "Nota operativa (fake)",
@@ -82,13 +92,6 @@ class FakeProvider:
             return NativeResult(
                 message=NativeMessage(role="assistant", content="", tool_calls=[call]),
                 usage=self._usage_for(model, input_text=last_user, output_text="propose_work"))
-        change = re.search(r"cambia\s+(?:l'?)obiettivo(?:\s+(?:in|a)[:\s]+)?(.+)$", lowered)
-        if change and change.group(1).strip():
-            call = ToolCall(id="call_fake_patch", name="propose_plan_change", arguments={
-                "changes": [{"field": "objective", "to_value": change.group(1).strip()[:200]}]})
-            return NativeResult(
-                message=NativeMessage(role="assistant", content="", tool_calls=[call]),
-                usage=self._usage_for(model, input_text=last_user, output_text="patch"))
         text = (f"[fake:{digest}] Sono Homun in modalità deterministica: "
                 f"ricevuto «{last_user[:120]}». Per un lavoro concreto chiedi «prepara …».")
         return NativeResult(
