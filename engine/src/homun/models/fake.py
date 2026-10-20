@@ -18,9 +18,6 @@ class FakeProvider:
 
     provider_id = "fake"
     default_model = "fake-deterministic-v1"
-    # Endpoint of the fake route: lets the structured-fallback memo treat the
-    # fake like any other (endpoint, model) pair in tests.
-    base_url = "fake://deterministic.local"
 
     def __init__(self) -> None:
         self.last_stream_result: CompletionResult | None = None

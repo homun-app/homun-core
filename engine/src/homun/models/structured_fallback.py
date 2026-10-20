@@ -7,7 +7,7 @@ output is bound to the JSON Schema of a discriminated union of its actions —
 on Ollama's native API. The engine rules stay exactly the same: only the
 transport of the decision changes.
 
-The module also keeps a process-level memo of (endpoint, model, mode) triples
+The module also keeps a process-level memo of (route, model, mode) triples
 that already rejected a mode, so a route known to refuse ``tools`` never burns
 another guaranteed-fail round-trip (and vice versa). Inspired by Hermes'
 auxiliary structured-output memo, re-written for Homun's transports: no
@@ -28,7 +28,7 @@ from homun.models.types import UsageEntry
 TOOLS_MODE = 'tools'
 STRUCTURED_MODE = 'structured'
 
-# (endpoint key, model, mode) triples this process saw rejected by the provider.
+# (route key, model, mode) triples this process saw rejected by the provider.
 _REJECTED_MODES: set[tuple[str, str, str]] = set()
 
 # Rejections that speak to the route/model's capability, not this request's shape.
@@ -45,12 +45,18 @@ def endpoint_key(base_url: str | None) -> str:
     return (urlparse(str(base_url or '')).netloc or '').lower()
 
 
-def mode_rejected(base_url: str | None, model_id: str, mode: str) -> bool:
-    return (endpoint_key(base_url), str(model_id or ''), mode) in _REJECTED_MODES
+def route_key(provider) -> str:
+    """What identifies a model route for the memo: the endpoint host when the
+    provider has one, otherwise the provider itself (the fake has no endpoint)."""
+    return endpoint_key(getattr(provider, 'base_url', None)) or str(getattr(provider, 'provider_id', '') or '')
 
 
-def remember_mode_rejected(base_url: str | None, model_id: str, mode: str) -> None:
-    _REJECTED_MODES.add((endpoint_key(base_url), str(model_id or ''), mode))
+def mode_rejected(route: str, model_id: str, mode: str) -> bool:
+    return (route, str(model_id or ''), mode) in _REJECTED_MODES
+
+
+def remember_mode_rejected(route: str, model_id: str, mode: str) -> None:
+    _REJECTED_MODES.add((route, str(model_id or ''), mode))
 
 
 def reset_mode_memory() -> None:

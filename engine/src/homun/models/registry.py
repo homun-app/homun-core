@@ -424,7 +424,8 @@ class ModelRegistry:
             self.usage.append(result.usage)
             return result
         if not isinstance(provider, OpenAICompatibleProvider):
-            raise ValidationError('Native tools require an OpenAI-compatible connection')
+            raise ValidationError('Native tools require an OpenAI-compatible connection',
+                                  reason='model.connection_kind_unsupported')
         provider = bound_provider(provider, pid, expected_runtime)
         kwargs = {} if runaway_floor is None else {'runaway_floor': runaway_floor}
         if runaway_copies is not None:
@@ -449,7 +450,8 @@ class ModelRegistry:
         pid = connection_id or self.active_provider_id
         provider = self._get_provider(pid)
         if not isinstance(provider, OpenAICompatibleProvider):
-            raise ValidationError('Structured output requires an OpenAI-compatible connection')
+            raise ValidationError('Structured output requires an OpenAI-compatible connection',
+                                  reason='model.connection_kind_unsupported')
         try:
             result = complete_structured(provider, messages, schema=schema, model_id=model_id,
                                          max_output_tokens=max_output_tokens)

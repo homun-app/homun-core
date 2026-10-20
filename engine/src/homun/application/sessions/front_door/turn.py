@@ -39,13 +39,14 @@ CODE_EMPTY_RESPONSE = 'model.empty_response'
 class FrontDoorModelError(DomainError):
     """Model output that could not be corrected within the turn budget.
 
-    ``code`` is ``model.output_invalid`` or ``model.empty_response`` — never
-    retried automatically; the person can send the message again.
+    ``reason`` doubles as the typed ``code`` (``model.output_invalid`` or
+    ``model.empty_response``) — never retried automatically; the person can
+    send the message again.
     """
 
-    def __init__(self, message: str, *, code: str):
-        super().__init__(message, reason=code)
-        self.code = code
+    def __init__(self, message: str, *, reason: str):
+        super().__init__(message, reason=reason)
+        self.code = reason
 
 
 def default_roster(store, actor: Actor, payload: dict[str, Any]):
@@ -171,23 +172,18 @@ class _ModelCall:
         registry = self._ctx.models
         provider = registry._get_provider(self._connection_id or registry.active_provider_id)
         model_id = str(getattr(provider, 'default_model', '') or '')
-        endpoint = str(getattr(provider, 'base_url', '') or '')
-        # The memo is per (endpoint, model): without a real endpoint (the fake
-        # provider) there is nothing durable to remember.
-        memoizable = bool(structured_fallback.endpoint_key(endpoint))
-        if not memoizable or not structured_fallback.mode_rejected(
-                endpoint, model_id, structured_fallback.TOOLS_MODE):
+        route = structured_fallback.route_key(provider)
+        if not structured_fallback.mode_rejected(route, model_id, structured_fallback.TOOLS_MODE):
             try:
                 result = registry.complete_tools(messages, tools=tool_catalog,
                                                  connection_id=self._connection_id)
                 return result.message
             except NativeModelError as exc:
-                if not memoizable or not structured_fallback.is_tools_rejection(exc):
+                if not structured_fallback.is_tools_rejection(exc):
                     raise
-                structured_fallback.remember_mode_rejected(endpoint, model_id,
-                                                           structured_fallback.TOOLS_MODE)
+                structured_fallback.remember_mode_rejected(route, model_id, structured_fallback.TOOLS_MODE)
                 logger.warning('front door: tools rifiutati da %s (%s): ripiego con output strutturato',
-                               endpoint, model_id)
+                               route, model_id)
         result = registry.complete_structured(messages, schema=structured_union_schema(tool_catalog),
                                               connection_id=self._connection_id)
         return _structured_to_message(result.payload)
@@ -204,7 +200,8 @@ def run_front_door_turn(ctx, actor: Actor, body: CommandRequest, result: dict[st
     if not text.strip() or not conversation_id:
         return result, ''
     if len(text) > MAX_CURRENT_CHARACTERS:
-        raise ValidationError('Message exceeds interpretation character limit; shorten the message')
+        raise ValidationError('Message exceeds the front-door character limit; shorten the message',
+                              reason='message.too_long', params={'max': MAX_CURRENT_CHARACTERS})
 
     store = ctx.service.store
     work = authorized_conversation_work(store, actor, conversation_id)
@@ -273,7 +270,7 @@ def _decide(ctx, actor, body, conversation_context, roster, text, language,
                 _warn_front_door(ctx, CODE_EMPTY_RESPONSE, 'empty answer after the reminder')
                 raise FrontDoorModelError(
                     'Model returned an empty response twice in one front-door turn',
-                    code=CODE_EMPTY_RESPONSE)
+                    reason=CODE_EMPTY_RESPONSE)
             return outcomes.FrontDoorOutcome(kind=outcomes.TEXT, text=message.content.strip())
         first = message.tool_calls[0]
         if len(message.tool_calls) > 1:
@@ -294,7 +291,7 @@ def _decide(ctx, actor, body, conversation_context, roster, text, language,
             raise FrontDoorModelError(
                 f'Model tool arguments stayed invalid after {MAX_ARGUMENT_CORRECTIONS} '
                 f'corrections: {last_error[:200]}',
-                code=CODE_OUTPUT_INVALID)
+                reason=CODE_OUTPUT_INVALID)
         corrections += 1
         messages.append(message)
         messages.append(NativeMessage(role='tool', tool_call_id=first.id, name=first.name,
@@ -337,11 +334,11 @@ def finalize_front_door(ctx, actor: Actor, body: CommandRequest, enriched: dict[
             text=str(body.payload.get('text', '')))
         enriched['intake_proposal'] = proposal
         if proposal.get('status') != 'pending_confirmation':
+            # The intake error code stays on the proposal record for the UI;
+            # the chat sentence never carries internal codes.
             from homun.i18n import user_text
-            replacement = user_text(
-                'front_door.work_proposal_failed',
-                {'error': str(proposal.get('error_code') or '')},
-                language=str(front.get('language') or 'en'))
+            replacement = user_text('front_door.work_proposal_failed',
+                                    language=str(front.get('language') or 'en'))
             if replacement:
                 display = replacement
     conversation_id = str(body.payload.get('conversation_id', ''))
