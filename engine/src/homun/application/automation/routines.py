@@ -46,16 +46,54 @@ def _schedule_context(routine_id: str) -> dict[str, Any]:
     return {"routine_id": routine_id}
 
 
+def _now_local(zone):
+    from datetime import datetime
+    return datetime.now(zone)
+
+
+def next_occurrences(cron: str, cron_timezone: str, *, count: int = 1, after=None) -> list:
+    """Le prossime `count` occorrenze dopo `after` (default: adesso), come
+    datetime consapevoli nel fuso della routine — l'unico calcolo condiviso
+    fra anteprima (`/routines/preview`) ed esecuzione (`next_occurrence`).
+
+    L'ora locale indicata dalla persona resta quella in ogni stagione: il
+    calcolo avviene in ora locale «da muro» (croniter su datetime ingenuo) e
+    solo alla fine l'istante viene ancorato al fuso e rinormalizzato. Il
+    croniter venduto da dbos (3.1.0, fork del 2012) con datetime già
+    consapevoli porta avanti l'offset di partenza e slitta di un'ora quando
+    l'occorrenza attraversa un cambio d'ora.
+
+    Orari locali inesistenti (la notte di primavera) collassano sull'ora
+    valida successiva; l'ora ripetuta della notte d'autunno produce una sola
+    esecuzione (la prima). Le occorrenze restano strette, distinte, crescenti.
+    """
+    from dbos._scheduler import croniter
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    zone = ZoneInfo(cron_timezone)
+    start = _now_local(zone) if after is None else after.astimezone(zone)
+    iterator = croniter(cron, start.replace(tzinfo=None))
+    occurrences: list = []
+    previous = start
+    while len(occurrences) < count:
+        # il passaggio per UTC rinormalizza: astimezone sullo stesso fuso è un
+        # no-op e lascerebbe vive le ore locali inesistenti della notte di
+        # primavera; per le ore ambigue vale la prima occorrenza (fold=0)
+        anchored = iterator.get_next(datetime).replace(tzinfo=zone)
+        occurrence = anchored.astimezone(timezone.utc).astimezone(zone)
+        if occurrence <= previous:
+            # orario locale inesistente già coperto dal salto in avanti
+            continue
+        occurrences.append(occurrence)
+        previous = occurrence
+    return occurrences
+
+
 def next_occurrence(cron: str, cron_timezone: str) -> str:
     """The next ISO occurrence strictly after now, in the routine's timezone."""
-    from dbos._scheduler import croniter
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
     from homun.domain.errors import ValidationError as _ValidationError
-    zone = ZoneInfo(cron_timezone)
     try:
-        iterator = croniter(cron, datetime.now(zone))
-        return iterator.get_next(datetime).astimezone(zone).isoformat()
+        return next_occurrences(cron, cron_timezone)[0].isoformat()
     except Exception as exc:
         raise _ValidationError(f"invalid cron: {exc}") from exc
 

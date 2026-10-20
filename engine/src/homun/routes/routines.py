@@ -113,16 +113,12 @@ def skip_next_routine(workspace_id: str, routine_id: str, body: RoutineActionReq
 @router.get("/routines/preview")
 def preview_cron(workspace_id: str, cron: str, tz: str = "Europe/Rome"):
     """Next three occurrences of a cron in its timezone; invalid cron is a 400."""
-    from dbos._scheduler import croniter
-    from zoneinfo import ZoneInfo
-    from datetime import datetime
     ctx = get_context().snapshot()
     if workspace_id != ctx.workspace_id:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Unknown workspace"})
     try:
-        zone = ZoneInfo(tz)
-        iterator = croniter(cron, datetime.now(zone), second_at_beginning=True)
-        upcoming = [iterator.get_next(datetime).isoformat() for _ in range(3)]
+        upcoming = [occurrence.isoformat()
+                    for occurrence in routines.next_occurrences(cron, tz, count=3)]
     except Exception:
         raise HTTPException(
             status_code=400,
