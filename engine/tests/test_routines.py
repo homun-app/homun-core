@@ -159,6 +159,112 @@ def test_routine_update_revises_template_and_cron_versioned(client):
     assert store.routines[routine_id].cron == "0 8 * * 2"
 
 
+# --- D1: l'ora locale scelta dalla persona resta quella in ogni stagione ----
+# Il calcolo delle occorrenze attraversa i cambi d'ora (25/10 e 29/03 per
+# Europe/Rome) senza slittare di un'ora: preview e skip_next condividono la
+# stessa funzione, quindi i due percorsi non possono divergere.
+
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+ROME = ZoneInfo("Europe/Rome")
+
+
+def test_next_occurrence_crosses_autumn_dst_change_at_the_local_hour():
+    """«Ogni lunedì alle 9» resta alle 9 anche attraversando il 25/10/2026."""
+    from homun.application.automation.routines import next_occurrences
+    # lunedì 19/10/2026, prima del cambio d'ora: il lunedì dopo (26/10) è
+    # oltre il ritorno all'ora solare
+    occurrences = next_occurrences("0 9 * * 1", "Europe/Rome", count=2,
+                                   after=datetime(2026, 10, 19, 12, 0, tzinfo=ROME))
+    assert [o.isoformat() for o in occurrences] == [
+        "2026-10-26T09:00:00+01:00",
+        "2026-11-02T09:00:00+01:00",
+    ]
+
+
+def test_next_occurrence_crosses_spring_dst_change_at_the_local_hour():
+    from homun.application.automation.routines import next_occurrences
+    occurrences = next_occurrences("0 9 * * 1", "Europe/Rome", count=2,
+                                   after=datetime(2026, 3, 23, 12, 0, tzinfo=ROME))
+    assert [o.isoformat() for o in occurrences] == [
+        "2026-03-30T09:00:00+02:00",
+        "2026-04-06T09:00:00+02:00",
+    ]
+
+
+def test_next_occurrence_nonexistent_hour_maps_to_next_valid_hour():
+    """Le 02:30 della notte di primavera (29/03/2026) non esistono: l'occorrenza
+    scivola sulla prima ora valida successiva (le 03:30), come documentato."""
+    from homun.application.automation.routines import next_occurrences
+    occurrences = next_occurrences("30 2 * * *", "Europe/Rome", count=2,
+                                   after=datetime(2026, 3, 28, 12, 0, tzinfo=ROME))
+    assert [o.isoformat() for o in occurrences] == [
+        "2026-03-29T03:30:00+02:00",
+        "2026-03-30T02:30:00+02:00",
+    ]
+
+
+def test_next_occurrence_repeated_hour_runs_once():
+    """Le 02:30 della notte d'autunno (25/10/2026) esistono due volte: la
+    routine parte una sola volta (la prima delle due)."""
+    from homun.application.automation.routines import next_occurrences
+    occurrences = next_occurrences("30 2 * * *", "Europe/Rome", count=2,
+                                   after=datetime(2026, 10, 24, 12, 0, tzinfo=ROME))
+    assert [o.isoformat() for o in occurrences] == [
+        "2026-10-25T02:30:00+02:00",
+        "2026-10-26T02:30:00+01:00",
+    ]
+
+
+def test_next_occurrence_quarter_hours_stay_distinct_around_dst_changes():
+    """`*/15` attorno ai cambi: sequenza stretta, crescente, senza duplicati —
+    i quarti d'ora inesistenti collassano nel salto, quelli ripetuti valgono
+    una volta sola."""
+    from homun.application.automation.routines import next_occurrences
+    # primavera: 02:00–02:45 del 29/03 non esistono
+    spring = next_occurrences("*/15 * * * *", "Europe/Rome", count=5,
+                              after=datetime(2026, 3, 29, 1, 40, tzinfo=ROME))
+    assert [o.isoformat() for o in spring] == [
+        "2026-03-29T01:45:00+01:00",
+        "2026-03-29T03:00:00+02:00",
+        "2026-03-29T03:15:00+02:00",
+        "2026-03-29T03:30:00+02:00",
+        "2026-03-29T03:45:00+02:00",
+    ]
+    # autunno: l'ora 02:00–02:59 del 25/10 esiste due volte
+    autumn = next_occurrences("*/15 * * * *", "Europe/Rome", count=6,
+                              after=datetime(2026, 10, 25, 1, 40, tzinfo=ROME))
+    assert [o.isoformat() for o in autumn] == [
+        "2026-10-25T01:45:00+02:00",
+        "2026-10-25T02:00:00+02:00",
+        "2026-10-25T02:15:00+02:00",
+        "2026-10-25T02:30:00+02:00",
+        "2026-10-25T02:45:00+02:00",
+        "2026-10-25T03:00:00+01:00",
+    ]
+
+
+def test_next_occurrence_honors_a_foreign_timezone():
+    from homun.application.automation.routines import next_occurrences
+    occurrences = next_occurrences("0 9 * * 1", "America/New_York", count=1,
+                                   after=datetime(2026, 10, 26, 12, 0,
+                                                  tzinfo=ZoneInfo("America/New_York")))
+    assert [o.isoformat() for o in occurrences] == ["2026-11-02T09:00:00-05:00"]
+
+
+def test_cron_preview_endpoint_renormalizes_dst_offset(client, monkeypatch):
+    """L'anteprima passa dallo stesso calcolo dell'esecuzione: attraversando il
+    cambio d'ora del 25/10/2026 la prossima esecuzione resta alle 9 locali."""
+    from homun.application.automation import routine_schedule
+    monkeypatch.setattr(routine_schedule, "_now_local",
+                        lambda zone: datetime(2026, 10, 19, 12, 0, tzinfo=zone))
+    ok = client.get("/v1/workspaces/ws_local/routines/preview",
+                    params={"cron": "0 9 * * 1", "tz": "Europe/Rome"})
+    assert ok.status_code == 200
+    assert ok.json()["next"][0] == "2026-10-26T09:00:00+01:00"
+
+
 def test_skip_next_consumes_occurrence_without_running(client):
     actor = Actor(id="person_fabio", workspace_id="ws_local", display_name="Fabio")
     conv_id, agent_id = _seed_routine_base(actor)

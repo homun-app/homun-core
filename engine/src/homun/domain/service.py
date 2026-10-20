@@ -141,16 +141,19 @@ class DomainService:
 
     def __init__(self, store: WorkspaceStore, *,
                  known_connection_ids: Callable[[], Iterable[str]] | None = None,
-                 durable_runtime: bool = False, data_dir: Path | None = None) -> None:
+                 durable_runtime: bool = False, data_dir: Path | None = None,
+                 routine_next_run_at: Callable[[str, str, str | None], str] | None = None) -> None:
         self._context = CommandContext(store, known_connection_ids=known_connection_ids,
-                                       durable_runtime=durable_runtime, data_dir=data_dir)
+                                       durable_runtime=durable_runtime, data_dir=data_dir,
+                                       routine_next_run_at=routine_next_run_at)
 
     def for_store(self, store: WorkspaceStore) -> DomainService:
         """Bind the same dependencies to a disposable request snapshot."""
         return DomainService(store,
                              known_connection_ids=self._context._known_connection_ids,
                              durable_runtime=self._context._durable_runtime,
-                             data_dir=self._context._data_dir)
+                             data_dir=self._context._data_dir,
+                             routine_next_run_at=self._context._routine_next_run_at)
 
     @property
     def store(self) -> WorkspaceStore:

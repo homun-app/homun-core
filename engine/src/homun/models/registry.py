@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -32,6 +33,8 @@ from homun.models.types import (
     VerifyResult,
     utc_now,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ModelRegistry:
@@ -89,12 +92,21 @@ class ModelRegistry:
             self._fake.provider_id: self._fake,
             self._openai.provider_id: self._openai,
         }
+        # connessioni la cui costruzione è fallita: mai silenziose (log
+        # WARNING) e mai scambiate per utilizzabili in Impostazioni → Modelli
+        self._unusable: dict[str, str] = {}
         try:
             from homun.application.providers.registry import create_builtin_profiles
             builtin_profiles = create_builtin_profiles()
-            for pid, prof in builtin_profiles.items():
-                if pid in self._providers:
-                    continue
+        except Exception as exc:
+            builtin_profiles = {}
+            self._unusable["*"] = f"{type(exc).__name__}: {exc}"
+            logger.warning("provider_build_failed scope=builtin_profiles error=%s: %s",
+                           type(exc).__name__, exc)
+        for pid, prof in builtin_profiles.items():
+            if pid in self._providers:
+                continue
+            try:
                 prof_cfg = self._config.get(pid) or {}
                 b_url = str(prof_cfg.get("base_url") or prof.base_url or "https://api.openai.com/v1")
                 default_mod = prof_cfg.get("default_model") or prof.default_aux_model or (prof.fallback_models[0] if prof.fallback_models else "default")
@@ -104,9 +116,14 @@ class ModelRegistry:
                     default_model=str(default_mod),
                     provider_id=pid,
                 )
-            for cid, cfg in self._config.items():
-                if cid in self._providers or cid in ("active_provider_id", "version") or not isinstance(cfg, dict):
-                    continue
+            except Exception as exc:
+                self._unusable[pid] = f"{type(exc).__name__}: {exc}"
+                logger.warning("provider_build_failed connection=%s error=%s: %s",
+                               pid, type(exc).__name__, exc)
+        for cid, cfg in self._config.items():
+            if cid in self._providers or cid in ("active_provider_id", "version") or not isinstance(cfg, dict):
+                continue
+            try:
                 base_pid = cid.split(":")[0]
                 prof = builtin_profiles.get(base_pid)
                 b_url = str(cfg.get("base_url") or (prof.base_url if prof else "https://api.openai.com/v1"))
@@ -117,8 +134,10 @@ class ModelRegistry:
                     default_model=default_mod,
                     provider_id=base_pid,
                 )
-        except Exception:
-            pass
+            except Exception as exc:
+                self._unusable[cid] = f"{type(exc).__name__}: {exc}"
+                logger.warning("provider_build_failed connection=%s error=%s: %s",
+                               cid, type(exc).__name__, exc)
 
     @property
     def active_provider_id(self) -> str:
@@ -177,16 +196,18 @@ class ModelRegistry:
                 )
                 default_mod = prof_cfg.get("default_model") or prof.default_aux_model or (prof.fallback_models[0] if prof.fallback_models else "")
                 b_url = prof_cfg.get("base_url") or prof.base_url or ""
+                unusable = self._unusable.get(pid)
                 res.append(
                     ProviderInfo(
                         id=pid,
                         kind="openai_compatible",
                         display_name=prof.display_name,
-                        configured=True,
+                        configured=unusable is None,
                         credential_present=has_cred,
                         default_model=str(default_mod),
                         base_url=str(b_url),
-                        notes=[prof.description],
+                        notes=([prof.description] if unusable is None
+                                else [f"Connessione non utilizzabile: {unusable}", prof.description]),
                     )
                 )
             for cid, cfg in self._config.items():
@@ -203,16 +224,18 @@ class ModelRegistry:
                     or (prof and any(bool(os.environ.get(ev)) for ev in prof.env_vars))
                     or bool(pool.list_credentials(provider=base_pid))
                 )
+                unusable = self._unusable.get(cid)
                 res.append(
                     ProviderInfo(
                         id=cid,
                         kind="openai_compatible",
                         display_name=d_name,
-                        configured=True,
+                        configured=unusable is None,
                         credential_present=has_cred or base_pid == "ollama",
                         default_model=d_mod,
                         base_url=b_url,
-                        notes=[prof.description if prof else ""],
+                        notes=([prof.description if prof else ""] if unusable is None
+                                else [f"Connessione non utilizzabile: {unusable}"]),
                     )
                 )
         except Exception:

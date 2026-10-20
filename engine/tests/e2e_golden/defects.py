@@ -64,11 +64,24 @@ ENGINE_DEFECTS: list[tuple[str, str]] = [
     ),
     (
         r"prossima occorrenza non è lunedì alle 9",
-        "anteprima delle prossime esecuzioni: `croniter(cron, now, second_at_beginning=True)."
-        "get_next(datetime)` attraversa il cambio d'ora (25/10/2026) senza rinormalizzare "
-        "l'offset del fuso e slitta di un'ora — `engine/src/homun/routes/routines.py:124` "
-        "(`preview_cron`); stesso calcolo in "
-        "`engine/src/homun/application/automation/routines.py:57` (`next_occurrence`).",
+        "anteprima delle prossime esecuzioni: le occorrenze non attraversano il cambio d'ora "
+        "(25/10/2026) all'ora locale scelta — "
+        "`engine/src/homun/application/automation/routine_schedule.py` (`next_occurrences`, "
+        "il calcolo condiviso da anteprima, `next_run_at` e battito).",
+    ),
+    (
+        r"non coincide con nessuna occorrenza dell'anteprima|non ha next_run_at",
+        "anteprima ed esecuzione divergono: il puntatore `Routine.next_run_at` (porta "
+        "`routine_next_run_at`, `engine/src/homun/domain/commands/routines.py`) o l'occorrenza "
+        "scelta dal battito (`engine/src/homun/application/automation/routine_tick.py`, "
+        "`occurrence_to_run`) non passano dallo stesso calcolo dell'anteprima "
+        "(`routine_schedule.next_occurrences`).",
+    ),
+    (
+        r"diverso dallo scheduled_for del lavoro",
+        "l'occorrenza eseguita e quella registrata sulla routine differiscono — "
+        "`engine/src/homun/application/automation/routine_runs.py` (`run_recurrence`, "
+        "`last_scheduled_for` e `work.scheduled_for` nella stessa transazione).",
     ),
     (
         r"non cita nessun contenuto del (pdf|file markdown)|presenta meno di due punti chiave",

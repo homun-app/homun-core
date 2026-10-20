@@ -57,7 +57,8 @@ def _story_d(golden, run: GoldenRun) -> None:
         assert item.get("cron_timezone") == "Europe/Rome", str(item.get("cron_timezone"))
         assert item.get("status") == "active", f"stato: {item.get('status')!r}"
         preview = client.routine_preview(CRON_LUNEDI_ALLE_9)
-        first_next = datetime.fromisoformat((preview.get("next") or [""])[0])
+        upcoming = [datetime.fromisoformat(value) for value in preview.get("next") or []]
+        first_next = upcoming[0]
         if not (first_next.weekday() == 0 and first_next.hour == 9):
             run.recorder.note(
                 "D1: /routines/preview per «0 9 * * 1» (Europe/Rome) ha dato "
@@ -71,7 +72,19 @@ def _story_d(golden, run: GoldenRun) -> None:
             assert first_next.weekday() == 0 and first_next.hour == 9, (
                 f"prossima occorrenza non è lunedì alle 9: {first_next.isoformat()}"
             )
+        # il motore decide quando la routine è dovuta (next_run_at) con lo stesso
+        # calcolo dell'anteprima: il puntatore è una delle occorrenze mostrate
+        with run.probe("D1.puntatore"):
+            pointer = item.get("next_run_at")
+            assert pointer, "la routine non ha next_run_at: il battito non la farà partire"
+            assert datetime.fromisoformat(pointer) in upcoming, (
+                f"next_run_at ({pointer}) non coincide con nessuna occorrenza dell'anteprima: "
+                f"{preview.get('next')}"
+            )
     with run.step("D2.occorrenza"):
+        # anteprima presa prima di creare la routine: l'esecuzione reale deve
+        # cadere su una delle occorrenze che la persona vedrebbe (D1.esecuzione-coerente)
+        preview_minute = client.routine_preview(CRON_OGNI_MINUTO)
         forced = client.create_routine(
             "Routine al minuto (golden)", CRON_OGNI_MINUTO, conversation_id, template
         )
@@ -98,6 +111,21 @@ def _story_d(golden, run: GoldenRun) -> None:
         plan = detail.get("plan") or {}
         titles = [step.get("title") for step in plan.get("steps") or []]
         assert TEMPLATE["plan_steps"][0]["title"] in titles, f"fasi del modello non rispettate: {titles}"
+    # sonda (non interrompe D3): anteprima ed esecuzione usano lo stesso calcolo,
+    # quindi lo scheduled_for del lavoro reale (D2) è una delle occorrenze
+    # mostrate prima di creare la routine
+    with run.probe("D1.esecuzione-coerente"):
+        scheduled_for = str(work.get("scheduled_for") or "")
+        assert scheduled_for, "il lavoro ricorrente non registra scheduled_for"
+        shown = [datetime.fromisoformat(value) for value in preview_minute.get("next") or []]
+        assert datetime.fromisoformat(scheduled_for) in shown, (
+            f"l'esecuzione reale ({scheduled_for}) non coincide con nessuna occorrenza "
+            f"dell'anteprima: {preview_minute.get('next')}"
+        )
+        assert fired.get("last_scheduled_for") == scheduled_for, (
+            f"last_scheduled_for della routine ({fired.get('last_scheduled_for')}) "
+            f"diverso dallo scheduled_for del lavoro ({scheduled_for})"
+        )
     with run.step("D3.riavvio"):
         golden.engine.restart()
     with run.step("D3.persistenza"):

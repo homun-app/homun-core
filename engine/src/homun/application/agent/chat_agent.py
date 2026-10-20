@@ -321,6 +321,19 @@ def _presentable(text: str, run: Dict[str, Any], user_message: str | None) -> st
     return clean or text
 
 
+def _chat_error_note(ctx, run) -> str:
+    """La nota di errore per un run chat terminato male, dal catalogo condiviso
+    (contracts/i18n): failed e blocked non lasciano mai la chat muta e il codice
+    tipizzato resta visibile nella nota (mai un taglio silenzioso)."""
+    from homun.application.ops.preferences import resolve_language
+    from homun.i18n import user_text
+    status = str(run.get("status"))
+    code = str(run.get("error_code") or status)
+    reason = "agent_run.chat_failed" if status == "failed" else "agent_run.chat_blocked"
+    language = resolve_language(ctx, person_id="person_local")
+    return user_text(reason, {"code": code}, language=language) or ""
+
+
 def deliver_chat_answers(ctx) -> int:
     """Pump: le risposte dei run chat completati tornano in conversazione."""
     from homun.application.agent.runs.runs import PROPOSAL_TYPE
@@ -332,13 +345,18 @@ def deliver_chat_answers(ctx) -> int:
         run = record.result
         if run.get("_chat_delivered") or not run.get("_chat_conversation_id"):
             continue
-        if run.get("status") == "failed":
-            code = str(run.get("error_code") or "failed")
+        if run.get("status") in {"failed", "blocked"}:
+            code = str(run.get("error_code") or run.get("status"))
             failed_conv = run.get("_chat_conversation_id")
-            logger.warning("chat-run FAILED conv=%s run=%s errore=%s",
-                           failed_conv, run.get("id"), code)
+            logger.warning("chat-run %s conv=%s run=%s errore=%s",
+                           str(run.get("status")).upper(), failed_conv, run.get("id"), code)
             conversation_id = failed_conv
             if not conversation_id or conversation_id not in store.conversations:
+                continue
+            note = _chat_error_note(ctx, run)
+            if not note:
+                logger.warning("nota d'errore chat vuota per %s: manca la voce di catalogo",
+                               run.get("id"))
                 continue
             try:
                 with ctx.repository.locked():
@@ -349,10 +367,10 @@ def deliver_chat_answers(ctx) -> int:
                             command_id=f"chat-error:{run['id'][:16]}:{secrets.token_hex(3)}",
                             conversation_id=str(conversation_id),
                             author_id="homun_engine",
-                            text=f"⚠️ La risposta non è andata a buon fine ({code}). "
-                                 "Controlla il modello selezionato nei dettagli del tentativo.",
+                            text=note,
                             event_type="message.interpreted",
                             event_payload={"agent_run_id": run["id"], "chat": True,
+                                           "run_status": run.get("status"),
                                            "error_code": code})
                         target = write_store.commands.get(run["id"])
                         if target is not None:
