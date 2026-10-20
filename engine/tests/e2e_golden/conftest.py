@@ -64,7 +64,8 @@ def golden_recorder(golden_provider) -> Recorder:
     )
     _RECORDER.note(
         "D2: non esiste un endpoint «esegui ora» per le routine; l'esecuzione forzata "
-        "usa una routine con cadenza al minuto e attende l'occorrenza reale dello scheduler."
+        "usa una routine con cadenza al minuto e attende l'occorrenza reale del battito del "
+        "motore (schedule unico «homun-routine-tick», ogni minuto in UTC)."
     )
     return _RECORDER
 
