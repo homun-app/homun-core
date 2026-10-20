@@ -82,9 +82,11 @@ def _create_conversation_and_work(client: TestClient, *, title: str, objective: 
 
 
 @pytest.mark.parametrize(("slug", "user_text", "_keyword"), SCENARIOS)
-def test_f3_gate_three_intents_propose_plan(
+def test_f3_gate_three_intents_propose_the_agreement(
     client: TestClient, slug: str, user_text: str, _keyword: str
 ) -> None:
+    """The front door turns each work ask into an agreement proposal awaiting
+    confirmation: no work (and no plan) starts on the model's word alone."""
     conversation_id, work_id = _create_conversation_and_work(
         client, title=slug, objective=f"Obiettivo iniziale {slug}"
     )
@@ -103,11 +105,14 @@ def test_f3_gate_three_intents_propose_plan(
     )
     assert posted.status_code == 200, posted.text
     result = posted.json()["result"]
-    assert result["interpretation"]["kind"] == "command_proposal"
-    assert result.get("plan_draft")
-    assert result.get("plan_proposed"), f"expected plan for {slug}"
-    assert result["plan_proposed"]["work_id"] == work_id
-    assert int(result["plan_proposed"]["plan_revision"]) >= 1
+    assert result["front_door"]["kind"] == "work_proposal"
+    proposal = result["intake_proposal"]
+    assert proposal["status"] == "pending_confirmation"
+    assert proposal["work_id"] == work_id
+    work = client.get(f"/v1/workspaces/ws_local/works/{work_id}", headers=_headers()).json()["work"]
+    assert work["status"] == "draft"
+    assert work["current_plan_revision"] == 0, "nothing is started without the person's confirmation"
+    assert not result.get("plan_proposed")
     # Fake complete path still distinguishes intents without domain sector switches.
     complete = client.post(
         "/v1/models/complete",
@@ -177,7 +182,7 @@ def test_domain_has_no_sector_hardcoding() -> None:
         for word in banned:
             if word in text:
                 offenders.append(f"{path.name}:{word}")
-    for path in (root / "planning").rglob("*.py"):
+    for path in (root / "application" / "sessions" / "front_door").rglob("*.py"):
         text = path.read_text(encoding="utf-8").lower()
         for word in banned:
             if word in text:

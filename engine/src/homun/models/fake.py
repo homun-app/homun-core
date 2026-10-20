@@ -82,7 +82,7 @@ class FakeProvider:
             return NativeResult(
                 message=NativeMessage(role="assistant", content="", tool_calls=[call]),
                 usage=self._usage_for(model, input_text=last_user, output_text="patch"))
-        if re.search(r"\b(prepara|nota|relazion|ricerca|catalogo|report)\b", lowered):
+        if re.search(r"\b(prepara|nota|relazion|ricerca|catalogo|report|analizza|analisi)\b", lowered):
             call = ToolCall(id="call_fake_work", name="propose_work", arguments={
                 "title": "Nota operativa (fake)",
                 "objective": last_user[:200] or "Obiettivo della richiesta",
