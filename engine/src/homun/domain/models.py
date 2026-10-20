@@ -294,6 +294,9 @@ class Routine(BaseModel):
     """ISO datetime of the last fired occurrence (recovery idempotency)."""
     skip_until: str | None = None
     """ISO datetime: occurrences strictly before it are consumed without running."""
+    next_run_at: str | None = None
+    """ISO datetime (UTC) of the next due occurrence; None while paused or stopped.
+    Computed through the command context's routine schedule port, never here."""
     revision: int = 1
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

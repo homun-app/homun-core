@@ -17,6 +17,7 @@
     "object_transfer.publisher_not_trusted": "Il dispositivo che ha pubblicato non è noto o non è più attivo.",
     "object_transfer.object_id_invalid": "Identificativo dell'oggetto non valido.",
     "workspace.unknown": "Spazio di lavoro sconosciuto su questo motore.",
+    "routine.cron.invalid": "La cadenza della routine non è valida: controlla l'espressione cron.",
     "session.scope_denied": "La sessione di questo dispositivo non dà accesso a quella parte del motore: sono disponibili solo le funzioni condivise per il lavoro remoto.",
     "remote.actor_header_forbidden": "Sul listener remoto l'identità non si dichiara con un'intestazione: deriva solo dal token di sessione del dispositivo.",
     "preferences.language_invalid": "Lingua non supportata: {language}.",

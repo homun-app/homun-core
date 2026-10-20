@@ -36,6 +36,7 @@ Linux AppImage can update itself from `homun-releases`, and the chat composer ma
 - **Tool chains resume after artifact publication without duplicating results**, preserving DBOS journal step order.
 - **Synthesis respects the assigned collaborator's budget and approved sources**, preserving known token counts in partial usage reports and blocking further calls at exhausted limits.
 - **Routine recovery reconciles cron and timezone drift** while preserving pause state.
+- **Routines start at the local hour the person chose, in every season.** The engine decides when a routine is due (`next_run_at`, the same calculation as the preview) and DBOS only provides a single durable heartbeat; the old per-routine DBOS schedules slipped by an hour across daylight-saving changes. An occurrence missed while the engine was off runs once (the most recent one).
 - **Manual update checks offer the available version only once.**
 
 ## Improvements

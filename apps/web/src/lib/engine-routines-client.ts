@@ -26,6 +26,8 @@ export type EngineRoutine = {
   last_run_work_id: string | null;
   last_scheduled_for: string | null;
   skip_until: string | null;
+  /** Next due occurrence (ISO, UTC) decided by the engine's heartbeat; null while paused or stopped. */
+  next_run_at: string | null;
   revision: number;
 };
 
@@ -77,8 +79,8 @@ export async function routineEngineAction(input: {
   expectedVersion: number;
   actor?: EngineActor;
 }): Promise<void> {
-  // Dedicated routes (not the generic command endpoint): they pair the domain
-  // transition with its DBOS schedule twin and compute skip_until server-side.
+  // Dedicated routes (not the generic command endpoint): skip_until is computed
+  // server-side, where the engine owns the routine calendar.
   const response = await routinesFetch(
     `/v1/workspaces/${DEFAULT_WORKSPACE_ID}/routines/${encodeURIComponent(input.routineId)}/${input.action}`,
     {

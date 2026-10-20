@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 
 from homun.application.sessions.operations import SessionOperations
+from homun.application.automation.routine_schedule import next_run_at as routine_next_run_at
 from homun.domain.service import DomainService
 from homun.memory.sqlite_port import SqliteMemoryPort
 from homun.memory.mem0_port import build_memory_port
@@ -79,6 +80,8 @@ def create_context(
             known_connection_ids=lambda: {c.id for c in models.list_connections()},
             durable_runtime=False,
             data_dir=root,
+            routine_next_run_at=lambda cron, zone, skip_until: routine_next_run_at(
+                cron, zone, skip_until=skip_until),
         )
         memory_connection = _open_connection(path, encryption_key)
         resources.callback(memory_connection.close)

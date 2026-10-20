@@ -17,6 +17,7 @@
     "object_transfer.publisher_not_trusted": "The publishing device is not known or is no longer active.",
     "object_transfer.object_id_invalid": "Invalid object identifier.",
     "workspace.unknown": "Unknown workspace on this engine.",
+    "routine.cron.invalid": "The routine schedule is not valid: check the cron expression.",
     "session.scope_denied": "This device session does not grant access to that part of the engine; only the shared remote work functions are available.",
     "remote.actor_header_forbidden": "On the remote listener identity is not declared with a header: it comes only from the device session token.",
     "preferences.language_invalid": "Unsupported language: {language}.",

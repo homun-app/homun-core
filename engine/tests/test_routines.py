@@ -256,8 +256,8 @@ def test_next_occurrence_honors_a_foreign_timezone():
 def test_cron_preview_endpoint_renormalizes_dst_offset(client, monkeypatch):
     """L'anteprima passa dallo stesso calcolo dell'esecuzione: attraversando il
     cambio d'ora del 25/10/2026 la prossima esecuzione resta alle 9 locali."""
-    from homun.application.automation import routines as app_routines
-    monkeypatch.setattr(app_routines, "_now_local",
+    from homun.application.automation import routine_schedule
+    monkeypatch.setattr(routine_schedule, "_now_local",
                         lambda zone: datetime(2026, 10, 19, 12, 0, tzinfo=zone))
     ok = client.get("/v1/workspaces/ws_local/routines/preview",
                     params={"cron": "0 9 * * 1", "tz": "Europe/Rome"})

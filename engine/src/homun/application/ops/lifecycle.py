@@ -20,10 +20,10 @@ async def runtime_lifespan(ctx):
         tool_chain.bind_context(ctx)
         agent_run.bind_context(ctx)
         dbos_app.launch_dbos()
-        from homun.application.automation.routines import reconcile_routine_schedules
-        repaired = reconcile_routine_schedules(ctx)
+        from homun.application.automation.routines import reconcile_routines
+        repaired = reconcile_routines(ctx)
         if repaired:
-            logging.getLogger(__name__).info("Routine schedules repaired: %d", len(repaired))
+            logging.getLogger(__name__).info("Routine next_run_at repaired: %d", len(repaired))
 
     # DBOS must own its event loop so destroy cancels durable async waits before
     # closing its database. Adopting the ASGI loop prevents that cleanup.
@@ -52,8 +52,6 @@ async def runtime_lifespan(ctx):
         logging.getLogger(__name__).info("Budget recovery charged %d stale reservations as unknown", recovered)
     stop = asyncio.Event()
 
-    from homun.application.automation.routines import reconcile_routine_schedules, take_schedule_sync_request
-
     cron_worker = None
 
     async def pump():
@@ -63,11 +61,6 @@ async def runtime_lifespan(ctx):
                 await asyncio.to_thread(deliver_pending, ctx)
             except Exception:
                 logging.getLogger(__name__).exception("Runtime delivery pass failed")
-            try:
-                if take_schedule_sync_request():
-                    await asyncio.to_thread(reconcile_routine_schedules, ctx)
-            except Exception:
-                logging.getLogger(__name__).exception("Routine schedule sync failed")
             try:
                 await asyncio.to_thread(reconcile_cron_runs, ctx, limit=20)
                 if cron_worker is None or cron_worker.done():

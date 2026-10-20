@@ -52,6 +52,13 @@ def _validate_template(template: dict[str, Any], store) -> dict[str, Any]:
     return {"title": title, "objective": objective, "plan_steps": steps}
 
 
+def _due_pointer(ctx: CommandContext, routine: Routine) -> str | None:
+    """`next_run_at` for an active routine: the application's calendar decides
+    (same calculus as the preview); a bare store without the port keeps None and
+    the startup convergence fills it."""
+    return ctx.routine_next_run_at(routine.cron, routine.cron_timezone, routine.skip_until)
+
+
 def _routine_create(ctx: CommandContext, actor: Actor, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     name = str(payload.get("name") or "").strip() or "Routine"
     cron = validate_cron(str(payload.get("cron") or ""))
@@ -72,6 +79,7 @@ def _routine_create(ctx: CommandContext, actor: Actor, command_id: str, payload:
         conversation_id=conversation.id,
         template=template,
     )
+    routine.next_run_at = _due_pointer(ctx, routine)
     ctx.store.routines[routine.id] = routine
     ctx._emit(
         actor=actor, command_id=command_id, aggregate_id=routine.id,
@@ -92,6 +100,7 @@ def _routine_transition(ctx: CommandContext, actor: Actor, command_id: str, payl
     if target not in allowed.get(routine.status, set()):
         raise ValidationError(f"Cannot go from {routine.status} to {target}")
     routine.status = target
+    routine.next_run_at = _due_pointer(ctx, routine) if target == "active" else None
     routine.revision += 1
     routine.updated_at = utc_now()
     ctx._emit(
@@ -144,6 +153,8 @@ def _routine_update(ctx: CommandContext, actor: Actor, command_id: str, payload:
         changed_cron = True
     if "template" in payload:
         routine.template = _validate_template(payload.get("template") or {}, ctx.store)
+    if changed_cron and routine.status == "active":
+        routine.next_run_at = _due_pointer(ctx, routine)
     routine.revision += 1
     routine.updated_at = utc_now()
     ctx._emit(
@@ -170,6 +181,7 @@ def _routine_skip_next(ctx: CommandContext, actor: Actor, command_id: str, paylo
     if not skip_until:
         raise ValidationError("skip_until is required (computed by the caller)")
     routine.skip_until = skip_until
+    routine.next_run_at = _due_pointer(ctx, routine)
     routine.revision += 1
     routine.updated_at = utc_now()
     ctx._emit(
