@@ -19,12 +19,14 @@ from homun.application.sessions.conversation_context import (
     authorized_conversation_work, compose_conversation_context, revalidate_context,
 )
 from homun.domain.errors import DomainError, ValidationError
+from homun.domain.ids import new_id
 from homun.domain.models import Actor
 from homun.domain.roster import build_workspace_roster
 from homun.models.conversation_context import MAX_CURRENT_CHARACTERS, ContextManifest, context_notice
 from homun.models.native_errors import EMPTY, TIMEOUT, NativeModelError
 from homun.models.native_turn import NativeMessage
 from homun.models.prompt_store import prompts_for
+from homun.models.types import AttemptContext, UsageAttempt, utc_now
 from . import outcomes, tools
 
 logger = logging.getLogger(__name__)
@@ -161,22 +163,30 @@ def _synthetic_call(name: str, arguments: dict[str, Any]):
 
 class _ModelCall:
     """One front-door model step: native tools, or the constrained structured
-    fallback when the (endpoint, model) route rejects tools."""
+    fallback when the (endpoint, model) route rejects tools.
 
-    def __init__(self, ctx, *, connection_id):
+    Every provider round-trip lands in the UsageAttempt ledger (the one the
+    Models settings panel lists): status, error code and the tokens the
+    provider reported — never invented.
+    """
+
+    def __init__(self, ctx, *, connection_id, attempt_context: AttemptContext):
         self._ctx = ctx
         self._connection_id = connection_id
+        self._attempt_context = attempt_context
+        self._attempt_index = 0
 
     def message(self, messages, tool_catalog) -> NativeMessage:
         from homun.models import structured_fallback
         registry = self._ctx.models
-        provider = registry._get_provider(self._connection_id or registry.active_provider_id)
+        provider_id = self._connection_id or registry.active_provider_id
+        provider = registry._get_provider(provider_id)
         model_id = str(getattr(provider, 'default_model', '') or '')
         route = structured_fallback.route_key(provider)
         if not structured_fallback.mode_rejected(route, model_id, structured_fallback.TOOLS_MODE):
             try:
-                result = registry.complete_tools(messages, tools=tool_catalog,
-                                                 connection_id=self._connection_id)
+                result = self._attempted(provider_id, model_id, lambda: registry.complete_tools(
+                    messages, tools=tool_catalog, connection_id=self._connection_id))
                 return result.message
             except NativeModelError as exc:
                 if not structured_fallback.is_tools_rejection(exc):
@@ -184,9 +194,39 @@ class _ModelCall:
                 structured_fallback.remember_mode_rejected(route, model_id, structured_fallback.TOOLS_MODE)
                 logger.warning('front door: tools rifiutati da %s (%s): ripiego con output strutturato',
                                route, model_id)
-        result = registry.complete_structured(messages, schema=structured_union_schema(tool_catalog),
-                                              connection_id=self._connection_id)
+        result = self._attempted(provider_id, model_id, lambda: registry.complete_structured(
+            messages, schema=structured_union_schema(tool_catalog), connection_id=self._connection_id))
         return _structured_to_message(result.payload)
+
+    def _attempted(self, provider_id, model_id, call):
+        registry = self._ctx.models
+        started = utc_now()
+        usage_before = len(registry.usage)
+        try:
+            result = call()
+        except NativeModelError as exc:
+            self._record(provider_id, model_id, usage_before, started, status='error', error_code=exc.code)
+            raise
+        self._record(provider_id, model_id, usage_before, started, status='ok')
+        return result
+
+    def _record(self, provider_id, model_id, usage_before, started, *, status, error_code=None):
+        registry = self._ctx.models
+        usage_entry = registry.usage[-1] if len(registry.usage) > usage_before else None
+        context = self._attempt_context
+        registry.append_attempt(UsageAttempt(
+            id=new_id('uat'), workspace_id=getattr(registry, 'workspace_id', '') or '',
+            command_id=context.command_id, conversation_id=context.conversation_id,
+            work_id=context.work_id, actor_id=context.actor_id, purpose=context.purpose,
+            attempt_index=self._attempt_index, provider_id=provider_id,
+            model_id=(usage_entry.model_id if usage_entry else None) or model_id or None,
+            status=status, error_code=error_code,
+            usage_entry_id=usage_entry.id if usage_entry else None,
+            input_tokens=usage_entry.input_tokens if usage_entry else None,
+            output_tokens=usage_entry.output_tokens if usage_entry else None,
+            started_at=started, finished_at=utc_now(),
+            notes='Front-door turn step; the model proposed, nothing was executed.'))
+        self._attempt_index += 1
 
 
 def run_front_door_turn(ctx, actor: Actor, body: CommandRequest, result: dict[str, Any]):
@@ -249,7 +289,9 @@ def _payload_for(outcome, language) -> dict[str, Any]:
 def _decide(ctx, actor, body, conversation_context, roster, text, language,
             tool_catalog, work, plan, agents, anchor, roster_ids) -> outcomes.FrontDoorOutcome:
     connection_id = body.payload.get('connection_id') or body.payload.get('provider_id')
-    call = _ModelCall(ctx, connection_id=connection_id)
+    call = _ModelCall(ctx, connection_id=connection_id, attempt_context=AttemptContext(
+        command_id=body.command_id, conversation_id=str(body.payload.get('conversation_id', '')),
+        work_id=work.id if work is not None else None, actor_id=actor.id, purpose='front_door'))
     messages = _decision_messages(ctx.models, language, conversation_context, roster, text, tool_catalog)
     corrections = 0
     empty_retries = 0

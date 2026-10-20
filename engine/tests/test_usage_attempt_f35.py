@@ -1,114 +1,103 @@
-"""F3.5 UsageAttempt ledger — interpret attempts linked to commands, never invent tokens."""
+"""F3.5 UsageAttempt ledger — every front-door model step is linked to its
+command, with the tokens the provider reported and never invented ones."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from homun.app import create_app
 from homun.context import create_context, reset_context_for_tests
-from homun.models.interpretation import MessageInterpretation, RosterEntry
-from homun.models.registry import build_default_registry
-from homun.models.types import AttemptContext
+from homun.models.native_errors import NETWORK, NativeModelError
+from homun.models.native_turn import NativeMessage, ToolCall
+
+HEADERS = {"X-Homun-Actor-Id": "person_fabio", "X-Homun-Actor-Name": "Fabio"}
 
 
-def test_interpret_records_usage_attempt(tmp_path: Path) -> None:
-    registry = build_default_registry(tmp_path, for_tests=True)
-    roster = [RosterEntry(id="person_fabio", display_name="Fabio", kind="person")]
-    ctx = AttemptContext(
-        command_id="cmd_msg_1",
-        conversation_id="conv_1",
-        actor_id="person_fabio",
-        purpose="interpret",
-    )
-    result = registry.interpret("ciao", roster=roster, context=ctx)
-    assert result.kind == "reply"
-    attempts = registry.list_attempts()
-    assert len(attempts) == 1
-    attempt = attempts[0]
-    assert attempt.command_id == "cmd_msg_1"
-    assert attempt.conversation_id == "conv_1"
-    assert attempt.actor_id == "person_fabio"
-    assert attempt.purpose == "interpret"
-    assert attempt.attempt_index == 0
-    assert attempt.status == "ok"
-    assert attempt.provider_id == "fake"
-    # Fake interpret does not invent token counts
-    assert attempt.input_tokens is None
-    assert attempt.output_tokens is None
+def _context(tmp_path: Path):
+    ctx = create_context(workspace_id="ws_local", db_path=tmp_path / "ws_local.sqlite3",
+                         data_dir=tmp_path, for_tests=True)
+    reset_context_for_tests(ctx)
+    return ctx
 
 
-def test_retry_records_failed_then_ok_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from homun.models import interpret as interpret_mod
-
-    registry = build_default_registry(tmp_path, for_tests=True)
-    calls = {"n": 0}
-
-    def flaky(*_args, **_kwargs):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise RuntimeError("provider blip")
-        return MessageInterpretation(kind="reply", text="recovered")
-
-    monkeypatch.setattr(interpret_mod, "run_interpret", flaky)
-    roster = [RosterEntry(id="person_fabio", display_name="Fabio", kind="person")]
-    ctx = AttemptContext(command_id="cmd_retry", actor_id="person_fabio", purpose="interpret")
-    result = registry.interpret("ciao", roster=roster, provider_id="fake", context=ctx)
-    assert result.text == "recovered"
-    attempts = registry.list_attempts()
-    assert len(attempts) == 2
-    assert attempts[0].status == "error"
-    assert attempts[0].attempt_index == 0
-    assert attempts[0].error_code == "provider_error"
-    assert attempts[1].status == "ok"
-    assert attempts[1].attempt_index == 1
-    # Failed attempt must not claim zero tokens
-    assert attempts[0].input_tokens is None
-    assert attempts[0].output_tokens is None
+def _conversation(client: TestClient) -> str:
+    created = client.post("/v1/workspaces/ws_local/commands", headers=HEADERS,
+                          json={"command_id": "c_conv", "type": "conversation.create",
+                                "payload": {"title": "Test"}})
+    assert created.status_code == 200
+    return created.json()["result"]["conversation_id"]
 
 
-def test_http_lists_usage_attempts(tmp_path: Path) -> None:
-    db_path = tmp_path / "ws_local.sqlite3"
-    reset_context_for_tests(
-        create_context(workspace_id="ws_local", db_path=db_path, data_dir=tmp_path, for_tests=True)
-    )
-    headers = {"X-Homun-Actor-Id": "person_fabio", "X-Homun-Actor-Name": "Fabio"}
-    app = create_app()
-    with TestClient(app) as client:
-        created = client.post(
-            "/v1/workspaces/ws_local/commands",
-            headers=headers,
-            json={
-                "command_id": "c_conv",
-                "type": "conversation.create",
-                "payload": {"title": "Test"},
-            },
-        )
-        assert created.status_code == 200
-        conversation_id = created.json()["result"]["conversation_id"]
+def _post(client: TestClient, conversation_id: str, text: str, command_id: str = "c_msg"):
+    return client.post("/v1/workspaces/ws_local/commands", headers=HEADERS,
+                       json={"command_id": command_id, "type": "conversation.post_message",
+                             "payload": {"conversation_id": conversation_id, "text": text}})
 
-        posted = client.post(
-            "/v1/workspaces/ws_local/commands",
-            headers=headers,
-            json={
-                "command_id": "c_msg",
-                "type": "conversation.post_message",
-                "payload": {"conversation_id": conversation_id, "text": "ciao Homun"},
-            },
-        )
-        assert posted.status_code == 200, posted.text
 
-        listed = client.get("/v1/models/usage-attempts")
-        assert listed.status_code == 200
-        items = listed.json()["items"]
-        assert len(items) >= 1
-        last = items[-1]
-        assert last["command_id"] == "c_msg"
-        assert last["conversation_id"] == conversation_id
-        assert last["purpose"] == "interpret"
-        assert last["status"] == "ok"
-        assert last["input_tokens"] is None or isinstance(last["input_tokens"], int)
+def test_http_lists_front_door_usage_attempt(tmp_path: Path) -> None:
+    _context(tmp_path)
+    try:
+        with TestClient(create_app()) as client:
+            conversation_id = _conversation(client)
+            posted = _post(client, conversation_id, "ciao Homun")
+            assert posted.status_code == 200, posted.text
 
-    reset_context_for_tests(None)
+            listed = client.get("/v1/models/usage-attempts")
+            assert listed.status_code == 200
+            items = listed.json()["items"]
+            assert items, "the front-door step must land in the ledger"
+            last = items[-1]
+            assert last["command_id"] == "c_msg"
+            assert last["conversation_id"] == conversation_id
+            assert last["actor_id"] == "person_fabio"
+            assert last["purpose"] == "front_door"
+            assert last["status"] == "ok"
+            assert last["provider_id"] == "fake"
+            assert last["attempt_index"] == 0
+            assert last["input_tokens"] is None or isinstance(last["input_tokens"], int)
+    finally:
+        reset_context_for_tests(None)
+
+
+def test_transport_failure_records_error_attempt_without_tokens(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    try:
+        with TestClient(create_app()) as client:
+            conversation_id = _conversation(client)
+            ctx.models._fake.native_script = [NativeModelError(NETWORK, "provider unreachable")]
+            posted = _post(client, conversation_id, "ciao Homun")
+            assert posted.status_code == 503, posted.text
+            attempt = ctx.models.list_attempts()[-1]
+            assert attempt.command_id == "c_msg"
+            assert attempt.purpose == "front_door"
+            assert attempt.status == "error"
+            assert attempt.error_code == NETWORK
+            # A failed call reported no usage: the ledger must not claim zero tokens.
+            assert attempt.input_tokens is None
+            assert attempt.output_tokens is None
+    finally:
+        reset_context_for_tests(None)
+
+
+def test_correction_rounds_are_separate_attempts_of_the_same_command(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    try:
+        with TestClient(create_app()) as client:
+            conversation_id = _conversation(client)
+            work = {"title": "Nota", "objective": "Preparare la nota", "output": "Nota breve"}
+            ctx.models._fake.native_script = [
+                NativeMessage(role="assistant", content="", tool_calls=[
+                    ToolCall(id="call_bad", name="propose_work", arguments={**work, "capability": "inesistente"})]),
+                NativeMessage(role="assistant", content="", tool_calls=[
+                    ToolCall(id="call_good", name="propose_work", arguments=work)]),
+            ]
+            posted = _post(client, conversation_id, "Prepara una nota.")
+            assert posted.status_code == 200, posted.text
+            attempts = [a for a in ctx.models.list_attempts() if a.command_id == "c_msg"]
+            assert [a.attempt_index for a in attempts] == [0, 1]
+            assert all(a.status == "ok" for a in attempts), "the provider answered: the arguments were wrong, not the call"
+            assert all(a.purpose == "front_door" for a in attempts)
+    finally:
+        reset_context_for_tests(None)
