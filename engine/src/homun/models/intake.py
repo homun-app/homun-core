@@ -83,7 +83,7 @@ class IntakeBrief(BaseModel):
         return [item for item in value if item in _BRIEF_FIELDS]
 
 
-def _plan_step_assignee_names_valid(steps, agents, collaborator_name):
+def plan_step_assignee_names_valid(steps, agents, collaborator_name):
     """Fresh phases must name people who can actually take them: an active roster
     collaborator or the brief's own proposed one. An empty name is the default
     (the brief's collaborator takes the phase); anything else unresolvable is
@@ -101,11 +101,14 @@ def _plan_step_assignee_names_valid(steps, agents, collaborator_name):
 
 
 def validate_brief(brief: IntakeBrief, agents: list[dict]) -> IntakeBrief:
-    """The ONE engine-side validation of a brief, whatever produced it.
+    """The ONE engine-side validation of a brief as the model produced it.
 
     Used both by ``synthesize`` (first-message intake) and by the front-door
     native turn (``propose_work`` arguments): registry capability, staffing
-    consistency, plan-step people and length limits. Raises ``ValueError`` or
+    consistency and length limits. The people named in the phases are checked
+    afterwards, on the EFFECTIVE agreement (``effective_values``), because a
+    staffing-only refinement may legitimately echo old assignments that the
+    engine normalises before persisting. Raises ``ValueError`` or
     ``pydantic.ValidationError`` — the caller decides whether that becomes a
     failed proposal or a tool error the model can correct.
     """
@@ -114,23 +117,18 @@ def validate_brief(brief: IntakeBrief, agents: list[dict]) -> IntakeBrief:
     require_capability(brief.capability)
     if brief.suggested_agent_id and brief.new_agent:
         raise ValueError('Choose existing agent or new profile')
-    collaborator_name = brief.new_agent.name if brief.new_agent else None
     if brief.suggested_agent_id:
         # Engine-side validation: the recommended agent must have the required
         # capability in its structural link, not just a plausible-sounding role.
-        from homun.domain.capabilities import REGISTRY as _registry
         selected = next((a for a in agents if a['id'] == brief.suggested_agent_id), None)
         if selected is None:
             raise ValueError('Suggested agent does not exist in active roster')
-        collaborator_name = selected['name']
-        if brief.capability in _registry and _registry[brief.capability].kind == 'executable':
+        if brief.capability in REGISTRY and REGISTRY[brief.capability].kind == 'executable':
             matching = [a for a in agents if brief.capability in (a.get('capabilities') or [])]
             if matching and brief.suggested_agent_id not in [a['id'] for a in matching]:
                 # The model recommended someone without the capability link while
                 # a linked candidate exists: prefer the linked one.
                 brief.suggested_agent_id = matching[0]['id']
-    if not _plan_step_assignee_names_valid(brief.plan_steps, agents, collaborator_name):
-        raise ValueError('Plan step assignee is not a roster collaborator')
     return brief
 
 

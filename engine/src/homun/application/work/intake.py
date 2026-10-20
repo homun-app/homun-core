@@ -1,14 +1,13 @@
 """Durable conversational brief, with model work outside transactions."""
 from copy import deepcopy
 from homun.application.work.price_comparisons import cached, save
-from homun.application.work.intake_policy import PROPOSAL_TYPE, authority, digest, idle, lookup, permission_snapshot, public
+from homun.application.work.intake_policy import (PROPOSAL_TYPE, active_agents, anchor_brief, authority, digest, idle,
+                                                  lookup, permission_snapshot, proposals_for, public)
 from homun.application.work.organization_context import organization_background
-from homun.application.work.intake_brief import brief_changes, effective_values, preserve_staffing, stabilize
-from homun.domain.capabilities import require_capability
+from homun.application.work.intake_brief import effective_values
 from homun.domain.errors import BudgetExhaustedError, ConflictError, ValidationError
 from homun.domain.models import utc_now
-from homun.models.intake import _plan_step_assignee_names_valid, classify_request, synthesize
-from homun.models.intake import IntakeBrief
+from homun.models.intake import classify_request, synthesize
 from homun.policy.capabilities import capability_catalog
 from homun.policy.work import require_work_access
 
@@ -81,8 +80,8 @@ def propose(ctx, actor, work_id, body):
             text=body['text']
             if not text.strip() or len(text)>12000:
                 raise ValidationError('Request must contain 1-12000 characters')
-            previous=[r.result for r in sorted(store.commands.values(),key=lambda r:r.created_at) if r.type==PROPOSAL_TYPE and r.result['work_id']==work_id]
-            previous_brief=next((deepcopy(public(p)) for p in reversed(previous) if p['objective']),None)
+            previous=proposals_for(store,work_id)
+            previous_brief=anchor_brief(previous)
             original='\n\n'.join([p['_submitted_text'] for p in previous]+[text])
             if len(original)>30000:
                 raise ValidationError('Intake context too long')
@@ -98,9 +97,7 @@ def propose(ctx, actor, work_id, body):
                       '_permissions':permission_snapshot(store,actor,work)}
             proposal['digest']=digest(proposal)
             save(store,actor,body['command_id'],PROPOSAL_TYPE,fingerprint,proposal)
-            agents=[{'id':a.id,'name':a.name,'role':a.role,'instructions':a.instructions,'revision':a.revision,
-                     'capabilities':a.capabilities}
-                    for a in store.agents.values() if a.status=='active']
+            agents=active_agents(store)
             # Ground the collaborator recommendation in what the engine can really run.
             capabilities=capability_catalog(store,actor)
         ctx.service.store=store
@@ -185,15 +182,12 @@ def commit_front_door_proposal(ctx, actor, *, command_id, conversation_id, work_
     work = authority(store, actor, {'work_id': work_id})
     _record, fingerprint = cached(store, actor, command_id, PROPOSAL_TYPE,
                                   {'work_id': work_id, 'front_door': True})
-    previous = [r.result for r in sorted(store.commands.values(), key=lambda r: r.created_at)
-                if r.type == PROPOSAL_TYPE and r.result['work_id'] == work_id]
+    previous = proposals_for(store, work_id)
     for p in previous:
         if p['status'] == 'pending_confirmation':
             p.update(status='failed', error_code='intake_superseded')
-    previous_brief = next((deepcopy(public(p)) for p in reversed(previous) if p['objective']), None)
-    agents = [{'id': a.id, 'name': a.name, 'role': a.role, 'revision': a.revision,
-               'capabilities': a.capabilities}
-              for a in store.agents.values() if a.status == 'active']
+    previous_brief = anchor_brief(previous)
+    agents = active_agents(store)
     proposal = {'id': command_id, 'status': 'failed', 'work_id': work_id,
                 'expected_version': work.version,
                 'title': 'Richiesta da chiarire', 'objective': '', 'output': '', 'constraints': [],

@@ -1,6 +1,7 @@
 """Shared intake authority and immutable proposal identity."""
 import hashlib
 import json
+from copy import deepcopy
 from homun.domain.errors import ConflictError, NotFoundError, PermissionDeniedError
 from homun.domain.states import WorkStatus
 from homun.policy.work import require_work_access
@@ -9,6 +10,21 @@ PROPOSAL_TYPE = 'intake.propose'
 
 def public(proposal):
     return {key:value for key,value in proposal.items() if not key.startswith('_')}
+
+def proposals_for(store, work_id):
+    """Intake proposals of one work, oldest first."""
+    return [r.result for r in sorted(store.commands.values(), key=lambda r: r.created_at)
+            if r.type == PROPOSAL_TYPE and r.result['work_id'] == work_id]
+
+def anchor_brief(proposals):
+    """The brief later proposals stabilise against: the latest with a non-empty objective."""
+    return next((deepcopy(public(p)) for p in reversed(proposals) if p['objective']), None)
+
+def active_agents(store):
+    """The roster a brief is validated against, as the model sees it."""
+    return [{'id': a.id, 'name': a.name, 'role': a.role, 'instructions': a.instructions,
+             'revision': a.revision, 'capabilities': a.capabilities}
+            for a in store.agents.values() if a.status == 'active']
 
 def digest(proposal):
     return hashlib.sha256(json.dumps({k:v for k,v in proposal.items() if k not in {'digest','status','error_code'}},sort_keys=True,ensure_ascii=False).encode()).hexdigest()

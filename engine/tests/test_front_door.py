@@ -284,15 +284,18 @@ def test_plan_change_without_plan_returns_error_to_model(env):
 
 def test_plan_change_with_plan_builds_preview(env):
     # Un lavoro con piano ACCETTATO: proposta → conferma con fasi, come la UI.
-    env.client.post('/v1/workspaces/ws_local/commands', headers=env.headers,
-                    json={'command_id': 'plan', 'type': 'plan.propose',
-                          'payload': {'work_id': env.work_id, 'expected_version': 1,
-                                      'steps': [{'title': 'Nota', 'capability': 'general'}]}})
+    proposed = env.client.post('/v1/workspaces/ws_local/commands', headers=env.headers,
+                               json={'command_id': 'plan', 'type': 'plan.propose',
+                                     'payload': {'work_id': env.work_id, 'expected_version': 1,
+                                                 'steps': [{'title': 'Nota', 'capability': 'general',
+                                                            'assignee_id': 'person_fabio'}]}})
+    assert proposed.status_code == 200, proposed.text
     version = env.client.get(f'/v1/workspaces/ws_local/works/{env.work_id}',
                              headers=env.headers).json()['work']['version']
-    env.client.post('/v1/workspaces/ws_local/commands', headers=env.headers,
-                    json={'command_id': 'plan_accept', 'type': 'plan.accept',
-                          'payload': {'work_id': env.work_id, 'expected_version': version}})
+    accepted = env.client.post('/v1/workspaces/ws_local/commands', headers=env.headers,
+                               json={'command_id': 'plan_accept', 'type': 'plan.accept',
+                                     'payload': {'work_id': env.work_id, 'expected_version': version}})
+    assert accepted.status_code == 200, accepted.text
     script(env.ctx, tool_call('propose_plan_change',
                               {'changes': [{'field': 'objective', 'to_value': 'Nuovo obiettivo condiviso'}]}))
     response = post_message(env, 'Cambia l\'obiettivo in: nuovo obiettivo condiviso.')

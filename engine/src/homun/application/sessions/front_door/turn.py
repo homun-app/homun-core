@@ -211,16 +211,18 @@ def run_front_door_turn(ctx, actor: Actor, body: CommandRequest, result: dict[st
     )
     roster = default_roster(store, actor, body.payload)
     from homun.application.ops.preferences import resolve_language
+    from homun.application.work.intake_policy import active_agents, anchor_brief, proposals_for
     language = resolve_language(ctx, None, person_id=actor.id)
     tool_catalog = tools.front_door_tools(ctx.models, language)
     plan = ctx.service.current_plan(work) if work is not None else None
-    agents = outcomes.active_agents(store)
+    agents = active_agents(store)
+    anchor = anchor_brief(proposals_for(store, work.id)) if work is not None else None
     roster_ids = {entry.id for entry in roster}
     roster_ids.update(store.agents.keys())
 
     def decide():
         return _decide(ctx, actor, body, conversation_context, roster, text, language,
-                       tool_catalog, work, plan, agents, roster_ids)
+                       tool_catalog, work, plan, agents, anchor, roster_ids)
 
     outcome = _budgeted_turn(ctx, actor, work, decide) if work is not None else decide()
 
@@ -245,7 +247,7 @@ def _payload_for(outcome, language) -> dict[str, Any]:
 
 
 def _decide(ctx, actor, body, conversation_context, roster, text, language,
-            tool_catalog, work, plan, agents, roster_ids) -> outcomes.FrontDoorOutcome:
+            tool_catalog, work, plan, agents, anchor, roster_ids) -> outcomes.FrontDoorOutcome:
     connection_id = body.payload.get('connection_id') or body.payload.get('provider_id')
     call = _ModelCall(ctx, connection_id=connection_id)
     messages = _decision_messages(ctx.models, language, conversation_context, roster, text, tool_catalog)
@@ -282,7 +284,8 @@ def _decide(ctx, actor, body, conversation_context, roster, text, language,
                 error = f'Invalid arguments for {first.name}: {exc}. Fix them and call again.'
             else:
                 outcome, error = outcomes.outcome_from_call(
-                    first.name, arguments, work=work, plan=plan, agents=agents, roster_ids=roster_ids)
+                    first.name, arguments, work=work, plan=plan, agents=agents, anchor=anchor,
+                    roster_ids=roster_ids)
                 if error is None:
                     return outcome
         last_error = error

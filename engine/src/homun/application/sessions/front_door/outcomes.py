@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from homun.application.work.intake_brief import effective_values
 from homun.domain.models import Work
 from homun.domain.patch import WorkPatchChange, build_preview
 from homun.domain.states import WorkStatus
@@ -31,12 +32,6 @@ class FrontDoorOutcome:
     questions: list[dict[str, Any]] = field(default_factory=list)
     brief: IntakeBrief | None = None
     plan_preview: dict[str, Any] | None = None
-
-
-def active_agents(store) -> list[dict]:
-    return [{'id': a.id, 'name': a.name, 'role': a.role, 'revision': a.revision,
-             'capabilities': a.capabilities}
-            for a in store.agents.values() if a.status == 'active']
 
 
 def work_accepts_proposal(work: Work | None) -> str | None:
@@ -62,7 +57,7 @@ def plan_change_preview(work, plan, arguments, *, roster_ids):
     return preview.model_dump(mode='json'), None
 
 
-def outcome_from_call(name: str, arguments, *, work, plan, agents, roster_ids) -> tuple[FrontDoorOutcome | None, str | None]:
+def outcome_from_call(name: str, arguments, *, work, plan, agents, anchor, roster_ids) -> tuple[FrontDoorOutcome | None, str | None]:
     """Validate one tool call against fresh state.
 
     Returns ``(outcome, None)`` when the model's proposal is valid, or
@@ -80,6 +75,10 @@ def outcome_from_call(name: str, arguments, *, work, plan, agents, roster_ids) -
             return None, blocked
         try:
             brief = validate_brief(arguments.to_brief(), agents)
+            # The same effective-agreement rules the first-message path applies
+            # before persisting (anchor, staffing, plan-step people): the model
+            # learns here, not at commit time.
+            effective_values(brief, agents, anchor, owner_id=work.owner_id if work else None)
         except Exception as exc:  # noqa: BLE001 — pydantic or ValueError, both model-correctable
             return None, f'Invalid propose_work arguments: {exc}. Fix the arguments and call again.'
         return FrontDoorOutcome(kind=WORK_PROPOSAL, brief=brief), None
