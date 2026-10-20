@@ -4024,37 +4024,6 @@
         "title": "IntegrationConfigureRequest",
         "type": "object"
       },
-      "InterpretRequest": {
-        "properties": {
-          "provider_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider Id"
-          },
-          "roster": {
-            "items": {
-              "$ref": "#/components/schemas/RosterEntry"
-            },
-            "title": "Roster",
-            "type": "array"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "text"
-        ],
-        "title": "InterpretRequest",
-        "type": "object"
-      },
       "InvitationRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6223,34 +6192,6 @@
           "expected_revision"
         ],
         "title": "RevisionRequest",
-        "type": "object"
-      },
-      "RosterEntry": {
-        "properties": {
-          "display_name": {
-            "title": "Display Name",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "kind": {
-            "default": "person",
-            "enum": [
-              "person",
-              "agent",
-              "other"
-            ],
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "display_name"
-        ],
-        "title": "RosterEntry",
         "type": "object"
       },
       "RoutineActionRequest": {
@@ -15482,49 +15423,6 @@
           }
         },
         "summary": "Upsert Connection",
-        "tags": [
-          "models"
-        ]
-      }
-    },
-    "/v1/models/interpret": {
-      "post": {
-        "operationId": "interpret_message_v1_models_interpret_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InterpretRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Interpret Message V1 Models Interpret Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Interpret Message",
         "tags": [
           "models"
         ]
