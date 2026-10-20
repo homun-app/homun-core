@@ -83,21 +83,28 @@ class IntakeBrief(BaseModel):
         return [item for item in value if item in _BRIEF_FIELDS]
 
 
-def plan_step_assignee_names_valid(steps, agents, collaborator_name):
-    """Fresh phases must name people who can actually take them: an active roster
-    collaborator or the brief's own proposed one. An empty name is the default
-    (the brief's collaborator takes the phase); anything else unresolvable is
-    an invalid brief."""
-    if not steps:
-        return True
+def invalid_plan_step_assignees(steps, agents, collaborator_name) -> list[str]:
+    """Phase assignees that resolve to nobody: not an active roster collaborator
+    and not the brief's own proposed one. An empty name is the default (the
+    brief's collaborator takes the phase) and is always valid."""
     roster = {agent['name'].strip().casefold() for agent in agents}
     collaborator = (collaborator_name or '').strip().casefold()
-    for step in steps:
-        name = (step.get('assignee', '') if isinstance(step, dict) else step.assignee)
-        name = str(name).strip().casefold()
-        if name and name not in roster and name != collaborator:
-            return False
-    return True
+    invalid = []
+    for step in steps or []:
+        raw = (step.get('assignee', '') if isinstance(step, dict) else step.assignee)
+        name = str(raw).strip()
+        if name and name.casefold() not in roster and name.casefold() != collaborator:
+            invalid.append(name)
+    return invalid
+
+
+def plan_step_assignee_error(invalid: list[str], agents, collaborator_name) -> str:
+    """The correction a model can act on: who was wrong and who is allowed."""
+    allowed = sorted({agent['name'] for agent in agents} | ({collaborator_name} if collaborator_name else set()))
+    options = ', '.join(f"'{name}'" for name in allowed) or 'none yet'
+    return (f"Plan step assignee not in the active roster: {', '.join(repr(n) for n in invalid)}. "
+            f"Valid assignees: {options}; leave assignee empty for the proposed collaborator. "
+            "People named in the request who are not collaborators belong in the step title or the constraints.")
 
 
 def validate_brief(brief: IntakeBrief, agents: list[dict]) -> IntakeBrief:

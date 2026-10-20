@@ -6,7 +6,7 @@ brief (the latest proposal with a non-empty objective), so a staffing-only
 clarification can never rewrite objective, output, constraints or capability —
 even when the model returns different text for them.
 """
-from homun.models.intake import IntakeBrief, plan_step_assignee_names_valid
+from homun.models.intake import IntakeBrief, invalid_plan_step_assignees, plan_step_assignee_error
 
 PRESERVED_FIELDS = ('title', 'objective', 'output', 'constraints', 'capability', 'plan_steps')
 
@@ -32,8 +32,9 @@ def effective_values(brief: IntakeBrief, agents: list[dict], anchor: dict | None
         values = preserve_staffing(values, anchor, agents, owner_id=owner_id)
     collaborator = values.get('suggested_agent') or values.get('new_agent')
     collaborator_name = collaborator.get('name') if collaborator else None
-    if not plan_step_assignee_names_valid(values.get('plan_steps'), agents, collaborator_name):
-        raise ValueError('Plan step assignee is not a roster collaborator')
+    invalid = invalid_plan_step_assignees(values.get('plan_steps'), agents, collaborator_name)
+    if invalid:
+        raise ValueError(plan_step_assignee_error(invalid, agents, collaborator_name))
     return values, brief_changes(anchor, values)
 
 

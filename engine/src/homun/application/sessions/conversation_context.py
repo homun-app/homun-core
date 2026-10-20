@@ -73,13 +73,21 @@ def compose_conversation_context(store, actor, conversation_id, current_message_
                                manifest=manifest, preamble=preamble)
 
 
+def _latest_brief(store, work, status):
+    from homun.application.work.intake_policy import proposals_for
+    matching = [proposal for proposal in proposals_for(store, work.id) if proposal.get('status') == status]
+    return matching[-1] if matching else None
+
+
 def _confirmed_brief(store, work):
     """The confirmed agreement is the single source of truth for later turns."""
-    from homun.application.work.intake_policy import PROPOSAL_TYPE
-    confirmed = [record.result for record in sorted(store.commands.values(), key=lambda r: r.created_at)
-                 if record.type == PROPOSAL_TYPE and record.result.get('work_id') == work.id
-                 and record.result.get('status') == 'confirmed']
-    return confirmed[-1] if confirmed else None
+    return _latest_brief(store, work, 'confirmed')
+
+
+def _pending_brief(store, work):
+    """The agreement proposal still waiting for the person: the model must know
+    it exists, or it re-proposes (or asks) instead of answering a «thanks»."""
+    return _latest_brief(store, work, 'pending_confirmation')
 
 
 def _readable_materials(store, actor, work):
@@ -116,6 +124,13 @@ def _work_preamble(store, actor, work, memory):
         lines.append(f"Accordo confermato: {brief.get('title')} · attività {brief.get('capability')}"
                      f" · risultato atteso: {brief.get('output')}"
                      + (f" · vincoli: {constraints}" if constraints else ''))
+    pending = _pending_brief(store, work)
+    if pending:
+        missing = '; '.join(str(item) for item in (pending.get('missing_information') or []) if str(item).strip())
+        lines.append(f"Proposta di accordo IN ATTESA DELLA CONFERMA della persona: {pending.get('title')}"
+                     f" · obiettivo: {str(pending.get('objective') or '')[:160]}"
+                     + (f" · manca: {missing}" if missing else '')
+                     + " — già proposta: non riproporla e non chiedere se proporla; la persona conferma dalla card.")
     from homun.application.work.organization_context import organization_background
     background = organization_background(store, actor)
     if background:
