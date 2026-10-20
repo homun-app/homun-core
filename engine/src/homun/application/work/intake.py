@@ -3,11 +3,12 @@ from copy import deepcopy
 from homun.application.work.price_comparisons import cached, save
 from homun.application.work.intake_policy import PROPOSAL_TYPE, authority, digest, idle, lookup, permission_snapshot, public
 from homun.application.work.organization_context import organization_background
-from homun.application.work.intake_brief import brief_changes, preserve_staffing, stabilize
+from homun.application.work.intake_brief import brief_changes, effective_values, preserve_staffing, stabilize
 from homun.domain.capabilities import require_capability
 from homun.domain.errors import BudgetExhaustedError, ConflictError, ValidationError
 from homun.domain.models import utc_now
-from homun.models.intake import classify_request, synthesize
+from homun.models.intake import _plan_step_assignee_names_valid, classify_request, synthesize
+from homun.models.intake import IntakeBrief
 from homun.policy.capabilities import capability_catalog
 from homun.policy.work import require_work_access
 
@@ -53,23 +54,6 @@ def classify_message(ctx, actor, work_id, text):
     except Exception:
         work_budgets.reconcile_unknown(ctx, actor, work_id, reservation)
         raise
-
-def _plan_step_assignee_names_valid(steps, agents, collaborator_name):
-    """Fresh phases must name people who can actually take them: an active roster
-    collaborator or the brief's own proposed one. An empty name is the default
-    (the brief's collaborator takes the phase); anything else unresolvable is
-    an invalid brief."""
-    if not steps:
-        return True
-    roster = {agent['name'].strip().casefold() for agent in agents}
-    collaborator = (collaborator_name or '').strip().casefold()
-    for step in steps:
-        name = (step.get('assignee', '') if isinstance(step, dict) else step.assignee)
-        name = str(name).strip().casefold()
-        if name and name not in roster and name != collaborator:
-            return False
-    return True
-
 
 def _resolve_plan_assignee(store, name, fallback_agent_id):
     wanted = str(name or '').strip().casefold()
@@ -155,26 +139,11 @@ def propose(ctx, actor, work_id, body):
     else:
         work_budgets.reconcile(ctx, actor, work_id, reservation, usage=_usage_counters(usage))
         try:
-            selected = next((a for a in agents if a['id'] == brief.suggested_agent_id), None)
-            if brief.suggested_agent_id and not selected:
-                raise ValueError('Suggested agent does not exist in active roster')
-            if previous_brief:
-                values = stabilize(brief, previous_brief)
-            else:
-                values = brief.model_dump(exclude={'suggested_agent_id'})
-            values['suggested_agent'] = {k: selected[k] for k in ('id', 'name', 'role', 'revision')} if selected else None
-            if previous_brief:
-                values = preserve_staffing(values, previous_brief, agents, owner_id=work.owner_id)
-            # Validate the effective agreement: a staffing-only clarification
-            # may legitimately echo old assignments before normalization.
-            collaborator = values.get('suggested_agent') or values.get('new_agent')
-            collaborator_name = collaborator.get('name') if collaborator else None
-            if not _plan_step_assignee_names_valid(values.get('plan_steps'), agents, collaborator_name):
-                raise ValueError('Plan step assignee is not a roster collaborator')
-            changes = brief_changes(previous_brief, values)
-            error = None
+            values, changes = effective_values(brief, agents, previous_brief, owner_id=work.owner_id)
         except (ValueError, TypeError):
             values = {}; changes = []; error = 'intake_invalid_response'
+        else:
+            error = None
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             proposal=lookup(store,body['command_id'],work_id)

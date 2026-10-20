@@ -6,9 +6,35 @@ brief (the latest proposal with a non-empty objective), so a staffing-only
 clarification can never rewrite objective, output, constraints or capability —
 even when the model returns different text for them.
 """
-from homun.models.intake import IntakeBrief
+from homun.models.intake import IntakeBrief, _plan_step_assignee_names_valid
 
 PRESERVED_FIELDS = ('title', 'objective', 'output', 'constraints', 'capability', 'plan_steps')
+
+
+def effective_values(brief: IntakeBrief, agents: list[dict], anchor: dict | None,
+                     *, owner_id: str | None = None) -> tuple[dict, list[dict]]:
+    """Persistence values + backend diff for a validated brief, whatever produced it.
+
+    Shared by the first-message intake path (``synthesize`` → ``propose``) and
+    the front-door native turn (``propose_work``): staffing resolution against
+    the anchor, staffing preservation and the plan-step people check live in
+    ONE place. Raises ``ValueError`` when the effective agreement is invalid.
+    """
+    selected = next((a for a in agents if a['id'] == brief.suggested_agent_id), None)
+    if brief.suggested_agent_id and not selected:
+        raise ValueError('Suggested agent does not exist in active roster')
+    if anchor:
+        values = stabilize(brief, anchor)
+    else:
+        values = brief.model_dump(exclude={'suggested_agent_id'})
+    values['suggested_agent'] = {k: selected[k] for k in ('id', 'name', 'role', 'revision')} if selected else None
+    if anchor:
+        values = preserve_staffing(values, anchor, agents, owner_id=owner_id)
+    collaborator = values.get('suggested_agent') or values.get('new_agent')
+    collaborator_name = collaborator.get('name') if collaborator else None
+    if not _plan_step_assignee_names_valid(values.get('plan_steps'), agents, collaborator_name):
+        raise ValueError('Plan step assignee is not a roster collaborator')
+    return values, brief_changes(anchor, values)
 
 
 def staffing_label(brief: dict) -> str | None:
