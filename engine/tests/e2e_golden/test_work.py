@@ -5,12 +5,14 @@ Percorso della UI: `engine-intake-creation.ts` (classifica → proposta intake),
 `engine-agent-run-client.ts` (esecuzione), `engine-work-review.ts` (revisione).
 La scelta dell'esecutore segue la capability dell'accordo, come fa la UI.
 
-B6 misura l'altra strada della richiesta di lavoro: non il primo messaggio di
-una conversazione nuova (B1), ma un messaggio successivo in una conversazione
-esistente, che la UI manda con `conversation.post_message`
-(useEngineWorkspace.postMessage → postEngineConversationMessage) e il motore
-interpreta in `models/interpret.py`. B7 misura un lavoro eseguito con una
-connessione modello creata dalla persona con un nome suo (Impostazioni → Modelli).
+B6, B8 e B9 misurano l'altra strada della richiesta di lavoro: non la coppia
+classifica → proposta intake del primo messaggio (B1), ma
+`conversation.post_message` (useEngineWorkspace.postMessage →
+postEngineConversationMessage), che il motore risolve con il turno di ingresso
+nativo a strumenti (`application/sessions/front_door`): il modello propone
+(testo, chiarimento, accordo, modifica del piano), il motore decide. B7 misura
+un lavoro eseguito con una connessione modello creata dalla persona con un nome
+suo (Impostazioni → Modelli).
 """
 from __future__ import annotations
 
@@ -18,20 +20,17 @@ from dataclasses import replace
 
 import pytest
 
-from .common import WORKSPACE, GoldenError, ensure_accepted, normalize_for_match, run_indices
+from .common import (RICHIESTA_NOTA, RINGRAZIAMENTO, WORKSPACE, GoldenError, ensure_accepted,
+                     normalize_for_match, run_indices)
 from .reporting import GoldenRun
 
 pytestmark = pytest.mark.golden
 
-RICHIESTA_NOTA = (
-    "Prepara una nota operativa: rinnovo contratto fornitore Rossi entro il 30 novembre, "
-    "Marco segue la parte legale, io il budget (max 12.000 euro)."
-)
 COMMENTO_CORREZIONE = (
     "Aggiungi una sezione «Rischi» con le conseguenze di un ritardo oltre il 30 novembre."
 )
 DOMANDA_APERTURA = "Cosa sai fare?"
-RINGRAZIAMENTO = "grazie"
+RICHIESTA_VAGA = "Crea una relazione sui fornitori 2027"
 
 # La connessione che la persona crea con un nome suo (B7): id e nome scelti da
 # lei, kind `openai_compatible`, stesso endpoint e modello del provider golden.
@@ -151,24 +150,41 @@ def test_b_lavoro_dalla_chat(golden, run_index: int) -> None:
 def _work_request_outcome(result: dict) -> str:
     """Che cosa vede la persona dopo una richiesta di lavoro mandata in chat.
 
-    «proposta»: un piano proposto sul lavoro (o una modifica proposta);
-    «chiarimento»: il motore chiede ciò che manca; «agente»: la risposta arriva
-    dal run della chat con agente; altrimenti la richiesta è stata trattata
-    come semplice conversazione.
+    «proposta»: una proposta di accordo in attesa di conferma (o una modifica
+    del piano in anteprima); «chiarimento»: il motore chiede ciò che manca;
+    «agente»: la risposta arriva dal run della chat con agente; altrimenti la
+    richiesta è stata trattata come semplice conversazione.
     """
     if result.get("chat_agent"):
         return "agente"
-    patch = result.get("patch_proposal") or {}
-    if patch:
+    front_door = result.get("front_door") or {}
+    kind = str(front_door.get("kind") or "?")
+    if kind == "work_proposal":
+        proposal = result.get("intake_proposal") or {}
+        if proposal.get("status") == "pending_confirmation":
+            return "proposta"
+        return f"proposta non salvata (error_code={proposal.get('error_code')!r})"
+    if kind == "plan_change":
+        patch = result.get("patch_proposal") or {}
         return "chiarimento" if patch.get("missing_or_ambiguous") else "proposta"
-    if result.get("plan_proposed"):
-        return "proposta"
-    kind = str((result.get("interpretation") or {}).get("kind") or "?")
-    if kind == "command_proposal":
-        return "chiarimento" if (result.get("plan_draft") or {}).get("missing_fields") else "proposta"
     if kind == "clarification":
         return "chiarimento"
     return f"risposta semplice (kind={kind})"
+
+
+def _pending_proposal(client, work_id: str) -> dict | None:
+    """La proposta di accordo in attesa di conferma del lavoro, se c'è."""
+    items = client.get(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/intake").get("items") or []
+    return next((item for item in reversed(items) if item.get("status") == "pending_confirmation"), None)
+
+
+def _assert_nothing_started(client, work_id: str) -> None:
+    """Nessun lavoro parte sulla parola del modello: bozza, senza piano, nessun accordo confermato."""
+    work = client.work_detail(work_id)["work"]
+    assert work.get("status") == "draft", f"il lavoro è partito senza conferma: stato {work.get('status')!r}"
+    assert int(work.get("current_plan_revision") or 0) == 0, "un piano è stato creato senza conferma"
+    items = client.get(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/intake").get("items") or []
+    assert not any(item.get("status") == "confirmed" for item in items), "un accordo risulta confermato"
 
 
 def _story_b6(golden, run: GoldenRun) -> None:
@@ -212,6 +228,67 @@ def _story_b6(golden, run: GoldenRun) -> None:
 @pytest.mark.parametrize("run_index", run_indices())
 def test_b6_richiesta_come_messaggio_successivo(golden, run_index: int) -> None:
     golden.run(["B6"], run_index, _story_b6)
+
+
+# -- B8: richiesta vaga → chiarimento o proposta con informazioni mancanti ----
+
+
+def _story_b8(golden, run: GoldenRun) -> None:
+    client = golden.client
+    with run.step("B8.richiesta-vaga"):
+        conversation_id, work_id, _version = client.create_conversation_and_work()
+        roster = client.ui_roster()
+        result, error = client.post_message(conversation_id, RICHIESTA_VAGA, roster=roster)
+        ensure_accepted(error, "richiesta vaga rifiutata")
+        if result.get("chat_agent"):
+            client.resolve_reply(conversation_id, result, result.get("message_id"))
+        outcome = _work_request_outcome(result)
+        run.recorder.note(f"B8 run {run.run_index}: esito della richiesta vaga = {outcome}")
+        if outcome == "proposta":
+            proposal = result.get("intake_proposal") or {}
+            missing = [item for item in (proposal.get("missing_information") or []) if str(item).strip()]
+            assert missing, "la proposta su una richiesta vaga non dichiara nessuna informazione mancante"
+        else:
+            assert outcome in {"chiarimento", "agente"}, (
+                f"la richiesta vaga non ha prodotto né un chiarimento né una proposta: {outcome}"
+            )
+    with run.step("B8.nessun-avvio"):
+        _assert_nothing_started(client, work_id)
+
+
+@pytest.mark.parametrize("run_index", run_indices())
+def test_b8_richiesta_vaga(golden, run_index: int) -> None:
+    golden.run(["B8"], run_index, _story_b8)
+
+
+# -- B9: richiesta di lavoro come PRIMO messaggio via post_message -----------
+
+
+def _story_b9(golden, run: GoldenRun) -> None:
+    """La strada che la UI userà nella PR 2: niente classify/intake, solo post_message."""
+    client = golden.client
+    with run.step("B9.richiesta"):
+        conversation_id, work_id, _version = client.create_conversation_and_work()
+        roster = client.ui_roster()
+        result, error = client.post_message(conversation_id, RICHIESTA_NOTA, roster=roster)
+        ensure_accepted(error, "richiesta di lavoro rifiutata")
+        if result.get("chat_agent"):
+            client.resolve_reply(conversation_id, result, result.get("message_id"))
+        outcome = _work_request_outcome(result)
+        run.recorder.note(f"B9 run {run.run_index}: esito della richiesta = {outcome}")
+        assert outcome == "proposta", f"il primo messaggio non ha prodotto una proposta di accordo: {outcome}"
+    with run.step("B9.proposta"):
+        proposal = _pending_proposal(client, work_id)
+        assert proposal is not None, "nessuna proposta in attesa di conferma sul lavoro della conversazione"
+        assert str(proposal.get("title") or "").strip(), "proposta senza titolo"
+        assert str(proposal.get("objective") or "").strip(), "proposta senza obiettivo"
+        assert str(proposal.get("output") or "").strip(), "proposta senza risultato atteso"
+        _assert_nothing_started(client, work_id)
+
+
+@pytest.mark.parametrize("run_index", run_indices())
+def test_b9_richiesta_come_primo_messaggio(golden, run_index: int) -> None:
+    golden.run(["B9"], run_index, _story_b9)
 
 
 # -- B7: lavoro con una connessione creata dalla persona ----------------------

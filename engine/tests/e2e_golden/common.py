@@ -27,6 +27,12 @@ UI_NEW_REQUEST_TITLE = "Nuova richiesta"
 UI_NEW_REQUEST_OBJECTIVE = "Obiettivo da concordare"
 # Il lavoro interno dei turni di chat con agente (chat_agent.CHAT_WORK_TITLE).
 CHAT_WORK_TITLE = "Chat agente"
+# La richiesta operativa del percorso d'oro (B1, B6, B9, A5) e il ringraziamento (A5, B6).
+RICHIESTA_NOTA = (
+    "Prepara una nota operativa: rinnovo contratto fornitore Rossi entro il 30 novembre, "
+    "Marco segue la parte legale, io il budget (max 12.000 euro)."
+)
+RINGRAZIAMENTO = "grazie"
 
 # Tempi massimi di attesa in secondi: con modelli veri il percorso è lento
 # e la suite misura, non corre.
@@ -47,6 +53,8 @@ SCENARIOS: dict[str, str] = {
     "A2": "Tre messaggi di fila accettati, nell'ordine giusto",
     "A3": "Dopo un errore provocato il messaggio successivo è accettato",
     "A4": "La conversazione si ritrova e riprende dopo il riavvio",
+    "A5": "Dopo una proposta, «grazie» riceve una risposta testuale e non crea proposte",
+    "A6": "Risposta vuota del modello → errore chiaro, e il messaggio successivo è accettato SUBITO",
     "B1": "Richiesta operativa → proposta di lavoro (intake)",
     "B2": "Conferma → esecuzione → risultato prodotto",
     "B3": "Il risultato contiene i fatti dati (Rossi, 30 novembre, 12.000)",
@@ -54,6 +62,8 @@ SCENARIOS: dict[str, str] = {
     "B5": "Il lavoro sta in Compiti, il risultato approvato in Documenti",
     "B6": "Richiesta di lavoro come messaggio successivo: accettata, proposta o chiarimento",
     "B7": "Lavoro eseguito con una connessione creata dall'utente con un nome suo",
+    "B8": "Richiesta vaga → chiarimento o proposta con informazioni mancanti, mai un lavoro avviato",
+    "B9": "Richiesta di lavoro come PRIMO messaggio via conversation.post_message → proposta di accordo",
     "C1": "Progetto con 2 file caricati (.md e .pdf) leggibili",
     "C2": "Ricerca nei materiali: il risultato cita i contenuti veri dei file",
     "C3": "Riassunto di un file: il risultato ne presenta i punti chiave",
