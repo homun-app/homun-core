@@ -20,6 +20,10 @@ ASK_CLARIFICATION = 'ask_clarification'
 PROPOSE_WORK = 'propose_work'
 PROPOSE_PLAN_CHANGE = 'propose_plan_change'
 
+# Catalog order as the model reads it: small models lean on the first entry,
+# and proposing the agreement (with missing_information) is the safe default.
+TOOL_ORDER = (PROPOSE_WORK, ASK_CLARIFICATION, PROPOSE_PLAN_CHANGE)
+
 CAPABILITY_VALUES = ('general', 'synthesize', 'read_material', 'compare_csv', 'agent_run')
 
 
@@ -239,7 +243,7 @@ def front_door_tools(registry, language: str | None) -> list[ToolDefinition]:
     prompts = prompts_for(registry)
     return [ToolDefinition(name=name, description=prompts.get(f'front_door/tool.{name}', language).text.strip(),
                            input_schema=_SCHEMAS[name])
-            for name in (ASK_CLARIFICATION, PROPOSE_WORK, PROPOSE_PLAN_CHANGE)]
+            for name in TOOL_ORDER]
 
 
 def tools_block(tools: list[ToolDefinition]) -> str:

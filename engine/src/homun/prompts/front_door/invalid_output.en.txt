@@ -1,0 +1,1 @@
+Your last answer was not valid ({{detail}}). Answer again, briefly: text for the person, or exactly one tool call with complete JSON arguments.

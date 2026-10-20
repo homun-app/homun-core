@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from homun.app import create_app
 from homun.context import create_context, reset_context_for_tests
-from homun.models.native_errors import INVALID_REQUEST, NETWORK, NativeModelError
+from homun.models.native_errors import EMPTY, INVALID_REQUEST, MALFORMED, NETWORK, NativeModelError
 from homun.models.native_turn import NativeMessage, NativeResult, ToolCall
 from homun.models.types import UsageEntry
 
@@ -242,6 +242,44 @@ def test_empty_response_once_recovers_with_reminder(env):
     response = post_message(env, 'Cosa sai fare?')
     assert response.status_code == 200, response.text
     assert response.json()['result']['assistant_text'].startswith('Ora rispondo')
+
+
+def test_transport_empty_twice_is_model_empty_response_not_provider_unavailable(env):
+    """Il trasporto classifica una risposta senza testo né strumenti come EMPTY:
+    dopo il promemoria il turno finisce in model.empty_response, mai in un
+    provider_unavailable ripetibile in automatico."""
+    from homun.application.ops.preferences import set_person_language
+    set_person_language(env.ctx, 'person_fabio', 'it')
+    script(env.ctx, NativeModelError(EMPTY, 'neither tools nor a final answer'),
+           NativeModelError(EMPTY, 'neither tools nor a final answer'))
+    response = post_message(env, 'Dimmi qualcosa.')
+    assert response.status_code == 400, response.text
+    assert response.json()['detail']['code'] == 'model.empty_response'
+    assert len(env.ctx.models._fake.native_calls) == 2, 'un promemoria, un nuovo tentativo, poi basta'
+    reminder = env.ctx.models._fake.native_calls[1][-1]
+    assert reminder['role'] == 'user' and 'vuota' in reminder['content'].lower()
+    record = env.ctx.repository.load().commands['msg']
+    assert record.followup_next_attempt_at is None
+
+
+def test_malformed_output_gets_a_correction_round_then_output_invalid(env):
+    """JSON rotto o risposta troncata sono errori del modello: una nota di
+    correzione in lingua, poi model.output_invalid; mai provider_unavailable."""
+    from homun.application.ops.preferences import set_person_language
+    set_person_language(env.ctx, 'person_fabio', 'it')
+    script(env.ctx, NativeModelError(MALFORMED, 'bad json in tool arguments'),
+           text_message('Riprovo: sono Homun.'))
+    response = post_message(env, 'Cosa sai fare?')
+    assert response.status_code == 200, response.text
+    assert response.json()['result']['assistant_text'].startswith('Riprovo')
+    note = env.ctx.models._fake.native_calls[1][-1]
+    assert note['role'] == 'user' and 'non era valida' in note['content']
+
+    script(env.ctx, *(NativeModelError(MALFORMED, f'broken {i}') for i in range(3)))
+    response = post_message(env, 'Cosa sai fare?', command_id='msg2')
+    assert response.status_code == 400, response.text
+    assert response.json()['detail']['code'] == 'model.output_invalid'
+    assert env.ctx.repository.load().commands['msg2'].followup_next_attempt_at is None
 
 
 # -- tolleranza della forma --------------------------------------------------

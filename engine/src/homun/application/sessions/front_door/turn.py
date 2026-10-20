@@ -23,7 +23,7 @@ from homun.domain.ids import new_id
 from homun.domain.models import Actor
 from homun.domain.roster import build_workspace_roster
 from homun.models.conversation_context import MAX_CURRENT_CHARACTERS, ContextManifest, context_notice
-from homun.models.native_errors import EMPTY, TIMEOUT, NativeModelError
+from homun.models.native_errors import EMPTY, MALFORMED, REPETITION, TIMEOUT, TRUNCATED, NativeModelError
 from homun.models.native_turn import NativeMessage
 from homun.models.prompt_store import prompts_for
 from homun.models.types import AttemptContext, UsageAttempt, utc_now
@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 MAX_ARGUMENT_CORRECTIONS = 2
 MAX_EMPTY_RETRIES = 1
+# Model output the model itself must fix (never a transport failure to retry in the background).
+INVALID_OUTPUT_CODES = frozenset({MALFORMED, TRUNCATED, REPETITION})
 
 CODE_OUTPUT_INVALID = 'model.output_invalid'
 CODE_EMPTY_RESPONSE = 'model.empty_response'
@@ -64,9 +66,13 @@ def default_roster(store, actor: Actor, payload: dict[str, Any]):
     return build_workspace_roster(actor=actor, agents=store.agents.values(), existing=existing)
 
 
-def _empty_reminder() -> str:
-    return ('Your last answer was empty. Reply with text for the person, or call exactly '
-            'one of the available tools.')
+def _prompt(registry, name: str, language: str | None, **values) -> str:
+    """A front-door template in the prompt's language (person → workspace → en).
+
+    The file's trailing newline is dropped so the person's text stays the
+    exact tail of the request.
+    """
+    return prompts_for(registry).get(f'front_door/{name}', language).render(**values).rstrip('\n')
 
 
 def _budgeted_turn(ctx, actor, work, call):
@@ -95,15 +101,14 @@ def _budgeted_turn(ctx, actor, work, call):
 
 
 def _decision_messages(registry, language, conversation_context, roster, text, tool_catalog):
-    system = prompts_for(registry).get('front_door/instructions', language).render(
-        tools=tools.tools_block(tool_catalog))
+    system = _prompt(registry, 'instructions', language, tools=tools.tools_block(tool_catalog))
     messages = [NativeMessage(role='system', content=system)]
     for message in conversation_context.messages:
         messages.append(NativeMessage(role=message.role, content=message.content))
     roster_lines = '\n'.join(f'- {entry.id} | {entry.display_name} | {entry.kind}'
                              for entry in roster) or '(empty roster)'
     preamble = getattr(conversation_context, 'preamble', '') or ''
-    core = f'Roster:\n{roster_lines}\n\nMessaggio della persona:\n{text}'
+    core = _prompt(registry, 'request', language, roster=roster_lines, text=text)
     prompt = f'{context_notice(conversation_context)}{preamble}\n\n{core}' if preamble \
         else f'{context_notice(conversation_context)}{core}'
     messages.append(NativeMessage(role='user', content=prompt))
@@ -120,8 +125,7 @@ def structured_union_schema(tool_catalog) -> dict[str, Any]:
         'type': 'object',
         'properties': {
             'action': {'type': 'string',
-                       'enum': ['reply', tools.ASK_CLARIFICATION, tools.PROPOSE_WORK,
-                                tools.PROPOSE_PLAN_CHANGE]},
+                       'enum': ['reply', *tools.TOOL_ORDER]},
             'reply_text': {'type': 'string'},
             'questions': tools.CLARIFY_SCHEMA['properties']['questions'],
             'question': {'type': 'string'},
@@ -152,7 +156,7 @@ def _structured_to_message(payload: dict[str, Any]) -> NativeMessage:
             arguments = {'changes': payload.get('plan_changes') or []}
         return NativeMessage(role='assistant', content='',
                              tool_calls=[_synthetic_call(action, arguments)])
-    raise NativeModelError(EMPTY, f'Unknown structured action: {action or "(missing)"}')
+    raise NativeModelError(MALFORMED, f'Unknown structured action: {action or "(missing)"}')
 
 
 def _synthetic_call(name: str, arguments: dict[str, Any]):
@@ -293,9 +297,7 @@ def _decide(ctx, actor, body, conversation_context, roster, text, language,
         command_id=body.command_id, conversation_id=str(body.payload.get('conversation_id', '')),
         work_id=work.id if work is not None else None, actor_id=actor.id, purpose='front_door'))
     messages = _decision_messages(ctx.models, language, conversation_context, roster, text, tool_catalog)
-    corrections = 0
-    empty_retries = 0
-    last_error = ''
+    budget = _TurnBudget(ctx, language)
     rounds = 0
     while True:
         if rounds:
@@ -308,21 +310,19 @@ def _decide(ctx, actor, body, conversation_context, roster, text, language,
         try:
             message = call.message(messages, tool_catalog)
         except NativeModelError as exc:
-            if exc.code == EMPTY and empty_retries < MAX_EMPTY_RETRIES:
-                empty_retries += 1
-                messages.append(NativeMessage(role='user', content=_empty_reminder()))
+            if exc.code == EMPTY:
+                messages.append(budget.empty_reminder())
+                continue
+            if exc.code in INVALID_OUTPUT_CODES:
+                # Malformed, truncated or looping output is the model's to fix,
+                # not a transport failure to retry in the background.
+                messages.append(budget.invalid_output(str(exc)))
                 continue
             raise _transport_error(exc)
         if not message.tool_calls:
             if not message.content.strip():
-                if empty_retries < MAX_EMPTY_RETRIES:
-                    empty_retries += 1
-                    messages.append(NativeMessage(role='user', content=_empty_reminder()))
-                    continue
-                _warn_front_door(ctx, CODE_EMPTY_RESPONSE, 'empty answer after the reminder')
-                raise FrontDoorModelError(
-                    'Model returned an empty response twice in one front-door turn',
-                    reason=CODE_EMPTY_RESPONSE)
+                messages.append(budget.empty_reminder())
+                continue
             return outcomes.FrontDoorOutcome(kind=outcomes.TEXT, text=message.content.strip())
         first = message.tool_calls[0]
         if len(message.tool_calls) > 1:
@@ -338,17 +338,46 @@ def _decide(ctx, actor, body, conversation_context, roster, text, language,
                     roster_ids=roster_ids)
                 if error is None:
                     return outcome
-        last_error = error
-        if corrections >= MAX_ARGUMENT_CORRECTIONS:
-            _warn_front_door(ctx, CODE_OUTPUT_INVALID, last_error)
-            raise FrontDoorModelError(
-                f'Model tool arguments stayed invalid after {MAX_ARGUMENT_CORRECTIONS} '
-                f'corrections: {last_error[:200]}',
-                reason=CODE_OUTPUT_INVALID)
-        corrections += 1
+        budget.correction(error)
         messages.append(message)
         messages.append(NativeMessage(role='tool', tool_call_id=first.id, name=first.name,
                                       content=error))
+
+
+class _TurnBudget:
+    """How many times the model may be asked to fix itself in one turn.
+
+    Two argument/output corrections and one reminder for an empty answer;
+    beyond that the turn ends with a typed error the engine never retries on
+    its own (the person can send the message again).
+    """
+
+    def __init__(self, ctx, language):
+        self._ctx = ctx
+        self._language = language
+        self.corrections = 0
+        self.empty_retries = 0
+
+    def empty_reminder(self) -> NativeMessage:
+        if self.empty_retries >= MAX_EMPTY_RETRIES:
+            _warn_front_door(self._ctx, CODE_EMPTY_RESPONSE, 'empty answer after the reminder')
+            raise FrontDoorModelError('Model returned an empty response twice in one front-door turn',
+                                      reason=CODE_EMPTY_RESPONSE)
+        self.empty_retries += 1
+        return NativeMessage(role='user', content=_prompt(self._ctx.models, 'empty_reminder', self._language))
+
+    def correction(self, error: str) -> None:
+        if self.corrections >= MAX_ARGUMENT_CORRECTIONS:
+            _warn_front_door(self._ctx, CODE_OUTPUT_INVALID, error)
+            raise FrontDoorModelError(
+                f'Model output stayed invalid after {MAX_ARGUMENT_CORRECTIONS} corrections: {error[:200]}',
+                reason=CODE_OUTPUT_INVALID)
+        self.corrections += 1
+
+    def invalid_output(self, detail: str) -> NativeMessage:
+        note = _prompt(self._ctx.models, 'invalid_output', self._language, detail=detail[:200])
+        self.correction(note)
+        return NativeMessage(role='user', content=note)
 
 
 def _transport_error(exc: NativeModelError) -> DomainError:

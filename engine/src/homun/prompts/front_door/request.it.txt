@@ -1,0 +1,5 @@
+Roster (id | nome | tipo):
+{{roster}}
+
+Messaggio della persona:
+{{text}}

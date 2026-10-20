@@ -1,0 +1,5 @@
+Roster (id | name | kind):
+{{roster}}
+
+Current message from the person:
+{{text}}

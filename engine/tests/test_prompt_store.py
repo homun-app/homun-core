@@ -30,6 +30,7 @@ def test_language_fallback_never_breaks_a_call(tmp_path):
 def test_production_templates_exist_in_default_and_english():
     store = PromptStore()
     for name in ('intake/synthesize', 'intake/classify', 'front_door/instructions',
+                 'front_door/request', 'front_door/empty_reminder', 'front_door/invalid_output',
                  'front_door/tool.ask_clarification', 'front_door/tool.propose_work',
                  'front_door/tool.propose_plan_change'):
         assert store.get(name).language == 'it', name
