@@ -90,6 +90,13 @@
     "intake.catalog.limits": "Limiti",
     "intake.catalog.none": "nessuno",
     "intake.catalog.note": "I materiali si caricano dopo la conferma dell'accordo: la loro assenza ora non cambia la scelta della capability.",
+    "front_door.work_proposed": "Ho preparato la proposta di accordo «{title}»: controllala e conferma. Nessun lavoro parte senza la tua conferma.",
+    "front_door.work_proposed_missing": "Prima di conferma, manca all'appello: {items}.",
+    "front_door.work_proposal_failed": "La proposta non si è potuta salvare ({error}); il messaggio resta in chat: riprova a inviarlo.",
+    "front_door.plan_change_proposed": "Propongo questa modifica al lavoro:",
+    "front_door.plan_change_confirm": "Usa Conferma o Annulla sulla card.",
+    "model.output_invalid": "Il modello non ha prodotto una proposta valida, nemmeno dopo la correzione. Il messaggio resta salvato: riprova a inviarlo.",
+    "model.empty_response": "Il modello non ha dato nessuna risposta. Il messaggio resta salvato: riprova a inviarlo.",
     "object_transfer.project_mismatch": "L'oggetto appartiene a un altro progetto e non può essere ripubblicato altrove.",
     "object_transfer.version_immutable": "Questa versione dell'oggetto esiste già e non può essere sostituita: pubblica una versione successiva.",
     "object_transfer.version_not_increasing": "La nuova versione deve essere successiva all'ultima già pubblicata.",
@@ -132,6 +139,8 @@
     "budget_exhausted": "Il budget disponibile per questo lavoro è esaurito.",
     "domain_error": "L'operazione non è riuscita. Riprova.",
     "backend_unavailable": "Un componente del motore non è disponibile. Verifica lo stato e riprova.",
-    "unknown": "Errore imprevisto."
+    "unknown": "Errore imprevisto.",
+    "model.output_invalid": "Il modello non ha prodotto una proposta valida. Il messaggio resta salvato: puoi riprovare.",
+    "model.empty_response": "Il modello non ha dato nessuna risposta. Il messaggio resta salvato: puoi riprovare."
   }
 }

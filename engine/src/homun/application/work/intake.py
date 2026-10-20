@@ -164,6 +164,61 @@ def propose(ctx, actor, work_id, body):
     return deepcopy(public(proposal))
 
 
+def commit_front_door_proposal(ctx, actor, *, command_id, conversation_id, work_id, brief, text):
+    """Commit a validated front-door brief as the SAME record the first-message
+    intake path creates: pending confirmation, same UI, same confirmation flow.
+
+    The brief already passed the shared ``validate_brief`` rules during the
+    model turn; here values are re-assembled against fresh state (anchor brief,
+    staffing, plan-step people) and optimistic failures land on the record as
+    typed intake error codes instead of crashing the chat turn. Runs inside the
+    caller's repository transaction, on ``ctx.service.store``.
+    """
+    store = ctx.service.store
+    service = ctx.service
+    if work_id is None:
+        # A chat without a linked work gets its draft work when the first
+        # proposal lands, exactly like the UI's createEngineConversationAndWork.
+        work_id = service.apply(actor, f'{command_id}:work', 'work.create', {
+            'conversation_id': conversation_id,
+            'title': brief.title, 'objective': brief.objective})['work_id']
+    work = authority(store, actor, {'work_id': work_id})
+    _record, fingerprint = cached(store, actor, command_id, PROPOSAL_TYPE,
+                                  {'work_id': work_id, 'front_door': True})
+    previous = [r.result for r in sorted(store.commands.values(), key=lambda r: r.created_at)
+                if r.type == PROPOSAL_TYPE and r.result['work_id'] == work_id]
+    for p in previous:
+        if p['status'] == 'pending_confirmation':
+            p.update(status='failed', error_code='intake_superseded')
+    previous_brief = next((deepcopy(public(p)) for p in reversed(previous) if p['objective']), None)
+    agents = [{'id': a.id, 'name': a.name, 'role': a.role, 'revision': a.revision,
+               'capabilities': a.capabilities}
+              for a in store.agents.values() if a.status == 'active']
+    proposal = {'id': command_id, 'status': 'failed', 'work_id': work_id,
+                'expected_version': work.version,
+                'title': 'Richiesta da chiarire', 'objective': '', 'output': '', 'constraints': [],
+                'missing_information': [], 'suggested_agent': None, 'new_agent': None,
+                'rationale': '', 'capability': 'general', 'original_request': text,
+                'changed_fields': [], 'changes': [],
+                'error_code': 'intake_interrupted', '_submitted_text': text,
+                '_permissions': permission_snapshot(store, actor, work)}
+    try:
+        idle(work)
+        values, changes = effective_values(brief, agents, previous_brief, owner_id=work.owner_id)
+        error = None
+    except (ValueError, TypeError, ConflictError):
+        values = {}; changes = []; error = 'intake_invalid_response'
+    if error:
+        proposal.update(status='failed', error_code=error)
+    else:
+        proposal.update(values, status='pending_confirmation')
+        proposal.pop('error_code', None)
+    proposal['changes'] = changes
+    proposal['digest'] = digest(proposal)
+    save(store, actor, command_id, PROPOSAL_TYPE, fingerprint, proposal)
+    return deepcopy(public(proposal))
+
+
 def confirm(ctx,actor,work_id,proposal_id,body):
     payload={**body,'work_id':work_id,'proposal_id':proposal_id}
     with ctx.repository.locked():

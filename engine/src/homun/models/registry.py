@@ -12,10 +12,6 @@ from homun.domain.errors import NotFoundError, ValidationError
 from homun.domain.ids import new_id
 from homun.models.fake import FakeProvider
 from homun.models.runtime_binding import bound_provider
-from homun.models.guardrails import apply_interpretation_guardrails
-from homun.models.interpret import run_interpret_with_retry
-from homun.models.interpretation import MessageInterpretation, RosterEntry
-from homun.models.conversation_context import ConversationContext
 from homun.models.openai_compat import SECRET_KEY, OpenAICompatibleProvider
 from homun.models.port import (Connection, ConnectionKind, ContextLimits, UNSET_PIN, UnsetPin,
                                effective_context_window)
@@ -23,14 +19,12 @@ from pydantic import ValidationError as SchemaError
 from homun.models.prompt_store import PromptStore
 from homun.models.secrets import FileSecretStore, MemorySecretStore, SecretStore
 from homun.models.types import (
-    AttemptContext,
     ChatMessage,
     CompletionResult,
     ProviderInfo,
     UsageAttempt,
     UsageEntry,
     VerifyResult,
-    utc_now,
 )
 
 
@@ -422,6 +416,13 @@ class ModelRegistry:
         from homun.models.native_transport import complete_tools
         pid = connection_id or self.active_provider_id
         provider = self._get_provider(pid)
+        # The fake provider runs native tool turns deterministically (tests, CI).
+        native_fn = getattr(provider, 'complete_tools_native', None)
+        if native_fn is not None:
+            result = native_fn(messages, tools=tools, model_id=model_id,
+                               context_window=context_window, max_output_tokens=max_output_tokens)
+            self.usage.append(result.usage)
+            return result
         if not isinstance(provider, OpenAICompatibleProvider):
             raise ValidationError('Native tools require an OpenAI-compatible connection')
         provider = bound_provider(provider, pid, expected_runtime)
@@ -432,6 +433,26 @@ class ModelRegistry:
             result = complete_tools(provider, messages, tools=tools, model_id=model_id, context_window=context_window,
                                     max_output_tokens=max_output_tokens, stream=stream,
                                     cancel_check=cancel_check, on_delta=on_delta, **kwargs)
+        except NativeModelError as exc:
+            if isinstance(exc.usage, UsageEntry):
+                self.usage.append(exc.usage)
+            raise
+        self.usage.append(result.usage)
+        return result
+
+    def complete_structured(self, messages, *, schema, connection_id=None, model_id=None,
+                            max_output_tokens=8192):
+        """One constrained structured-output call (front-door fallback)."""
+        from homun.domain.errors import ValidationError
+        from homun.models.native_errors import NativeModelError
+        from homun.models.structured_fallback import complete_structured
+        pid = connection_id or self.active_provider_id
+        provider = self._get_provider(pid)
+        if not isinstance(provider, OpenAICompatibleProvider):
+            raise ValidationError('Structured output requires an OpenAI-compatible connection')
+        try:
+            result = complete_structured(provider, messages, schema=schema, model_id=model_id,
+                                         max_output_tokens=max_output_tokens)
         except NativeModelError as exc:
             if isinstance(exc.usage, UsageEntry):
                 self.usage.append(exc.usage)
@@ -513,29 +534,6 @@ class ModelRegistry:
     def append_attempt(self, attempt: UsageAttempt) -> UsageAttempt:
         self.attempts.append(attempt)
         return attempt
-
-    def interpret(
-        self,
-        text: str,
-        *,
-        roster: list[RosterEntry],
-        provider_id: str | None = None,
-        context: AttemptContext | None = None,
-        conversation_context: ConversationContext | None = None,
-    ) -> MessageInterpretation:
-        pid = provider_id or self.active_provider_id
-        prov = self._get_provider(pid)
-        if prov is None:
-            raise KeyError(f"Unknown provider: {pid}")
-        raw = run_interpret_with_retry(
-            self,
-            text,
-            roster=roster,
-            provider_id=pid,
-            context=context,
-            conversation_context=conversation_context,
-        )
-        return apply_interpretation_guardrails(raw, roster)
 
     def apply_ollama_preset(self, *, model: str = "qwen3.5:4b") -> None:
         """Point openai_compatible at local Ollama and activate it."""
