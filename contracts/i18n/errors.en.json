@@ -71,6 +71,8 @@
     "message.in_progress.same": "This message is already being processed: wait for its result before trying again.",
     "message.in_progress.other": "Another message in this conversation is being processed.",
     "message.superseded": "A newer attempt superseded the previous one: its result was not applied.",
+    "agent_run.chat_failed": "⚠️ The reply did not complete ({code}). Check the selected model in the attempt details.",
+    "agent_run.chat_blocked": "⚠️ The run was stopped by a safety check ({code}). Open the attempt details, check the model connection, and try again.",
     "work.transition_invalid": "The work cannot move from “{from@label}” to “{to@label}”.",
     "plan.propose.state_invalid": "A plan can only be proposed while the work is draft or ready.",
     "plan.propose.needs_steps": "The plan needs at least one step.",

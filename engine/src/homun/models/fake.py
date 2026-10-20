@@ -24,6 +24,7 @@ class FakeProvider:
     """Always available. Completions are deterministic from the last user message."""
 
     provider_id = "fake"
+    transport_kind = "fake"
     default_model = "fake-deterministic-v1"
 
     def __init__(self) -> None:

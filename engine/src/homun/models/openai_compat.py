@@ -47,6 +47,11 @@ class OpenAICompatibleProvider:
     """Talks to OpenAI-compatible /v1/chat/completions (also Ollama-compatible gateways)."""
 
     provider_id = "openai_compatible"
+    # il kind REALE del trasporto (ciò che questa classe è), distinto
+    # dall'identità della connessione che il registro gli assegna:
+    # `provider_id` può portare un id scelto dalla persona (es. `golden_local`)
+    # e non deve mai essere scambiato per il kind nel controllo d'identità
+    transport_kind = "openai_compatible"
 
     def __init__(
         self,

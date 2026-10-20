@@ -71,6 +71,8 @@
     "message.in_progress.same": "Questo messaggio è già in elaborazione: attendi il risultato prima di riprovare.",
     "message.in_progress.other": "Un altro messaggio di questa conversazione è in elaborazione.",
     "message.superseded": "Un nuovo tentativo ha sostituito quello precedente: il suo risultato non è stato applicato.",
+    "agent_run.chat_failed": "⚠️ La risposta non è andata a buon fine ({code}). Controlla il modello selezionato nei dettagli del tentativo.",
+    "agent_run.chat_blocked": "⚠️ L'esecuzione è stata fermata da un controllo di sicurezza ({code}). Apri i dettagli del tentativo, verifica la connessione del modello e riprova.",
     "work.transition_invalid": "Il lavoro non può passare da «{from@label}» a «{to@label}».",
     "plan.propose.state_invalid": "Il piano si può proporre solo mentre il lavoro è in bozza o pronto.",
     "plan.propose.needs_steps": "Il piano richiede almeno un passaggio.",
