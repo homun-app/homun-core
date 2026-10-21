@@ -154,16 +154,35 @@ class AskClarificationArgs(_TolerantModel):
         return _tolerant_list(value)
 
     def normalized_questions(self) -> list[dict[str, Any]]:
-        """Plain question dicts for the transcript payload; raises when empty."""
+        """Plain question dicts for the transcript payload; raises when empty.
+
+        Small models sometimes wrap the question list in a JSON string: it is
+        unwrapped here rather than shown raw to the person.
+        """
+        import json
         raw = list(self.questions or [])
         if not raw and (self.question or '').strip():
             raw = [{'question': self.question, 'choices': self.choices or [], 'multi_select': self.multi_select}]
-        questions = []
+        questions: list[dict[str, Any]] = []
         for item in raw:
             if isinstance(item, str):
                 text = item.strip()
-                if text:
-                    questions.append({'question': text, 'choices': [], 'multi_select': False})
+                if not text:
+                    continue
+                embedded = None
+                if text.startswith('[') or text.startswith('{'):
+                    try:
+                        embedded = json.loads(text)
+                    except ValueError:
+                        embedded = None
+                if isinstance(embedded, list):
+                    questions.extend(self.__class__(questions=embedded).normalized_questions())
+                    continue
+                if isinstance(embedded, dict):
+                    embedded = [embedded]
+                    questions.extend(self.__class__(questions=embedded).normalized_questions())
+                    continue
+                questions.append({'question': text, 'choices': [], 'multi_select': False})
                 continue
             parsed = ClarifyQuestion.model_validate(item)
             questions.append({'question': parsed.question, 'choices': parsed.choices,

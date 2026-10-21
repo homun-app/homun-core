@@ -20,8 +20,8 @@ from .reporting import GoldenRun
 pytestmark = pytest.mark.golden
 
 RICHIESTA_RICERCA = (
-    "Trova le scadenze e i responsabili nei materiali del progetto e prepara "
-    "un breve riepilogo operativo con date e nomi."
+    "Prepara un breve riepilogo operativo con date e nomi, leggendo TUTTI i "
+    "materiali caricati nel progetto: trova le scadenze e i responsabili."
 )
 RICHIESTA_RIASSUNTO = (
     "Riassumi il file «appunti-riunione.md» con i suoi punti chiave: date, "

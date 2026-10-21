@@ -44,6 +44,29 @@ def work_accepts_proposal(work: Work | None) -> str | None:
     return None
 
 
+def _blank_non_collaborator_assignees(brief, agents) -> None:
+    """Phase assignees that are not active collaborators cannot be assigned.
+
+    The engine, not the model, keeps the proposal confirmable: an unknown name
+    is blanked (the standing collaborator takes the phase, visible on the
+    card) instead of exhausting the correction budget and losing the turn —
+    the message the old check returned is what this does deterministically.
+    """
+    from homun.models.intake import invalid_plan_step_assignees
+    collaborator_name = None
+    if brief.suggested_agent_id:
+        collaborator_name = next((a['name'] for a in agents if a['id'] == brief.suggested_agent_id), None)
+    elif brief.new_agent:
+        collaborator_name = brief.new_agent.name
+    raw_steps = [step.model_dump() for step in brief.plan_steps]
+    invalid = {name.strip().casefold() for name in invalid_plan_step_assignees(raw_steps, agents, collaborator_name)}
+    if not invalid:
+        return
+    for step in brief.plan_steps:
+        if (step.assignee or '').strip().casefold() in invalid:
+            step.assignee = ''
+
+
 def plan_change_preview(work, plan, arguments, *, roster_ids):
     """Reuse the patch preview builder; issues come back as an error message."""
     changes = [WorkPatchChange(field=change.field, to_value=change.to_value, step_id=change.step_id)
@@ -77,6 +100,7 @@ def outcome_from_call(name: str, arguments, *, work, plan, agents, anchor, roste
             # Su una revisione i campi non detti arrivano dall'accordo
             # esistente (anchor): il modello non deve ripeterli.
             brief = validate_brief(arguments.to_brief(anchor), agents)
+            _blank_non_collaborator_assignees(brief, agents)
             # The same effective-agreement rules the first-message path applies
             # before persisting (anchor, staffing, plan-step people): the model
             # learns here, not at commit time.

@@ -190,22 +190,18 @@ def test_invalid_capability_returns_error_to_model_then_corrects(env):
     assert 'capability' in tool_results[0]['content'].lower()
 
 
-def test_unknown_plan_step_assignee_returns_error_to_model(env):
-    script(env.ctx,
-           tool_call('propose_work', {**VALID_WORK,
-                                      'plan_steps': [{'title': 'Fase legale', 'assignee': 'Avvocato Inesistente'}]},
-                     call_id='call_bad'),
-           tool_call('propose_work', {**VALID_WORK, 'plan_steps': [{'title': 'Fase legale', 'assignee': ''}]},
-                     call_id='call_good'))
+def test_non_collaborator_step_assignee_is_blanked_not_rejected(env):
+    """Una persona citata nella richiesta non è un collaboratore: il motore
+    azzera l'assegnazione (la fase passa al collaboratore di riferimento, in
+    carta) invece di consumare i giri di correzione e perdere il turno."""
+    script(env.ctx, tool_call('propose_work', {
+        **VALID_WORK, 'plan_steps': [{'title': 'Fase legale', 'assignee': 'Avvocato Inesistente'}]}))
     response = post_message(env, 'Prepara una nota con una fase legale.')
     assert response.status_code == 200, response.text
     proposal = response.json()['result']['intake_proposal']
-    assert proposal['status'] == 'pending_confirmation'
+    assert proposal['status'] == 'pending_confirmation', proposal
     assert proposal['plan_steps'][0]['title'] == 'Fase legale'
-    # The correction names the offender and what is allowed: the model can act on it.
-    tool_result = next(m for m in env.ctx.models._fake.native_calls[1] if m['role'] == 'tool')
-    assert "'Avvocato Inesistente'" in tool_result['content']
-    assert 'leave assignee empty' in tool_result['content']
+    assert proposal['plan_steps'][0]['assignee'] == '', proposal['plan_steps']
 
 
 def test_three_invalid_argument_rounds_raise_output_invalid(env):
