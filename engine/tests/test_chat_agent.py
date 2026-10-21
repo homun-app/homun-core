@@ -150,6 +150,45 @@ def test_blocked_run_is_reported_in_chat_with_typed_message(setup):
     assert chat_agent.deliver_chat_answers(ctx) == 0
 
 
+def test_blocked_run_does_not_make_the_conversation_busy(setup):
+    """Un run chat finito «blocked» riceve la nota tipizzata ma NON occupa la
+    conversazione: il messaggio successivo passa l'ammissione (nessun turno in
+    volo, nessun retry pendente) e apre un run nuovo, non steera quello bloccato."""
+    from homun.application.sessions.command_delivery import (
+        admit, complete, conversation_busy, turn_in_flight)
+    from homun.application.sessions.command_types import CommandRequest
+    from homun.domain.models import utc_now
+    ctx, actor, conv = setup
+    chat_agent.bind(ctx, actor, conv, "agent_chat")
+
+    def post(command_id, text):
+        body = CommandRequest(command_id=command_id, type="conversation.post_message",
+                              payload={"conversation_id": conv, "text": text})
+        return body, complete(ctx, admit(ctx, actor, body))
+
+    _, first = post("m1", "primo")
+    assert first["chat_agent"] is True and first["steered"] is False
+    with ctx.repository.transaction() as store:
+        store.commands[first["agent_run_id"]].result["status"] = "blocked"
+        store.commands[first["agent_run_id"]].result["error_code"] = "version_conflict"
+    assert chat_agent.deliver_chat_answers(ctx) == 1
+
+    store = ctx.repository.load()
+    second_body = CommandRequest(command_id="m2", type="conversation.post_message",
+                                 payload={"conversation_id": conv, "text": "secondo"})
+    assert store.commands["m1"].followup_status == "completed"
+    assert chat_agent._active_chat_run(store, conv) is None
+    assert turn_in_flight(store, conv, now=utc_now(), exclude="m2") is False
+    assert conversation_busy(store, second_body, utc_now()) is False
+
+    second = complete(ctx, admit(ctx, actor, second_body))
+    assert second["steered"] is False
+    assert second["agent_run_id"] != first["agent_run_id"]
+    run = ctx.repository.load().commands[second["agent_run_id"]].result
+    assert run["status"] in {"queued", "running"}
+    assert run["_chat_conversation_id"] == conv
+
+
 def _catalog_sentence(reason, params):
     from homun.application.ops.preferences import resolve_language
     from homun.context import get_context

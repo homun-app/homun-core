@@ -16,6 +16,9 @@ from homun.models.native_errors import EMPTY, INVALID_REQUEST, MALFORMED, NETWOR
 from homun.models.native_turn import NativeMessage, NativeResult, ToolCall
 from homun.models.types import UsageEntry
 
+# fixture riusata: server HTTP OpenAI-compatibile locale che registra le richieste
+from test_session_runtime_preferences import local_model_http  # noqa: F401
+
 
 @dataclass
 class Env:
@@ -540,3 +543,43 @@ def test_italian_instructions_for_italian_person(env):
     calls = env.ctx.models._fake.native_calls
     system = next(m for m in calls[0] if m['role'] == 'system')
     assert 'proposta di lavoro' in system['content'].lower() or 'accord' in system['content'].lower()
+
+
+# -- trasporto: connessione dal nome scelto dalla persona (B7) ----------------
+
+
+def test_user_named_connection_reaches_the_front_door_transport(env, local_model_http):
+    """Il turno di ingresso passa dallo stesso trasporto degli altri turni
+    (``complete_tools`` → ``bound_provider``): una connessione creata dalla
+    persona con un id suo (``golden_local``) arriva al modello. L'id della
+    connessione non è il kind del trasporto, quindi il turno non finisce in
+    «Selected model transport differs» e il tentativo è registrato a nome di
+    quella connessione."""
+    from homun.application.agent.runtime_selection import resolve
+    from homun.models.runtime_binding import bound_provider
+
+    url, seen = local_model_http
+    env.ctx.models.upsert_connection(
+        connection_id='golden_local', kind='openai_compatible', display_name='La mia connessione',
+        model_id='provider-resolved-alias', base_url=url)
+    provider = env.ctx.models._get_provider('golden_local')
+    assert provider.provider_id == 'golden_local'
+    assert provider.transport_kind == 'openai_compatible'
+    # L'identità approvata (connection_id, endpoint, kind reale) che gli altri
+    # trasporti controllano accetta questa connessione: nessun conflitto.
+    approved = resolve(env.ctx.models, connection_id='golden_local')
+    assert bound_provider(provider, 'golden_local', approved) is provider
+
+    response = env.client.post(
+        '/v1/workspaces/ws_local/commands', headers=env.headers,
+        json={'command_id': 'msg-golden', 'type': 'conversation.post_message',
+              'payload': {'conversation_id': env.conversation_id, 'text': 'Cosa sai fare?',
+                          'connection_id': 'golden_local'}})
+    assert response.status_code == 200, response.text
+    assert 'transport differs' not in response.text
+    assert response.json()['result']['assistant_text'] == 'Done'
+    assert len(seen) == 1 and seen[0][0]['model'] == 'provider-resolved-alias'
+    attempts = [a for a in env.ctx.models.attempts if a.purpose == 'front_door']
+    assert attempts, 'il giro al provider finisce nel registro dei tentativi'
+    assert attempts[-1].provider_id == 'golden_local'
+    assert attempts[-1].status == 'ok'
