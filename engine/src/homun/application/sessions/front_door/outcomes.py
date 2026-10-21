@@ -74,7 +74,9 @@ def outcome_from_call(name: str, arguments, *, work, plan, agents, anchor, roste
         if blocked := work_accepts_proposal(work):
             return None, blocked
         try:
-            brief = validate_brief(arguments.to_brief(), agents)
+            # Su una revisione i campi non detti arrivano dall'accordo
+            # esistente (anchor): il modello non deve ripeterli.
+            brief = validate_brief(arguments.to_brief(anchor), agents)
             # The same effective-agreement rules the first-message path applies
             # before persisting (anchor, staffing, plan-step people): the model
             # learns here, not at commit time.

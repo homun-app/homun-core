@@ -71,11 +71,17 @@ class PlanStepDraftArgs(_TolerantModel):
 
 
 class ProposeWorkArgs(_TolerantModel):
-    """``propose_work`` arguments: few required fields, tolerant lists."""
+    """``propose_work`` arguments: tolerant in shape, strict in meaning.
 
-    title: str = Field(min_length=1, max_length=100)
-    objective: str = Field(min_length=1, max_length=700)
-    output: str = Field(min_length=1, max_length=500)
+    On a FIRST proposal title/objective/output must all be there. On a
+    REVISION of an existing agreement the model may send only what changes:
+    the engine fills the missing fields from the anchor brief, never trusts
+    the model to echo them.
+    """
+
+    title: str | None = Field(default=None, max_length=100)
+    objective: str | None = Field(default=None, max_length=700)
+    output: str | None = Field(default=None, max_length=500)
     constraints: list[str] = Field(default_factory=list, max_length=12)
     missing_information: list[str] = Field(default_factory=list, max_length=12)
     suggested_agent_id: str | None = None
@@ -90,17 +96,33 @@ class ProposeWorkArgs(_TolerantModel):
     def _lists(cls, value):
         return _tolerant_list(value)
 
-    def to_brief(self) -> IntakeBrief:
-        """Project onto the strict IntakeBrief; validation stays with the engine."""
+    def to_brief(self, anchor: dict | None = None) -> IntakeBrief:
+        """Project onto the strict IntakeBrief; validation stays with the engine.
+
+        Missing identity fields come verbatim from the anchor (the existing
+        agreement); without an anchor they are mandatory and the model gets a
+        correction it can act on.
+        """
+        def pick(value: str | None, key: str, *, limit: int = 700) -> str:
+            text = (value or '').strip()
+            if text:
+                return text[:limit]
+            if anchor is not None:
+                return str(anchor.get(key) or '').strip()[:limit]
+            raise ValueError(f'{key} is required on a first proposal; '
+                             'a revision may omit it and the engine keeps the agreement\'s value')
+
+        title = pick(self.title, 'title', limit=100)
+        rationale = (self.rationale or '').strip() or f'{title[:80]} — proposta dalla chat'
         return IntakeBrief(
-            title=self.title.strip(),
-            objective=self.objective.strip(),
-            output=self.output.strip(),
+            title=title,
+            objective=pick(self.objective, 'objective'),
+            output=pick(self.output, 'output'),
             constraints=self.constraints,
             missing_information=self.missing_information,
             suggested_agent_id=self.suggested_agent_id,
             new_agent=self.new_agent.model_dump() if self.new_agent else None,
-            rationale=(self.rationale or '').strip() or f'{self.title.strip()[:80]} — proposta dalla chat',
+            rationale=rationale,
             capability=self.capability,
             changed_fields=self.changed_fields,
             plan_steps=[PlanStepDraft.model_validate(step.model_dump()) for step in self.plan_steps],

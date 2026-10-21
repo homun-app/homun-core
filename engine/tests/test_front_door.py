@@ -368,6 +368,41 @@ def confirm_proposal(env: Env, proposal: dict, command_id: str = 'confirm') -> d
     return response.json()
 
 
+def test_revision_call_omits_unchanged_fields_engine_fills_from_anchor(env):
+    """La revisione può essere MINIMALE: il modello indica solo i campi che
+    cambiano; i campi d'identità li recupera il motore dall'accordo esistente.
+    Senza accordo precedente, i campi obbligatori mancano e il modello riceve
+    una correzione su cui può agire."""
+    from homun.application.sessions.front_door import outcomes, tools
+
+    script(env.ctx, tool_call('propose_work', {
+        **VALID_WORK, 'constraints': ['Consegna entro il 30 novembre']}))
+    first = post_message(env, 'Prepara una nota operativa.')
+    assert first.status_code == 200, first.text
+    original = first.json()['result']['intake_proposal']
+    confirm_proposal(env, original, 'confirm_minimal')
+
+    # Revisione minimale: solo constraints e changed_fields.
+    script(env.ctx, tool_call('propose_work', {
+        'constraints': ['Consegna entro il 15 dicembre'],
+        'changed_fields': ['constraints']}))
+    revised = post_message(env, 'Sposta la consegna al 15 dicembre.', command_id='msg_min')
+    assert revised.status_code == 200, revised.text
+    proposal = revised.json()['result']['intake_proposal']
+    assert proposal['status'] == 'pending_confirmation', proposal
+    assert proposal['title'] == original['title'], 'il titolo arriva dall\'anchor'
+    assert proposal['objective'] == original['objective']
+    change = next(c for c in proposal['changes'] if c['field'] == 'constraints')
+    assert change['to_value'] == ['Consegna entro il 15 dicembre']
+
+    # Prima proposta senza campi obbligatori: correzione, non silenzio.
+    arguments = tools.parse_arguments('propose_work', {'constraints': ['solo vincoli']})
+    outcome, error = outcomes.outcome_from_call(
+        'propose_work', arguments, work=env.ctx.service.store.works[env.work_id],
+        plan=None, agents=[], anchor=None, roster_ids=set())
+    assert outcome is None and 'title is required' in error
+
+
 def test_confirmed_agreement_revision_message_creates_change_proposal(env):
     """La persona chiede in chat di cambiare un accordo già confermato: il turno
     di ingresso produce una proposta di modifica con il diff dell'accordo
