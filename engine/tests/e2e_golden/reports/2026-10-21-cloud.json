@@ -1,27 +1,27 @@
 {
- "generated_at": "2026-10-21T12:02:47+00:00",
+ "generated_at": "2026-10-21T16:38:49+00:00",
  "meta": {
   "date": "2026-10-21",
   "provider": "cloud",
   "model": "glm-5.3-flash:cloud",
   "base_url": "http://127.0.0.1:11434/v1",
   "runs": 3,
-  "commit": "44e4b077",
+  "commit": "150a1ddf",
   "suite": "engine/tests/e2e_golden",
-  "started_at": "2026-10-21T11:49:19+00:00",
+  "started_at": "2026-10-21T16:27:21+00:00",
   "data_dirs": [
-   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-121/homun-golden-0",
-   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-121/homun-golden-1",
-   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-121/homun-golden-2",
-   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-121/homun-golden-3",
-   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-121/homun-golden-4",
-   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-121/homun-golden-5",
-   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-121/homun-golden-6",
-   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-121/homun-golden-7",
-   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-121/homun-golden-8",
-   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-121/homun-golden-9"
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-138/homun-golden-0",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-138/homun-golden-1",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-138/homun-golden-2",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-138/homun-golden-3",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-138/homun-golden-4",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-138/homun-golden-5",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-138/homun-golden-6",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-138/homun-golden-7",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-138/homun-golden-8",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-138/homun-golden-9"
   ],
-  "duration": "13 min"
+  "duration": "11 min"
  },
  "scenarios": [
   {
@@ -32,7 +32,7 @@
    "successes": 1,
    "attempted": 1,
    "interrupted": 0,
-   "avg_duration": 4.4,
+   "avg_duration": 0.9,
    "failures": [],
    "engine_defects": [],
    "id": "M0"
@@ -45,7 +45,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 3.8,
+   "avg_duration": 1.6,
    "failures": [],
    "engine_defects": [],
    "id": "A1"
@@ -58,7 +58,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 8.7,
+   "avg_duration": 8.3,
    "failures": [],
    "engine_defects": [],
    "id": "A2"
@@ -71,7 +71,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 1.5,
+   "avg_duration": 1.9,
    "failures": [],
    "engine_defects": [],
    "id": "A3"
@@ -84,7 +84,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 9.7,
+   "avg_duration": 8.1,
    "failures": [],
    "engine_defects": [],
    "id": "A4"
@@ -97,7 +97,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 10.4,
+   "avg_duration": 7.6,
    "failures": [],
    "engine_defects": [],
    "id": "A5"
@@ -110,7 +110,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 1.7,
+   "avg_duration": 1.6,
    "failures": [],
    "engine_defects": [],
    "id": "A6"
@@ -133,39 +133,12 @@
    "runs": 3,
    "expected_runs": 3,
    "missing": 0,
-   "successes": 0,
+   "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 6.7,
-   "failures": [
-    {
-     "run": 1,
-     "step": "C2.ricerca",
-     "code": "version_conflict",
-     "reason": "policy.intake_unconfirmed",
-     "excerpt": "{'detail': {'code': 'version_conflict', 'message': 'Confirm the intake before assigning or executing this work', 'reason': 'policy.intake_unconfirmed'}}",
-     "interrupted_before": false
-    },
-    {
-     "run": 2,
-     "step": "C2.ricerca",
-     "code": "version_conflict",
-     "reason": "policy.intake_unconfirmed",
-     "excerpt": "{'detail': {'code': 'version_conflict', 'message': 'Confirm the intake before assigning or executing this work', 'reason': 'policy.intake_unconfirmed'}}",
-     "interrupted_before": false
-    },
-    {
-     "run": 3,
-     "step": "C2.ricerca",
-     "code": "version_conflict",
-     "reason": "policy.intake_unconfirmed",
-     "excerpt": "{'detail': {'code': 'version_conflict', 'message': 'Confirm the intake before assigning or executing this work', 'reason': 'policy.intake_unconfirmed'}}",
-     "interrupted_before": false
-    }
-   ],
-   "engine_defects": [
-    "punto del codice da individuare (vedi i fallimenti sotto)"
-   ],
+   "avg_duration": 23.6,
+   "failures": [],
+   "engine_defects": [],
    "id": "C2"
   },
   {
@@ -173,39 +146,12 @@
    "runs": 3,
    "expected_runs": 3,
    "missing": 0,
-   "successes": 0,
+   "successes": 3,
    "attempted": 3,
-   "interrupted": 3,
-   "avg_duration": 0.0,
-   "failures": [
-    {
-     "run": 1,
-     "step": "C3 (interrotto prima)",
-     "code": "version_conflict",
-     "reason": "storia interrotta prima, al passo «C2.ricerca»: policy.intake_unconfirmed",
-     "excerpt": "",
-     "interrupted_before": true
-    },
-    {
-     "run": 2,
-     "step": "C3 (interrotto prima)",
-     "code": "version_conflict",
-     "reason": "storia interrotta prima, al passo «C2.ricerca»: policy.intake_unconfirmed",
-     "excerpt": "",
-     "interrupted_before": true
-    },
-    {
-     "run": 3,
-     "step": "C3 (interrotto prima)",
-     "code": "version_conflict",
-     "reason": "storia interrotta prima, al passo «C2.ricerca»: policy.intake_unconfirmed",
-     "excerpt": "",
-     "interrupted_before": true
-    }
-   ],
-   "engine_defects": [
-    "punto del codice da individuare (vedi i fallimenti sotto)"
-   ],
+   "interrupted": 0,
+   "avg_duration": 18.5,
+   "failures": [],
+   "engine_defects": [],
    "id": "C3"
   },
   {
@@ -229,7 +175,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 38.1,
+   "avg_duration": 50.2,
    "failures": [],
    "engine_defects": [],
    "id": "D2"
@@ -242,7 +188,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 5.0,
+   "avg_duration": 4.8,
    "failures": [],
    "engine_defects": [],
    "id": "D3"
@@ -255,7 +201,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 16.3,
+   "avg_duration": 18.1,
    "failures": [],
    "engine_defects": [],
    "id": "B9"
@@ -265,23 +211,12 @@
    "runs": 3,
    "expected_runs": 3,
    "missing": 0,
-   "successes": 2,
+   "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 17.2,
-   "failures": [
-    {
-     "run": 1,
-     "step": "B2.esecuzione",
-     "code": "run_waiting_input",
-     "reason": "run agente golden-031d44e09649 ha chiesto un chiarimento invece di consegnare",
-     "excerpt": "{'surface': 'desktop', 'toolset': 'full', 'denied_tools': [], 'micro_compaction': True, 'native_stream': False, 'parallel_read_tools': False, 'id': 'golden-031d44e09649', 'work_id': 'work_OZD13LPQDt8ZAw', 'status': 'waiting_input', 'expected_version': 3, 'digest': 'd8c60936fa2ce5ba5ef06f69f72314279c41241d7bd0a95f780812359b44c6ff', 'materials': [], 'limits': {'max_turns': 8, 'max_model_attempts': 1…",
-     "interrupted_before": false
-    }
-   ],
-   "engine_defects": [
-    "punto del codice da individuare (vedi i fallimenti sotto)"
-   ],
+   "avg_duration": 11.1,
+   "failures": [],
+   "engine_defects": [],
    "id": "B2"
   },
   {
@@ -289,23 +224,12 @@
    "runs": 3,
    "expected_runs": 3,
    "missing": 0,
-   "successes": 2,
+   "successes": 3,
    "attempted": 3,
-   "interrupted": 1,
+   "interrupted": 0,
    "avg_duration": 0.0,
-   "failures": [
-    {
-     "run": 1,
-     "step": "B3 (interrotto prima)",
-     "code": "run_waiting_input",
-     "reason": "storia interrotta prima, al passo «B2.esecuzione»: run agente golden-031d44e09649 ha chiesto un chiarimento invece di consegnare",
-     "excerpt": "",
-     "interrupted_before": true
-    }
-   ],
-   "engine_defects": [
-    "punto del codice da individuare (vedi i fallimenti sotto)"
-   ],
+   "failures": [],
+   "engine_defects": [],
    "id": "B3"
   },
   {
@@ -313,23 +237,12 @@
    "runs": 3,
    "expected_runs": 3,
    "missing": 0,
-   "successes": 2,
+   "successes": 3,
    "attempted": 3,
-   "interrupted": 1,
-   "avg_duration": 48.1,
-   "failures": [
-    {
-     "run": 1,
-     "step": "B4 (interrotto prima)",
-     "code": "run_waiting_input",
-     "reason": "storia interrotta prima, al passo «B2.esecuzione»: run agente golden-031d44e09649 ha chiesto un chiarimento invece di consegnare",
-     "excerpt": "",
-     "interrupted_before": true
-    }
-   ],
-   "engine_defects": [
-    "punto del codice da individuare (vedi i fallimenti sotto)"
-   ],
+   "interrupted": 0,
+   "avg_duration": 10.1,
+   "failures": [],
+   "engine_defects": [],
    "id": "B4"
   },
   {
@@ -337,23 +250,12 @@
    "runs": 3,
    "expected_runs": 3,
    "missing": 0,
-   "successes": 2,
+   "successes": 3,
    "attempted": 3,
-   "interrupted": 1,
-   "avg_duration": 25.8,
-   "failures": [
-    {
-     "run": 1,
-     "step": "B5 (interrotto prima)",
-     "code": "run_waiting_input",
-     "reason": "storia interrotta prima, al passo «B2.esecuzione»: run agente golden-031d44e09649 ha chiesto un chiarimento invece di consegnare",
-     "excerpt": "",
-     "interrupted_before": true
-    }
-   ],
-   "engine_defects": [
-    "punto del codice da individuare (vedi i fallimenti sotto)"
-   ],
+   "interrupted": 0,
+   "avg_duration": 0.0,
+   "failures": [],
+   "engine_defects": [],
    "id": "B5"
   },
   {
@@ -364,7 +266,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 13.1,
+   "avg_duration": 8.0,
    "failures": [],
    "engine_defects": [],
    "id": "B6"
@@ -377,7 +279,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 6.7,
+   "avg_duration": 4.5,
    "failures": [],
    "engine_defects": [],
    "id": "B8"
@@ -390,7 +292,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 22.8,
+   "avg_duration": 10.3,
    "failures": [],
    "engine_defects": [],
    "id": "B10"
@@ -403,7 +305,7 @@
    "successes": 3,
    "attempted": 3,
    "interrupted": 0,
-   "avg_duration": 41.8,
+   "avg_duration": 27.5,
    "failures": [],
    "engine_defects": [],
    "id": "B7"
@@ -415,8 +317,11 @@
   "A5 run 2: esito della richiesta = work_proposal",
   "A5 run 3: esito della richiesta = work_proposal",
   "materiali run 1: esito della richiesta = proposta",
+  "C2 run 1: citati dal md ['14 novembre', 'Marco Bianchi', '2 dicembre', 'Anna Neri'], dal pdf ['15 gennaio', 'Luca Rossi', '20 dicembre']",
   "materiali run 2: esito della richiesta = proposta",
+  "C2 run 2: citati dal md ['14 novembre', 'Marco Bianchi', '2 dicembre', 'Anna Neri'], dal pdf ['15 gennaio', 'Luca Rossi', '20 dicembre']",
   "materiali run 3: esito della richiesta = proposta",
+  "C2 run 3: citati dal md ['14 novembre', 'Marco Bianchi', '2 dicembre', 'Anna Neri'], dal pdf ['15 gennaio', 'Luca Rossi', '20 dicembre']",
   "B(run) run 1: esito della richiesta = proposta",
   "B(run) run 2: esito della richiesta = proposta",
   "B(run) run 3: esito della richiesta = proposta",
