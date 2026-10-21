@@ -25,8 +25,8 @@ RICHIESTA_RICERCA = (
     "responsabili che trovi nei file."
 )
 RICHIESTA_RIASSUNTO = (
-    "Riassumi il file «appunti-riunione.md» con i suoi punti chiave: date, "
-    "responsabili e cose da fare."
+    "Prepara un riassunto scritto del file «appunti-riunione.md», con i suoi "
+    "punti chiave: date, responsabili e cose da fare."
 )
 
 
