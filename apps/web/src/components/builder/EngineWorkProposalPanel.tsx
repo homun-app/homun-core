@@ -24,7 +24,6 @@ export function EngineWorkProposalPanel({
   onRename?: ((title: string) => Promise<void>) | undefined;
 }) {
   const [editing, setEditing] = useState(false);
-  const [clarification, setClarification] = useState("");
   const agent = proposal.suggested_agent ?? proposal.new_agent;
   const isBusy = busy || intake.busy;
 
@@ -134,41 +133,21 @@ export function EngineWorkProposalPanel({
           type="button"
           className="cs-link"
           disabled={isBusy}
-          onClick={() => setEditing(!editing)}
+          onClick={() => {
+            setEditing(!editing);
+            // La modifica passa dalla chat: porta il focus al composer.
+            window.dispatchEvent(new CustomEvent("homun:composer-focus"));
+          }}
         >
           {editing ? "Chiudi modifica" : "Modifica proposta"}
         </button>
       </div>
 
       {editing && (
-        <form
-          className="cw-intake-edit"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (clarification.trim()) {
-              void intake.refine(clarification).then((ok) => {
-                if (ok) {
-                  setEditing(false);
-                  setClarification("");
-                }
-              });
-            }
-          }}
-        >
-          <label>
-            Cosa vuoi cambiare o chiarire?
-            <textarea
-              rows={3}
-              value={clarification}
-              disabled={isBusy}
-              placeholder="Es. aggiungi una fase per i test, oppure specifica una scadenza…"
-              onChange={(e) => setClarification(e.target.value)}
-            />
-          </label>
-          <button className="cw-secondary" disabled={isBusy || !clarification.trim()}>
-            Aggiorna proposta
-          </button>
-        </form>
+        <p className="cw-engine-summary__hint" data-intake-edit-hint>
+          Scrivi in chat cosa vuoi cambiare (es. una scadenza, una fase, il responsabile): Homun
+          prepara la proposta aggiornata e la confermi dalla scheda.
+        </p>
       )}
 
       {intake.busy && (

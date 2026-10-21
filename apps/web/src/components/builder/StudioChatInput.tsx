@@ -1,4 +1,4 @@
-import { useState, useRef, useId, useLayoutEffect, type ReactNode } from "react";
+import { useState, useRef, useId, useEffect, useLayoutEffect, type ReactNode } from "react";
 import { ArrowUp, Paperclip, Square, X } from "lucide-react";
 import {
   PromptInput,
@@ -115,6 +115,15 @@ function Composer({
       nextCursor.current = null;
     }
   }, [textInput.value]);
+  // Focus dal resto dell'interfaccia (es. «Modifica proposta» del pannello):
+  // la modifica di un accordo passa dalla chat, il composer deve accoglierla.
+  useEffect(() => {
+    const focusComposer = () => {
+      input.current?.focus();
+    };
+    window.addEventListener("homun:composer-focus", focusComposer);
+    return () => window.removeEventListener("homun:composer-focus", focusComposer);
+  }, []);
   function choose(ref: ChatReference) {
     if (!mention) return;
     const insertion = `@${ref.name} `;

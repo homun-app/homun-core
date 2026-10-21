@@ -134,7 +134,6 @@ export function ConversationWorkspaceWorkPanel({
             busy: false,
             error: null,
             confirm: async () => {},
-            refine: async () => false,
           }
         }
         contributionPanel={contributionPanel}

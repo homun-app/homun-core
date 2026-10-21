@@ -241,11 +241,18 @@ export function ConversationWorkspace() {
       const title = (text || s.initial || s.title).trim().slice(0, 100) || "Lavoro motore";
       const objective = (text || s.initial).trim() || title;
       void engine
-        .createWork(title, objective, false, projectId ?? newChatProjectId ?? undefined)
+        .createWork(title, objective, projectId ?? newChatProjectId ?? undefined)
         .then((created) => {
-          if (created) {
-            open(created.id);
-            setNotice(`Lavoro creato · ${created.id}`);
+          if (!created) return;
+          open(created.id);
+          setNotice(`Lavoro creato · ${created.id}`);
+          // Il testo della persona, quando c'è, è un messaggio: passa dalla
+          // porta d'ingresso come ogni altro messaggio.
+          const message = (text ?? "").trim();
+          if (message) {
+            void engine
+              .postMessage(created, message, attachments)
+              .catch(() => setNotice("Invio al motore non riuscito. Controlla il banner errori."));
           }
         });
       return;
@@ -526,10 +533,23 @@ export function ConversationWorkspace() {
   }
   function createFreeWork(name: string, text: string, attachments: File[], projectId?: string) {
     if (engine.backend === "engine") {
-      void engine.createWork("Nuova richiesta", text).then((created) => {
-        if (created) {
-          open(created.id);
-          setNotice(`Lavoro creato per ${name} · ${created.id}`);
+      if (engine.gateError) {
+        setNotice("App locale non pronta: impossibile creare il lavoro.");
+        return undefined;
+      }
+      // Il lavoro nasce con i segnaposto: il testo è un messaggio e decide
+      // la porta d'ingresso cosa farne (come ogni primo messaggio).
+      void engine.createWork("Nuova richiesta", "", projectId).then((created) => {
+        if (!created) return;
+        open(created.id);
+        setNotice(`Lavoro creato per ${name} · ${created.id}`);
+        const message = text.trim();
+        if (message) {
+          bumpOwnSend();
+          void engine
+            .postMessage(created, message, attachments)
+            .then(() => setNotice(""))
+            .catch(() => setNotice("Invio al motore non riuscito. Controlla il banner errori."));
         }
       });
       return undefined;

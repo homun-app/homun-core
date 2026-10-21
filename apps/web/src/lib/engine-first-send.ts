@@ -2,12 +2,7 @@ import type { Work } from "@/components/builder/conversation-types";
 import type { AutonomyLevel } from "@/components/builder/conversation-preferences";
 
 type FirstSendEngine = {
-  createWork: (
-    title: string,
-    objective: string,
-    draftOnly?: boolean,
-    projectId?: string,
-  ) => Promise<Work | null>;
+  createWork: (title: string, objective?: string, projectId?: string) => Promise<Work | null>;
   postMessage: (
     work: Work,
     text: string,
@@ -19,8 +14,8 @@ type FirstSendEngine = {
 
 /**
  * First message of a brand-new engine work: open the conversation immediately,
- * then let postMessage own routing so the person sees the echoed message and
- * the staged honest waits instead of a mute hero.
+ * then the message goes through postMessage — the front door decides what it
+ * is (reply, clarification, agreement proposal), never the UI.
  */
 export function sendEngineFirstMessage(
   engine: FirstSendEngine,
@@ -33,7 +28,7 @@ export function sendEngineFirstMessage(
   modelConnectionId?: string,
   projectId?: string,
 ): void {
-  void engine.createWork("Nuova richiesta", text, true, projectId).then((created) => {
+  void engine.createWork("Nuova richiesta", "", projectId).then((created) => {
     if (!created) {
       setNotice("Creazione non riuscita. Controlla le impostazioni dei modelli.");
       return;

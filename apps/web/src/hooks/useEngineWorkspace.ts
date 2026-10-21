@@ -41,15 +41,10 @@ import type { EngineRoutine } from "@/lib/engine-routines-client";
 import { useEngineWorkspaceRoutines } from "./useEngineWorkspaceRoutines";
 import { useEngineWorkspaceWorkLifecycle } from "./useEngineWorkspaceWorkLifecycle";
 import { createEngineSkill } from "@/lib/engine-mcp-client";
-import { createIntakeConversation } from "@/lib/engine-intake-creation";
-import { confirmWorkIntake, proposeWorkIntake } from "@/lib/engine-intake-client";
+import { confirmWorkIntake } from "@/lib/engine-intake-client";
 import { approveAgentRun, prepareAgentRun } from "@/lib/engine-agent-run-client";
 import type { AutonomyLevel } from "@/components/builder/conversation-preferences";
 import { applyIntakePreview } from "@/lib/engine-intake-display";
-import {
-  routeEngineFirstMessage,
-  type FirstMessageRoute,
-} from "@/lib/engine-first-message-routing";
 export type EngineWorkspaceState = {
   dataSource: EngineDataSource;
   backend: "simulation" | "engine";
@@ -102,12 +97,7 @@ export type EngineWorkspaceState = {
       removeStepId?: string;
     },
   ) => Promise<void>;
-  createWork: (
-    title: string,
-    objective: string,
-    draftOnly?: boolean,
-    projectId?: string,
-  ) => Promise<Work | null>;
+  createWork: (title: string, objective?: string, projectId?: string) => Promise<Work | null>;
   postMessage: (
     work: Work,
     text: string,
@@ -256,29 +246,26 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
   }
 
   async function createWork(
-    _title: string,
-    objective: string,
-    draftOnly = false,
+    title: string,
+    objective = "",
     projectId?: string,
   ): Promise<Work | null> {
     if (backend !== "engine" || !engineReady) return null;
     const signal = beginRequest();
     try {
-      // draftOnly hands the first message to postMessage instead: the
-      // conversation opens immediately with the echoed message and the honest
-      // staged wait, rather than staying on the hero through a mute interpret.
-      const record = draftOnly
-        ? parseEngineWorkRecord(
-            (
-              await createEngineConversationAndWork({
-                title: "Nuova richiesta",
-                objective: "Obiettivo da concordare",
-                actor: defaultLocalActor(),
-                ...(projectId ? { projectId } : {}),
-              })
-            ).record as unknown as Record<string, unknown>,
-          )
-        : await createIntakeConversation(objective, signal, setError, projectId);
+      // La creazione resta conversazione + lavoro, niente di più: ogni
+      // messaggio — primo incluso — passa da postMessage e dalla porta
+      // d'ingresso del motore.
+      const record = parseEngineWorkRecord(
+        (
+          await createEngineConversationAndWork({
+            title: title.trim() || "Nuova richiesta",
+            objective: objective.trim().slice(0, 700) || "Obiettivo da concordare",
+            actor: defaultLocalActor(),
+            ...(projectId ? { projectId } : {}),
+          })
+        ).record as unknown as Record<string, unknown>,
+      );
       await refresh();
       return engineWorkToUiWork(record, []);
     } catch (cause) {
@@ -328,107 +315,10 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
       ],
     }));
     try {
-      // A question must be able to stay a question: the engine classifies the
-      // message (and its language) before a work proposal is forced. Any
-      // routing failure keeps today's durable propose path, which surfaces its
-      // own typed errors.
-      const routed = (await routeEngineFirstMessage(work, effectiveText, signal).catch((cause) => {
-        if (isHomunClientError(cause) && cause.code === "request_cancelled") throw cause;
-        return { route: "propose" as const };
-      })) as FirstMessageRoute;
-      if (routed.route === "propose") {
-        if (autonomyLevel === "autonomous") {
-          // Autonomous mode: propose and immediately confirm the intake, then auto-prepare & approve the agent run
-          setMessageOverlay((current) => ({
-            ...current,
-            [work.id]: (current[work.id] ?? work.messages).map((message) =>
-              message.who === "agent" && message.partial && message.wait
-                ? { ...message, wait: { phase: "preparing", startedAt } }
-                : message,
-            ),
-          }));
-          const intake = await proposeWorkIntake(
-            work.id,
-            effectiveText,
-            work.revision,
-            crypto.randomUUID(),
-            signal,
-            routed.language,
-          );
-          await confirmWorkIntake(work.id, intake, crypto.randomUUID(), Boolean(intake.new_agent));
-          bumpIntakeSeq();
-          await refresh();
-
-          const runCmdId = crypto.randomUUID();
-          const preparedRun = await prepareAgentRun(
-            work,
-            work.materialIds ?? [],
-            runCmdId,
-            modelConnectionId || undefined,
-            undefined,
-            [],
-            undefined,
-            "local",
-            undefined,
-            true, // webPages
-            true, // browser
-            true, // memory
-            true, // skills
-            true, // delegation
-            true, // clarify
-            true, // goals
-            true, // cron
-            true, // sessionManagement
-            true, // gateway
-            true, // codeExecution
-            true, // plugins
-            undefined,
-            undefined,
-            { toolset: "full", micro_compaction: true, native_stream: true },
-          );
-          await approveAgentRun(work.id, preparedRun, crypto.randomUUID());
-          await refresh();
-
-          setMessageOverlay((current) => ({
-            ...current,
-            [work.id]: (current[work.id] ?? work.messages).filter(
-              (m) => !(m.who === "agent" && m.partial),
-            ),
-          }));
-          return;
-        }
-
-        // The wait stays visible through synthesis: an honest phase instead of
-        // a mute gap between the message and the agreement card.
-        setMessageOverlay((current) => ({
-          ...current,
-          [work.id]: (current[work.id] ?? work.messages).map((message) =>
-            message.who === "agent" && message.partial && message.wait
-              ? { ...message, wait: { phase: "preparing", startedAt } }
-              : message,
-          ),
-        }));
-        await proposeWorkIntake(
-          work.id,
-          effectiveText,
-          work.revision,
-          crypto.randomUUID(),
-          signal,
-          routed.language,
-        );
-        bumpIntakeSeq();
-        await refresh();
-        // The request is durable (the engine posts it before synthesis) and
-        // the agreement card owns the outcome: drop only the wait, let the
-        // transcript reload replace the rest.
-        setMessageOverlay((current) => ({
-          ...current,
-          [work.id]: (current[work.id] ?? work.messages).filter(
-            (m) => !(m.who === "agent" && m.partial),
-          ),
-        }));
-        return;
-      }
+      // La UI manda solo il messaggio: primo messaggio, messaggi successivi e
+      // richieste di modifica passano tutti dal turno di ingresso del motore,
+      // che risponde, chiede, propone l'accordo (o la sua revisione) o
+      // propone la modifica del piano.
       let streamed = "";
       const posted = await postEngineConversationMessage({
         conversationId: work.engineConversationId,
@@ -462,15 +352,66 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
           ...current,
           [work.id]: [...prior, { who: "you", sender: "Fabio", text }],
         }));
-      } else {
+        return;
+      }
+      setMessageOverlay((current) => ({
+        ...current,
+        [work.id]: [...prior, { who: "you", sender: "Fabio", text }, assistantFromPosted(posted)],
+      }));
+      // Il turno del motore può aver salvato una proposta di accordo (o
+      // un'anteprima di modifica) sul lavoro collegato: senza questo
+      // rientro la card resta invisibile finché qualcos'altro non aggiorna.
+      if (posted.intakeProposal || posted.patchProposal) bumpIntakeSeq();
+      // In autonomia la proposta della porta d'ingresso si conferma da sola e
+      // il run parte; con chiarimenti o risposta testuale non c'è nulla
+      // da confermare — la persona legge e risponde.
+      if (
+        autonomyLevel === "autonomous" &&
+        posted.intakeProposal?.status === "pending_confirmation"
+      ) {
+        const intakeProposal = posted.intakeProposal;
+        await confirmWorkIntake(
+          work.id,
+          intakeProposal,
+          crypto.randomUUID(),
+          Boolean(intakeProposal.new_agent),
+        );
+        bumpIntakeSeq();
+        await refresh();
+
+        const runCmdId = crypto.randomUUID();
+        const preparedRun = await prepareAgentRun(
+          work,
+          work.materialIds ?? [],
+          runCmdId,
+          modelConnectionId || undefined,
+          undefined,
+          [],
+          undefined,
+          "local",
+          undefined,
+          true, // webPages
+          true, // browser
+          true, // memory
+          true, // skills
+          true, // delegation
+          true, // clarify
+          true, // goals
+          true, // cron
+          true, // sessionManagement
+          true, // gateway
+          true, // codeExecution
+          true, // plugins
+          undefined,
+          undefined,
+          { toolset: "full", micro_compaction: true, native_stream: true },
+        );
+        await approveAgentRun(work.id, preparedRun, crypto.randomUUID());
+        await refresh();
         setMessageOverlay((current) => ({
           ...current,
           [work.id]: [...prior, { who: "you", sender: "Fabio", text }, assistantFromPosted(posted)],
         }));
-        // Il turno del motore può aver salvato una proposta di accordo (o
-        // un'anteprima di modifica) sul lavoro collegato: senza questo
-        // rientro la card resta invisibile finché qualcos'altro non aggiorna.
-        if (posted.intakeProposal || posted.patchProposal) bumpIntakeSeq();
       }
     } catch (cause) {
       if (isHomunClientError(cause) && cause.code === "request_cancelled") {
