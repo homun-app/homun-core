@@ -25,7 +25,10 @@ const ENGINE_DIR = resolve("engine");
 // pulito invece di fallire — il flusso del motore resta coperto lì.
 const ENGINE_PYTHON = process.env.HOMUN_TEST_PYTHON || join(ENGINE_DIR, ".venv", "bin", "python");
 const engineImportable = spawnSync(ENGINE_PYTHON, ["-c", "import homun"]).status === 0;
-test.skip(!engineImportable, `nessun interprete con homun (${ENGINE_PYTHON}): motore non installato`);
+test.skip(
+  !engineImportable,
+  `nessun interprete con homun (${ENGINE_PYTHON}): motore non installato`,
+);
 
 let engine: ChildProcess | null = null;
 let dataDir: string | null = null;
