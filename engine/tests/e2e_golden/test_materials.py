@@ -14,7 +14,7 @@ import secrets
 import pytest
 
 from .fixtures.materials import MD_MARKERS, MD_NAME, MD_TEXT, PDF_MARKERS, PDF_NAME, make_pdf
-from .common import normalize_for_match, run_indices
+from .common import GoldenError, normalize_for_match, run_indices
 from .reporting import GoldenRun
 
 pytestmark = pytest.mark.golden
@@ -30,15 +30,30 @@ RICHIESTA_RIASSUNTO = (
 
 
 def _run_intake_work(golden, conversation_id: str, text: str, material_ids: list[str], run: GoldenRun) -> dict:
-    """Filiera completa della UI per un lavoro con materiali; ritorna l'artifact."""
-    from .test_work import _execute_work
+    """Filiera completa della UI per un lavoro con materiali; ritorna l'artifact.
+
+    Ogni richiesta passa da `conversation.post_message` (porta d'ingresso):
+    la proposta nasce dal turno, la conferma dall'endpoint di conferma.
+    """
+    from .test_work import _execute_work, _pending_proposal, _work_request_outcome
+    from .common import ensure_accepted
 
     client = golden.client
-    created = client.create_work(conversation_id, "Nuova richiesta", text)
+    created = client.create_work(conversation_id, "Nuova richiesta", "Obiettivo da concordare")
     work_id = str(created["work_id"])
-    version = int(created["version"])
-    proposal = client.propose_intake(work_id, text, version)
-    assert proposal.get("status") == "pending_confirmation", str(proposal.get("status"))
+    roster = client.ui_roster()
+    result, error = client.post_message(conversation_id, text, roster=roster)
+    ensure_accepted(error, "richiesta di lavoro rifiutata")
+    if result.get("chat_agent"):
+        client.resolve_reply(conversation_id, result, result.get("message_id"))
+    outcome = _work_request_outcome(result)
+    run.recorder.note(f"materiali run {run.run_index}: esito della richiesta = {outcome}")
+    if outcome == "chiarimento":
+        # La richiesta dei materiali è specifica: un chiarimento qui è un difetto
+        # del turno, non una scelta legittima.
+        raise GoldenError("front_door", f"la richiesta con materiali è finita in chiarimento: {outcome}", "")
+    proposal = _pending_proposal(client, work_id)
+    assert proposal is not None, "nessuna proposta in attesa di conferma dopo il messaggio"
     client.confirm_intake(work_id, proposal)
     version = int(client.work_detail(work_id)["work"]["version"])
     return _execute_work(golden, work_id, version, material_ids, run)

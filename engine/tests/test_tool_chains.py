@@ -30,12 +30,8 @@ def setup(tmp_path):
              'suggested_agent_id': None, 'new_agent': {'name': 'Lettore', 'role': 'Lettura',
                                                        'instructions': 'Legge i materiali autorizzati'},
              'rationale': 'ok', 'capability': 'read_material'}
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    from homun.application.work.intake import confirm as intake_confirm
-    from homun.application.work.intake import propose as intake_propose
-    p = intake_propose(ctx, actor, work, {'command_id': 'intake', 'text': 'Leggi i documenti', 'expected_version': 1})
-    intake_confirm(ctx, actor, work, p['id'], {'command_id': 'staff', 'digest': p['digest'],
-                                               'expected_version': 1, 'create_agent': True})
+    from intake_setup import front_door_intake
+    front_door_intake(ctx, actor, work, brief, text='Leggi i documenti', create_agent=True)
     yield ctx, actor, work, materials
     ctx.close()
 

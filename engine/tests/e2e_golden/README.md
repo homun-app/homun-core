@@ -102,7 +102,6 @@ scenari; con Ollama, modelli `:cloud` inclusi, la suite passa dal preset
 | A4       | La conversazione si ritrova nell'elenco e si riprende dopo il riavvio del motore                                                                                                                                                         |
 | A5       | Dopo una proposta di accordo, «grazie» riceve una risposta testuale e non crea né cambia proposte                                                                                                                                        |
 | A6       | Una risposta **vuota** del modello (stub OpenAI-compatibile in `fixtures/empty_model.py`) produce un errore tipizzato e chiaro (`model.empty_response`), e il messaggio successivo è accettato **subito**, senza finestra di tentativi   |
-| B1       | La richiesta operativa (nota «Rossi / 30 novembre / 12.000») produce la proposta di lavoro                                                                                                                                               |
 | B2       | La conferma della proposta porta il lavoro in esecuzione fino al risultato                                                                                                                                                               |
 | B3       | Il risultato contiene i fatti dati e non ne inventa altri                                                                                                                                                                                |
 | B4       | Una correzione motivata produce una nuova versione del risultato                                                                                                                                                                         |
@@ -110,7 +109,8 @@ scenari; con Ollama, modelli `:cloud` inclusi, la suite passa dal preset
 | B6       | La stessa richiesta mandata come **messaggio successivo** di una conversazione esistente (dopo «Cosa sai fare?») è accettata e produce una proposta di lavoro o un chiarimento, non un errore; un terzo messaggio («grazie») è accettato |
 | B7       | Un lavoro eseguito con una **connessione creata dalla persona con un nome suo** (Impostazioni → Modelli) arriva al risultato; la chat con l'agente sulla stessa connessione risponde                                                     |
 | B8       | Una richiesta **vaga** («Crea una relazione sui fornitori 2027») produce un chiarimento o una proposta con `missing_information` non vuoto; il lavoro resta in bozza, senza piano, senza accordo confermato                              |
-| B9       | La richiesta di lavoro come **primo messaggio** inviata con `conversation.post_message` (la strada che la UI userà nella PR 2) produce una proposta di accordo in attesa di conferma                                                     |
+| B9       | La richiesta di lavoro come **primo messaggio** inviata con `conversation.post_message` produce una proposta di accordo in attesa di conferma; è anche l'apertura del percorso B (B2–B5 partono da qui)                                  |
+| B10      | La **modifica di un accordo confermato** chiesta in chat («sposta la scadenza al 15 dicembre») produce una proposta di revisione con il diff dell'accordo; confermandola, l'accordo riflette la modifica                                 |
 | C1       | Un progetto con 2 file di prova (`.md` e `.pdf` generati in `fixtures/`) diventa leggibile                                                                                                                                               |
 | C2       | «Trova scadenze e responsabili nei materiali»: il risultato cita i contenuti veri dei file                                                                                                                                               |
 | C3       | Il riassunto di un file ne presenta i punti chiave                                                                                                                                                                                       |
@@ -144,18 +144,24 @@ Precisazioni oneste:
   (`fixtures/empty_model.py`, porta libera di loopback, non 11434): la risposta
   vuota riceve UN promemoria e un nuovo tentativo, poi il turno finisce con
   `model.empty_response`; il messaggio successivo deve passare al primo colpo.
-- **B1 e B6/B8/B9** sono le due strade della richiesta di lavoro. Il primo
-  messaggio di una conversazione nuova nella UI di oggi passa da
-  `engine-intake-creation.ts` (classifica → proposta intake): è B1. Un messaggio
-  inviato con `conversation.post_message` (`useEngineWorkspace.postMessage` →
-  `postEngineConversationMessage`, con il roster) passa dal **turno di ingresso
-  nativo a strumenti** (`application/sessions/front_door`): il modello risponde
-  con testo oppure chiama `ask_clarification`, `propose_work` o
-  `propose_plan_change`, e il motore valida e decide. B6 lo misura come
-  messaggio successivo (dopo «Cosa sai fare?»), B9 come primo messaggio (la
-  strada che la UI userà nella PR 2), B8 con una richiesta vaga. In B6 il passo
-  «richiesta» è una sonda: se viene rifiutato, il rapporto ne registra `code` e
-  `reason` e «grazie» si misura comunque.
+- **B1 non esiste più**: misurava la coppia classifica → proposta intake via
+  API (`POST …/intake/classify` + `POST …/intake`), la strada che la UI non
+  percorre più da quando ogni messaggio passa dalla porta d'ingresso
+  (`conversation.post_message`, turno nativo a strumenti in
+  `application/sessions/front_door`). Portata su `post_message`, B1 diventava
+  identica a B9: sono state **unificate** — il percorso B apre con i passi di
+  B9 (primo messaggio → proposta di accordo) e prosegue con B2–B5; B9 resta
+  anche scenario autonomo come segnale veloce, separato dai fallimenti
+  d'esecuzione. B6 misura la stessa strada come messaggio successivo (dopo
+  «Cosa sai fare?», con il passo «richiesta» da sonda: se viene rifiutato, il
+  rapporto ne registra `code` e `reason` e «grazie» si misura comunque), B8 con
+  una richiesta vaga.
+- **B10** misura la revisione di un accordo confermato chiesta in chat: prima
+  la UI la otteneva con `classify` + `POST /intake`; ora la chiede la persona
+  con un messaggio («sposta la scadenza al 15 dicembre»), il turno di ingresso
+  richiama `propose_work` con `changed_fields` e il motore produce la proposta
+  di revisione con il diff (`changes`); la conferma applica la modifica
+  all'accordo.
 - **B7** crea la connessione come il modale Modelli (`POST /models/connections`
   con id e nome scelti dalla persona, poi attivazione e verifica) e usa un
   lavoro con un passo adattivo esplicito (`plan.propose` con capability
@@ -214,7 +220,7 @@ e2e_golden/
 ├── fixtures/materials.py  # i due file di prova (.md e .pdf) generati dal test
 ├── fixtures/empty_model.py # stub OpenAI-compatibile che risponde vuoto (A6)
 ├── test_chat.py        # A1–A6
-├── test_work.py        # B1–B9
+├── test_work.py        # B2–B10
 ├── test_materials.py   # C1–C3
 ├── test_routines.py    # D1–D3
 └── reports/            # rapporti committati (md + json)

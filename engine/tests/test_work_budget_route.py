@@ -42,11 +42,8 @@ def test_works_list_reports_budget_and_set_budget_updates_caps(client):
     wid = work["work_id"]
     brief = {"title": "T", "objective": "O", "output": "R", "constraints": [], "missing_information": [],
              "suggested_agent_id": None, "new_agent": None, "rationale": "r", "capability": "general"}
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    from homun.application.work.intake import propose, confirm
-    p = propose(ctx, actor, wid, {"command_id": "i", "text": "un lavoro", "expected_version": 1})
-    confirm(ctx, actor, wid, "i", {"command_id": "ok", "digest": p["digest"], "expected_version": 1,
-                                   "create_agent": False})
+    from intake_setup import front_door_intake
+    front_door_intake(ctx, actor, wid, brief, command_id="i", text="un lavoro")
     ctx.service.apply(actor, "sb", "work.set_budget", {"work_id": wid, "caps": {"model_attempts": 12}})
     ctx.persist()
     items = tc.get("/v1/workspaces/ws_local/works",

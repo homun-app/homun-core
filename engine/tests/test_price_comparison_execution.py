@@ -29,18 +29,14 @@ def confirmation(p):
 
 
 def test_supervised_intake_keeps_human_reviewer_through_execution(setup):
-    import json
-    from types import SimpleNamespace
-    from homun.application.work.intake import propose as intake_propose, confirm as intake_confirm
+    from intake_setup import front_door_intake
     ctx, actor, work, body = setup
-    ctx.models.complete = lambda *_args, **_kwargs: SimpleNamespace(text=json.dumps({
+    front_door_intake(ctx, actor, work, {
         'title': 'Confronto prezzi', 'objective': 'Verificare variazioni', 'output': 'Report e CSV',
         'constraints': [], 'missing_information': [], 'suggested_agent_id': None,
         'new_agent': {'name': 'Analista', 'role': 'Analisi CSV', 'instructions': 'Confronta i listini autorizzati'},
         'rationale': 'Analisi dei listini', 'capability': 'compare_csv',
-    }))
-    p = intake_propose(ctx, actor, work, {'command_id': 'intake', 'text': 'Confronta i listini', 'expected_version': 1})
-    intake_confirm(ctx, actor, work, p['id'], {'command_id': 'staff', 'digest': p['digest'], 'expected_version': 1, 'create_agent': True})
+    }, text='Confronta i listini', create_agent=True)
     staffed = ctx.repository.load().works[work]
     assert staffed.owner_id != actor.id
     assert staffed.reviewer_id == actor.id

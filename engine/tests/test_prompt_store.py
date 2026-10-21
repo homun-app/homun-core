@@ -29,7 +29,7 @@ def test_language_fallback_never_breaks_a_call(tmp_path):
 
 def test_production_templates_exist_in_default_and_english():
     store = PromptStore()
-    for name in ('intake/synthesize', 'intake/classify', 'front_door/instructions',
+    for name in ('front_door/instructions',
                  'front_door/request', 'front_door/empty_reminder', 'front_door/invalid_output',
                  'front_door/tool.ask_clarification', 'front_door/tool.propose_work',
                  'front_door/tool.propose_plan_change'):
@@ -52,10 +52,4 @@ def test_test_fakes_fall_back_to_the_default_store():
         def complete(self, messages):
             raise AssertionError('not called')
 
-    assert prompts_for(Capture()).get('intake/classify').language == 'it'
-
-
-def test_capability_catalog_lines_follow_the_template_language():
-    from homun.models.intake import _capability_catalog_lines
-    assert 'eseguibile dal motore' in _capability_catalog_lines(None, 'it')
-    assert 'executable by the engine' in _capability_catalog_lines(None, 'en')
+    assert prompts_for(Capture()).get('front_door/instructions').language == 'it'

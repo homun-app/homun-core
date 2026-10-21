@@ -46,7 +46,6 @@ def test_capabilities_update_selectively(setup):
 def test_intake_recommends_agent_with_matching_capability_link(setup):
     """When two agents exist and only one has the capability link, the engine
     corrects the model's recommendation to the linked one."""
-    from homun.application.work.intake import propose as intake_propose
     ctx, actor = setup
     linked = ctx.service.apply(actor, 'linked', 'agent.create', {
         'name': 'Chiara', 'role': 'Analista di listini CSV',
@@ -66,16 +65,14 @@ def test_intake_recommends_agent_with_matching_capability_link(setup):
         'output': 'Report e CSV', 'constraints': [], 'missing_information': [],
         'suggested_agent_id': other['agent_id'], 'new_agent': None,
         'rationale': 'ok', 'capability': 'compare_csv', 'changed_fields': []}
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    p = intake_propose(ctx, actor, wid, {'command_id': 'i', 'text': 'Confronta i listini', 'expected_version': 1})
+    from intake_setup import front_door_intake
+    p = front_door_intake(ctx, actor, wid, brief, command_id='i', confirm=False)
     # Engine-side correction: the agent WITH the capability link wins.
     assert p['suggested_agent']['id'] == linked['agent_id']
     assert p['suggested_agent']['name'] == 'Chiara'
 
 
 def test_intake_new_agent_carries_capabilities(setup):
-    from homun.application.work.intake import confirm as intake_confirm
-    from homun.application.work.intake import propose as intake_propose
     ctx, actor = setup
     conv = ctx.service.apply(actor, 'c', 'conversation.create', {'title': 'Nuova richiesta'})
     wid = ctx.service.apply(actor, 'w', 'work.create', {
@@ -89,32 +86,21 @@ def test_intake_new_agent_carries_capabilities(setup):
                       'responsibility': 'Leggere i documenti.', 'specializations': ['Lettura'],
                       'method': '', 'tone': 'Diretto', 'capabilities': ['read_material']},
         'rationale': 'ok', 'capability': 'read_material', 'changed_fields': []}
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    p = intake_propose(ctx, actor, wid, {'command_id': 'i', 'text': 'Leggi i documenti', 'expected_version': 1})
-    intake_confirm(ctx, actor, wid, p['id'], {
-        'command_id': 'ok', 'digest': p['digest'], 'expected_version': 1, 'create_agent': True})
+    from intake_setup import front_door_intake
+    front_door_intake(ctx, actor, wid, brief, command_id='i', text='Leggi i documenti', create_agent=True)
     agents = [a for a in ctx.repository.load().agents.values() if a.name == 'Elena']
     assert len(agents) == 1
     assert agents[0].capabilities == ['read_material']
 
 
-def test_roster_sent_to_model_includes_capabilities(setup):
-    from homun.application.work.intake import propose as intake_propose
+def test_agent_catalog_for_the_turn_includes_capabilities(setup):
+    """Il catalogo che il turno di ingresso valida (e il modello vede nel
+    preamble) porta i link di capacità reali degli agenti attivi."""
+    from homun.application.work.intake_policy import active_agents
     ctx, actor = setup
     ctx.service.apply(actor, 'a', 'agent.create', {
         'name': 'Chiara', 'role': 'Analista', 'instructions': 'I.', 'capabilities': ['compare_csv']})
     ctx.persist()
-    conv = ctx.service.apply(actor, 'c', 'conversation.create', {'title': 'N'})
-    wid = ctx.service.apply(actor, 'w', 'work.create', {
-        'conversation_id': conv['conversation_id'], 'title': 'N', 'objective': 'O'})['work_id']
-    ctx.persist()
-    seen = []
-    def model(messages):
-        seen.append(json.loads(messages[-1].content))
-        return SimpleNamespace(text=json.dumps({
-            'title': 'T', 'objective': 'O', 'output': 'Out', 'constraints': [],
-            'missing_information': [], 'suggested_agent_id': None, 'new_agent': None,
-            'rationale': 'r', 'capability': 'general', 'changed_fields': []}))
-    ctx.models.complete = model
-    intake_propose(ctx, actor, wid, {'command_id': 'i', 'text': 'Test', 'expected_version': 1})
-    assert seen[0]['agents'][0]['capabilities'] == ['compare_csv']
+    agents = active_agents(ctx.repository.load())
+    chiara = next(a for a in agents if a['name'] == 'Chiara')
+    assert chiara['capabilities'] == ['compare_csv']

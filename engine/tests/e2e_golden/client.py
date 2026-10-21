@@ -289,19 +289,6 @@ class HomunClient:
     def accept_plan(self, work_id: str, expected_version: int) -> dict[str, Any]:
         return self.command("plan.accept", {"work_id": work_id, "expected_version": expected_version})
 
-    def classify_intake(self, work_id: str, text: str) -> dict[str, Any]:
-        return self.post(
-            f"/v1/workspaces/{WORKSPACE}/works/{work_id}/intake/classify", {"text": text}
-        )
-
-    def propose_intake(self, work_id: str, text: str, expected_version: int) -> dict[str, Any]:
-        body = {
-            "command_id": f"golden-{secrets.token_hex(6)}",
-            "text": text,
-            "expected_version": expected_version,
-        }
-        return self.post(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/intake", body)
-
     def confirm_intake(
         self, work_id: str, proposal: dict[str, Any], create_agent: bool = False
     ) -> dict[str, Any]:

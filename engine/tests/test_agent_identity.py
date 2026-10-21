@@ -82,8 +82,6 @@ def test_intake_created_agent_carries_identity(setup):
     """The intake confirm passes the brief's identity fields into agent.create."""
     import json
     from types import SimpleNamespace
-    from homun.application.work.intake import confirm as intake_confirm
-    from homun.application.work.intake import propose as intake_propose
     ctx, actor = setup
     conv = ctx.service.apply(actor, 'c', 'conversation.create', {'title': 'Nuova richiesta'})
     wid = ctx.service.apply(actor, 'w', 'work.create', {
@@ -103,10 +101,8 @@ def test_intake_created_agent_carries_identity(setup):
             'tone': 'Chiaro e sintetico',
         },
         'rationale': 'ok', 'capability': 'compare_csv', 'changed_fields': []}
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    p = intake_propose(ctx, actor, wid, {'command_id': 'i', 'text': 'Confronta i listini', 'expected_version': 1})
-    intake_confirm(ctx, actor, wid, p['id'], {
-        'command_id': 'ok', 'digest': p['digest'], 'expected_version': 1, 'create_agent': True})
+    from intake_setup import front_door_intake
+    front_door_intake(ctx, actor, wid, brief, command_id='i', create_agent=True)
     agents = [a for a in ctx.repository.load().agents.values() if a.name == 'Chiara']
     assert len(agents) == 1
     assert agents[0].responsibility == 'Confronti accurati e verificabili.'

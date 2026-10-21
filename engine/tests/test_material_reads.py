@@ -33,16 +33,13 @@ def confirmation(p):
 
 
 def confirm_intake(ctx, actor, work, *, capability='read_material', create_agent=True):
-    from homun.application.work.intake import propose as intake_propose, confirm as intake_confirm
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps({
+    from intake_setup import front_door_intake
+    front_door_intake(ctx, actor, work, {
         'title': 'Lettura documento', 'objective': 'Leggere il materiale caricato.', 'output': 'Artifact di lettura',
         'constraints': [], 'missing_information': [], 'suggested_agent_id': None,
         'new_agent': {'name': 'Lettore', 'role': 'Lettura materiali', 'instructions': 'Legge i materiali autorizzati'},
         'rationale': 'Lettura documentale', 'capability': capability,
-    }))
-    p = intake_propose(ctx, actor, work, {'command_id': 'intake', 'text': 'Leggi il documento caricato', 'expected_version': 1})
-    intake_confirm(ctx, actor, work, p['id'], {'command_id': 'staff', 'digest': p['digest'],
-                                               'expected_version': p['expected_version'], 'create_agent': create_agent})
+    }, text='Leggi il documento caricato', create_agent=create_agent)
     return ctx.repository.load().works[work].version
 
 

@@ -79,32 +79,3 @@ def test_capabilities_http_contract(setup):
         reset_context_for_tests(None)
 
 
-def test_intake_synthesis_is_grounded_in_the_registered_catalog(setup):
-    from homun.models.intake import synthesize
-    ctx, actor, project = setup
-    seen = []
-
-    class Capture:
-        def complete(self, messages):
-            seen.extend(messages)
-            brief = {'title': 'Confronto listini', 'objective': 'Variazioni di prezzo.',
-                     'output': 'Report e CSV', 'constraints': [], 'missing_information': [],
-                     'suggested_agent_id': None, 'new_agent': None,
-                     'rationale': 'ok', 'capability': 'general'}
-            return SimpleNamespace(text=json.dumps(brief))
-
-    capabilities = capability_catalog(ctx.repository.load(), actor)
-    synthesize(Capture(), 'Confronta i listini', [], capabilities=capabilities)
-    user_payload = json.loads(seen[-1].content)
-    assert [item['id'] for item in user_payload['capabilities']] == ['compare_csv', 'read_material', 'synthesize', 'general', 'agent_run']
-    # Readiness stays queryable on the HTTP endpoint, never model-facing: it
-    # made small models decline executable work before files were uploaded.
-    # IO detail (inputs/effects/prerequisites) stays: it anchors the output
-    # language and never caused the downgrade.
-    for item in user_payload['capabilities']:
-        assert 'ready' not in item and 'eligible_materials' not in item
-        assert 'inputs' in item or item['id'] == 'general'
-    system_prompt = seen[0].content
-    assert 'compare_csv (eseguibile dal motore)' in system_prompt
-    assert REGISTRY['compare_csv'].summary in system_prompt
-    assert 'general (solo preparazione' in system_prompt

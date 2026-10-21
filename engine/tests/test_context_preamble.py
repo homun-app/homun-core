@@ -79,12 +79,8 @@ def test_confirmed_agreement_is_in_the_preamble(setup):
              'constraints': ['Nessuna conversione valutaria'], 'missing_information': [], 'suggested_agent_id': None,
              'new_agent': {'name': 'Analista', 'role': 'Analisi', 'instructions': 'Confronta i listini autorizzati'},
              'rationale': 'ok', 'capability': 'compare_csv', 'changed_fields': []}
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    from homun.application.work.intake import confirm as intake_confirm
-    from homun.application.work.intake import propose as intake_propose
-    p = intake_propose(ctx, actor, 'work_1', {'command_id': 'i1', 'text': 'Confronta i listini', 'expected_version': 1})
-    intake_confirm(ctx, actor, 'work_1', p['id'], {'command_id': 'ok', 'digest': p['digest'],
-                                                   'expected_version': 1, 'create_agent': True})
+    from intake_setup import front_door_intake
+    front_door_intake(ctx, actor, 'work_1', brief, command_id='i1', create_agent=True)
     context = compose(setup)
     assert 'Accordo confermato: Confronto listini' in context.preamble
     assert 'compare_csv' in context.preamble
