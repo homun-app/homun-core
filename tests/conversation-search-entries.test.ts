@@ -43,6 +43,7 @@ const engineRoutine = {
   last_run_work_id: null,
   last_scheduled_for: null,
   skip_until: null,
+  next_run_at: "2026-10-26T08:00:00+00:00",
   revision: 1,
 };
 const simulatedMaterial = {

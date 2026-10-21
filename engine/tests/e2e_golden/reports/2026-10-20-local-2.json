@@ -1,0 +1,346 @@
+{
+ "generated_at": "2026-10-20T11:34:32+00:00",
+ "meta": {
+  "date": "2026-10-20",
+  "provider": "local",
+  "model": "qwen3.5:4b",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "runs": 3,
+  "commit": "3e73b237",
+  "suite": "engine/tests/e2e_golden",
+  "started_at": "2026-10-20T11:13:57+00:00",
+  "data_dirs": [
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-32/homun-golden-0",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-32/homun-golden-1",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-32/homun-golden-2",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-32/homun-golden-3",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-32/homun-golden-4",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-32/homun-golden-5",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-32/homun-golden-6",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-32/homun-golden-7",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-32/homun-golden-8",
+   "/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/pytest-of-fabio/pytest-32/homun-golden-9"
+  ],
+  "duration": "21 min"
+ },
+ "scenarios": [
+  {
+   "title": "Connessione modello verificata (Impostazioni → Modelli)",
+   "runs": 1,
+   "expected_runs": 1,
+   "missing": 0,
+   "successes": 1,
+   "attempted": 1,
+   "interrupted": 0,
+   "avg_duration": 0.4,
+   "failures": [],
+   "engine_defects": [],
+   "id": "M0"
+  },
+  {
+   "title": "Domanda semplice: risposta in chat, nessun lavoro creato",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 3.9,
+   "failures": [],
+   "engine_defects": [],
+   "id": "A1"
+  },
+  {
+   "title": "Tre messaggi di fila accettati, nell'ordine giusto",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 0,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 25.6,
+   "failures": [
+    {
+     "run": 1,
+     "step": "A2.messaggio-2",
+     "code": "provider_unavailable",
+     "reason": "messaggio 2 rifiutato: Local model interpret failed: 1 validation error for MessageInterpretation\npatch_changes\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type",
+     "excerpt": "{'detail': {'code': 'provider_unavailable', 'message': 'Local model interpret failed: 1 validation error for MessageInterpretation\\npatch_changes\\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type'}}",
+     "interrupted_before": false
+    },
+    {
+     "run": 2,
+     "step": "A2.messaggio-2",
+     "code": "provider_unavailable",
+     "reason": "messaggio 2 rifiutato: Local model interpret failed: 1 validation error for MessageInterpretation\npatch_changes\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type",
+     "excerpt": "{'detail': {'code': 'provider_unavailable', 'message': 'Local model interpret failed: 1 validation error for MessageInterpretation\\npatch_changes\\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type'}}",
+     "interrupted_before": false
+    },
+    {
+     "run": 3,
+     "step": "A2.messaggio-2",
+     "code": "provider_unavailable",
+     "reason": "messaggio 2 rifiutato: Local model interpret failed: 1 validation error for MessageInterpretation\npatch_changes\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type",
+     "excerpt": "{'detail': {'code': 'provider_unavailable', 'message': 'Local model interpret failed: 1 validation error for MessageInterpretation\\npatch_changes\\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type'}}",
+     "interrupted_before": false
+    }
+   ],
+   "engine_defects": [
+    "interpretazione del messaggio: il JSON del modello porta `null` nei campi lista (`patch_changes`, `mentions[].candidates`) e `MessageInterpretation.model_validate` lo rifiuta invece di normalizzarlo a `[]` — `engine/src/homun/models/interpretation.py:42` (`patch_changes`) e `:21` (`MentionResolution.candidates`), chiamato da `engine/src/homun/models/interpret.py:66` (`_interpret_via_json_completion`); il turno finisce in `provider_unavailable` (`command_delivery.complete`, riga 186)."
+   ],
+   "id": "A2"
+  },
+  {
+   "title": "Dopo un errore provocato il messaggio successivo è accettato",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 38.1,
+   "failures": [],
+   "engine_defects": [],
+   "id": "A3"
+  },
+  {
+   "title": "La conversazione si ritrova e riprende dopo il riavvio",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 11.3,
+   "failures": [],
+   "engine_defects": [],
+   "id": "A4"
+  },
+  {
+   "title": "Progetto con 2 file caricati (.md e .pdf) leggibili",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 2.7,
+   "failures": [],
+   "engine_defects": [],
+   "id": "C1"
+  },
+  {
+   "title": "Ricerca nei materiali: il risultato cita i contenuti veri dei file",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 2,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 47.7,
+   "failures": [
+    {
+     "run": 2,
+     "step": "C2.ricerca",
+     "code": "run_agente_failed",
+     "reason": "run agente golden-240f0a35e92e è terminato in stato failed (error_code validation_error); motore: homun.domain.errors.ValidationError: Adaptive run reached its turn limit",
+     "excerpt": "{'surface': 'desktop', 'toolset': 'full', 'denied_tools': [], 'micro_compaction': True, 'native_stream': False, 'parallel_read_tools': False, 'id': 'golden-240f0a35e92e', 'work_id': 'work_1NmdBy-GCYAosw', 'status': 'failed', 'expected_version': 3, 'digest': '59d5d8ec09786c21482c7484476f23ce209cff9f19937c83e70d754465f96a6c', 'materials': [{'id': 'mat_Si8V4ktv21f7wQ', 'title': 'appunti-riunione.md',…",
+     "interrupted_before": false
+    }
+   ],
+   "engine_defects": [
+    "run adattivo terminato male: l'`error_code` e l'eccezione del motore sono nel motivo — `engine/src/homun/application/agent/runs/run_failures.py:12` (`fail`) e `engine/src/homun/application/agent/runs/run_execution.py`."
+   ],
+   "id": "C2"
+  },
+  {
+   "title": "Riassunto di un file: il risultato ne presenta i punti chiave",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 2,
+   "attempted": 3,
+   "interrupted": 1,
+   "avg_duration": 54.5,
+   "failures": [
+    {
+     "run": 2,
+     "step": "C3 (interrotto prima)",
+     "code": "run_agente_failed",
+     "reason": "storia interrotta prima, al passo «C2.ricerca»: run agente golden-240f0a35e92e è terminato in stato failed (error_code validation_error); motore: homun.domain.errors.ValidationError: Adaptive run reached its turn limit",
+     "excerpt": "",
+     "interrupted_before": true
+    }
+   ],
+   "engine_defects": [
+    "run adattivo terminato male: l'`error_code` e l'eccezione del motore sono nel motivo — `engine/src/homun/application/agent/runs/run_failures.py:12` (`fail`) e `engine/src/homun/application/agent/runs/run_execution.py`."
+   ],
+   "id": "C3"
+  },
+  {
+   "title": "Routine creata con la pianificazione giusta (lunedì alle 9)",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 0.0,
+   "failures": [],
+   "engine_defects": [],
+   "id": "D1"
+  },
+  {
+   "title": "Esecuzione forzata della routine → lavoro ricorrente prodotto",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 44.2,
+   "failures": [],
+   "engine_defects": [],
+   "id": "D2"
+  },
+  {
+   "title": "La routine sopravvive al riavvio del motore ed è ancora attiva",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 5.1,
+   "failures": [],
+   "engine_defects": [],
+   "id": "D3"
+  },
+  {
+   "title": "Richiesta operativa → proposta di lavoro (intake)",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 18.0,
+   "failures": [],
+   "engine_defects": [],
+   "id": "B1"
+  },
+  {
+   "title": "Conferma → esecuzione → risultato prodotto",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 18.1,
+   "failures": [],
+   "engine_defects": [],
+   "id": "B2"
+  },
+  {
+   "title": "Il risultato contiene i fatti dati (Rossi, 30 novembre, 12.000)",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 0.0,
+   "failures": [],
+   "engine_defects": [],
+   "id": "B3"
+  },
+  {
+   "title": "Correzione motivata → nuova versione del risultato",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 23.2,
+   "failures": [],
+   "engine_defects": [],
+   "id": "B4"
+  },
+  {
+   "title": "Il lavoro sta in Compiti, il risultato approvato in Documenti",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 0.0,
+   "failures": [],
+   "engine_defects": [],
+   "id": "B5"
+  },
+  {
+   "title": "Richiesta di lavoro come messaggio successivo: accettata, proposta o chiarimento",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 0,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 85.2,
+   "failures": [
+    {
+     "run": 1,
+     "step": "B6.richiesta",
+     "code": "provider_unavailable",
+     "reason": "richiesta di lavoro rifiutata: Local model interpret failed: 1 validation error for MessageInterpretation\npatch_changes\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type",
+     "excerpt": "{'detail': {'code': 'provider_unavailable', 'message': 'Local model interpret failed: 1 validation error for MessageInterpretation\\npatch_changes\\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type'}}",
+     "interrupted_before": false
+    },
+    {
+     "run": 2,
+     "step": "B6.richiesta",
+     "code": "provider_unavailable",
+     "reason": "richiesta di lavoro rifiutata: Local model interpret failed: 1 validation error for MessageInterpretation\npatch_changes\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type",
+     "excerpt": "{'detail': {'code': 'provider_unavailable', 'message': 'Local model interpret failed: 1 validation error for MessageInterpretation\\npatch_changes\\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type'}}",
+     "interrupted_before": false
+    },
+    {
+     "run": 3,
+     "step": "B6.richiesta",
+     "code": "provider_unavailable",
+     "reason": "richiesta di lavoro rifiutata: Local model interpret failed: 1 validation error for MessageInterpretation\npatch_changes\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type",
+     "excerpt": "{'detail': {'code': 'provider_unavailable', 'message': 'Local model interpret failed: 1 validation error for MessageInterpretation\\npatch_changes\\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type'}}",
+     "interrupted_before": false
+    }
+   ],
+   "engine_defects": [
+    "interpretazione del messaggio: il JSON del modello porta `null` nei campi lista (`patch_changes`, `mentions[].candidates`) e `MessageInterpretation.model_validate` lo rifiuta invece di normalizzarlo a `[]` — `engine/src/homun/models/interpretation.py:42` (`patch_changes`) e `:21` (`MentionResolution.candidates`), chiamato da `engine/src/homun/models/interpret.py:66` (`_interpret_via_json_completion`); il turno finisce in `provider_unavailable` (`command_delivery.complete`, riga 186)."
+   ],
+   "id": "B6"
+  },
+  {
+   "title": "Lavoro eseguito con una connessione creata dall'utente con un nome suo",
+   "runs": 3,
+   "expected_runs": 3,
+   "missing": 0,
+   "successes": 3,
+   "attempted": 3,
+   "interrupted": 0,
+   "avg_duration": 37.9,
+   "failures": [],
+   "engine_defects": [],
+   "id": "B7"
+  }
+ ],
+ "notes": [
+  "D2: non esiste un endpoint «esegui ora» per le routine; l'esecuzione forzata usa una routine con cadenza al minuto e attende l'occorrenza reale dello scheduler.",
+  "C2 run 1: citati dal md ['14 novembre', 'Marco Bianchi'], dal pdf ['15 gennaio', 'Luca Rossi', '20 dicembre']",
+  "C2 run 3: citati dal md ['14 novembre', 'Marco Bianchi'], dal pdf ['15 gennaio', 'Luca Rossi', '20 dicembre']",
+  "B6 run 1: «grazie» accettato solo dopo 11 rifiuti command_in_progress (finestra di retry del turno fallito, come in A3).",
+  "B6 run 2: «grazie» accettato solo dopo 11 rifiuti command_in_progress (finestra di retry del turno fallito, come in A3).",
+  "B6 run 3: «grazie» accettato solo dopo 11 rifiuti command_in_progress (finestra di retry del turno fallito, come in A3)."
+ ]
+}

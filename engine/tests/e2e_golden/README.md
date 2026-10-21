@@ -114,7 +114,7 @@ scenari; con Ollama, modelli `:cloud` inclusi, la suite passa dal preset
 | C1       | Un progetto con 2 file di prova (`.md` e `.pdf` generati in `fixtures/`) diventa leggibile                                                                                                                                               |
 | C2       | «Trova scadenze e responsabili nei materiali»: il risultato cita i contenuti veri dei file                                                                                                                                               |
 | C3       | Il riassunto di un file ne presenta i punti chiave                                                                                                                                                                                       |
-| D1       | «Ogni lunedì alle 9»: la routine si salva con la pianificazione giusta (`0 9 * * 1`, Europe/Rome)                                                                                                                                        |
+| D1       | «Ogni lunedì alle 9»: la routine si salva con la pianificazione giusta (`0 9 * * 1`, Europe/Rome); il suo `next_run_at` e lo `scheduled_for` dell'esecuzione reale (D2) coincidono con occorrenze dell'anteprima                         |
 | D2       | L'esecuzione della routine produce il suo lavoro ricorrente supervisionato                                                                                                                                                               |
 | D3       | Dopo il riavvio del motore la routine esiste ancora ed è attiva                                                                                                                                                                          |
 
@@ -123,16 +123,23 @@ Precisazioni oneste:
 - **B4** passa quando la correzione produce una **nuova versione**; se il
   modello recepisce davvero la motivazione («sezione Rischi») si vede
   nell'estratto del rapporto, ma non è criterio di fallimento.
+- **D1** ha tre sonde oltre ai passi di creazione: la prossima occorrenza
+  dell'anteprima è lunedì alle 9; `next_run_at` della routine è una delle
+  occorrenze dell'anteprima; dopo D2, lo `scheduled_for` del lavoro reale è
+  una delle occorrenze che l'anteprima della routine al minuto mostrava
+  **prima** di crearla. Anteprima ed esecuzione devono usare lo stesso calcolo
+  (`routine_schedule.next_occurrences`): la sonda misura proprio questo.
 - **D2**: non esiste un endpoint «esegui ora» per le routine (né in UI né in
   API). L'esecuzione forzata usa una routine con cadenza al minuto e attende
-  l'occorrenza reale dello scheduler del motore. L'occorrenza crea un lavoro
-  supervisionato con le fasi del modello: quello è il risultato della
-  routine, come da guida d'uso.
+  l'occorrenza reale del battito del motore (lo schedule unico
+  `homun-routine-tick`, ogni minuto in UTC, che avvia le routine con
+  `next_run_at` scaduto). L'occorrenza crea un lavoro supervisionato con le
+  fasi del modello: quello è il risultato della routine, come da guida d'uso.
 - **A3**: dopo un errore di trasporto (connessione irraggiungibile) il motore
   programma tentativi automatici; con la porta d'ingresso un messaggio nuovo
   non viene più rifiutato per questo (ha la precedenza e annulla i tentativi),
-  ma la suite continua a tollerare la finestra di retry per misurare onestamente
-  anche i motori precedenti.
+  ma la suite continua a tollerare la finestra di retry del motore (~40-60 s)
+  per misurare onestamente anche i motori precedenti.
 - **A6** usa uno stub OpenAI-compatibile che risponde sempre vuoto
   (`fixtures/empty_model.py`, porta libera di loopback, non 11434): la risposta
   vuota riceve UN promemoria e un nuovo tentativo, poi il turno finisce con
@@ -162,6 +169,10 @@ A fine sessione la suite scrive in `reports/`:
 
 - `<data>-<provider>.md` — il rapporto leggibile;
 - `<data>-<provider>.json` — gli stessi dati in forma strutturata.
+
+Una seconda misura nello stesso giorno non sovrascrive la prima: prende il
+suffisso `-2`, `-3`… (`<data>-<provider>-2.md`), così il prima/dopo di una
+correzione resta leggibile in `reports/`.
 
 Ogni riga della tabella è uno scenario: **successo N/M**, tentati, durata
 media. Un run la cui storia si è fermata in uno scenario precedente (per

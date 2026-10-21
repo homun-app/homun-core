@@ -133,8 +133,15 @@ class Recorder:
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y-%m-%d")
         provider = str(self.meta.get("provider", "sconosciuto"))
-        md_path = REPORTS_DIR / f"{stamp}-{provider}.md"
-        json_path = REPORTS_DIR / f"{stamp}-{provider}.json"
+        # una seconda misura nello stesso giorno non cancella la prima: la
+        # storia del prima/dopo sta tutta in reports/
+        stem = f"{stamp}-{provider}"
+        attempt = 1
+        while (REPORTS_DIR / f"{stem}.md").exists() or (REPORTS_DIR / f"{stem}.json").exists():
+            attempt += 1
+            stem = f"{stamp}-{provider}-{attempt}"
+        md_path = REPORTS_DIR / f"{stem}.md"
+        json_path = REPORTS_DIR / f"{stem}.json"
         json_path.write_text(
             json.dumps(self.to_json_payload(), ensure_ascii=False, indent=1) + "\n",
             encoding="utf-8",

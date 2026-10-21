@@ -128,7 +128,11 @@ Una capacità dichiarata nel profilo non estende gli strumenti disponibili nel c
 - **Ricorrenza:** da un lavoro concluso scegli “Rendi ripetibile”, verifica
   cadenza e prossime esecuzioni. Automazioni permette di gestire la routine.
   Il motore deve essere disponibile per eseguirla: ogni occorrenza crea un
-  lavoro supervisionato, non un risultato già accettato.
+  lavoro supervisionato, non un risultato già accettato. L'ora è quella locale
+  che hai scelto, in ogni stagione: le prossime esecuzioni mostrate e quelle
+  reali escono dallo stesso calcolo. Se il motore era spento quando una
+  ricorrenza era dovuta, al riavvio esegue **una sola volta la più recente**
+  fra le occorrenze perse; le precedenti non si recuperano.
 - **Ripresa:** torna alla conversazione del lavoro per vedere piano, materiali,
   risultati e attese. Un'esecuzione riuscita può attendere ancora la tua revisione.
 

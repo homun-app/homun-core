@@ -19,11 +19,20 @@ class CommandContext:
         known_connection_ids: Callable[[], Iterable[str]] | None = None,
         durable_runtime: bool = False,
         data_dir: Path | None = None,
+        routine_next_run_at: Callable[[str, str, str | None], str] | None = None,
     ) -> None:
         self.store = store
         self._known_connection_ids = known_connection_ids
         self._durable_runtime = durable_runtime
         self._data_dir = data_dir
+        self._routine_next_run_at = routine_next_run_at
+
+    def routine_next_run_at(self, cron: str, cron_timezone: str, skip_until: str | None) -> str | None:
+        """Port to the application's occurrence calculus: the next due instant
+        (ISO, UTC) of a routine, or None when no calendar is attached (bare store)."""
+        if self._routine_next_run_at is None:
+            return None
+        return self._routine_next_run_at(cron, cron_timezone, skip_until)
 
     def get_work(self, work_id: str) -> Work:
         work = self.store.works.get(work_id)

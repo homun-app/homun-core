@@ -103,8 +103,15 @@ def test_deliver_chat_answers_appends_engine_message(setup):
     assert chat_agent.deliver_chat_answers(ctx) == 0
 
 
+def _error_events(store, conv):
+    """Gli eventi del canale per la conversazione: lì viaggia il codice."""
+    return [e for e in store.events
+            if e.aggregate_id == conv and e.type == "message.interpreted"]
+
+
 def test_failed_run_delivers_honest_error_note(setup):
-    """Un run fallito non lascia la chat muta: arriva una nota con il codice."""
+    """Un run fallito non lascia la chat muta: nota tipizzata dal catalogo
+    condiviso; il codice viaggia nell'evento, non nella frase."""
     ctx, actor, conv = setup
     chat_agent.bind(ctx, actor, conv, "agent_chat")
     outcome = chat_agent.start_chat_turn(ctx, actor, conv, "x")
@@ -114,9 +121,41 @@ def test_failed_run_delivers_honest_error_note(setup):
     assert chat_agent.deliver_chat_answers(ctx) == 1
     store = ctx.repository.load()
     notes = [m for m in store.messages.values()
-             if m.conversation_id == conv and m.author_id == "homun_engine"
-             and "non è andata a buon fine" in m.text]
-    assert notes and "agent_model_invalid_request" in notes[0].text
+             if m.conversation_id == conv and m.author_id == "homun_engine"]
+    assert notes and notes[-1].text == _catalog_sentence("agent_run.chat_failed",
+                                                         {"code": "agent_model_invalid_request"})
+    assert _error_events(store, conv)[-1].payload["error_code"] == "agent_model_invalid_request"
+    # idempotente: non riconsegna
+    assert chat_agent.deliver_chat_answers(ctx) == 0
+
+
+def test_blocked_run_is_reported_in_chat_with_typed_message(setup):
+    """B7: nemmeno un run bloccato lascia la chat muta — arriva la nota
+    tipizzata dal catalogo condiviso (contracts/i18n), con il codice nell'evento."""
+    ctx, actor, conv = setup
+    chat_agent.bind(ctx, actor, conv, "agent_chat")
+    outcome = chat_agent.start_chat_turn(ctx, actor, conv, "x")
+    with ctx.repository.transaction() as store:
+        store.commands[outcome["agent_run_id"]].result["status"] = "blocked"
+        store.commands[outcome["agent_run_id"]].result["error_code"] = "version_conflict"
+    assert chat_agent.deliver_chat_answers(ctx) == 1
+    store = ctx.repository.load()
+    notes = [m for m in store.messages.values()
+             if m.conversation_id == conv and m.author_id == "homun_engine"]
+    assert notes and notes[-1].text == _catalog_sentence("agent_run.chat_blocked",
+                                                         {"code": "version_conflict"})
+    assert _error_events(store, conv)[-1].payload["error_code"] == "version_conflict"
+    assert store.commands[outcome["agent_run_id"]].result["_chat_delivered"] is True
+    # idempotente: non riconsegna
+    assert chat_agent.deliver_chat_answers(ctx) == 0
+
+
+def _catalog_sentence(reason, params):
+    from homun.application.ops.preferences import resolve_language
+    from homun.context import get_context
+    from homun.i18n import user_text
+    language = resolve_language(get_context(), person_id="person_local")
+    return user_text(reason, params, language=language)
 
 
 def test_default_agent_makes_every_chat_an_agent_chat(setup):
