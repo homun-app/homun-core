@@ -117,6 +117,11 @@ export type EngineWorkspaceState = {
   ) => Promise<void>;
   confirmPatch: (work: Work, messageIndex: number) => Promise<void>;
   discardPatch: (work: Work, messageIndex: number) => void;
+  /** Applica un'anteprima di patch della chat motore e ricarica lo stato autorevole. */
+  applyPatchPreview: (
+    work: Work,
+    patch: NonNullable<ConversationMessage["patchProposal"]>,
+  ) => Promise<void>;
   applyObjectivePatch: (work: Work, nextObjective: string) => Promise<void>;
   saveMemoryFromMessage: (work: Work, messageIndex: number) => Promise<void>;
   saveSkillFromMessage: (work: Work, messageIndex: number) => Promise<void>;
@@ -572,6 +577,30 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     });
   }
 
+  async function applyPatchPreview(
+    work: Work,
+    patch: NonNullable<ConversationMessage["patchProposal"]>,
+  ): Promise<void> {
+    if (backend !== "engine" || work.source !== "engine") {
+      throw new Error("applyPatchPreview requires an engine-backed work");
+    }
+    const signal = beginRequest();
+    try {
+      await applyEngineWorkPatch({
+        workId: patch.work_id || work.id,
+        expectedVersion: patch.base_version,
+        changes: patch.changes,
+        actor: defaultLocalActor(),
+        signal,
+      });
+      // La versione del lavoro si muove: l'anteprima si storicizza da sé e lo
+      // stato che la persona vede è quello che il motore ha davvero applicato.
+      await refresh();
+    } finally {
+      endRequest(signal);
+    }
+  }
+
   async function applyObjectivePatch(work: Work, nextObjective: string): Promise<void> {
     if (backend !== "engine" || work.source !== "engine") {
       throw new Error("applyObjectivePatch requires an engine-backed work");
@@ -735,6 +764,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
     postMessage,
     confirmPatch,
     discardPatch,
+    applyPatchPreview,
     applyObjectivePatch,
     saveMemoryFromMessage,
     saveSkillFromMessage,

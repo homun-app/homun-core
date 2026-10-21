@@ -114,7 +114,9 @@ export function parseFrontDoorPayload(raw: unknown): FrontDoorPayload | undefine
       )
       .map((q) => ({
         question: q.question,
-        choices: Array.isArray(q.choices) ? q.choices.filter((c): c is string => typeof c === "string") : [],
+        choices: Array.isArray(q.choices)
+          ? q.choices.filter((c): c is string => typeof c === "string")
+          : [],
         ...(q.multi_select === true ? { multi_select: true } : {}),
       }));
     if (parsed.length > 0) payload.questions = parsed;

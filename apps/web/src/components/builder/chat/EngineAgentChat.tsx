@@ -3,18 +3,25 @@
     Il composer è `StudioChatInput` (modello, autonomia, menzioni, allegati) e
     l'invio passa dalla pipeline engine esistente (`handleEngineSend`), non da
     una strada parallela. Il thread renderizza trascrizione e streaming SSE.
+    Sotto ogni messaggio assistente può comparire la scheda dell'esito del
+    turno di ingresso (accordo, chiarimento, modifica del piano): la stessa
+    scheda ovunque, selezionata dal modulo puro `frontDoorCards`.
     Gli stati del motore vivono qui, nel thread e sopra il campo di scrittura:
     mai tra i messaggi del runtime. */
+import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 
 import { useConversationEventStream } from "@/hooks/useConversationEventStream";
 import { useTransientResolved } from "@/hooks/useTransientResolved";
 import type { AutonomyLevel } from "../conversation-preferences";
+import type { Work } from "../conversation-types";
 import { ConversationBrowserPip } from "../ConversationBrowserPip";
 import type { ConversationScenario } from "../conversation-scenarios";
 import type { SpaceData } from "../ConversationSpace";
 import { ConversationWorkspaceWelcome } from "../ConversationWorkspaceWelcome";
 import { StudioChatInput, type ChatReference } from "../StudioChatInput";
+import type { WorkIntakeState } from "@/hooks/useWorkIntake";
+import type { FrontDoorPatchPreview } from "@/lib/front-door-cards";
 import {
   chatStatusLayout,
   type ChatStatusActionId,
@@ -27,7 +34,16 @@ import {
   ThreadEndStatusNotices,
   ThreadTopStatusNotices,
 } from "./ChatStatusNotices";
+import { EngineFrontDoorMessageExtra, FrontDoorCardsProvider } from "./EngineFrontDoorCards";
+import { frontDoorCardMap } from "@/lib/front-door-cards";
 import { useChatStream } from "./useChatStream";
+
+type FrontDoorSlots = {
+  intake: WorkIntakeState;
+  work: Work | undefined;
+  /** Applica un'anteprima di patch (Conferma della scheda di modifica piano). */
+  onConfirmPatch: (patch: FrontDoorPatchPreview) => Promise<void>;
+};
 
 type Props = {
   newChatProject?: { id: string; name: string } | null | undefined;
@@ -55,6 +71,8 @@ type Props = {
   scenarios: ConversationScenario[];
   spaceData: SpaceData;
   onCreateExample: (index: number) => void;
+  /** Schede degli esiti del turno di ingresso (accordo/chiarimento/piano). */
+  frontDoor: FrontDoorSlots | undefined;
 };
 
 export function EngineAgentChat({
@@ -80,6 +98,7 @@ export function EngineAgentChat({
   scenarios,
   spaceData,
   onCreateExample,
+  frontDoor,
 }: Props) {
   const {
     messages,
@@ -92,6 +111,41 @@ export function EngineAgentChat({
     ...(onRefreshEngine ? { onNewMessage: () => void onRefreshEngine() } : {}),
   });
 
+  // Chiusure locali delle schede: la proposta Annullata non si rimostra, una
+  // patch applicata o annullata resta chiusa finché la versione non cambia.
+  const [dismissedProposalIds, setDismissedProposalIds] = useState<string[]>([]);
+  const [resolvedPatchIds, setResolvedPatchIds] = useState<string[]>([]);
+
+  const frontDoorCardsMap = useMemo(() => {
+    if (!frontDoor) return new Map();
+    return frontDoorCardMap({
+      messages,
+      intakeProposal: frontDoor.intake.proposal,
+      workVersion: frontDoor.work?.revision ?? 0,
+      resolvedPatchIds,
+      dismissedProposalIds,
+    });
+  }, [frontDoor, messages, resolvedPatchIds, dismissedProposalIds]);
+
+  function handleSend(text: string, files: File[]) {
+    noteUserSent(text);
+    onSend(text, files);
+  }
+
+  const frontDoorSlots = frontDoor
+    ? {
+        cards: frontDoorCardsMap,
+        intake: frontDoor.intake,
+        busy: engineBusy || isRunning,
+        onSendMessage: (text: string) => handleSend(text, []),
+        onDismissProposal: (proposalId: string) =>
+          setDismissedProposalIds((current) => [...current, proposalId]),
+        onConfirmPatch: frontDoor.onConfirmPatch,
+        onDismissPatch: (messageId: string) =>
+          setResolvedPatchIds((current) => [...current, messageId]),
+      }
+    : null;
+
   const showThread = Boolean(conversationId) || messages.length > 0;
   const loading = conversationId ? streamLoading || historyLoading : false;
 
@@ -102,11 +156,6 @@ export function EngineAgentChat({
   function handleStatusAction(action: ChatStatusActionId) {
     if (action === "refresh") void onRefreshEngine?.();
     else if (action === "open-models") onOpenModels?.();
-  }
-
-  function handleSend(text: string, files: File[]) {
-    noteUserSent(text);
-    onSend(text, files);
   }
 
   return (
@@ -121,12 +170,15 @@ export function EngineAgentChat({
               />
               {/* gli avvisi vivono DENTRO l'area scorrevole del thread: si
                   legono dove si leggono i messaggi, non oltre il suo fondo */}
-              <AgentChat
-                messages={messages}
-                isRunning={isRunning || engineBusy}
-                threadTop={<ThreadTopStatusNotices notices={status.threadTop} />}
-                threadEnd={<ThreadEndStatusNotices notices={status.threadEnd} />}
-              />
+              <FrontDoorCardsProvider slots={frontDoorSlots}>
+                <AgentChat
+                  messages={messages}
+                  isRunning={isRunning || engineBusy}
+                  threadTop={<ThreadTopStatusNotices notices={status.threadTop} />}
+                  threadEnd={<ThreadEndStatusNotices notices={status.threadEnd} />}
+                  assistantMessageExtra={frontDoorSlots ? EngineFrontDoorMessageExtra : undefined}
+                />
+              </FrontDoorCardsProvider>
             </>
           ) : (
             <>

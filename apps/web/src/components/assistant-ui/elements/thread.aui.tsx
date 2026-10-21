@@ -587,7 +587,8 @@ const AssistantMessage: FC = () => {
         className="text-foreground px-2 leading-relaxed wrap-break-word"
       >
         <MessagePrimitive.GroupedParts groupBy={groupBy}>
-          {({ part, children }) => {            switch (part.type) {
+          {({ part, children }) => {
+            switch (part.type) {
               case "group-chainOfThought":
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
               case "group-task":

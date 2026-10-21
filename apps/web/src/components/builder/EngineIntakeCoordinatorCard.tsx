@@ -1,6 +1,13 @@
+/**
+ * LA scheda della proposta di accordo (porta d'ingresso unica): la stessa in
+ * trascrizione e nel pannello. Conferma usa l'endpoint di conferma; Modifica
+ * passa dalla chat (il turno di ingresso produce la revisione); Annulla
+ * chiude la scheda e lascia il record del motore com'è.
+ */
 import { useState } from "react";
 import type { WorkIntake } from "@/lib/engine-intake-client";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
+import { briefChangeLines, preservedFieldLabels } from "@/lib/engine-intake-display";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { Check, Sparkles, Bot, Globe, Layers, ArrowRight, CornerDownLeft } from "lucide-react";
 
@@ -8,18 +15,52 @@ export function EngineIntakeCoordinatorCard({
   proposal,
   intake,
   onInspectAgent,
+  onSendMessage,
+  onDismiss,
 }: {
   proposal: WorkIntake;
   intake: WorkIntakeState;
   onInspectAgent?: ((agentIdOrName: string) => void) | undefined;
+  /** La modifica passa dalla chat: la porta d'ingresso produce la revisione. */
+  onSendMessage?: ((text: string) => void) | undefined;
+  /** Annulla chiude la scheda in questo client; il record nel motore resta. */
+  onDismiss?: (() => void) | undefined;
 }) {
   const [customClarify, setCustomClarify] = useState("");
   const steps = proposal.plan_steps ?? [];
   const reqs = proposal.missing_information ?? [];
+  const changes = proposal.changes ?? [];
   const isBusy = intake.busy;
+
+  if (proposal.status === "confirmed") {
+    return (
+      <article
+        className="cw-intake-coordinator-card is-confirmed"
+        aria-label="Accordo di lavoro confermato"
+      >
+        <div className="cw-intake-coordinator-card__head">
+          <span className="cw-intake-coordinator-card__badge">ACCORDO CONFERMATO</span>
+          <h3 className="cw-intake-coordinator-card__title">{proposal.title}</h3>
+          <p className="cw-intake-coordinator-card__objective">
+            <strong>Risultato concordato:</strong> {proposal.output || proposal.objective}
+          </p>
+        </div>
+        {(proposal.constraints?.length ?? 0) > 0 && (
+          <p className="cw-intake-note">Vincoli: {proposal.constraints.join(" · ")}</p>
+        )}
+      </article>
+    );
+  }
 
   const hasCompetitorReq = reqs.some((r) => /competitor|concorren/i.test(r));
   const hasVaultReq = reqs.some((r) => /vault|material|dataset|report preesistent/i.test(r));
+  const canSendModification = Boolean(onSendMessage) && !isBusy;
+
+  function sendModification(text: string) {
+    if (!onSendMessage || !text.trim() || isBusy) return;
+    onSendMessage(text.trim());
+    setCustomClarify("");
+  }
 
   return (
     <article
@@ -33,6 +74,22 @@ export function EngineIntakeCoordinatorCard({
           <strong>Risultato concordato:</strong> {proposal.output || proposal.objective}
         </p>
       </div>
+
+      {changes.length > 0 && (
+        <div className="cw-intake-changes" data-intake-changes>
+          <strong>Cosa cambia rispetto all'accordo precedente</strong>
+          <ul>
+            {briefChangeLines(changes).map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          {preservedFieldLabels(changes).length > 0 && (
+            <p className="cw-intake-note">
+              Restano invariati: {preservedFieldLabels(changes).join(", ")}.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Staffetta Fasi Operative */}
       {steps.length > 0 && (
@@ -90,101 +147,76 @@ export function EngineIntakeCoordinatorCard({
             ))}
           </ul>
 
-          <div className="cw-intake-coordinator-card__chips-container">
-            <span className="cw-intake-coordinator-card__chips-label">
-              Scegli come impostare la squadra o la ricerca:
-            </span>
-            <div className="cw-intake-coordinator-card__chips">
-              {hasCompetitorReq && (
-                <>
+          {onSendMessage && (
+            <div className="cw-intake-coordinator-card__chips-container">
+              <span className="cw-intake-coordinator-card__chips-label">
+                Scegli come impostare la squadra o la ricerca (la risposta va in chat, come ogni
+                messaggio):
+              </span>
+              <div className="cw-intake-coordinator-card__chips">
+                {hasCompetitorReq && (
+                  <>
+                    <button
+                      type="button"
+                      className="cw-coordinator-chip"
+                      disabled={isBusy}
+                      onClick={() =>
+                        sendModification(
+                          "Crea un agente specializzato 'Ricercatore di Mercato' con l'istruzione di scandagliare il web per identificare i 3 competitor chiave e assegnagli la fase di ricerca iniziale.",
+                        )
+                      }
+                    >
+                      <Bot size={13} />
+                      Crea agente «Ricercatore di Mercato»
+                    </button>
+                    <button
+                      type="button"
+                      className="cw-coordinator-chip"
+                      disabled={isBusy}
+                      onClick={() =>
+                        sendModification(
+                          "Seleziona tu autonomamente i 3 principali competitor di riferimento nel settore dell'orchestrazione agenti e avvia l'analisi.",
+                        )
+                      }
+                    >
+                      <Globe size={13} />
+                      Cerca autonomamente online i 3 leader
+                    </button>
+                  </>
+                )}
+                {hasVaultReq && (
                   <button
                     type="button"
                     className="cw-coordinator-chip"
                     disabled={isBusy}
                     onClick={() =>
-                      void intake.refine(
-                        "Crea un agente specializzato 'Ricercatore di Mercato' con l'istruzione di scandagliare il web per identificare i 3 competitor chiave e assegnagli la fase di ricerca iniziale.",
+                      sendModification(
+                        "Procedi partendo da zero senza file o dataset pregressi nel Vault.",
                       )
                     }
                   >
-                    <Bot size={13} />
-                    Crea agente «Ricercatore di Mercato»
+                    <ArrowRight size={13} />
+                    Procedi da zero senza dati nel Vault
                   </button>
+                )}
+                {!hasCompetitorReq && !hasVaultReq && (
                   <button
                     type="button"
                     className="cw-coordinator-chip"
                     disabled={isBusy}
                     onClick={() =>
-                      void intake.refine(
-                        "Seleziona tu autonomamente i 3 principali competitor di riferimento nel settore dell'orchestrazione agenti e avvia l'analisi.",
+                      sendModification(
+                        "Procedi autonomamente raccogliendo tutte le informazioni necessarie.",
                       )
                     }
                   >
-                    <Globe size={13} />
-                    Cerca autonomamente online i 3 leader
+                    <Sparkles size={13} />
+                    Risolvi autonomamente e aggiorna piano
                   </button>
-                </>
-              )}
-              {hasVaultReq && (
-                <button
-                  type="button"
-                  className="cw-coordinator-chip"
-                  disabled={isBusy}
-                  onClick={() =>
-                    void intake.refine(
-                      "Procedi partendo da zero senza file o dataset pregressi nel Vault.",
-                    )
-                  }
-                >
-                  <ArrowRight size={13} />
-                  Procedi da zero senza dati nel Vault
-                </button>
-              )}
-              {!hasCompetitorReq && !hasVaultReq && (
-                <button
-                  type="button"
-                  className="cw-coordinator-chip"
-                  disabled={isBusy}
-                  onClick={() =>
-                    void intake.refine(
-                      "Procedi autonomamente raccogliendo tutte le informazioni necessarie.",
-                    )
-                  }
-                >
-                  <Sparkles size={13} />
-                  Risolvi autonomamente e aggiorna piano
-                </button>
-              )}
+                )}
+              </div>
             </div>
-
-            {/* Direct Inline Clarification Input */}
-            <form
-              className="cw-intake-coordinator-card__inline-clarify"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!customClarify.trim() || isBusy) return;
-                void intake.refine(customClarify.trim());
-                setCustomClarify("");
-              }}
-            >
-              <input
-                type="text"
-                className="cw-intake-coordinator-card__inline-input"
-                placeholder="Oppure scrivi qui i competitor o chiarimenti (es: CrewAI, AutoGen, LangGraph)…"
-                value={customClarify}
-                disabled={isBusy}
-                onChange={(e) => setCustomClarify(e.target.value)}
-              />
-              <button
-                type="submit"
-                className="cw-intake-coordinator-card__inline-submit"
-                disabled={isBusy || !customClarify.trim()}
-              >
-                <CornerDownLeft size={12} />
-                Applica
-              </button>
-            </form>
-          </div>
+          )}
         </div>
       )}
 
@@ -197,7 +229,7 @@ export function EngineIntakeCoordinatorCard({
                 type="button"
                 className="cw-intake-coordinator-card__btn is-gated"
                 disabled
-                title="Scegli un'opzione sopra o rispondi ai chiarimenti per avviare il lavoro."
+                title="Scegli un'opzione sopra o scrivi in chat per impostare il lavoro."
               >
                 <Sparkles size={14} />
                 Scegli una modalità per avviare la staffetta
@@ -232,6 +264,48 @@ export function EngineIntakeCoordinatorCard({
             </span>
           </>
         )}
+        <div className="cs-actions cw-intake-coordinator-card__secondary">
+          <form
+            className="cw-intake-coordinator-card__inline-clarify"
+            onSubmit={(e) => {
+              e.preventDefault();
+              sendModification(customClarify);
+            }}
+          >
+            <input
+              type="text"
+              className="cw-intake-coordinator-card__inline-input"
+              placeholder={
+                canSendModification
+                  ? "Modifica: scrivi qui cosa cambiare (va in chat, come ogni messaggio)…"
+                  : "Per modificare l'accordo scrivi in chat cosa vuoi cambiare…"
+              }
+              value={customClarify}
+              disabled={!canSendModification}
+              onChange={(e) => setCustomClarify(e.target.value)}
+            />
+            <button
+              type="submit"
+              className="cw-intake-coordinator-card__inline-submit"
+              disabled={!canSendModification || !customClarify.trim()}
+              aria-label="Invia la modifica in chat"
+            >
+              <CornerDownLeft size={12} />
+              Modifica
+            </button>
+          </form>
+          {onDismiss && (
+            <button
+              type="button"
+              className="cs-link"
+              disabled={isBusy}
+              onClick={onDismiss}
+              aria-label="Annulla la proposta"
+            >
+              Annulla
+            </button>
+          )}
+        </div>
       </div>
 
       {isBusy && (

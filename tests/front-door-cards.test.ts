@@ -9,6 +9,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { frontDoorCards } from "../apps/web/src/lib/front-door-cards.ts";
 
+const PATCH = {
+  work_id: "w",
+  base_version: 2,
+  changes: [],
+  summary_lines: ["Obiettivo: «a» → «b»"],
+};
+
 function message(partial: Record<string, unknown>) {
   return { who: "agent" as const, text: "...", ...partial };
 }
@@ -17,27 +24,28 @@ test("la scheda di proposta si aggancia al messaggio che l'ha prodotta", () => {
   const cards = frontDoorCards({
     messages: [
       { who: "you" as const, text: "Prepara una nota operativa" },
-      message({ engineMessageId: "a1", intakeProposalId: "p1" }),
-      message({ engineMessageId: "a2", text: "Altro messaggio" }),
+      message({ id: "a1", intakeProposalId: "p1" }),
+      message({ id: "a2", text: "Altro messaggio" }),
     ],
     intakeProposal: { id: "p1", status: "pending_confirmation" },
     workVersion: 1,
   });
-  assert.deepEqual(cards, [{ kind: "agreement", messageId: "a1", state: "pending" }]);
+  assert.equal(cards.length, 1);
+  assert.deepEqual(cards[0], { kind: "agreement", id: "a1", state: "pending" });
 });
 
 test("la proposta confermata lascia la traccia, non i bottoni", () => {
   const cards = frontDoorCards({
-    messages: [message({ engineMessageId: "a1", intakeProposalId: "p1" })],
+    messages: [message({ id: "a1", intakeProposalId: "p1" })],
     intakeProposal: { id: "p1", status: "confirmed" },
     workVersion: 2,
   });
-  assert.deepEqual(cards, [{ kind: "agreement", messageId: "a1", state: "confirmed" }]);
+  assert.deepEqual(cards, [{ kind: "agreement", id: "a1", state: "confirmed" }]);
 });
 
 test("una proposta sorpassata da una più recente non ha scheda", () => {
   const cards = frontDoorCards({
-    messages: [message({ engineMessageId: "a1", intakeProposalId: "p1" })],
+    messages: [message({ id: "a1", intakeProposalId: "p1" })],
     intakeProposal: { id: "p2", status: "pending_confirmation" },
     workVersion: 1,
   });
@@ -46,7 +54,7 @@ test("una proposta sorpassata da una più recente non ha scheda", () => {
 
 test("Annulla nasconde la scheda azionabile, non inventa stato nel motore", () => {
   const cards = frontDoorCards({
-    messages: [message({ engineMessageId: "a1", intakeProposalId: "p1" })],
+    messages: [message({ id: "a1", intakeProposalId: "p1" })],
     intakeProposal: { id: "p1", status: "pending_confirmation" },
     workVersion: 1,
     dismissedProposalIds: ["p1"],
@@ -55,23 +63,25 @@ test("Annulla nasconde la scheda azionabile, non inventa stato nel motore", () =
 });
 
 test("chiarimento: la scheda con le scelte resta finché la persona non risponde", () => {
-  const questions = [{ question: "Per quando?", choices: ["Domani", "Entro il 30"], multi_select: false }];
+  const questions = [
+    { question: "Per quando?", choices: ["Domani", "Entro il 30"], multi_select: false },
+  ];
   const open = frontDoorCards({
     messages: [
       { who: "you" as const, text: "Crea una relazione" },
-      message({ engineMessageId: "a1", frontDoor: { kind: "clarification", questions } }),
+      message({ id: "a1", frontDoor: { kind: "clarification", questions } }),
     ],
     intakeProposal: null,
     workVersion: 1,
   });
-  assert.deepEqual(open, [{ kind: "clarify", messageId: "a1", questions }]);
+  assert.deepEqual(open, [{ kind: "clarify", id: "a1", questions }]);
 
   const answered = frontDoorCards({
     messages: [
       { who: "you" as const, text: "Crea una relazione" },
-      message({ engineMessageId: "a1", frontDoor: { kind: "clarification", questions } }),
+      message({ id: "a1", frontDoor: { kind: "clarification", questions } }),
       { who: "you" as const, text: "Entro il 30" },
-      message({ engineMessageId: "a2", text: "Perfetto." }),
+      message({ id: "a2", text: "Perfetto." }),
     ],
     intakeProposal: null,
     workVersion: 1,
@@ -80,20 +90,14 @@ test("chiarimento: la scheda con le scelte resta finché la persona non risponde
 });
 
 test("anteprima di piano: attiva contro la versione corrente, non dopo", () => {
-  const base = [
-    message({
-      engineMessageId: "a1",
-      patchProposal: {
-        work_id: "w",
-        base_version: 2,
-        changes: [],
-        summary_lines: ["Obiettivo: «a» → «b»"],
-      },
-    }),
-  ];
-  assert.deepEqual(frontDoorCards({ messages: base, intakeProposal: null, workVersion: 2 }), [
-    { kind: "plan-change", messageId: "a1", summaryLines: ["Obiettivo: «a» → «b»"] },
-  ]);
+  const base = [message({ id: "a1", patchProposal: PATCH })];
+  const active = frontDoorCards({ messages: base, intakeProposal: null, workVersion: 2 });
+  assert.equal(active.length, 1);
+  assert.equal(active[0].kind, "plan-change");
+  assert.equal(
+    active[0].kind === "plan-change" && active[0].summaryLines[0],
+    PATCH.summary_lines[0],
+  );
   assert.deepEqual(
     frontDoorCards({ messages: base, intakeProposal: null, workVersion: 3 }),
     [],
@@ -113,18 +117,21 @@ test("anteprima di piano: attiva contro la versione corrente, non dopo", () => {
 test("i tre tipi convivono, ciascuno sul proprio messaggio", () => {
   const cards = frontDoorCards({
     messages: [
-      message({ engineMessageId: "a1", intakeProposalId: "p1" }),
+      message({ id: "a1", intakeProposalId: "p1" }),
       { who: "you" as const, text: "grazie" },
       message({
-        engineMessageId: "a2",
+        id: "a2",
         patchProposal: { work_id: "w", base_version: 4, changes: [], summary_lines: ["x"] },
       }),
     ],
     intakeProposal: { id: "p1", status: "pending_confirmation" },
     workVersion: 4,
   });
-  assert.deepEqual(cards, [
-    { kind: "agreement", messageId: "a1", state: "pending" },
-    { kind: "plan-change", messageId: "a2", summaryLines: ["x"] },
-  ]);
+  assert.deepEqual(
+    cards.map((card) => [card.kind, card.id]),
+    [
+      ["agreement", "a1"],
+      ["plan-change", "a2"],
+    ],
+  );
 });

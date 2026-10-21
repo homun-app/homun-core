@@ -9,7 +9,7 @@ import {
   useExternalStoreRuntime,
   type ThreadMessageLike,
 } from "@assistant-ui/react";
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 
@@ -41,6 +41,7 @@ export function AgentChat({
   isRunning,
   threadTop,
   threadEnd,
+  assistantMessageExtra,
 }: {
   messages: ChatStreamMessage[];
   isRunning: boolean;
@@ -48,6 +49,8 @@ export function AgentChat({
   threadTop?: ReactNode;
   /** Contenuto in fondo al thread, dentro l'area scorrevole (es. followup). */
   threadEnd?: ReactNode;
+  /** Slot sotto ogni messaggio assistente: la scheda dell'esito del turno. */
+  assistantMessageExtra?: ComponentType | undefined;
 }) {
   const runtime = useExternalStoreRuntime<ChatStreamMessage>({
     isRunning,
@@ -61,7 +64,14 @@ export function AgentChat({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread components={{ Composer: NoComposer }} threadTop={threadTop} threadEnd={threadEnd} />
+      <Thread
+        components={{
+          Composer: NoComposer,
+          ...(assistantMessageExtra ? { AssistantMessageExtra: assistantMessageExtra } : {}),
+        }}
+        threadTop={threadTop}
+        threadEnd={threadEnd}
+      />
     </AssistantRuntimeProvider>
   );
 }

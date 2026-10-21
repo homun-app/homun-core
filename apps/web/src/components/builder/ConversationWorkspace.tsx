@@ -1042,7 +1042,6 @@ export function ConversationWorkspace() {
             }
             onClearNotice={() => setNotice("")}
             engineMode={false}
-            engineIntake={undefined}
             onRefreshEngine={engine.refresh}
             engineAgents={undefined}
             agentNames={undefined}
