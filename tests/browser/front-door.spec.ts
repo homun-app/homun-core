@@ -9,7 +9,7 @@
  * Il motore gira come processo reale su 127.0.0.1:8765 (porta della UI in
  * sviluppo) con data dir temporanea e `--dev-insecure` (solo loopback).
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -19,6 +19,13 @@ import { expect, test } from "@playwright/test";
 const ENGINE_PORT = 8765;
 const ENGINE_URL = `http://127.0.0.1:${ENGINE_PORT}`;
 const ENGINE_DIR = resolve("engine");
+
+// Come i test desktop che avviano il motore: interprete configurabile e,
+// quando nessun python sa importare homun (job CI senza motore), salto
+// pulito invece di fallire — il flusso del motore resta coperto lì.
+const ENGINE_PYTHON = process.env.HOMUN_TEST_PYTHON || join(ENGINE_DIR, ".venv", "bin", "python");
+const engineImportable = spawnSync(ENGINE_PYTHON, ["-c", "import homun"]).status === 0;
+test.skip(!engineImportable, `nessun interprete con homun (${ENGINE_PYTHON}): motore non installato`);
 
 let engine: ChildProcess | null = null;
 let dataDir: string | null = null;
@@ -38,7 +45,7 @@ test.beforeAll(async () => {
     `${JSON.stringify({ active_provider_id: "fake" }, null, 2)}\n`,
   );
   engine = spawn(
-    join(ENGINE_DIR, ".venv", "bin", "python"),
+    ENGINE_PYTHON,
     [
       "-m",
       "homun",
