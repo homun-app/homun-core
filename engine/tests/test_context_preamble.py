@@ -15,7 +15,8 @@ from homun.domain.models import Actor, MaterialVersion, Work
 from homun.domain.states import WorkStatus
 from homun.memory.types import MemoryNote
 from homun.models.conversation_context import ContextManifest, ContextResource, ContextSource
-from homun.models.interpretation import MessageInterpretation
+from homun.models.native_turn import NativeMessage, NativeResult
+from homun.models.types import UsageEntry
 
 
 @pytest.fixture
@@ -142,17 +143,22 @@ def test_legacy_manifest_without_material_identity_still_runs_identity_checks(se
         revalidate_context(ctx.repository.load(), actor, manifest)
 
 
-def test_preamble_reaches_the_interpretation_call(setup, monkeypatch):
+def test_preamble_reaches_the_front_door_call(setup, monkeypatch):
     add_material(setup)
     ctx, actor, conv, project = setup
     seen = []
-    original = ctx.models.interpret
 
-    def spy(text, *, roster, conversation_context=None, context=None, **kw):
-        seen.append(conversation_context)
-        return MessageInterpretation(kind='reply', text='Ricevuto')
-    monkeypatch.setattr(ctx.models, 'interpret', spy)
+    def spy(messages, *, tools=None, connection_id=None, **_kw):
+        seen.append(list(messages))
+        return NativeResult(message=NativeMessage(role='assistant', content='Ricevuto'),
+                            usage=UsageEntry(id='u', provider_id='fake', model_id='fake-deterministic-v1',
+                                             input_tokens=1, output_tokens=1, status='ok'))
+    monkeypatch.setattr(ctx.models, 'complete_tools', spy)
     result = complete(ctx, post(setup))
     assert result.get('assistant_text') == 'Ricevuto'
-    assert 'Listino settembre' in seen[0].preamble
-    assert seen[0].manifest.version == 2
+    # The authorized work-state preamble travels with the current request, never as a command.
+    current = seen[0][-1]
+    assert current.role == 'user'
+    assert 'Listino settembre' in current.content
+    assert current.content.endswith('Come procediamo?')
+    assert result['context_manifest']['version'] == 2

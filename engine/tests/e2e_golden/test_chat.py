@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from .common import CHAT_WORK_TITLE, describe, ensure_accepted, run_indices
+from .common import (CHAT_WORK_TITLE, RICHIESTA_NOTA, RINGRAZIAMENTO, WORKSPACE, describe,
+                     ensure_accepted, run_indices)
+from .fixtures.empty_model import EMPTY_MODEL_ID, EmptyModelServer
 from .reporting import GoldenRun
 
 pytestmark = pytest.mark.golden
@@ -138,6 +140,84 @@ def _story_a4(golden, run: GoldenRun) -> None:
         assert _reply(golden, conversation_id, result).strip()
 
 
+def _intake_items(client, work_id: str) -> list[dict]:
+    return client.get(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/intake").get("items") or []
+
+
+def _story_a5(golden, run: GoldenRun) -> None:
+    """Dopo una proposta, «grazie» è conversazione: testo, nessuna proposta nuova."""
+    client = golden.client
+    with run.step("A5.proposta"):
+        conversation_id, work_id, _version = client.create_conversation_and_work()
+        roster = client.ui_roster()
+        result, error = client.post_message(conversation_id, RICHIESTA_NOTA, roster=roster)
+        ensure_accepted(error, "richiesta di lavoro rifiutata")
+        if result.get("chat_agent"):
+            client.resolve_reply(conversation_id, result, result.get("message_id"))
+        kind = str((result.get("front_door") or {}).get("kind") or "?")
+        run.recorder.note(f"A5 run {run.run_index}: esito della richiesta = {kind}")
+        before = _intake_items(client, work_id)
+    with run.step("A5.grazie"):
+        result, error = client.post_message(conversation_id, RINGRAZIAMENTO, roster=roster)
+        ensure_accepted(error, f"«{RINGRAZIAMENTO}» rifiutato")
+        reply = _reply(golden, conversation_id, result)
+        assert reply.strip(), f"nessuna risposta a «{RINGRAZIAMENTO}»"
+        kind = str((result.get("front_door") or {}).get("kind") or ("agente" if result.get("chat_agent") else "?"))
+        assert kind in {"text", "agente"}, f"«{RINGRAZIAMENTO}» non ha ricevuto una risposta testuale: {kind}"
+    with run.step("A5.nessuna-proposta-nuova"):
+        after = _intake_items(client, work_id)
+        assert [item.get("id") for item in after] == [item.get("id") for item in before], (
+            "«grazie» ha creato una nuova proposta di accordo"
+        )
+        assert [item.get("status") for item in after] == [item.get("status") for item in before], (
+            "«grazie» ha cambiato lo stato delle proposte esistenti"
+        )
+
+
+def _story_a6(golden, run: GoldenRun) -> None:
+    """Una risposta vuota del modello è un errore tipizzato e chiaro, non un blocco:
+    il messaggio successivo è accettato SUBITO, senza aspettare la finestra dei tentativi."""
+    client = golden.client
+    connection = "golden_vuota"
+    with EmptyModelServer() as empty:
+        with run.step("A6.preparazione"):
+            conversation_id = client.create_conversation("Risposta vuota del modello")
+            client.post(
+                "/v1/models/connections",
+                {
+                    "connection_id": connection,
+                    "kind": "openai_compatible",
+                    "display_name": "Sempre vuoto (golden)",
+                    "model_id": EMPTY_MODEL_ID,
+                    "base_url": empty.base_url,
+                    "api_key": "golden",
+                    "max_output_tokens": 512,
+                },
+            )
+        with run.step("A6.risposta-vuota"):
+            result, error = client.post_message(
+                conversation_id, "Dimmi qualcosa di utile.", connection_id=connection
+            )
+            assert error is not None, f"il modello vuoto ha prodotto una risposta: {result!r}"
+            assert error.code in {"model.empty_response", "model.output_invalid"}, describe(error)
+            # Una risposta vuota riceve un promemoria e UN nuovo tentativo, poi basta.
+            assert len(empty.requests) == 2, f"chiamate al modello vuoto: {len(empty.requests)} (attese 2)"
+    with run.step("A6.subito-dopo"):
+        # Nessuna attesa: il messaggio nuovo è accettato al primo colpo.
+        testo = "Adesso rispondi con la connessione normale"
+        result, error = client.post_message(conversation_id, f"{testo}: una riga.")
+        ensure_accepted(error, "messaggio successivo rifiutato subito dopo l'errore del modello")
+        assert _reply(golden, conversation_id, result).strip(), "nessuna risposta dopo l'errore"
+    with run.step("A6.messaggio-conservato"):
+        messages = client.messages(conversation_id)
+        assert any("Dimmi qualcosa di utile." in (m.get("text") or "") for m in messages), (
+            "il messaggio della risposta vuota non è rimasto in trascrizione"
+        )
+        followups = (client.conversation(conversation_id) or {}).get("followups") or []
+        scheduled = [f for f in followups if f.get("status") == "retry_scheduled"]
+        assert not scheduled, f"restano tentativi automatici programmati: {scheduled!r}"
+
+
 @pytest.mark.parametrize("run_index", run_indices())
 def test_a1_domanda_semplice(golden, run_index: int) -> None:
     golden.run(["A1"], run_index, _story_a1)
@@ -156,3 +236,13 @@ def test_a3_ripresa_dopo_errore(golden, run_index: int) -> None:
 @pytest.mark.parametrize("run_index", run_indices())
 def test_a4_ritrovo_dopo_riavvio(golden_solo, run_index: int) -> None:
     golden_solo.run(["A4"], run_index, _story_a4)
+
+
+@pytest.mark.parametrize("run_index", run_indices())
+def test_a5_grazie_dopo_una_proposta(golden, run_index: int) -> None:
+    golden.run(["A5"], run_index, _story_a5)
+
+
+@pytest.mark.parametrize("run_index", run_indices())
+def test_a6_risposta_vuota_poi_messaggio_accettato(golden, run_index: int) -> None:
+    golden.run(["A6"], run_index, _story_a6)

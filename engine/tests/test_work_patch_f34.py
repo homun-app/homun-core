@@ -186,56 +186,40 @@ def test_apply_patch_with_issues_raises_validation() -> None:
 
 
 def test_post_message_returns_patch_preview_without_applying(tmp_path: Path) -> None:
+    """A chat message proposing a change previews the patch; nothing is applied until confirmed."""
     db_path = tmp_path / "ws_local.sqlite3"
     reset_context_for_tests(
         create_context(workspace_id="ws_local", db_path=db_path, data_dir=tmp_path, for_tests=True)
     )
     app = create_app()
     headers = {"X-Homun-Actor-Id": "person_fabio", "X-Homun-Actor-Name": "Fabio"}
+
+    def command(client, command_id, type_, payload):
+        response = client.post("/v1/workspaces/ws_local/commands", headers=headers,
+                               json={"command_id": command_id, "type": type_, "payload": payload})
+        assert response.status_code == 200, response.text
+        return response.json()["result"]
+
     with TestClient(app) as client:
-        created = client.post(
-            "/v1/workspaces/ws_local/commands",
-            headers=headers,
-            json={
-                "command_id": "cmd_f34_create",
-                "type": "conversation.create",
-                "payload": {"title": "Catalogo"},
-            },
-        )
-        conversation_id = created.json()["result"]["conversation_id"]
-        work = client.post(
-            "/v1/workspaces/ws_local/commands",
-            headers=headers,
-            json={
-                "command_id": "cmd_f34_work",
-                "type": "work.create",
-                "payload": {
-                    "conversation_id": conversation_id,
-                    "title": "Catalogo",
-                    "objective": "Vecchio obiettivo",
-                },
-            },
-        )
-        work_id = work.json()["result"]["work_id"]
-        version = work.json()["result"]["version"]
-        posted = client.post(
-            "/v1/workspaces/ws_local/commands",
-            headers=headers,
-            json={
-                "command_id": "cmd_f34_msg",
-                "type": "conversation.post_message",
-                "payload": {
-                    "conversation_id": conversation_id,
-                    "text": "Cambia obiettivo a Catalogo invernale Acme",
-                    "roster": [
-                        {"id": "person_fabio", "display_name": "Fabio", "kind": "person"},
-                    ],
-                },
-            },
-        )
-        assert posted.status_code == 200, posted.text
-        body = posted.json()["result"]
-        assert body["interpretation"]["kind"] == "patch_proposal"
+        conversation_id = command(client, "cmd_f34_create", "conversation.create",
+                                  {"title": "Catalogo"})["conversation_id"]
+        work = command(client, "cmd_f34_work", "work.create",
+                       {"conversation_id": conversation_id, "title": "Catalogo",
+                        "objective": "Vecchio obiettivo"})
+        work_id = work["work_id"]
+        # propose_plan_change needs a plan on the linked work, like the UI's patch card.
+        proposed = command(client, "cmd_f34_plan", "plan.propose",
+                           {"work_id": work_id, "expected_version": work["version"],
+                            "steps": [{"title": "Bozza", "assignee_id": "person_fabio"}]})
+        accepted = command(client, "cmd_f34_accept", "plan.accept",
+                           {"work_id": work_id, "expected_version": proposed["version"]})
+        version = accepted["version"]
+        body = command(client, "cmd_f34_msg", "conversation.post_message", {
+            "conversation_id": conversation_id,
+            "text": "Cambia obiettivo a Catalogo invernale Acme",
+            "roster": [{"id": "person_fabio", "display_name": "Fabio", "kind": "person"}],
+        })
+        assert body["front_door"]["kind"] == "plan_change"
         assert body["patch_proposal"]["changes"][0]["to_value"] == "Catalogo invernale Acme"
         assert "Obiettivo" in "\n".join(body["patch_proposal"]["summary_lines"])
 
@@ -243,36 +227,23 @@ def test_post_message_returns_patch_preview_without_applying(tmp_path: Path) -> 
         assert listed.status_code == 200
         assert listed.json()["work"]["objective"] == "Vecchio obiettivo"
 
-        applied = client.post(
-            "/v1/workspaces/ws_local/commands",
-            headers=headers,
-            json={
-                "command_id": "cmd_f34_apply",
-                "type": "work.apply_patch",
-                "payload": {
-                    "work_id": work_id,
-                    "expected_version": version,
-                    "changes": body["patch_proposal"]["changes"],
-                    "roster_ids": ["person_fabio"],
-                },
-            },
-        )
-        assert applied.status_code == 200, applied.text
+        command(client, "cmd_f34_apply", "work.apply_patch", {
+            "work_id": work_id, "expected_version": version,
+            "changes": body["patch_proposal"]["changes"], "roster_ids": ["person_fabio"],
+        })
         after = client.get(f"/v1/workspaces/ws_local/works/{work_id}", headers=headers)
         assert after.json()["work"]["objective"] == "Catalogo invernale Acme"
+    reset_context_for_tests(None)
 
 
-def test_fake_assign_phrase_is_patch_proposal() -> None:
+def test_fake_objective_phrase_proposes_a_plan_change() -> None:
     from homun.models.fake import FakeProvider
-    from homun.models.interpretation import RosterEntry
+    from homun.models.native_turn import NativeMessage
 
     provider = FakeProvider()
-    roster = [
-        RosterEntry(id="person_fabio", display_name="Fabio", kind="person"),
-        RosterEntry(id="agent_vera", display_name="Vera", kind="agent"),
-    ]
-    interp = provider.interpret("Assegna a @Vera il prossimo passo del piano", roster=roster)
-    assert interp.kind == "patch_proposal"
-    assert interp.patch_changes
-    assert interp.patch_changes[0].field == "step_assignee"
-    assert interp.patch_changes[0].to_value == "agent_vera"
+    for phrase in ("Cambia l'obiettivo in: Catalogo invernale Acme",
+                   "Cambia obiettivo a Catalogo invernale Acme"):
+        result = provider.complete_tools_native([NativeMessage(role="user", content=phrase)])
+        call = result.message.tool_calls[0]
+        assert call.name == "propose_plan_change"
+        assert call.arguments["changes"][0] == {"field": "objective", "to_value": "Catalogo invernale Acme"}

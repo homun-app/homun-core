@@ -44,6 +44,8 @@ def _http_error(exc: DomainError) -> HTTPException:
         "budget_exhausted": 429,
         "permission_denied": 403,
         "not_found": 404,
+        "provider_unavailable": 503,
+        "request_timeout": 503,
     }.get(exc.code, 400)
     return HTTPException(
         status_code=status,

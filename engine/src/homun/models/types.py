@@ -40,7 +40,7 @@ class AttemptContext(BaseModel):
     conversation_id: str | None = None
     work_id: str | None = None
     actor_id: str = ""
-    purpose: str = "interpret"  # interpret | complete | plan_draft | chat
+    purpose: str = "interpret"  # interpret | complete | plan_draft | chat | front_door
 
 
 class UsageAttempt(BaseModel):

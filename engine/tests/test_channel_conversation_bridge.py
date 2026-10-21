@@ -55,7 +55,7 @@ def test_provider_failure_surfaces_typed_code(ctx, monkeypatch):
     def unavailable(*args, **kwargs):
         raise RuntimeError("Provider offline")
 
-    monkeypatch.setattr(ctx.models, "interpret", unavailable)
+    monkeypatch.setattr(ctx.models, "complete_tools", unavailable)
     reply = channel_reply(_message("ciao"))
     assert "provider_unavailable" in reply
     store = ctx.repository.load()

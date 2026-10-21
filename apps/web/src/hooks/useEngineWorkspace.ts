@@ -462,6 +462,10 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
           ...current,
           [work.id]: [...prior, { who: "you", sender: "Fabio", text }, assistantFromPosted(posted)],
         }));
+        // Il turno del motore può aver salvato una proposta di accordo (o
+        // un'anteprima di modifica) sul lavoro collegato: senza questo
+        // rientro la card resta invisibile finché qualcos'altro non aggiorna.
+        if (posted.intakeProposal || posted.patchProposal) bumpIntakeSeq();
       }
     } catch (cause) {
       if (isHomunClientError(cause) && cause.code === "request_cancelled") {

@@ -1,0 +1,1 @@
+La tua ultima risposta non era valida ({{detail}}). Rispondi di nuovo, in modo breve: un testo per la persona oppure esattamente una chiamata di strumento con argomenti JSON completi.

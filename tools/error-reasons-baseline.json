@@ -1,5 +1,5 @@
 {
   "description": "Frozen error-literal debt after wave 1 (docs/development/2026-10-15-errori-multilingua.md). Never increase either counter; lower them after each migration wave. Enforced by engine/tests/test_error_reason_baseline.py via tools/census_domain_raises.py.",
-  "domain_raises_without_reason": 1087,
+  "domain_raises_without_reason": 1085,
   "http_details_without_reason": 86
 }

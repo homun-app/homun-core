@@ -1,10 +1,10 @@
 """Durable conversational brief, with model work outside transactions."""
 from copy import deepcopy
 from homun.application.work.price_comparisons import cached, save
-from homun.application.work.intake_policy import PROPOSAL_TYPE, authority, digest, idle, lookup, permission_snapshot, public
+from homun.application.work.intake_policy import (PROPOSAL_TYPE, active_agents, anchor_brief, authority, digest, idle,
+                                                  lookup, permission_snapshot, proposals_for, public)
 from homun.application.work.organization_context import organization_background
-from homun.application.work.intake_brief import brief_changes, preserve_staffing, stabilize
-from homun.domain.capabilities import require_capability
+from homun.application.work.intake_brief import effective_values
 from homun.domain.errors import BudgetExhaustedError, ConflictError, ValidationError
 from homun.domain.models import utc_now
 from homun.models.intake import classify_request, synthesize
@@ -54,23 +54,6 @@ def classify_message(ctx, actor, work_id, text):
         work_budgets.reconcile_unknown(ctx, actor, work_id, reservation)
         raise
 
-def _plan_step_assignee_names_valid(steps, agents, collaborator_name):
-    """Fresh phases must name people who can actually take them: an active roster
-    collaborator or the brief's own proposed one. An empty name is the default
-    (the brief's collaborator takes the phase); anything else unresolvable is
-    an invalid brief."""
-    if not steps:
-        return True
-    roster = {agent['name'].strip().casefold() for agent in agents}
-    collaborator = (collaborator_name or '').strip().casefold()
-    for step in steps:
-        name = (step.get('assignee', '') if isinstance(step, dict) else step.assignee)
-        name = str(name).strip().casefold()
-        if name and name not in roster and name != collaborator:
-            return False
-    return True
-
-
 def _resolve_plan_assignee(store, name, fallback_agent_id):
     wanted = str(name or '').strip().casefold()
     if wanted:
@@ -97,8 +80,8 @@ def propose(ctx, actor, work_id, body):
             text=body['text']
             if not text.strip() or len(text)>12000:
                 raise ValidationError('Request must contain 1-12000 characters')
-            previous=[r.result for r in sorted(store.commands.values(),key=lambda r:r.created_at) if r.type==PROPOSAL_TYPE and r.result['work_id']==work_id]
-            previous_brief=next((deepcopy(public(p)) for p in reversed(previous) if p['objective']),None)
+            previous=proposals_for(store,work_id)
+            previous_brief=anchor_brief(previous)
             original='\n\n'.join([p['_submitted_text'] for p in previous]+[text])
             if len(original)>30000:
                 raise ValidationError('Intake context too long')
@@ -114,9 +97,7 @@ def propose(ctx, actor, work_id, body):
                       '_permissions':permission_snapshot(store,actor,work)}
             proposal['digest']=digest(proposal)
             save(store,actor,body['command_id'],PROPOSAL_TYPE,fingerprint,proposal)
-            agents=[{'id':a.id,'name':a.name,'role':a.role,'instructions':a.instructions,'revision':a.revision,
-                     'capabilities':a.capabilities}
-                    for a in store.agents.values() if a.status=='active']
+            agents=active_agents(store)
             # Ground the collaborator recommendation in what the engine can really run.
             capabilities=capability_catalog(store,actor)
         ctx.service.store=store
@@ -155,26 +136,11 @@ def propose(ctx, actor, work_id, body):
     else:
         work_budgets.reconcile(ctx, actor, work_id, reservation, usage=_usage_counters(usage))
         try:
-            selected = next((a for a in agents if a['id'] == brief.suggested_agent_id), None)
-            if brief.suggested_agent_id and not selected:
-                raise ValueError('Suggested agent does not exist in active roster')
-            if previous_brief:
-                values = stabilize(brief, previous_brief)
-            else:
-                values = brief.model_dump(exclude={'suggested_agent_id'})
-            values['suggested_agent'] = {k: selected[k] for k in ('id', 'name', 'role', 'revision')} if selected else None
-            if previous_brief:
-                values = preserve_staffing(values, previous_brief, agents, owner_id=work.owner_id)
-            # Validate the effective agreement: a staffing-only clarification
-            # may legitimately echo old assignments before normalization.
-            collaborator = values.get('suggested_agent') or values.get('new_agent')
-            collaborator_name = collaborator.get('name') if collaborator else None
-            if not _plan_step_assignee_names_valid(values.get('plan_steps'), agents, collaborator_name):
-                raise ValueError('Plan step assignee is not a roster collaborator')
-            changes = brief_changes(previous_brief, values)
-            error = None
+            values, changes = effective_values(brief, agents, previous_brief, owner_id=work.owner_id)
         except (ValueError, TypeError):
             values = {}; changes = []; error = 'intake_invalid_response'
+        else:
+            error = None
     with ctx.repository.locked():
         with ctx.repository.transaction() as store:
             proposal=lookup(store,body['command_id'],work_id)
@@ -192,6 +158,58 @@ def propose(ctx, actor, work_id, body):
             proposal['changes']=changes
             proposal['digest']=digest(proposal)
         ctx.service.store=store
+    return deepcopy(public(proposal))
+
+
+def commit_front_door_proposal(ctx, actor, *, command_id, conversation_id, work_id, brief, text):
+    """Commit a validated front-door brief as the SAME record the first-message
+    intake path creates: pending confirmation, same UI, same confirmation flow.
+
+    The brief already passed the shared ``validate_brief`` rules during the
+    model turn; here values are re-assembled against fresh state (anchor brief,
+    staffing, plan-step people) and optimistic failures land on the record as
+    typed intake error codes instead of crashing the chat turn. Runs inside the
+    caller's repository transaction, on ``ctx.service.store``.
+    """
+    store = ctx.service.store
+    service = ctx.service
+    if work_id is None:
+        # A chat without a linked work gets its draft work when the first
+        # proposal lands, exactly like the UI's createEngineConversationAndWork.
+        work_id = service.apply(actor, f'{command_id}:work', 'work.create', {
+            'conversation_id': conversation_id,
+            'title': brief.title, 'objective': brief.objective})['work_id']
+    work = authority(store, actor, {'work_id': work_id})
+    _record, fingerprint = cached(store, actor, command_id, PROPOSAL_TYPE,
+                                  {'work_id': work_id, 'front_door': True})
+    previous = proposals_for(store, work_id)
+    for p in previous:
+        if p['status'] == 'pending_confirmation':
+            p.update(status='failed', error_code='intake_superseded')
+    previous_brief = anchor_brief(previous)
+    agents = active_agents(store)
+    proposal = {'id': command_id, 'status': 'failed', 'work_id': work_id,
+                'expected_version': work.version,
+                'title': 'Richiesta da chiarire', 'objective': '', 'output': '', 'constraints': [],
+                'missing_information': [], 'suggested_agent': None, 'new_agent': None,
+                'rationale': '', 'capability': 'general', 'original_request': text,
+                'changed_fields': [], 'changes': [],
+                'error_code': 'intake_interrupted', '_submitted_text': text,
+                '_permissions': permission_snapshot(store, actor, work)}
+    try:
+        idle(work)
+        values, changes = effective_values(brief, agents, previous_brief, owner_id=work.owner_id)
+        error = None
+    except (ValueError, TypeError, ConflictError):
+        values = {}; changes = []; error = 'intake_invalid_response'
+    if error:
+        proposal.update(status='failed', error_code=error)
+    else:
+        proposal.update(values, status='pending_confirmation')
+        proposal.pop('error_code', None)
+    proposal['changes'] = changes
+    proposal['digest'] = digest(proposal)
+    save(store, actor, command_id, PROPOSAL_TYPE, fingerprint, proposal)
     return deepcopy(public(proposal))
 
 

@@ -26,13 +26,13 @@ def setup(tmp_path):
 @pytest.mark.parametrize('suffix', ['', '/stream'])
 def test_model_failure_keeps_committed_user_message_and_retry_resumes(setup, monkeypatch, suffix):
     ctx, client, headers, body = setup
-    original = ctx.models.interpret
+    original = ctx.models.complete_tools
     def unavailable(*args, **kwargs):
         saved = ctx.repository.load()
         assert 'message' in saved.commands, 'Provider started before command commit'
         assert len(saved.messages) == 1
         raise RuntimeError('Provider offline')
-    monkeypatch.setattr(ctx.models, 'interpret', unavailable)
+    monkeypatch.setattr(ctx.models, 'complete_tools', unavailable)
     response = client.post('/v1/workspaces/ws_local/commands' + suffix, headers=headers, json=body)
     if suffix:
         assert 'provider_unavailable' in response.text
@@ -41,12 +41,12 @@ def test_model_failure_keeps_committed_user_message_and_retry_resumes(setup, mon
     saved = ctx.repository.load()
     assert len(saved.messages) == 1
     assert saved.commands['message'].followup_status == 'failed'
-    monkeypatch.setattr(ctx.models, 'interpret', original)
+    monkeypatch.setattr(ctx.models, 'complete_tools', original)
     response = client.post('/v1/workspaces/ws_local/commands' + suffix, headers=headers, json=body)
     assert response.status_code == 200
     assert len(ctx.repository.load().messages) == 2
     # Completed replay never calls the model again.
-    monkeypatch.setattr(ctx.models, 'interpret', unavailable)
+    monkeypatch.setattr(ctx.models, 'complete_tools', unavailable)
     replay = client.post('/v1/workspaces/ws_local/commands', headers=headers, json=body)
     assert replay.status_code == 200
     assert replay.json()['result']['assistant_text']
@@ -79,7 +79,7 @@ def test_pending_claim_blocks_duplicate_but_not_other_commands(setup, monkeypatc
     delivery = admit(ctx, actor, request)
     with pytest.raises(CommandInProgressError):
         admit(ctx, actor, request)
-    original = ctx.models.interpret
+    original = ctx.models.complete_tools
     def interleaved(*args, **kwargs):
         # No SQL write transaction or shared connection is held across generation.
         ctx.memory.add_approved(text='A durable memory', actor_id=actor.id)
@@ -87,7 +87,7 @@ def test_pending_claim_blocks_duplicate_but_not_other_commands(setup, monkeypatc
                                json={'command_id': 'parallel', 'type': 'conversation.create', 'payload': {'title': 'Parallel'}})
         assert response.status_code == 200
         return original(*args, **kwargs)
-    monkeypatch.setattr(ctx.models, 'interpret', interleaved)
+    monkeypatch.setattr(ctx.models, 'complete_tools', interleaved)
     result = complete(ctx, delivery)
     assert result['assistant_message_id']
     saved = ctx.repository.load()

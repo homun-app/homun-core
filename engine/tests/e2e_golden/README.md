@@ -100,6 +100,8 @@ scenari; con Ollama, modelli `:cloud` inclusi, la suite passa dal preset
 | A2       | Tre messaggi di fila nella stessa conversazione: tutti accettati, nell'ordine giusto                                                                                                                                                     |
 | A3       | Dopo un errore provocato (connessione modello rotta) il messaggio successivo è accettato                                                                                                                                                 |
 | A4       | La conversazione si ritrova nell'elenco e si riprende dopo il riavvio del motore                                                                                                                                                         |
+| A5       | Dopo una proposta di accordo, «grazie» riceve una risposta testuale e non crea né cambia proposte                                                                                                                                        |
+| A6       | Una risposta **vuota** del modello (stub OpenAI-compatibile in `fixtures/empty_model.py`) produce un errore tipizzato e chiaro (`model.empty_response`), e il messaggio successivo è accettato **subito**, senza finestra di tentativi   |
 | B1       | La richiesta operativa (nota «Rossi / 30 novembre / 12.000») produce la proposta di lavoro                                                                                                                                               |
 | B2       | La conferma della proposta porta il lavoro in esecuzione fino al risultato                                                                                                                                                               |
 | B3       | Il risultato contiene i fatti dati e non ne inventa altri                                                                                                                                                                                |
@@ -107,6 +109,8 @@ scenari; con Ollama, modelli `:cloud` inclusi, la suite passa dal preset
 | B5       | Il lavoro sta fra i Compiti e il risultato approvato fra i Documenti                                                                                                                                                                     |
 | B6       | La stessa richiesta mandata come **messaggio successivo** di una conversazione esistente (dopo «Cosa sai fare?») è accettata e produce una proposta di lavoro o un chiarimento, non un errore; un terzo messaggio («grazie») è accettato |
 | B7       | Un lavoro eseguito con una **connessione creata dalla persona con un nome suo** (Impostazioni → Modelli) arriva al risultato; la chat con l'agente sulla stessa connessione risponde                                                     |
+| B8       | Una richiesta **vaga** («Crea una relazione sui fornitori 2027») produce un chiarimento o una proposta con `missing_information` non vuoto; il lavoro resta in bozza, senza piano, senza accordo confermato                              |
+| B9       | La richiesta di lavoro come **primo messaggio** inviata con `conversation.post_message` (la strada che la UI userà nella PR 2) produce una proposta di accordo in attesa di conferma                                                     |
 | C1       | Un progetto con 2 file di prova (`.md` e `.pdf` generati in `fixtures/`) diventa leggibile                                                                                                                                               |
 | C2       | «Trova scadenze e responsabili nei materiali»: il risultato cita i contenuti veri dei file                                                                                                                                               |
 | C3       | Il riassunto di un file ne presenta i punti chiave                                                                                                                                                                                       |
@@ -131,19 +135,27 @@ Precisazioni oneste:
   `homun-routine-tick`, ogni minuto in UTC, che avvia le routine con
   `next_run_at` scaduto). L'occorrenza crea un lavoro supervisionato con le
   fasi del modello: quello è il risultato della routine, come da guida d'uso.
-- **A3**: dopo l'errore la conversazione può restare occupata per la
-  finestra di retry del motore (~40-60 s): la suite aspetta quella finestra
-  prima di dichiarare la conversazione bloccata.
-- **B1 e B6** sono le due strade della richiesta di lavoro nella UI. Il primo
-  messaggio di una conversazione nuova passa da `engine-intake-creation.ts`
-  (classifica → proposta intake): è B1. Un messaggio successivo in una
-  conversazione esistente passa da `conversation.post_message`
-  (`useEngineWorkspace.postMessage` → `postEngineConversationMessage`, con il
-  roster) e viene interpretato dal motore (`models/interpret.py`): è B6, che
-  apre la conversazione come la UI (conversazione + lavoro «Nuova richiesta»).
-  Il passo «richiesta» è una sonda: se viene rifiutato, il rapporto ne registra
-  `code` e `reason` e «grazie» si misura comunque, aspettando la finestra di
-  retry come in A3.
+- **A3**: dopo un errore di trasporto (connessione irraggiungibile) il motore
+  programma tentativi automatici; con la porta d'ingresso un messaggio nuovo
+  non viene più rifiutato per questo (ha la precedenza e annulla i tentativi),
+  ma la suite continua a tollerare la finestra di retry del motore (~40-60 s)
+  per misurare onestamente anche i motori precedenti.
+- **A6** usa uno stub OpenAI-compatibile che risponde sempre vuoto
+  (`fixtures/empty_model.py`, porta libera di loopback, non 11434): la risposta
+  vuota riceve UN promemoria e un nuovo tentativo, poi il turno finisce con
+  `model.empty_response`; il messaggio successivo deve passare al primo colpo.
+- **B1 e B6/B8/B9** sono le due strade della richiesta di lavoro. Il primo
+  messaggio di una conversazione nuova nella UI di oggi passa da
+  `engine-intake-creation.ts` (classifica → proposta intake): è B1. Un messaggio
+  inviato con `conversation.post_message` (`useEngineWorkspace.postMessage` →
+  `postEngineConversationMessage`, con il roster) passa dal **turno di ingresso
+  nativo a strumenti** (`application/sessions/front_door`): il modello risponde
+  con testo oppure chiama `ask_clarification`, `propose_work` o
+  `propose_plan_change`, e il motore valida e decide. B6 lo misura come
+  messaggio successivo (dopo «Cosa sai fare?»), B9 come primo messaggio (la
+  strada che la UI userà nella PR 2), B8 con una richiesta vaga. In B6 il passo
+  «richiesta» è una sonda: se viene rifiutato, il rapporto ne registra `code` e
+  `reason` e «grazie» si misura comunque.
 - **B7** crea la connessione come il modale Modelli (`POST /models/connections`
   con id e nome scelti dalla persona, poi attivazione e verifica) e usa un
   lavoro con un passo adattivo esplicito (`plan.propose` con capability
@@ -200,8 +212,9 @@ e2e_golden/
 ├── reporting.py        # registrazione dei passi e rapporti (md + json)
 ├── defects.py          # fallimento → difetto del motore e punto del codice
 ├── fixtures/materials.py  # i due file di prova (.md e .pdf) generati dal test
-├── test_chat.py        # A1–A4
-├── test_work.py        # B1–B7
+├── fixtures/empty_model.py # stub OpenAI-compatibile che risponde vuoto (A6)
+├── test_chat.py        # A1–A6
+├── test_work.py        # B1–B9
 ├── test_materials.py   # C1–C3
 ├── test_routines.py    # D1–D3
 └── reports/            # rapporti committati (md + json)

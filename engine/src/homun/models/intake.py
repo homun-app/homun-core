@@ -83,6 +83,62 @@ class IntakeBrief(BaseModel):
         return [item for item in value if item in _BRIEF_FIELDS]
 
 
+def invalid_plan_step_assignees(steps, agents, collaborator_name) -> list[str]:
+    """Phase assignees that resolve to nobody: not an active roster collaborator
+    and not the brief's own proposed one. An empty name is the default (the
+    brief's collaborator takes the phase) and is always valid."""
+    roster = {agent['name'].strip().casefold() for agent in agents}
+    collaborator = (collaborator_name or '').strip().casefold()
+    invalid = []
+    for step in steps or []:
+        raw = (step.get('assignee', '') if isinstance(step, dict) else step.assignee)
+        name = str(raw).strip()
+        if name and name.casefold() not in roster and name.casefold() != collaborator:
+            invalid.append(name)
+    return invalid
+
+
+def plan_step_assignee_error(invalid: list[str], agents, collaborator_name) -> str:
+    """The correction a model can act on: who was wrong and who is allowed."""
+    allowed = sorted({agent['name'] for agent in agents} | ({collaborator_name} if collaborator_name else set()))
+    options = ', '.join(f"'{name}'" for name in allowed) or 'none yet'
+    return (f"Plan step assignee not in the active roster: {', '.join(repr(n) for n in invalid)}. "
+            f"Valid assignees: {options}; leave assignee empty for the proposed collaborator. "
+            "People named in the request who are not collaborators belong in the step title or the constraints.")
+
+
+def validate_brief(brief: IntakeBrief, agents: list[dict]) -> IntakeBrief:
+    """The ONE engine-side validation of a brief as the model produced it.
+
+    Used both by ``synthesize`` (first-message intake) and by the front-door
+    native turn (``propose_work`` arguments): registry capability, staffing
+    consistency and length limits. The people named in the phases are checked
+    afterwards, on the EFFECTIVE agreement (``effective_values``), because a
+    staffing-only refinement may legitimately echo old assignments that the
+    engine normalises before persisting. Raises ``ValueError`` or
+    ``pydantic.ValidationError`` — the caller decides whether that becomes a
+    failed proposal or a tool error the model can correct.
+    """
+    if any(len(item) > 500 for item in brief.constraints + brief.missing_information):
+        raise ValueError('Intake list item too long')
+    require_capability(brief.capability)
+    if brief.suggested_agent_id and brief.new_agent:
+        raise ValueError('Choose existing agent or new profile')
+    if brief.suggested_agent_id:
+        # Engine-side validation: the recommended agent must have the required
+        # capability in its structural link, not just a plausible-sounding role.
+        selected = next((a for a in agents if a['id'] == brief.suggested_agent_id), None)
+        if selected is None:
+            raise ValueError('Suggested agent does not exist in active roster')
+        if brief.capability in REGISTRY and REGISTRY[brief.capability].kind == 'executable':
+            matching = [a for a in agents if brief.capability in (a.get('capabilities') or [])]
+            if matching and brief.suggested_agent_id not in [a['id'] for a in matching]:
+                # The model recommended someone without the capability link while
+                # a linked candidate exists: prefer the linked one.
+                brief.suggested_agent_id = matching[0]['id']
+    return brief
+
+
 _MODEL_HIDDEN_KEYS = {"ready", "eligible_materials"}
 """Kept out of the model-facing catalog: readiness signals made small models
 decline executable work before the files were uploaded. IO detail stays: it
@@ -172,26 +228,8 @@ def synthesize(registry, text, agents, *, previous_brief=None, latest_request=No
         except (_ValidationError, ValueError):
             if attempt:
                 raise
-    if any(len(item)>500 for item in brief.constraints + brief.missing_information):
-        raise ValueError('Intake list item too long')
-    require_capability(brief.capability)
-    if brief.suggested_agent_id and brief.new_agent:
-        raise ValueError('Choose existing agent or new profile')
-    if brief.suggested_agent_id:
-        # Engine-side validation: the recommended agent must have the required
-        # capability in its structural link, not just a plausible-sounding role.
-        from homun.domain.capabilities import REGISTRY as _registry
-        selected = next((a for a in agents if a['id'] == brief.suggested_agent_id), None)
-        if selected is None:
-            raise ValueError('Suggested agent does not exist in active roster')
-        linked = selected.get('capabilities') or []
-        if brief.capability in _registry and _registry[brief.capability].kind == 'executable':
-            matching = [a for a in agents if brief.capability in (a.get('capabilities') or [])]
-            if matching and brief.suggested_agent_id not in [a['id'] for a in matching]:
-                # The model recommended someone without the capability link while
-                # a linked candidate exists: prefer the linked one.
-                brief.suggested_agent_id = matching[0]['id']
-    return brief
+    # Same engine rules as the front-door turn: one shared validation.
+    return validate_brief(brief, agents)
 
 
 def classify_request(registry, text, *, pending_brief=None, usage_out=None):

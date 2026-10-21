@@ -11,7 +11,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 from homun.application.sessions.command_types import CommandRequest
-from homun.application.sessions.interpretation import finalize_assistant, prepare_interpretation
+from homun.application.sessions.front_door.turn import finalize_front_door, run_front_door_turn
 from homun.application.sessions.conversation_context import authorized_conversation_work, revalidate_context
 from homun.models.conversation_context import ContextManifest
 from homun.context import EngineContext
@@ -22,6 +22,12 @@ from homun.policy.work import require_conversation_access
 FOLLOWUP_LEASE = timedelta(minutes=5)
 MAX_FOLLOWUP_ATTEMPTS = 3
 FOLLOWUP_BACKOFF_SECONDS = 5
+# Model-output failures are never retried automatically: the person sends the
+# message again (or re-posts it by hand). Transport failures stay retryable.
+NON_RETRYABLE_CODES = frozenset({
+    'permission_denied', 'not_found', 'validation_error', 'version_conflict',
+    'budget_exhausted', 'model.output_invalid', 'model.empty_response',
+})
 
 
 class FollowupLeaseExpiredError(ConflictError):
@@ -48,22 +54,61 @@ def require_followup_authority(store, actor, body):
     require_conversation_access(store, actor, body.payload.get('conversation_id', ''))
 
 
-def conversation_busy(store, body, now, *, recovering=False):
-    conversation_id = body.payload.get('conversation_id')
-    pending = []
+def _conversation_records(store, conversation_id):
+    """Post-message commands linked to one conversation, oldest first."""
     for record in sorted(store.commands.values(), key=lambda item: item.created_at):
-        unfinished = (record.followup_status == 'processing' or
-                      (record.followup_status == 'failed' and record.followup_next_attempt_at is not None))
-        if not unfinished:
+        if record.type != 'conversation.post_message':
             continue
         message = store.messages.get(record.result.get('message_id'))
         linked = message.conversation_id if message else (record.followup_body or {}).get('payload', {}).get('conversation_id')
         if linked == conversation_id:
+            yield record
+
+
+def conversation_busy(store, body, now, *, recovering=False):
+    conversation_id = body.payload.get('conversation_id')
+    pending = []
+    for record in _conversation_records(store, conversation_id):
+        unfinished = (record.followup_status == 'processing' or
+                      (record.followup_status == 'failed' and record.followup_next_attempt_at is not None))
+        if unfinished and record.command_id != body.command_id:
             pending.append(record.command_id)
     # Expiry permits takeover of this command, never overtaking by another one.
     if recovering:
         return bool(pending and pending[0] != body.command_id)
-    return any(command_id != body.command_id for command_id in pending)
+    return bool(pending)
+
+
+def turn_in_flight(store, conversation_id, *, now, exclude):
+    """A turn is TRULY in flight: processing under a still-valid lease."""
+    for record in _conversation_records(store, conversation_id):
+        if record.command_id == exclude or record.followup_status != 'processing':
+            continue
+        if record.followup_expires_at is None or record.followup_expires_at <= now:
+            continue
+        return True
+    return False
+
+
+def cancel_superseded_turns(store, conversation_id, *, now, exclude):
+    """The new message wins: automatic retries of older turns are cancelled.
+
+    A failed record with a pending retry loses its schedule; an expired
+    processing record is fenced out for good. Both stay saved, incomplete and
+    manually retryable (re-posting the same message re-claims it).
+    """
+    for record in _conversation_records(store, conversation_id):
+        if record.command_id == exclude:
+            continue
+        if record.followup_status == 'failed' and record.followup_next_attempt_at is not None:
+            record.followup_next_attempt_at = None
+        elif record.followup_status == 'processing' and (
+                record.followup_expires_at is None or record.followup_expires_at <= now):
+            record.followup_status = 'failed'
+            record.followup_error = record.followup_error or 'followup_superseded'
+            record.followup_token = None
+            record.followup_expires_at = None
+            record.followup_next_attempt_at = None
 
 
 def claim(record, actor, body, now):
@@ -101,9 +146,14 @@ def admit(ctx: EngineContext, actor: Actor, body: CommandRequest) -> Delivery:
                         and record.followup_expires_at > now):
                     raise CommandInProgressError('This message is already being processed; retry after completion',
                                          reason='message.in_progress.same')
-                if conversation_busy(store, body, now):
+                conversation_id = body.payload.get('conversation_id')
+                # A new message is only refused while a turn is REALLY in
+                # flight; pending automatic retries of older messages step
+                # aside (they stay saved and manually retryable).
+                if turn_in_flight(store, conversation_id, now=now, exclude=body.command_id):
                     raise CommandInProgressError('Another message in this conversation is being processed',
                                          reason='message.in_progress.other')
+                cancel_superseded_turns(store, conversation_id, now=now, exclude=body.command_id)
                 # An explicit retry starts a fresh bounded recovery budget.
                 record.followup_attempts = 0
                 token = claim(record, actor, body, now)
@@ -160,7 +210,7 @@ def complete(ctx: EngineContext, delivery: Delivery) -> dict:
             current = ctx.repository.snapshot()
             require_followup_authority(current, delivery.actor, delivery.body)
             model_context = replace(ctx, service=ctx.service.for_store(current))
-        prepared, display = prepare_interpretation(
+        prepared, display = run_front_door_turn(
             model_context, delivery.actor, delivery.body, delivery.result,
         )
         with ctx.repository.locked():
@@ -173,7 +223,7 @@ def complete(ctx: EngineContext, delivery: Delivery) -> dict:
                     raise FollowupLeaseExpiredError('Model attempt lease expired; recovery will retry within its attempt budget')
                 require_followup_authority(store, delivery.actor, delivery.body)
                 fresh = replace(ctx, service=ctx.service.for_store(store))
-                result = finalize_assistant(fresh, delivery.actor, delivery.body, prepared, display)
+                result = finalize_front_door(fresh, delivery.actor, delivery.body, prepared, display)
                 record.result = deepcopy(result)
                 record.followup_status = 'completed'
                 record.followup_next_attempt_at = None
@@ -197,7 +247,7 @@ def fail(ctx: EngineContext, delivery: Delivery, code: str) -> None:
             if record is not None and record.followup_token == delivery.token:
                 record.followup_status = 'failed'
                 record.followup_error = code
-                retryable = code not in {'permission_denied', 'not_found', 'validation_error', 'version_conflict', 'budget_exhausted'}
+                retryable = code not in NON_RETRYABLE_CODES
                 record.followup_next_attempt_at = (
                     utc_now() + timedelta(seconds=FOLLOWUP_BACKOFF_SECONDS * 2 ** (record.followup_attempts - 1))
                     if retryable and record.followup_attempts < MAX_FOLLOWUP_ATTEMPTS else None

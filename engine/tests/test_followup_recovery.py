@@ -70,13 +70,13 @@ def test_competing_recovery_claims_and_superseded_token(context):
 def test_exhaustion_backoff_and_explicit_same_command_retry(context, monkeypatch):
     from homun.application.agent.runs.followup_recovery import recover_pending
     from homun.application.sessions.command_delivery import MAX_FOLLOWUP_ATTEMPTS
-    original = context.models.interpret
+    original = context.models.complete_tools
     delivery = pending(context)
     calls = []
     def offline(*args, **kwargs):
         calls.append(True)
         raise RuntimeError('offline')
-    monkeypatch.setattr(context.models, 'interpret', offline)
+    monkeypatch.setattr(context.models, 'complete_tools', offline)
     assert recover_pending(context)['failed'] == 1
     assert recover_pending(context)['failed'] == 0  # backoff
     with context.repository.transaction() as store:
@@ -89,7 +89,7 @@ def test_exhaustion_backoff_and_explicit_same_command_retry(context, monkeypatch
     assert record.followup_error == 'provider_unavailable'
     assert recover_pending(context)['failed'] == 0
     assert len(calls) == 2  # initial attempt was interrupted before model execution
-    monkeypatch.setattr(context.models, 'interpret', original)
+    monkeypatch.setattr(context.models, 'complete_tools', original)
     retry = admit(context, delivery.actor, delivery.body)
     assert complete(context, retry)['assistant_message_id']
     assert len(context.repository.load().messages) == 2
@@ -102,12 +102,12 @@ def test_authority_revocation_during_model_generation_blocks_finalization(contex
         service = context.service.for_store(store)
         project = service.apply(delivery.actor, 'project', 'project.create', {'name': 'P'})['project_id']
         store.conversations[delivery.body.payload['conversation_id']].project_id = project
-    original = context.models.interpret
+    original = context.models.complete_tools
     def revoke(*args, **kwargs):
         with context.repository.transaction() as store:
             store.grants.clear()
         return original(*args, **kwargs)
-    monkeypatch.setattr(context.models, 'interpret', revoke)
+    monkeypatch.setattr(context.models, 'complete_tools', revoke)
     assert recover_pending(context)['failed'] == 1
     saved = context.repository.load()
     assert len(saved.messages) == 1
@@ -152,7 +152,7 @@ def test_tampered_recovery_context_never_reaches_provider(context, monkeypatch):
         store.commands['message'].followup_body['payload']['text'] = 'changed'
     def unexpected(*args, **kwargs):
         pytest.fail('Invalid recovery context reached model')
-    monkeypatch.setattr(context.models, 'interpret', unexpected)
+    monkeypatch.setattr(context.models, 'complete_tools', unexpected)
     recover_pending(context)
     assert context.repository.load().commands['message'].followup_error == 'followup_context_invalid'
 
@@ -185,20 +185,44 @@ def test_crashed_final_attempt_becomes_terminal_without_provider(context):
     assert record.followup_token is None
 
 
-def test_expired_and_backoff_followups_keep_conversation_ownership(context):
-    from homun.application.sessions.command_delivery import fail
+def test_newer_message_supersedes_an_expired_followup(context):
+    """A new message is never refused because the engine is retrying an older one:
+    an expired lease is not a turn in flight, the newer message wins and the
+    older one stays saved, incomplete and manually retryable."""
     from homun.application.agent.runs.followup_recovery import claim_next
-    from homun.domain.errors import CommandInProgressError
     expired = pending(context)
     newer = expired.body.model_copy(update={'command_id': 'newer'})
-    with pytest.raises(CommandInProgressError):
-        admit(context, expired.actor, newer)
+    accepted = admit(context, expired.actor, newer)
+    older = context.repository.load().commands['message']
+    assert older.followup_status == 'failed'
+    assert older.followup_error == 'followup_superseded'
+    assert older.followup_next_attempt_at is None, 'no automatic retry of the superseded turn'
+    assert claim_next(context) is None, 'recovery has nothing to pick up'
+    assert complete(context, accepted)['assistant_message_id']
+    saved = context.repository.load()
+    assert len(saved.messages) == 3  # older user message kept, newer one answered
+    # The person can still re-post the older message by hand.
+    assert complete(context, admit(context, expired.actor, expired.body))['assistant_message_id']
+    assert len(context.repository.load().messages) == 4
+
+
+def test_newer_message_cancels_the_backoff_of_a_failed_followup(context):
+    from homun.application.sessions.command_delivery import fail
+    from homun.application.agent.runs.followup_recovery import claim_next
+    expired = pending(context)
     recovered = claim_next(context)
     assert recovered is not None
     fail(context, recovered, 'provider_unavailable')
-    with pytest.raises(CommandInProgressError):
-        admit(context, expired.actor, newer)
-    assert len(context.repository.load().messages) == 1
+    older = context.repository.load().commands['message']
+    assert older.followup_next_attempt_at is not None, 'a transport failure is scheduled for retry'
+    newer = expired.body.model_copy(update={'command_id': 'newer'})
+    accepted = admit(context, expired.actor, newer)
+    older = context.repository.load().commands['message']
+    assert older.followup_status == 'failed'
+    assert older.followup_error == 'provider_unavailable'
+    assert older.followup_next_attempt_at is None, 'the newer message cancels the automatic retry'
+    assert claim_next(context) is None
+    assert complete(context, accepted)['assistant_message_id']
 
 
 def test_expired_current_attempt_schedules_recovery_instead_of_terminal_conflict(context):

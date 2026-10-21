@@ -18,6 +18,9 @@
     "policy.entity_not_found": { "kind": "policy.entity.grant" },
     "agent_run.chat_failed": { "code": "provider_unavailable" },
     "agent_run.chat_blocked": { "code": "version_conflict" },
-    "plan.revise.insert_after_unknown": { "step_id": "step-3" }
+    "plan.revise.insert_after_unknown": { "step_id": "step-3" },
+    "front_door.work_proposed": { "title": "Nota operativa rinnovo Rossi" },
+    "front_door.work_proposed_missing": { "items": "scadenza; perimetro" },
+    "message.too_long": { "max": 12000 }
   }
 }
