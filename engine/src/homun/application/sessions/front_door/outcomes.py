@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from homun.application.work.intake_brief import effective_values
+from homun.application.work.intake_policy import revisable
 from homun.domain.models import Work
 from homun.domain.patch import WorkPatchChange, build_preview
 from homun.domain.states import WorkStatus
@@ -34,9 +35,11 @@ class FrontDoorOutcome:
     plan_preview: dict[str, Any] | None = None
 
 
-def work_accepts_proposal(work: Work | None) -> str | None:
-    """Engine-side gate mirroring the intake ``idle`` rule, as an error message."""
+def work_accepts_proposal(work: Work | None, *, anchor: dict | None = None) -> str | None:
+    """Engine-side gate mirroring the intake ``idle``/``revisable`` rules, as an error message."""
     if work is None:
+        return None
+    if anchor is not None and revisable(work):
         return None
     if work.status != WorkStatus.DRAFT or work.current_plan_revision or work.current_artifact_version:
         return ('This work already has an agreement or has started: propose_work needs an idle draft. '
@@ -67,8 +70,16 @@ def _blank_non_collaborator_assignees(brief, agents) -> None:
             step.assignee = ''
 
 
+PATCH_FIELDS = ('objective', 'owner_id', 'step_assignee')
+
+
 def plan_change_preview(work, plan, arguments, *, roster_ids):
     """Reuse the patch preview builder; issues come back as an error message."""
+    unsupported = sorted({change.field for change in arguments.changes} - set(PATCH_FIELDS))
+    if unsupported:
+        return None, ('propose_plan_change only supports these fields: ' + ', '.join(PATCH_FIELDS)
+                      + f'. {", ".join(unsupported)} belong to the work agreement:'
+                        ' revise it with propose_work (changed_fields) instead.')
     changes = [WorkPatchChange(field=change.field, to_value=change.to_value, step_id=change.step_id)
                for change in arguments.changes]
     if not changes:
@@ -94,7 +105,7 @@ def outcome_from_call(name: str, arguments, *, work, plan, agents, anchor, roste
         return FrontDoorOutcome(kind=CLARIFICATION, questions=questions), None
 
     if name == tools.PROPOSE_WORK:
-        if blocked := work_accepts_proposal(work):
+        if blocked := work_accepts_proposal(work, anchor=anchor):
             return None, blocked
         try:
             # Su una revisione i campi non detti arrivano dall'accordo

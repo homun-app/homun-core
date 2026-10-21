@@ -7,7 +7,7 @@ calls a model: the brief is what the model proposed and the engine validated.
 from copy import deepcopy
 from homun.application.work.price_comparisons import cached, save
 from homun.application.work.intake_policy import (PROPOSAL_TYPE, active_agents, anchor_brief, authority, digest, idle,
-                                                  lookup, permission_snapshot, proposals_for, public)
+                                                  lookup, permission_snapshot, proposals_for, public, revisable)
 from homun.application.work.intake_brief import effective_values
 from homun.domain.errors import ConflictError, ValidationError
 from homun.domain.models import utc_now
@@ -61,7 +61,12 @@ def commit_front_door_proposal(ctx, actor, *, command_id, conversation_id, work_
                 'error_code': 'intake_interrupted', '_submitted_text': text,
                 '_permissions': permission_snapshot(store, actor, work)}
     try:
-        idle(work)
+        if previous_brief is None:
+            idle(work)
+        elif not revisable(work):
+            # La revisione di un accordo con anchor passa finché il lavoro non
+            # parte davvero: il piano pubblicato dalla sua conferma non è un avvio.
+            raise ConflictError('The agreement can only be revised before the work starts')
         # Defence in depth: the turn already validated the brief; the same
         # shared rules run again against fresh state before anything persists.
         from homun.models.intake import validate_brief
@@ -102,7 +107,13 @@ def confirm(ctx,actor,work_id,proposal_id,body):
                 raise ConflictError('A newer intake proposal supersedes this confirmation')
             if record:
                 return deepcopy(public(proposal))
-            idle(work)
+            if proposal.get('changed_fields'):
+                # Revisione di un accordo con anchor: ammessa finché il lavoro
+                # non parte davvero (il piano della conferma non è un avvio).
+                if not revisable(work):
+                    raise ConflictError('The agreement can only be revised before the work starts')
+            else:
+                idle(work)
             if proposal['status']!='pending_confirmation' or work.version!=proposal['expected_version']:
                 raise ConflictError('Proposal or work changed; propose again')
             service=ctx.service.for_store(store)

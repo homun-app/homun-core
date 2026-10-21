@@ -350,6 +350,34 @@ def test_plan_change_with_plan_builds_preview(env):
     assert work['objective'] != 'Nuovo obiettivo condiviso'
 
 
+def test_plan_change_on_agreement_field_is_corrected_not_crashed(env):
+    """Un cambio su un campo dell'accordo (es. constraints) non è un 500:
+    il motore risponde al modello con l'errore da correggere."""
+    proposed = env.client.post('/v1/workspaces/ws_local/commands', headers=env.headers,
+                               json={'command_id': 'plan', 'type': 'plan.propose',
+                                     'payload': {'work_id': env.work_id, 'expected_version': 1,
+                                                 'steps': [{'title': 'Nota', 'capability': 'general',
+                                                            'assignee_id': 'person_fabio'}]}})
+    assert proposed.status_code == 200, proposed.text
+    version = env.client.get(f'/v1/workspaces/ws_local/works/{env.work_id}',
+                             headers=env.headers).json()['work']['version']
+    accepted = env.client.post('/v1/workspaces/ws_local/commands', headers=env.headers,
+                               json={'command_id': 'plan_accept', 'type': 'plan.accept',
+                                     'payload': {'work_id': env.work_id, 'expected_version': version}})
+    assert accepted.status_code == 200, accepted.text
+    script(env.ctx,
+           tool_call('propose_plan_change',
+                     {'changes': [{'field': 'constraints', 'to_value': 'Scadenza: 15 dicembre'}]},
+                     call_id='call_bad'),
+           text_message('Per la scadenza aggiorno l\'accordo: dimmi pure.'))
+    response = post_message(env, 'Sposta la scadenza al 15 dicembre.')
+    assert response.status_code == 200, response.text
+    assert response.json()['result']['assistant_text'].startswith('Per la scadenza')
+    tool_results = [m for m in env.ctx.models._fake.native_calls[1] if m['role'] == 'tool']
+    correction = tool_results[0]['content'] if tool_results else ''
+    assert 'propose_work' in correction and 'constraints' in correction, correction
+
+
 # -- revisione di un accordo confermato ---------------------------------------
 
 
@@ -438,6 +466,35 @@ def test_confirmed_agreement_revision_message_creates_change_proposal(env):
     assert work['status'] == 'draft'
     assert not work['current_plan_revision']
     assert not work['current_artifact_version']
+
+
+def test_revision_of_phased_agreement_after_confirm_publishes_plan(env):
+    """L'accordo confermato pubblicava le fasi (piano accettato, lavoro ready):
+    la revisione via propose_work resta possibile — il piano della conferma
+    non è un avvio — e la sua conferma ripubblica il piano aggiornato."""
+    script(env.ctx, tool_call('propose_work', {
+        **VALID_WORK, 'constraints': ['Consegna entro il 30 novembre'],
+        'plan_steps': [{'title': 'Raccolta punti', 'capability': 'general'}]}))
+    first = post_message(env, 'Prepara una nota operativa con una fase di raccolta.')
+    assert first.status_code == 200, first.text
+    original = first.json()['result']['intake_proposal']
+    confirm_proposal(env, original, 'confirm_phased')
+    work = env.client.get(f'/v1/workspaces/ws_local/works/{env.work_id}', headers=env.headers).json()['work']
+    assert work['current_plan_revision'] == 1, work
+
+    script(env.ctx, tool_call('propose_work', {
+        'constraints': ['Consegna entro il 15 dicembre'],
+        'changed_fields': ['constraints']}))
+    revised = post_message(env, 'Sposta la consegna al 15 dicembre.', command_id='msg_phased')
+    assert revised.status_code == 200, revised.text
+    proposal = revised.json()['result']['intake_proposal']
+    assert proposal['status'] == 'pending_confirmation', proposal
+
+    confirmed = confirm_proposal(env, proposal, 'confirm_phased_rev')
+    assert confirmed['status'] == 'confirmed'
+    work = env.client.get(f'/v1/workspaces/ws_local/works/{env.work_id}', headers=env.headers).json()['work']
+    assert work['current_plan_revision'] >= 1
+    assert not work['current_artifact_version'], 'nessun risultato prodotto dalla revisione'
 
 
 def test_model_sees_changed_fields_in_the_tool_catalog(env):

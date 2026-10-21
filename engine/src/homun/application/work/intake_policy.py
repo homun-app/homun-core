@@ -45,6 +45,15 @@ def idle(work):
     if work.status != WorkStatus.DRAFT or work.current_plan_revision or work.current_artifact_version:
         raise ConflictError('Intake requires an idle draft without a plan')
 
+def revisable(work):
+    """An anchored agreement can be revised until the work really starts.
+
+    The plan an agreement's own confirm publishes is not a start: revising the
+    agreement re-publishes it. This is the one rule both front-door gates
+    (turn-side error message, commit-side admission) share.
+    """
+    return work.status in (WorkStatus.DRAFT, WorkStatus.READY) and not work.current_artifact_version
+
 def permission_snapshot(store, actor, work):
     from homun.policy.work import work_project_ids
     projects=work_project_ids(store,work)
