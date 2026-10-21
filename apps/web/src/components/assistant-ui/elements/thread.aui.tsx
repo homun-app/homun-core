@@ -90,6 +90,8 @@ export type ThreadComponents = {
   Welcome?: ComponentType | undefined;
   /** Il composer di default è integrato; Homun lo sostituisce con `StudioChatInput`. */
   Composer?: ComponentType<{ autoFocus: boolean }> | undefined;
+  /** Contenuto dopo il messaggio assistente (es. la scheda dell'esito del turno). */
+  AssistantMessageExtra?: ComponentType | undefined;
   ToolFallback?: ToolCallMessagePartComponent | undefined;
   ToolGroup?: ComponentType<PropsWithChildren<{ group: ThreadGroupPart }>> | undefined;
   ReasoningGroup?: ComponentType<PropsWithChildren<{ group: ThreadGroupPart }>> | undefined;
@@ -566,6 +568,7 @@ const AssistantMessage: FC = () => {
     ToolGroup,
     ReasoningGroup,
     TaskGroup: TaskGroupComponent,
+    AssistantMessageExtra,
   } = useContext(ThreadComponentsContext);
   const groupBy = TaskGroupComponent ? taskAwareGroupBy : messageGroupBy;
 
@@ -584,8 +587,7 @@ const AssistantMessage: FC = () => {
         className="text-foreground px-2 leading-relaxed wrap-break-word"
       >
         <MessagePrimitive.GroupedParts groupBy={groupBy}>
-          {({ part, children }) => {
-            switch (part.type) {
+          {({ part, children }) => {            switch (part.type) {
               case "group-chainOfThought":
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
               case "group-task":
@@ -654,6 +656,12 @@ const AssistantMessage: FC = () => {
         </MessagePrimitive.GroupedParts>
         <MessageError />
       </div>
+
+      {AssistantMessageExtra ? (
+        <div data-slot="aui_assistant-message-extra" className="empty:hidden px-2 pb-1">
+          <AssistantMessageExtra />
+        </div>
+      ) : null}
 
       <div
         data-slot="aui_assistant-message-footer"

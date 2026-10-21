@@ -38,11 +38,21 @@ export type AgentWait = {
   startedAt: number;
 };
 
+/** Esito del turno di ingresso che ha prodotto un messaggio del motore. */
+export type FrontDoorPayload = {
+  kind: "text" | "clarification" | "work_proposal" | "plan_change" | string;
+  questions?: Array<{ question: string; choices: string[]; multi_select?: boolean }>;
+};
+
 export type ConversationMessage = {
   engineMessageId?: string;
   sender?: string;
   who: "you" | "agent";
   text: string;
+  /** Porta d'ingresso: tipo di esito (e domande di chiarimento) del turno. */
+  frontDoor?: FrontDoorPayload;
+  /** Porta d'ingresso: id della proposta di accordo nata da questo messaggio. */
+  intakeProposalId?: string;
   /** F3.5: in-flight / incomplete assistant turn (not yet final). */
   partial?: boolean;
   /** Ragionamento (think) del run che ha prodotto il turno — visibile nello storico. */

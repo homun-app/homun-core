@@ -24,9 +24,11 @@ class FakeProvider:
         self.last_stream_result: CompletionResult | None = None
         # Native front-door support: scripted responses consumed in order, and
         # a log of the message lists received (tests assert the correction
-        # rounds and the prompt language here).
+        # rounds and the prompt language here). The tool catalog of each turn
+        # is logged too: what the model could see.
         self.native_script: list[Any] = []
         self.native_calls: list[list[dict]] = []
+        self.native_tools: list[list[dict]] = []
 
     def verify_connection(self) -> VerifyResult:
         return VerifyResult(
@@ -58,6 +60,7 @@ class FakeProvider:
         """
         from homun.models.native_turn import NativeMessage, NativeResult, ToolCall
         self.native_calls.append([message.model_dump(mode="json") for message in messages])
+        self.native_tools.append([tool.model_dump(mode="json") for tool in (tools or [])])
         model = model_id or self.default_model
         if self.native_script:
             item = self.native_script.pop(0)

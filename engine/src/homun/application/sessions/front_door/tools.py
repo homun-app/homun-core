@@ -178,6 +178,8 @@ PROPOSE_WORK_SCHEMA: dict[str, Any] = {
         'suggested_agent_id': {'type': 'string'},
         'new_agent': {'type': 'object'},
         'rationale': {'type': 'string'},
+        'changed_fields': {'type': 'array', 'items': {'type': 'string', 'enum': [
+            'title', 'objective', 'output', 'constraints', 'capability', 'staffing', 'plan_steps']}},
         'plan_steps': {'type': 'array', 'items': {
             'type': 'object',
             'properties': {'title': {'type': 'string'}, 'capability': {'type': 'string'},

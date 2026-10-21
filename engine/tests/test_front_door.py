@@ -354,6 +354,93 @@ def test_plan_change_with_plan_builds_preview(env):
     assert work['objective'] != 'Nuovo obiettivo condiviso'
 
 
+# -- revisione di un accordo confermato ---------------------------------------
+
+
+def confirm_proposal(env: Env, proposal: dict, command_id: str = 'confirm') -> dict:
+    response = env.client.post(
+        f'/v1/workspaces/ws_local/works/{env.work_id}/intake/{proposal["id"]}/confirm',
+        headers=env.headers,
+        json={'command_id': command_id, 'digest': proposal['digest'],
+              'expected_version': proposal['expected_version'], 'create_agent': False},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_confirmed_agreement_revision_message_creates_change_proposal(env):
+    """La persona chiede in chat di cambiare un accordo già confermato: il turno
+    di ingresso produce una proposta di modifica con il diff dell'accordo
+    (changed_fields / brief_changes), da confermare come la prima."""
+    script(env.ctx, tool_call('propose_work', {
+        **VALID_WORK, 'constraints': ['Consegna entro il 30 novembre']}))
+    first = post_message(env, 'Prepara una nota operativa: rinnovo contratto Rossi entro il 30 novembre.')
+    assert first.status_code == 200, first.text
+    original = first.json()['result']['intake_proposal']
+    confirm_proposal(env, original, 'confirm_original')
+
+    script(env.ctx, tool_call('propose_work', {
+        **VALID_WORK, 'constraints': ['Consegna entro il 15 dicembre'],
+        'changed_fields': ['constraints']}))
+    revised = post_message(env, 'Il cliente ha anticipato: chiudi entro il 15 dicembre invece del 30.',
+                           command_id='msg_rev')
+    assert revised.status_code == 200, revised.text
+    proposal = revised.json()['result']['intake_proposal']
+    assert proposal['status'] == 'pending_confirmation', proposal
+    # Il diff è calcolato dal motore sull'accordo esistente (anchor).
+    constraints_change = next((c for c in proposal['changes'] if c['field'] == 'constraints'), None)
+    assert constraints_change is not None, proposal['changes']
+    assert constraints_change['from_value'] == ['Consegna entro il 30 novembre']
+    assert constraints_change['to_value'] == ['Consegna entro il 15 dicembre']
+    # I campi non dichiarati restano quelli dell'accordo confermato.
+    assert proposal['title'] == original['title']
+    assert proposal['objective'] == original['objective']
+
+    confirmed = confirm_proposal(env, proposal, 'confirm_revision')
+    assert confirmed['status'] == 'confirmed'
+    items = proposals(env)
+    latest = items[-1]
+    assert latest['status'] == 'confirmed'
+    assert latest['constraints'] == ['Consegna entro il 15 dicembre'], latest
+    # L'accordo riflette la modifica; il lavoro non è partito da solo.
+    work = env.client.get(f'/v1/workspaces/ws_local/works/{env.work_id}', headers=env.headers).json()['work']
+    assert work['status'] == 'draft'
+    assert not work['current_plan_revision']
+    assert not work['current_artifact_version']
+
+
+def test_model_sees_changed_fields_in_the_tool_catalog(env):
+    """Senza changed_fields nello schema e nella descrizione, il modello non può
+    sapere che propose_work revisiona un accordo esistente."""
+    script(env.ctx, text_message('Ok.'))
+    response = post_message(env, 'Cosa sai fare?')
+    assert response.status_code == 200, response.text
+    calls = env.ctx.models._fake.native_calls
+    system = next(m for m in calls[0] if m['role'] == 'system')
+    assert 'changed_fields' in system['content'], 'lo schema o la descrizione devono dichiarare changed_fields'
+    tool_catalog = env.ctx.models._fake.native_tools[0] if env.ctx.models._fake.native_tools else []
+    propose = next((t for t in tool_catalog if t['name'] == 'propose_work'), None)
+    assert propose is not None and 'changed_fields' in propose['input_schema']['properties'], \
+        'lo schema nativo di propose_work deve esporre changed_fields'
+
+
+def test_transcript_exposes_front_door_payloads(env):
+    """La trascrizione espone per messaggio l'esito del turno di ingresso
+    (front_door e intake_proposal): la UI attacha la card al messaggio che
+    l'ha prodotta, anche dopo un ricaricamento."""
+    script(env.ctx, tool_call('propose_work', dict(VALID_WORK)))
+    response = post_message(env, 'Prepara una nota operativa.')
+    assert response.status_code == 200, response.text
+    proposal = response.json()['result']['intake_proposal']
+    items = env.client.get(
+        f'/v1/workspaces/ws_local/conversations/{env.conversation_id}/messages',
+        headers=env.headers).json()['items']
+    assistant = next(m for m in items if m['author_id'] == 'homun_engine')
+    assert assistant['front_door']['kind'] == 'work_proposal'
+    assert assistant['intake_proposal']['id'] == proposal['id']
+    assert assistant['intake_proposal']['status'] == 'pending_confirmation'
+
+
 # -- ripiego vincolato -------------------------------------------------------
 
 

@@ -3,7 +3,12 @@
  * Explicit source tagging — never treat engine rows as IndexedDB simulation data.
  */
 
-import type { Phase, Work, ConversationMessage } from "../components/builder/conversation-types.ts";
+import type {
+  FrontDoorPayload,
+  Phase,
+  Work,
+  ConversationMessage,
+} from "../components/builder/conversation-types.ts";
 import {
   defaultLocalActor,
   postEngineCommand,
@@ -427,6 +432,8 @@ export function assistantFromPosted(posted: {
   patchProposal: WorkPatchProposal | null;
   reasoning?: string;
   tools?: Array<{ tool: string; message: string }>;
+  frontDoor?: FrontDoorPayload;
+  intakeProposalId?: string;
 }): ConversationMessage {
   return {
     who: "agent",
@@ -435,6 +442,8 @@ export function assistantFromPosted(posted: {
     text: posted.assistantText,
     ...(posted.reasoning ? { reasoning: posted.reasoning } : {}),
     ...(posted.tools && posted.tools.length > 0 ? { tools: posted.tools } : {}),
+    ...(posted.frontDoor ? { frontDoor: posted.frontDoor } : {}),
+    ...(posted.intakeProposalId ? { intakeProposalId: posted.intakeProposalId } : {}),
     ...(posted.patchProposal
       ? {
           patchProposal: {

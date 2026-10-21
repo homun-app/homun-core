@@ -4,7 +4,10 @@ import { DEFAULT_WORKSPACE_ID, defaultLocalActor, domainFetch } from "./engine-d
 import { assistantFromPosted } from "./conversation-engine-bridge.ts";
 import { parseWorkPatchProposal } from "./interpretation-display.ts";
 import { HomunClientError, homunErrorFromHttp } from "./homun-errors.ts";
-import type { ConversationMessage } from "../components/builder/conversation-types.ts";
+import type {
+  ConversationMessage,
+  FrontDoorPayload,
+} from "../components/builder/conversation-types.ts";
 
 export async function loadEngineTranscript(
   conversationId: string,
@@ -51,6 +54,8 @@ export async function loadEngineTranscript(
             assistantMessageId: item.id,
             assistantText: item.text,
             patchProposal: parseWorkPatchProposal(item.patch_proposal),
+            frontDoor: parseFrontDoorPayload(item.front_door),
+            intakeProposalId: parseIntakeProposalId(item.intake_proposal),
             reasoning: typeof item.reasoning === "string" ? item.reasoning : undefined,
             tools: Array.isArray(item.tools)
               ? item.tools
@@ -90,6 +95,38 @@ export async function loadEngineTranscript(
     "validation_error",
     "Storico troppo esteso: caricamento interrotto senza mostrare risultati parziali",
   );
+}
+
+/** Esito del turno di ingresso viaggiante con la riga; forma sconosciuta → assente. */
+export function parseFrontDoorPayload(raw: unknown): FrontDoorPayload | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const kind = (raw as { kind?: unknown }).kind;
+  if (typeof kind !== "string" || !kind) return undefined;
+  const payload: FrontDoorPayload = { kind };
+  const questions = (raw as { questions?: unknown }).questions;
+  if (Array.isArray(questions)) {
+    const parsed = questions
+      .filter(
+        (q): q is { question: string; choices: string[]; multi_select?: boolean } =>
+          typeof q === "object" &&
+          q !== null &&
+          typeof (q as { question?: unknown }).question === "string",
+      )
+      .map((q) => ({
+        question: q.question,
+        choices: Array.isArray(q.choices) ? q.choices.filter((c): c is string => typeof c === "string") : [],
+        ...(q.multi_select === true ? { multi_select: true } : {}),
+      }));
+    if (parsed.length > 0) payload.questions = parsed;
+  }
+  return payload;
+}
+
+/** Id della proposta di accordo nata dal turno; solo l'id serve alla card. */
+export function parseIntakeProposalId(raw: unknown): string | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const id = (raw as { id?: unknown }).id;
+  return typeof id === "string" && id ? id : undefined;
 }
 
 export type TranscriptAnnotation = Pick<
