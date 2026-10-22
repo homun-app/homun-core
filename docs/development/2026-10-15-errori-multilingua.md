@@ -161,9 +161,12 @@ infrastruttura ICU ora.
   esplicita per-request, campo `language` di intake, vince sulla catena perché
   serve al routing). La lingua della conversazione è quella che la persona
   scrive: il turno di ingresso la rileva senza chiamate extra — il modello la
-  riporta nell'argomento comune `language` di ogni strumento — e il motore la
-  ricorda sulla conversazione; la preferenza esplicita della persona vince
-  sempre sulla rilevazione.
+  riporta nell'argomento comune `language` di ogni strumento, e al primo
+  turno, prima che esista qualsiasi storia, la rileva il motore stesso dalle
+  parole del messaggio (`homun.i18n.detect_language`: deterministico, parole
+  grammaticali) così che già il primo prompt parli la lingua del messaggio —
+  e il motore la ricorda sulla conversazione; la preferenza esplicita della
+  persona vince sempre sulla rilevazione.
 - **Persistenza**: chiavi nella tabella `meta` dello storage (`storage/schema.py`
   — key/value già libere, **schema v1 invariato**, nessuna migrazione):
   `language` per il workspace, `language:person:<person_id>` per ogni persona,
