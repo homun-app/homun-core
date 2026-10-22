@@ -95,6 +95,42 @@ def test_workspace_default_still_applies_without_detection(env):
     assert result['assistant_text'] == _proposal_text('it'), result['assistant_text']
 
 
+def test_first_turn_prompt_follows_the_message_language(env):
+    """Prima che esista qualsiasi preferenza, il prompt parla la lingua del
+    messaggio (rilevazione deterministica): i modelli piccoli decidono molto
+    meglio con istruzioni nella lingua che devono interpretare."""
+    script(env.ctx, text_message('Ciao! Sono Homun.'))
+    response = post_message(env, 'Cosa sai fare per aiutarmi nel lavoro di ogni giorno?')
+    assert response.status_code == 200, response.text
+    system = next(m for m in env.ctx.models._fake.native_calls[0] if m['role'] == 'system')
+    assert 'Sei Homun' in system['content'], 'il prompt deve essere in italiano'
+    assert 'work assistant' not in system['content'].lower()
+
+
+def test_english_message_gets_english_prompt_without_preferences(env):
+    script(env.ctx, text_message('Hello! I am Homun.'))
+    response = post_message(env, 'What can you do to help me with my everyday work?')
+    assert response.status_code == 200, response.text
+    system = next(m for m in env.ctx.models._fake.native_calls[0] if m['role'] == 'system')
+    assert 'work assistant' in system['content'].lower()
+    assert 'Sei Homun' not in system['content']
+
+
+def test_engine_texts_follow_the_message_when_the_model_reports_nothing(env):
+    """Il modello non riporta la lingua: i testi seguono comunque quella del
+    messaggio (rilevazione del motore), e la conversazione la ricorda per i
+    turni successivi."""
+    from homun.application.ops.preferences import conversation_language
+
+    script(env.ctx, tool_call('propose_work', dict(VALID_WORK)))
+    response = post_message(env, 'Prepara una relazione sui fornitori.')
+    assert response.status_code == 200, response.text
+    result = response.json()['result']
+    assert result['front_door']['language'] == 'it', result['front_door']
+    assert result['assistant_text'] == _proposal_text('it'), result['assistant_text']
+    assert conversation_language(env.ctx, env.conversation_id) == 'it'
+
+
 def test_structured_fallback_reports_the_language_too(env, monkeypatch):
     """Anche il ripiego vincolato riporta la lingua: campo ``language`` della
     decisione strutturata, proiettato negli argomenti della chiamata."""

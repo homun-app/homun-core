@@ -11,21 +11,12 @@ from homun.domain.ids import new_id
 from homun.models.types import ChatMessage, CompletionResult, UsageEntry, VerifyResult
 
 _MENTION = re.compile(r"@([^\s@]+)")
-# The words of the golden/browser requests are unambiguous: enough for the
-# fake to report the person's language like a real model does.
-_ITALIAN_MARKERS = re.compile(
-    r"\b(prepara|nota|relazion|ricerca|grazie|ciao|cosa|sposta|cambia|consegna|scadenza|entro|crea|chiedi)\b"
-)
-_ENGLISH_MARKERS = re.compile(r"\b(prepare|note|report|thanks|hello|what|move|change|deadline|write|create)\b")
-
-
 def _language_of(text: str) -> str:
-    lowered = text.lower()
-    if _ITALIAN_MARKERS.search(lowered):
-        return "it"
-    if _ENGLISH_MARKERS.search(lowered):
-        return "en"
-    return "en"
+    """The person's language like a real model reports it: the shared
+    deterministic detection, English when the text carries no signal."""
+    from homun.i18n import detect_language
+
+    return detect_language(text) or "en"
 
 
 class FakeProvider:

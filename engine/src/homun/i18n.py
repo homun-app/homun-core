@@ -26,6 +26,41 @@ DEFAULT_LANGUAGE = "en"
 _CONTRACT_DIR = Path("contracts") / "i18n"
 _PLACEHOLDER = re.compile(r"\{(\w+)(?:@(\w+))?\}")
 
+# Function words only, high signal per language: they carry no topic, so their
+# count says which language a sentence is written in, not what it is about.
+_LANGUAGE_MARKERS = {
+    "it": ("il", "lo", "la", "i", "gli", "le", "un", "una", "di", "del", "della", "che",
+           "per", "con", "non", "sono", "sei", "cosa", "come", "quando", "grazie", "ciao",
+           "prepara", "crea", "scrivi", "vorrei", "entro", "fino", "allego", "buongiorno"),
+    "en": ("the", "a", "an", "of", "to", "in", "on", "for", "with", "is", "are", "do",
+           "does", "what", "how", "when", "please", "thanks", "hello", "prepare",
+           "create", "write", "would", "until", "attach", "review"),
+}
+
+
+def detect_language(text: str) -> str | None:
+    """The language a piece of text is written in ('it'/'en'), from function
+    words; None when the text carries no usable signal.
+
+    Deterministic and free — it picks the prompt language of a first turn
+    before any preference or conversation history exists, so prompts and
+    engine texts can follow the language the person actually writes in.
+    """
+    counts = {language: 0 for language in _LANGUAGE_MARKERS}
+    words = re.findall(r"[a-zA-ZàèéìòóùÀÈÉÌÒÓÙ']+", text or "")
+    for word in words:
+        lowered = word.lower()
+        for language, markers in _LANGUAGE_MARKERS.items():
+            if lowered in markers:
+                counts[language] += 1
+    best = max(counts, key=counts.get)
+    top = counts[best]
+    if top == 0:
+        return None
+    if counts["it"] == counts["en"]:
+        return None
+    return best if top >= 2 or len(words) <= 3 else None
+
 
 class CatalogUnavailableError(RuntimeError):
     """The shared error catalog could not be located or read."""

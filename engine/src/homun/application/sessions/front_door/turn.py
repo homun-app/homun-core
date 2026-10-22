@@ -257,13 +257,19 @@ def run_front_door_turn(ctx, actor: Actor, body: CommandRequest, result: dict[st
         memory=getattr(ctx, 'memory', None),
     )
     roster = default_roster(store, actor, body.payload)
-    from homun.application.ops.preferences import person_language, resolve_language
+    from homun.application.ops.preferences import conversation_language, person_language, workspace_language
     from homun.application.work.intake_policy import active_agents, anchor_brief, proposals_for
-    # Prompts follow the documented chain: person → conversation (detected) →
-    # workspace → en. The texts generated AFTER the turn add this turn's fresh
-    # detection (see below): the person's explicit preference always wins.
+    from homun.i18n import DEFAULT_LANGUAGE, detect_language
+    # Prompts follow the person's language: preference → conversation (already
+    # detected) → the language THIS message is written in → workspace → en.
+    # Small models decide far better when instructions speak the language of
+    # the message they must interpret (measured on the golden local model).
     person_pref = person_language(ctx, actor.id)
-    prompt_language = person_pref or resolve_language(ctx, None, conversation_id=conversation_id)
+    prompt_language = (person_pref
+                       or conversation_language(ctx, conversation_id)
+                       or detect_language(text)
+                       or workspace_language(ctx)
+                       or DEFAULT_LANGUAGE)
     language = prompt_language
     tool_catalog = tools.front_door_tools(ctx.models, language)
     plan = ctx.service.current_plan(work) if work is not None else None
@@ -278,18 +284,22 @@ def run_front_door_turn(ctx, actor: Actor, body: CommandRequest, result: dict[st
 
     outcome = _budgeted_turn(ctx, actor, work, decide) if work is not None else decide()
 
-    detected = outcome.language
-    if person_pref is not None:
-        text_language = person_pref
-    elif detected is not None:
-        text_language = detected
-    else:
-        text_language = prompt_language
+    # What the engine writes for the person: their preference wins, then what
+    # they write in this very message (engine detection first, the model's own
+    # report as fallback), then the conversation's history, workspace, en.
+    written = detect_language(text)
+    text_language = (person_pref
+                     or written
+                     or outcome.language
+                     or conversation_language(ctx, conversation_id)
+                     or workspace_language(ctx)
+                     or DEFAULT_LANGUAGE)
 
     display = outcomes.display_for(outcome, language=text_language)
     enriched = dict(result)
     enriched['context_manifest'] = conversation_context.manifest.model_dump(mode='json', exclude_none=True)
-    enriched['front_door'] = _payload_for(outcome, text_language, detected=detected)
+    enriched['front_door'] = _payload_for(outcome, text_language,
+                                          detected=outcome.language or written)
     if outcome.kind == outcomes.PLAN_CHANGE:
         enriched['patch_proposal'] = outcome.plan_preview
     return enriched, display
