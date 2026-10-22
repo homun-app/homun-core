@@ -324,6 +324,11 @@ def _story_b10(golden, run: GoldenRun) -> None:
         assert confirmed.get("status") == "confirmed", str(
             confirmed.get("status") or confirmed.get("error_code")
         )
+        # L'accordo confermato può pubblicare le fasi (piano, lavoro ready):
+        # è il punto di partenza da cui la revisione non deve muovere nulla.
+        after_first = client.work_detail(work_id)["work"]
+        first_plan_revision = int(after_first.get("current_plan_revision") or 0)
+        first_status = str(after_first.get("status"))
     with run.step("B10.richiesta-modifica"):
         accepted, error, rejections = client.post_message_when_free(
             conversation_id, RICHIESTA_REVISIONE, roster=roster
@@ -344,12 +349,17 @@ def _story_b10(golden, run: GoldenRun) -> None:
         assert revision.get("id") != confirmed.get("id"), "la proposta di revisione è la stessa del primo accordo"
         changes = revision.get("changes") or []
         assert changes, "la revisione non dichiara nessuna differenza rispetto all'accordo"
-        # La revisione aspetta la persona: il lavoro non parte da solo e non
-        # cambia esecutore prima della conferma (il primo accordo è confermato,
-        # la revisione no: qui il «nulla è partito» è solo sul nuovo).
+        # La revisione aspetta la persona: senza la sua conferma il lavoro non
+        # avanza — stesso piano di dopo la prima conferma, nessun risultato,
+        # stesso stato (l'esecutore non cambia prima della conferma).
         work = client.work_detail(work_id)["work"]
-        assert work.get("status") == "draft", f"il lavoro è partito senza conferma: stato {work.get('status')!r}"
-        assert int(work.get("current_plan_revision") or 0) == 0, "un piano è stato creato senza conferma"
+        assert int(work.get("current_plan_revision") or 0) == first_plan_revision, (
+            "un nuovo piano è stato pubblicato senza la conferma della revisione"
+        )
+        assert not work.get("current_artifact_version"), "qualcosa è stato eseguito senza conferma"
+        assert str(work.get("status")) == first_status, (
+            f"lo stato del lavoro è cambiato senza conferma: {first_status} → {work.get('status')!r}"
+        )
     with run.step("B10.conferma-modifica"):
         revised = client.confirm_intake(work_id, revision)
         assert revised.get("status") == "confirmed", str(

@@ -69,7 +69,11 @@ def _complete(provider, messages, *, tools, model_id, context_window, max_output
                             'description': t.description, 'parameters': t.input_schema}} for t in tools]
     try:
         if ollama:
-            payload.update(think=False, options={'temperature': 0, 'num_predict': limits.max_output_tokens})
+            # No `think` override: thinking models (qwen3.5 & co.) decide far
+            # better on tool turns when their reasoning runs — measured on the
+            # golden local model, where forcing think=False flipped questions
+            # into proposals. Non-thinking models ignore the default anyway.
+            payload.update(options={'temperature': 0, 'num_predict': limits.max_output_tokens})
             if limits.context_window is not None:
                 payload['options']['num_ctx'] = limits.context_window
             response = None if stream else provider._post_ollama_chat(payload)
