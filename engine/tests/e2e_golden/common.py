@@ -53,7 +53,7 @@ HTTP_TIMEOUT = httpx.Timeout(connect=10.0, read=320.0, write=60.0, pool=360.0)
 # dei passi registrati («A1», «B2.conferma» → «B2»).
 SCENARIOS: dict[str, str] = {
     "M0": "Connessione modello verificata (Impostazioni → Modelli)",
-    "A1": "Domanda semplice: risposta in chat, nessun lavoro creato",
+    "A1": "Domanda semplice: risposta testuale (nessun chiarimento, nessuna proposta), nessun lavoro creato",
     "A2": "Tre messaggi di fila accettati, nell'ordine giusto",
     "A3": "Dopo un errore provocato il messaggio successivo è accettato",
     "A4": "La conversazione si ritrova e riprende dopo il riavvio",

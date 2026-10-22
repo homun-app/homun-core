@@ -114,6 +114,18 @@ def test_text_reply_becomes_assistant_message(env):
     assert not proposals(env), 'una risposta testuale non crea proposte'
 
 
+def test_question_gets_a_text_outcome_not_clarification(env):
+    """La mappa delle decisioni del provider fake (specchio di ciò che i modelli
+    veri dovrebbero fare): una domanda riceve una RISPOSTA, mai una lista di
+    chiarimenti e mai una proposta."""
+    response = post_message(env, 'Cosa sai fare?')
+    assert response.status_code == 200, response.text
+    result = response.json()['result']
+    assert result['front_door']['kind'] == 'text', result['front_door']
+    assert result['assistant_text'].strip(), 'risposta testuale vuota'
+    assert not proposals(env), 'una domanda non crea proposte'
+
+
 def test_ask_clarification_ends_the_turn_with_questions(env):
     script(env.ctx, tool_call('ask_clarification', {
         'questions': [{'question': 'Per quando ti serve la relazione?'},
