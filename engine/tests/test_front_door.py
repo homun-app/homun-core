@@ -29,14 +29,6 @@ class Env:
     work_id: str
 
 
-@pytest.fixture(autouse=True)
-def _clean_mode_memory():
-    from homun.models import structured_fallback
-    structured_fallback.reset_mode_memory()
-    yield
-    structured_fallback.reset_mode_memory()
-
-
 @pytest.fixture
 def env(tmp_path):
     ctx = create_context(db_path=tmp_path / 'ws.db', data_dir=tmp_path, for_tests=True)
