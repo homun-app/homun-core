@@ -11,6 +11,21 @@ from homun.domain.ids import new_id
 from homun.models.types import ChatMessage, CompletionResult, UsageEntry, VerifyResult
 
 _MENTION = re.compile(r"@([^\s@]+)")
+# The words of the golden/browser requests are unambiguous: enough for the
+# fake to report the person's language like a real model does.
+_ITALIAN_MARKERS = re.compile(
+    r"\b(prepara|nota|relazion|ricerca|grazie|ciao|cosa|sposta|cambia|consegna|scadenza|entro|crea|chiedi)\b"
+)
+_ENGLISH_MARKERS = re.compile(r"\b(prepare|note|report|thanks|hello|what|move|change|deadline|write|create)\b")
+
+
+def _language_of(text: str) -> str:
+    lowered = text.lower()
+    if _ITALIAN_MARKERS.search(lowered):
+        return "it"
+    if _ENGLISH_MARKERS.search(lowered):
+        return "en"
+    return "en"
 
 
 class FakeProvider:
@@ -92,7 +107,8 @@ class FakeProvider:
             call = ToolCall(id="call_fake_clarify", name="ask_clarification", arguments={
                 "questions": [{"question": "Qual è l'obiettivo della relazione sui fornitori?",
                                "choices": ["Confronto prezzi", "Panoramica generale"]},
-                              {"question": "Per quando ti serve?"}]})
+                              {"question": "Per quando ti serve?"}],
+                "language": _language_of(last_user)})
             return NativeResult(
                 message=NativeMessage(role="assistant", content="", tool_calls=[call]),
                 usage=self._usage_for(model, input_text=last_user, output_text="clarify"))
@@ -101,7 +117,8 @@ class FakeProvider:
         if re.search(r"\bsposta la (?:consegna|scadenza)\b", lowered):
             call = ToolCall(id="call_fake_revise", name="propose_work", arguments={
                 "constraints": ["Consegna entro il 15 dicembre"],
-                "changed_fields": ["constraints"]})
+                "changed_fields": ["constraints"],
+                "language": _language_of(last_user)})
             return NativeResult(
                 message=NativeMessage(role="assistant", content="", tool_calls=[call]),
                 usage=self._usage_for(model, input_text=last_user, output_text="revise"))
@@ -111,6 +128,7 @@ class FakeProvider:
                 "objective": last_user[:200] or "Obiettivo della richiesta",
                 "output": "Nota operativa breve",
                 "capability": "general",
+                "language": _language_of(last_user),
             })
             return NativeResult(
                 message=NativeMessage(role="assistant", content="", tool_calls=[call]),

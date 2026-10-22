@@ -3,10 +3,12 @@
 Stored in the workspace ``meta`` table (schema v1 unchanged: free-form
 key/value) — ``language`` for the workspace, ``language:person:<id>`` for each
 person (F5: a workspace already holds several people and engine-generated
-texts go to a specific person). Resolution chain, documented in
-docs/development/2026-10-15-errori-multilingua.md §3: **person → workspace →
-English**. The engine reads the resolved language ONLY for texts it generates
-by itself — HTTP error bodies stay neutral and the client translates them.
+texts go to a specific person) and ``language:conversation:<id>`` for the
+language detected while talking with a person. Resolution chain, documented in
+docs/development/2026-10-15-errori-multilingua.md §3: **person → conversation
+(detected) → workspace → English**. The engine reads the resolved language
+ONLY for texts it generates by itself — HTTP error bodies stay neutral and the
+client translates them.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from homun.i18n import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES
 
 _WORKSPACE_KEY = "language"
 _PERSON_KEY_PREFIX = "language:person:"
+_CONVERSATION_KEY_PREFIX = "language:conversation:"
 
 
 def _read(conn, key: str) -> str | None:
@@ -66,14 +69,36 @@ def set_person_language(ctx, person_id: str, language: str) -> None:
         conn.commit()
 
 
-def resolve_language(ctx, requested: str | None = None, *, person_id: str | None = None) -> str:
-    """person → workspace → English; an explicit per-request language wins."""
+def conversation_language(ctx, conversation_id: str) -> str | None:
+    """The language detected while talking in this conversation (None when never detected)."""
+    with ctx.repository.locked() as conn:
+        return _read(conn, _CONVERSATION_KEY_PREFIX + conversation_id)
+
+
+def remember_conversation_language(conn, conversation_id: str, language: str) -> None:
+    """Remember a freshly detected language on a connection already inside an
+    open transaction (no commit).
+
+    The caller's transaction owns the commit: the detected language persists
+    exactly when the rest of the turn does. Nothing happens for unusable values.
+    """
+    if language in SUPPORTED_LANGUAGES:
+        _write(conn, _CONVERSATION_KEY_PREFIX + conversation_id, language)
+
+
+def resolve_language(ctx, requested: str | None = None, *, person_id: str | None = None,
+                     conversation_id: str | None = None) -> str:
+    """person → conversation → workspace → English; an explicit per-request language wins."""
     if isinstance(requested, str) and requested.strip():
         return requested
     if person_id is not None:
         person = person_language(ctx, person_id)
         if person is not None:
             return person
+    if conversation_id is not None:
+        conversation = conversation_language(ctx, conversation_id)
+        if conversation is not None:
+            return conversation
     workspace = workspace_language(ctx)
     if workspace is not None:
         return workspace

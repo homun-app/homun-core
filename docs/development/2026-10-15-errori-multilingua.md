@@ -156,12 +156,19 @@ infrastruttura ICU ora.
   valore predefinito.** Il motore ha già più persone per workspace (F5:
   `Person`, `PersonDevice`, sessioni persona) e i messaggi sui canali vanno a
   una persona precisa. Catena di risoluzione, applicata da
-  `application/ops/preferences.py::resolve_language`: **persona → workspace →
-  inglese** (una richiesta esplicita per-request, campo `language` di intake,
-  vince sulla catena perché serve al routing).
+  `application/ops/preferences.py::resolve_language`: **persona →
+  conversazione (lingua rilevata) → workspace → inglese** (una richiesta
+  esplicita per-request, campo `language` di intake, vince sulla catena perché
+  serve al routing). La lingua della conversazione è quella che la persona
+  scrive: il turno di ingresso la rileva senza chiamate extra — il modello la
+  riporta nell'argomento comune `language` di ogni strumento — e il motore la
+  ricorda sulla conversazione; la preferenza esplicita della persona vince
+  sempre sulla rilevazione.
 - **Persistenza**: chiavi nella tabella `meta` dello storage (`storage/schema.py`
   — key/value già libere, **schema v1 invariato**, nessuna migrazione):
-  `language` per il workspace, `language:person:<person_id>` per ogni persona.
+  `language` per il workspace, `language:person:<person_id>` per ogni persona,
+  `language:conversation:<conversation_id>` per la lingua rilevata di ogni
+  conversazione.
 - **Rotte**: `GET/PUT /v1/workspaces/{workspace_id}/people/{person_id}/language`
   per la persona (la propria lingua la imposta la persona stessa; quella di un
   altro serve l'autorità del workspace) e `GET/PUT

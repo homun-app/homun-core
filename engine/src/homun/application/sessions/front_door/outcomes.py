@@ -33,6 +33,9 @@ class FrontDoorOutcome:
     questions: list[dict[str, Any]] = field(default_factory=list)
     brief: IntakeBrief | None = None
     plan_preview: dict[str, Any] | None = None
+    # The person's language as the model reported it ('it'/'en'), when it did:
+    # the engine remembers it on the conversation and uses it for its texts.
+    language: str | None = None
 
 
 def work_accepts_proposal(work: Work | None, *, anchor: dict | None = None) -> str | None:
@@ -102,7 +105,8 @@ def outcome_from_call(name: str, arguments, *, work, plan, agents, anchor, roste
             questions = arguments.normalized_questions()
         except ValueError as exc:
             return None, f'Invalid ask_clarification arguments: {exc}'
-        return FrontDoorOutcome(kind=CLARIFICATION, questions=questions), None
+        return FrontDoorOutcome(kind=CLARIFICATION, questions=questions,
+                                language=tools.normalized_language(arguments.language)), None
 
     if name == tools.PROPOSE_WORK:
         if blocked := work_accepts_proposal(work, anchor=anchor):
@@ -118,7 +122,8 @@ def outcome_from_call(name: str, arguments, *, work, plan, agents, anchor, roste
             effective_values(brief, agents, anchor, owner_id=work.owner_id if work else None)
         except Exception as exc:  # noqa: BLE001 — pydantic or ValueError, both model-correctable
             return None, f'Invalid propose_work arguments: {exc}. Fix the arguments and call again.'
-        return FrontDoorOutcome(kind=WORK_PROPOSAL, brief=brief), None
+        return FrontDoorOutcome(kind=WORK_PROPOSAL, brief=brief,
+                                language=tools.normalized_language(arguments.language)), None
 
     if name == tools.PROPOSE_PLAN_CHANGE:
         if work is None:
@@ -129,7 +134,8 @@ def outcome_from_call(name: str, arguments, *, work, plan, agents, anchor, roste
         preview, error = plan_change_preview(work, plan, arguments, roster_ids=roster_ids)
         if error:
             return None, error
-        return FrontDoorOutcome(kind=PLAN_CHANGE, plan_preview=preview), None
+        return FrontDoorOutcome(kind=PLAN_CHANGE, plan_preview=preview,
+                                language=tools.normalized_language(arguments.language)), None
 
     return None, f'Unknown tool: {name}.'
 

@@ -9,6 +9,7 @@ Come decidere:
 
 Regole:
 - Esattamente uno strumento per turno.
+- In ogni chiamata agli strumenti aggiungi l'argomento language: il codice ISO della lingua in cui ti scrive la persona (per esempio it o en).
 - Il lavoro in bozza «Obiettivo da concordare» nel contesto è il contenitore della proposta: propose_work lo riempie.
 - Non inventare mai id di persone o agenti: usa solo quelli del roster e degli agenti attivi forniti nel messaggio; se nessuno è adatto, lascia vuoto.
 - Il motore valida i tuoi argomenti: se il risultato dello strumento segnala un errore, correggi e riprova con gli id e le capacità vere.

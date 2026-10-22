@@ -26,6 +26,22 @@ TOOL_ORDER = (PROPOSE_WORK, ASK_CLARIFICATION, PROPOSE_PLAN_CHANGE)
 
 CAPABILITY_VALUES = ('general', 'synthesize', 'read_material', 'compare_csv', 'agent_run')
 
+# The person's language as the model reports it (common tool argument). Free
+# text in the schema: junk normalizes to None, never a correction round.
+LANGUAGE_ALIASES = {'it': 'it', 'italiano': 'it', 'italian': 'it',
+                    'en': 'en', 'english': 'en'}
+
+
+def normalized_language(value: Any) -> str | None:
+    """'it'/'en' from whatever the model wrote in ``language``; None otherwise."""
+    if not isinstance(value, str):
+        return None
+    code = value.strip().lower()
+    if not code:
+        return None
+    base = code.split('-')[0].split('_')[0]
+    return LANGUAGE_ALIASES.get(code) or LANGUAGE_ALIASES.get(base)
+
 
 def _tolerant_list(value):
     """``None`` → empty list; a bare string → one-element list."""
@@ -70,7 +86,14 @@ class PlanStepDraftArgs(_TolerantModel):
         return _tolerant_list(value)
 
 
-class ProposeWorkArgs(_TolerantModel):
+class _LanguageReporting(_TolerantModel):
+    """The common optional ``language`` argument: how the model tells the
+    engine the language of the person's message (detection at no extra call)."""
+
+    language: str | None = Field(default=None, max_length=16)
+
+
+class ProposeWorkArgs(_LanguageReporting):
     """``propose_work`` arguments: tolerant in shape, strict in meaning.
 
     On a FIRST proposal title/objective/output must all be there. On a
@@ -140,7 +163,7 @@ class ClarifyQuestion(_TolerantModel):
         return _tolerant_list(value)
 
 
-class AskClarificationArgs(_TolerantModel):
+class AskClarificationArgs(_LanguageReporting):
     """Same contract as the agent ``ClarifyArguments``: questions, or one question."""
 
     questions: list[Any] | None = None
@@ -198,7 +221,7 @@ class PlanChangeDraftArgs(_TolerantModel):
     step_id: str | None = None
 
 
-class ProposePlanChangeArgs(_TolerantModel):
+class ProposePlanChangeArgs(_LanguageReporting):
     changes: list[PlanChangeDraftArgs] = Field(default_factory=list)
 
     @field_validator('changes', mode='before')
@@ -227,6 +250,7 @@ PROPOSE_WORK_SCHEMA: dict[str, Any] = {
                            'assignee': {'type': 'string'}, 'output_expected': {'type': 'string'},
                            'expected_materials': {'type': 'array', 'items': {'type': 'string'}}},
         }},
+        'language': {'type': 'string'},
     },
     'required': ['title', 'objective', 'output'],
 }
@@ -244,6 +268,7 @@ CLARIFY_SCHEMA: dict[str, Any] = {
         'question': {'type': 'string'},
         'choices': {'type': 'array', 'items': {'type': 'string'}},
         'multi_select': {'type': 'boolean'},
+        'language': {'type': 'string'},
     },
 }
 
@@ -256,6 +281,7 @@ PLAN_CHANGE_SCHEMA: dict[str, Any] = {
                            'to_value': {'type': 'string'}, 'step_id': {'type': 'string'}},
             'required': ['field'],
         }},
+        'language': {'type': 'string'},
     },
     'required': ['changes'],
 }
