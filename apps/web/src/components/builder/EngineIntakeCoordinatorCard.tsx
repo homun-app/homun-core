@@ -10,6 +10,7 @@ import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { briefChangeLines, preservedFieldLabels } from "@/lib/engine-intake-display";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { Check, Sparkles, Bot, Globe, Layers, ArrowRight, CornerDownLeft } from "lucide-react";
+import "./EngineIntakeCoordinatorCard.css";
 
 export function EngineIntakeCoordinatorCard({
   proposal,

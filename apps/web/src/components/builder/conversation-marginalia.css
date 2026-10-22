@@ -162,3 +162,18 @@
   border-color: rgba(255, 255, 255, 0.25);
   transform: translateX(-2px);
 }
+
+/* Highlight pulse for scroll-to target (la spina aggiunge/rimuove la classe) */
+@keyframes gentle-highlight {
+  0% {
+    background-color: rgba(104, 122, 89, 0.16);
+    border-radius: 8px;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.cw-highlight-pulse {
+  animation: gentle-highlight 2s ease-out;
+}

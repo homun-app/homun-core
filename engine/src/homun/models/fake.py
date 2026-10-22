@@ -86,6 +86,25 @@ class FakeProvider:
             return NativeResult(
                 message=NativeMessage(role="assistant", content="", tool_calls=[call]),
                 usage=self._usage_for(model, input_text=last_user, output_text="patch"))
+        # A vague report request, like the golden B8 one: the real models ask
+        # what the result should be — the fake asks the same deterministically.
+        if re.search(r"\bcrea una relazione\b", lowered):
+            call = ToolCall(id="call_fake_clarify", name="ask_clarification", arguments={
+                "questions": [{"question": "Qual è l'obiettivo della relazione sui fornitori?",
+                               "choices": ["Confronto prezzi", "Panoramica generale"]},
+                              {"question": "Per quando ti serve?"}]})
+            return NativeResult(
+                message=NativeMessage(role="assistant", content="", tool_calls=[call]),
+                usage=self._usage_for(model, input_text=last_user, output_text="clarify"))
+        # A deadline move on a confirmed agreement: a minimal revision
+        # (only the changed constraint, like the golden B10 request).
+        if re.search(r"\bsposta la (?:consegna|scadenza)\b", lowered):
+            call = ToolCall(id="call_fake_revise", name="propose_work", arguments={
+                "constraints": ["Consegna entro il 15 dicembre"],
+                "changed_fields": ["constraints"]})
+            return NativeResult(
+                message=NativeMessage(role="assistant", content="", tool_calls=[call]),
+                usage=self._usage_for(model, input_text=last_user, output_text="revise"))
         if re.search(r"\b(prepara|nota|relazion|ricerca|catalogo|report|analizza|analisi)\b", lowered):
             call = ToolCall(id="call_fake_work", name="propose_work", arguments={
                 "title": "Nota operativa (fake)",

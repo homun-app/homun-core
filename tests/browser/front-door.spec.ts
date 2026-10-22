@@ -91,6 +91,21 @@ async function sendMessage(page: import("@playwright/test").Page, text: string) 
   await composer.press("Enter");
 }
 
+/** Lo stile calcolato di un elemento: la scheda deve avere la sua grafica. */
+async function computedStyle(
+  page: import("@playwright/test").Page,
+  selector: string,
+  properties: string[],
+): Promise<Record<string, string>> {
+  return page
+    .locator(selector)
+    .first()
+    .evaluate((element, props) => {
+      const style = getComputedStyle(element);
+      return Object.fromEntries(props.map((prop) => [prop, style.getPropertyValue(prop)]));
+    }, properties);
+}
+
 test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
   test("domanda, proposta in chat, conferma, Compiti e «grazie»", async ({ page }) => {
     await page.goto("/");
@@ -127,5 +142,65 @@ test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
       timeout: 30_000,
     });
     await expect(page.getByText("PROPOSTA DI LAVORO")).toHaveCount(proposalsBefore);
+  });
+
+  test("le schede (proposta, modifica, chiarimento) hanno il loro stile, non testo grezzo", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    // 1. Proposta: la scheda nella trascrizione ha la sua grafica (badge,
+    //    separatore, bottone), non è testo grezzo.
+    await sendMessage(
+      page,
+      "Prepara una nota operativa: rinnovo contratto Rossi entro il 30 novembre.",
+    );
+    const card = page.getByRole("article", { name: "Proposta di lavoro e coordinamento Homun" });
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    expect(
+      await computedStyle(page, ".cw-intake-coordinator-card__badge", ["text-transform"]),
+    ).toEqual({
+      "text-transform": "uppercase",
+    });
+    expect(
+      await computedStyle(page, ".cw-intake-coordinator-card__footer", [
+        "border-top-width",
+        "border-top-style",
+      ]),
+    ).toEqual({ "border-top-width": "1px", "border-top-style": "solid" });
+    expect(
+      await computedStyle(page, ".cw-intake-coordinator-card__btn", ["border-radius"]),
+    ).toEqual({ "border-radius": "10px" });
+
+    // 2. Conferma, poi revisione: la scheda del cambiamento (cw-intake-changes)
+    //    ha bordo e sfondo propri, diversi dalla trascrizione.
+    await card.getByRole("button", { name: /Conferma accordo/ }).click();
+    await expect(page.getByRole("article", { name: "Accordo di lavoro confermato" })).toBeVisible({
+      timeout: 30_000,
+    });
+    await sendMessage(page, "Sposta la consegna al 15 dicembre.");
+    const changes = page.locator(".cw-intake-changes");
+    await expect(changes).toBeVisible({ timeout: 30_000 });
+    expect(
+      await computedStyle(page, ".cw-intake-changes", [
+        "background-color",
+        "border-top-width",
+        "border-top-style",
+        "border-radius",
+      ]),
+    ).toEqual({
+      "background-color": "rgb(255, 255, 255)",
+      "border-top-width": "1px",
+      "border-top-style": "solid",
+      "border-radius": "12px",
+    });
+
+    // 3. Chiarimento: la scheda delle domande ha il suo bordo e sfondo.
+    await sendMessage(page, "Crea una relazione sui fornitori 2027");
+    const clarify = page.locator(".cw-clarify-card");
+    await expect(clarify).toBeVisible({ timeout: 30_000 });
+    expect(
+      await computedStyle(page, ".cw-clarify-card", ["border-top-width", "border-top-style"]),
+    ).toEqual({ "border-top-width": "1px", "border-top-style": "solid" });
   });
 });

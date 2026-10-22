@@ -14,6 +14,9 @@ import {
   User,
   Layers,
 } from "lucide-react";
+// cw-intake-note (la nota sotto la scala delle fasi) è condiviso con la scheda
+// della proposta in chat: stesso foglio.
+import "./EngineIntakeCoordinatorCard.css";
 
 const STEP_STATUS_LABELS: Record<string, string> = {
   pending: "In attesa",

@@ -9,6 +9,9 @@ import {
   intakeConfirmLabel,
   preservedFieldLabels,
 } from "@/lib/engine-intake-display";
+// Il diff della revisione (cw-intake-changes / cw-intake-note) è condiviso con
+// la scheda in chat: stesso foglio, così i due montaggi non divergono.
+import "./EngineIntakeCoordinatorCard.css";
 
 export function EngineWorkProposalPanel({
   work,
