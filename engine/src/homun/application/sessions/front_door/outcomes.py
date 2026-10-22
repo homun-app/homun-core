@@ -141,28 +141,19 @@ def outcome_from_call(name: str, arguments, *, work, plan, agents, anchor, roste
 
 
 def display_for(outcome: FrontDoorOutcome, *, language: str) -> str:
-    """The assistant text shown in chat for each outcome, in the person's language."""
+    """The assistant text shown in chat for each outcome, in the person's language.
+
+    When the turn produced a CARD (proposal, clarification, plan change) the
+    message is ONE short sentence that points at it: the card carries the
+    content, the message never repeats it and never gives instructions in the
+    engine's voice.
+    """
     if outcome.kind == TEXT:
         return outcome.text
     if outcome.kind == CLARIFICATION:
-        lines = []
-        for question in outcome.questions:
-            lines.append(question['question'])
-            lines.extend(f'  • {choice}' for choice in question.get('choices') or [])
-        return '\n'.join(lines)
+        return user_text('front_door.clarification_proposed', language=language) or ''
     if outcome.kind == WORK_PROPOSAL:
-        title = outcome.brief.title if outcome.brief else ''
-        missing = outcome.brief.missing_information if outcome.brief else []
-        text = user_text('front_door.work_proposed', {'title': title}, language=language) or ''
-        if missing:
-            joined = '; '.join(missing)
-            note = user_text('front_door.work_proposed_missing', {'items': joined}, language=language)
-            if note:
-                text = f'{text}\n{note}'
-        return text
-    if outcome.kind == PLAN_CHANGE and outcome.plan_preview:
-        lines = outcome.plan_preview.get('summary_lines') or []
-        header = user_text('front_door.plan_change_proposed', language=language) or ''
-        footer = user_text('front_door.plan_change_confirm', language=language) or ''
-        return '\n'.join([header, *lines, footer]).strip()
+        return user_text('front_door.work_proposed', language=language) or ''
+    if outcome.kind == PLAN_CHANGE:
+        return user_text('front_door.plan_change_proposed', language=language) or ''
     return ''

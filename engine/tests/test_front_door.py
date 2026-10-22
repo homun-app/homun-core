@@ -136,7 +136,14 @@ def test_ask_clarification_ends_the_turn_with_questions(env):
     questions = (result.get('front_door') or {}).get('questions') or []
     assert [q['question'] for q in questions] == [
         'Per quando ti serve la relazione?', 'Quali fornitori ti interessano?']
-    assert 'Per quando ti serve la relazione?' in result['assistant_text']
+    # Il messaggio è UNA frase che rimanda alla scheda: le domande stanno
+    # nella scheda, non ripetute nel testo (niente duplicazione).
+    from homun.i18n import user_text
+
+    language = result['front_door']['language']
+    assert result['assistant_text'] == (user_text('front_door.clarification_proposed',
+                                                  language=language) or '')
+    assert 'Per quando ti serve la relazione?' not in result['assistant_text']
     assert not proposals(env), 'un chiarimento non crea proposte'
 
 

@@ -203,4 +203,39 @@ test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
       await computedStyle(page, ".cw-clarify-card", ["border-top-width", "border-top-style"]),
     ).toEqual({ "border-top-width": "1px", "border-top-style": "solid" });
   });
+
+  test("il messaggio che annuncia una scheda è una frase nella lingua della persona, senza ripeterla", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    /** Il testo del messaggio assistente che porta una certa scheda. */
+    async function messageTextWith(has: import("@playwright/test").Locator) {
+      const root = page.locator('[data-slot="aui_assistant-message-root"]', { has }).last();
+      await expect(root).toBeVisible({ timeout: 30_000 });
+      return (await root.locator('[data-slot="aui_assistant-message-content"]').innerText()).trim();
+    }
+
+    // 1. Proposta (persona che scrive in italiano, senza preferenze): il
+    //    messaggio è UNA frase in italiano che rimanda alla scheda; non ripete
+    //    titolo né contenuto e non dà istruzioni in voce motore.
+    await sendMessage(
+      page,
+      "Prepara una nota operativa: rinnovo contratto Rossi entro il 30 novembre.",
+    );
+    const proposalMessage = await messageTextWith(
+      page.getByRole("article", { name: "Proposta di lavoro e coordinamento Homun" }),
+    );
+    expect(proposalMessage).toBe("Ho preparato una proposta: controllala e confermala qui sotto.");
+    expect(proposalMessage).not.toContain("Nota operativa");
+    expect(proposalMessage).not.toMatch(/Usa |Use /);
+
+    // 2. Chiarimento: stessa regola — le domande stanno nella scheda.
+    await sendMessage(page, "Crea una relazione sui fornitori 2027");
+    const clarifyMessage = await messageTextWith(page.locator(".cw-clarify-card"));
+    expect(clarifyMessage).toBe(
+      "Ho alcune domande prima di proporti il lavoro: rispondi qui sotto.",
+    );
+    expect(clarifyMessage).not.toContain("relazione sui fornitori?");
+  });
 });
