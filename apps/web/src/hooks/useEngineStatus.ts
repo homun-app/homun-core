@@ -15,6 +15,8 @@ export type EngineConnectionState = "checking" | "connected" | "absent";
 
 export type EngineStatus = {
   connection: EngineConnectionState;
+  /** Vero quando questa sessione ha visto il motore raggiungibile ALMENO una volta. */
+  everConnected: boolean;
   health: EngineHealth | null;
   capabilities: EngineCapabilities | null;
   error: string | null;
@@ -27,6 +29,7 @@ const POLL_MS = 4000;
 
 export function useEngineStatus(baseUrl: string = ENGINE_DEFAULT_BASE_URL): EngineStatus {
   const [connection, setConnection] = useState<EngineConnectionState>("checking");
+  const [everConnected, setEverConnected] = useState(false);
   const [health, setHealth] = useState<EngineHealth | null>(null);
   const [capabilities, setCapabilities] = useState<EngineCapabilities | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +55,7 @@ export function useEngineStatus(baseUrl: string = ENGINE_DEFAULT_BASE_URL): Engi
         setCapabilities(nextCapabilities);
         setError(null);
         setConnection("connected");
+        setEverConnected(true);
       } catch (cause) {
         if (cancelled || controller.signal.aborted) {
           return;
@@ -77,6 +81,7 @@ export function useEngineStatus(baseUrl: string = ENGINE_DEFAULT_BASE_URL): Engi
 
   return {
     connection,
+    everConnected,
     health,
     capabilities,
     error,

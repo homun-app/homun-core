@@ -247,6 +247,31 @@ test("P4: la conversazione aperta sopravvive alla caduta del motore e si ricaric
   await expect(thread).toContainText("arrivata dopo la riconnessione", { timeout: 10_000 });
 });
 
+test("P7: «Connessione ripristinata» solo dopo una caduta VISTA in questa sessione", async ({
+  page,
+}) => {
+  const state = { online: false, extraConversation: false, extraMessage: false };
+  await mockEngine(page, state);
+  await page.goto("/");
+  const restored = page.getByText("Connessione ripristinata.", { exact: true });
+  const unreachableNotice = page.locator('[data-chat-status="engine-unreachable"]');
+
+  // Partenza a motore freddo (come l'app all'avvio: la UI arriva prima del
+  // motore): l'assenza si dichiara, ma la connessione non è MAI caduta.
+  await expect(unreachableNotice).toBeVisible({ timeout: 10_000 });
+  state.online = true;
+  await expect(unreachableNotice).toBeHidden({ timeout: 15_000 });
+  // L'esito breve dura 6 s: si controlla SUBITO, senza aspettare che scada da
+  // sé (un'attesa lunga mascherebbe proprio il difetto).
+  await expect(restored).toHaveCount(0, { timeout: 300 });
+
+  // Caduta vera e ritorno: ora l'esito c'è, una volta sola.
+  state.online = false;
+  await expect(unreachableNotice).toBeVisible({ timeout: 10_000 });
+  state.online = true;
+  await expect(restored).toBeVisible({ timeout: 15_000 });
+});
+
 test("P5: la caduta del motore durante un invio produce UN solo avviso, senza testo grezzo", async ({
   page,
 }) => {
