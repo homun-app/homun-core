@@ -76,6 +76,8 @@ type Props = {
     attachments: File[],
     projectId?: string,
   ) => string | undefined;
+  /** Il campo del Project Hub: il testo della persona verbatim, o il «+» senza testo. */
+  onProjectPrompt: (projectId: string, text?: string) => void;
   onRunRoutine: (r: SpaceRoutine) => void;
   onUpdateMaterial: (item: ConversationMaterial) => void;
   onRemoveMaterial: (id: string) => void;
@@ -124,6 +126,7 @@ export function ConversationWorkspaceSpaceHost({
   onMoveWork,
   onStartAssignment,
   onCreateFreeWork,
+  onProjectPrompt,
   onRunRoutine,
   onUpdateMaterial,
   onRemoveMaterial,
@@ -159,9 +162,7 @@ export function ConversationWorkspaceSpaceHost({
         selected={spaceSelected}
         onProject={(id) => onOpenSpace("Progetti", "", id)}
         onWork={onOpenWork}
-        onCreateWork={(projId) =>
-          onCreateFreeWork("Nuovo lavoro", "Descrivi l'obiettivo di questa attività...", [], projId)
-        }
+        onProjectPrompt={onProjectPrompt}
         engineMode={engineMode}
         sidebarOpen={sidebarOpen}
         onOpenSidebar={onOpenSidebar}

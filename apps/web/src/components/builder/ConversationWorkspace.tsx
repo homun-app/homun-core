@@ -1,5 +1,9 @@
 import { createSimulationActions } from "./conversation-simulation-actions";
-import { defaultPreferences, type ConversationPreferences } from "./conversation-preferences";
+import {
+  defaultPreferences,
+  type AutonomyLevel,
+  type ConversationPreferences,
+} from "./conversation-preferences";
 import { type CatalogPlan } from "./ConversationCatalogPlan";
 import { ConversationContribution } from "./ConversationContribution";
 import { ConversationHumanWork } from "./ConversationHumanWork";
@@ -33,6 +37,9 @@ import { demoWorkspaceBootstrap } from "./conversation-demo-mode";
 import { downloadWorkResult } from "./conversation-export";
 import { buildMaterialLibrary } from "./conversation-material-library";
 import { sendEngineExampleWork, sendEngineFreeWork } from "@/lib/engine-work-creation";
+import { useEngineAutonomyPreference } from "@/hooks/useEngineAutonomyPreference";
+import { useProjectPrompt } from "@/hooks/useProjectPrompt";
+import { createContributionRequest } from "./conversation-contribution-request";
 import { useConversationSearchEntries } from "@/hooks/useConversationSearchEntries";
 import {
   isCompletedNoticeForViewer,
@@ -139,6 +146,13 @@ export function ConversationWorkspace() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // La modalità di autonomia della persona vive nel motore (l'ultima scelta è
+  // il suo default ovunque): la pipeline sta in hooks/useEngineAutonomyPreference.ts.
+  const changeAutonomyLevel = useEngineAutonomyPreference(
+    loaded && engine.backend === "engine" && !engine.gateError,
+    setPreferences,
+  );
   const closeSearch = () => setSearchOpen(false);
   function openSpace(view: SpaceView, initial = "", selected = "") {
     if (window.innerWidth <= 800) setSidebarOpen(false);
@@ -472,24 +486,7 @@ export function ConversationWorkspace() {
     setContribution("");
     setFiles([]);
   }
-  function approvePlan() {
-    if (!work || work.phase !== "review" || viewer !== (work.reviewer || work.requester || "Fabio"))
-      return;
-    patch({
-      phase: "approved",
-      approvedBy: viewer,
-      autoDelivered: false,
-      messages: [
-        ...work.messages,
-        { who: "you", sender: viewer, text: "Approvo questa bozza." },
-        {
-          who: "agent",
-          text: "Approvazione registrata. Il risultato rimane qui nella conversazione. Nessun invio esterno.",
-        },
-      ],
-    });
-  }
-  const { simulateQuestion, simulate, runRoutine } = createSimulationActions({
+  const { simulateQuestion, simulate, runRoutine, approvePlan } = createSimulationActions({
     work,
     scenario,
     works,
@@ -537,6 +534,17 @@ export function ConversationWorkspace() {
     setScenarios((current) => [...current, spec]);
     return create(index, text, attachments, projectId, spec);
   }
+  // Il campo del Project Hub è la chat di quel progetto (testo verbatim dalla
+  // porta d'ingresso): la pipeline sta in hooks/useProjectPrompt.ts.
+  const projectPrompt = useProjectPrompt({
+    engine,
+    preferences,
+    setNewChatProjectId,
+    open,
+    setNotice,
+    bumpOwnSend,
+    createFreeWork,
+  });
   const send = createConversationSend({
     engine,
     work,
@@ -638,33 +646,15 @@ export function ConversationWorkspace() {
     );
     return boardMoveSuccessMessage(phase);
   }
-  function requestContribution(to: string, need: string) {
-    if (
-      !work ||
-      (work.request?.status === "pending" && work.request.childId) ||
-      (viewer !== (work.requester || "Fabio") && viewer !== work.reviewer)
-    )
-      return;
-    const childId = isHumanMember(to, spaceData.profiles)
-      ? ""
-      : createFreeWork(to, need, [], work.projectId);
-    const request = { to, need, status: "pending" as const, ...(childId ? { childId } : {}) };
-    setWorks((all) =>
-      all.map((w) =>
-        w.id === work.id
-          ? {
-              ...w,
-              phase: "waiting",
-              request,
-              messages: [
-                ...w.messages,
-                { who: "you", sender: viewer, text: `Richiesta a ${to}: ${need}` },
-              ],
-            }
-          : w,
-      ),
-    );
-  }
+  // La richiesta di contributo (simulazione): il corpo sta in
+  // conversation-contribution-request.ts.
+  const requestContribution = createContributionRequest({
+    work,
+    viewer,
+    spaceData,
+    setWorks,
+    createFreeWork,
+  });
   function fulfillContribution(text: string, attachments: File[], ids: string[]) {
     if (
       !work?.request ||
@@ -935,6 +925,7 @@ export function ConversationWorkspace() {
             onMoveWork={moveWork}
             onStartAssignment={startAssignment}
             onCreateFreeWork={createFreeWork}
+            onProjectPrompt={projectPrompt}
             onRunRoutine={runRoutine}
             onUpdateMaterial={updateMaterial}
             onRemoveMaterial={removeMaterial}
@@ -984,7 +975,10 @@ export function ConversationWorkspace() {
             work={work}
             activeWorkId={active}
             preferences={preferences}
-            setPreferences={setPreferences}
+            onAutonomyLevelChange={changeAutonomyLevel}
+            onModelConnectionIdChange={(connId) =>
+              setPreferences((p) => ({ ...p, preferredModelConnectionId: connId }))
+            }
             notice={notice}
             setNotice={setNotice}
             assignee={assignee}
@@ -1031,9 +1025,7 @@ export function ConversationWorkspace() {
             onSend={send}
             onOpenSpace={openSpace}
             autonomyLevel={preferences.autonomyLevel}
-            onAutonomyLevelChange={(level) =>
-              setPreferences((p) => ({ ...p, autonomyLevel: level }))
-            }
+            onAutonomyLevelChange={changeAutonomyLevel}
             modelConnectionId={preferences.preferredModelConnectionId ?? ""}
             onModelConnectionIdChange={(connId) =>
               setPreferences((p) => ({ ...p, preferredModelConnectionId: connId }))

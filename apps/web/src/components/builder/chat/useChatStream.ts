@@ -77,6 +77,11 @@ export function useChatStream(conversationId: string | undefined) {
   const streamEchoIdRef = useRef<string | null>(null);
   // id stabili assegnati ai messaggi del motore (engineMessageId -> id del nodo)
   const stableIdsRef = useRef<Map<string, string>>(new Map());
+  // l'ultima conversazione definita vista: distingue «cambio conversazione»
+  // (gli echi in sospeso erano dell'altra) da «conversazione nata dal
+  // messaggio appena scritto» (l'eco è SUO e il messaggio del motore deve
+  // ereditarne l'id, altrimenti il thread mostra un secondo ramo «2 / 2»)
+  const previousConversationRef = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async (id: string) => {
     try {
@@ -168,6 +173,7 @@ export function useChatStream(conversationId: string | undefined) {
     }
     if (!hadConversationRef.current) return;
     hadConversationRef.current = false;
+    previousConversationRef.current = undefined;
     pendingRef.current = [];
     activeRunsRef.current.clear();
     seenToolsRef.current.clear();
@@ -184,12 +190,19 @@ export function useChatStream(conversationId: string | undefined) {
   // trascrizione iniziale al (ri)collegamento della conversazione
   useEffect(() => {
     if (!conversationId) return;
+    const previous = previousConversationRef.current;
+    previousConversationRef.current = conversationId;
     assistantBaselineRef.current = 0;
-    pendingRef.current = [];
     seenToolsRef.current.clear();
-    echoPendingIdsRef.current.clear();
     stableIdsRef.current.clear();
-    setPending([]);
+    if (previous !== undefined && previous !== conversationId) {
+      // Cambio di conversazione: gli echi in sospeso erano dell'altra.
+      pendingRef.current = [];
+      echoPendingIdsRef.current.clear();
+      setPending([]);
+    }
+    // Da «nessuna conversazione» a questa: l'eco del primo messaggio resta e
+    // la trascrizione lo SOSTITUISCE (stesso id, stesso nodo del thread).
     setStream(null);
     setServerMessages([]);
     setToolEvents([]);

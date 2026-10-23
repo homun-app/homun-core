@@ -2,6 +2,7 @@
   "description": "Sample params per error reason: realistic values the way the engine raises them (label params carry catalog keys, user input params carry raw echoes). Shared by the engine and client tests that compose every catalog sentence (docs/development/2026-10-15-errori-multilingua.md).",
   "params": {
     "preferences.language_invalid": { "language": "fr" },
+    "preferences.autonomy_invalid": { "level": "turbo" },
     "materials.upload.too_large": { "max_bytes": 52428800 },
     "materials.not_found": { "material_id": "mat_7f3kq2" },
     "materials.size_out_of_range": { "max_bytes": 26214400 },

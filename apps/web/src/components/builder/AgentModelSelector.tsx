@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown, Search, Star, AlertCircle, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@homun/ui/components/popover";
 import {
+  listModelConnections,
   listModelProviders,
   listOllamaTags,
+  type ModelConnectionsResponse,
   type ModelProviderInfo,
 } from "@/lib/engine-models-client";
 import { KNOWN_MODEL_PRESETS, findModelPreset } from "@/lib/known-model-presets";
@@ -52,6 +54,7 @@ export function AgentModelSelector({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [providers, setProviders] = useState<ModelProviderInfo[]>([]);
+  const [connections, setConnections] = useState<ModelConnectionsResponse | null>(null);
   const [activeProviderId, setActiveProviderId] = useState<string>("openai_compatible");
   const [ollamaTags, setOllamaTags] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -60,8 +63,9 @@ export function AgentModelSelector({
     let active = true;
     async function loadData() {
       try {
-        const [provRes, tagsRes] = await Promise.all([
+        const [provRes, connRes, tagsRes] = await Promise.all([
           listModelProviders().catch(() => null),
+          listModelConnections().catch(() => null),
           listOllamaTags().catch(() => []),
         ]);
         if (!active) return;
@@ -69,6 +73,7 @@ export function AgentModelSelector({
           setProviders(provRes.items);
           setActiveProviderId(provRes.active_provider_id);
         }
+        setConnections(connRes);
         setOllamaTags(tagsRes);
         setLoaded(true);
       } catch {
@@ -119,19 +124,28 @@ export function AgentModelSelector({
 
   // Information about the current space default
   const spaceDefaultInfo = useMemo(() => {
+    // La verità è la CONNESSIONE ATTIVA del motore: display_name e modello
+    // veri, anche quando l'id è una connessione creata dalla persona (senza
+    // preset noto) — mai l'id tecnico.
+    const activeConnection =
+      connections?.items.find((c) => c.id === connections.active_connection_id) ??
+      connections?.items.find((c) => c.active);
+    if (activeConnection?.display_name && activeConnection.model_id) {
+      return `${activeConnection.display_name} · ${activeConnection.model_id}`;
+    }
     const fromActive = activeProviders.find((p) => p.providerId === activeProviderId);
     const fromPreset = KNOWN_MODEL_PRESETS.find((p) => p.id === activeProviderId);
     const provName = fromActive?.providerName || fromPreset?.name || activeProviderId;
     const modelName = fromActive?.defaultModel || fromPreset?.defaultModel || "predefinito";
     return `${provName} · ${modelName}`;
-  }, [activeProviders, activeProviderId]);
+  }, [connections, activeProviders, activeProviderId]);
 
   // Determine currently selected display labels
   const currentSelectionLabel = useMemo(() => {
     if (!value || value.trim() === "") {
       return {
         isDefault: true,
-        title: "Quello dello spazio (predefinito)",
+        title: `Quello dello spazio (${spaceDefaultInfo})`,
         subtitle: spaceDefaultInfo,
         providerId: null,
       };
@@ -219,9 +233,9 @@ export function AgentModelSelector({
                   className="flex-shrink-0"
                 />
               )}
-              <span className="truncate max-w-[130px]">
+              <span className="truncate max-w-[190px]">
                 {currentSelectionLabel.isDefault
-                  ? `Spazio (${spaceDefaultInfo.split("·")[0]?.trim() || "Default"})`
+                  ? spaceDefaultInfo
                   : currentSelectionLabel.modelId || currentSelectionLabel.title}
               </span>
               <ChevronDown

@@ -12,6 +12,7 @@ import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 
 import { useConversationEventStream } from "@/hooks/useConversationEventStream";
+import { useEngineStatus } from "@/hooks/useEngineStatus";
 import { useTransientResolved } from "@/hooks/useTransientResolved";
 import type { AutonomyLevel } from "../conversation-preferences";
 import type { Work } from "../conversation-types";
@@ -154,8 +155,11 @@ export function EngineAgentChat({
 
   const status = chatStatusLayout(statusNotices, conversationId ?? null);
   const unreachable = status.aboveComposer.some((item) => item.kind === "engine-unreachable");
-  // alla risoluzione un esito breve, poi più nulla: senza tracce nello storico
-  const connectionRestored = useTransientResolved(unreachable);
+  // L'esito «Connessione ripristinata.» celebra una caduta VISTA in questa
+  // sessione: all'avvio a motore freddo la connessione non è mai caduta, stava
+  // solo arrivando — niente esito finché non è stata su almeno una volta.
+  const { everConnected } = useEngineStatus();
+  const connectionRestored = useTransientResolved(unreachable && everConnected);
   function handleStatusAction(action: ChatStatusActionId) {
     if (action === "refresh") void onRefreshEngine?.();
     else if (action === "open-models") onOpenModels?.();

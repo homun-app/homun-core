@@ -1,17 +1,23 @@
-"""Language preference transport: the person first, the workspace as default.
+"""Person preference transport: the person first, the workspace as default.
 
 The web client PUTs the language of the CURRENT session person when the user
-changes language (best-effort: a down engine never blocks the UI switch).
-The workspace language — the default for people without their own preference —
-is reserved to workspace authority, checked with the existing identity
-controls (require_owner_or_admin), never a hand-written check.
+changes language (best-effort: a down engine never blocks the UI switch), and
+does the same for the chat autonomy mode — the person's default for new
+conversations, kept in the engine so it survives any browser. The workspace
+language — the default for people without their own preference — is reserved
+to workspace authority, checked with the existing identity controls
+(require_owner_or_admin), never a hand-written check.
 """
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from homun.application.ops.preferences import (
+    AUTONOMY_LEVELS,
+    DEFAULT_AUTONOMY,
+    person_autonomy,
     person_language,
     resolve_language,
+    set_person_autonomy,
     set_person_language,
     set_workspace_language,
     workspace_language,
@@ -27,6 +33,10 @@ router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["preferences"])
 
 class LanguageRequest(BaseModel):
     language: str
+
+
+class AutonomyRequest(BaseModel):
+    autonomy: str
 
 
 def _require_workspace(workspace_id: str):
@@ -95,3 +105,46 @@ def write_person_language(workspace_id: str, person_id: str, body: LanguageReque
     except DomainError as exc:
         raise _http_error(exc) from exc
     return {"language": language}
+
+
+@router.get("/people/{person_id}/autonomy")
+def read_person_autonomy(workspace_id: str, person_id: str) -> dict[str, str]:
+    ctx = _require_workspace(workspace_id)
+    try:
+        _require_active_person(ctx, person_id)
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+    return {"autonomy": person_autonomy(ctx, person_id) or DEFAULT_AUTONOMY}
+
+
+@router.put("/people/{person_id}/autonomy")
+def write_person_autonomy(workspace_id: str, person_id: str, body: AutonomyRequest,
+                          x_homun_actor_id: str | None = Header(default=None),
+                          x_homun_actor_name: str | None = Header(default=None)) -> dict[str, str]:
+    ctx = _require_workspace(workspace_id)
+    actor = _actor_from_headers(workspace_id, x_homun_actor_id, x_homun_actor_name)
+    level = body.autonomy.strip().lower()
+    try:
+        if actor.id == person_id:
+            # Own mode for oneself, anche prima di qualsiasi comando: la
+            # preferenza crea la Person al primo uso (bootstrap owner), come
+            # ogni primo comando della persona.
+            _ensure_self(ctx, actor)
+        else:
+            _require_active_person(ctx, person_id)
+            require_owner_or_admin(ctx, actor)
+        set_person_autonomy(ctx, person_id, level)
+    except DomainError as exc:
+        raise _http_error(exc) from exc
+    return {"autonomy": level}
+
+
+def _ensure_self(ctx, actor) -> None:
+    """The actor's own Person, bootstrapped on first use (idempotent)."""
+    from types import SimpleNamespace
+
+    from homun.domain.commands.identity import ensure_person
+
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            ensure_person(SimpleNamespace(store=store), actor)

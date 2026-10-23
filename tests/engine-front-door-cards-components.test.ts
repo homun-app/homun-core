@@ -136,3 +136,36 @@ test("scheda chiarimento del turno: domande con scelte che passano dalla chat", 
     await ui.close();
   }
 });
+
+test("scheda chiarimento: mai JSON grezzo — le domande in una stringa JSON (anche oggetti concatenati) diventano domande e le scelte bottoni", async () => {
+  // Invariante (punto 2 del giro): con qwen3.5:4b le domande arrivavano come
+  // `[{"question": …, "choices": […]}][{…}]` in UN campo di testo e la scheda
+  // le mostrava così. La scheda non disegna mai JSON: decodifica e disegna
+  // domande con scelte cliccabili.
+  const ui = await componentRenderer(
+    "/apps/web/src/components/builder/chat/EngineFrontDoorClarifyCard.tsx",
+    "EngineFrontDoorClarifyCard",
+  );
+  try {
+    const raw =
+      JSON.stringify([
+        { question: "Qual è l'obiettivo?", choices: ["Confronto prezzi", "Panoramica"] },
+      ]) + JSON.stringify([{ question: "Per quando ti serve?" }]);
+    const markup = ui.render({
+      questions: [{ question: raw, choices: [], multi_select: false }],
+      onSendMessage: (_text: string) => {},
+    });
+    assert.match(markup, /Qual è l(?:&#x27;|')obiettivo\?/);
+    assert.match(markup, /Per quando ti serve\?/);
+    assert.doesNotMatch(
+      markup,
+      /\[\{|\}\]|(?:&quot;|")question(?:&quot;|")|(?:&quot;|")choices(?:&quot;|")/,
+    );
+    // Le scelte sono bottoni, non testo.
+    assert.match(markup, /<button[^>]*>[^<]*<span[^>]*>Confronto prezzi<\/span>/);
+    assert.match(markup, /<button[^>]*>[^<]*<span[^>]*>Panoramica<\/span>/);
+    assert.equal((markup.match(/<legend/g) ?? []).length, 2);
+  } finally {
+    await ui.close();
+  }
+});

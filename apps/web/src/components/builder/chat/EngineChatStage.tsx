@@ -2,6 +2,7 @@
 
     Tiene la mappatura (preferenze, menzioni, refresh) fuori dallo shell, che
     resta sotto il ratchet architetturale. */
+import type { AutonomyLevel } from "../conversation-preferences";
 import type { ConversationPreferences } from "../conversation-preferences";
 import type { ConversationScenario } from "../conversation-scenarios";
 import type { SpaceData } from "../ConversationSpace";
@@ -18,7 +19,8 @@ export function EngineChatStage({
   work,
   activeWorkId,
   preferences,
-  setPreferences,
+  onAutonomyLevelChange,
+  onModelConnectionIdChange,
   notice,
   setNotice,
   assignee,
@@ -34,7 +36,10 @@ export function EngineChatStage({
   work: Work | undefined;
   activeWorkId: string | null;
   preferences: ConversationPreferences;
-  setPreferences: React.Dispatch<React.SetStateAction<ConversationPreferences>>;
+  /** La scelta della persona: cambia il default e si persiste nel motore. */
+  onAutonomyLevelChange: (level: AutonomyLevel) => void;
+  /** Il modello preferito della persona, salvato con le altre preferenze. */
+  onModelConnectionIdChange: (connectionId: string) => void;
   notice: string;
   setNotice: (notice: string) => void;
   assignee: string;
@@ -79,11 +84,9 @@ export function EngineChatStage({
       onCancelInFlight={() => engine.cancelInFlight()}
       historyLoading={engine.historyLoading}
       autonomyLevel={preferences.autonomyLevel}
-      onAutonomyLevelChange={(level) => setPreferences((p) => ({ ...p, autonomyLevel: level }))}
+      onAutonomyLevelChange={onAutonomyLevelChange}
       modelConnectionId={preferences.preferredModelConnectionId || undefined}
-      onModelConnectionIdChange={(connId) =>
-        setPreferences((p) => ({ ...p, preferredModelConnectionId: connId }))
-      }
+      onModelConnectionIdChange={onModelConnectionIdChange}
       references={buildMentionRefs(scenarios, spaceData, engine.agents)}
       onRefreshEngine={engine.refresh}
       onOpenSpace={onOpenSpace}

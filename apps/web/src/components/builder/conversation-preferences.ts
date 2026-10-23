@@ -1,5 +1,11 @@
 export type AutonomyLevel = "autonomous" | "guarded" | "supervised";
 
+export const AUTONOMY_LEVELS: readonly AutonomyLevel[] = ["autonomous", "guarded", "supervised"];
+
+export function isAutonomyLevel(value: unknown): value is AutonomyLevel {
+  return typeof value === "string" && (AUTONOMY_LEVELS as readonly string[]).includes(value);
+}
+
 export type ConversationPreferences = {
   spaceName: string;
   displayName: string;

@@ -164,6 +164,37 @@ class ClarifyQuestion(_TolerantModel):
         return _tolerant_list(value)
 
 
+# «Una o due domande sull'essenziale» (instructions): three is the ceiling the
+# engine enforces; beyond that the model is told to keep the essential ones.
+MAX_CLARIFY_QUESTIONS = 3
+
+
+def _looks_like_json(text: str) -> bool:
+    return text.lstrip().startswith(('[', '{'))
+
+
+def _json_values(text: str) -> list[Any]:
+    """Every JSON value in ``text``, in order — one list, or several objects
+    (or lists) concatenated with nothing but whitespace between them, as small
+    models sometimes emit. Anything that is not JSON is an error."""
+    import json
+    decoder = json.JSONDecoder()
+    values: list[Any] = []
+    index, length = 0, len(text)
+    while index < length:
+        while index < length and text[index].isspace():
+            index += 1
+        if index >= length:
+            break
+        try:
+            value, index = decoder.raw_decode(text, index)
+        except ValueError as exc:
+            raise ValueError(f'the questions text looks like JSON but is not valid JSON ({str(exc)[:80]}); '
+                             'send questions as a list of objects with a "question" text') from exc
+        values.append(value)
+    return values
+
+
 class AskClarificationArgs(_LanguageReporting):
     """Same contract as the agent ``ClarifyArguments``: questions, or one question."""
 
@@ -178,42 +209,64 @@ class AskClarificationArgs(_LanguageReporting):
         return _tolerant_list(value)
 
     def normalized_questions(self) -> list[dict[str, Any]]:
-        """Plain question dicts for the transcript payload; raises when empty.
+        """Plain question dicts for the transcript payload; raises when invalid.
 
-        Small models sometimes wrap the question list in a JSON string: it is
-        unwrapped here rather than shown raw to the person.
+        Small models sometimes wrap the question list in a JSON string, or
+        concatenate several JSON objects, or hide the JSON inside the single
+        ``question`` field: whatever decodes into questions is decoded here —
+        the person never reads raw JSON. Whatever is not a question, and more
+        than :data:`MAX_CLARIFY_QUESTIONS` questions, goes back to the model as
+        an error it can act on.
         """
-        import json
-        raw = list(self.questions or [])
-        if not raw and (self.question or '').strip():
-            raw = [{'question': self.question, 'choices': self.choices or [], 'multi_select': self.multi_select}]
+        raw: list[Any] = list(self.questions or [])
+        single = (self.question or '').strip()
+        if not raw and single:
+            raw = [single] if _looks_like_json(single) else [
+                {'question': single, 'choices': self.choices or [], 'multi_select': self.multi_select}]
         questions: list[dict[str, Any]] = []
-        for item in raw:
+        self._collect(raw, questions)
+        if not questions:
+            raise ValueError('ask_clarification requires at least one question')
+        if len(questions) > MAX_CLARIFY_QUESTIONS:
+            raise ValueError(f'at most {MAX_CLARIFY_QUESTIONS} questions per turn (got {len(questions)}): '
+                             'keep only the essential ones')
+        return questions
+
+    @classmethod
+    def _collect(cls, items: list[Any], out: list[dict[str, Any]]) -> None:
+        for item in items:
             if isinstance(item, str):
                 text = item.strip()
                 if not text:
                     continue
-                embedded = None
-                if text.startswith('[') or text.startswith('{'):
-                    try:
-                        embedded = json.loads(text)
-                    except ValueError:
-                        embedded = None
-                if isinstance(embedded, list):
-                    questions.extend(self.__class__(questions=embedded).normalized_questions())
+                if _looks_like_json(text):
+                    cls._collect(cls._flatten(_json_values(text)), out)
                     continue
-                if isinstance(embedded, dict):
-                    embedded = [embedded]
-                    questions.extend(self.__class__(questions=embedded).normalized_questions())
-                    continue
-                questions.append({'question': text, 'choices': [], 'multi_select': False})
+                out.append({'question': text, 'choices': [], 'multi_select': False})
                 continue
+            if isinstance(item, list):
+                cls._collect(item, out)
+                continue
+            if not isinstance(item, dict):
+                raise ValueError(f'each question must be an object with a "question" text, got {type(item).__name__}')
+            if 'question' not in item:
+                raise ValueError('each question must be an object with a "question" text '
+                                 f'(got keys: {", ".join(map(str, item)) or "none"})')
             parsed = ClarifyQuestion.model_validate(item)
-            questions.append({'question': parsed.question, 'choices': parsed.choices,
-                              'multi_select': parsed.multi_select})
-        if not questions:
-            raise ValueError('ask_clarification requires at least one question')
-        return questions[:5]
+            if _looks_like_json(parsed.question):
+                # The JSON hid inside the question text itself.
+                cls._collect(cls._flatten(_json_values(parsed.question)), out)
+                continue
+            out.append({'question': parsed.question.strip(), 'choices': parsed.choices,
+                        'multi_select': parsed.multi_select})
+
+    @staticmethod
+    def _flatten(values: list[Any]) -> list[Any]:
+        """Decoded JSON values as question items: lists contribute their items."""
+        items: list[Any] = []
+        for value in values:
+            items.extend(value if isinstance(value, list) else [value])
+        return items
 
 
 class PlanChangeDraftArgs(_TolerantModel):
@@ -263,7 +316,7 @@ PROPOSE_WORK_SCHEMA: dict[str, Any] = {
 CLARIFY_SCHEMA: dict[str, Any] = {
     'type': 'object',
     'properties': {
-        'questions': {'type': 'array', 'items': {
+        'questions': {'type': 'array', 'maxItems': MAX_CLARIFY_QUESTIONS, 'items': {
             'type': 'object',
             'properties': {'question': {'type': 'string'},
                            'choices': {'type': 'array', 'items': {'type': 'string'}},
