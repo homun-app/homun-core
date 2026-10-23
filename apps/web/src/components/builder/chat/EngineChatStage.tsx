@@ -9,6 +9,7 @@ import type { Work } from "../conversation-types";
 import type { EngineWorkspaceState } from "@/hooks/useEngineWorkspace";
 import { buildMentionRefs } from "../conversation-mentions";
 import { chatStatusNotices } from "@/lib/chat-status-notices";
+import { useWorkExecution } from "@/hooks/useWorkExecution";
 
 import { EngineAgentChat } from "./EngineAgentChat";
 
@@ -49,6 +50,14 @@ export function EngineChatStage({
 }) {
   // Gli stati del motore diventano avvisi qui, dallo stato del client: la
   // collocazione nel thread è dello stage. Sano in modalità motore → vuoto.
+  // Lo stato dell'esecuzione del lavoro di questa conversazione: si rilegge
+  // alla conferma dell'accordo e a ogni nuovo messaggio.
+  const execution = useWorkExecution(
+    work && work.source === "engine" ? work.id : null,
+    preferences.autonomyLevel ?? "guarded",
+    `${engine.intake.proposal?.id ?? ""}:${engine.intake.proposal?.status ?? ""}:${work?.messages.length ?? 0}`,
+    engine.refresh,
+  );
   const statusNotices = chatStatusNotices({
     dataSource: engine.dataSource,
     gateError: engine.gateError,
@@ -87,6 +96,7 @@ export function EngineChatStage({
         work && work.source === "engine"
           ? {
               intake: engine.intake,
+              execution,
               work,
               onConfirmPatch: (patch) => engine.applyPatchPreview(work, patch),
             }

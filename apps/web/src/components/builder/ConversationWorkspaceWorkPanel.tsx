@@ -133,7 +133,7 @@ export function ConversationWorkspaceWorkPanel({
             loaded: true,
             busy: false,
             error: null,
-            confirm: async () => {},
+            confirm: async () => null,
           }
         }
         contributionPanel={contributionPanel}

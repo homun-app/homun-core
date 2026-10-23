@@ -42,7 +42,7 @@ import { useEngineWorkspaceRoutines } from "./useEngineWorkspaceRoutines";
 import { useEngineWorkspaceWorkLifecycle } from "./useEngineWorkspaceWorkLifecycle";
 import { createEngineSkill } from "@/lib/engine-mcp-client";
 import { confirmWorkIntake } from "@/lib/engine-intake-client";
-import { approveAgentRun, prepareAgentRun } from "@/lib/engine-agent-run-client";
+import { startWork as startWorkExecution } from "@/lib/engine-work-execution-client";
 import type { AutonomyLevel } from "@/components/builder/conversation-preferences";
 import { applyIntakePreview } from "@/lib/engine-intake-display";
 export type EngineWorkspaceState = {
@@ -324,6 +324,7 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
         conversationId: work.engineConversationId,
         text,
         connectionId: modelConnectionId || undefined,
+        autonomy: autonomyLevel,
         actor: defaultLocalActor(),
         signal,
         onToken: (chunk) => {
@@ -379,34 +380,9 @@ export function useEngineWorkspace(activeWorkId: string | null = null): EngineWo
         bumpIntakeSeq();
         await refresh();
 
-        const runCmdId = crypto.randomUUID();
-        const preparedRun = await prepareAgentRun(
-          work,
-          work.materialIds ?? [],
-          runCmdId,
-          modelConnectionId || undefined,
-          undefined,
-          [],
-          undefined,
-          "local",
-          undefined,
-          true, // webPages
-          true, // browser
-          true, // memory
-          true, // skills
-          true, // delegation
-          true, // clarify
-          true, // goals
-          true, // cron
-          true, // sessionManagement
-          true, // gateway
-          true, // codeExecution
-          true, // plugins
-          undefined,
-          undefined,
-          { toolset: "full", micro_compaction: true, native_stream: true },
-        );
-        await approveAgentRun(work.id, preparedRun, crypto.randomUUID());
+        // Il motore sceglie l'esecutore dall'accordo (sintesi, lettura,
+        // confronto o run adattivo): la UI chiede solo di avviare.
+        await startWorkExecution(work.id, "autonomous");
         await refresh();
         setMessageOverlay((current) => ({
           ...current,

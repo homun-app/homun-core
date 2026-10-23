@@ -73,7 +73,8 @@ export function handleEngineSend({
     void engine
       .postMessage(work, text, attachments, autonomyLevel, modelConnectionId)
       .then(() => setNotice(""))
-      .catch(() => setNotice("Invio al motore non riuscito. Controlla il banner errori."));
+      // L'esito del fallimento sta in chat (avviso + nota sul messaggio), mai nel piè di pagina.
+      .catch(() => undefined);
     return true;
   }
 
