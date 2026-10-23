@@ -295,7 +295,7 @@ test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
     page,
   }) => {
     // Con un modello vero ogni passo dura secondi o minuti.
-    if (GOLDEN) test.setTimeout(15 * 60_000);
+    if (GOLDEN) test.setTimeout(30 * 60_000);
     await page.goto("/");
 
     // 1. Richiesta e conferma, nella modalità predefinita («Con guardrail»):
@@ -307,7 +307,12 @@ test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
     const card = page.getByRole("article", { name: "Proposta di lavoro e coordinamento Homun" });
     await expect(card).toBeVisible({ timeout: GOLDEN ? 5 * 60_000 : 30_000 });
     if (GOLDEN) await page.screenshot({ path: "docs/screenshots/confirmed-work/01-proposta.png" });
-    await card.getByRole("button", { name: /Conferma accordo/ }).click();
+    // Un modello vero può proporre l'accordo con «nodi aperti» (domande prima
+    // di iniziare): la persona conferma lo stesso con «Procedi subito con
+    // impostazioni predefinite», che è la stessa conferma della UI.
+    await card
+      .getByRole("button", { name: /Conferma accordo|Procedi subito con impostazioni predefinite/ })
+      .click();
 
     // 2. Sotto l'accordo, la scheda dell'esecuzione: dallo stato «in corso»
     //    al risultato da rivedere, senza ricaricare la pagina.
