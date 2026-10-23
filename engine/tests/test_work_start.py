@@ -194,3 +194,45 @@ def test_a_correction_restarts_the_same_executor_with_a_new_version(setup):
     execute_synthesis(ctx, second['id'])
     after = work_start.current(ctx, actor, work)
     assert after['artifact']['version'] > done['artifact']['version']
+
+
+# -- trasporto HTTP: le tre rotte che usano la UI e il percorso d'oro ----------
+
+def test_http_start_then_current_shows_the_result(tmp_path):
+    from fastapi.testclient import TestClient
+    from object_transfer_f55_support import OWNER, _apply_host, host  # noqa: F401
+    from homun.app import create_app
+    from homun.context import reset_context_for_tests
+
+    ctx = create_context(db_path=tmp_path / 'host.db', data_dir=tmp_path, for_tests=True)
+    reset_context_for_tests(ctx)
+    try:
+        app = create_app(session_token='t' * 40)
+        actor = Actor(id='person_fabio', workspace_id=ctx.workspace_id, display_name='Fabio')
+        project = _apply_host(ctx, 'p', 'project.create', {'name': 'Fornitori'})['project_id']
+        conv = _apply_host(ctx, 'c', 'conversation.create',
+                           {'title': 'Fornitori', 'project_id': project})['conversation_id']
+        work = _apply_host(ctx, 'w', 'work.create', {
+            'conversation_id': conv, 'title': 'Nota', 'objective': 'Nota operativa'})['work_id']
+        _confirm(ctx, actor, work)
+        base = f'/v1/workspaces/{ctx.workspace_id}/works/{work}'
+        with TestClient(app) as client:
+            started = client.post(f'{base}/start', headers=OWNER,
+                                  json={'command_id': 'go-1', 'mode': 'supervised'})
+            assert started.status_code == 200, started.text
+            view = started.json()
+            assert view['kind'] == 'synthesis' and view['status'] == 'pending_approval'
+            approved = client.post(f"{base}/executions/{view['id']}/approve", headers=OWNER, json={
+                'command_id': 'go-2', 'digest': view['digest'], 'expected_version': view['expected_version']})
+            assert approved.status_code == 200, approved.text
+            assert approved.json()['status'] == 'queued'
+            execute_synthesis(ctx, view['id'])
+            current = client.get(f'{base}/execution', headers=OWNER)
+            assert current.status_code == 200, current.text
+            body = current.json()
+            assert body['status'] == 'completed' and body['artifact']['content']
+            refused = client.post(f'{base}/start', headers=OWNER, json={'command_id': 'go-3', 'mode': 'yolo'})
+            assert refused.status_code == 422
+    finally:
+        reset_context_for_tests(None)
+        ctx.close()
