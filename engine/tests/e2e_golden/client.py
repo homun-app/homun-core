@@ -301,53 +301,52 @@ class HomunClient:
         path = f"/v1/workspaces/{WORKSPACE}/works/{work_id}/intake/{proposal['id']}/confirm"
         return self.post(path, body)
 
-    def prepare_synthesis(
-        self, work_id: str, expected_version: int, material_ids: list[str]
-    ) -> dict[str, Any]:
-        body = {
-            "command_id": f"golden-{secrets.token_hex(6)}",
-            "expected_version": expected_version,
-            "material_ids": material_ids,
-            "skill_ids": [],
-        }
-        return self.post(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/syntheses", body)
+    def start_work(self, work_id: str, mode: str = "guarded") -> dict[str, Any]:
+        """«Conferma accordo e avvia» della UI: il motore sceglie l'esecutore."""
+        body = {"command_id": f"golden-{secrets.token_hex(6)}", "mode": mode}
+        return self.post(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/start", body)
 
-    def approve_synthesis(self, work_id: str, proposal: dict[str, Any]) -> dict[str, Any]:
+    def approve_execution(self, work_id: str, view: dict[str, Any]) -> dict[str, Any]:
+        """«Avvia» della scheda di esecuzione (modalità Supervisionato)."""
         body = {
             "command_id": f"golden-{secrets.token_hex(6)}",
-            "digest": proposal["digest"],
-            "expected_version": proposal["expected_version"],
+            "digest": view["digest"],
+            "expected_version": view["expected_version"],
         }
-        path = f"/v1/workspaces/{WORKSPACE}/works/{work_id}/syntheses/{proposal['id']}/approve"
+        path = f"/v1/workspaces/{WORKSPACE}/works/{work_id}/executions/{view['id']}/approve"
         return self.post(path, body)
 
-    def wait_synthesis(
-        self, work_id: str, proposal_id: str, timeout: float = WORK_RUN_TIMEOUT
+    def execution(self, work_id: str) -> dict[str, Any]:
+        return self.get(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/execution")
+
+    def wait_execution(
+        self, work_id: str, execution_id: str, timeout: float = WORK_RUN_TIMEOUT
     ) -> dict[str, Any]:
-        return self._wait_item(
-            f"/v1/workspaces/{WORKSPACE}/works/{work_id}/syntheses",
-            proposal_id,
-            timeout,
-            label="sintesi",
+        """Rilegge lo stato dell'esecuzione come fa la scheda in chat."""
+        deadline = time.monotonic() + timeout
+        latest: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            latest = self.execution(work_id)
+            status = str(latest.get("status") or "")
+            if latest.get("id") == execution_id and status == "completed":
+                return latest
+            if status in {"failed", "cancelled", "blocked"}:
+                detail = f" (error_code {latest['error_code']})" if latest.get("error_code") else ""
+                raise GoldenError(
+                    f"{latest.get('kind') or 'esecuzione'}_{status}",
+                    f"esecuzione {execution_id} terminata in stato {status}{detail}",
+                    excerpt_of(latest),
+                )
+            if status == "waiting_input":
+                raise GoldenError(
+                    "run_waiting_input",
+                    f"esecuzione {execution_id} ha chiesto un chiarimento invece di consegnare",
+                    excerpt_of(latest),
+                )
+            time.sleep(POLL_INTERVAL)
+        raise GoldenError(
+            "timeout", f"esecuzione {execution_id} non completata entro {timeout:g}s", excerpt_of(latest)
         )
-
-    def prepare_agent_run(
-        self, work_id: str, expected_version: int, material_ids: list[str]
-    ) -> dict[str, Any]:
-        body = {
-            "command_id": f"golden-{secrets.token_hex(6)}",
-            "expected_version": expected_version,
-            "material_ids": material_ids,
-        }
-        return self.post(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/agent-runs", body)
-
-    def approve_agent_run(self, work_id: str, run: dict[str, Any]) -> dict[str, Any]:
-        body = {
-            "command_id": f"golden-{secrets.token_hex(6)}",
-            "expected_version": run["expected_version"],
-            "digest": run["digest"],
-        }
-        return self.post(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/agent-runs/{run['id']}/approve", body)
 
     def agent_runs(self, work_id: str) -> list[dict[str, Any]]:
         return self.get(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/agent-runs").get("items") or []

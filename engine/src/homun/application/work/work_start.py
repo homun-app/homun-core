@@ -50,6 +50,15 @@ def _by_type() -> dict[str, Executor]:
 
 # -- choosing ------------------------------------------------------------------
 
+def _agreed(store, work) -> bool:
+    """A work may start once the person agreed on it: a confirmed agreement, or
+    a plan accepted directly (team builder, phased plans without intake)."""
+    agreement = latest_intake(store, work.id)
+    if agreement:
+        return agreement.get('status') == 'confirmed'
+    return bool(work.current_plan_revision)
+
+
 def execution_capability(store, work) -> str:
     """The executable capability the next execution of this work runs.
 
@@ -207,8 +216,7 @@ def start_blocker(store, work) -> str | None:
     """Why `start_work` must not run now, worded for the model; None if it may."""
     if work is None:
         return 'No work is linked to this conversation: reply with text or use propose_work.'
-    agreement = latest_intake(store, work.id)
-    if not agreement or agreement.get('status') != 'confirmed':
+    if not _agreed(store, work):
         return ('The agreement is not confirmed yet: the person confirms it from the card. '
                 'Reply with text; never say the work has started.')
     active = _active(store, work.id)
@@ -231,8 +239,7 @@ def start(ctx, actor, work_id, body) -> dict[str, Any]:
     with ctx.repository.locked():
         store = ctx.repository.load()
         work = require_work_access(store, actor, work_id)
-        agreement = latest_intake(store, work_id)
-        if not agreement or agreement.get('status') != 'confirmed':
+        if not _agreed(store, work):
             raise ConflictError('Confirm the work agreement before starting it',
                                 reason='work.start.agreement_required')
         capability = execution_capability(store, work)

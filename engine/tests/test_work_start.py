@@ -236,3 +236,21 @@ def test_http_start_then_current_shows_the_result(tmp_path):
     finally:
         reset_context_for_tests(None)
         ctx.close()
+
+
+def test_a_plan_accepted_without_intake_can_start(setup):
+    """Il costruttore squadra accetta un piano senza accordo: anche quello parte."""
+    ctx, actor, work, _project = setup
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            service = ctx.service.for_store(store)
+            version = store.works[work].version
+            service.apply(actor, 'plan', 'plan.propose', {
+                'work_id': work, 'expected_version': version,
+                'steps': [{'title': 'Nota', 'assignee_id': actor.id, 'capability': 'agent_run',
+                           'output_expected': 'Nota operativa'}]})
+            service.apply(actor, 'accept', 'plan.accept', {
+                'work_id': work, 'expected_version': store.works[work].version})
+        ctx.service.store = store
+    view = work_start.start(ctx, actor, work, {'command_id': 'start-1', 'mode': 'guarded'})
+    assert view['kind'] == 'agent_run'
