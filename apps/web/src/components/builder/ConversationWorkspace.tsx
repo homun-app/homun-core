@@ -1,5 +1,9 @@
 import { createSimulationActions } from "./conversation-simulation-actions";
-import { defaultPreferences, type ConversationPreferences } from "./conversation-preferences";
+import {
+  defaultPreferences,
+  type AutonomyLevel,
+  type ConversationPreferences,
+} from "./conversation-preferences";
 import { type CatalogPlan } from "./ConversationCatalogPlan";
 import { ConversationContribution } from "./ConversationContribution";
 import { ConversationHumanWork } from "./ConversationHumanWork";
@@ -34,6 +38,7 @@ import { downloadWorkResult } from "./conversation-export";
 import { buildMaterialLibrary } from "./conversation-material-library";
 import { sendEngineExampleWork, sendEngineFreeWork } from "@/lib/engine-work-creation";
 import { handleEngineSend } from "@/lib/engine-send-handler";
+import { fetchEngineAutonomy, setEngineAutonomy } from "@/lib/engine-preferences-client";
 import { useConversationSearchEntries } from "@/hooks/useConversationSearchEntries";
 import {
   isCompletedNoticeForViewer,
@@ -140,6 +145,20 @@ export function ConversationWorkspace() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // La modalità di autonomia della persona vive nel motore: l'ultima scelta è
+  // il default per le conversazioni nuove in QUALSIASI browser (non solo in
+  // questo). Si applica una volta, quando motore e archivio locale sono
+  // pronti, così non sovrascrive una scelta fatta in questa sessione.
+  const engineAutonomyApplied = useRef(false);
+  const engineAutonomyReady = loaded && engine.backend === "engine" && !engine.gateError;
+  useEffect(() => {
+    if (!engineAutonomyReady || engineAutonomyApplied.current) return;
+    engineAutonomyApplied.current = true;
+    void fetchEngineAutonomy().then((level) => {
+      if (level) setPreferences((current) => ({ ...current, autonomyLevel: level }));
+    });
+  }, [engineAutonomyReady]);
   const closeSearch = () => setSearchOpen(false);
   function openSpace(view: SpaceView, initial = "", selected = "") {
     if (window.innerWidth <= 800) setSidebarOpen(false);
@@ -149,6 +168,14 @@ export function ConversationWorkspace() {
     setSpaceSelected(selected);
     setSpaceVersion((v) => v + 1);
     setNotifications(false);
+  }
+
+  // La scelta della modalità della persona: cambia il default di QUESTA
+  // sessione e si persiste nel motore (il suo default per le conversazioni
+  // nuove, in qualsiasi browser).
+  function changeAutonomyLevel(level: AutonomyLevel) {
+    setPreferences((p) => ({ ...p, autonomyLevel: level }));
+    void setEngineAutonomy(level);
   }
 
   const [planEdit, setPlanEdit] = useState<{ workId: string; plan: CatalogPlan } | null>(null);
@@ -1014,7 +1041,10 @@ export function ConversationWorkspace() {
             work={work}
             activeWorkId={active}
             preferences={preferences}
-            setPreferences={setPreferences}
+            onAutonomyLevelChange={changeAutonomyLevel}
+            onModelConnectionIdChange={(connId) =>
+              setPreferences((p) => ({ ...p, preferredModelConnectionId: connId }))
+            }
             notice={notice}
             setNotice={setNotice}
             assignee={assignee}
@@ -1061,9 +1091,7 @@ export function ConversationWorkspace() {
             onSend={send}
             onOpenSpace={openSpace}
             autonomyLevel={preferences.autonomyLevel}
-            onAutonomyLevelChange={(level) =>
-              setPreferences((p) => ({ ...p, autonomyLevel: level }))
-            }
+            onAutonomyLevelChange={changeAutonomyLevel}
             modelConnectionId={preferences.preferredModelConnectionId ?? ""}
             onModelConnectionIdChange={(connId) =>
               setPreferences((p) => ({ ...p, preferredModelConnectionId: connId }))

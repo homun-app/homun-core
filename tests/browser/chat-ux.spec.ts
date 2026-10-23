@@ -14,6 +14,8 @@ import {
   personMessagesInEngine,
   pointBrowserAtEngine,
   postCommand,
+  readEngine,
+  selectMode,
   sendMessage,
   startTestEngine,
   type TestEngine,
@@ -111,5 +113,38 @@ test.describe.serial("difetti della chat", () => {
     await expect(userBubbles(page)).toHaveCount(2);
     await expect(userBubbles(page).nth(1)).toHaveText("E con i documenti?");
     await expect(picker).toHaveCount(0);
+  });
+
+  test("6 · l'ultima modalità scelta resta il default per le conversazioni nuove e sopravvive al ricaricamento", async ({
+    page,
+    browser,
+  }) => {
+    // Invariante: l'ultima modalità scelta dalla persona (Autonomo /
+    // Supervisionato / Con guardrail) è il SUO default per le conversazioni
+    // nuove, e persiste come preferenza della persona NEL MOTORE — non solo
+    // in questo browser: un browser nuovo (senza IndexedDB né localStorage)
+    // la ritrova.
+    await page.goto("/");
+    await selectMode(page, "Autonomo");
+
+    // Una conversazione nuova parte con la stessa modalità.
+    await page.locator(".cw-sb-new-btn").click();
+    await expect(page.getByTitle(/^Modalità: Autonomo/)).toBeVisible();
+
+    // Il motore custodisce la preferenza della persona.
+    await expect
+      .poll(() => readEngine(engine!.url, "people/person_fabio/autonomy"), { timeout: 10_000 })
+      .toEqual({ autonomy: "autonomous" });
+
+    // Un browser nuovo di zecca: la modalità arriva dal motore.
+    const fresh = await browser.newContext();
+    try {
+      const other = await fresh.newPage();
+      await pointBrowserAtEngine(other, engine!.url);
+      await other.goto("/");
+      await expect(other.getByTitle(/^Modalità: Autonomo/)).toBeVisible({ timeout: 30_000 });
+    } finally {
+      await fresh.close();
+    }
   });
 });
