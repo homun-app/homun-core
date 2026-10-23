@@ -143,6 +143,8 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
 /** Sceglie la modalità di autonomia dal composer, come la persona. */
 export async function selectMode(page: Page, label: string): Promise<void> {
   await page.getByTitle(/^Modalità:/).click();
-  await page.getByText(label, { exact: true }).click();
+  // L'opzione del popover, non l'etichetta del bottone: possono coincidere
+  // quando la modalità scelta è già quella attiva.
+  await page.getByRole("option", { name: new RegExp(`^${label}(\\s|$)`) }).click();
   await expect(page.getByTitle(new RegExp(`^Modalità: ${label}`))).toBeVisible();
 }
