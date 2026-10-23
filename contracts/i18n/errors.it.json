@@ -21,6 +21,7 @@
     "session.scope_denied": "La sessione di questo dispositivo non dà accesso a quella parte del motore: sono disponibili solo le funzioni condivise per il lavoro remoto.",
     "remote.actor_header_forbidden": "Sul listener remoto l'identità non si dichiara con un'intestazione: deriva solo dal token di sessione del dispositivo.",
     "preferences.language_invalid": "Lingua non supportata: {language}.",
+    "preferences.autonomy_invalid": "Modalità di autonomia non supportata: {level}.",
     "preferences.person_unknown": "Persona sconosciuta in questo spazio di lavoro.",
     "permission.workspace_authority_required": "Questa azione richiede l'autorità dello spazio di lavoro: solo un proprietario o un amministratore può compierla.",
     "materials.workspace_unknown": "Spazio di lavoro sconosciuto su questo motore.",

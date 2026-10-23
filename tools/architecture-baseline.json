@@ -4,7 +4,7 @@
     "apps/web/src/components/ai-elements/prompt-input.tsx": 1307,
     "apps/web/src/components/builder/ConversationMaterials.tsx": 959,
     "apps/web/src/components/builder/ConversationSpace.tsx": 989,
-    "apps/web/src/components/builder/ConversationWorkspace.tsx": 1227,
+    "apps/web/src/components/builder/ConversationWorkspace.tsx": 1219,
     "apps/web/src/components/builder/StudioDocuments.tsx": 541
   },
   "import_exceptions": []

@@ -47,6 +47,11 @@ const INITIAL_SNAPSHOT: EngineStatusSnapshot = {
   error: null,
 };
 
+/** Lo stato per il rendering lato server: «checking», la sonda non è mai partita. */
+export function engineStatusServerSnapshot(): EngineStatusSnapshot {
+  return INITIAL_SNAPSHOT;
+}
+
 class EngineStatusStore {
   private snapshot: EngineStatusSnapshot = INITIAL_SNAPSHOT;
   private readonly listeners = new Set<() => void>();

@@ -8,7 +8,11 @@ import {
   subscribeEngineDataSource,
   writeEngineDataSource,
 } from "../lib/engine-client";
-import { engineStatusStore, type EngineConnectionState } from "../lib/engine-status-store";
+import {
+  engineStatusServerSnapshot,
+  engineStatusStore,
+  type EngineConnectionState,
+} from "../lib/engine-status-store";
 
 export type { EngineConnectionState };
 
@@ -32,7 +36,11 @@ export type EngineStatus = {
  */
 export function useEngineStatus(baseUrl: string = ENGINE_DEFAULT_BASE_URL): EngineStatus {
   const store = engineStatusStore(baseUrl);
-  const status = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const status = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    engineStatusServerSnapshot,
+  );
   const dataSource = useSyncExternalStore(
     subscribeEngineDataSource,
     readEngineDataSource,

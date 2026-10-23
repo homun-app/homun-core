@@ -21,6 +21,7 @@
     "session.scope_denied": "This device session does not grant access to that part of the engine; only the shared remote work functions are available.",
     "remote.actor_header_forbidden": "On the remote listener identity is not declared with a header: it comes only from the device session token.",
     "preferences.language_invalid": "Unsupported language: {language}.",
+    "preferences.autonomy_invalid": "Unsupported autonomy level: {level}.",
     "preferences.person_unknown": "Unknown person in this workspace.",
     "permission.workspace_authority_required": "This action requires workspace authority: only an owner or an admin can do it.",
     "materials.workspace_unknown": "Unknown workspace on this engine.",

@@ -37,8 +37,9 @@ import { demoWorkspaceBootstrap } from "./conversation-demo-mode";
 import { downloadWorkResult } from "./conversation-export";
 import { buildMaterialLibrary } from "./conversation-material-library";
 import { sendEngineExampleWork, sendEngineFreeWork } from "@/lib/engine-work-creation";
-import { handleEngineSend } from "@/lib/engine-send-handler";
-import { fetchEngineAutonomy, setEngineAutonomy } from "@/lib/engine-preferences-client";
+import { useEngineAutonomyPreference } from "@/hooks/useEngineAutonomyPreference";
+import { useProjectPrompt } from "@/hooks/useProjectPrompt";
+import { createContributionRequest } from "./conversation-contribution-request";
 import { useConversationSearchEntries } from "@/hooks/useConversationSearchEntries";
 import {
   isCompletedNoticeForViewer,
@@ -146,19 +147,12 @@ export function ConversationWorkspace() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // La modalità di autonomia della persona vive nel motore: l'ultima scelta è
-  // il default per le conversazioni nuove in QUALSIASI browser (non solo in
-  // questo). Si applica una volta, quando motore e archivio locale sono
-  // pronti, così non sovrascrive una scelta fatta in questa sessione.
-  const engineAutonomyApplied = useRef(false);
-  const engineAutonomyReady = loaded && engine.backend === "engine" && !engine.gateError;
-  useEffect(() => {
-    if (!engineAutonomyReady || engineAutonomyApplied.current) return;
-    engineAutonomyApplied.current = true;
-    void fetchEngineAutonomy().then((level) => {
-      if (level) setPreferences((current) => ({ ...current, autonomyLevel: level }));
-    });
-  }, [engineAutonomyReady]);
+  // La modalità di autonomia della persona vive nel motore (l'ultima scelta è
+  // il suo default ovunque): la pipeline sta in hooks/useEngineAutonomyPreference.ts.
+  const changeAutonomyLevel = useEngineAutonomyPreference(
+    loaded && engine.backend === "engine" && !engine.gateError,
+    setPreferences,
+  );
   const closeSearch = () => setSearchOpen(false);
   function openSpace(view: SpaceView, initial = "", selected = "") {
     if (window.innerWidth <= 800) setSidebarOpen(false);
@@ -168,14 +162,6 @@ export function ConversationWorkspace() {
     setSpaceSelected(selected);
     setSpaceVersion((v) => v + 1);
     setNotifications(false);
-  }
-
-  // La scelta della modalità della persona: cambia il default di QUESTA
-  // sessione e si persiste nel motore (il suo default per le conversazioni
-  // nuove, in qualsiasi browser).
-  function changeAutonomyLevel(level: AutonomyLevel) {
-    setPreferences((p) => ({ ...p, autonomyLevel: level }));
-    void setEngineAutonomy(level);
   }
 
   const [planEdit, setPlanEdit] = useState<{ workId: string; plan: CatalogPlan } | null>(null);
@@ -500,24 +486,7 @@ export function ConversationWorkspace() {
     setContribution("");
     setFiles([]);
   }
-  function approvePlan() {
-    if (!work || work.phase !== "review" || viewer !== (work.reviewer || work.requester || "Fabio"))
-      return;
-    patch({
-      phase: "approved",
-      approvedBy: viewer,
-      autoDelivered: false,
-      messages: [
-        ...work.messages,
-        { who: "you", sender: viewer, text: "Approvo questa bozza." },
-        {
-          who: "agent",
-          text: "Approvazione registrata. Il risultato rimane qui nella conversazione. Nessun invio esterno.",
-        },
-      ],
-    });
-  }
-  const { simulateQuestion, simulate, runRoutine } = createSimulationActions({
+  const { simulateQuestion, simulate, runRoutine, approvePlan } = createSimulationActions({
     work,
     scenario,
     works,
@@ -565,34 +534,17 @@ export function ConversationWorkspace() {
     setScenarios((current) => [...current, spec]);
     return create(index, text, attachments, projectId, spec);
   }
-  // Il campo del Project Hub è la chat di quel progetto: il testo della persona
-  // parte VERBATIM dalla stessa porta d'ingresso del composer (lavoro nuovo nel
-  // progetto + conversation.post_message), con le sue preferenze di autonomia e
-  // modello. Mai un segnaposto come messaggio: il «+» apre solo la
-  // conversazione nuova nel progetto e aspetta le sue parole.
-  function projectPrompt(projectId: string, text = "") {
-    setNewChatProjectId(projectId);
-    if (!text.trim()) {
-      open(null);
-      return;
-    }
-    if (
-      handleEngineSend({
-        engine,
-        work: null,
-        text,
-        attachments: [],
-        open,
-        setNotice,
-        bumpOwnSend,
-        autonomyLevel: preferences.autonomyLevel,
-        modelConnectionId: preferences.preferredModelConnectionId || undefined,
-        projectId,
-      })
-    )
-      return;
-    createFreeWork("Nuovo lavoro", text, [], projectId);
-  }
+  // Il campo del Project Hub è la chat di quel progetto (testo verbatim dalla
+  // porta d'ingresso): la pipeline sta in hooks/useProjectPrompt.ts.
+  const projectPrompt = useProjectPrompt({
+    engine,
+    preferences,
+    setNewChatProjectId,
+    open,
+    setNotice,
+    bumpOwnSend,
+    createFreeWork,
+  });
   const send = createConversationSend({
     engine,
     work,
@@ -694,33 +646,15 @@ export function ConversationWorkspace() {
     );
     return boardMoveSuccessMessage(phase);
   }
-  function requestContribution(to: string, need: string) {
-    if (
-      !work ||
-      (work.request?.status === "pending" && work.request.childId) ||
-      (viewer !== (work.requester || "Fabio") && viewer !== work.reviewer)
-    )
-      return;
-    const childId = isHumanMember(to, spaceData.profiles)
-      ? ""
-      : createFreeWork(to, need, [], work.projectId);
-    const request = { to, need, status: "pending" as const, ...(childId ? { childId } : {}) };
-    setWorks((all) =>
-      all.map((w) =>
-        w.id === work.id
-          ? {
-              ...w,
-              phase: "waiting",
-              request,
-              messages: [
-                ...w.messages,
-                { who: "you", sender: viewer, text: `Richiesta a ${to}: ${need}` },
-              ],
-            }
-          : w,
-      ),
-    );
-  }
+  // La richiesta di contributo (simulazione): il corpo sta in
+  // conversation-contribution-request.ts.
+  const requestContribution = createContributionRequest({
+    work,
+    viewer,
+    spaceData,
+    setWorks,
+    createFreeWork,
+  });
   function fulfillContribution(text: string, attachments: File[], ids: string[]) {
     if (
       !work?.request ||

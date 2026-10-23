@@ -256,5 +256,22 @@ export function createSimulationActions({
     setWorks((current) => [...current, run, ...children]);
     open(id);
   }
-  return { simulateQuestion, simulate, runRoutine };
+  function approvePlan() {
+    if (!work || work.phase !== "review" || viewer !== (work.reviewer || work.requester || "Fabio"))
+      return;
+    patch({
+      phase: "approved",
+      approvedBy: viewer,
+      autoDelivered: false,
+      messages: [
+        ...work.messages,
+        { who: "you", sender: viewer, text: "Approvo questa bozza." },
+        {
+          who: "agent",
+          text: "Approvazione registrata. Il risultato rimane qui nella conversazione. Nessun invio esterno.",
+        },
+      ],
+    });
+  }
+  return { simulateQuestion, simulate, runRoutine, approvePlan };
 }
