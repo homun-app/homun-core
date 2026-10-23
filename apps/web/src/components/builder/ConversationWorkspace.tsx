@@ -32,6 +32,7 @@ import {
 import { demoWorkspaceBootstrap } from "./conversation-demo-mode";
 import { downloadWorkResult } from "./conversation-export";
 import { buildMaterialLibrary } from "./conversation-material-library";
+import { sendEngineExampleWork, sendEngineFreeWork } from "@/lib/engine-work-creation";
 import { useConversationSearchEntries } from "@/hooks/useConversationSearchEntries";
 import {
   isCompletedNoticeForViewer,
@@ -232,22 +233,15 @@ export function ConversationWorkspace() {
     override?: (typeof scenarios)[number],
   ) {
     if (engine.backend === "engine") {
-      if (engine.gateError) {
-        setNotice("App locale non pronta: impossibile creare il lavoro.");
-        return;
-      }
-      const s = override || scenarios[index]!;
-      // Never reuse demo scenario titles as identity — objective text is the work title.
-      const title = (text || s.initial || s.title).trim().slice(0, 100) || "Lavoro motore";
-      const objective = (text || s.initial).trim() || title;
-      void engine
-        .createWork(title, objective, false, projectId ?? newChatProjectId ?? undefined)
-        .then((created) => {
-          if (created) {
-            open(created.id);
-            setNotice(`Lavoro creato · ${created.id}`);
-          }
-        });
+      sendEngineExampleWork(
+        { engine, open, setNotice },
+        {
+          scenario: override || scenarios[index]!,
+          text: text ?? "",
+          attachments,
+          projectId: projectId ?? newChatProjectId ?? undefined,
+        },
+      );
       return;
     }
     if (spaceData.removedPeople?.includes((override || scenarios[index]!).agent)) {
@@ -526,12 +520,16 @@ export function ConversationWorkspace() {
   }
   function createFreeWork(name: string, text: string, attachments: File[], projectId?: string) {
     if (engine.backend === "engine") {
-      void engine.createWork("Nuova richiesta", text).then((created) => {
-        if (created) {
-          open(created.id);
-          setNotice(`Lavoro creato per ${name} · ${created.id}`);
-        }
-      });
+      if (engine.gateError) {
+        setNotice("App locale non pronta: impossibile creare il lavoro.");
+        return undefined;
+      }
+      // Il lavoro nasce con i segnaposto: il testo è un messaggio e decide
+      // la porta d'ingresso cosa farne (come ogni primo messaggio).
+      sendEngineFreeWork(
+        { engine, open, setNotice, bumpOwnSend },
+        { name, text, attachments, projectId },
+      );
       return undefined;
     }
     const spec = buildFreeWorkSpec(name, text, spaceData);
@@ -1042,7 +1040,6 @@ export function ConversationWorkspace() {
             }
             onClearNotice={() => setNotice("")}
             engineMode={false}
-            engineIntake={undefined}
             onRefreshEngine={engine.refresh}
             engineAgents={undefined}
             agentNames={undefined}

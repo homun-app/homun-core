@@ -56,18 +56,15 @@ def test_direct_synthesis_plan_declares_capability_and_approval_starts_it(setup)
 
 
 def confirm_intake(ctx, actor, work, *, capability='synthesize', plan_steps=None, agent_name='Redattrice'):
-    from homun.application.work.intake import propose as intake_propose, confirm as intake_confirm
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps({
+    from intake_setup import front_door_intake
+    front_door_intake(ctx, actor, work, {
         'title': 'Catalogo prodotti Acme', 'objective': 'Preparare il catalogo per Acme dai listini.',
         'output': 'Bozza di catalogo in Markdown', 'constraints': ['prezzi dai listini caricati'],
         'missing_information': [], 'suggested_agent_id': None,
         'new_agent': {'name': agent_name, 'role': 'Redazione di cataloghi', 'instructions': 'Redige cataloghi dai listini'} if agent_name else None,
         'rationale': 'Redazione documentale', 'capability': capability,
         'plan_steps': plan_steps or [],
-    }))
-    p = intake_propose(ctx, actor, work, {'command_id': 'intake', 'text': 'Prepara il catalogo per Acme', 'expected_version': 1})
-    intake_confirm(ctx, actor, work, p['id'], {'command_id': 'staff', 'digest': p['digest'],
-                                               'expected_version': p['expected_version'], 'create_agent': bool(agent_name)})
+    }, text='Prepara il catalogo per Acme', create_agent=bool(agent_name))
     return ctx.repository.load().works[work].version
 
 
@@ -340,6 +337,8 @@ def test_missing_model_usage_is_unknown_and_charged_to_assignee(setup):
     ctx, actor, work, material = setup
     version = confirm_intake(ctx, actor, work)
     agent_id = _agent_id(ctx.repository.load(), 'Redattrice')
+    # Il modello non riporta l'uso: il tentativo finisce come «sconosciuto».
+    ctx.models.complete = lambda *a, **k: SimpleNamespace(text='Draft')
     with ctx.repository.locked(), ctx.repository.transaction() as store:
         store.work_budgets[work].allocations[agent_id] = BudgetAllocation(actor_id=agent_id, model_attempts=5)
     before = ctx.repository.load().work_budgets[work].unknown.attempts

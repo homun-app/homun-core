@@ -26,6 +26,22 @@ TOOL_ORDER = (PROPOSE_WORK, ASK_CLARIFICATION, PROPOSE_PLAN_CHANGE)
 
 CAPABILITY_VALUES = ('general', 'synthesize', 'read_material', 'compare_csv', 'agent_run')
 
+# The person's language as the model reports it (common tool argument). Free
+# text in the schema: junk normalizes to None, never a correction round.
+LANGUAGE_ALIASES = {'it': 'it', 'italiano': 'it', 'italian': 'it',
+                    'en': 'en', 'english': 'en'}
+
+
+def normalized_language(value: Any) -> str | None:
+    """'it'/'en' from whatever the model wrote in ``language``; None otherwise."""
+    if not isinstance(value, str):
+        return None
+    code = value.strip().lower()
+    if not code:
+        return None
+    base = code.split('-')[0].split('_')[0]
+    return LANGUAGE_ALIASES.get(code) or LANGUAGE_ALIASES.get(base)
+
 
 def _tolerant_list(value):
     """``None`` → empty list; a bare string → one-element list."""
@@ -70,12 +86,25 @@ class PlanStepDraftArgs(_TolerantModel):
         return _tolerant_list(value)
 
 
-class ProposeWorkArgs(_TolerantModel):
-    """``propose_work`` arguments: few required fields, tolerant lists."""
+class _LanguageReporting(_TolerantModel):
+    """The common optional ``language`` argument: how the model tells the
+    engine the language of the person's message (detection at no extra call)."""
 
-    title: str = Field(min_length=1, max_length=100)
-    objective: str = Field(min_length=1, max_length=700)
-    output: str = Field(min_length=1, max_length=500)
+    language: str | None = Field(default=None, max_length=16)
+
+
+class ProposeWorkArgs(_LanguageReporting):
+    """``propose_work`` arguments: tolerant in shape, strict in meaning.
+
+    On a FIRST proposal title/objective/output must all be there. On a
+    REVISION of an existing agreement the model may send only what changes:
+    the engine fills the missing fields from the anchor brief, never trusts
+    the model to echo them.
+    """
+
+    title: str | None = Field(default=None, max_length=100)
+    objective: str | None = Field(default=None, max_length=700)
+    output: str | None = Field(default=None, max_length=500)
     constraints: list[str] = Field(default_factory=list, max_length=12)
     missing_information: list[str] = Field(default_factory=list, max_length=12)
     suggested_agent_id: str | None = None
@@ -90,17 +119,33 @@ class ProposeWorkArgs(_TolerantModel):
     def _lists(cls, value):
         return _tolerant_list(value)
 
-    def to_brief(self) -> IntakeBrief:
-        """Project onto the strict IntakeBrief; validation stays with the engine."""
+    def to_brief(self, anchor: dict | None = None) -> IntakeBrief:
+        """Project onto the strict IntakeBrief; validation stays with the engine.
+
+        Missing identity fields come verbatim from the anchor (the existing
+        agreement); without an anchor they are mandatory and the model gets a
+        correction it can act on.
+        """
+        def pick(value: str | None, key: str, *, limit: int = 700) -> str:
+            text = (value or '').strip()
+            if text:
+                return text[:limit]
+            if anchor is not None:
+                return str(anchor.get(key) or '').strip()[:limit]
+            raise ValueError(f'{key} is required on a first proposal; '
+                             'a revision may omit it and the engine keeps the agreement\'s value')
+
+        title = pick(self.title, 'title', limit=100)
+        rationale = (self.rationale or '').strip() or f'{title[:80]} — proposta dalla chat'
         return IntakeBrief(
-            title=self.title.strip(),
-            objective=self.objective.strip(),
-            output=self.output.strip(),
+            title=title,
+            objective=pick(self.objective, 'objective'),
+            output=pick(self.output, 'output'),
             constraints=self.constraints,
             missing_information=self.missing_information,
             suggested_agent_id=self.suggested_agent_id,
             new_agent=self.new_agent.model_dump() if self.new_agent else None,
-            rationale=(self.rationale or '').strip() or f'{self.title.strip()[:80]} — proposta dalla chat',
+            rationale=rationale,
             capability=self.capability,
             changed_fields=self.changed_fields,
             plan_steps=[PlanStepDraft.model_validate(step.model_dump()) for step in self.plan_steps],
@@ -118,7 +163,7 @@ class ClarifyQuestion(_TolerantModel):
         return _tolerant_list(value)
 
 
-class AskClarificationArgs(_TolerantModel):
+class AskClarificationArgs(_LanguageReporting):
     """Same contract as the agent ``ClarifyArguments``: questions, or one question."""
 
     questions: list[Any] | None = None
@@ -132,16 +177,35 @@ class AskClarificationArgs(_TolerantModel):
         return _tolerant_list(value)
 
     def normalized_questions(self) -> list[dict[str, Any]]:
-        """Plain question dicts for the transcript payload; raises when empty."""
+        """Plain question dicts for the transcript payload; raises when empty.
+
+        Small models sometimes wrap the question list in a JSON string: it is
+        unwrapped here rather than shown raw to the person.
+        """
+        import json
         raw = list(self.questions or [])
         if not raw and (self.question or '').strip():
             raw = [{'question': self.question, 'choices': self.choices or [], 'multi_select': self.multi_select}]
-        questions = []
+        questions: list[dict[str, Any]] = []
         for item in raw:
             if isinstance(item, str):
                 text = item.strip()
-                if text:
-                    questions.append({'question': text, 'choices': [], 'multi_select': False})
+                if not text:
+                    continue
+                embedded = None
+                if text.startswith('[') or text.startswith('{'):
+                    try:
+                        embedded = json.loads(text)
+                    except ValueError:
+                        embedded = None
+                if isinstance(embedded, list):
+                    questions.extend(self.__class__(questions=embedded).normalized_questions())
+                    continue
+                if isinstance(embedded, dict):
+                    embedded = [embedded]
+                    questions.extend(self.__class__(questions=embedded).normalized_questions())
+                    continue
+                questions.append({'question': text, 'choices': [], 'multi_select': False})
                 continue
             parsed = ClarifyQuestion.model_validate(item)
             questions.append({'question': parsed.question, 'choices': parsed.choices,
@@ -157,7 +221,7 @@ class PlanChangeDraftArgs(_TolerantModel):
     step_id: str | None = None
 
 
-class ProposePlanChangeArgs(_TolerantModel):
+class ProposePlanChangeArgs(_LanguageReporting):
     changes: list[PlanChangeDraftArgs] = Field(default_factory=list)
 
     @field_validator('changes', mode='before')
@@ -178,12 +242,15 @@ PROPOSE_WORK_SCHEMA: dict[str, Any] = {
         'suggested_agent_id': {'type': 'string'},
         'new_agent': {'type': 'object'},
         'rationale': {'type': 'string'},
+        'changed_fields': {'type': 'array', 'items': {'type': 'string', 'enum': [
+            'title', 'objective', 'output', 'constraints', 'capability', 'staffing', 'plan_steps']}},
         'plan_steps': {'type': 'array', 'items': {
             'type': 'object',
             'properties': {'title': {'type': 'string'}, 'capability': {'type': 'string'},
                            'assignee': {'type': 'string'}, 'output_expected': {'type': 'string'},
                            'expected_materials': {'type': 'array', 'items': {'type': 'string'}}},
         }},
+        'language': {'type': 'string'},
     },
     'required': ['title', 'objective', 'output'],
 }
@@ -201,6 +268,7 @@ CLARIFY_SCHEMA: dict[str, Any] = {
         'question': {'type': 'string'},
         'choices': {'type': 'array', 'items': {'type': 'string'}},
         'multi_select': {'type': 'boolean'},
+        'language': {'type': 'string'},
     },
 }
 
@@ -213,6 +281,7 @@ PLAN_CHANGE_SCHEMA: dict[str, Any] = {
                            'to_value': {'type': 'string'}, 'step_id': {'type': 'string'}},
             'required': ['field'],
         }},
+        'language': {'type': 'string'},
     },
     'required': ['changes'],
 }

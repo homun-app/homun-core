@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import pytest
 
 from homun.application.work import budgets
-from homun.application.work.intake import classify_message, propose
 from homun.context import create_context
 from homun.domain.errors import BudgetExhaustedError, ConflictError, PermissionDeniedError
 from homun.domain.models import Actor, BudgetCounters, utc_now
@@ -91,36 +90,6 @@ def test_denied_actor_cannot_reserve(setup):
     stranger = Actor(id='stranger', workspace_id='ws_local', display_name='Stranger')
     with pytest.raises(PermissionDeniedError):
         budgets.reserve(ctx, stranger, wid, BudgetCounters(attempts=1))
-
-
-def test_intake_propose_fails_durably_when_exhausted_then_set_budget_recovers(setup):
-    ctx, actor, wid, brief = setup
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    ctx.service.apply(actor, 'cap', 'work.set_budget', {'work_id': wid, 'caps': {'model_attempts': 1}})
-    ctx.persist()
-    p = propose(ctx, actor, wid, {'command_id': 'i1', 'text': 'Confronta listini', 'expected_version': 1})
-    assert p['status'] == 'pending_confirmation'
-    assert budget(ctx, wid).spent.attempts + budget(ctx, wid).unknown.attempts == 1
-    p2 = propose(ctx, actor, wid, {'command_id': 'i2', 'text': 'Ancora un confronto', 'expected_version': 1})
-    assert p2['status'] == 'failed' and p2['error_code'] == 'budget_exhausted'
-    assert ctx.repository.load().works[wid].owner_id == actor.id
-    # Raising the cap explicitly restores the flow.
-    ctx.service.apply(actor, 'cap2', 'work.set_budget', {'work_id': wid, 'caps': {'model_attempts': 3}})
-    ctx.persist()
-    p3 = propose(ctx, actor, wid, {'command_id': 'i3', 'text': 'Riproviamo il confronto', 'expected_version': 1})
-    assert p3['status'] == 'pending_confirmation'
-
-
-def test_classify_reserves_and_reports_exhaustion(setup):
-    ctx, actor, wid, _ = setup
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps({'kind': 'question'}))
-    assert classify_message(ctx, actor, wid, 'Una domanda?') == ('question', None)
-    # Fake providers report no usage: the attempt is charged, as unknown.
-    assert budget(ctx, wid).spent.attempts + budget(ctx, wid).unknown.attempts == 1
-    ctx.service.apply(actor, 'cap', 'work.set_budget', {'work_id': wid, 'caps': {'model_attempts': 1}})
-    ctx.persist()
-    with pytest.raises(BudgetExhaustedError):
-        classify_message(ctx, actor, wid, 'Un\'altra domanda?')
 
 
 def test_set_budget_version_conflict(setup):
@@ -302,13 +271,27 @@ def test_agent_owner_cannot_approve_concrete_actions_person_gate(setup):
     brief['capability'] = 'compare_csv'
     ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
     from homun.application.work.intake import confirm as intake_confirm
-    from homun.application.work.intake import propose as intake_propose
-    p = intake_propose(ctx, actor, wid, {'command_id': 'i1', 'text': 'Confronta i listini', 'expected_version': 1})
+    from homun.application.work.intake import commit_front_door_proposal
+    from homun.models.intake import IntakeBrief
+
+    def front_propose(command_id, text, brief_overrides=None):
+        from copy import deepcopy as _copy
+        merged = {**brief, **(brief_overrides or {})}
+        conversation_id = ctx.repository.load().works[wid].primary_conversation_id
+        with ctx.repository.locked():
+            with ctx.repository.transaction() as store:
+                ctx.service.store = store
+                return commit_front_door_proposal(ctx, actor, command_id=command_id,
+                                                  conversation_id=conversation_id, work_id=wid,
+                                                  brief=IntakeBrief.model_validate(merged), text=text)
+        ctx.service.store = ctx.repository.load()
+
+    front_propose('i1', 'Confronto i listini')
     # Delegate to a fresh agent: it becomes the owner, Fabio stays reviewer.
-    brief['new_agent'] = {'name': 'Analista', 'role': 'Analisi', 'instructions': 'Confronta'}
-    brief['suggested_agent_id'] = None
-    brief['changed_fields'] = ['staffing']
-    p2 = intake_propose(ctx, actor, wid, {'command_id': 'i2', 'text': 'Con confronto', 'expected_version': 1})
+    p2 = front_propose('i2', 'Con confronto', {
+        'new_agent': {'name': 'Analista', 'role': 'Analisi', 'instructions': 'Confronta'},
+        'suggested_agent_id': None,
+        'changed_fields': ['staffing']})
     intake_confirm(ctx, actor, wid, p2['id'], {'command_id': 'ok', 'digest': p2['digest'],
                                                'expected_version': p2['expected_version'], 'create_agent': True})
     store = ctx.repository.load()

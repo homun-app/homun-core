@@ -11,6 +11,12 @@ from homun.domain.ids import new_id
 from homun.models.types import ChatMessage, CompletionResult, UsageEntry, VerifyResult
 
 _MENTION = re.compile(r"@([^\s@]+)")
+def _language_of(text: str) -> str:
+    """The person's language like a real model reports it: the shared
+    deterministic detection, English when the text carries no signal."""
+    from homun.i18n import detect_language
+
+    return detect_language(text) or "en"
 
 
 class FakeProvider:
@@ -24,9 +30,11 @@ class FakeProvider:
         self.last_stream_result: CompletionResult | None = None
         # Native front-door support: scripted responses consumed in order, and
         # a log of the message lists received (tests assert the correction
-        # rounds and the prompt language here).
+        # rounds and the prompt language here). The tool catalog of each turn
+        # is logged too: what the model could see.
         self.native_script: list[Any] = []
         self.native_calls: list[list[dict]] = []
+        self.native_tools: list[list[dict]] = []
 
     def verify_connection(self) -> VerifyResult:
         return VerifyResult(
@@ -58,6 +66,7 @@ class FakeProvider:
         """
         from homun.models.native_turn import NativeMessage, NativeResult, ToolCall
         self.native_calls.append([message.model_dump(mode="json") for message in messages])
+        self.native_tools.append([tool.model_dump(mode="json") for tool in (tools or [])])
         model = model_id or self.default_model
         if self.native_script:
             item = self.native_script.pop(0)
@@ -83,12 +92,34 @@ class FakeProvider:
             return NativeResult(
                 message=NativeMessage(role="assistant", content="", tool_calls=[call]),
                 usage=self._usage_for(model, input_text=last_user, output_text="patch"))
+        # A vague report request, like the golden B8 one: the real models ask
+        # what the result should be — the fake asks the same deterministically.
+        if re.search(r"\bcrea una relazione\b", lowered):
+            call = ToolCall(id="call_fake_clarify", name="ask_clarification", arguments={
+                "questions": [{"question": "Qual è l'obiettivo della relazione sui fornitori?",
+                               "choices": ["Confronto prezzi", "Panoramica generale"]},
+                              {"question": "Per quando ti serve?"}],
+                "language": _language_of(last_user)})
+            return NativeResult(
+                message=NativeMessage(role="assistant", content="", tool_calls=[call]),
+                usage=self._usage_for(model, input_text=last_user, output_text="clarify"))
+        # A deadline move on a confirmed agreement: a minimal revision
+        # (only the changed constraint, like the golden B10 request).
+        if re.search(r"\bsposta la (?:consegna|scadenza)\b", lowered):
+            call = ToolCall(id="call_fake_revise", name="propose_work", arguments={
+                "constraints": ["Consegna entro il 15 dicembre"],
+                "changed_fields": ["constraints"],
+                "language": _language_of(last_user)})
+            return NativeResult(
+                message=NativeMessage(role="assistant", content="", tool_calls=[call]),
+                usage=self._usage_for(model, input_text=last_user, output_text="revise"))
         if re.search(r"\b(prepara|nota|relazion|ricerca|catalogo|report|analizza|analisi)\b", lowered):
             call = ToolCall(id="call_fake_work", name="propose_work", arguments={
                 "title": "Nota operativa (fake)",
                 "objective": last_user[:200] or "Obiettivo della richiesta",
                 "output": "Nota operativa breve",
                 "capability": "general",
+                "language": _language_of(last_user),
             })
             return NativeResult(
                 message=NativeMessage(role="assistant", content="", tool_calls=[call]),

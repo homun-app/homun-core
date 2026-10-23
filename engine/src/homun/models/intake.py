@@ -1,11 +1,7 @@
 """Bounded structured intake; recommendations cannot grant capabilities."""
-import json
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from homun.domain.capabilities import REGISTRY, require_capability
-from homun.i18n import user_text
-from homun.models.prompt_store import prompts_for
-from homun.models.types import ChatMessage
 
 class NewAgent(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -22,15 +18,6 @@ BriefField = Literal['title', 'objective', 'output', 'constraints', 'capability'
 """Parts of a brief the model may declare as intentionally changed by a clarification."""
 
 _BRIEF_FIELDS = {'title', 'objective', 'output', 'constraints', 'capability', 'staffing', 'plan_steps'}
-
-RequestKind = Literal['work_request', 'question']
-"""A message either asks for a durable work result or just asks / chats."""
-
-class RequestClassification(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    kind: RequestKind
-    language: str | None = Field(default=None, max_length=8)
-    """Detected language of the request (ISO code such as 'en'); routing aid only."""
 
 
 class PlanStepDraft(BaseModel):
@@ -139,46 +126,6 @@ def validate_brief(brief: IntakeBrief, agents: list[dict]) -> IntakeBrief:
     return brief
 
 
-_MODEL_HIDDEN_KEYS = {"ready", "eligible_materials"}
-"""Kept out of the model-facing catalog: readiness signals made small models
-decline executable work before the files were uploaded. IO detail stays: it
-anchors the output language and never caused the downgrade."""
-
-
-def _capability_catalog_lines(capabilities, language='it'):
-    """Registry-grounded capability descriptions for the model.
-
-    Labels come from the shared catalog (contracts/i18n): the only texts the
-    engine used to keep in two languages inside the code.
-    """
-    labels = {
-        name: (user_text(f"intake.catalog.{name}", language=language)
-               or user_text(f"intake.catalog.{name}", language='it'))
-        for name in ('executable', 'preparation', 'limits', 'none', 'note')
-    }
-    if not capabilities:
-        capabilities = [spec.public() for spec in REGISTRY.values()]
-    lines = []
-    for item in capabilities:
-        limits = ", ".join(f"{key}={value}" for key, value in sorted(item.get("limits", {}).items()))
-        if item.get("kind") == "executable":
-            lines.append(
-                f"- {item['id']} {labels['executable']}: {item['summary']} "
-                f"{labels['limits']}: {limits or labels['none']}. {labels['note']}"
-            )
-        else:
-            lines.append(f"- {item['id']} {labels['preparation']}: {item['summary']}")
-    return "\n".join(lines)
-
-
-def _model_capabilities(capabilities):
-    """Minimal shape before anything reaches the model."""
-    if not capabilities:
-        return None
-    return [{key: value for key, value in item.items() if key not in _MODEL_HIDDEN_KEYS}
-            for item in capabilities]
-
-
 def _extract_json_payload(text):
     """Tolerant extraction shared with the interpret parser (see json_payload)."""
     from homun.models.json_payload import extract_json_payload
@@ -195,57 +142,3 @@ def approved_skills_index() -> list:
     return [{'name': s.name, 'description': s.description}
             for s in sorted(store.skills.values(), key=lambda s: s.name)
             if s.status == 'approved'][:40]
-
-
-def synthesize(registry, text, agents, *, previous_brief=None, latest_request=None, capabilities=None, language=None, usage_out=None, organization_context=None):
-    catalog = _model_capabilities(capabilities)
-    # Language selection is structural: a known language picks its template, an
-    # unknown one falls back to the workspace default. Output language follows
-    # the template plus each template's own request-language rule.
-    template = prompts_for(registry).get('intake/synthesize', language=language)
-    system = template.render(
-        schema=json.dumps(IntakeBrief.model_json_schema(), ensure_ascii=False),
-        catalog=_capability_catalog_lines(catalog, template.language))
-    skills = approved_skills_index()
-    payload = json.dumps({'request':text,'latest_request':latest_request or text,'previous_brief':previous_brief,
-                          'agents':agents,'skills':skills,'organization_context':organization_context or {},
-                          'capabilities':catalog or [spec.public() for spec in REGISTRY.values()]},ensure_ascii=False)
-    messages = [ChatMessage(role='system',content=system),
-                ChatMessage(role='user',content=payload)]
-    # Small local models sometimes wrap the schema in prose or drift from it:
-    # one strict retry (billed and ledgered like any attempt) keeps the brief
-    # durable instead of failing the whole proposal on a formatting hiccup.
-    from pydantic import ValidationError as _ValidationError
-    for attempt in range(2):
-        result = registry.complete(messages if attempt == 0 else
-                                   messages + [ChatMessage(role='user',content='La risposta precedente non era JSON valido per lo schema. Restituisci SOLO il JSON valido, senza testo attorno.')])
-        usage = getattr(result, 'usage', None)
-        if usage_out is not None and usage is not None:
-            usage_out.append(usage)
-        try:
-            brief = IntakeBrief.model_validate_json(_extract_json_payload(result.text))
-            break
-        except (_ValidationError, ValueError):
-            if attempt:
-                raise
-    # Same engine rules as the front-door turn: one shared validation.
-    return validate_brief(brief, agents)
-
-
-def classify_request(registry, text, *, pending_brief=None, usage_out=None):
-    """Routing only: does this message ask for a work result or just ask a question?
-
-    Stateless by design — the durable record of whatever is said lives in the
-    transcript of the path chosen by the caller, never here.
-    """
-    system = prompts_for(registry).get('intake/classify').render(
-        schema=json.dumps(RequestClassification.model_json_schema(), ensure_ascii=False))
-    result = registry.complete([ChatMessage(role='system',content=system), ChatMessage(role='user',content=json.dumps({'request':text,'pending_brief':pending_brief},ensure_ascii=False))])
-    usage = getattr(result, 'usage', None)
-    if usage_out is not None and usage is not None:
-        usage_out.append(usage)
-    raw = _extract_json_payload(result.text)
-    classification = RequestClassification.model_validate_json(raw)
-    language = (classification.language or '').strip().lower()[:8] or None
-    return classification.kind, language
-

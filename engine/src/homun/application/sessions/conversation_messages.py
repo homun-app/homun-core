@@ -6,7 +6,9 @@ from homun.policy.work import require_conversation_works_access
 
 
 _MESSAGE_EVENTS = {'message.created', 'message.interpreted'}
-_CARD_FIELDS = ('interpretation', 'patch_proposal', 'plan_draft')
+# Front-door card payloads travel with the transcript row so the UI can mount
+# the outcome's card next to the message that produced it, reload included.
+_CARD_FIELDS = ('interpretation', 'patch_proposal', 'plan_draft', 'intake_proposal', 'front_door')
 
 
 def _attach_run_context(store, item, payload):

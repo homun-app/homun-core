@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ENGINE_DEFAULT_BASE_URL } from "@/lib/engine-client";
 import { loadEngineTranscript } from "@/lib/engine-transcript-client";
+import type { FrontDoorPatchPreview } from "@/lib/front-door-cards";
+import type { FrontDoorPayload } from "@/components/builder/conversation-types";
 
 export type ChatStreamMessage = {
   id: string;
@@ -15,6 +17,12 @@ export type ChatStreamMessage = {
   reasoning?: string;
   /** Attività tool del run che ha prodotto questo messaggio (solo live). */
   tools?: ChatToolEvent[];
+  /** Esito del turno di ingresso (porta d'ingresso) di questo messaggio. */
+  frontDoor?: FrontDoorPayload;
+  /** Id della proposta di accordo nata dal turno di questo messaggio. */
+  intakeProposalId?: string;
+  /** Anteprima di modifica del piano proposta da questo messaggio. */
+  patchProposal?: FrontDoorPatchPreview;
 };
 
 /** Attività tool del run attivo, mostrata come avanzamento live. */
@@ -96,6 +104,9 @@ export function useChatStream(conversationId: string | undefined) {
           role,
           content: m.text,
           ...(m.reasoning ? { reasoning: m.reasoning } : {}),
+          ...(m.frontDoor ? { frontDoor: m.frontDoor } : {}),
+          ...(m.intakeProposalId ? { intakeProposalId: m.intakeProposalId } : {}),
+          ...(m.patchProposal ? { patchProposal: m.patchProposal } : {}),
           ...(m.tools && m.tools.length > 0
             ? {
                 tools: m.tools.map((tool, toolIndex) => ({

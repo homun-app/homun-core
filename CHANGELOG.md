@@ -24,6 +24,7 @@ Linux AppImage can update itself from `homun-releases`, and the chat composer ma
 
 ## Highlights
 
+- **One front door: every message is just a message.** First messages, follow-ups and requests to change a confirmed agreement all go through `conversation.post_message`; the engine's front-door turn decides (reply, clarification, agreement proposal, plan change) and each outcome shows as a card in the chat transcript — confirm, modify or cancel without reloading. The UI's own classify/propose routing and the engine's `intake/classify` and text-proposal `intake` endpoints are gone.
 - **Work directly with Homun without creating a specialist bot.** Optional company onboarding proposes a small team for recurring responsibilities.
 - **Adaptive work over approved materials.** Homun can read, search, consult selected AI teammates, request clarification and deliver a reviewable result with persisted progress.
 - **Scoped human contributions.** Named recipients can answer one request through an expiring, revocable link; an adaptive run can resume from that answer. Reachable hosting remains a prerequisite.

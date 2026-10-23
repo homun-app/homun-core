@@ -1,18 +1,20 @@
 """Area B — lavori dalla chat: dalla richiesta operativa al documento approvato.
 
-Percorso della UI: `engine-intake-creation.ts` (classifica → proposta intake),
-`engine-intake-client.ts` (conferma), `engine-synthesis-client.ts` o
-`engine-agent-run-client.ts` (esecuzione), `engine-work-review.ts` (revisione).
-La scelta dell'esecutore segue la capability dell'accordo, come fa la UI.
+Percorso della UI (porta d'ingresso unica): ogni richiesta — primo messaggio o
+messaggio successivo — passa da `conversation.post_message`
+(useEngineWorkspace.postMessage → postEngineConversationMessage); il turno di
+ingresso nativo (`application/sessions/front_door`) produce la risposta, il
+chiarimento o la proposta di accordo, che si conferma da
+`engine-intake-client.ts`. L'esecuzione segue la capability dell'accordo, come
+la UI (`engine-synthesis-client.ts` o `engine-agent-run-client.ts`), la
+revisione passa da `engine-work-review.ts`.
 
-B6, B8 e B9 misurano l'altra strada della richiesta di lavoro: non la coppia
-classifica → proposta intake del primo messaggio (B1), ma
-`conversation.post_message` (useEngineWorkspace.postMessage →
-postEngineConversationMessage), che il motore risolve con il turno di ingresso
-nativo a strumenti (`application/sessions/front_door`): il modello propone
-(testo, chiarimento, accordo, modifica del piano), il motore decide. B7 misura
-un lavoro eseguito con una connessione modello creata dalla persona con un nome
-suo (Impostazioni → Modelli).
+B1 misurava la coppia classifica → proposta intake via API, la strada che la
+UI non percorre più: è stata assorbita da B9 (l'apertura del percorso B è
+identica al primo messaggio via post_message). B7 misura un lavoro eseguito
+con una connessione modello creata dalla persona con un nome suo
+(Impostazioni → Modelli). B10 misura la revisione di un accordo confermato
+chiesta in chat.
 """
 from __future__ import annotations
 
@@ -20,8 +22,8 @@ from dataclasses import replace
 
 import pytest
 
-from .common import (RICHIESTA_NOTA, RINGRAZIAMENTO, WORKSPACE, GoldenError, ensure_accepted,
-                     normalize_for_match, run_indices)
+from .common import (RICHIESTA_NOTA, RICHIESTA_REVISIONE, RINGRAZIAMENTO, WORKSPACE, GoldenError,
+                     ensure_accepted, normalize_for_match, run_indices)
 from .reporting import GoldenRun
 
 pytestmark = pytest.mark.golden
@@ -81,21 +83,26 @@ def _latest_intake_capability(client, work_id: str) -> str:
 
 
 def _story_b(golden, run: GoldenRun) -> None:
+    """Il percorso B apre come B9: primo messaggio via post_message, proposta
+    della porta d'ingresso, poi conferma, esecuzione, correzione, approvazione."""
     client = golden.client
-    with run.step("B1.richiesta"):
-        conversation_id = client.create_conversation("Nuova richiesta")
-        created = client.create_work(conversation_id, "Nuova richiesta", RICHIESTA_NOTA)
-        work_id = str(created["work_id"])
-        version = int(created["version"])
-        classified = client.classify_intake(work_id, RICHIESTA_NOTA)
-        assert classified.get("kind") == "work_request", (
-            f"la richiesta operativa è stata classificata come {classified.get('kind')!r}"
-        )
-    with run.step("B1.proposta"):
-        proposal = client.propose_intake(work_id, RICHIESTA_NOTA, version)
-        assert proposal.get("status") == "pending_confirmation", str(proposal.get("status"))
+    with run.step("B9.richiesta"):
+        conversation_id, work_id, _version = client.create_conversation_and_work()
+        roster = client.ui_roster()
+        result, error = client.post_message(conversation_id, RICHIESTA_NOTA, roster=roster)
+        ensure_accepted(error, "richiesta di lavoro rifiutata")
+        if result.get("chat_agent"):
+            client.resolve_reply(conversation_id, result, result.get("message_id"))
+        outcome = _work_request_outcome(result)
+        run.recorder.note(f"B(run) run {run.run_index}: esito della richiesta = {outcome}")
+        assert outcome == "proposta", f"il primo messaggio non ha prodotto una proposta di accordo: {outcome}"
+    with run.step("B9.proposta"):
+        proposal = _pending_proposal(client, work_id)
+        assert proposal is not None, "nessuna proposta in attesa di conferma sul lavoro della conversazione"
         assert str(proposal.get("title") or "").strip(), "proposta senza titolo"
         assert str(proposal.get("objective") or "").strip(), "proposta senza obiettivo"
+        assert str(proposal.get("output") or "").strip(), "proposta senza risultato atteso"
+        _assert_nothing_started(client, work_id)
     with run.step("B2.conferma"):
         confirmed = client.confirm_intake(work_id, proposal)
         assert confirmed.get("status") == "confirmed", str(
@@ -141,7 +148,7 @@ def _story_b(golden, run: GoldenRun) -> None:
 
 @pytest.mark.parametrize("run_index", run_indices())
 def test_b_lavoro_dalla_chat(golden, run_index: int) -> None:
-    golden.run(["B1", "B2", "B3", "B4", "B5"], run_index, _story_b)
+    golden.run(["B9", "B2", "B3", "B4", "B5"], run_index, _story_b)
 
 
 # -- B6: richiesta di lavoro come messaggio successivo -----------------------
@@ -289,6 +296,94 @@ def _story_b9(golden, run: GoldenRun) -> None:
 @pytest.mark.parametrize("run_index", run_indices())
 def test_b9_richiesta_come_primo_messaggio(golden, run_index: int) -> None:
     golden.run(["B9"], run_index, _story_b9)
+
+
+# -- B10: revisione di un accordo confermato, chiesta in chat ----------------
+
+
+def _story_b10(golden, run: GoldenRun) -> None:
+    """La persona chiede in chat di cambiare un accordo già confermato: il
+    turno di ingresso produce una proposta di REVISIONE (con il diff
+    dell'accordo), la conferma la applica. La strada che prima faceva la UI
+    con classify + POST /intake."""
+    client = golden.client
+    with run.step("B10.richiesta"):
+        conversation_id, work_id, _version = client.create_conversation_and_work()
+        roster = client.ui_roster()
+        result, error = client.post_message(conversation_id, RICHIESTA_NOTA, roster=roster)
+        ensure_accepted(error, "richiesta di lavoro rifiutata")
+        if result.get("chat_agent"):
+            client.resolve_reply(conversation_id, result, result.get("message_id"))
+        outcome = _work_request_outcome(result)
+        run.recorder.note(f"B10 run {run.run_index}: esito della richiesta = {outcome}")
+        assert outcome == "proposta", f"il primo messaggio non ha prodotto una proposta di accordo: {outcome}"
+    with run.step("B10.conferma"):
+        proposal = _pending_proposal(client, work_id)
+        assert proposal is not None, "nessuna proposta in attesa di conferma"
+        confirmed = client.confirm_intake(work_id, proposal)
+        assert confirmed.get("status") == "confirmed", str(
+            confirmed.get("status") or confirmed.get("error_code")
+        )
+        # L'accordo confermato può pubblicare le fasi (piano, lavoro ready):
+        # è il punto di partenza da cui la revisione non deve muovere nulla.
+        after_first = client.work_detail(work_id)["work"]
+        first_plan_revision = int(after_first.get("current_plan_revision") or 0)
+        first_status = str(after_first.get("status"))
+    with run.step("B10.richiesta-modifica"):
+        accepted, error, rejections = client.post_message_when_free(
+            conversation_id, RICHIESTA_REVISIONE, roster=roster
+        )
+        ensure_accepted(
+            error, f"la richiesta di modifica è stata rifiutata (dopo {rejections} rifiuti)"
+        )
+        if accepted.get("chat_agent"):
+            client.resolve_reply(conversation_id, accepted, accepted.get("message_id"))
+        outcome = _work_request_outcome(accepted)
+        run.recorder.note(f"B10 run {run.run_index}: esito della richiesta di modifica = {outcome}")
+        assert outcome == "proposta", (
+            f"la richiesta di modifica non ha prodotto una proposta di revisione: {outcome}"
+        )
+    with run.step("B10.revisione"):
+        revision = _pending_proposal(client, work_id)
+        assert revision is not None, "nessuna proposta di revisione in attesa di conferma"
+        assert revision.get("id") != confirmed.get("id"), "la proposta di revisione è la stessa del primo accordo"
+        changes = revision.get("changes") or []
+        assert changes, "la revisione non dichiara nessuna differenza rispetto all'accordo"
+        # La revisione aspetta la persona: senza la sua conferma il lavoro non
+        # avanza — stesso piano di dopo la prima conferma, nessun risultato,
+        # stesso stato (l'esecutore non cambia prima della conferma).
+        work = client.work_detail(work_id)["work"]
+        assert int(work.get("current_plan_revision") or 0) == first_plan_revision, (
+            "un nuovo piano è stato pubblicato senza la conferma della revisione"
+        )
+        assert not work.get("current_artifact_version"), "qualcosa è stato eseguito senza conferma"
+        assert str(work.get("status")) == first_status, (
+            f"lo stato del lavoro è cambiato senza conferma: {first_status} → {work.get('status')!r}"
+        )
+    with run.step("B10.conferma-modifica"):
+        revised = client.confirm_intake(work_id, revision)
+        assert revised.get("status") == "confirmed", str(
+            revised.get("status") or revised.get("error_code")
+        )
+        items = client.get(f"/v1/workspaces/{WORKSPACE}/works/{work_id}/intake").get("items") or []
+        latest_confirmed = next(
+            (item for item in reversed(items) if item.get("status") == "confirmed"), None
+        )
+        assert latest_confirmed is not None, "nessun accordo confermato dopo la revisione"
+        agreement = normalize_for_match(
+            " ".join(
+                str(latest_confirmed.get(field) or "")
+                for field in ("title", "objective", "output", "constraints")
+            )
+        )
+        assert "15dicembre" in agreement, (
+            "l'accordo confermato non riflette la modifica della scadenza al 15 dicembre"
+        )
+
+
+@pytest.mark.parametrize("run_index", run_indices())
+def test_b10_revisione_accordo_confermato(golden, run_index: int) -> None:
+    golden.run(["B10"], run_index, _story_b10)
 
 
 # -- B7: lavoro con una connessione creata dalla persona ----------------------

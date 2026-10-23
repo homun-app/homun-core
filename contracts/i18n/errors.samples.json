@@ -20,7 +20,6 @@
     "agent_run.chat_blocked": { "code": "version_conflict" },
     "plan.revise.insert_after_unknown": { "step_id": "step-3" },
     "front_door.work_proposed": { "title": "Nota operativa rinnovo Rossi" },
-    "front_door.work_proposed_missing": { "items": "scadenza; perimetro" },
     "message.too_long": { "max": 12000 }
   }
 }

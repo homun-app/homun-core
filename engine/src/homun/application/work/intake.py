@@ -1,58 +1,18 @@
-"""Durable conversational brief, with model work outside transactions."""
+"""Durable conversational brief, committed by the front-door turn.
+
+Proposals arrive from the front-door native turn (``commit_front_door_proposal``);
+confirmation and listing are the stable transport the UI reads. Nothing here
+calls a model: the brief is what the model proposed and the engine validated.
+"""
 from copy import deepcopy
 from homun.application.work.price_comparisons import cached, save
 from homun.application.work.intake_policy import (PROPOSAL_TYPE, active_agents, anchor_brief, authority, digest, idle,
-                                                  lookup, permission_snapshot, proposals_for, public)
-from homun.application.work.organization_context import organization_background
+                                                  lookup, permission_snapshot, proposals_for, public, revisable)
 from homun.application.work.intake_brief import effective_values
-from homun.domain.errors import BudgetExhaustedError, ConflictError, ValidationError
+from homun.domain.errors import ConflictError, ValidationError
 from homun.domain.models import utc_now
-from homun.models.intake import classify_request, synthesize
-from homun.policy.capabilities import capability_catalog
 from homun.policy.work import require_work_access
 
-
-def _usage_counters(usage):
-    """Reported usage when the provider returned it; None keeps unknown as unknown."""
-    if not usage:
-        return None
-    entry = usage[-1]
-    if entry.input_tokens is None and entry.output_tokens is None:
-        return None
-    from homun.domain.models import BudgetCounters
-    return BudgetCounters(attempts=1,
-                          input_tokens=entry.input_tokens or 0,
-                          output_tokens=entry.output_tokens or 0)
-
-
-def classify_message(ctx, actor, work_id, text):
-    """Ephemeral routing between chat and the agreement flow; persists nothing.
-
-    The durable record of whatever the person said belongs to the transcript of
-    the path chosen by the caller (chat reply or intake proposal), never here.
-    """
-    text = text.strip()
-    if not text or len(text) > 12000:
-        raise ValidationError('Request must contain 1-12000 characters')
-    store = ctx.repository.load()
-    authority(store, actor, {'work_id': work_id})
-    pending = next((r.result for r in sorted(store.commands.values(), key=lambda r: r.created_at)
-                    if r.type == PROPOSAL_TYPE and r.result['work_id'] == work_id
-                    and r.result['status'] == 'pending_confirmation'), None)
-    pending_brief = ({'title': pending['title'], 'objective': pending['objective']}
-                     if pending and pending.get('objective') else None)
-    from homun.application.work import budgets as work_budgets
-    from homun.domain.models import BudgetCounters
-    reservation = work_budgets.reserve(ctx, actor, work_id, BudgetCounters(attempts=1),
-                                       purpose='intake.classify')
-    usage = []
-    try:
-        kind, language = classify_request(ctx.models, text, pending_brief=pending_brief, usage_out=usage)
-        work_budgets.reconcile(ctx, actor, work_id, reservation, usage=_usage_counters(usage))
-        return kind, language
-    except Exception:
-        work_budgets.reconcile_unknown(ctx, actor, work_id, reservation)
-        raise
 
 def _resolve_plan_assignee(store, name, fallback_agent_id):
     wanted = str(name or '').strip().casefold()
@@ -63,102 +23,6 @@ def _resolve_plan_assignee(store, name, fallback_agent_id):
     if wanted:
         raise ConflictError('Plan phase collaborator is no longer active')
     return fallback_agent_id
-
-
-def propose(ctx, actor, work_id, body):
-    payload={**body,'work_id':work_id}
-    with ctx.repository.locked():
-        with ctx.repository.transaction() as store:
-            work=authority(store,actor,{"work_id":work_id})
-            record,fingerprint=cached(store,actor,body['command_id'],PROPOSAL_TYPE,payload)
-            if record:
-                authority(store,actor,record.result)
-                return deepcopy(public(record.result))
-            idle(work)
-            if work.version != body['expected_version']:
-                raise ConflictError('Work changed; refresh before proposing')
-            text=body['text']
-            if not text.strip() or len(text)>12000:
-                raise ValidationError('Request must contain 1-12000 characters')
-            previous=proposals_for(store,work_id)
-            previous_brief=anchor_brief(previous)
-            original='\n\n'.join([p['_submitted_text'] for p in previous]+[text])
-            if len(original)>30000:
-                raise ValidationError('Intake context too long')
-            ctx.service.for_store(store).apply(actor,body['command_id']+':message','conversation.post_message',{'conversation_id':work.primary_conversation_id,'text':text})
-            for p in previous:
-                if p['status']=='pending_confirmation':
-                    p.update(status='failed',error_code='intake_superseded')
-            proposal={'id':body['command_id'],'status':'failed','work_id':work_id,'expected_version':work.version,
-                      'title':'Richiesta da chiarire','objective':'','output':'','constraints':[], 'missing_information':[],
-                      'suggested_agent':None,'new_agent':None,'rationale':'','capability':'general','original_request':original,
-                      'changed_fields':[],'changes':[],
-                      'error_code':'intake_interrupted','_submitted_text':text,
-                      '_permissions':permission_snapshot(store,actor,work)}
-            proposal['digest']=digest(proposal)
-            save(store,actor,body['command_id'],PROPOSAL_TYPE,fingerprint,proposal)
-            agents=active_agents(store)
-            # Ground the collaborator recommendation in what the engine can really run.
-            capabilities=capability_catalog(store,actor)
-        ctx.service.store=store
-    requested_language = body.get('language')
-    requested_language = (requested_language.strip().lower()[:8] or None
-                          if isinstance(requested_language, str) else None)
-    # A per-request language wins (routing aid); otherwise the texts this
-    # engine generates for THIS person follow the person → workspace → en chain.
-    from homun.application.ops.preferences import resolve_language
-    language = resolve_language(ctx, requested_language, person_id=actor.id)
-    from homun.application.work import budgets as work_budgets
-    from homun.domain.models import BudgetCounters
-    # Reserve before the provider call: exhaustion is durable and typed, and a
-    # crash between reserve and reconcile leaves a recoverable trace.
-    try:
-        reservation = work_budgets.reserve(ctx, actor, work_id, BudgetCounters(attempts=1),
-                                           purpose='intake.synthesize')
-    except BudgetExhaustedError:
-        with ctx.repository.locked():
-            with ctx.repository.transaction() as store:
-                proposal = lookup(store, body['command_id'], work_id)
-                proposal.update(status='failed', error_code='budget_exhausted')
-                proposal['digest'] = digest(proposal)
-            ctx.service.store = store
-        return deepcopy(public(proposal))
-    usage = []
-    try:
-        brief = synthesize(ctx.models, original, agents, previous_brief=previous_brief,
-                           latest_request=text, capabilities=capabilities, language=language,
-                           usage_out=usage, organization_context=organization_background(store, actor))
-    except BaseException as cause:
-        # The call may have consumed provider budget even on failure.
-        work_budgets.reconcile_unknown(ctx, actor, work_id, reservation)
-        values = {}; changes = []
-        error = 'intake_invalid_response' if isinstance(cause, (ValueError, TypeError)) else 'intake_provider_failed'
-    else:
-        work_budgets.reconcile(ctx, actor, work_id, reservation, usage=_usage_counters(usage))
-        try:
-            values, changes = effective_values(brief, agents, previous_brief, owner_id=work.owner_id)
-        except (ValueError, TypeError):
-            values = {}; changes = []; error = 'intake_invalid_response'
-        else:
-            error = None
-    with ctx.repository.locked():
-        with ctx.repository.transaction() as store:
-            proposal=lookup(store,body['command_id'],work_id)
-            work=authority(store,actor,proposal)
-            if work.version != proposal['expected_version'] or permission_snapshot(store,actor,work)!=proposal['_permissions']:
-                error='intake_obsolete'
-            newer=any(r.type==PROPOSAL_TYPE and r.result['work_id']==work_id and r.result['id']!=proposal['id'] and r.result.get('original_request','').startswith(original+'\n\n') for r in store.commands.values())
-            if newer:
-                error='intake_superseded'
-            if error:
-                proposal.update(status='failed',error_code=error)
-            else:
-                proposal.update(values,status='pending_confirmation')
-                proposal.pop('error_code',None)
-            proposal['changes']=changes
-            proposal['digest']=digest(proposal)
-        ctx.service.store=store
-    return deepcopy(public(proposal))
 
 
 def commit_front_door_proposal(ctx, actor, *, command_id, conversation_id, work_id, brief, text):
@@ -197,7 +61,16 @@ def commit_front_door_proposal(ctx, actor, *, command_id, conversation_id, work_
                 'error_code': 'intake_interrupted', '_submitted_text': text,
                 '_permissions': permission_snapshot(store, actor, work)}
     try:
-        idle(work)
+        if previous_brief is None:
+            idle(work)
+        elif not revisable(work):
+            # La revisione di un accordo con anchor passa finché il lavoro non
+            # parte davvero: il piano pubblicato dalla sua conferma non è un avvio.
+            raise ConflictError('The agreement can only be revised before the work starts')
+        # Defence in depth: the turn already validated the brief; the same
+        # shared rules run again against fresh state before anything persists.
+        from homun.models.intake import validate_brief
+        validate_brief(brief, agents)
         values, changes = effective_values(brief, agents, previous_brief, owner_id=work.owner_id)
         error = None
     except (ValueError, TypeError, ConflictError):
@@ -234,7 +107,13 @@ def confirm(ctx,actor,work_id,proposal_id,body):
                 raise ConflictError('A newer intake proposal supersedes this confirmation')
             if record:
                 return deepcopy(public(proposal))
-            idle(work)
+            if proposal.get('changed_fields'):
+                # Revisione di un accordo con anchor: ammessa finché il lavoro
+                # non parte davvero (il piano della conferma non è un avvio).
+                if not revisable(work):
+                    raise ConflictError('The agreement can only be revised before the work starts')
+            else:
+                idle(work)
             if proposal['status']!='pending_confirmation' or work.version!=proposal['expected_version']:
                 raise ConflictError('Proposal or work changed; propose again')
             service=ctx.service.for_store(store)

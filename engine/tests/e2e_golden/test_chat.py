@@ -31,6 +31,13 @@ def _story_a1(golden, run: GoldenRun) -> None:
     with run.step("A1.risposta"):
         result, error = client.post_message(conversation_id, DOMANDA_SEMPLICE)
         ensure_accepted(error, "invio rifiutato")
+        # «Cosa sai fare?» è una domanda: la risposta deve essere UNA RISPOSTA
+        # TESTUALE, non un chiarimento e non una proposta (sarebbe comunque
+        # passata al vecchio controllo «nessun lavoro creato»).
+        kind = str(
+            (result.get("front_door") or {}).get("kind") or ("agente" if result.get("chat_agent") else "?")
+        )
+        assert kind in {"text", "agente"}, f"la domanda non ha ricevuto una risposta testuale: {kind}"
         reply = _reply(golden, conversation_id, result)
         assert len(reply.strip()) >= 30, f"risposta troppo povera: {reply!r}"
     with run.step("A1.nessun-lavoro"):

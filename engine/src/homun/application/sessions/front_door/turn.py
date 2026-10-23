@@ -133,6 +133,7 @@ def structured_union_schema(tool_catalog) -> dict[str, Any]:
             'multi_select': {'type': 'boolean'},
             'work': tools.PROPOSE_WORK_SCHEMA,
             'plan_changes': tools.PLAN_CHANGE_SCHEMA['properties']['changes'],
+            'language': {'type': 'string'},
         },
         'required': ['action'],
     }
@@ -141,6 +142,7 @@ def structured_union_schema(tool_catalog) -> dict[str, Any]:
 def _structured_to_message(payload: dict[str, Any]) -> NativeMessage:
     """One structured decision projected onto the same shape as a tool turn."""
     action = str(payload.get('action') or '')
+    language = {'language': payload['language']} if payload.get('language') else {}
     if action == 'reply':
         text = str(payload.get('reply_text') or payload.get('text') or '')
         if not text.strip():
@@ -154,6 +156,7 @@ def _structured_to_message(payload: dict[str, Any]) -> NativeMessage:
             arguments = dict(payload.get('work') or {})
         else:
             arguments = {'changes': payload.get('plan_changes') or []}
+        arguments.update(language)
         return NativeMessage(role='assistant', content='',
                              tool_calls=[_synthetic_call(action, arguments)])
     raise NativeModelError(MALFORMED, f'Unknown structured action: {action or "(missing)"}')
@@ -254,9 +257,20 @@ def run_front_door_turn(ctx, actor: Actor, body: CommandRequest, result: dict[st
         memory=getattr(ctx, 'memory', None),
     )
     roster = default_roster(store, actor, body.payload)
-    from homun.application.ops.preferences import resolve_language
+    from homun.application.ops.preferences import conversation_language, person_language, workspace_language
     from homun.application.work.intake_policy import active_agents, anchor_brief, proposals_for
-    language = resolve_language(ctx, None, person_id=actor.id)
+    from homun.i18n import DEFAULT_LANGUAGE, detect_language
+    # Prompts follow the person's language: preference → conversation (already
+    # detected) → the language THIS message is written in → workspace → en.
+    # Small models decide far better when instructions speak the language of
+    # the message they must interpret (measured on the golden local model).
+    person_pref = person_language(ctx, actor.id)
+    prompt_language = (person_pref
+                       or conversation_language(ctx, conversation_id)
+                       or detect_language(text)
+                       or workspace_language(ctx)
+                       or DEFAULT_LANGUAGE)
+    language = prompt_language
     tool_catalog = tools.front_door_tools(ctx.models, language)
     plan = ctx.service.current_plan(work) if work is not None else None
     agents = active_agents(store)
@@ -270,17 +284,31 @@ def run_front_door_turn(ctx, actor: Actor, body: CommandRequest, result: dict[st
 
     outcome = _budgeted_turn(ctx, actor, work, decide) if work is not None else decide()
 
-    display = outcomes.display_for(outcome, language=language)
+    # What the engine writes for the person: their preference wins, then what
+    # they write in this very message (engine detection first, the model's own
+    # report as fallback), then the conversation's history, workspace, en.
+    written = detect_language(text)
+    text_language = (person_pref
+                     or written
+                     or outcome.language
+                     or conversation_language(ctx, conversation_id)
+                     or workspace_language(ctx)
+                     or DEFAULT_LANGUAGE)
+
+    display = outcomes.display_for(outcome, language=text_language)
     enriched = dict(result)
     enriched['context_manifest'] = conversation_context.manifest.model_dump(mode='json', exclude_none=True)
-    enriched['front_door'] = _payload_for(outcome, language)
+    enriched['front_door'] = _payload_for(outcome, text_language,
+                                          detected=outcome.language or written)
     if outcome.kind == outcomes.PLAN_CHANGE:
         enriched['patch_proposal'] = outcome.plan_preview
     return enriched, display
 
 
-def _payload_for(outcome, language) -> dict[str, Any]:
+def _payload_for(outcome, language, *, detected=None) -> dict[str, Any]:
     payload: dict[str, Any] = {'kind': outcome.kind, 'language': language}
+    if detected is not None:
+        payload['detected_language'] = detected
     if outcome.kind == outcomes.CLARIFICATION:
         payload['questions'] = outcome.questions
     if outcome.kind == outcomes.WORK_PROPOSAL and outcome.brief is not None:
@@ -404,6 +432,14 @@ def finalize_front_door(ctx, actor: Actor, body: CommandRequest, enriched: dict[
     if manifest is not None:
         revalidate_context(ctx.service.store, actor, ContextManifest.model_validate(manifest))
     front = enriched.get('front_door') or {}
+    conversation_id = str(body.payload.get('conversation_id', ''))
+    # The detected language joins the same transaction as the rest of the turn:
+    # it persists exactly when the reply does (person → conversation → ws → en).
+    detected = str(front.get('detected_language') or '')
+    if conversation_id and detected:
+        from homun.application.ops.preferences import remember_conversation_language
+        with ctx.repository.locked() as conn:
+            remember_conversation_language(conn, conversation_id, detected)
     if front.get('kind') == outcomes.WORK_PROPOSAL:
         from homun.application.work.intake import commit_front_door_proposal
         from homun.models.intake import IntakeBrief
@@ -423,7 +459,6 @@ def finalize_front_door(ctx, actor: Actor, body: CommandRequest, enriched: dict[
                                     language=str(front.get('language') or 'en'))
             if replacement:
                 display = replacement
-    conversation_id = str(body.payload.get('conversation_id', ''))
     if not display or not conversation_id:
         return enriched
     assistant = ctx.service.append_engine_message(

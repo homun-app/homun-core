@@ -27,10 +27,14 @@ UI_NEW_REQUEST_TITLE = "Nuova richiesta"
 UI_NEW_REQUEST_OBJECTIVE = "Obiettivo da concordare"
 # Il lavoro interno dei turni di chat con agente (chat_agent.CHAT_WORK_TITLE).
 CHAT_WORK_TITLE = "Chat agente"
-# La richiesta operativa del percorso d'oro (B1, B6, B9, A5) e il ringraziamento (A5, B6).
+# La richiesta operativa del percorso d'oro (B, B6, B9, B10, A5), il
+# ringraziamento (A5, B6) e la modifica dell'accordo confermato (B10).
 RICHIESTA_NOTA = (
     "Prepara una nota operativa: rinnovo contratto fornitore Rossi entro il 30 novembre, "
     "Marco segue la parte legale, io il budget (max 12.000 euro)."
+)
+RICHIESTA_REVISIONE = (
+    "Il cliente ha anticipato la consegna: sposta la scadenza al 15 dicembre invece del 30 novembre."
 )
 RINGRAZIAMENTO = "grazie"
 
@@ -49,13 +53,12 @@ HTTP_TIMEOUT = httpx.Timeout(connect=10.0, read=320.0, write=60.0, pool=360.0)
 # dei passi registrati («A1», «B2.conferma» → «B2»).
 SCENARIOS: dict[str, str] = {
     "M0": "Connessione modello verificata (Impostazioni → Modelli)",
-    "A1": "Domanda semplice: risposta in chat, nessun lavoro creato",
+    "A1": "Domanda semplice: risposta testuale (nessun chiarimento, nessuna proposta), nessun lavoro creato",
     "A2": "Tre messaggi di fila accettati, nell'ordine giusto",
     "A3": "Dopo un errore provocato il messaggio successivo è accettato",
     "A4": "La conversazione si ritrova e riprende dopo il riavvio",
     "A5": "Dopo una proposta, «grazie» riceve una risposta testuale e non crea proposte",
     "A6": "Risposta vuota del modello → errore chiaro, e il messaggio successivo è accettato SUBITO",
-    "B1": "Richiesta operativa → proposta di lavoro (intake)",
     "B2": "Conferma → esecuzione → risultato prodotto",
     "B3": "Il risultato contiene i fatti dati (Rossi, 30 novembre, 12.000)",
     "B4": "Correzione motivata → nuova versione del risultato",
@@ -64,6 +67,7 @@ SCENARIOS: dict[str, str] = {
     "B7": "Lavoro eseguito con una connessione creata dall'utente con un nome suo",
     "B8": "Richiesta vaga → chiarimento o proposta con informazioni mancanti, mai un lavoro avviato",
     "B9": "Richiesta di lavoro come PRIMO messaggio via conversation.post_message → proposta di accordo",
+    "B10": "Modifica di un accordo confermato chiesta in chat → proposta di revisione → conferma",
     "C1": "Progetto con 2 file caricati (.md e .pdf) leggibili",
     "C2": "Ricerca nei materiali: il risultato cita i contenuti veri dei file",
     "C3": "Riassunto di un file: il risultato ne presenta i punti chiave",

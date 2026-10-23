@@ -83,6 +83,15 @@ export function EngineChatStage({
       scenarios={scenarios}
       spaceData={spaceData}
       onCreateExample={onCreateExample}
+      frontDoor={
+        work && work.source === "engine"
+          ? {
+              intake: engine.intake,
+              work,
+              onConfirmPatch: (patch) => engine.applyPatchPreview(work, patch),
+            }
+          : undefined
+      }
     />
   );
 }

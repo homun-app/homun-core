@@ -7,7 +7,6 @@ import { Markdown as ChatMarkdown } from "./ChatMarkdown";
 import { ConversationAgentLive } from "./ConversationAgentLive";
 import { ConversationBrowserPip } from "./ConversationBrowserPip";
 import { useConversationEventStream } from "@/hooks/useConversationEventStream";
-import { EngineWorkIntake } from "./EngineWorkIntake";
 import { EnginePlanRelayTimeline } from "./EnginePlanRelayTimeline";
 import { ConversationMarginaliaSpine } from "./ConversationMarginaliaSpine";
 import { EngineAgentProfileModal } from "./EngineAgentProfileModal";
@@ -22,7 +21,6 @@ import type { ConversationScenario } from "./conversation-scenarios";
 import type { SpaceData } from "./ConversationSpace";
 import { ConversationWorkspaceWelcome } from "./ConversationWorkspaceWelcome";
 import type { Work } from "./conversation-types";
-import type { WorkIntakeState } from "@/hooks/useWorkIntake";
 import { StudioChatInput } from "./StudioChatInput";
 import { WorkPatchPreviewCard } from "./WorkPatchPreviewCard";
 import { ThreadTopStatusNotices } from "./chat/ChatStatusNotices";
@@ -58,7 +56,6 @@ type Props = {
   onClearNotice: () => void;
   engineMode?: boolean;
   engineAgents?: EngineAgentProfile[] | undefined;
-  engineIntake?: WorkIntakeState | undefined;
   onRefreshEngine: () => Promise<void>;
   engineBusy?: boolean;
   historyLoading?: boolean;
@@ -105,7 +102,6 @@ export function ConversationWorkspaceChatStage({
   onCancelPlanEdit,
   onSend,
   onClearNotice,
-  engineIntake,
   onRefreshEngine,
   engineMode = false,
   engineAgents,
@@ -205,13 +201,13 @@ export function ConversationWorkspaceChatStage({
   const threadTopNotices = dataSource === "simulation" ? simulationSourceNotice() : [];
 
   useEffect(() => {
-    if (historyRef.current && (work?.messages.length || engineIntake?.proposal)) {
+    if (historyRef.current && work?.messages.length) {
       historyRef.current.scrollTo({
         top: historyRef.current.scrollHeight,
         behavior: "smooth",
       });
     }
-  }, [work?.messages.length, engineIntake?.proposal?.digest]);
+  }, [work?.messages.length]);
 
   return (
     <div className={`cw-stage ${work && panelOpen ? "with-panel" : ""}`}>
@@ -415,15 +411,6 @@ export function ConversationWorkspaceChatStage({
                 onInspectAgent={handleInspectAgent}
               />
             )}
-          {engineMode && work?.source === "engine" && engineIntake && (
-            <EngineWorkIntake
-              key={work.id}
-              work={work}
-              intake={engineIntake}
-              onChanged={onRefreshEngine}
-              onInspectAgent={handleInspectAgent}
-            />
-          )}
         </div>
         <div className="cw-composer">
           {assignee && (
@@ -460,7 +447,7 @@ export function ConversationWorkspaceChatStage({
           )}
         </div>
       </section>
-      {!panelOpen && <ConversationMarginaliaSpine work={work} intake={engineIntake} />}
+      {!panelOpen && <ConversationMarginaliaSpine work={work} />}
       {panelOpen && details}
       {inspectedAgent && (
         <EngineAgentProfileModal agent={inspectedAgent} onClose={() => setInspectedAgent(null)} />

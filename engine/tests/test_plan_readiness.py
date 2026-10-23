@@ -18,7 +18,6 @@ def setup(tmp_path):
 
 def _planned_ready_work(ctx, actor, project_id):
     """Confirmed intake with one executable phase: work READY with the accepted plan."""
-    from homun.application.work.intake import propose, confirm
     conv = ctx.service.apply(actor, 'c', 'conversation.create', {'title': 'Lavoro listini', 'project_id': project_id})
     work = ctx.service.apply(actor, 'w', 'work.create', {'conversation_id': conv['conversation_id'], 'title': 'Lavoro listini', 'objective': 'Confrontare i listini.'})
     agent = ctx.service.apply(actor, 'a', 'agent.create', {'name': 'Ada', 'role': 'Analisi CSV', 'instructions': 'Confronta dati'})
@@ -28,9 +27,8 @@ def _planned_ready_work(ctx, actor, project_id):
              'new_agent': None, 'rationale': 'ruolo analitico', 'capability': 'compare_csv',
              'plan_steps': [{'title': 'Confrontare i listini', 'capability': 'compare_csv',
                              'expected_materials': [], 'output_expected': 'Report differenze', 'assignee': 'Ada'}]}
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    p = propose(ctx, actor, work['work_id'], {'command_id': 'i', 'text': 'Confronta i listini', 'expected_version': 1})
-    confirm(ctx, actor, work['work_id'], 'i', {'command_id': 'ok', 'digest': p['digest'], 'expected_version': 1, 'create_agent': False})
+    from intake_setup import front_door_intake
+    front_door_intake(ctx, actor, work['work_id'], brief, command_id='i')
     return work['work_id'], conv['conversation_id']
 
 
@@ -79,7 +77,6 @@ def test_first_ready_step_requires_work_project_materials(setup):
 
 def test_approving_intermediate_phase_advances_instead_of_completing(setup):
     ctx, actor = setup
-    from homun.application.work.intake import propose, confirm
     conv = ctx.service.apply(actor, 'c', 'conversation.create', {'title': 'L'})
     work = ctx.service.apply(actor, 'w', 'work.create', {'conversation_id': conv['conversation_id'], 'title': 'L', 'objective': 'Confrontare.'})
     agent = ctx.service.apply(actor, 'a', 'agent.create', {'name': 'Ada', 'role': 'X', 'instructions': 'Y'})
@@ -88,9 +85,8 @@ def test_approving_intermediate_phase_advances_instead_of_completing(setup):
              'suggested_agent_id': agent['agent_id'], 'new_agent': None, 'rationale': 'r', 'capability': 'general',
              'plan_steps': [{'title': 'Fase uno', 'capability': 'general', 'assignee': ''},
                             {'title': 'Fase due', 'capability': 'general', 'assignee': ''}]}
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    p = propose(ctx, actor, work['work_id'], {'command_id': 'i', 'text': 'due fasi', 'expected_version': 1})
-    confirm(ctx, actor, work['work_id'], 'i', {'command_id': 'ok', 'digest': p['digest'], 'expected_version': 1, 'create_agent': False})
+    from intake_setup import front_door_intake
+    front_door_intake(ctx, actor, work['work_id'], brief, command_id='i')
     wid = work['work_id']
     store = ctx.service.store
     ver = store.works[wid].version
@@ -112,7 +108,6 @@ def test_approving_intermediate_phase_advances_instead_of_completing(setup):
 
 def test_contribution_resolves_its_phase_and_announces_next(setup):
     ctx, actor = setup
-    from homun.application.work.intake import propose, confirm
     conv = ctx.service.apply(actor, 'c', 'conversation.create', {'title': 'L'})
     work = ctx.service.apply(actor, 'w', 'work.create', {'conversation_id': conv['conversation_id'], 'title': 'L', 'objective': 'Raccogliere.'})
     agent = ctx.service.apply(actor, 'a', 'agent.create', {'name': 'Ada', 'role': 'X', 'instructions': 'Y'})
@@ -121,9 +116,8 @@ def test_contribution_resolves_its_phase_and_announces_next(setup):
              'suggested_agent_id': agent['agent_id'], 'new_agent': None, 'rationale': 'r', 'capability': 'general',
              'plan_steps': [{'title': 'Raccolta', 'capability': 'general', 'assignee': ''},
                             {'title': 'Confronto', 'capability': 'compare_csv', 'assignee': ''}]}
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    p = propose(ctx, actor, work['work_id'], {'command_id': 'i', 'text': 'fasi', 'expected_version': 1})
-    confirm(ctx, actor, work['work_id'], 'i', {'command_id': 'ok', 'digest': p['digest'], 'expected_version': 1, 'create_agent': False})
+    from intake_setup import front_door_intake
+    front_door_intake(ctx, actor, work['work_id'], brief, command_id='i')
     wid = work['work_id']
     store = ctx.service.store
     ver = store.works[wid].version
@@ -149,7 +143,6 @@ def test_phased_general_work_admits_comparison_on_its_phase(setup):
     import json
     from types import SimpleNamespace
     from homun.application.work.material_ingest import ingest_file
-    from homun.application.work.intake import propose as intake_propose, confirm as intake_confirm
     from homun.application.work.price_comparisons import propose as cmp_propose, approve as cmp_approve
     from homun.application.work.price_comparison_execution import execute as cmp_execute
     ctx, actor = setup
@@ -165,9 +158,8 @@ def test_phased_general_work_admits_comparison_on_its_phase(setup):
              'suggested_agent_id': agent['agent_id'], 'new_agent': None, 'rationale': 'r', 'capability': 'general',
              'plan_steps': [{'title': 'Raccolta', 'capability': 'general', 'assignee': ''},
                             {'title': 'Confronto', 'capability': 'compare_csv', 'assignee': ''}]}
-    ctx.models.complete = lambda *_a, **_k: SimpleNamespace(text=json.dumps(brief))
-    p = intake_propose(ctx, actor, work['work_id'], {'command_id': 'i', 'text': 'due fasi', 'expected_version': 1})
-    intake_confirm(ctx, actor, work['work_id'], 'i', {'command_id': 'ok', 'digest': p['digest'], 'expected_version': 1, 'create_agent': False})
+    from intake_setup import front_door_intake
+    front_door_intake(ctx, actor, work['work_id'], brief, command_id='i')
     wid = work['work_id']
     store = ctx.service.store
     assert store.works[wid].current_plan_revision == 1  # il piano delle fasi

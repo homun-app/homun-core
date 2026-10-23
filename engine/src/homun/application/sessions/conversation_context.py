@@ -146,7 +146,9 @@ def _work_preamble(store, actor, work, memory):
         fingerprint = f"sha:{material.content_hash[:12]}" if material.content_hash else 'senza hash'
         material_lines.append(f"- {material.title} · v{material.version} · {material.byte_size or '?'} B · {fingerprint}")
     if material_lines:
-        lines.append('Materiali del progetto (riferimenti, il contenuto non è incluso):')
+        lines.append('Materiali già caricati nel progetto, usabili come fonti '
+                      '(non chiedere quali usare: la proposta li può comprendere tutti; '
+                      'riferimenti, il contenuto non è incluso):')
         lines.extend(material_lines)
     memory_lines = _memory_lines(memory, work)
     if memory_lines:

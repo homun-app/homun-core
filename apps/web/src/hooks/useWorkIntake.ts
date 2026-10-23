@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Work } from "@/components/builder/conversation-types";
 import { isHomunClientError } from "@/lib/homun-errors";
-import {
-  confirmWorkIntake,
-  listWorkIntakes,
-  proposeWorkIntake,
-  type WorkIntake,
-} from "@/lib/engine-intake-client";
+import { confirmWorkIntake, listWorkIntakes, type WorkIntake } from "@/lib/engine-intake-client";
 
 export type WorkIntakeState = {
   proposal: WorkIntake | null;
@@ -14,7 +9,6 @@ export type WorkIntakeState = {
   busy: boolean;
   error: unknown;
   confirm: () => Promise<void>;
-  refine: (text: string) => Promise<boolean>;
 };
 
 /**
@@ -124,28 +118,5 @@ export function useWorkIntake(
       setBusy(false);
     }
   }
-  async function refine(text: string) {
-    if (!work || busy) return false;
-    setBusy(true);
-    setError(null);
-    try {
-      const next = await proposeWorkIntake(work.id, text, work.revision, crypto.randomUUID());
-      setProposal(next);
-      approval.current = crypto.randomUUID();
-      await callback.current();
-      return next.status !== "failed";
-    } catch (cause) {
-      if (isHomunClientError(cause) && cause.code === "not_found") {
-        // Stale work after engine restart: clear and let the effect re-fetch.
-        setProposal(null);
-        setError(null);
-      } else {
-        setError(cause);
-      }
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
-  return { proposal, loaded, busy, error, confirm, refine };
+  return { proposal, loaded, busy, error, confirm };
 }
