@@ -16,11 +16,12 @@ class CapabilitySpec:
     """Immutable description of one engine capability."""
 
     __slots__ = ('id', 'kind', 'tool_version', 'summary', 'inputs', 'outputs',
-                 'effects', 'prerequisites', 'limits', 'timeout_seconds', 'fallback_collaborator')
+                 'effects', 'prerequisites', 'limits', 'timeout_seconds', 'fallback_collaborator',
+                 'external_effects')
 
     def __init__(self, *, id, kind, tool_version, summary, inputs=(), outputs=(),
                  effects=(), prerequisites=(), limits=None, timeout_seconds=0,
-                 fallback_collaborator=None):
+                 fallback_collaborator=None, external_effects=False):
         self.id = id
         self.kind = kind
         self.tool_version = tool_version
@@ -32,6 +33,9 @@ class CapabilitySpec:
         self.limits = dict(limits or {})
         self.timeout_seconds = timeout_seconds
         self.fallback_collaborator = dict(fallback_collaborator or {})
+        # True when running the capability reaches outside the workspace
+        # (sending, publishing, paying): «Con guardrail» then asks first.
+        self.external_effects = bool(external_effects)
 
     def public(self):
         return {
@@ -39,6 +43,7 @@ class CapabilitySpec:
             'summary': self.summary, 'inputs': list(self.inputs), 'outputs': list(self.outputs),
             'effects': list(self.effects), 'prerequisites': list(self.prerequisites),
             'limits': dict(self.limits), 'timeout_seconds': self.timeout_seconds,
+            'external_effects': self.external_effects,
         }
 
 
@@ -155,3 +160,25 @@ def require_capability(capability_id):
     if spec is None:
         raise ValidationError(f'Unknown capability: {capability_id}')
     return spec
+
+
+AutonomyMode = Literal['autonomous', 'guarded', 'supervised']
+AUTONOMY_MODES = ('autonomous', 'guarded', 'supervised')
+
+
+def starts_without_approval(capability_id, mode):
+    """Whether a confirmed work on this capability starts without a separate go.
+
+    The one rule behind the composer's autonomy levels: «Autonomo» always
+    starts, «Supervisionato» always waits for «Avvia», «Con guardrail» starts
+    unless the capability has external effects (an artifact in human review is
+    not one). Agent-run tools keep their own gates (terminal, file edits).
+    """
+    if mode not in AUTONOMY_MODES:
+        raise ValidationError(f'Unknown autonomy mode: {mode}', reason='work.start.mode_invalid')
+    spec = require_capability(capability_id)
+    if mode == 'autonomous':
+        return True
+    if mode == 'supervised':
+        return False
+    return not spec.external_effects
