@@ -206,6 +206,9 @@ test("P2: a motore fermo la schermata iniziale ha UN solo avviso di motore irrag
 test("P4: la conversazione aperta sopravvive alla caduta del motore e si ricarica alla riconnessione", async ({
   page,
 }) => {
+  // La sonda dello stato gira ogni 10 s: caduta e ritorno si vedono al tick
+  // successivo, quindi le attese stanno sopra il battito.
+  test.setTimeout(150_000);
   const state = { online: true, extraConversation: false, extraMessage: false };
   await mockEngine(page, state);
   await page.goto("/");
@@ -220,7 +223,7 @@ test("P4: la conversazione aperta sopravvive alla caduta del motore e si ricaric
   // il motore cade: avviso sopra il campo di scrittura, in sola lettura
   state.online = false;
   const notice = page.locator('[data-chat-status="engine-unreachable"]');
-  await expect(notice).toBeVisible({ timeout: 10_000 });
+  await expect(notice).toBeVisible({ timeout: 16_000 });
   await expect(composer).toBeDisabled();
 
   // l'elenco delle conversazioni NON si svuota e il thread resta leggibile
@@ -235,16 +238,16 @@ test("P4: la conversazione aperta sopravvive alla caduta del motore e si ricaric
   state.online = true;
   state.extraConversation = true;
   state.extraMessage = true;
-  await expect(notice).toBeHidden({ timeout: 15_000 });
-  await expect(page.locator(".cw-sb-row", { hasText: "Logs" })).toBeVisible({ timeout: 10_000 });
+  await expect(notice).toBeHidden({ timeout: 20_000 });
+  await expect(page.locator(".cw-sb-row", { hasText: "Logs" })).toBeVisible({ timeout: 16_000 });
   await expect(composer).toBeEnabled();
 
   // il thread aperto si ricarica normalmente riaprendo la conversazione
   await page.locator(".cw-sb-row", { hasText: "Logs" }).click();
   // il followup di Listini non entra nel thread di un'altra conversazione
-  await expect(page.locator('[data-chat-status="followup"]')).toBeHidden({ timeout: 10_000 });
+  await expect(page.locator('[data-chat-status="followup"]')).toBeHidden({ timeout: 16_000 });
   await page.locator(".cw-sb-row", { hasText: "Listini" }).click();
-  await expect(thread).toContainText("arrivata dopo la riconnessione", { timeout: 10_000 });
+  await expect(thread).toContainText("arrivata dopo la riconnessione", { timeout: 16_000 });
 });
 
 test("P7: «Connessione ripristinata» solo dopo una caduta VISTA in questa sessione", async ({
