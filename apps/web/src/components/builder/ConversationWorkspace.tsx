@@ -33,6 +33,7 @@ import { demoWorkspaceBootstrap } from "./conversation-demo-mode";
 import { downloadWorkResult } from "./conversation-export";
 import { buildMaterialLibrary } from "./conversation-material-library";
 import { sendEngineExampleWork, sendEngineFreeWork } from "@/lib/engine-work-creation";
+import { handleEngineSend } from "@/lib/engine-send-handler";
 import { useConversationSearchEntries } from "@/hooks/useConversationSearchEntries";
 import {
   isCompletedNoticeForViewer,
@@ -537,6 +538,34 @@ export function ConversationWorkspace() {
     setScenarios((current) => [...current, spec]);
     return create(index, text, attachments, projectId, spec);
   }
+  // Il campo del Project Hub è la chat di quel progetto: il testo della persona
+  // parte VERBATIM dalla stessa porta d'ingresso del composer (lavoro nuovo nel
+  // progetto + conversation.post_message), con le sue preferenze di autonomia e
+  // modello. Mai un segnaposto come messaggio: il «+» apre solo la
+  // conversazione nuova nel progetto e aspetta le sue parole.
+  function projectPrompt(projectId: string, text = "") {
+    setNewChatProjectId(projectId);
+    if (!text.trim()) {
+      open(null);
+      return;
+    }
+    if (
+      handleEngineSend({
+        engine,
+        work: null,
+        text,
+        attachments: [],
+        open,
+        setNotice,
+        bumpOwnSend,
+        autonomyLevel: preferences.autonomyLevel,
+        modelConnectionId: preferences.preferredModelConnectionId || undefined,
+        projectId,
+      })
+    )
+      return;
+    createFreeWork("Nuovo lavoro", text, [], projectId);
+  }
   const send = createConversationSend({
     engine,
     work,
@@ -935,6 +964,7 @@ export function ConversationWorkspace() {
             onMoveWork={moveWork}
             onStartAssignment={startAssignment}
             onCreateFreeWork={createFreeWork}
+            onProjectPrompt={projectPrompt}
             onRunRoutine={runRoutine}
             onUpdateMaterial={updateMaterial}
             onRemoveMaterial={removeMaterial}

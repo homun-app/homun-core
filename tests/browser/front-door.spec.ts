@@ -9,26 +9,21 @@
  * Il motore gira come processo reale su 127.0.0.1:8765 (porta della UI in
  * sviluppo) con data dir temporanea e `--dev-insecure` (solo loopback).
  */
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-
 import { expect, test } from "@playwright/test";
+
+import {
+  ENGINE_SKIP_REASON,
+  engineImportable,
+  selectMode,
+  sendMessage,
+  startTestEngine,
+  type TestEngine,
+} from "./engine-harness";
 
 const ENGINE_PORT = 8765;
 const ENGINE_URL = `http://127.0.0.1:${ENGINE_PORT}`;
-const ENGINE_DIR = resolve("engine");
 
-// Come i test desktop che avviano il motore: interprete configurabile e,
-// quando nessun python sa importare homun (job CI senza motore), salto
-// pulito invece di fallire — il flusso del motore resta coperto lì.
-const ENGINE_PYTHON = process.env.HOMUN_TEST_PYTHON || join(ENGINE_DIR, ".venv", "bin", "python");
-const engineImportable = spawnSync(ENGINE_PYTHON, ["-c", "import homun"]).status === 0;
-test.skip(
-  !engineImportable,
-  `nessun interprete con homun (${ENGINE_PYTHON}): motore non installato`,
-);
+test.skip(!engineImportable, ENGINE_SKIP_REASON);
 
 // Percorso d'oro NELLA UI con un modello vero (come il banco golden): con
 // HOMUN_GOLDEN_PROVIDER=local|cloud il motore usa Ollama (locale o «:cloud») e
@@ -63,76 +58,18 @@ async function useGoldenModel() {
   if (!active.ok) throw new Error(`connessione golden non attivata: ${await active.text()}`);
 }
 
-let engine: ChildProcess | null = null;
-let dataDir: string | null = null;
+let engine: TestEngine | null = null;
 
 test.beforeAll(async () => {
-  // Mai usare un motore estraneo: se la porta è occupata, fermo subito.
-  const occupied = await fetch(`${ENGINE_URL}/v1/health`).then(
-    (response) => response.ok,
-    () => false,
-  );
-  if (occupied) throw new Error("la porta 8765 è già occupata da un altro motore");
-  dataDir = await mkdtemp(join(tmpdir(), "homun-front-door-e2e-"));
-  // Il provider fake è esplicito: un profilo offline/CI rispettato dal motore.
-  await mkdir(dataDir, { recursive: true });
-  await writeFile(
-    join(dataDir, "models.json"),
-    `${JSON.stringify({ active_provider_id: "fake" }, null, 2)}\n`,
-  );
-  engine = spawn(
-    ENGINE_PYTHON,
-    [
-      "-m",
-      "homun",
-      "serve",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(ENGINE_PORT),
-      "--dev-insecure",
-    ],
-    {
-      cwd: ENGINE_DIR,
-      env: { ...process.env, HOMUN_DATA_DIR: dataDir, HOMUN_LOG_LEVEL: "WARNING" },
-      stdio: "ignore",
-    },
-  );
-  const deadline = Date.now() + 40_000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${ENGINE_URL}/v1/health`);
-      if (response.ok) {
-        if (GOLDEN) await useGoldenModel();
-        return;
-      }
-    } catch {
-      /* il motore sta ancora aprendo il socket */
-    }
-    await new Promise((sleep) => setTimeout(sleep, 500));
-  }
-  throw new Error("il motore di prova non è diventato raggiungibile su " + ENGINE_URL);
+  // Porta predefinita della UI (8765): nessun `homunDesktop` da iniettare, così
+  // il percorso golden gira esattamente come l'app.
+  engine = await startTestEngine(ENGINE_PORT, "homun-front-door-e2e-");
+  if (GOLDEN) await useGoldenModel();
 });
 
 test.afterAll(async () => {
-  engine?.kill();
-  await new Promise((wait) => setTimeout(wait, 500));
-  if (dataDir) await rm(dataDir, { recursive: true, force: true });
+  await engine?.stop();
 });
-
-async function sendMessage(page: import("@playwright/test").Page, text: string) {
-  const composer = page.getByPlaceholder("Chiedi, crea o assegna un compito…");
-  await expect(composer).toBeVisible();
-  await composer.fill(text);
-  await composer.press("Enter");
-}
-
-/** Sceglie la modalità di autonomia dal composer, come la persona. */
-async function selectMode(page: import("@playwright/test").Page, label: string) {
-  await page.getByTitle(/^Modalità:/).click();
-  await page.getByText(label, { exact: true }).click();
-  await expect(page.getByTitle(new RegExp(`^Modalità: ${label}`))).toBeVisible();
-}
 
 /** Lo stile calcolato di un elemento: la scheda deve avere la sua grafica. */
 async function computedStyle(

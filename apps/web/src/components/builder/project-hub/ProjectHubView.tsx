@@ -49,7 +49,12 @@ type Props = {
   selectedId: string;
   onSelectProject: (id: string) => void;
   onOpenWork: (id: string) => void;
-  onCreateWork?: ((projectId: string) => void) | undefined;
+  /**
+   * Il campo «Chiedi o assegna un compito in questo progetto…»: `text` è ciò
+   * che la persona ha scritto, parola per parola. Senza testo (il «+») si
+   * apre una conversazione nuova nel progetto.
+   */
+  onProjectPrompt?: ((projectId: string, text?: string) => void) | undefined;
   engineMode?: boolean | undefined;
   sidebarOpen?: boolean | undefined;
   onOpenSidebar?: (() => void) | undefined;
@@ -61,7 +66,7 @@ export function ProjectHubView({
   selectedId,
   onSelectProject,
   onOpenWork,
-  onCreateWork,
+  onProjectPrompt,
   engineMode = false,
   sidebarOpen = true,
   onOpenSidebar,
@@ -399,8 +404,9 @@ export function ProjectHubView({
   }
 
   function handlePromptSubmit() {
-    if (!promptValue.trim()) return;
-    onCreateWork?.(currentProjectId);
+    const text = promptValue.trim();
+    if (!text) return;
+    onProjectPrompt?.(currentProjectId, text);
     setPromptValue("");
   }
 
@@ -508,7 +514,7 @@ export function ProjectHubView({
           <button
             className="ph-icon-tab"
             title="Nuovo lavoro in questo progetto"
-            onClick={() => onCreateWork?.(currentProjectId)}
+            onClick={() => onProjectPrompt?.(currentProjectId)}
           >
             <Plus size={15} />
           </button>
@@ -523,7 +529,7 @@ export function ProjectHubView({
             projectName={projectName}
             works={projectWorks}
             onOpenWork={onOpenWork}
-            onNewWork={() => onCreateWork?.(currentProjectId)}
+            onNewWork={() => onProjectPrompt?.(currentProjectId)}
           />
         )}
         {activeTab === "agents" && (

@@ -12,7 +12,7 @@ export function EngineWorkspaceProjects({
   selected,
   onProject,
   onWork,
-  onCreateWork,
+  onProjectPrompt,
   engineMode = false,
   sidebarOpen,
   onOpenSidebar,
@@ -22,7 +22,7 @@ export function EngineWorkspaceProjects({
   selected: string;
   onProject: (id: string) => void;
   onWork: (id: string) => void;
-  onCreateWork?: (projectId: string) => void;
+  onProjectPrompt?: (projectId: string, text?: string) => void;
   engineMode?: boolean | undefined;
   sidebarOpen?: boolean | undefined;
   onOpenSidebar?: (() => void) | undefined;
@@ -34,7 +34,7 @@ export function EngineWorkspaceProjects({
       selectedId={selected}
       onSelectProject={onProject}
       onOpenWork={onWork}
-      onCreateWork={onCreateWork}
+      onProjectPrompt={onProjectPrompt}
       engineMode={engineMode}
       sidebarOpen={sidebarOpen}
       onOpenSidebar={onOpenSidebar}
