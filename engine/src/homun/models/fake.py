@@ -127,7 +127,8 @@ class FakeProvider:
                 "title": "Nota operativa (fake)",
                 "objective": last_user[:200] or "Obiettivo della richiesta",
                 "output": "Nota operativa breve",
-                "capability": "general",
+                # A written note is a synthesis, as real models classify it.
+                "capability": "synthesize",
                 "language": _language_of(last_user),
             })
             return NativeResult(
