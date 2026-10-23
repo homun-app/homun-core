@@ -14,6 +14,7 @@ import {
   personMessagesInEngine,
   pointBrowserAtEngine,
   postCommand,
+  sendMessage,
   startTestEngine,
   type TestEngine,
 } from "./engine-harness";
@@ -81,5 +82,34 @@ test.describe.serial("difetti della chat", () => {
     // segnaposto: la prova sta nel motore, non solo nello schermo.
     const saved = await personMessagesInEngine(engine!.url);
     expect(saved).toEqual([text]);
+  });
+
+  test("3 · un messaggio inviato = una bolla, senza selettore di versioni «2 / 2»", async ({
+    page,
+  }) => {
+    // Invariante: l'eco locale del messaggio viene SOSTITUITO dal messaggio
+    // del motore (stesso nodo del thread), mai aggiunto come secondo ramo. Il
+    // selettore di versioni compare solo per rigenerazioni vere.
+    const picker = page.locator('[data-slot="aui_user-branch-picker"]');
+    await page.goto("/");
+
+    // 1. Primo messaggio di una conversazione nuova: il caso del giro.
+    await sendMessage(page, "Cosa sai fare?");
+    await expect(page.getByText("Sono Homun in modalità deterministica").first()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(userBubbles(page)).toHaveCount(1);
+    await expect(userBubbles(page).first()).toHaveText("Cosa sai fare?");
+    await expect(picker).toHaveCount(0);
+    await expect(page.getByText(/^\s*\d+\s*\/\s*\d+\s*$/)).toHaveCount(0);
+
+    // 2. Messaggio successivo nella stessa conversazione: idem.
+    await sendMessage(page, "E con i documenti?");
+    await expect(page.getByText("Sono Homun in modalità deterministica")).toHaveCount(2, {
+      timeout: 30_000,
+    });
+    await expect(userBubbles(page)).toHaveCount(2);
+    await expect(userBubbles(page).nth(1)).toHaveText("E con i documenti?");
+    await expect(picker).toHaveCount(0);
   });
 });
