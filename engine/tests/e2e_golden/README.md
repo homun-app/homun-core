@@ -198,6 +198,21 @@ codice non è noto, la riga lo dice. Poi «Fallimenti» elenca scenario, run,
 
 I rapporti si committano: sono la storia della misura.
 
+### Il banco fa solo le chiamate che fa l'interfaccia
+
+Ogni scenario usa **esclusivamente** le chiamate HTTP che la UI fa per lo
+stesso gesto della persona: il banco non sceglie nulla che la UI non sappia
+scegliere. In particolare, dopo la conferma di un accordo, il lavoro parte
+con `POST …/works/{id}/start` (la modalità predefinita della UI, «Con
+guardrail») e si legge con `GET …/works/{id}/execution`, come la scheda in
+chat: è il motore a scegliere l'esecutore (sintesi, lettura, confronto, run
+adattivo) e i materiali del progetto. Se uno scenario ha bisogno di una
+chiamata nuova, prima la deve fare la UI.
+
+Il motivo è un difetto vero: il banco segnava il 100% sul percorso B mentre
+nell'interfaccia un lavoro confermato non partiva mai, perché dopo la
+conferma il banco chiamava da sé le API dell'esecutore giusto e la UI no.
+
 ### Regola d'ingresso per il nucleo del motore
 
 D'ora in poi, una modifica al nucleo del motore — modelli, interpretazione,

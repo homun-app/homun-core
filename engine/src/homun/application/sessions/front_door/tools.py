@@ -19,10 +19,11 @@ from homun.models.prompt_store import prompts_for
 ASK_CLARIFICATION = 'ask_clarification'
 PROPOSE_WORK = 'propose_work'
 PROPOSE_PLAN_CHANGE = 'propose_plan_change'
+START_WORK = 'start_work'
 
 # Catalog order as the model reads it: small models lean on the first entry,
 # and proposing the agreement (with missing_information) is the safe default.
-TOOL_ORDER = (PROPOSE_WORK, ASK_CLARIFICATION, PROPOSE_PLAN_CHANGE)
+TOOL_ORDER = (PROPOSE_WORK, ASK_CLARIFICATION, PROPOSE_PLAN_CHANGE, START_WORK)
 
 CAPABILITY_VALUES = ('general', 'synthesize', 'read_material', 'compare_csv', 'agent_run')
 
@@ -230,6 +231,10 @@ class ProposePlanChangeArgs(_LanguageReporting):
         return _tolerant_list(value)
 
 
+class StartWorkArgs(_LanguageReporting):
+    """No arguments: the engine starts what the person already confirmed."""
+
+
 PROPOSE_WORK_SCHEMA: dict[str, Any] = {
     'type': 'object',
     'properties': {
@@ -286,16 +291,23 @@ PLAN_CHANGE_SCHEMA: dict[str, Any] = {
     'required': ['changes'],
 }
 
+START_WORK_SCHEMA: dict[str, Any] = {
+    'type': 'object',
+    'properties': {'language': {'type': 'string'}},
+}
+
 _ARGUMENT_MODELS = {
     ASK_CLARIFICATION: AskClarificationArgs,
     PROPOSE_WORK: ProposeWorkArgs,
     PROPOSE_PLAN_CHANGE: ProposePlanChangeArgs,
+    START_WORK: StartWorkArgs,
 }
 
 _SCHEMAS = {
     ASK_CLARIFICATION: CLARIFY_SCHEMA,
     PROPOSE_WORK: PROPOSE_WORK_SCHEMA,
     PROPOSE_PLAN_CHANGE: PLAN_CHANGE_SCHEMA,
+    START_WORK: START_WORK_SCHEMA,
 }
 
 
@@ -303,7 +315,7 @@ def parse_arguments(name: str, arguments: dict[str, Any]):
     """Tolerant parse of one tool call's arguments; raises with a model-facing message."""
     model = _ARGUMENT_MODELS.get(name)
     if model is None:
-        raise ValueError(f'Unknown tool: {name}. Available: ask_clarification, propose_work, propose_plan_change.')
+        raise ValueError(f'Unknown tool: {name}. Available: ask_clarification, propose_work, propose_plan_change, start_work.')
     return model.model_validate(arguments or {})
 
 

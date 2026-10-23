@@ -18,15 +18,19 @@ import {
   type FrontDoorPatchPreview,
 } from "@/lib/front-door-cards";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
+import type { WorkExecutionState } from "@/hooks/useWorkExecution";
 import { HomunErrorNotice } from "@/components/HomunErrorNotice";
 import { EngineIntakeCoordinatorCard } from "../EngineIntakeCoordinatorCard";
 import { WorkPatchPreviewCard } from "../WorkPatchPreviewCard";
 import { EngineFrontDoorClarifyCard } from "./EngineFrontDoorClarifyCard";
+import { EngineWorkExecutionCard } from "./EngineWorkExecutionCard";
 
 export type FrontDoorCardsSlots = {
   /** Schede vive per id del nodo del thread (modulo puro). */
   cards: Map<string, FrontDoorCard>;
   intake: WorkIntakeState;
+  /** Esecuzione del lavoro confermato: la scheda sta sotto l'accordo. */
+  execution: WorkExecutionState;
   busy: boolean;
   onSendMessage: (text: string) => void;
   onDismissProposal: (proposalId: string) => void;
@@ -57,18 +61,31 @@ export function EngineFrontDoorMessageExtra() {
   if (card.kind === "agreement") {
     const proposal = slots.intake.proposal;
     if (!proposal) return null;
+    // «Conferma accordo e avvia»: conferma, poi il motore avvia nella modalità
+    // scelta (o prepara il via libera). La UI non sceglie mai l'esecutore.
+    const intake: WorkIntakeState = {
+      ...slots.intake,
+      confirm: async () => {
+        const confirmed = await slots.intake.confirm();
+        if (confirmed?.status === "confirmed") await slots.execution.start();
+        return confirmed;
+      },
+    };
     return (
-      <EngineIntakeCoordinatorCard
-        proposal={proposal}
-        intake={slots.intake}
-        onInspectAgent={slots.onInspectAgent}
-        onSendMessage={slots.onSendMessage}
-        onDismiss={
-          card.state === "pending" && proposal.status === "pending_confirmation"
-            ? () => slots.onDismissProposal(proposal.id)
-            : undefined
-        }
-      />
+      <>
+        <EngineIntakeCoordinatorCard
+          proposal={proposal}
+          intake={intake}
+          onInspectAgent={slots.onInspectAgent}
+          onSendMessage={slots.onSendMessage}
+          onDismiss={
+            card.state === "pending" && proposal.status === "pending_confirmation"
+              ? () => slots.onDismissProposal(proposal.id)
+              : undefined
+          }
+        />
+        {proposal.status === "confirmed" && <EngineWorkExecutionCard state={slots.execution} />}
+      </>
     );
   }
   if (card.kind === "clarify") {

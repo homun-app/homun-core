@@ -44,7 +44,8 @@ export function sendEngineExampleWork(
     if (input.text.trim()) {
       void ctx.engine
         .postMessage(created, input.text.trim(), input.attachments)
-        .catch(() => ctx.setNotice("Invio al motore non riuscito. Controlla il banner errori."));
+        // L'esito del fallimento sta in chat (avviso + nota sul messaggio), mai nel piè di pagina.
+        .catch(() => undefined);
     }
   });
 }
@@ -74,7 +75,8 @@ export function sendEngineFreeWork(
       void ctx.engine
         .postMessage(created, message, input.attachments)
         .then(() => ctx.setNotice(""))
-        .catch(() => ctx.setNotice("Invio al motore non riuscito. Controlla il banner errori."));
+        // L'esito del fallimento sta in chat (avviso + nota sul messaggio), mai nel piè di pagina.
+        .catch(() => undefined);
     }
   });
 }

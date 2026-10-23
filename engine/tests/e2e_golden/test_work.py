@@ -5,9 +5,9 @@ messaggio successivo — passa da `conversation.post_message`
 (useEngineWorkspace.postMessage → postEngineConversationMessage); il turno di
 ingresso nativo (`application/sessions/front_door`) produce la risposta, il
 chiarimento o la proposta di accordo, che si conferma da
-`engine-intake-client.ts`. L'esecuzione segue la capability dell'accordo, come
-la UI (`engine-synthesis-client.ts` o `engine-agent-run-client.ts`), la
-revisione passa da `engine-work-review.ts`.
+`engine-intake-client.ts`. L'avvio è «start» (`engine-work-execution-client.ts`):
+il motore sceglie l'esecutore dall'accordo, la UI e il banco non scelgono;
+lo stato e la revisione passano dalla stessa scheda di esecuzione in chat.
 
 B1 misurava la coppia classifica → proposta intake via API, la strada che la
 UI non percorre più: è stata assorbita da B9 (l'apertura del percorso B è
@@ -40,25 +40,23 @@ CONNESSIONE_PROPRIA_ID = "ufficio-di-fabio"
 CONNESSIONE_PROPRIA_NOME = "Ufficio di Fabio"
 
 
-def _execute_work(
-    golden, work_id: str, expected_version: int, material_ids: list[str], run: GoldenRun
-) -> dict:
-    """Esegue il lavoro secondo la capability dell'accordo, come la UI.
+def _execute_work(golden, work_id: str, run: GoldenRun) -> dict:
+    """Avvia il lavoro come la UI: «start» nella modalità predefinita, poi la
+    scheda rilegge lo stato. Il motore sceglie l'esecutore (sintesi, lettura,
+    confronto o run adattivo) e i materiali del progetto: il banco non sceglie.
 
     Restituisce l'artifact appena prodotto.
     """
     client = golden.client
-    capability = _latest_intake_capability(client, work_id)
-    if capability in {"general", "agent_run"}:
-        run_view = client.prepare_agent_run(work_id, expected_version, material_ids)
-        client.approve_agent_run(work_id, run_view)
-        _wait_run_explained(golden, work_id, run_view["id"])
-    else:
-        proposal = client.prepare_synthesis(work_id, expected_version, material_ids)
-        client.approve_synthesis(work_id, proposal)
-        client.wait_synthesis(work_id, proposal["id"])
-    row = client.work_row(work_id)
-    artifact = (row or {}).get("latest_artifact") or {}
+    view = client.start_work(work_id, mode="guarded")
+    run.recorder.note(f"esecuzione run {run.run_index}: {view.get('kind')} → {view.get('status')}")
+    try:
+        current = client.wait_execution(work_id, view["id"])
+    except GoldenError as exc:
+        detail = golden.engine.last_exception()
+        reason = f"{exc.reason}; motore: {detail}" if detail else exc.reason
+        raise GoldenError(exc.code, reason, exc.excerpt) from exc
+    artifact = current.get("artifact") or {}
     assert artifact.get("content"), "esecuzione completata senza artifact leggibile"
     return artifact
 
@@ -110,7 +108,7 @@ def _story_b(golden, run: GoldenRun) -> None:
         )
         version = int(client.work_detail(work_id)["work"]["version"])
     with run.step("B2.esecuzione"):
-        first = _execute_work(golden, work_id, version, [], run)
+        first = _execute_work(golden, work_id, run)
         first_version = int(first["version"])
     with run.step("B3.fatti"):
         content = normalize_for_match(first["content"])
@@ -128,7 +126,7 @@ def _story_b(golden, run: GoldenRun) -> None:
         )
         version = int(client.work_detail(work_id)["work"]["version"])
     with run.step("B4.nuova-versione"):
-        second = _execute_work(golden, work_id, version, [], run)
+        second = _execute_work(golden, work_id, run)
         assert int(second["version"]) > first_version, (
             f"la correzione non ha prodotto una nuova versione ({second['version']} ≤ {first_version})"
         )
@@ -426,12 +424,12 @@ def _story_b7(golden, run: GoldenRun) -> None:
         version = int(client.work_detail(work_id)["work"]["version"])
     # Sonde: lavoro e chat si misurano entrambi anche se uno dei due fallisce.
     with run.probe("B7.esecuzione"):
-        run_view = client.prepare_agent_run(work_id, version, [])
-        assert run_view.get("connection_id") == config.connection_id, (
-            f"il run non usa la connessione propria: {run_view.get('connection_id')!r}"
+        view = client.start_work(work_id, mode="guarded")
+        runs = [item for item in client.agent_runs(work_id) if item.get("id") == view["id"]]
+        assert runs and runs[0].get("connection_id") == config.connection_id, (
+            f"il run non usa la connessione propria: {(runs[0] if runs else {}).get('connection_id')!r}"
         )
-        client.approve_agent_run(work_id, run_view)
-        _wait_run_explained(golden, work_id, run_view["id"])
+        client.wait_execution(work_id, view["id"])
         artifact = (client.work_row(work_id) or {}).get("latest_artifact") or {}
         assert artifact.get("content"), "run completato senza risultato leggibile"
     with run.probe("B7.chat"):

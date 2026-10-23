@@ -2,6 +2,7 @@
  * Pure bridge between engine domain records and simulation-era Work UI shapes.
  * Explicit source tagging — never treat engine rows as IndexedDB simulation data.
  */
+import type { AutonomyLevel } from "@/components/builder/conversation-preferences";
 
 import type {
   FrontDoorPayload,
@@ -314,6 +315,8 @@ export async function postEngineConversationMessage(input: {
   conversationId: string;
   text: string;
   connectionId?: string | undefined;
+  /** Modalità di autonomia: il motore la usa se il turno avvia il lavoro. */
+  autonomy?: AutonomyLevel | undefined;
   actor?: EngineActor;
   roster?: Array<{ id: string; display_name: string; kind: "person" | "agent" | "other" }>;
   signal?: AbortSignal;
@@ -358,6 +361,7 @@ export async function postEngineConversationMessage(input: {
     payload: {
       conversation_id: input.conversationId,
       text: input.text,
+      ...(input.autonomy ? { autonomy: input.autonomy } : {}),
       roster,
       ...(input.connectionId ? { connection_id: input.connectionId } : {}),
     },

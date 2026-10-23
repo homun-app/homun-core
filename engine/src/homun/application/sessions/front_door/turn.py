@@ -277,10 +277,12 @@ def run_front_door_turn(ctx, actor: Actor, body: CommandRequest, result: dict[st
     anchor = anchor_brief(proposals_for(store, work.id)) if work is not None else None
     roster_ids = {entry.id for entry in roster}
     roster_ids.update(store.agents.keys())
+    from homun.application.work.work_start import start_blocker
+    start_blocked = start_blocker(store, work)
 
     def decide():
         return _decide(ctx, actor, body, conversation_context, roster, text, language,
-                       tool_catalog, work, plan, agents, anchor, roster_ids)
+                       tool_catalog, work, plan, agents, anchor, roster_ids, start_blocked)
 
     outcome = _budgeted_turn(ctx, actor, work, decide) if work is not None else decide()
 
@@ -319,7 +321,8 @@ def _payload_for(outcome, language, *, detected=None) -> dict[str, Any]:
 
 
 def _decide(ctx, actor, body, conversation_context, roster, text, language,
-            tool_catalog, work, plan, agents, anchor, roster_ids) -> outcomes.FrontDoorOutcome:
+            tool_catalog, work, plan, agents, anchor, roster_ids,
+            start_blocked=None) -> outcomes.FrontDoorOutcome:
     connection_id = body.payload.get('connection_id') or body.payload.get('provider_id')
     call = _ModelCall(ctx, connection_id=connection_id, attempt_context=AttemptContext(
         command_id=body.command_id, conversation_id=str(body.payload.get('conversation_id', '')),
@@ -363,7 +366,7 @@ def _decide(ctx, actor, body, conversation_context, roster, text, language,
             else:
                 outcome, error = outcomes.outcome_from_call(
                     first.name, arguments, work=work, plan=plan, agents=agents, anchor=anchor,
-                    roster_ids=roster_ids)
+                    roster_ids=roster_ids, start_blocked=start_blocked)
                 if error is None:
                     return outcome
         budget.correction(error)

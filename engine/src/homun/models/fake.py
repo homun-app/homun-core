@@ -113,12 +113,22 @@ class FakeProvider:
             return NativeResult(
                 message=NativeMessage(role="assistant", content="", tool_calls=[call]),
                 usage=self._usage_for(model, input_text=last_user, output_text="revise"))
+        # A go-ahead on an agreed work: the engine decides whether it may start
+        # (and tells the model when not). Before the work keywords, since a
+        # go-ahead often names the result («procedi e preparami la nota»).
+        if re.search(r"\b(procedi|avvialo|avviala|vai pure|go ahead|proceed)\b", lowered):
+            call = ToolCall(id="call_fake_start", name="start_work",
+                            arguments={"language": _language_of(last_user)})
+            return NativeResult(
+                message=NativeMessage(role="assistant", content="", tool_calls=[call]),
+                usage=self._usage_for(model, input_text=last_user, output_text="start_work"))
         if re.search(r"\b(prepara|nota|relazion|ricerca|catalogo|report|analizza|analisi)\b", lowered):
             call = ToolCall(id="call_fake_work", name="propose_work", arguments={
                 "title": "Nota operativa (fake)",
                 "objective": last_user[:200] or "Obiettivo della richiesta",
                 "output": "Nota operativa breve",
-                "capability": "general",
+                # A written note is a synthesis, as real models classify it.
+                "capability": "synthesize",
                 "language": _language_of(last_user),
             })
             return NativeResult(

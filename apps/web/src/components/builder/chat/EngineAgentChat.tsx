@@ -21,6 +21,7 @@ import type { SpaceData } from "../ConversationSpace";
 import { ConversationWorkspaceWelcome } from "../ConversationWorkspaceWelcome";
 import { StudioChatInput, type ChatReference } from "../StudioChatInput";
 import type { WorkIntakeState } from "@/hooks/useWorkIntake";
+import type { WorkExecutionState } from "@/hooks/useWorkExecution";
 import type { FrontDoorPatchPreview } from "@/lib/front-door-cards";
 import {
   chatStatusLayout,
@@ -40,6 +41,7 @@ import { useChatStream } from "./useChatStream";
 
 type FrontDoorSlots = {
   intake: WorkIntakeState;
+  execution: WorkExecutionState;
   work: Work | undefined;
   /** Applica un'anteprima di patch (Conferma della scheda di modifica piano). */
   onConfirmPatch: (patch: FrontDoorPatchPreview) => Promise<void>;
@@ -136,6 +138,7 @@ export function EngineAgentChat({
     ? {
         cards: frontDoorCardsMap,
         intake: frontDoor.intake,
+        execution: frontDoor.execution,
         busy: engineBusy || isRunning,
         onSendMessage: (text: string) => handleSend(text, []),
         onDismissProposal: (proposalId: string) =>

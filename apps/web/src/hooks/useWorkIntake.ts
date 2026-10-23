@@ -8,7 +8,8 @@ export type WorkIntakeState = {
   loaded: boolean;
   busy: boolean;
   error: unknown;
-  confirm: () => Promise<void>;
+  /** Conferma l'accordo; restituisce la proposta confermata, o null se non lo è. */
+  confirm: () => Promise<WorkIntake | null>;
 };
 
 /**
@@ -80,20 +81,20 @@ export function useWorkIntake(
       if (timer) clearTimeout(timer);
     };
   }, [refresh, workId, work?.revision, work?.messages.length, reloadSeq]);
-  async function confirm() {
-    if (!proposal || busy) return;
+  async function confirm(): Promise<WorkIntake | null> {
+    if (!proposal || busy) return null;
     setBusy(true);
     setError(null);
     try {
-      setProposal(
-        await confirmWorkIntake(
-          proposal.work_id,
-          proposal,
-          approval.current,
-          Boolean(proposal.new_agent),
-        ),
+      const confirmed = await confirmWorkIntake(
+        proposal.work_id,
+        proposal,
+        approval.current,
+        Boolean(proposal.new_agent),
       );
+      setProposal(confirmed);
       await callback.current();
+      return confirmed;
     } catch (cause) {
       // A 404 after an engine restart or a 409 on a stale expected_version mean
       // the cached proposal is dead: refresh the intake list instead of showing
@@ -117,6 +118,7 @@ export function useWorkIntake(
     } finally {
       setBusy(false);
     }
+    return null;
   }
   return { proposal, loaded, busy, error, confirm };
 }

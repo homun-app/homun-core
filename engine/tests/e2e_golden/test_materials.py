@@ -1,8 +1,8 @@
 """Area C — materiali e file: progetto, upload, ricerca e riassunto.
 
 Percorso della UI: `engine-projects-client.ts` (progetto e upload multipart),
-poi la stessa filiera dell'area B con i materiali selezionati
-(`material_ids` nella proposta di esecuzione), come nella guida d'uso
+poi la stessa filiera dell'area B: la UI non sceglie i materiali, il motore
+avvia il lavoro con quelli del progetto, come nella guida d'uso
 («Un lavoro con materiali»).
 I marcatori dei file esistono SOLO nei file: se il risultato li cita, ha
 letto davvero i materiali e non il prompt.
@@ -30,7 +30,7 @@ RICHIESTA_RIASSUNTO = (
 )
 
 
-def _run_intake_work(golden, conversation_id: str, text: str, material_ids: list[str], run: GoldenRun) -> dict:
+def _run_intake_work(golden, conversation_id: str, text: str, run: GoldenRun) -> dict:
     """Filiera completa della UI per un lavoro con materiali; ritorna l'artifact.
 
     Ogni richiesta passa da `conversation.post_message` (porta d'ingresso):
@@ -56,8 +56,8 @@ def _run_intake_work(golden, conversation_id: str, text: str, material_ids: list
     proposal = _pending_proposal(client, work_id)
     assert proposal is not None, "nessuna proposta in attesa di conferma dopo il messaggio"
     client.confirm_intake(work_id, proposal)
-    version = int(client.work_detail(work_id)["work"]["version"])
-    return _execute_work(golden, work_id, version, material_ids, run)
+    # Come la UI: nessuna scelta di materiali, il motore usa quelli del progetto.
+    return _execute_work(golden, work_id, run)
 
 
 def _story_c(golden, run: GoldenRun) -> None:
@@ -83,10 +83,7 @@ def _story_c(golden, run: GoldenRun) -> None:
                 assert normalize_for_match(marker) in text, f"contenuto estratto senza {marker!r}"
     with run.step("C2.ricerca"):
         conversation_id = client.create_conversation("Materiali: scadenze", project_id)
-        artifact = _run_intake_work(
-            golden, conversation_id, RICHIESTA_RICERCA,
-            [md["material_id"], pdf["material_id"]], run,
-        )
+        artifact = _run_intake_work(golden, conversation_id, RICHIESTA_RICERCA, run)
     with run.step("C2.contenuti"):
         content = normalize_for_match(artifact["content"])
         from_md = [m for m in MD_MARKERS if normalize_for_match(m) in content]
@@ -98,9 +95,7 @@ def _story_c(golden, run: GoldenRun) -> None:
         )
     with run.step("C3.riassunto"):
         conversation_id = client.create_conversation("Materiali: riassunto", project_id)
-        artifact = _run_intake_work(
-            golden, conversation_id, RICHIESTA_RIASSUNTO, [md["material_id"]], run
-        )
+        artifact = _run_intake_work(golden, conversation_id, RICHIESTA_RIASSUNTO, run)
     with run.step("C3.punti-chiave"):
         content = normalize_for_match(artifact["content"])
         cited = [m for m in MD_MARKERS if normalize_for_match(m) in content]

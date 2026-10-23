@@ -30,6 +30,39 @@ test.skip(
   `nessun interprete con homun (${ENGINE_PYTHON}): motore non installato`,
 );
 
+// Percorso d'oro NELLA UI con un modello vero (come il banco golden): con
+// HOMUN_GOLDEN_PROVIDER=local|cloud il motore usa Ollama (locale o «:cloud») e
+// gira solo il test del lavoro completo; gli altri dipendono dal fake.
+const GOLDEN = process.env.HOMUN_GOLDEN_PROVIDER ?? "";
+const GOLDEN_MODEL =
+  GOLDEN === "cloud"
+    ? process.env.HOMUN_GOLDEN_CLOUD_MODEL || "glm-5.3-flash:cloud"
+    : process.env.HOMUN_GOLDEN_LOCAL_MODEL || "qwen3.5:4b";
+
+async function useGoldenModel() {
+  const headers = { "Content-Type": "application/json", "X-Homun-Actor-Id": "person_fabio" };
+  const connection = await fetch(`${ENGINE_URL}/v1/models/connections`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      connection_id: `golden_${GOLDEN}`,
+      kind: "openai_compatible",
+      display_name: `Golden ${GOLDEN}`,
+      model_id: GOLDEN_MODEL,
+      base_url: "http://127.0.0.1:11434/v1",
+      context_window: 16384,
+      max_output_tokens: 8192,
+    }),
+  });
+  if (!connection.ok) throw new Error(`connessione golden rifiutata: ${await connection.text()}`);
+  const active = await fetch(`${ENGINE_URL}/v1/models/providers/active`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ provider_id: `golden_${GOLDEN}` }),
+  });
+  if (!active.ok) throw new Error(`connessione golden non attivata: ${await active.text()}`);
+}
+
 let engine: ChildProcess | null = null;
 let dataDir: string | null = null;
 
@@ -69,7 +102,10 @@ test.beforeAll(async () => {
   while (Date.now() < deadline) {
     try {
       const response = await fetch(`${ENGINE_URL}/v1/health`);
-      if (response.ok) return;
+      if (response.ok) {
+        if (GOLDEN) await useGoldenModel();
+        return;
+      }
     } catch {
       /* il motore sta ancora aprendo il socket */
     }
@@ -91,6 +127,13 @@ async function sendMessage(page: import("@playwright/test").Page, text: string) 
   await composer.press("Enter");
 }
 
+/** Sceglie la modalità di autonomia dal composer, come la persona. */
+async function selectMode(page: import("@playwright/test").Page, label: string) {
+  await page.getByTitle(/^Modalità:/).click();
+  await page.getByText(label, { exact: true }).click();
+  await expect(page.getByTitle(new RegExp(`^Modalità: ${label}`))).toBeVisible();
+}
+
 /** Lo stile calcolato di un elemento: la scheda deve avere la sua grafica. */
 async function computedStyle(
   page: import("@playwright/test").Page,
@@ -108,6 +151,7 @@ async function computedStyle(
 
 test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
   test("domanda, proposta in chat, conferma, Compiti e «grazie»", async ({ page }) => {
+    test.skip(Boolean(GOLDEN), "dipende dal provider fake deterministico");
     await page.goto("/");
 
     // 1. Domanda di apertura: risposta testuale, nessuna proposta.
@@ -147,6 +191,7 @@ test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
   test("le schede (proposta, modifica, chiarimento) hanno il loro stile, non testo grezzo", async ({
     page,
   }) => {
+    test.skip(Boolean(GOLDEN), "dipende dal provider fake deterministico");
     await page.goto("/");
 
     // 1. Proposta: la scheda nella trascrizione ha la sua grafica (badge,
@@ -173,7 +218,10 @@ test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
     ).toEqual({ "border-radius": "10px" });
 
     // 2. Conferma, poi revisione: la scheda del cambiamento (cw-intake-changes)
-    //    ha bordo e sfondo propri, diversi dalla trascrizione.
+    //    ha bordo e sfondo propri, diversi dalla trascrizione. In Supervisionato
+    //    l'accordo confermato non è ancora partito, quindi si può ancora rivedere
+    //    (con guardrail «Conferma accordo e avvia» lo avvia subito).
+    await selectMode(page, "Supervisionato");
     await card.getByRole("button", { name: /Conferma accordo/ }).click();
     await expect(page.getByRole("article", { name: "Accordo di lavoro confermato" })).toBeVisible({
       timeout: 30_000,
@@ -207,13 +255,17 @@ test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
   test("il messaggio che annuncia una scheda è una frase nella lingua della persona, senza ripeterla", async ({
     page,
   }) => {
+    test.skip(Boolean(GOLDEN), "dipende dal provider fake deterministico");
     await page.goto("/");
 
     /** Il testo del messaggio assistente che porta una certa scheda. */
     async function messageTextWith(has: import("@playwright/test").Locator) {
       const root = page.locator('[data-slot="aui_assistant-message-root"]', { has }).last();
       await expect(root).toBeVisible({ timeout: 30_000 });
-      return (await root.locator('[data-slot="aui_assistant-message-content"]').innerText()).trim();
+      const content = root.locator('[data-slot="aui_assistant-message-content"]');
+      // La scheda può comparire prima del testo del messaggio: si aspetta il testo.
+      await expect(content).not.toHaveText(/^\s*$/, { timeout: 30_000 });
+      return (await content.innerText()).trim();
     }
 
     // 1. Proposta (persona che scrive in italiano, senza preferenze): il
@@ -237,5 +289,51 @@ test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
       "Ho alcune domande prima di proporti il lavoro: rispondi qui sotto.",
     );
     expect(clarifyMessage).not.toContain("relazione sui fornitori?");
+  });
+
+  test("il lavoro confermato parte, il risultato sta in chat, si corregge, si approva", async ({
+    page,
+  }) => {
+    // Con un modello vero ogni passo dura secondi o minuti.
+    if (GOLDEN) test.setTimeout(30 * 60_000);
+    await page.goto("/");
+
+    // 1. Richiesta e conferma, nella modalità predefinita («Con guardrail»):
+    //    «Conferma accordo e avvia» avvia davvero, la UI non sceglie l'esecutore.
+    await sendMessage(
+      page,
+      "Prepara una nota operativa: rinnovo contratto Rossi entro il 30 novembre.",
+    );
+    const card = page.getByRole("article", { name: "Proposta di lavoro e coordinamento Homun" });
+    await expect(card).toBeVisible({ timeout: GOLDEN ? 5 * 60_000 : 30_000 });
+    if (GOLDEN) await page.screenshot({ path: "docs/screenshots/confirmed-work/01-proposta.png" });
+    // Un modello vero può proporre l'accordo con «nodi aperti» (domande prima
+    // di iniziare): la persona conferma lo stesso con «Procedi subito con
+    // impostazioni predefinite», che è la stessa conferma della UI.
+    await card
+      .getByRole("button", { name: /Conferma accordo|Procedi subito con impostazioni predefinite/ })
+      .click();
+
+    // 2. Sotto l'accordo, la scheda dell'esecuzione: dallo stato «in corso»
+    //    al risultato da rivedere, senza ricaricare la pagina.
+    const execution = page.getByTestId("work-execution-card");
+    await expect(execution).toBeVisible({ timeout: 30_000 });
+    const work = GOLDEN ? 8 * 60_000 : 60_000;
+    await expect(execution).toHaveAttribute("data-status", "completed", { timeout: work });
+    await expect(execution.getByText(/Risultato da rivedere · v1/)).toBeVisible();
+    await expect(execution.getByTestId("work-execution-result")).not.toBeEmpty();
+    if (GOLDEN) await page.screenshot({ path: "docs/screenshots/confirmed-work/02-risultato.png" });
+
+    // 3. «Chiedi correzione» con un motivo: riparte e arriva la versione 2.
+    await execution.getByRole("button", { name: "Chiedi correzione" }).click();
+    await execution.getByLabel("Cosa correggere").fill("Aggiungi una sezione Rischi.");
+    await execution.getByRole("button", { name: "Invia la correzione" }).click();
+    await expect(execution.getByText(/Risultato da rivedere · v2/)).toBeVisible({ timeout: work });
+
+    // 4. «Approva»: il lavoro è approvato e il risultato sta in Documenti.
+    await execution.getByRole("button", { name: "Approva" }).click();
+    await expect(execution.getByText("Approvato · in Documenti")).toBeVisible({ timeout: 30_000 });
+    if (GOLDEN) await page.screenshot({ path: "docs/screenshots/confirmed-work/03-approvato.png" });
+    await expect(page.getByText("Invio al motore non riuscito")).toHaveCount(0);
   });
 });

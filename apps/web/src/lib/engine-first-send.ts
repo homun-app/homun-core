@@ -38,6 +38,7 @@ export function sendEngineFirstMessage(
     bumpOwnSend();
     void engine
       .postMessage(created, text, attachments, autonomyLevel, modelConnectionId)
-      .catch(() => setNotice("Invio al motore non riuscito. Controlla il banner errori."));
+      // L'esito del fallimento sta in chat (avviso + nota sul messaggio), mai nel piè di pagina.
+      .catch(() => undefined);
   });
 }
