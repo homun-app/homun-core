@@ -250,6 +250,9 @@ test("P4: la conversazione aperta sopravvive alla caduta del motore e si ricaric
 test("P7: «Connessione ripristinata» solo dopo una caduta VISTA in questa sessione", async ({
   page,
 }) => {
+  // La sonda dello stato gira ogni 10 s: le fasi di caduta e ritorno stanno
+  // dentro quel battito.
+  test.setTimeout(120_000);
   const state = { online: false, extraConversation: false, extraMessage: false };
   await mockEngine(page, state);
   await page.goto("/");

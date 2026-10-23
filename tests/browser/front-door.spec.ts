@@ -87,6 +87,9 @@ async function computedStyle(
 }
 
 test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
+  // Ogni passo è un giro vero del motore; gli altri file di test girano in
+  // parallelo con il loro motore, quindi il margine di tempo è generoso.
+  test.describe.configure({ timeout: 90_000 });
   test("domanda, proposta in chat, conferma, Compiti e «grazie»", async ({ page }) => {
     test.skip(Boolean(GOLDEN), "dipende dal provider fake deterministico");
     await page.goto("/");

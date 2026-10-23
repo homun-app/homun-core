@@ -1,17 +1,16 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import {
   ENGINE_DEFAULT_BASE_URL,
   type EngineCapabilities,
   type EngineDataSource,
   type EngineHealth,
-  fetchEngineCapabilities,
-  fetchEngineHealth,
   readEngineDataSource,
-  writeEngineDataSource,
   subscribeEngineDataSource,
+  writeEngineDataSource,
 } from "../lib/engine-client";
+import { engineStatusStore, type EngineConnectionState } from "../lib/engine-status-store";
 
-export type EngineConnectionState = "checking" | "connected" | "absent";
+export type { EngineConnectionState };
 
 export type EngineStatus = {
   connection: EngineConnectionState;
@@ -25,70 +24,31 @@ export type EngineStatus = {
   refresh: () => void;
 };
 
-const POLL_MS = 4000;
-
+/**
+ * Lo stato del motore, letto dall'UNICO sondatore condiviso: una coppia
+ * health+capabilities ogni STATUS_POLL_INTERVAL_MS con la scheda visibile,
+ * in pausa quando è nascosta. Ogni componente che ne ha bisogno si abbona;
+ * dieci abbonati restano dieci letture, non dieci sondatori.
+ */
 export function useEngineStatus(baseUrl: string = ENGINE_DEFAULT_BASE_URL): EngineStatus {
-  const [connection, setConnection] = useState<EngineConnectionState>("checking");
-  const [everConnected, setEverConnected] = useState(false);
-  const [health, setHealth] = useState<EngineHealth | null>(null);
-  const [capabilities, setCapabilities] = useState<EngineCapabilities | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const store = engineStatusStore(baseUrl);
+  const status = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const dataSource = useSyncExternalStore(
     subscribeEngineDataSource,
     readEngineDataSource,
     () => "engine" as const,
   );
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    let cancelled = false;
-
-    async function probe() {
-      try {
-        const nextHealth = await fetchEngineHealth(baseUrl, controller.signal);
-        const nextCapabilities = await fetchEngineCapabilities(baseUrl, controller.signal);
-        if (cancelled) {
-          return;
-        }
-        setHealth(nextHealth);
-        setCapabilities(nextCapabilities);
-        setError(null);
-        setConnection("connected");
-        setEverConnected(true);
-      } catch (cause) {
-        if (cancelled || controller.signal.aborted) {
-          return;
-        }
-        setHealth(null);
-        setCapabilities(null);
-        setConnection("absent");
-        setError(cause instanceof Error ? cause.message : "Engine unavailable");
-      }
-    }
-
-    void probe();
-    const timer = window.setInterval(() => {
-      void probe();
-    }, POLL_MS);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      window.clearInterval(timer);
-    };
-  }, [baseUrl, tick]);
-
+  const refresh = useCallback(() => store.refresh(), [store]);
   return {
-    connection,
-    everConnected,
-    health,
-    capabilities,
-    error,
+    connection: status.connection,
+    everConnected: status.everConnected,
+    health: status.health,
+    capabilities: status.capabilities,
+    error: status.error,
     dataSource,
     setDataSource: (source) => {
       writeEngineDataSource(source);
     },
-    refresh: () => setTick((value) => value + 1),
+    refresh,
   };
 }
