@@ -538,6 +538,19 @@
         "title": "AutomationCommand",
         "type": "object"
       },
+      "AutonomyRequest": {
+        "properties": {
+          "autonomy": {
+            "title": "Autonomy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "autonomy"
+        ],
+        "title": "AutonomyRequest",
+        "type": "object"
+      },
       "BatchItem": {
         "properties": {
           "expected": {
@@ -23547,6 +23560,156 @@
         "summary": "Revoke Invite",
         "tags": [
           "identity"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/people/{person_id}/autonomy": {
+      "get": {
+        "operationId": "read_person_autonomy_v1_workspaces__workspace_id__people__person_id__autonomy_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "person_id",
+            "required": true,
+            "schema": {
+              "title": "Person Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Read Person Autonomy V1 Workspaces  Workspace Id  People  Person Id  Autonomy Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Person Autonomy",
+        "tags": [
+          "preferences"
+        ]
+      },
+      "put": {
+        "operationId": "write_person_autonomy_v1_workspaces__workspace_id__people__person_id__autonomy_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "person_id",
+            "required": true,
+            "schema": {
+              "title": "Person Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-homun-actor-name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Homun-Actor-Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutonomyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Write Person Autonomy V1 Workspaces  Workspace Id  People  Person Id  Autonomy Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Write Person Autonomy",
+        "tags": [
+          "preferences"
         ]
       }
     },
