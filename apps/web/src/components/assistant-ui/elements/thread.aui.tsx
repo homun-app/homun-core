@@ -206,8 +206,15 @@ const ThreadRoot: FC<{
         ["--composer-padding" as string]: "8px",
       }}
     >
+      {/*
+          Ancora in FONDO (il classico comportamento da chat, default di
+          assistant-ui): un messaggio o una scheda nuova porta la vista in
+          fondo solo se la persona era già in fondo; se è salita a leggere, la
+          vista non si muove, e «Vai in fondo» scorre sempre davvero (con
+          turnAnchor="top" l'auto-scroll è spento e la riserva d'ancora
+          ripristina la posizione, tanto da sembrare un bottone morto).
+        */}
       <ThreadPrimitive.Viewport
-        turnAnchor="top"
         data-slot="aui_thread-viewport"
         className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
       >

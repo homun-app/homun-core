@@ -7,7 +7,8 @@
  * VISIBILI nell'area del thread dove si legge, non soltanto presenti nel
  * DOM: il controllo geometrico contro il contenitore scorrevole è la prova.
  */
-import { expect, test, type Locator, type Route } from "@playwright/test";
+import { expect, test, type Route } from "@playwright/test";
+import { insideVisibleArea } from "./geometry";
 
 const CONVERSATION_ID = "conv-listini";
 const WORK_ID = "work-listini";
@@ -151,16 +152,6 @@ async function mockEngine(
     }
     return json({ items: [] });
   });
-}
-
-/** Un elemento è dentro l'area VISIBILE del contenitore scorrevole. */
-async function insideVisibleArea(inner: Locator, outer: Locator): Promise<boolean> {
-  const innerBox = await inner.boundingBox();
-  const outerBox = await outer.boundingBox();
-  if (!innerBox || !outerBox) return false;
-  return (
-    innerBox.y >= outerBox.y - 1 && innerBox.y + innerBox.height <= outerBox.y + outerBox.height + 1
-  );
 }
 
 test.beforeEach(async ({ page }) => {
