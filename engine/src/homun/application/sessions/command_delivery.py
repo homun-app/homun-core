@@ -237,7 +237,7 @@ def complete(ctx: EngineContext, delivery: Delivery) -> dict:
     # «Procedi»: the start runs after the reply commits; its outcome (or typed
     # refusal) is the sentence the person reads — never a retryable failure.
     from homun.application.sessions.front_door.start import start_after_turn
-    return start_after_turn(ctx, delivery.actor, delivery.body, result)
+    return start_after_turn(ctx, delivery.actor, delivery.body, result, publish=_publish)
 
 
 def fail(ctx: EngineContext, delivery: Delivery, code: str) -> None:

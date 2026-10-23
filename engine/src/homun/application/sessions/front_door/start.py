@@ -25,7 +25,7 @@ def _sentence(language: str, view: dict | None, error: DomainError | None) -> st
     return user_text(key, language=language) or ''
 
 
-def start_after_turn(ctx, actor, body, result: dict[str, Any]) -> dict[str, Any]:
+def start_after_turn(ctx, actor, body, result: dict[str, Any], *, publish) -> dict[str, Any]:
     front = result.get('front_door') or {}
     if front.get('kind') != outcomes.WORK_STARTED:
         return result
@@ -69,6 +69,5 @@ def start_after_turn(ctx, actor, body, result: dict[str, Any]) -> dict[str, Any]
             if record is not None:
                 record.result = dict(out)
         ctx.service.store = store
-    from homun.application.sessions.command_delivery import _publish
-    _publish(ctx, store)
+    publish(ctx, store)
     return out

@@ -254,3 +254,22 @@ def test_a_plan_accepted_without_intake_can_start(setup):
         ctx.service.store = store
     view = work_start.start(ctx, actor, work, {'command_id': 'start-1', 'mode': 'guarded'})
     assert view['kind'] == 'agent_run'
+
+
+def test_a_pending_start_made_stale_by_a_change_is_offered_again(setup):
+    """Supervisionato: se l'accordo cambia prima di «Avvia», l'avvio preparato è
+    superato — la scheda torna a «Avvia il lavoro» e un nuovo avvio lo rifà."""
+    ctx, actor, work, _project = setup
+    _confirm(ctx, actor, work)
+    first = work_start.start(ctx, actor, work, {'command_id': 'start-1', 'mode': 'supervised'})
+    assert first['status'] == 'pending_approval'
+    with ctx.repository.locked():
+        with ctx.repository.transaction() as store:
+            ctx.service.for_store(store).apply(actor, 'rename', 'work.rename', {
+                'work_id': work, 'expected_version': store.works[work].version,
+                'title': 'Nota Rossi rivista'})
+        ctx.service.store = store
+    assert work_start.current(ctx, actor, work)['status'] == 'not_started'
+    second = work_start.start(ctx, actor, work, {'command_id': 'start-2', 'mode': 'supervised'})
+    assert second['id'] != first['id']
+    assert second['status'] == 'pending_approval'

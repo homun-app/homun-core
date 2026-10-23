@@ -149,9 +149,17 @@ def _executions(store, work_id) -> list[tuple[Executor, dict, Any]]:
                   key=lambda item: item[2])
 
 
+def _stale(store, work_id, result) -> bool:
+    """A start waiting for «Avvia» on a work that changed since: superseded."""
+    work = store.works.get(work_id)
+    return (result['status'] == 'pending_approval' and work is not None
+            and result.get('expected_version') != work.version)
+
+
 def _active(store, work_id):
     return next(((executor, result) for executor, result, _ in reversed(_executions(store, work_id))
-                 if result['status'] in ACTIVE and result.get('expected_version') is not None), None)
+                 if result['status'] in ACTIVE and result.get('expected_version') is not None
+                 and not _stale(store, work_id, result)), None)
 
 
 def _artifact(store, work_id) -> dict[str, Any] | None:
@@ -179,6 +187,10 @@ def current(ctx, actor, work_id) -> dict[str, Any]:
         return {**base, 'id': None, 'kind': None, 'status': 'not_started', 'digest': None,
                 'expected_version': None, 'error_code': None, 'material_ids': []}
     executor, result, _ = latest
+    if _stale(store, work_id, result):
+        # The person sees «Avvia il lavoro» again; a new start prepares it anew.
+        return {**base, 'id': None, 'kind': None, 'status': 'not_started', 'digest': None,
+                'expected_version': None, 'error_code': None, 'material_ids': []}
     return {**base, **_view(executor, result)}
 
 
@@ -197,7 +209,7 @@ def execution_line(store, work) -> str | None:
     if not agreement or agreement.get('status') != 'confirmed':
         return None
     executions = _executions(store, work.id)
-    if not executions:
+    if not executions or _stale(store, work.id, executions[-1][1]):
         return ('Esecuzione: non avviata — se la persona chiede di procedere, chiama start_work.')
     executor, result, _ = executions[-1]
     status = result['status']
