@@ -124,6 +124,12 @@ def _work_preamble(store, actor, work, memory):
         lines.append(f"Accordo confermato: {brief.get('title')} · attività {brief.get('capability')}"
                      f" · risultato atteso: {brief.get('output')}"
                      + (f" · vincoli: {constraints}" if constraints else ''))
+        # The real execution state: without it the model «proceeds» in words
+        # on a work that never started (seen in the UI walkthrough).
+        from homun.application.work.work_start import execution_line
+        execution = execution_line(store, work)
+        if execution:
+            lines.append(execution)
     pending = _pending_brief(store, work)
     if pending:
         missing = '; '.join(str(item) for item in (pending.get('missing_information') or []) if str(item).strip())

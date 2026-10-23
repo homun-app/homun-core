@@ -19,7 +19,7 @@ from homun.domain.errors import ConflictError, NotFoundError, ValidationError
 from homun.policy.intake import latest_intake
 from homun.policy.work import require_work_access
 
-START_TYPE = 'work.start'
+START_TYPE = 'work.execution_start'
 ACTIVE = {'pending_approval', 'queued', 'running', 'waiting_input'}
 
 
@@ -171,6 +171,54 @@ def current(ctx, actor, work_id) -> dict[str, Any]:
                 'expected_version': None, 'error_code': None, 'material_ids': []}
     executor, result, _ = latest
     return {**base, **_view(executor, result)}
+
+
+STATE_WORDS = {
+    'pending_approval': 'in attesa del via libera della persona (card «Avvia»)',
+    'queued': 'in coda', 'running': 'in corso',
+    'waiting_input': 'in attesa di una risposta della persona',
+    'completed': 'completata', 'failed': 'non riuscita', 'blocked': 'non riuscita',
+    'cancelled': 'annullata',
+}
+
+
+def execution_line(store, work) -> str | None:
+    """One context line on the real execution state of a confirmed work."""
+    agreement = latest_intake(store, work.id)
+    if not agreement or agreement.get('status') != 'confirmed':
+        return None
+    executions = _executions(store, work.id)
+    if not executions:
+        return ('Esecuzione: non avviata — se la persona chiede di procedere, chiama start_work.')
+    executor, result, _ = executions[-1]
+    status = result['status']
+    line = f"Esecuzione: {STATE_WORDS.get(status, status)} ({executor.kind})"
+    artifact = _artifact(store, work.id)
+    work_status = str(getattr(work.status, 'value', work.status))
+    if status == 'completed' and artifact:
+        line += f" — risultato v{artifact['version']} " + (
+            'approvato' if work_status == 'completed' else 'in revisione della persona')
+    if status in {'failed', 'blocked'} and result.get('error_code'):
+        line += f" — {result['error_code']}"
+    return line
+
+
+def start_blocker(store, work) -> str | None:
+    """Why `start_work` must not run now, worded for the model; None if it may."""
+    if work is None:
+        return 'No work is linked to this conversation: reply with text or use propose_work.'
+    agreement = latest_intake(store, work.id)
+    if not agreement or agreement.get('status') != 'confirmed':
+        return ('The agreement is not confirmed yet: the person confirms it from the card. '
+                'Reply with text; never say the work has started.')
+    active = _active(store, work.id)
+    if active:
+        return (f"This work already has an execution {active[1]['status']}: do not start it again. "
+                'Reply with text describing that state.')
+    if str(getattr(work.status, 'value', work.status)) in {'review', 'completed', 'cancelled'}:
+        return ('This work has a result already (review or done): reply with text; a correction is '
+                'requested from the result card.')
+    return None
 
 
 # -- commands --------------------------------------------------------------------

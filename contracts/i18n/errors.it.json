@@ -109,7 +109,10 @@
     "work.start.agreement_required": "Conferma l'accordo prima di avviare il lavoro.",
     "work.start.materials_required": "Scegli i materiali da usare: il progetto ne ha più di quelli che questo lavoro può leggere da solo.",
     "work.start.mode_invalid": "Modalità di autonomia non riconosciuta.",
-    "work.start.execution_not_found": "Esecuzione del lavoro non trovata: ricarica la conversazione."
+    "work.start.execution_not_found": "Esecuzione del lavoro non trovata: ricarica la conversazione.",
+    "front_door.work_started": "Ho avviato il lavoro concordato: l'avanzamento e il risultato compaiono qui sotto.",
+    "front_door.work_start_pending": "Il lavoro è pronto: dai il via libera qui sotto per avviarlo.",
+    "front_door.work_start_failed": "Non ho potuto avviare il lavoro."
   },
   "labels": {
     "comparison.previous": "listino precedente",

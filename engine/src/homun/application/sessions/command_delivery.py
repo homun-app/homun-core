@@ -231,10 +231,13 @@ def complete(ctx: EngineContext, delivery: Delivery) -> dict:
                 record.followup_expires_at = None
                 record.followup_error = None
             _publish(ctx, store)
-        return result
     except Exception as exc:
         fail(ctx, delivery, getattr(exc, 'code', 'provider_unavailable'))
         raise
+    # «Procedi»: the start runs after the reply commits; its outcome (or typed
+    # refusal) is the sentence the person reads — never a retryable failure.
+    from homun.application.sessions.front_door.start import start_after_turn
+    return start_after_turn(ctx, delivery.actor, delivery.body, result)
 
 
 def fail(ctx: EngineContext, delivery: Delivery, code: str) -> None:

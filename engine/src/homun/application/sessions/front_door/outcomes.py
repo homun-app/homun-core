@@ -24,6 +24,7 @@ TEXT = 'text'
 CLARIFICATION = 'clarification'
 WORK_PROPOSAL = 'work_proposal'
 PLAN_CHANGE = 'plan_change'
+WORK_STARTED = 'work_started'
 
 
 @dataclass
@@ -94,7 +95,8 @@ def plan_change_preview(work, plan, arguments, *, roster_ids):
     return preview.model_dump(mode='json'), None
 
 
-def outcome_from_call(name: str, arguments, *, work, plan, agents, anchor, roster_ids) -> tuple[FrontDoorOutcome | None, str | None]:
+def outcome_from_call(name: str, arguments, *, work, plan, agents, anchor, roster_ids,
+                      start_blocked: str | None = None) -> tuple[FrontDoorOutcome | None, str | None]:
     """Validate one tool call against fresh state.
 
     Returns ``(outcome, None)`` when the model's proposal is valid, or
@@ -137,6 +139,14 @@ def outcome_from_call(name: str, arguments, *, work, plan, agents, anchor, roste
         return FrontDoorOutcome(kind=PLAN_CHANGE, plan_preview=preview,
                                 language=tools.normalized_language(arguments.language)), None
 
+    if name == tools.START_WORK:
+        # The engine starts it after the reply commits (work_start.start), with
+        # the conversation's autonomy mode; here only whether it may start.
+        if start_blocked:
+            return None, start_blocked
+        return FrontDoorOutcome(kind=WORK_STARTED,
+                                language=tools.normalized_language(arguments.language)), None
+
     return None, f'Unknown tool: {name}.'
 
 
@@ -156,4 +166,6 @@ def display_for(outcome: FrontDoorOutcome, *, language: str) -> str:
         return user_text('front_door.work_proposed', language=language) or ''
     if outcome.kind == PLAN_CHANGE:
         return user_text('front_door.plan_change_proposed', language=language) or ''
+    # WORK_STARTED: the sentence depends on what the start really did
+    # (running, waiting for «Avvia», refused) — written after it, never before.
     return ''

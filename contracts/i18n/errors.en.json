@@ -109,7 +109,10 @@
     "work.start.agreement_required": "Confirm the agreement before starting the work.",
     "work.start.materials_required": "Choose the materials to use: the project has more than this work can pick on its own.",
     "work.start.mode_invalid": "Unknown autonomy mode.",
-    "work.start.execution_not_found": "Work execution not found: reload the conversation."
+    "work.start.execution_not_found": "Work execution not found: reload the conversation.",
+    "front_door.work_started": "I started the agreed work: progress and result appear below.",
+    "front_door.work_start_pending": "The work is ready: give the go-ahead below to start it.",
+    "front_door.work_start_failed": "I could not start the work."
   },
   "labels": {
     "comparison.previous": "previous price list",
