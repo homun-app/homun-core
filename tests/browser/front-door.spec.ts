@@ -205,7 +205,9 @@ test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
       const content = root.locator('[data-slot="aui_assistant-message-content"]');
       // La scheda può comparire prima del testo del messaggio: si aspetta il testo.
       await expect(content).not.toHaveText(/^\s*$/, { timeout: 30_000 });
-      return (await content.innerText()).trim();
+      // textContent, non innerText: un messaggio fuori schermo
+      // (content-visibility) non ha ancora testo renderizzato.
+      return ((await content.textContent()) ?? "").trim();
     }
 
     // 1. Proposta (persona che scrive in italiano, senza preferenze): il
@@ -238,8 +240,10 @@ test.describe.serial("porta d'ingresso unica nella chat del motore", () => {
     if (GOLDEN) test.setTimeout(30 * 60_000);
     await page.goto("/");
 
-    // 1. Richiesta e conferma, nella modalità predefinita («Con guardrail»):
-    //    «Conferma accordo e avvia» avvia davvero, la UI non sceglie l'esecutore.
+    // 1. Richiesta e conferma, in «Con guardrail» scelta QUI: la modalità è
+    //    ora una preferenza della persona che persiste nel motore (punto 6),
+    //    quindi il test non può più darle per scontata.
+    await selectMode(page, "Con guardrail");
     await sendMessage(
       page,
       "Prepara una nota operativa: rinnovo contratto Rossi entro il 30 novembre.",
