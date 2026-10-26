@@ -20,11 +20,14 @@ import { isValidTimeZone } from './tz'
 import { nextScheduleRun, nextPollAt } from './triggers'
 import { triggerShapeErrors, manualServerPollError } from '../shared/triggers'
 import { generateWebhookToken } from './webhooks'
+import { enqueueJob } from '../main/store/jobs'
 import { enqueueUserMessage, enqueueWidgetResponse } from './enqueue'
+import { loadTemplates, templateById, buildKickstartMessage } from '../main/templates'
 import { deliverHeldForAgent } from './outbox'
 import type { JobWorker } from './worker'
 import type { ConnectorsManager } from '../main/connectors'
 import type { Presence } from './presence'
+import type { Onboarding } from './onboarding'
 import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger } from '../shared/types'
 
 type Emitter = (e: SandbotEvent) => void
@@ -34,7 +37,7 @@ export function buildApiMethods(
   worker: JobWorker,
   connectors?: ConnectorsManager,
   presence?: Presence,
-  opts: { webhookPort?: number } = {}
+  opts: { webhookPort?: number; onboarding?: Onboarding } = {}
 ): Record<string, (params: unknown[]) => unknown> {
   const mcp = () => import('../main/mcp')
   const vault = () => import('../main/vault')
@@ -116,6 +119,40 @@ export function buildApiMethods(
       store.deleteAgent(id as string)
       emit({ type: 'agents' })
     },
+    // fase 7: il bot principale è UNO (setting mainAgentId) — si cambia dalle
+    // impostazioni dell'agente ("Rendi principale")
+    'agents:set-main': ([id]) => {
+      const a = store.getAgent(id as string)
+      if (!a) throw new Error('Agente non trovato')
+      store.setSetting('mainAgentId', a.id)
+      emit({ type: 'agents' })
+      return { ok: true }
+    },
+
+    // ---- fase 7: template dei bot + kickstart ----
+    'templates:list': () => loadTemplates(),
+    'agents:create-from-template': ([templateId]) => {
+      const t = templateById(String(templateId))
+      if (!t) throw new Error(`template sconosciuto: ${String(templateId)}`)
+      const a = store.createAgent(t.name, t.description)
+      // il kickstart parte come job della coda: un riavvio a metà lo riprende
+      // come gli altri turni (payload.entryId, fase 2)
+      const now = Date.now()
+      enqueueJob(db(), {
+        agentId: a.id,
+        kind: 'user-message',
+        payload: {
+          text: buildKickstartMessage(t),
+          initiator: 'TEMPLATE_IMPORT',
+          extraMeta: { templateName: t.name }
+        },
+        runAt: now,
+        now
+      })
+      worker.poke()
+      emit({ type: 'agents' })
+      return a
+    },
 
     // ---- transcript ----
     'agents:entries': ([agentId, afterId]) => store.getEntries(agentId as string, (afterId as number) ?? 0),
@@ -129,16 +166,29 @@ export function buildApiMethods(
 
     // ---- fase 3: risposta ai widget ask_user ----
     'widget:respond': ([agentId, entryId, value]) => {
+      const widget = store.getEntries(agentId as string).find((e) => e.id === (entryId as number))
       // fase 6: risposta alla domanda sulle routine in pausa per assenza —
       // "Riattiva tutte" riprende SOLO quelle con pausedForAway, in modo
       // deterministico (non quelle fermate a mano dall'utente)
-      const widget = store.getEntries(agentId as string).find((e) => e.id === (entryId as number))
       if (widget?.meta?.awayResume && presence) {
         const chosen = Array.isArray(value) ? value : [value]
         if (chosen.includes('resume-away')) {
           const resumed = presence.resumeAwayPaused()
           appendLocalNotice(agentId as string, resumed > 0 ? `Routine riattivate: ${resumed}.` : 'Nessuna routine da riattivare.')
         }
+      }
+      // fase 7: i widget di sistema dell'onboarding sono deterministici —
+      // niente turno del modello: il ruolo prepara i bot (o parcheggia sul
+      // provider), il bottone del provider apre le impostazioni (UI)
+      if (widget?.meta?.onboardingRole && opts.onboarding) {
+        opts.onboarding.answerRole(entryId as number, value as string | string[])
+        return { ok: true }
+      }
+      if (widget?.meta?.onboardingProvider) {
+        const meta = widget.meta ?? {}
+        store.updateEntryMeta(widget.id, { ...meta, respondedValue: value as string | string[] })
+        emitUpdatedEntry(agentId as string, widget.id)
+        return { ok: true }
       }
       const job = enqueueWidgetResponse(db(), agentId as string, entryId as number, value as string | string[], emit)
       if (job) worker.poke()
@@ -447,6 +497,8 @@ export function buildApiMethods(
       ps.push(p as Parameters<typeof store.saveProviders>[0][number])
       store.saveProviders(ps)
       emit({ type: 'agents' })
+      // fase 7: l'onboarding fermo sul provider riprende appena ce n'è uno
+      if (opts.onboarding) void opts.onboarding.resume().catch(() => undefined)
     },
     'providers:delete': ([id]) => {
       store.saveProviders(store.listProviders().filter((x) => x.id !== id))

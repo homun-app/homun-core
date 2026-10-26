@@ -15,7 +15,7 @@ import type { SandbotEvent } from '../shared/types'
 
 /** Canali inoltrati 1:1 al daemon (nomi = metodi RPC). */
 export const DAEMON_RPC_CHANNELS = [
-  'agents:list', 'agents:create', 'agents:update', 'agents:delete',
+  'agents:list', 'agents:create', 'agents:update', 'agents:delete', 'agents:set-main',
   'agents:entries', 'chat:send', 'chat:interrupt',
   'widget:respond', 'draft:send', 'draft:discard', 'draft:update',
   'quickask',
@@ -30,7 +30,9 @@ export const DAEMON_RPC_CHANNELS = [
   'vault:list', 'vault:store', 'vault:delete',
   'approvals:resolve', 'approvals:resolve-latest',
   'providers:list', 'providers:save', 'providers:delete', 'providers:discover', 'providers:test', 'models:list',
-  'permissions:get', 'permissions:set', 'settings:get', 'settings:set'
+  'permissions:get', 'permissions:set', 'settings:get', 'settings:set',
+  // fase 7: template dei bot (catalogo + creazione col kickstart)
+  'templates:list', 'agents:create-from-template'
 ] as const
 
 export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindow[]): void {

@@ -18,9 +18,9 @@
 // draft_external. Ogni turno si chiude con un evento meta.turnEnd ∈
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID } from 'node:crypto'
-import { getAgent, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry } from '../store/db'
+import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
-import { systemPrompt, secondaryPrompts } from './prompts'
+import { systemPrompt, secondaryPrompts, mainAgentSection } from './prompts'
 import { toolDefs, executeTool } from './tools'
 import * as permissions from './permissions'
 import { getProvider } from './providers'
@@ -32,6 +32,8 @@ import { buildMemorySection } from './memory'
 import { buildSkillsSection } from './skills'
 import { maybeCompactHistory, summarizeWithLlm } from './compaction'
 import { automationEventText } from './update-state'
+import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX } from '../../shared/agent-message'
+import { mainAgentOf } from '../../daemon/presence'
 import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
@@ -142,6 +144,13 @@ export interface RunTurnOptions {
   respondedTo?: number
   /** Fase 5: chi ha avviato il turno (es. 'CONNECTOR_CONNECTED' dopo la connessione di un connettore offerto). */
   initiator?: string
+  /**
+   * Fase 7 (§3bis L8): il turno è stato aperto da un messaggio di un altro
+   * bot (initiator AGENT) — serve al limite anti-ciclo dei send_to_agent.
+   */
+  agentMessage?: { fromAgentId: string; fromAgentName: string; hop: number }
+  /** Fase 7: meta extra del messaggio che apre il turno (es. templateName per TEMPLATE_IMPORT). */
+  extraMeta?: Record<string, unknown>
 }
 
 export async function runTurn(agentId: string, userText: string, emit: Emitter, images?: string[], opts: RunTurnOptions = {}): Promise<void> {
@@ -219,6 +228,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         meta: {
           ...(opts.respondedTo !== undefined ? { respondedTo: opts.respondedTo } : {}),
           ...(opts.initiator ? { initiator: opts.initiator } : {}),
+          // fase 7: provenienza del messaggio di un altro bot (rate per coppia)
+          ...(opts.agentMessage ? { fromAgentId: opts.agentMessage.fromAgentId, fromAgentName: opts.agentMessage.fromAgentName, toAgentId: agentId, hop: opts.agentMessage.hop } : {}),
+          ...(opts.extraMeta ?? {}),
           ...(images?.length ? { images: images.length } : {})
         }
       })
@@ -242,6 +254,25 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // §5.3: il messaggio corrente è l'ultimo entry del transcript → compare una volta sola.
     // Fase 4: il system prompt include memoria (§3bis L6) e skill disponibili.
     // Fase 5: include le istruzioni personalizzate dei connettori connessi.
+    // Fase 7: se questo è il bot principale, la sezione di coordinamento con
+    // l'elenco degli altri bot (nome, descrizione, routine attive)
+    let mainSection = ''
+    try {
+      const agents = listAgents()
+      if (mainAgentOf(agents, getSetting<string | null>('mainAgentId', null))?.id === agentId) {
+        mainSection = mainAgentSection(
+          agents
+            .filter((a) => a.id !== agentId)
+            .map((a) => ({
+              name: a.name,
+              description: a.description,
+              routines: listRoutines(a.id).filter((r) => r.enabled).map((r) => r.title)
+            }))
+        )
+      }
+    } catch {
+      // elenco non disponibile: il prompt resta quello di base
+    }
     let connectorsSection = ''
     try {
       const { connectorInstructionsFromSettings } = await import('../connectors')
@@ -254,7 +285,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // connettori non disponibili: il system prompt resta quello di base
     }
     const messages: ChatMessage[] = buildMessages(
-      systemPrompt(agent) + buildMemorySection(agentId) + buildSkillsSection(agentId) + connectorsSection,
+      systemPrompt(agent) + mainSection + buildMemorySection(agentId) + buildSkillsSection(agentId) + connectorsSection,
       getEntries(agentId),
       images
     )
@@ -445,6 +476,57 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: `offerta mostrata all'utente: la connessione di ${entry2.name} avviene SOLO dal suo click sul bottone Connetti. Quando l'utente connette riceverai un messaggio di sistema e potrai usare i tool mcp__${entry2.id}__*.`
+          })
+          continue
+        }
+
+        // fase 7 (§3bis L8): messaggio a un ALTRO bot — accodato come job
+        // user-message con initiator AGENT; il destinatario lo riceverà come
+        // blocco evidenza <messaggio_da_agente> e potrà rispondere al mittente
+        if (call.name === 'send_to_agent') {
+          const toId = String(input.agentId ?? '')
+          const dest = listAgents().find((a) => a.id === toId)
+          if (!dest) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: `Destinatario non trovato ("${toId}"): cerca l'id esatto con list_agents.` })
+            continue
+          }
+          if (toId === agentId) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: 'Non puoi mandare un messaggio a te stesso: parla con l\'utente o delega a un altro bot.' })
+            continue
+          }
+          const text = String(input.text ?? '')
+          if (!text.trim()) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: 'Testo mancante: scrivi il messaggio per l\'altro bot nel campo text.' })
+            continue
+          }
+          // protezione anti-ciclo: hop del messaggio che ha aperto QUESTO
+          // turno + messaggi tra la coppia nell'ultima ora (entrambe le direzioni)
+          const incomingHop = opts.agentMessage?.hop ?? 0
+          const pairLastHour = countPairMessagesLastHour([...getEntries(agentId), ...getEntries(toId)], agentId, toId, Date.now())
+          const guard = agentSendGuard({ incomingHop, pairLastHour })
+          if (!guard.ok) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: guard.error })
+            continue
+          }
+          const { enqueueJob } = await import('../store/jobs')
+          const now = Date.now()
+          enqueueJob(db(), {
+            agentId: toId,
+            kind: 'user-message',
+            payload: {
+              text: formatAgentMessage(agent.name, text),
+              initiator: 'AGENT',
+              fromAgentId: agentId,
+              fromAgentName: agent.name,
+              toAgentId: toId,
+              hop: guard.hop
+            },
+            runAt: now,
+            now
+          })
+          messages.push({
+            role: 'tool', toolCallId: call.id,
+            content: `Messaggio in coda per ${dest.name}: entrerà nel suo prossimo turno (passaggio ${guard.hop} di ${AGENT_HOP_MAX}). Lui non vede questa conversazione: se serve contesto, mettilo nel messaggio.`
           })
           continue
         }

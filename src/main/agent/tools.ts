@@ -221,8 +221,29 @@ export const toolDefs: ToolDef[] = [
     }
   },
   {
+    name: 'send_to_agent',
+    description: "Manda un messaggio a un altro bot dell'utente (delega, aggiornamenti, domande). Il destinatario lo riceve come evidenza in un blocco <messaggio_da_agente> e può risponderti con lo stesso tool. Cerca l'id con list_agents. Limiti anti-ciclo: catena massima di 3 passaggi e 10 messaggi per coppia di bot all'ora.",
+    parameters: {
+      type: 'object',
+      properties: {
+        agentId: { type: 'string', description: 'Id del bot destinatario (da list_agents)' },
+        text: { type: 'string', description: 'Il messaggio per l\'altro bot (chiaro e autonomo: lui non vede la tua conversazione)' }
+      },
+      required: ['agentId', 'text']
+    }
+  },
+  {
+    name: 'list_agents',
+    description: "Elenca gli ALTRI bot dell'utente (nome, id, descrizione, stato): serve per decidere a chi delegare con send_to_agent.",
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
     name: 'update_state',
-    description: "Modifica il tuo stato. target 'memory' → come update_memory (action write/update/delete). target 'routine' → action: create (campi name, description, prompt, schedule cron a 5 campi, timezone; la routine nasce SEMPRE in pausa: chiedi all'utente se attivarla, l'attivazione richiede la sua approvazione), update (id + campi da cambiare), pause, resume, delete (id).",
+    description: "Modifica il tuo stato. target 'memory' → come update_memory (action write/update/delete). target 'routine' → action: create (campi name, description, prompt, schedule cron a 5 campi OPPURE trigger di tipo schedule, timezone, provenance 'template' se crei le routine di un template; la routine nasce SEMPRE in pausa: chiedi all'utente se attivarla, l'attivazione richiede la sua approvazione), update (id + campi da cambiare), pause, resume, delete (id).",
     parameters: {
       type: 'object',
       properties: {
@@ -233,6 +254,8 @@ export const toolDefs: ToolDef[] = [
         description: { type: 'string', description: 'Descrizione breve (routine/skill)' },
         prompt: { type: 'string', description: 'Il prompt che la routine esegue' },
         schedule: { type: 'string', description: 'Schedule cron a 5 campi, es. "30 8 * * 1-5"' },
+        trigger: { type: 'object', description: "In alternativa al cron: trigger di tipo schedule ({type:'schedule', kind:'cron', cron} o {type:'schedule', kind:'every', every, at, mode}); SOLO schedule: email/webhook/poll li configura l'utente", additionalProperties: true },
+        provenance: { type: 'string', enum: ['template', 'agent'], description: "'template' se la routine arriva dal kickstart di un template (default agent)" },
         timezone: { type: 'string', description: 'Fuso orario della schedule (es. Europe/Rome)' },
         content: { type: 'string', description: 'Contenuto (per target memory)' },
         tier: { type: 'string', enum: ['core', 'log'], description: 'Tier della memoria (per target memory)' },
@@ -289,19 +312,38 @@ async function runRoutineAction(agentId: string, input: Record<string, unknown>)
   if (action === 'create') {
     const name = str(input.name)
     const prompt = str(input.prompt)
-    const schedule = str(input.schedule)
     if (!name) return { output: 'Routine non creata: manca il nome (campo name).', meta: {} }
     if (!prompt) return { output: 'Routine non creata: manca il prompt.', meta: {} }
-    if (!schedule || !parseCron(schedule)) {
-      return { output: `Schedule non valida: "${schedule ?? ''}" — usare un cron a 5 campi, es. "0 9 * * *".`, meta: {} }
+    // fase 7: trigger opzionale di tipo schedule (stessa validazione delle
+    // routine utente); poll e webhook restano configurabili solo dall'utente
+    let trigger: import('../../shared/types').RoutineTrigger | null = null
+    if (input.trigger !== undefined && input.trigger !== null) {
+      const t = input.trigger as import('../../shared/types').RoutineTrigger
+      if (!t || typeof t !== 'object' || t.type !== 'schedule') {
+        return {
+          output: 'Trigger non valido: update_state accetta solo trigger di tipo schedule (cron o "ogni X"); i trigger su email/webhook/poll si configurano dall\'utente nelle Impostazioni → routine.',
+          meta: {}
+        }
+      }
+      const errors = (await import('../../shared/triggers')).triggerShapeErrors(t)
+      if (t.kind === 'cron' && !parseCron(t.cron)) errors.unshift(`cron non valido: "${t.cron}" (5 campi, es. "0 9 * * *")`)
+      if (errors.length) return { output: `Trigger non valido: ${errors.join('; ')}.`, meta: {} }
+      trigger = t
     }
-    // le routine dell'agente nascono SEMPRE in pausa, con provenance 'agent'
+    const schedule = str(input.schedule) ?? (trigger?.type === 'schedule' && trigger.kind === 'cron' ? trigger.cron : '')
+    if (!trigger && (!schedule || !parseCron(schedule))) {
+      return { output: `Schedule non valida: "${schedule ?? ''}" — usare un cron a 5 campi, es. "0 9 * * *", o un trigger schedule.`, meta: {} }
+    }
+    // le routine dell'agente nascono SEMPRE in pausa; provenance 'template'
+    // quando arrivano dal kickstart di un template, 'agent' negli altri casi
+    const provenance = input.provenance === 'template' ? 'template' : 'agent'
     const r = createRoutine(agentId, name, prompt, schedule, {
-      enabled: 0, provenance: 'agent',
-      description: str(input.description) ?? '', timezone: str(input.timezone) ?? ''
+      enabled: 0, provenance,
+      description: str(input.description) ?? '', timezone: str(input.timezone) ?? '',
+      ...(trigger ? { trigger } : {})
     })
     return {
-      output: `Routine "${name}" creata in PAUSA (id ${r.id}, provenance agent, schedule "${schedule}"): non girerà finché l'utente non la attiva con resume.`,
+      output: `Routine "${name}" creata in PAUSA (id ${r.id}, provenance ${provenance}, schedule "${schedule || 'da trigger'}"): non girerà finché l'utente non la attiva con resume.`,
       meta: { automation: { action: 'create', id: r.id, name } }
     }
   }
@@ -437,6 +479,16 @@ export async function executeTool(agentId: string, tool: string, input: Record<s
       if (input.target === 'memory') return runMemoryAction(agentId, input)
       if (input.target === 'routine') return runRoutineAction(agentId, input)
       return { output: `Target update_state non valido: ${JSON.stringify(input.target)} (routine | memory).`, meta: {} }
+    }
+    case 'list_agents': {
+      // fase 7: gli ALTRI bot dell'utente (nome, id, descrizione, stato)
+      const { listAgents } = await import('../store/db')
+      const others = listAgents().filter((a) => a.id !== agentId)
+      if (!others.length) return { output: 'Nessun altro bot: sei l\'unico agente dell\'utente.', meta: {} }
+      return {
+        output: others.map((a) => `- ${a.name} (id ${a.id}) · stato: ${a.status}${a.description ? ` · ${a.description}` : ''}`).join('\n'),
+        meta: {}
+      }
     }
     default: {
       if (tool.startsWith('mcp__')) {

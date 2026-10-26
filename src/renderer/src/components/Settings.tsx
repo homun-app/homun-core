@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { api, useStore } from '../store'
 import { describeTrigger } from '../../../shared/cron-human'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
-import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger } from '../../../shared/types'
+import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo } from '../../../shared/types'
 
 const KINDS: ProviderKind[] = [
   'ollama', 'lmstudio', 'anthropic', 'mistral', 'openrouter', 'zai', 'xai', 'deepseek', 'groq', 'openai-compatible'
@@ -11,9 +11,20 @@ const KINDS: ProviderKind[] = [
 
 export function Settings() {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const setSettingsTab = useStore((s) => s.setSettingsTab)
+  const pendingTab = useStore((s) => s.settingsTab)
   const refreshProviders = useStore((s) => s.refreshProviders)
   const refreshPermissions = useStore((s) => s.refreshPermissions)
   const [tab, setTab] = useState<'provider' | 'agenti' | 'permessi' | 'routine' | 'connettori' | 'generale'>('provider')
+
+  // fase 7: un widget può chiedere di aprire un tab preciso (es. il provider
+  // durante l'onboarding): lo si applica una volta e si consuma
+  useEffect(() => {
+    if (pendingTab) {
+      setTab(pendingTab as typeof tab)
+      setSettingsTab(null)
+    }
+  }, [pendingTab, setSettingsTab])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setSettingsOpen(false)}>
@@ -611,7 +622,11 @@ function ProviderForm({ initial, onSave, onCancel }: { initial: ProviderConfig; 
 function AgentsTab() {
   const agents = useStore((s) => s.agents)
   const providers = useStore((s) => s.providers)
+  const mainAgentId = useStore((s) => s.mainAgentId)
+  const setMainAgent = useStore((s) => s.setMainAgent)
   const [models, setModels] = useState<Record<string, ModelInfo[]>>({})
+  // fase 7: catalogo dei template (creazione bot col kickstart)
+  const [templates, setTemplates] = useState<TemplateInfo[]>([])
 
   useEffect(() => {
     for (const p of providers) {
@@ -620,10 +635,16 @@ function AgentsTab() {
       }
     }
   }, [providers])
+  useEffect(() => {
+    api.listTemplates().then(setTemplates).catch(() => undefined)
+  }, [])
 
   async function patch(a: Agent, p: Partial<Agent>) {
     await api.updateAgent(a.id, p)
   }
+
+  // fase 7: senza setting mainAgentId il principale è il primo agente
+  const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
 
   return (
     <div className="space-y-3">
@@ -632,6 +653,19 @@ function AgentsTab() {
         <div key={a.id} className="rounded-xl border border-neutral-800 px-3 py-2.5">
           <div className="mb-2 flex items-center gap-2">
             <span className="text-sm font-medium text-neutral-100">{a.name}</span>
+            {a.id === effectiveMain ? (
+              <span className="rounded bg-sky-800/60 px-1.5 py-0.5 text-[10px] text-sky-200" title="Punto di contatto principale dell'utente: coordina gli altri bot">
+                ★ principale
+              </span>
+            ) : (
+              <button
+                className="rounded px-1.5 py-0.5 text-[10px] text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+                title="Rendi questo bot il punto di contatto principale dell'utente"
+                onClick={() => void setMainAgent(a.id)}
+              >
+                Rendi principale
+              </button>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <select
@@ -667,6 +701,34 @@ function AgentsTab() {
           />
         </div>
       ))}
+
+      {templates.length > 0 && (
+        <div className="space-y-2 border-t border-neutral-800 pt-3">
+          <p className="text-xs text-neutral-500">
+            Crea un bot da template: parte con un messaggio di configurazione che crea routine (in pausa), memorie e domande di attivazione.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {templates.map((t) => (
+              <button
+                key={t.id}
+                className="rounded-xl border border-neutral-800 px-3 py-2 text-left hover:border-neutral-600"
+                onClick={async () => {
+                  try {
+                    await api.createAgentFromTemplate(t.id)
+                  } catch (e) {
+                    console.error('createAgentFromTemplate:', e instanceof Error ? e.message : e)
+                  }
+                }}
+                title={t.description}
+              >
+                <span className="mr-1">{t.avatar}</span>
+                <span className="text-sm text-neutral-100">{t.name}</span>
+                <span className="mt-0.5 block truncate text-xs text-neutral-500">{t.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -201,6 +201,12 @@ export interface SandbotApi {
   createAgent(name: string, description?: string): Promise<Agent>
   updateAgent(id: string, patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model'>>): Promise<void>
   deleteAgent(id: string): Promise<void>
+  /** fase 7: imposta il bot principale (mainAgentId, unico) */
+  setMainAgent(id: string): Promise<void>
+  /** fase 7: catalogo dei template di bot */
+  listTemplates(): Promise<TemplateInfo[]>
+  /** fase 7: crea un bot da template e avvia il kickstart (job TEMPLATE_IMPORT) */
+  createAgentFromTemplate(templateId: string): Promise<Agent>
   getEntries(agentId: string, afterId?: number): Promise<TranscriptEntry[]>
   sendMessage(agentId: string, text: string, images?: string[]): Promise<void>
   interrupt(agentId: string): Promise<void>
@@ -283,8 +289,8 @@ export interface RoutineInfo {
   enabled: number
   last_run: number | null
   created_at: number
-  /** fase 4: provenance 'agent' = creata dal bot via update_state (nasce in pausa) */
-  provenance?: 'user' | 'agent'
+  /** fase 4: provenance 'agent' = creata dal bot via update_state (nasce in pausa); fase 7: 'template' = importata dal kickstart */
+  provenance?: 'user' | 'agent' | 'template'
   description?: string
   timezone?: string
   /** fase 6: trigger esteso (null = schedule cron classica nella colonna schedule) */
@@ -387,6 +393,36 @@ export interface RoutineSuggestion {
   schedule: string
   description: string
 }
+
+// ---- template dei bot (fase 7, §3ter T4 + Appendice A) ----
+
+/**
+ * Un template di bot: routine (solo trigger schedule), connettori consigliati,
+ * memorie (regole operative atomiche e datate) e skill. Il JSON vive in
+ * src/main/templates/<id>.json, validato da validateTemplate all'avvio.
+ */
+export interface BotTemplate {
+  id: string
+  name: string
+  description: string
+  avatar: string
+  roles: string[]
+  routines: Array<{
+    name: string
+    slug: string
+    description: string
+    content: string
+    trigger: RoutineTrigger
+    /** domande da fare all'utente a fine kickstart (fuso orario, soglie, …) */
+    askUserFor: string[]
+  }>
+  connectors: Array<{ connectorId: string; why: string }>
+  memories: Array<{ content: string; created_at: string }>
+  skills: Array<{ name: string; description: string; content: string }>
+}
+
+/** Un template come lo vede la UI. */
+export type TemplateInfo = BotTemplate
 
 export interface McpServerInfo {
   id: string

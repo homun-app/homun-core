@@ -15,10 +15,10 @@
 // dell'outbox nelle finestre; le notifiche agent-done/agent-needs-input
 // passano dalle regole di soppressione (notifications.ts).
 import {
-  setDataDir, dataDir, db, getAgent, getSetting, setSetting,
-  listAgents, listRoutines, updateRoutine, appendEntry
+  setDataDir, dataDir, db, getAgent, getEntries, getSetting, setSetting,
+  listAgents, listRoutines, updateRoutine, appendEntry, updateEntryMeta, updateAgent, listProviders, createAgent
 } from '../main/store/db'
-import { requeueAllLeased } from '../main/store/jobs'
+import { requeueAllLeased, enqueueJob } from '../main/store/jobs'
 import { acquireDaemonLock, releaseDaemonLock, writeDaemonInfo, removeDaemonInfo } from './daemon-files'
 import { startWsServer, generateToken } from './ws-server'
 import { buildApiMethods } from './api'
@@ -33,6 +33,8 @@ import { deliverDueHeld } from './outbox'
 import { decideNotification, notifyTexts } from './notifications'
 import { enqueueUserMessage } from './enqueue'
 import { secondaryPrompts } from '../main/agent/prompts'
+import { loadTemplates, buildKickstartMessage } from '../main/templates'
+import { createOnboarding } from './onboarding'
 import type { SandbotEvent } from '../shared/types'
 
 function resolveDataDirArgv(argv: string[]): string | null {
@@ -146,7 +148,56 @@ async function main(): Promise<void> {
     emit
   )
   pokeWorker = () => worker.poke()
-  server.methods = buildApiMethods(emit, worker, connectors, presence, { webhookPort: server.port })
+
+  // fase 7: onboarding al primo avvio — bot principale "Bot" + widget di
+  // sistema sul ruolo; i due bot da template partono col kickstart in coda.
+  // Il catalogo dei template si valida QUI all'avvio: un JSON rotto ferma il
+  // daemon con l'errore chiaro invece di sorprendere a runtime.
+  loadTemplates()
+  const onboarding = createOnboarding({
+    now: () => Date.now(),
+    getSetting,
+    setSetting,
+    listAgents,
+    createAgent: (name, description) => createAgent(name, description),
+    updateAgent,
+    listProviders,
+    listModels: async (p) => (await import('../main/agent/providers')).listProviderModels(p),
+    appendSystemSend: (agentId, message, meta) => {
+      const content = message.type === 'text' ? message.text : message.type === 'widget' ? message.prompt : ''
+      const entry = appendEntry({
+        agentId, kind: 'send-message', role: 'assistant',
+        content,
+        meta: { message, ...(meta ?? {}) }
+      })
+      broadcast({ type: 'entries', agentId, entries: [entry] })
+    },
+    markWidgetResponded: (agentId, entryId, value) => {
+      const entry = getEntries(agentId).find((e) => e.id === entryId)
+      if (entry) {
+        updateEntryMeta(entryId, { ...(entry.meta ?? {}), respondedValue: value })
+        const updated = getEntries(agentId).find((e) => e.id === entryId)
+        if (updated) broadcast({ type: 'entries', agentId, entries: [updated] })
+      }
+    },
+    enqueueKickstart: (agentId, template) => {
+      const now = Date.now()
+      enqueueJob(database, {
+        agentId,
+        kind: 'user-message',
+        payload: {
+          text: buildKickstartMessage(template),
+          initiator: 'TEMPLATE_IMPORT',
+          extraMeta: { templateName: template.name }
+        },
+        runAt: now,
+        now
+      })
+      pokeWorker()
+    },
+    emit: (e) => broadcast(e)
+  })
+  server.methods = buildApiMethods(emit, worker, connectors, presence, { webhookPort: server.port, onboarding })
 
   // scheduler: ogni 30s calcola le routine dovute (cron e trigger schedule),
   // fa i poll dei connettori, mette in pausa le routine se l'utente è via da
@@ -175,6 +226,11 @@ async function main(): Promise<void> {
   const requeued = requeueAllLeased(database)
   if (requeued > 0) console.log(`[sandbotd] ${requeued} job con lease orfano rimessi in coda all'avvio`)
   worker.start()
+
+  // fase 7: primo avvio su dati vuoti → bot principale + widget del ruolo;
+  // se l'onboarding era fermo sul provider e ora c'è, riprende da qui
+  onboarding.maybeStart()
+  void onboarding.resume().catch((e) => console.error('[sandbotd] ripresa onboarding:', e))
 
   // autodiscovery dei provider locali silenziosa al boot (come faceva l'app)
   void import('../main/agent/providers').then((p) => p.discoverProviders().catch(() => undefined))

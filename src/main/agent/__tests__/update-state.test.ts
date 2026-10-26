@@ -92,6 +92,66 @@ describe('esecuzione (store reale)', () => {
     expect((await import('../../store/db')).listRoutines(AGENT)).toHaveLength(before)
   })
 
+  // ---- fase 7: create con trigger schedule opzionale e provenance template ----
+
+  it('create con trigger cron: routine in pausa, trigger_json salvato, cron nella colonna schedule', async () => {
+    const { output, meta } = await executeTool(AGENT, 'update_state', {
+      target: 'routine', action: 'create', name: 'Da template', prompt: 'p',
+      trigger: { type: 'schedule', kind: 'cron', cron: '30 8 * * 1-5' }, provenance: 'template'
+    })
+    expect(output).toContain('PAUSA')
+    expect(output).toContain('provenance template')
+    const id = (meta.automation as { id: number }).id
+    const r = getRoutine(id)!
+    expect(r.enabled).toBe(0)
+    expect(r.provenance).toBe('template')
+    expect(r.schedule).toBe('30 8 * * 1-5')
+    expect(r.trigger).toEqual({ type: 'schedule', kind: 'cron', cron: '30 8 * * 1-5' })
+  })
+
+  it('create con trigger every: colonna schedule vuota (nessun cron), trigger_json pieno', async () => {
+    const { meta } = await executeTool(AGENT, 'update_state', {
+      target: 'routine', action: 'create', name: 'Ogni giorno circa', prompt: 'p',
+      trigger: { type: 'schedule', kind: 'every', every: 'day', at: '09:00', mode: 'around' }
+    })
+    const r = getRoutine((meta.automation as { id: number }).id)!
+    expect(r.schedule).toBe('')
+    expect(r.trigger).toMatchObject({ type: 'schedule', kind: 'every', every: 'day', mode: 'around' })
+    expect(r.enabled).toBe(0)
+    expect(r.provenance).toBe('agent') // default senza provenance esplicita
+  })
+
+  it('create con trigger NON schedule (webhook/poll): rifiuto leggibile, niente routine', async () => {
+    const before = (await import('../../store/db')).listRoutines(AGENT).length
+    const webhook = await executeTool(AGENT, 'update_state', {
+      target: 'routine', action: 'create', name: 'Hook', prompt: 'p',
+      trigger: { type: 'webhook', token: 't' }
+    })
+    expect(webhook.output).toContain('solo trigger di tipo schedule')
+    expect(webhook.meta.automation).toBeUndefined()
+    const poll = await executeTool(AGENT, 'update_state', {
+      target: 'routine', action: 'create', name: 'Poll', prompt: 'p',
+      trigger: { type: 'connector_poll', connectorId: 'x', tool: 't', intervalMin: 5, idField: 'items[].id' }
+    })
+    expect(poll.output).toContain('solo trigger di tipo schedule')
+    expect((await import('../../store/db')).listRoutines(AGENT)).toHaveLength(before)
+  })
+
+  it('create con trigger schedule malformato: stessi errori delle routine utente', async () => {
+    const before = (await import('../../store/db')).listRoutines(AGENT).length
+    const badCron = await executeTool(AGENT, 'update_state', {
+      target: 'routine', action: 'create', name: 'Nope', prompt: 'p',
+      trigger: { type: 'schedule', kind: 'cron', cron: '9 * * *' }
+    })
+    expect(badCron.output).toContain('cron non valido')
+    const badEvery = await executeTool(AGENT, 'update_state', {
+      target: 'routine', action: 'create', name: 'Nope2', prompt: 'p',
+      trigger: { type: 'schedule', kind: 'every', every: 'mese', at: '09:00', mode: 'at' }
+    })
+    expect(badEvery.output).toContain('every non valido')
+    expect((await import('../../store/db')).listRoutines(AGENT)).toHaveLength(before)
+  })
+
   it('pause → enabled 0 con evento; resume → enabled 1 con evento', async () => {
     const created = await executeTool(AGENT, 'update_state', {
       target: 'routine', action: 'create', name: 'Giro prova', prompt: 'p', schedule: '0 9 * * *'

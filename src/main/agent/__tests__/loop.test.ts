@@ -14,6 +14,8 @@ const h = vi.hoisted(() => {
     routines: [] as Array<{ id: number; agent_id: string; title: string; prompt: string; schedule: string; enabled: number; provenance?: string; description?: string; timezone?: string }>,
     // fase 6: righe dell'outbox (le send-message trattenute dei turni automatici)
     outbox: [] as Array<{ entry_id: number; agent_id: string; created_at: number }>,
+    // fase 7: job accodati dal loop (send_to_agent verso altri bot)
+    jobs: [] as Array<{ id: number; agentId: string; kind: string; payload: Record<string, unknown> }>,
     nextId: 1,
     nextRoutineId: 1,
     dataDir: '' // riempita nel beforeAll (mkdtemp): memoria/skill scrivono lì
@@ -64,6 +66,10 @@ vi.mock('../../store/db', () => ({
     if (r) r.meta = { ...meta }
   },
   getSetting: (key: string, fallback: unknown) => (h.db.settings.has(key) ? h.db.settings.get(key) : fallback),
+  // fase 7: roster degli agenti (bot principale, send_to_agent) e routine attive
+  listAgents: () => [...h.db.agents.values()].sort((a, b) => a.createdAt - b.createdAt),
+  listRoutines: (agentId?: string) => h.db.routines.filter((r) => !agentId || r.agent_id === agentId),
+  db: () => undefined as never,
   setSetting: (key: string, value: unknown) => { h.db.settings.set(key, value) },
   // fase 6: outbox (i messaggi non urgenti dei turni automatici restano trattenuti)
   holdOutboxEntry: (entryId: number, agentId: string, createdAt: number) => {
@@ -102,6 +108,14 @@ vi.mock('../../store/db', () => ({
         { tool: 'list-credentials', pattern: '*', mode: 'always_allow' }
       ]
     }
+}))
+
+vi.mock('../../store/jobs', () => ({
+  enqueueJob: (_db: unknown, input: { agentId: string; kind: string; payload: Record<string, unknown>; runAt: number; now: number }) => {
+    const job = { id: h.db.jobs.length + 1, ...input, status: 'queued' }
+    h.db.jobs.push(job)
+    return job
+  }
 }))
 
 vi.mock('../providers', () => ({
@@ -207,6 +221,7 @@ beforeEach(() => {
   h.db.grants.length = 0
   h.db.routines.length = 0
   h.db.outbox.length = 0
+  h.db.jobs.length = 0
   h.db.nextId = 1
   h.db.nextRoutineId = 1
   // fase 4: memoria e skill scritte dai test non devono inquinare il dopo
@@ -1040,5 +1055,139 @@ describe('fase 6: outbox dei turni automatici', () => {
     expect(widget.meta?.message).toMatchObject({ type: 'widget' })
     expect(widget.meta?.held).toBeUndefined()
     expect(h.db.outbox).toHaveLength(0)
+  })
+})
+
+// ---- fase 7 (§3bis L8): messaggi tra agenti ----
+
+describe('fase 7: send_to_agent', () => {
+  const OTHER = 'agent_other'
+
+  beforeEach(() => {
+    h.db.agents.set(OTHER, {
+      id: OTHER, name: 'Specialista', description: 'smista la posta', providerId: 'prov', model: 'm1',
+      status: 'idle', unread: 0, createdAt: 2
+    })
+  })
+
+  it('accoda un job user-message sul destinatario con initiator AGENT, from e hop', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'a1', name: 'send_to_agent', arguments: JSON.stringify({ agentId: OTHER, text: 'controlla la posta di stamattina' }) }] },
+      { text: 'delegato' }
+    ]
+    await runTurn(AGENT, 'occupatene tu', emit)
+    expect(h.db.jobs).toHaveLength(1)
+    const job = h.db.jobs[0]!
+    expect(job.agentId).toBe(OTHER)
+    expect(job.kind).toBe('user-message')
+    expect(job.payload.initiator).toBe('AGENT')
+    expect(job.payload.fromAgentId).toBe(AGENT)
+    expect(job.payload.fromAgentName).toBe('TestBot')
+    expect(job.payload.toAgentId).toBe(OTHER)
+    expect(job.payload.hop).toBe(1)
+    // il testo entra nel blocco evidenza col nome del mittente
+    expect(String(job.payload.text)).toContain('<messaggio_da_agente nome="TestBot">')
+    expect(String(job.payload.text)).toContain('controlla la posta di stamattina')
+    // al modello: conferma leggibile
+    const lastCall = h.llm.calls[h.llm.calls.length - 1]!
+    const toolResults = lastCall.filter((m) => m.role === 'tool')
+    expect(toolResults.some((m) => String(m.content).includes('in coda per Specialista'))).toBe(true)
+  })
+
+  it('destinatario inesistente o se stesso: errore leggibile, NESSUN job', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'a2', name: 'send_to_agent', arguments: JSON.stringify({ agentId: 'agent_manca', text: 'ciao' }) }] },
+      { toolCalls: [{ id: 'a3', name: 'send_to_agent', arguments: JSON.stringify({ agentId: AGENT, text: 'a me stesso' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'prova destinazioni', emit)
+    expect(h.db.jobs).toHaveLength(0)
+    const lastCall = h.llm.calls[h.llm.calls.length - 1]!
+    const toolResults = lastCall.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(toolResults.some((c) => c.includes('list_agents'))).toBe(true)
+    expect(toolResults.some((c) => c.includes('te stesso'))).toBe(true)
+  })
+
+  it('hop massimo: il destinatario di un messaggio a hop 3 non genera altri messaggi', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'h3', name: 'send_to_agent', arguments: JSON.stringify({ agentId: OTHER, text: 'ancora un giro' }) }] },
+      { text: 'ok' }
+    ]
+    // questo turno è stato aperto da un messaggio a hop 3: niente più rimbalzi
+    await runTurn(AGENT, 'messaggio da altro bot', emit, undefined, {
+      agentMessage: { fromAgentId: OTHER, fromAgentName: 'Specialista', hop: 3 }
+    })
+    expect(h.db.jobs).toHaveLength(0)
+    const lastCall = h.llm.calls[h.llm.calls.length - 1]!
+    const toolResults = lastCall.filter((m) => m.role === 'tool')
+    expect(toolResults.some((m) => String(m.content).includes('hop massimo 3'))).toBe(true)
+  })
+
+  it('limite per ora: oltre 10 messaggi tra la stessa coppia, rifiuto senza accodare', async () => {
+    // 10 messaggi tra la coppia nell'ultima ora nel transcript del destinatario
+    const now = Date.now()
+    for (let i = 0; i < 10; i++) {
+      h.db.entries.push({
+        id: h.db.nextId++, agentId: OTHER, kind: 'message', role: 'user',
+        content: 'msg', createdAt: now - 60_000,
+        meta: { initiator: 'AGENT', fromAgentId: AGENT, fromAgentName: 'TestBot', toAgentId: OTHER, hop: 1 }
+      })
+    }
+    h.llm.queue = [
+      { toolCalls: [{ id: 'a4', name: 'send_to_agent', arguments: JSON.stringify({ agentId: OTHER, text: 'uno in più' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'ancora', emit)
+    expect(h.db.jobs).toHaveLength(0)
+    const lastCall = h.llm.calls[h.llm.calls.length - 1]!
+    const toolResults = lastCall.filter((m) => m.role === 'tool')
+    expect(toolResults.some((m) => String(m.content).includes('ultima ora'))).toBe(true)
+  })
+
+  it('il messaggio di un altro bot apre il turno con meta fromAgentId/hop (entry non scritta dall\'utente)', async () => {
+    h.llm.queue = [{ text: 'ricevuto' }]
+    await runTurn(AGENT, 'blocco evidenza', emit, undefined, {
+      initiator: 'AGENT',
+      agentMessage: { fromAgentId: OTHER, fromAgentName: 'Specialista', hop: 2 }
+    })
+    const msg = h.db.entries.find((e) => e.kind === 'message' && e.role === 'user')!
+    expect(msg.meta).toMatchObject({ initiator: 'AGENT', fromAgentId: OTHER, fromAgentName: 'Specialista', toAgentId: AGENT, hop: 2 })
+  })
+
+  it('il kickstart TEMPLATE_IMPORT apre il turno con initiator e templateName (per la riga espandibile della UI)', async () => {
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'configurati', emit, undefined, {
+      initiator: 'TEMPLATE_IMPORT', extraMeta: { templateName: 'Monitor delle menzioni' }
+    })
+    const msg = h.db.entries.find((e) => e.kind === 'message' && e.role === 'user')!
+    expect(msg.meta).toMatchObject({ initiator: 'TEMPLATE_IMPORT', templateName: 'Monitor delle menzioni' })
+  })
+
+  it('il bot principale ha la sezione di coordinamento con gli altri bot (nome, ruolo, routine attive)', async () => {
+    h.db.settings.set('mainAgentId', AGENT)
+    h.db.routines.push({ id: 9, agent_id: OTHER, title: 'Sgocciolaggio posta', prompt: 'p', schedule: '0 9 * * *', enabled: 1 })
+    h.llm.queue = [
+      (msgs: Array<{ role: string; content: string }>) => {
+        const system = String(msgs[0]!.content)
+        // il system del bot principale elenca gli altri bot con le routine attive
+        expect(system).toContain('punto di contatto principale')
+        expect(system).toContain('Specialista')
+        expect(system).toContain('smista la posta')
+        expect(system).toContain('Sgocciolaggio posta')
+        return { text: 'ok' }
+      }
+    ]
+    await runTurn(AGENT, 'chi c\'è?', emit)
+  })
+
+  it('un bot NON principale non ha la sezione di coordinamento', async () => {
+    h.db.settings.set('mainAgentId', OTHER)
+    h.llm.queue = [
+      (msgs: Array<{ role: string; content: string }>) => {
+        expect(String(msgs[0]!.content)).not.toContain('punto di contatto principale')
+        return { text: 'ok' }
+      }
+    ]
+    await runTurn(AGENT, 'normale', emit)
   })
 })

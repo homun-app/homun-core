@@ -278,6 +278,10 @@ export function getPermissions(): PermissionsConfig {
       // dal transcript; offer_connector è intercettato dal loop prima del gate
       { tool: 'search_connectors', pattern: '*', mode: 'always_allow' },
       { tool: 'offer_connector', pattern: '*', mode: 'always_allow' },
+      // fase 7: i messaggi tra bot sono interni all'utente (send_to_agent è
+      // intercettato dal loop; list_agents è una lettura del roster)
+      { tool: 'send_to_agent', pattern: '*', mode: 'always_allow' },
+      { tool: 'list_agents', pattern: '*', mode: 'always_allow' },
       { tool: 'mcp__*', pattern: '*', mode: 'needs_approval' }
     ]
   })
@@ -305,7 +309,7 @@ export interface Routine {
   id: number; agent_id: string; title: string; prompt: string
   schedule: string; enabled: number; last_run: number | null; created_at: number
   /** fase 4: descrizione e fuso orario (update_state), chi ha creato la routine */
-  description?: string; timezone?: string; provenance?: 'user' | 'agent'
+  description?: string; timezone?: string; provenance?: 'user' | 'agent' | 'template'
   /** fase 6: trigger esteso (null = cron della colonna schedule) */
   trigger?: RoutineTrigger | null
   /** fase 6: 1 = in pausa perché l'utente è via (riattivata solo al rientro) */
@@ -344,10 +348,10 @@ export function getRoutine(id: number): Routine | null {
   return r ? rowToRoutine(r) : null
 }
 
-/** Campi opzionali alla creazione: le routine dell'agente (update_state) nascono in pausa con provenance 'agent'. */
+/** Campi opzionali alla creazione: le routine dell'agente (update_state) nascono in pausa con provenance 'agent' o 'template'. */
 export interface CreateRoutineOpts {
   enabled?: number
-  provenance?: 'user' | 'agent'
+  provenance?: 'user' | 'agent' | 'template'
   description?: string
   timezone?: string
   trigger?: RoutineTrigger

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, useStore } from '../store'
+import { agentMessageDisplay } from '../../../shared/agent-message'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 import { ApprovalCard } from './ApprovalCard'
 import { WidgetCard } from './WidgetCard'
@@ -192,6 +193,32 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
   const reasoning = useStore((s) => s.reasoning[entry.id])
   switch (entry.kind) {
     case 'message':
+      // fase 7: messaggio di un ALTRO bot (initiator AGENT) — entry distinta
+      // "Da <nome>", mai mostrato come scritto dall'utente
+      if (entry.role === 'user' && entry.meta?.initiator === 'AGENT') {
+        return (
+          <div className="max-w-[80%] rounded-2xl rounded-bl-md border border-violet-800/50 bg-violet-950/20 px-4 py-2.5 text-sm text-neutral-100">
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-violet-300/80">
+              Da {String(entry.meta?.fromAgentName ?? 'altro bot')}
+            </p>
+            <p className="whitespace-pre-wrap">{agentMessageDisplay(entry.content)}</p>
+          </div>
+        )
+      }
+      // fase 7: il messaggio di kickstart iniettato dal sistema (TEMPLATE_IMPORT)
+      // non è scritto dall'utente: riga espandibile "Configurazione da template"
+      if (entry.role === 'user' && entry.meta?.initiator === 'TEMPLATE_IMPORT') {
+        return (
+          <details className="rounded-lg border border-neutral-800/60 bg-neutral-900/40 px-3 py-1.5">
+            <summary className="cursor-pointer select-none text-xs text-neutral-500">
+              Configurazione da template: {String(entry.meta?.templateName ?? '')}
+            </summary>
+            <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-neutral-500">
+              {entry.content}
+            </pre>
+          </details>
+        )
+      }
       return entry.role === 'user' ? (
         <div className="flex justify-end">
           <div className="max-w-[80%] rounded-2xl rounded-br-md bg-sky-700/40 px-4 py-2.5 text-sm text-neutral-100 whitespace-pre-wrap">
@@ -239,6 +266,11 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       // fase 6: trattenuto nell'outbox (turno automatico non urgent, in
       // attesa della finestra di consegna) — invisibile finché non consegnato
       if (meta.held) return null
+      // fase 7: widget di sistema che porta alle impostazioni del provider
+      // (onboarding fermo): il bottone apre le Impostazioni, niente turno
+      if (message?.type === 'widget' && (entry.meta as Record<string, unknown>)?.onboardingProvider) {
+        return <ProviderWidgetCard entry={entry} />
+      }
       if (message?.type === 'widget') return <WidgetCard entry={entry} />
       if (message?.type === 'draft') return <DraftCard entry={entry} />
       if (message?.type === 'connector') return <ConnectorCard entry={entry} />
@@ -288,4 +320,41 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
     default:
       return null
   }
+}
+
+/**
+ * Fase 7 (onboarding): widget di sistema che porta alle impostazioni del
+ * provider — il bottone apre le Impostazioni (la ripresa dell'onboarding la
+ * fa il daemon quando un provider viene salvato), niente turno del modello.
+ */
+function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const setTab = useStore((s) => s.setSettingsTab)
+  const widgetRespond = useStore((s) => s.widgetRespond)
+  const meta = (entry.meta ?? {}) as Partial<SendMessageMeta> & { respondedValue?: string | string[] }
+  const widget = meta.message as Extract<SendMessagePayload, { type: 'widget' }> | undefined
+  const activeId = useStore((s) => s.activeId)
+  if (!widget) return null
+  const responded = meta.respondedValue !== undefined
+
+  return (
+    <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-sky-800/50 bg-sky-950/20 px-4 py-3">
+      <p className="text-sm font-medium text-neutral-100">{widget.prompt}</p>
+      {widget.helpText && <p className="mt-1 text-xs text-neutral-400">{widget.helpText}</p>}
+      {responded ? (
+        <p className="mt-3 text-xs text-neutral-500">✓ Appena il provider è a posto preparo i tuoi bot.</p>
+      ) : (
+        <button
+          className="mt-3 rounded-lg border border-sky-500 bg-sky-700/70 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600"
+          onClick={() => {
+            setTab('provider')
+            setSettingsOpen(true)
+            if (activeId) widgetRespond(entry.id, 'open-provider-settings')
+          }}
+        >
+          Apri le impostazioni del provider
+        </button>
+      )}
+    </div>
+  )
 }

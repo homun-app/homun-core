@@ -13,7 +13,11 @@ interface Store {
   permissions: PermissionsConfig | null
   /** fase 5: catalogo "Connetti app" con lo stato di ogni connettore */
   connectors: ConnectorInfo[]
+  /** fase 7: setting mainAgentId (null → il primo agente è quello principale) */
+  mainAgentId: string | null
   settingsOpen: boolean
+  /** fase 7: tab da aprire alla prossima apertura delle Impostazioni (onboarding provider) */
+  settingsTab: string | null
   init(): Promise<void>
   select(agentId: string): Promise<void>
   send(text: string, images?: string[]): Promise<void>
@@ -25,10 +29,13 @@ interface Store {
   draftUpdate(entryId: number, body: string): void
   resolveApproval(approvalId: string, decision: 'allow' | 'deny', always: boolean): void
   createAgent(name: string): Promise<void>
+  /** fase 7: "Rendi principale" nelle impostazioni dell'agente */
+  setMainAgent(id: string): Promise<void>
   refreshProviders(): Promise<void>
   refreshPermissions(): Promise<void>
   refreshConnectors(): Promise<void>
   setSettingsOpen(v: boolean): void
+  setSettingsTab(v: string | null): void
 }
 
 export const useStore = create<Store>((set, get) => ({
@@ -39,14 +46,18 @@ export const useStore = create<Store>((set, get) => ({
   providers: [],
   permissions: null,
   connectors: [],
+  mainAgentId: null,
   settingsOpen: false,
+  settingsTab: null,
 
   async init() {
     const agents = await api.listAgents()
     const providers = await api.listProviders()
     const permissions = await api.getPermissions()
     const activeId = agents[0]?.id ?? null
-    set({ agents, providers, permissions, activeId })
+    // fase 7: il bot principale per il badge (null → il primo agente)
+    const mainAgentId = await api.settingsGet<string | null>('mainAgentId', null).catch(() => null)
+    set({ agents, providers, permissions, activeId, mainAgentId })
     if (activeId) {
       set({ entries: await api.getEntries(activeId) })
     }
@@ -215,6 +226,11 @@ export const useStore = create<Store>((set, get) => ({
     set({ agents })
   },
 
+  async setMainAgent(id) {
+    await api.setMainAgent(id)
+    set({ mainAgentId: id })
+  },
+
   async refreshProviders() {
     set({ providers: await api.listProviders() })
   },
@@ -229,6 +245,10 @@ export const useStore = create<Store>((set, get) => ({
 
   setSettingsOpen(v) {
     set({ settingsOpen: v })
+  },
+
+  setSettingsTab(v) {
+    set({ settingsTab: v })
   }
 }))
 

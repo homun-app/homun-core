@@ -53,6 +53,32 @@ describe('makeJobRunner: user-message', () => {
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.images).toEqual(['AAAA'])
   })
+
+  // fase 7: i payload speciali del sistema mappano sulle opzioni del turno
+  it('kickstart TEMPLATE_IMPORT: initiator ed extraMeta (templateName) arrivano a runTurn', async () => {
+    const job = enqueueJob(db, {
+      agentId: 'a1', kind: 'user-message',
+      payload: { text: 'configurati', initiator: 'TEMPLATE_IMPORT', extraMeta: { templateName: 'Gestore della posta in arrivo' } },
+      runAt: 0, now: 0
+    })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.opts.initiator).toBe('TEMPLATE_IMPORT')
+    expect(log[0]!.opts.extraMeta).toEqual({ templateName: 'Gestore della posta in arrivo' })
+    expect(log[0]!.opts.agentMessage).toBeUndefined()
+  })
+
+  it('messaggio di un altro bot (initiator AGENT): fromAgentId/fromAgentName/hop diventano opts.agentMessage', async () => {
+    const job = enqueueJob(db, {
+      agentId: 'a2', kind: 'user-message',
+      payload: { text: '<messaggio_da_agente nome="X">ciao</messaggio_da_agente>', initiator: 'AGENT', fromAgentId: 'a1', fromAgentName: 'Bot', toAgentId: 'a2', hop: 2 },
+      runAt: 0, now: 0
+    })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.opts.initiator).toBe('AGENT')
+    expect(log[0]!.opts.agentMessage).toEqual({ fromAgentId: 'a1', fromAgentName: 'Bot', hop: 2 })
+  })
 })
 
 describe('makeJobRunner: routine-run', () => {

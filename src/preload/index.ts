@@ -6,6 +6,10 @@ const api: SandbotApi = {
   createAgent: (name, description) => ipcRenderer.invoke('agents:create', name, description),
   updateAgent: (id, patch) => ipcRenderer.invoke('agents:update', id, patch),
   deleteAgent: (id) => ipcRenderer.invoke('agents:delete', id),
+  // fase 7: bot principale e template
+  setMainAgent: (id) => ipcRenderer.invoke('agents:set-main', id),
+  listTemplates: () => ipcRenderer.invoke('templates:list'),
+  createAgentFromTemplate: (templateId) => ipcRenderer.invoke('agents:create-from-template', templateId),
   getEntries: (agentId, afterId) => ipcRenderer.invoke('agents:entries', agentId, afterId),
   sendMessage: (agentId, text, images) => ipcRenderer.invoke('chat:send', agentId, text, images),
   interrupt: (agentId) => ipcRenderer.invoke('chat:interrupt', agentId),

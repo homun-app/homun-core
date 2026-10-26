@@ -21,11 +21,14 @@ const statusLabel: Record<AgentStatus, string> = {
 export function Sidebar() {
   const agents = useStore((s) => s.agents)
   const activeId = useStore((s) => s.activeId)
+  const mainAgentId = useStore((s) => s.mainAgentId)
   const select = useStore((s) => s.select)
   const createAgent = useStore((s) => s.createAgent)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
+  // fase 7: senza setting mainAgentId il principale è il primo agente (il più vecchio)
+  const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-neutral-800 bg-neutral-900/60">
@@ -50,7 +53,14 @@ export function Sidebar() {
           >
             <span className={`h-2 w-2 shrink-0 rounded-full ${statusColor[a.status]}`} title={statusLabel[a.status]} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm text-neutral-100">{a.name}</span>
+              <span className="flex items-center gap-1.5">
+                <span className="truncate text-sm text-neutral-100">{a.name}</span>
+                {a.id === effectiveMain && (
+                  <span className="shrink-0 rounded bg-sky-800/60 px-1.5 py-0.5 text-[10px] font-medium text-sky-200" title="Bot principale: coordina gli altri bot">
+                    ★ principale
+                  </span>
+                )}
+              </span>
               <span className="block truncate text-xs text-neutral-500">
                 {statusLabel[a.status]}
                 {a.model ? ` · ${a.model}` : ' · nessun modello'}
