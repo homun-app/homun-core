@@ -9,6 +9,8 @@ import * as loop from '../main/agent/loop'
 import * as permissions from '../main/agent/permissions'
 import { executeTool } from '../main/agent/tools'
 import { isExternalSend, applyDraftBody, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig } from '../main/agent/external-send'
+import { listMemories, updateMemory, deleteMemory } from '../main/agent/memory'
+import { listSkills, deleteSkill } from '../main/agent/skills'
 import * as providers from '../main/agent/providers'
 import { suggestRoutines } from '../main/routines'
 import { llmStream } from '../main/agent/llm'
@@ -178,6 +180,21 @@ export function buildApiMethods(emit: Emitter, worker: JobWorker): Record<string
       store.deleteRoutine(id as number)
     },
     'routines:suggest': ([agentId]) => suggestRoutines(agentId as string),
+
+    // ---- memoria (fase 4): sezione nella vista dell'agente ----
+    'memory:list': ([agentId]) => listMemories(agentId as string),
+    'memory:update': ([agentId, id, content]) => {
+      updateMemory(agentId as string, { id: id as string, content: content as string })
+    },
+    'memory:delete': ([agentId, id]) => {
+      deleteMemory(agentId as string, id as string)
+    },
+
+    // ---- skill (fase 4): elenco con visualizzazione ed eliminazione ----
+    'skills:list': ([agentId]) => listSkills(agentId as string),
+    'skills:delete': ([agentId, name]) => {
+      deleteSkill(agentId as string, name as string)
+    },
 
     // ---- MCP ----
     'mcp:list': () => mcp().then((x) => x.listServers()),

@@ -14,6 +14,13 @@ export function targetKey(tool: string, input: Record<string, unknown>): string 
   if (tool === 'use-app') {
     return String(input.action ?? '') // scope per azione, come l'originale
   }
+  // fase 4: grant/regole per skill e routine, non per tool intero
+  if (tool === 'update_skill') {
+    return `skill ${String(input.name ?? '')}`
+  }
+  if (tool === 'update_state') {
+    return input.target === 'routine' ? `routine ${String(input.id ?? '')}` : 'memory'
+  }
   return '*'
 }
 

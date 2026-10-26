@@ -3,11 +3,12 @@
 // Dal gate §5.1: run-command passa dall'analisi shell (tree-sitter), le grant
 // fanno match per chiave ESATTA ("name" o "name sub"), mai per prefisso.
 import { realpathSync } from 'node:fs'
-import { getPermissions, listGrants, addGrant } from '../store/db'
+import { getPermissions, listGrants, addGrant, getRoutine } from '../store/db'
 import { sandboxMode, boxDir } from '../sandbox'
 import type { PermissionMode } from '../../shared/types'
 import { targetKey, runCommandVerdict, commandKey, isNeverAuto, isInsideBox } from './permission-rules'
 import { analyzeCommand } from './shell-ast'
+import { updateStateVerdict, type UpdateStateArgs } from './update-state'
 
 // re-export: i consumer continuano a importare targetKey da qui (loop.ts usa permissions.targetKey)
 export { targetKey }
@@ -44,6 +45,34 @@ export async function check(
   agentId?: string
 ): Promise<Verdict> {
   const cfg = getPermissions()
+
+  // fase 4: memoria e LETTURA skill toccano solo i file dell'agente → sempre
+  // consentiti, anche con config utente personalizzata (vengono prima delle
+  // regole perché non hanno effetti fuori dai file del bot)
+  if (tool === 'update_memory' || tool === 'recall_memory' || tool === 'skill') {
+    return { kind: 'allow', via: 'rule' }
+  }
+
+  // fase 4: update_state decide per azione — create/pause/delete sempre;
+  // resume e update di schedule/prompt su una routine ATTIVA chiedono
+  // all'utente (cambiano ciò che il bot eseguirà da solo in futuro)
+  if (tool === 'update_state') {
+    const target = targetKey(tool, input)
+    const mode = matchRule(tool, target, cfg.rules) ?? cfg.default
+    if (mode === 'blocked') return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
+    const routine = input.target === 'routine' && Number.isInteger(Number(input.id)) && Number(input.id) > 0
+      ? getRoutine(Number(input.id))
+      : null
+    const v = updateStateVerdict(input as UpdateStateArgs, routine)
+    if (v.kind === 'ask') {
+      // una standing grant "Consenti sempre" su questa routine copre l'ask
+      if (listGrants().some((g) => g.tool === tool && g.target === target)) {
+        return { kind: 'allow', via: 'grant' }
+      }
+      return { kind: 'ask', reason: v.reason }
+    }
+    return { kind: 'allow', via: 'rule' }
+  }
 
   if (tool === 'run-command') {
     const analysis = await analyzeCommand(String(input.command ?? ''))

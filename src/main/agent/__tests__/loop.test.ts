@@ -11,7 +11,10 @@ const h = vi.hoisted(() => {
     agents: new Map<string, import('../../../shared/types').Agent>(),
     settings: new Map<string, unknown>(),
     grants: [] as Array<{ tool: string; target: string }>,
-    nextId: 1
+    routines: [] as Array<{ id: number; agent_id: string; title: string; prompt: string; schedule: string; enabled: number; provenance?: string; description?: string; timezone?: string }>,
+    nextId: 1,
+    nextRoutineId: 1,
+    dataDir: '' // riempita nel beforeAll (mkdtemp): memoria/skill scrivono lì
   }
   const llm = {
     queue: [] as unknown[],
@@ -28,10 +31,16 @@ const h = vi.hoisted(() => {
 
 interface FakeToolCall { id: string; name: string; arguments: string }
 interface FakeResp { text?: string; toolCalls?: FakeToolCall[] }
-type FakeQueueItem = FakeResp | (() => Promise<FakeResp>)
+/**
+ * Risposta in coda: oggetto, oppure funzione che vede i messaggi e i tool
+ * della chiamata (fase 4: distingue la chiamata di compaction — un solo
+ * messaggio, nessun tool — dal turno vero).
+ */
+type FakeQueueItem = FakeResp | ((msgs: Array<{ role: string; content: string }>, tools: unknown[]) => Promise<FakeResp> | FakeResp)
 const q = () => h.llm.queue as FakeQueueItem[]
 
 vi.mock('../../store/db', () => ({
+  dataDir: () => h.db.dataDir,
   getAgent: (id: string) => h.db.agents.get(id) ?? null,
   getEntries: (id: string, afterId = 0) =>
     h.db.entries.filter((e) => e.agentId === id && e.id > afterId).map((e) => ({ ...e, meta: e.meta ? { ...e.meta } : null })),
@@ -56,6 +65,25 @@ vi.mock('../../store/db', () => ({
   setSetting: (key: string, value: unknown) => { h.db.settings.set(key, value) },
   listGrants: () => h.db.grants.map((g, i) => ({ id: i + 1, tool: g.tool, target: g.target, createdAt: 0 })),
   addGrant: (tool: string, target: string) => { h.db.grants.push({ tool, target }) },
+  // fase 4: CRUD routine per update_state (verdetto del gate + esecuzione)
+  getRoutine: (id: number) => h.db.routines.find((r) => r.id === id) ?? null,
+  createRoutine: (agentId: string, title: string, prompt: string, schedule: string, opts: { enabled?: number; provenance?: string; description?: string; timezone?: string } = {}) => {
+    const r = {
+      id: h.db.nextRoutineId++, agent_id: agentId, title, prompt, schedule,
+      enabled: opts.enabled ?? 1, last_run: null, created_at: Date.now(),
+      provenance: opts.provenance ?? 'user', description: opts.description ?? '', timezone: opts.timezone ?? ''
+    }
+    h.db.routines.push(r)
+    return r
+  },
+  updateRoutine: (id: number, patch: Record<string, unknown>) => {
+    const r = h.db.routines.find((x) => x.id === id)
+    if (r) Object.assign(r, patch)
+  },
+  deleteRoutine: (id: number) => {
+    const i = h.db.routines.findIndex((x) => x.id === id)
+    if (i >= 0) h.db.routines.splice(i, 1)
+  },
   getPermissions: () =>
     (h.db.settings.get('permissions') as PermissionsConfig | undefined) ?? {
       default: 'needs_approval',
@@ -77,12 +105,17 @@ vi.mock('../providers', () => ({
 }))
 
 vi.mock('../llm', () => ({
-  llmStream: (_p: unknown, _model: string, messages: Array<{ role: string; content: string; toolCallId?: string; images?: string[]; toolCalls?: unknown[] }>) => {
+  llmStream: (
+    _p: unknown,
+    _model: string,
+    messages: Array<{ role: string; content: string; toolCallId?: string; images?: string[]; toolCalls?: unknown[] }>,
+    tools: unknown[] = []
+  ) => {
     h.llm.calls.push(messages.map((m) => ({ role: m.role, content: m.content, toolCallId: m.toolCallId, images: m.images, toolCalls: m.toolCalls })))
     const resp = (q().shift() ?? { text: 'ok' }) as FakeQueueItem
     return {
       async *[Symbol.asyncIterator]() {
-        const r: FakeResp = typeof resp === 'function' ? await resp() : resp
+        const r: FakeResp = typeof resp === 'function' ? await resp(messages, tools) : resp
         if (r.text) yield { textDelta: r.text }
         if (r.toolCalls) yield { toolCalls: r.toolCalls, finishReason: 'tool_calls' }
         else yield { finishReason: 'stop' }
@@ -132,6 +165,14 @@ const { runTurn, isRunning, resolveApproval, supersedeIfPaused, interrupt, RECOV
 const emit = () => undefined
 const AGENT = 'agent_t'
 
+// fase 4: memoria/skill del loop scrivono su file — directory temporanea
+// (la dataDir del mock db la legge da qui)
+const { mkdtempSync, rmSync } = await import('node:fs')
+const { tmpdir } = await import('node:os')
+const { join } = await import('node:path')
+const TMP = mkdtempSync(join(tmpdir(), 'sandbot-loop-test-'))
+h.db.dataDir = TMP
+
 function deferred<T = void>() {
   let resolve!: (v: T) => void
   const promise = new Promise<T>((r) => { resolve = r })
@@ -153,7 +194,11 @@ beforeEach(() => {
   h.db.agents.clear()
   h.db.settings.clear()
   h.db.grants.length = 0
+  h.db.routines.length = 0
   h.db.nextId = 1
+  h.db.nextRoutineId = 1
+  // fase 4: memoria e skill scritte dai test non devono inquinare il dopo
+  rmSync(join(TMP, 'agents'), { recursive: true, force: true })
   h.llm.queue.length = 0
   h.llm.calls.length = 0
   h.sandboxMock.exec = { command: '', env: {}, calls: 0 }
@@ -668,5 +713,150 @@ describe('residuo fase 4 (0c): interrupt durante un’approval', () => {
     expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('STOPPED')
     // nessuna seconda chiamata al modello dopo l'interrupt
     expect(h.llm.calls).toHaveLength(1)
+  })
+})
+
+describe('fase 4: memoria e skill nel system prompt', () => {
+  it('una memoria core finisce nella sezione # Memoria del system del turno', async () => {
+    const { writeMemory } = await import('../memory')
+    writeMemory(AGENT, { content: "l'utente vuole puntualità", tier: 'core' })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    const system = h.llm.calls[0]![0]!.content
+    expect(system).toContain('# Memoria')
+    expect(system).toContain("l'utente vuole puntualità")
+  })
+
+  it('nel system solo nome e descrizione delle skill; il corpo arriva col tool skill()', async () => {
+    const { writeSkill } = await import('../skills')
+    writeSkill(AGENT, { name: 'triage', description: 'smista la posta', content: 'CORPO SEGRETO della skill' })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'k1', name: 'skill', arguments: JSON.stringify({ name: 'triage' }) }] },
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'fatto' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'usa la skill', emit)
+    const system = h.llm.calls[0]![0]!.content
+    expect(system).toContain('# Skill disponibili')
+    expect(system).toContain('triage: smista la posta')
+    expect(system).not.toContain('CORPO SEGRETO')
+    // il tool skill ha consegnato il corpo al modello come tool result
+    expect(h.db.entries.some((e) => e.kind === 'tool-result' && e.content.includes('CORPO SEGRETO'))).toBe(true)
+  })
+})
+
+describe('fase 4: update_state nel loop', () => {
+  it('create: routine in pausa provenance agent + evento automation in chat, NESSUNA approval', async () => {
+    h.llm.queue = [
+      {
+        toolCalls: [{
+          id: 'u1', name: 'update_state',
+          arguments: JSON.stringify({ target: 'routine', action: 'create', name: 'Monitor', prompt: 'guarda', schedule: '0 9 * * *' })
+        }]
+      },
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'creata' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'crea una routine', emit)
+    expect(h.db.routines).toHaveLength(1)
+    expect(h.db.routines[0]).toMatchObject({ title: 'Monitor', enabled: 0, provenance: 'agent' })
+    expect(h.db.entries.some((e) => e.kind === 'approval')).toBe(false)
+    const ev = h.db.entries.find((e) => e.kind === 'event' && e.meta?.automation)
+    expect(ev?.content).toBe('Routine creata (in pausa): Monitor')
+    expect(ev?.meta?.automation).toMatchObject({ action: 'create', name: 'Monitor' })
+  })
+
+  it('resume: approval con nome e schedule in linguaggio naturale; allow → attivata con evento', async () => {
+    h.db.routines.push({ id: 3, agent_id: AGENT, title: 'Backup', prompt: 'backuppa tutto', schedule: '30 8 * * 1-5', enabled: 0 })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'u1', name: 'update_state', arguments: JSON.stringify({ target: 'routine', action: 'resume', id: 3 }) }] },
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'attivata' }) }] },
+      { text: '.' }
+    ]
+    const turn = runTurn(AGENT, 'attivala', emit)
+    await vi.waitFor(() => expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy())
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.content).toContain('Backup')
+    expect(appr.content).toContain('giorni feriali')
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', false)
+    await turn
+    expect(h.db.routines[0]!.enabled).toBe(1)
+    const ev = h.db.entries.find((e) => e.kind === 'event' && (e.meta?.automation as { action?: string } | undefined)?.action === 'resume')
+    expect(ev?.content).toBe('Routine attivata: Backup')
+  })
+
+  it('cron non valido: errore leggibile al modello, routine non creata, turno prosegue', async () => {
+    h.llm.queue = [
+      {
+        toolCalls: [{
+          id: 'u1', name: 'update_state',
+          arguments: JSON.stringify({ target: 'routine', action: 'create', name: 'Sbagliata', prompt: 'x', schedule: 'mai' })
+        }]
+      },
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'schedule errata' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'crea routine sbagliata', emit)
+    expect(h.db.routines).toHaveLength(0)
+    expect(h.db.entries.some((e) => e.kind === 'tool-result' && e.content.includes('Schedule non valida'))).toBe(true)
+    // il modello vede l'errore come tool result nella chiamata successiva
+    const secondCall = h.llm.calls[1]!
+    expect(secondCall.some((m) => m.role === 'tool' && m.content.includes('Schedule non valida'))).toBe(true)
+  })
+})
+
+describe('fase 4: compaction della history nel loop', () => {
+  it('sopra soglia: prima chiamata = riassunto (senza tool), il summary entra nella history', async () => {
+    h.db.settings.set('contextBudgetTokens', { 'prov/m1': 400 })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'primo' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'primo messaggio', emit)
+    h.db.entries.push({ id: h.db.nextId++, agentId: AGENT, kind: 'thinking', role: 'assistant', content: 'z'.repeat(4000), meta: null, createdAt: 1 })
+
+    h.llm.queue = [
+      async (msgs: Array<{ role: string; content: string }>, tools: unknown[]) => {
+        expect(tools).toHaveLength(0) // la chiamata di compaction non ha tool
+        expect(msgs).toHaveLength(1) // un solo messaggio utente: il digest
+        expect(msgs[0]!.content).toContain('primo messaggio')
+        return { text: "RIEPILOGO: l'utente ha chiesto il primo messaggio." }
+      },
+      { toolCalls: [{ id: 's2', name: 'send_to_user', arguments: JSON.stringify({ text: 'secondo' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'secondo messaggio', emit)
+
+    const summary = h.db.entries.find((e) => e.kind === 'summary')
+    expect(summary?.content).toContain('RIEPILOGO')
+    expect(typeof summary?.meta?.coversUpTo).toBe('number')
+    // alla chiamata del turno (l'ultima meno una: system + summary + user):
+    // c'è il riepilogo, non c'è più il thinking enorme
+    const turnCall = h.llm.calls.at(-2)!
+    expect(turnCall.some((m) => m.content.includes('RIEPILOGO'))).toBe(true)
+    expect(turnCall.some((m) => m.content.includes('z'.repeat(50)))).toBe(false)
+  })
+
+  it('riassunto che fallisce: nessun summary e il turno gira lo stesso (fallback)', async () => {
+    h.db.settings.set('contextBudgetTokens', { 'prov/m1': 400 })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'primo' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'primo messaggio', emit)
+    h.db.entries.push({ id: h.db.nextId++, agentId: AGENT, kind: 'thinking', role: 'assistant', content: 'z'.repeat(4000), meta: null, createdAt: 1 })
+
+    h.llm.queue = [
+      async () => { throw new Error('riassunto giù') },
+      { toolCalls: [{ id: 's2', name: 'send_to_user', arguments: JSON.stringify({ text: 'secondo' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'secondo messaggio', emit)
+    expect(h.db.entries.some((e) => e.kind === 'summary')).toBe(false)
+    // entrambi i turni sono girati lo stesso (2 chiamate ciascuno)
+    expect(h.llm.calls.filter((c) => c.length > 1)).toHaveLength(4)
   })
 })

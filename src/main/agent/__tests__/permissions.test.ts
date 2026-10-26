@@ -18,7 +18,8 @@ const DEFAULT_RULES: PermissionRule[] = [
 const state = {
   sandboxMode: 'host' as 'host' | 'docker',
   rules: DEFAULT_RULES.map((r) => ({ ...r })),
-  grants: [] as Array<{ tool: string; target: string }>
+  grants: [] as Array<{ tool: string; target: string }>,
+  routines: [] as Array<{ id: number; title: string; prompt: string; schedule: string; enabled: number }>
 }
 
 const TMP = mkdtempSync(join(tmpdir(), 'sandbot-permissions-test-'))
@@ -28,7 +29,8 @@ const OUTSIDE = join(TMP, 'outside')
 vi.mock('../../store/db', () => ({
   getPermissions: () => ({ default: 'needs_approval' as const, rules: state.rules }),
   listGrants: () => state.grants.map((g, i) => ({ id: i + 1, tool: g.tool, target: g.target, createdAt: 0 })),
-  addGrant: (tool: string, target: string) => { state.grants.push({ tool, target }) }
+  addGrant: (tool: string, target: string) => { state.grants.push({ tool, target }) },
+  getRoutine: (id: number) => state.routines.find((r) => r.id === id) ?? null
 }))
 
 vi.mock('../../sandbox', () => ({
@@ -50,6 +52,7 @@ beforeEach(() => {
   state.grants = []
   state.sandboxMode = 'host'
   state.rules = DEFAULT_RULES.map((r) => ({ ...r }))
+  state.routines = []
 })
 
 describe('C4: run-command con segreti passa sempre dall\'approvazione', () => {
@@ -125,5 +128,63 @@ describe('C5: read-file/list-directory in modalità host', () => {
     state.sandboxMode = 'docker'
     expect((await check('read-file', { path: join(OUTSIDE, 'id_rsa') }, 'agent_x')).kind).toBe('allow')
     expect((await check('list-directory', { path: '/etc' }, 'agent_x')).kind).toBe('allow')
+  })
+})
+
+describe('fase 4: memoria, skill e update_state', () => {
+  it('update_memory / recall_memory / skill: SEMPRE consentiti, anche con default needs_approval', async () => {
+    for (const tool of ['update_memory', 'recall_memory', 'skill']) {
+      const v = await check(tool, { action: 'write', content: 'x', query: 'x', name: 'x' })
+      expect(v, tool).toEqual({ kind: 'allow', via: 'rule' })
+    }
+  })
+
+  it('update_skill: default ask (cambia il comportamento futuro); grant sul nome → allow', async () => {
+    const ask = await check('update_skill', { name: 'ricerca-web', description: 'd', content: 'c' })
+    expect(ask.kind).toBe('ask')
+    state.grants = [{ tool: 'update_skill', target: 'skill ricerca-web' }]
+    const allow = await check('update_skill', { name: 'ricerca-web', description: 'd', content: 'c' })
+    expect(allow).toEqual({ kind: 'allow', via: 'grant' })
+  })
+
+  it('update_state routine: create/pause/delete allow; resume ask con nome e schedule; update su attiva solo se tocca schedule/prompt', async () => {
+    state.routines = [{ id: 7, title: 'Riepilogo', prompt: 'p', schedule: '30 8 * * 1-5', enabled: 0 }]
+    expect(await check('update_state', { target: 'routine', action: 'create', name: 'X' })).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check('update_state', { target: 'routine', action: 'pause', id: 7 })).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check('update_state', { target: 'routine', action: 'delete', id: 7 })).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check('update_state', { target: 'memory', action: 'write', content: 'x', tier: 'core' })).toEqual({ kind: 'allow', via: 'rule' })
+    // in pausa: update di schedule allow
+    expect(await check('update_state', { target: 'routine', action: 'update', id: 7, schedule: '0 9 * * *' })).toEqual({ kind: 'allow', via: 'rule' })
+
+    // ATTIVA: resume → ask; update con schedule → ask
+    state.routines = [{ id: 7, title: 'Riepilogo', prompt: 'p', schedule: '30 8 * * 1-5', enabled: 1 }]
+    const resume = await check('update_state', { target: 'routine', action: 'resume', id: 7 })
+    expect(resume.kind).toBe('ask')
+    if (resume.kind === 'ask') {
+      expect(resume.reason).toContain('Riepilogo')
+      expect(resume.reason).toContain('giorni feriali')
+    }
+    const upd = await check('update_state', { target: 'routine', action: 'update', id: 7, schedule: '0 9 * * *' })
+    expect(upd.kind).toBe('ask')
+    // attiva ma solo il nome: allow
+    expect(await check('update_state', { target: 'routine', action: 'update', id: 7, name: 'Altro' })).toEqual({ kind: 'allow', via: 'rule' })
+  })
+
+  it('update_state resume: "Consenti sempre" salva una grant per routine e la copre al prossimo giro', async () => {
+    state.routines = [{ id: 7, title: 'Riepilogo', prompt: 'p', schedule: '30 8 * * 1-5', enabled: 1 }]
+    await grantStanding('update_state', { target: 'routine', action: 'resume', id: 7 })
+    expect(state.grants).toContainEqual({ tool: 'update_state', target: 'routine 7' })
+    const v = await check('update_state', { target: 'routine', action: 'resume', id: 7 })
+    expect(v).toEqual({ kind: 'allow', via: 'grant' })
+    // un\'altra routine NON è coperta dalla grant
+    state.routines.push({ id: 8, title: 'Altra', prompt: 'p', schedule: '0 9 * * *', enabled: 1 })
+    expect((await check('update_state', { target: 'routine', action: 'resume', id: 8 })).kind).toBe('ask')
+  })
+
+  it('una regola blocked dell\'utente vince sui tool di stato', async () => {
+    state.rules.push({ tool: 'update_state', pattern: '*', mode: 'blocked' })
+    expect((await check('update_state', { target: 'routine', action: 'create', name: 'X' })).kind).toBe('deny')
+    state.rules.push({ tool: 'update_skill', pattern: '*', mode: 'blocked' })
+    expect((await check('update_skill', { name: 'x', description: 'd', content: 'c' })).kind).toBe('deny')
   })
 })

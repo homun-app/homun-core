@@ -22,6 +22,7 @@ export type EntryKind =
   | 'notice'         // nota di sistema (permesso negato, ecc.)
   | 'approval'       // card di approvazione
   | 'event'          // evento (cambio stato, interrupt, fine turno con meta.turnEnd)
+  | 'summary'        // fase 4: riepilogo dei turni più vecchi (compaction), visibile solo col toggle ragionamento
 
 /** Esito di fine turno (come GrokBotTaskListTurnEnd + awaiting_user dell'originale). */
 export type TurnEnd = 'FINISHED' | 'STOPPED' | 'SUPERSEDED' | 'AWAITING_USER'
@@ -215,6 +216,13 @@ export interface SandbotApi {
   updateRoutine(id: number, patch: Partial<Pick<RoutineInfo, 'enabled' | 'schedule' | 'title' | 'prompt'>>): Promise<void>
   deleteRoutine(id: number): Promise<void>
   suggestRoutines(agentId: string): Promise<RoutineSuggestion[]>
+  // memoria (fase 4): sezione nella vista dell'agente, modifica ed eliminazione
+  listMemories(agentId: string): Promise<MemoryInfo[]>
+  updateMemory(agentId: string, id: string, content: string): Promise<void>
+  deleteMemory(agentId: string, id: string): Promise<void>
+  // skill (fase 4): elenco con visualizzazione ed eliminazione
+  listSkills(agentId: string): Promise<SkillInfo[]>
+  deleteSkill(agentId: string, name: string): Promise<void>
   // MCP
   mcpList(): Promise<McpServerInfo[]>
   mcpSave(s: McpServerInfo): Promise<McpServerInfo[]>
@@ -240,6 +248,30 @@ export interface RoutineInfo {
   enabled: number
   last_run: number | null
   created_at: number
+  /** fase 4: provenance 'agent' = creata dal bot via update_state (nasce in pausa) */
+  provenance?: 'user' | 'agent'
+  description?: string
+  timezone?: string
+}
+
+// ---- memoria e skill (fase 4) ----
+
+/** Una memoria dell'agente (o condivisa, scope 'user') così come la vede la UI. */
+export interface MemoryInfo {
+  id: string
+  content: string
+  tier: 'core' | 'log'
+  scope: 'agent' | 'user'
+  source: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** Una skill dell'agente (SKILL.md), con le istruzioni complete. */
+export interface SkillInfo {
+  name: string
+  description: string
+  content: string
 }
 
 export interface RoutineSuggestion {

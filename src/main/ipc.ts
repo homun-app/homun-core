@@ -20,6 +20,8 @@ export const DAEMON_RPC_CHANNELS = [
   'widget:respond', 'draft:send', 'draft:discard', 'draft:update',
   'quickask',
   'routines:list', 'routines:create', 'routines:update', 'routines:delete', 'routines:suggest',
+  'memory:list', 'memory:update', 'memory:delete',
+  'skills:list', 'skills:delete',
   'mcp:list', 'mcp:save', 'mcp:delete', 'mcp:test',
   'vault:list', 'vault:store', 'vault:delete',
   'approvals:resolve', 'approvals:resolve-latest',

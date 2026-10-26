@@ -20,7 +20,7 @@
 import { randomUUID } from 'node:crypto'
 import { getAgent, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
-import { systemPrompt } from './prompts'
+import { systemPrompt, secondaryPrompts } from './prompts'
 import { toolDefs, executeTool } from './tools'
 import * as permissions from './permissions'
 import { getProvider } from './providers'
@@ -28,6 +28,10 @@ import { buildMessages, visibleReplyEntries } from './history'
 import { planResume, INTERRUPTED_TOOL_RESULT, RESUME_NOTICE } from './resume'
 import { isExternalSend, draftFromExternalCall, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig } from './external-send'
 import { normalizeOptions, findDismissibleWidgets } from './widgets'
+import { buildMemorySection } from './memory'
+import { buildSkillsSection } from './skills'
+import { maybeCompactHistory, summarizeWithLlm } from './compaction'
+import { automationEventText } from './update-state'
 import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
@@ -211,8 +215,23 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       opts.onTurnEntry?.(entry.id)
     }
 
-    // §5.3: il messaggio corrente è l'ultimo entry del transcript → compare una volta sola
-    const messages: ChatMessage[] = buildMessages(systemPrompt(agent), getEntries(agentId), images)
+    // fase 4: compaction della history PRIMA di costruire i messaggi — se la
+    // storia stimata supera il 70% del budget di contesto, i turni più vecchi
+    // diventano un'entry summary (se la chiamata LLM fallisce si prosegue col
+    // taglio a confine di turno già fatto da buildMessages)
+    await maybeCompactHistory(
+      agentId, provider.id, agent.model,
+      (digest) => summarizeWithLlm(provider, agent.model!, digest, secondaryPrompts.compaction),
+      emit
+    )
+
+    // §5.3: il messaggio corrente è l'ultimo entry del transcript → compare una volta sola.
+    // Fase 4: il system prompt include memoria (§3bis L6) e skill disponibili
+    const messages: ChatMessage[] = buildMessages(
+      systemPrompt(agent) + buildMemorySection(agentId) + buildSkillsSection(agentId),
+      getEntries(agentId),
+      images
+    )
 
     // tool statici + tool MCP attivi (server esterni → mcp__<server>__<tool>)
     const { toolDefs } = await import('./tools')
@@ -452,6 +471,17 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             meta: { callId: call.id, ...meta }
           })
           emit({ type: 'entries', agentId, entries: [res] })
+          // fase 4 (§3ter T2/T4): ogni azione su routine produce l'evento
+          // "automation-changed" in chat (meta.automation: azione, id, nome)
+          if (meta.automation && typeof meta.automation === 'object') {
+            const a = meta.automation as { action?: unknown; id?: unknown; name?: unknown }
+            appendEntry({
+              agentId, kind: 'event', role: 'system',
+              content: automationEventText(String(a.action ?? ''), String(a.name ?? '')),
+              meta: { automation: a }
+            })
+            emitLastEntry(agentId, emit)
+          }
           // run-command restituisce output GIÀ redatto (§5.6): stesso testo al modello e al transcript
           messages.push({ role: 'tool', toolCallId: call.id, content: output.slice(0, 50_000) })
           // immagini (computer use): le inietta come messaggio vision — il formato

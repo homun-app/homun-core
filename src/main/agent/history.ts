@@ -79,6 +79,10 @@ function toMessages(entries: TranscriptEntry[]): ChatMessage[] {
         msgs.push({ role: 'assistant', content: '', toolCalls: [call] })
       }
       msgs.push({ role: 'tool', toolCallId: call.id, content: sendResultText(e) })
+    } else if (e.kind === 'summary') {
+      // fase 4: riepilogo dei turni più vecchi (compaction) — entra come
+      // messaggio utente di contesto al posto delle entry che copre
+      if (e.content.trim()) msgs.push({ role: 'user', content: `[riepilogo dei turni precedenti]\n${e.content}` })
     } else if (e.kind === 'tool-call') {
       const prev = msgs[msgs.length - 1]
       const call = { id: String(e.meta?.id ?? e.id), name: String(e.meta?.name ?? ''), arguments: String(e.meta?.arguments ?? '{}') }
@@ -158,7 +162,17 @@ export function buildMessages(
   opts: BuildMessagesOptions = {}
 ): ChatMessage[] {
   const max = opts.maxMessages ?? DEFAULT_MAX_MESSAGES
-  let msgs = toMessages(entries)
+  // fase 4: l'entry summary più recente SOSTITUISCE i turni che copre
+  // (meta.coversUpTo) — le entry restano nel DB, ma al modello non arrivano
+  let effective = entries
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const s = entries[i]!
+    if (s.kind === 'summary' && typeof s.meta?.coversUpTo === 'number') {
+      effective = entries.filter((e) => e.id > (s.meta!.coversUpTo as number) || e.id === s.id)
+      break
+    }
+  }
+  let msgs = toMessages(effective)
   msgs = trimToTurnBoundary(msgs, max)
   msgs = repairToolPairs(msgs)
   // le immagini vanno all'ULTIMO messaggio utente (quello corrente)

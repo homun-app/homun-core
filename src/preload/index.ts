@@ -31,6 +31,12 @@ const api: SandbotApi = {
   updateRoutine: (id, patch) => ipcRenderer.invoke('routines:update', id, patch),
   deleteRoutine: (id) => ipcRenderer.invoke('routines:delete', id),
   suggestRoutines: (agentId) => ipcRenderer.invoke('routines:suggest', agentId),
+  // fase 4: memoria e skill dell'agente
+  listMemories: (agentId) => ipcRenderer.invoke('memory:list', agentId),
+  updateMemory: (agentId, id, content) => ipcRenderer.invoke('memory:update', agentId, id, content),
+  deleteMemory: (agentId, id) => ipcRenderer.invoke('memory:delete', agentId, id),
+  listSkills: (agentId) => ipcRenderer.invoke('skills:list', agentId),
+  deleteSkill: (agentId, name) => ipcRenderer.invoke('skills:delete', agentId, name),
   mcpList: () => ipcRenderer.invoke('mcp:list'),
   mcpSave: (s) => ipcRenderer.invoke('mcp:save', s),
   mcpDelete: (id) => ipcRenderer.invoke('mcp:delete', id),

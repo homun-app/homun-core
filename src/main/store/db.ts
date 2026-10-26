@@ -65,17 +65,32 @@ function open(): DatabaseSync {
       created_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS routines (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
       agent_id TEXT NOT NULL,
       title TEXT NOT NULL,
       prompt TEXT NOT NULL,
       schedule TEXT NOT NULL,
       enabled INTEGER DEFAULT 1,
       last_run INTEGER,
-      created_at INTEGER
+      created_at INTEGER,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      description TEXT DEFAULT '',
+      timezone TEXT DEFAULT '',
+      provenance TEXT DEFAULT 'user'
     );
     ${JOBS_DDL}
   `)
+  // fase 4: colonne nuove delle routine per i DB esistenti (CREATE TABLE IF
+  // NOT EXISTS non le aggiunge); provenance distingue le routine dell'utente
+  // da quelle create dall'agente via update_state
+  const routineCols = db.prepare("SELECT name FROM pragma_table_info('routines')").all() as Array<{ name: string }>
+  const present = new Set(routineCols.map((c) => c.name))
+  for (const [col, ddl] of [
+    ['description', "ALTER TABLE routines ADD COLUMN description TEXT DEFAULT ''"],
+    ['timezone', "ALTER TABLE routines ADD COLUMN timezone TEXT DEFAULT ''"],
+    ['provenance', "ALTER TABLE routines ADD COLUMN provenance TEXT DEFAULT 'user'"]
+  ] as const) {
+    if (!present.has(col)) db.exec(ddl)
+  }
   return db
 }
 
@@ -216,6 +231,14 @@ export function getPermissions(): PermissionsConfig {
       { tool: 'use-app', pattern: 'screenshot', mode: 'always_allow' },
       { tool: 'use-app', pattern: '*', mode: 'needs_approval' },
       { tool: 'list-credentials', pattern: '*', mode: 'always_allow' },
+      // fase 4: memoria e lettura skill toccano solo i file dell'agente (il
+      // gate in permissions.check le consente comunque, anche con config
+      // utente personalizzata); update_skill cambia il comportamento futuro
+      // dell'agente → ask; update_state decide per azione (update-state.ts)
+      { tool: 'update_memory', pattern: '*', mode: 'always_allow' },
+      { tool: 'recall_memory', pattern: '*', mode: 'always_allow' },
+      { tool: 'skill', pattern: '*', mode: 'always_allow' },
+      { tool: 'update_skill', pattern: '*', mode: 'needs_approval' },
       { tool: 'mcp__*', pattern: '*', mode: 'needs_approval' }
     ]
   })
@@ -238,6 +261,8 @@ export function saveProviders(ps: import('../../shared/types').ProviderConfig[])
 export interface Routine {
   id: number; agent_id: string; title: string; prompt: string
   schedule: string; enabled: number; last_run: number | null; created_at: number
+  /** fase 4: descrizione e fuso orario (update_state), chi ha creato la routine */
+  description?: string; timezone?: string; provenance?: 'user' | 'agent'
 }
 
 export function listRoutines(agentId?: string): Routine[] {
@@ -245,20 +270,40 @@ export function listRoutines(agentId?: string): Routine[] {
   return (agentId ? db().prepare(q).all(agentId) : db().prepare(q).all()) as unknown as Routine[]
 }
 
-export function createRoutine(agentId: string, title: string, prompt: string, schedule: string): Routine {
-  const now = Date.now()
-  const r = db()
-    .prepare('INSERT INTO routines(agent_id, title, prompt, schedule, enabled, created_at) VALUES(?,?,?,?,1,?)')
-    .run(agentId, title, prompt, schedule, now)
-  return { id: Number(r.lastInsertRowid), agent_id: agentId, title, prompt, schedule, enabled: 1, last_run: null, created_at: now }
+export function getRoutine(id: number): Routine | null {
+  return (db().prepare('SELECT * FROM routines WHERE id = ?').get(id) as unknown as Routine | undefined) ?? null
 }
 
-export function updateRoutine(id: number, patch: Partial<Pick<Routine, 'enabled' | 'schedule' | 'title' | 'prompt'>>): void {
+/** Campi opzionali alla creazione: le routine dell'agente (update_state) nascono in pausa con provenance 'agent'. */
+export interface CreateRoutineOpts {
+  enabled?: number
+  provenance?: 'user' | 'agent'
+  description?: string
+  timezone?: string
+}
+
+export function createRoutine(agentId: string, title: string, prompt: string, schedule: string, opts: CreateRoutineOpts = {}): Routine {
+  const now = Date.now()
+  const r = db()
+    .prepare('INSERT INTO routines(agent_id, title, prompt, schedule, enabled, created_at, description, timezone, provenance) VALUES(?,?,?,?,?,?,?,?,?)')
+    .run(agentId, title, prompt, schedule, opts.enabled ?? 1, now, opts.description ?? '', opts.timezone ?? '', opts.provenance ?? 'user')
+  return {
+    id: Number(r.lastInsertRowid), agent_id: agentId, title, prompt, schedule,
+    enabled: opts.enabled ?? 1, last_run: null, created_at: now,
+    description: opts.description ?? '', timezone: opts.timezone ?? '', provenance: opts.provenance ?? 'user'
+  }
+}
+
+export function updateRoutine(id: number, patch: Partial<Pick<Routine, 'enabled' | 'schedule' | 'title' | 'prompt' | 'description' | 'timezone' | 'provenance'>>): void {
   const cur = db().prepare('SELECT * FROM routines WHERE id = ?').get(id) as unknown as Routine | undefined
   if (!cur) return
   db()
-    .prepare('UPDATE routines SET enabled=?, schedule=?, title=?, prompt=? WHERE id=?')
-    .run(patch.enabled ?? cur.enabled, patch.schedule ?? cur.schedule, patch.title ?? cur.title, patch.prompt ?? cur.prompt, id)
+    .prepare('UPDATE routines SET enabled=?, schedule=?, title=?, prompt=?, description=?, timezone=?, provenance=? WHERE id=?')
+    .run(
+      patch.enabled ?? cur.enabled, patch.schedule ?? cur.schedule, patch.title ?? cur.title,
+      patch.prompt ?? cur.prompt, patch.description ?? cur.description ?? '', patch.timezone ?? cur.timezone ?? '',
+      patch.provenance ?? cur.provenance ?? 'user', id
+    )
 }
 
 export function touchRoutineRun(id: number): void {

@@ -6,6 +6,8 @@ import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../..
 import { ApprovalCard } from './ApprovalCard'
 import { WidgetCard } from './WidgetCard'
 import { DraftCard } from './DraftCard'
+import { MemoryPanel } from './MemoryPanel'
+import { SkillsPanel } from './SkillsPanel'
 
 export function Chat() {
   const agents = useStore((s) => s.agents)
@@ -21,6 +23,9 @@ export function Chat() {
   const [quickBusy, setQuickBusy] = useState(false)
   // fase 3: il ragionamento del modello è nascosto di default (§3bis L2)
   const [showReasoning, setShowReasoning] = useState(false)
+  // fase 4: sezioni memoria e skill della vista dell'agente
+  const [memoryOpen, setMemoryOpen] = useState(false)
+  const [skillsOpen, setSkillsOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const agent = agents.find((a) => a.id === activeId)
@@ -65,6 +70,20 @@ export function Chat() {
             {agent.providerId ? `${agent.providerId} · ${agent.model ?? ''}` : 'configura modello → Impostazioni'}
           </span>
           <button
+            className={`rounded-lg px-2 py-1 text-xs ${memoryOpen ? 'bg-neutral-700 text-neutral-200' : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}`}
+            title="Memoria del bot (fatti e regole ricordati)"
+            onClick={() => { setMemoryOpen(!memoryOpen); setSkillsOpen(false) }}
+          >
+            🗂 Memoria
+          </button>
+          <button
+            className={`rounded-lg px-2 py-1 text-xs ${skillsOpen ? 'bg-neutral-700 text-neutral-200' : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}`}
+            title="Skill del bot (procedure riutilizzabili)"
+            onClick={() => { setSkillsOpen(!skillsOpen); setMemoryOpen(false) }}
+          >
+            🛠 Skill
+          </button>
+          <button
             className={`rounded-lg px-2 py-1 text-xs ${showReasoning ? 'bg-neutral-700 text-neutral-200' : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}`}
             title="Mostra/nascondi il ragionamento del modello e gli eventi di turno"
             onClick={() => setShowReasoning(!showReasoning)}
@@ -80,6 +99,9 @@ export function Chat() {
           </button>
         </div>
       </header>
+
+      {memoryOpen && activeId && <MemoryPanel agentId={activeId} onClose={() => setMemoryOpen(false)} />}
+      {skillsOpen && activeId && <SkillsPanel agentId={activeId} onClose={() => setSkillsOpen(false)} />}
 
       {quickOpen && (
         <div className="mx-6 mt-3 rounded-xl border border-sky-800/50 bg-sky-950/20 px-4 py-3">
@@ -192,6 +214,19 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
           <summary className="cursor-pointer select-none text-xs text-neutral-500">Ragionamento</summary>
           <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-neutral-500">
             {entry.content || reasoning || '…'}
+          </pre>
+        </details>
+      )
+    }
+    case 'summary': {
+      // fase 4: riepilogo dei turni più vecchi (compaction) — dettaglio
+      // interno, visibile solo col toggle "mostra ragionamento"
+      if (!showReasoning) return null
+      return (
+        <details className="rounded-lg border border-neutral-800/60 bg-neutral-900/40 px-3 py-1.5">
+          <summary className="cursor-pointer select-none text-xs text-neutral-500">Riepilogo turni precedenti</summary>
+          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-neutral-500">
+            {entry.content || '…'}
           </pre>
         </details>
       )

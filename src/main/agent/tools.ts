@@ -2,6 +2,11 @@
 import type { ToolDef } from './llm'
 import * as sandbox from '../sandbox'
 import { resolveSecretRefs, redactSecrets } from './secrets'
+import {
+  writeMemory, updateMemory, deleteMemory, listMemories, searchMemoriesByQuery,
+  type MemoryTier, type MemoryScope
+} from './memory'
+import { readSkillBody, writeSkill, listSkills } from './skills'
 
 export const toolDefs: ToolDef[] = [
   {
@@ -141,6 +146,77 @@ export const toolDefs: ToolDef[] = [
       properties: {},
       required: []
     }
+  },
+  {
+    name: 'update_memory',
+    description: "Scrive, aggiorna o elimina una memoria persistente (file markdown che restano tra i turni). tier 'core' = fatti stabili (lingua, nome, preferenze: sempre nel contesto); tier 'log' = regole operative datate (sotto budget, le più recenti vincono). scope 'agent' (default) = solo questo bot; scope 'user' = condivisa da tutti i bot dell'utente. action 'write' crea (id generato dal sistema); 'update'/'delete' richiedono l'id avuto da write o recall_memory.",
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['write', 'update', 'delete'], description: "Azione sulla memoria" },
+        id: { type: 'string', description: 'Id della memoria (per update/delete)' },
+        content: { type: 'string', description: 'Il contenuto della memoria (per write/update)' },
+        tier: { type: 'string', enum: ['core', 'log'], description: "core = fatto stabile, log = regola operativa" },
+        scope: { type: 'string', enum: ['agent', 'user'], description: "agent = solo questo bot (default), user = tutti i bot" }
+      },
+      required: ['action', 'content', 'tier']
+    }
+  },
+  {
+    name: 'recall_memory',
+    description: "Cerca nelle tue memorie (del bot e condivise dall'utente) per parole chiave, case-insensitive. Ritorna le prime 10 con id, tier e scope: usa gli id per update_memory.",
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Parole chiave da cercare' }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'skill',
+    description: "Carica le istruzioni complete di una skill disponibile (nel system prompt vedi solo nome e descrizione). Chiamala quando una skill serve per il compito corrente, poi seguine le istruzioni.",
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Nome della skill (come elencato in "# Skill disponibili")' }
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'update_skill',
+    description: "Crea o aggiorna una skill (procedura riutilizzabile con istruzioni complete). Richiede l'approvazione dell'utente: una skill cambia il tuo comportamento futuro. name solo [a-z0-9-], max 64 caratteri.",
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Nome della skill ([a-z0-9-], max 64)' },
+        description: { type: 'string', description: 'Quando usare la skill (una riga, compare nel system prompt)' },
+        content: { type: 'string', description: 'Le istruzioni complete della skill (markdown)' }
+      },
+      required: ['name', 'description', 'content']
+    }
+  },
+  {
+    name: 'update_state',
+    description: "Modifica il tuo stato. target 'memory' → come update_memory (action write/update/delete). target 'routine' → action: create (campi name, description, prompt, schedule cron a 5 campi, timezone; la routine nasce SEMPRE in pausa: chiedi all'utente se attivarla, l'attivazione richiede la sua approvazione), update (id + campi da cambiare), pause, resume, delete (id).",
+    parameters: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', enum: ['routine', 'memory'], description: 'Cosa modificare' },
+        action: { type: 'string', enum: ['create', 'update', 'pause', 'resume', 'delete', 'write'], description: 'Azione (write è per target memory)' },
+        id: { type: 'number', description: 'Id della routine (update/pause/resume/delete) o della memoria (come stringa)' },
+        name: { type: 'string', description: 'Nome della routine (create)' },
+        description: { type: 'string', description: 'Descrizione breve (routine/skill)' },
+        prompt: { type: 'string', description: 'Il prompt che la routine esegue' },
+        schedule: { type: 'string', description: 'Schedule cron a 5 campi, es. "30 8 * * 1-5"' },
+        timezone: { type: 'string', description: 'Fuso orario della schedule (es. Europe/Rome)' },
+        content: { type: 'string', description: 'Contenuto (per target memory)' },
+        tier: { type: 'string', enum: ['core', 'log'], description: 'Tier della memoria (per target memory)' },
+        scope: { type: 'string', enum: ['agent', 'user'], description: 'Scope della memoria (per target memory)' }
+      },
+      required: ['target', 'action']
+    }
   }
 ]
 
@@ -148,6 +224,99 @@ export interface ToolExecResult {
   output: string
   meta: Record<string, unknown>
   images?: string[]  // base64 PNG per modelli vision
+}
+
+/** Azione su una memoria (update_memory e update_state target 'memory'). */
+function runMemoryAction(agentId: string, input: Record<string, unknown>): ToolExecResult {
+  const action = String(input.action ?? 'write')
+  if (action === 'write') {
+    const content = String(input.content ?? '')
+    if (!content.trim()) return { output: 'Contenuto memoria vuoto: non scritto nulla.', meta: {} }
+    const r = writeMemory(agentId, {
+      content,
+      tier: input.tier === 'core' ? 'core' : 'log',
+      ...(input.scope === 'user' ? { scope: 'user' as MemoryScope } : {}),
+      source: 'agent'
+    })
+    return { output: `Memoria creata (id ${r.id}, tier ${r.tier}, scope ${r.scope}).`, meta: { memoryId: r.id } }
+  }
+  if (action === 'update') {
+    const r = updateMemory(agentId, {
+      id: String(input.id ?? ''),
+      ...(input.content !== undefined ? { content: String(input.content) } : {}),
+      ...(input.tier === 'core' || input.tier === 'log' ? { tier: input.tier as MemoryTier } : {}),
+      ...(input.scope === 'agent' || input.scope === 'user' ? { scope: input.scope as MemoryScope } : {})
+    })
+    return { output: `Memoria ${r.id} aggiornata (tier ${r.tier}, scope ${r.scope}).`, meta: { memoryId: r.id } }
+  }
+  if (action === 'delete') {
+    const existed = deleteMemory(agentId, String(input.id ?? ''))
+    return { output: existed ? `Memoria ${input.id} eliminata.` : `Memoria ${input.id} non trovata (già eliminata?).`, meta: {} }
+  }
+  return { output: `Azione memoria non valida: "${action}" (write | update | delete).`, meta: {} }
+}
+
+/** Azione su una routine (update_state target 'routine'): validazione cron con parseCron del daemon. */
+async function runRoutineAction(agentId: string, input: Record<string, unknown>): Promise<ToolExecResult> {
+  const { parseCron } = await import('../../daemon/cron')
+  const { createRoutine, updateRoutine, getRoutine, deleteRoutine } = await import('../store/db')
+  const action = String(input.action ?? '')
+  const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined)
+
+  if (action === 'create') {
+    const name = str(input.name)
+    const prompt = str(input.prompt)
+    const schedule = str(input.schedule)
+    if (!name) return { output: 'Routine non creata: manca il nome (campo name).', meta: {} }
+    if (!prompt) return { output: 'Routine non creata: manca il prompt.', meta: {} }
+    if (!schedule || !parseCron(schedule)) {
+      return { output: `Schedule non valida: "${schedule ?? ''}" — usare un cron a 5 campi, es. "0 9 * * *".`, meta: {} }
+    }
+    // le routine dell'agente nascono SEMPRE in pausa, con provenance 'agent'
+    const r = createRoutine(agentId, name, prompt, schedule, {
+      enabled: 0, provenance: 'agent',
+      description: str(input.description) ?? '', timezone: str(input.timezone) ?? ''
+    })
+    return {
+      output: `Routine "${name}" creata in PAUSA (id ${r.id}, provenance agent, schedule "${schedule}"): non girerà finché l'utente non la attiva con resume.`,
+      meta: { automation: { action: 'create', id: r.id, name } }
+    }
+  }
+
+  const id = Number(input.id)
+  if (!Number.isInteger(id) || id <= 0) return { output: `Id routine non valido: ${JSON.stringify(input.id)} (serve l'id numerico dalla creazione).`, meta: {} }
+  if (action === 'delete') {
+    const cur = getRoutine(id)
+    if (!cur) return { output: `Routine ${id} non trovata.`, meta: {} }
+    deleteRoutine(id)
+    return { output: `Routine "${cur.title}" (id ${id}) eliminata.`, meta: { automation: { action: 'delete', id, name: cur.title } } }
+  }
+  const cur = getRoutine(id)
+  if (!cur) return { output: `Routine ${id} non trovata: verifica l'id con l'utente o nelle Impostazioni → routine.`, meta: {} }
+
+  if (action === 'pause') {
+    updateRoutine(id, { enabled: 0 })
+    return { output: `Routine "${cur.title}" messa in pausa.`, meta: { automation: { action: 'pause', id, name: cur.title } } }
+  }
+  if (action === 'resume') {
+    updateRoutine(id, { enabled: 1 })
+    return { output: `Routine "${cur.title}" attivata (schedule "${cur.schedule}").`, meta: { automation: { action: 'resume', id, name: cur.title } } }
+  }
+  if (action === 'update') {
+    const schedule = str(input.schedule)
+    if (schedule !== undefined && !parseCron(schedule)) {
+      return { output: `Schedule non valida: "${schedule}" — usare un cron a 5 campi, es. "0 9 * * *".`, meta: {} }
+    }
+    updateRoutine(id, {
+      ...(str(input.name) !== undefined ? { title: str(input.name) } : {}),
+      ...(str(input.prompt) !== undefined ? { prompt: str(input.prompt) } : {}),
+      ...(schedule !== undefined ? { schedule } : {}),
+      ...(str(input.description) !== undefined ? { description: str(input.description) } : {}),
+      ...(str(input.timezone) !== undefined ? { timezone: str(input.timezone) } : {})
+    })
+    return { output: `Routine "${cur.title}" aggiornata.`, meta: { automation: { action: 'update', id, name: str(input.name) ?? cur.title } } }
+  }
+  return { output: `Azione routine non valida: "${action}" (create | update | pause | resume | delete).`, meta: {} }
 }
 
 export async function executeTool(agentId: string, tool: string, input: Record<string, unknown>): Promise<ToolExecResult> {
@@ -203,6 +372,34 @@ export async function executeTool(agentId: string, tool: string, input: Record<s
       const { listSecretNames } = await import('../vault')
       const names = listSecretNames()
       return { output: names.length ? names.join('\n') : '(vault vuoto)', meta: { vault: true } }
+    }
+    case 'update_memory':
+      return runMemoryAction(agentId, input)
+    case 'recall_memory': {
+      const found = searchMemoriesByQuery(listMemories(agentId), String(input.query ?? ''))
+      if (!found.length) return { output: 'Nessuna memoria trovata per questa ricerca.', meta: {} }
+      const lines = found.map((r) => `- [${r.id}] (${r.tier}/${r.scope}, aggiornata ${new Date(r.updatedAt).toISOString().slice(0, 10)}) ${r.content.replace(/\n+/g, ' ')}`)
+      return { output: lines.join('\n'), meta: { memoryIds: found.map((r) => r.id) } }
+    }
+    case 'skill': {
+      const body = readSkillBody(agentId, String(input.name ?? ''))
+      return { output: body, meta: { skill: String(input.name ?? '') } }
+    }
+    case 'update_skill': {
+      const name = String(input.name ?? '')
+      // l'esistenza si guarda PRIMA della scrittura (dopo ci sarebbe sempre)
+      const existed = listSkills(agentId).some((x) => x.name === name)
+      const s = writeSkill(agentId, {
+        name,
+        description: String(input.description ?? ''),
+        content: String(input.content ?? '')
+      })
+      return { output: `Skill "${s.name}" ${existed ? 'aggiornata' : 'creata'} (disponibile da subito in "# Skill disponibili").`, meta: { skill: s.name } }
+    }
+    case 'update_state': {
+      if (input.target === 'memory') return runMemoryAction(agentId, input)
+      if (input.target === 'routine') return runRoutineAction(agentId, input)
+      return { output: `Target update_state non valido: ${JSON.stringify(input.target)} (routine | memory).`, meta: {} }
     }
     default: {
       if (tool.startsWith('mcp__')) {
