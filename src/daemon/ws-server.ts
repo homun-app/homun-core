@@ -15,6 +15,11 @@ import type { SandbotEvent } from '../shared/types'
 
 type MethodHandler = (params: unknown[]) => Promise<unknown> | unknown
 
+/** Tempo concesso per l'hello valido: dopo, la connessione è chiusa (4001). */
+const AUTH_TIMEOUT_MS = 5_000
+/** Tetto pre-autenticazione: buffer + frammenti accumulati non oltre 64 KB. */
+const PRE_AUTH_MAX_BYTES = 64 * 1024
+
 interface Pending {
   resolve: (v: unknown) => void
   reject: (e: Error) => void
@@ -28,20 +33,46 @@ class Connection {
   private fragments: Buffer[] | null = null
   private fragmentsOp = 0
   private closed = false
+  private authTimer: NodeJS.Timeout | null = null
   readonly pending = new Map<number, Pending>()
 
   constructor(
     private readonly socket: Duplex,
     private readonly onText: (text: string) => void,
-    private readonly onClose: () => void
+    private readonly onClose: () => void,
+    private readonly limits: { authTimeoutMs: number; preAuthMaxBytes: number }
   ) {
     socket.on('data', (d: Buffer) => this.feed(d))
     socket.on('close', () => this.destroy())
     socket.on('error', () => this.destroy())
+    // una connessione che non si autentica non resta appesa
+    this.authTimer = setTimeout(() => {
+      if (!this.authed) this.close(4001)
+    }, this.limits.authTimeoutMs)
+    this.authTimer.unref()
   }
 
-  private feed(d: Buffer): void {
+  /** Hello valido ricevuto: ferma il timer e azzera il tetto pre-auth. */
+  markAuthed(): void {
+    this.authed = true
+    if (this.authTimer) {
+      clearTimeout(this.authTimer)
+      this.authTimer = null
+    }
+  }
+
+  /** Byte accumulati in attesa di parse o di frammenti completi. */
+  private preAuthBytes(): number {
+    return this.buf.length + (this.fragments?.reduce((n, f) => n + f.length, 0) ?? 0)
+  }
+
+  feed(d: Buffer): void {
     this.buf = Buffer.concat([this.buf, d])
+    // prima dell'autenticazione nemmeno il buffer può crescire senza limite
+    if (!this.authed && this.preAuthBytes() > this.limits.preAuthMaxBytes) {
+      this.close(1009)
+      return
+    }
     for (;;) {
       let parsed: { frame: WsFrame; rest: Buffer } | null
       try {
@@ -73,6 +104,10 @@ class Connection {
         }
       } else if (opcode === OP_CONT && this.fragments) {
         this.fragments.push(payload)
+        if (!this.authed && this.preAuthBytes() > this.limits.preAuthMaxBytes) {
+          this.close(1009)
+          return
+        }
         if (fin) {
           const whole = Buffer.concat(this.fragments)
           const op = this.fragmentsOp
@@ -93,23 +128,35 @@ class Connection {
 
   close(code = 1000): void {
     if (this.closed) return
+    this.closed = true
     const body = Buffer.alloc(2)
     body.writeUInt16BE(code, 0)
     this.socket.write(encodeFrame(OP_CLOSE, body, false))
+    // niente destroy qui: end() svuota il write buffer così il close frame
+    // arriva davvero; l'evento 'close' della socket chiamerà destroy()
     this.socket.end()
-    this.destroy()
+    this.teardown()
+    this.onClose()
   }
 
   destroy(): void {
     if (this.closed) return
     this.closed = true
+    this.teardown()
+    this.socket.destroy()
+    this.onClose()
+  }
+
+  private teardown(): void {
+    if (this.authTimer) {
+      clearTimeout(this.authTimer)
+      this.authTimer = null
+    }
     for (const [, p] of this.pending) {
       clearTimeout(p.timer)
       p.reject(new Error('connessione UI chiusa'))
     }
     this.pending.clear()
-    this.socket.destroy()
-    this.onClose()
   }
 }
 
@@ -136,8 +183,16 @@ export function startWsServer(opts: {
   port?: number
   token: string
   onUiChange?: (connected: boolean) => void
+  /** Tempo concesso per l'hello valido prima della chiusura (default 5s). */
+  authTimeoutMs?: number
+  /** Tetto pre-autenticazione in byte, buffer + frammenti (default 64 KB). */
+  preAuthMaxBytes?: number
 }): Promise<WsRpcServer> {
   const host = opts.host ?? '127.0.0.1'
+  const limits = {
+    authTimeoutMs: opts.authTimeoutMs ?? AUTH_TIMEOUT_MS,
+    preAuthMaxBytes: opts.preAuthMaxBytes ?? PRE_AUTH_MAX_BYTES
+  }
   const conns = new Set<Connection>()
   let uiConn: Connection | null = null
   let nextCallId = 1
@@ -147,7 +202,7 @@ export function startWsServer(opts: {
     res.destroy()
   })
 
-  server.on('upgrade', (req: IncomingMessage, socket: Duplex) => {
+  server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const key = req.headers['sec-websocket-key']
     if (!key) {
       socket.destroy()
@@ -168,8 +223,12 @@ export function startWsServer(opts: {
           uiConn = null
           opts.onUiChange?.(false)
         }
-      }
+      },
+      limits
     )
+    // byte arrivati insieme alla richiesta di upgrade (stesso segmento TCP):
+    // node li consegna qui, non con l'evento 'data'
+    if (head.length > 0) conn.feed(head)
     conns.add(conn)
   })
 
@@ -178,7 +237,7 @@ export function startWsServer(opts: {
     // handshake: il PRIMO messaggio deve essere un hello col token valido
     if (!conn.authed) {
       if (isHelloAuthorized(msg, opts.token)) {
-        conn.authed = true
+        conn.markAuthed()
         if (uiConn && uiConn !== conn) uiConn.close(4000) // una sola UI per volta
         uiConn = conn
         conn.send(serializeHelloOk(true))

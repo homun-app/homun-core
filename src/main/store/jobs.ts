@@ -71,6 +71,17 @@ export function getJobById(db: DatabaseSync, id: number): Job | null {
   return r ? rowToJob(r) : null
 }
 
+/**
+ * Registra nel payload l'id dell'entry che apre il turno del job: al
+ * tentativo successivo (crash/exception) il turno RIPRENDE da lì invece di
+ * riscrivere il messaggio utente (R1).
+ */
+export function setJobEntryId(db: DatabaseSync, jobId: number, entryId: number): void {
+  const job = getJobById(db, jobId)
+  if (!job) return
+  db.prepare('UPDATE jobs SET payload_json = ? WHERE id = ?').run(JSON.stringify({ ...job.payload, entryId }), jobId)
+}
+
 /** Job in lease (attivo) per un agente: al più UN job attivo per agente. */
 export function activeJobForAgent(db: DatabaseSync, agentId: string): Job | null {
   const r = db.prepare("SELECT * FROM jobs WHERE agent_id = ? AND status = 'leased'").get(agentId) as JobRow | undefined

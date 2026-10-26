@@ -38,7 +38,7 @@ beforeEach(() => {
 
 describe('enqueueUserMessage: stessa semantica della coda della fase 1', () => {
   it('agente libero → job accodato senza notice', () => {
-    const job = enqueueUserMessage(db(), AGENT, 'ciao', undefined, emit)
+    const job = enqueueUserMessage(db(), AGENT, 'ciao', undefined, emit)!
     expect(job.kind).toBe('user-message')
     expect(job.status).toBe('queued')
     expect(job.payload).toEqual({ text: 'ciao' })
@@ -48,22 +48,28 @@ describe('enqueueUserMessage: stessa semantica della coda della fase 1', () => {
 
   it('agente occupato → job in coda con notice di posizione', async () => {
     // simula il worker: prende in lease il primo job dell'agente
-    const first = enqueueUserMessage(db(), AGENT, 'primo', undefined, emit)
+    const first = enqueueUserMessage(db(), AGENT, 'primo', undefined, emit)!
     const [leased] = claimDueJobs(db(), Date.now(), 120_000)
     expect(leased?.id).toBe(first.id)
 
-    const second = enqueueUserMessage(db(), AGENT, 'secondo', undefined, emit)
+    const second = enqueueUserMessage(db(), AGENT, 'secondo', undefined, emit)!
     expect(second.status).toBe('queued')
     const notices = getEntries(AGENT).filter((e) => e.kind === 'notice').map((e) => e.content)
     expect(notices).toEqual(['Agente occupato: messaggio in coda (posizione 1).'])
     expect(events.some((e) => e.type === 'entries')).toBe(true)
   })
 
-  it('tetto 10 messaggi in coda: l\'undicesimo è scartato con notice "Coda piena"', () => {
+  it('tetto 10 messaggi in coda: l\'undicesimo è scartato con notice "Coda piena" e NON accodato', () => {
+    const jobCount = (): number =>
+      (db().prepare('SELECT COUNT(*) AS n FROM jobs').get() as { n: number }).n
     // agente occupato dal primo job
     enqueueUserMessage(db(), AGENT, 'base', undefined, emit)
     claimDueJobs(db(), Date.now(), 120_000)
-    for (let i = 1; i <= 11; i++) enqueueUserMessage(db(), AGENT, `msg${i}`, undefined, emit)
+    for (let i = 1; i <= 10; i++) enqueueUserMessage(db(), AGENT, `msg${i}`, undefined, emit)
+    const before = jobCount()
+    const discarded = enqueueUserMessage(db(), AGENT, 'msg11', undefined, emit)
+    expect(discarded).toBeNull()
+    expect(jobCount()).toBe(before) // il numero di job in coda NON aumenta
     const notices = getEntries(AGENT).filter((e) => e.kind === 'notice').map((e) => e.content)
     // posizioni 1..10 + il messaggio 11 scartato
     expect(notices).toHaveLength(11)
@@ -72,9 +78,9 @@ describe('enqueueUserMessage: stessa semantica della coda della fase 1', () => {
   })
 
   it('le immagini viaggiano nel payload solo se presenti', () => {
-    const withImg = enqueueUserMessage(db(), AGENT, 'guarda', ['AAAA'], emit)
+    const withImg = enqueueUserMessage(db(), AGENT, 'guarda', ['AAAA'], emit)!
     expect(withImg.payload).toEqual({ text: 'guarda', images: ['AAAA'] })
-    const noImg = enqueueUserMessage(db(), AGENT, 'plain', undefined, emit)
+    const noImg = enqueueUserMessage(db(), AGENT, 'plain', undefined, emit)!
     expect(noImg.payload).toEqual({ text: 'plain' })
   })
 })

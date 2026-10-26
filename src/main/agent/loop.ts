@@ -19,6 +19,7 @@ import { toolDefs, executeTool } from './tools'
 import * as permissions from './permissions'
 import { getProvider } from './providers'
 import { buildMessages } from './history'
+import { planResume, INTERRUPTED_TOOL_RESULT, RESUME_NOTICE } from './resume'
 import type { Approval, SandbotEvent } from '../../shared/types'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
@@ -53,6 +54,14 @@ export interface RunTurnOptions {
   source?: 'user' | 'routine'
   /** Titolo routine per la notice di scarto. */
   title?: string
+  /**
+   * Ripresa dopo crash/retry (R1): id dell'entry del messaggio che ha aperto
+   * il turno (payload.entryId del job). Il messaggio NON viene riscritto e il
+   * turno interrotto viene riparato dal transcript prima di chiamare il modello.
+   */
+  resume?: { entryId: number }
+  /** Primo tentativo: chiamato con l'id dell'entry utente appena aggiunta, PRIMA del modello. */
+  onTurnEntry?: (entryId: number) => void
 }
 
 export async function runTurn(agentId: string, userText: string, emit: Emitter, images?: string[], opts: RunTurnOptions = {}): Promise<void> {
@@ -86,8 +95,38 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   running.set(agentId, run)
 
   try {
-    appendEntry({ agentId, kind: 'message', role: 'user', content: userText, meta: images?.length ? { images: images.length } : undefined })
-    emitLastEntry(agentId, emit)
+    if (opts.resume) {
+      // R1: ripresa dal transcript — il messaggio utente NON viene riscritto;
+      // il turno interrotto viene riparato PRIMA di chiamare il modello
+      const plan = planResume(getEntries(agentId), opts.resume.entryId)
+      if (plan.alreadyComplete) {
+        // il turno era già concluso: completa senza chiamare il modello
+        setStatus(agentId, 'idle', emit)
+        updateAgent(agentId, { unread: 0 })
+        emit({ type: 'agents' })
+        return
+      }
+      for (const appr of plan.pendingApprovals) {
+        updateEntryMeta(appr.id, { ...appr.meta, status: 'expired' })
+        const updated = getEntries(agentId).find((e) => e.id === appr.id)
+        if (updated) emit({ type: 'entries', agentId, entries: [updated] })
+      }
+      for (const call of plan.interruptedToolCalls) {
+        const res = appendEntry({
+          agentId, kind: 'tool-result', role: 'system', content: INTERRUPTED_TOOL_RESULT,
+          meta: { callId: String(call.meta?.id ?? call.id) }
+        })
+        emit({ type: 'entries', agentId, entries: [res] })
+      }
+      appendEntry({ agentId, kind: 'notice', role: 'system', content: RESUME_NOTICE })
+      emitLastEntry(agentId, emit)
+    } else {
+      const entry = appendEntry({ agentId, kind: 'message', role: 'user', content: userText, meta: images?.length ? { images: images.length } : undefined })
+      emitLastEntry(agentId, emit)
+      // R1: l'id dell'entry che apre il turno finisce nel payload del job,
+      // PRIMA di chiamare il modello, per poter riprendere dopo un crash
+      opts.onTurnEntry?.(entry.id)
+    }
 
     // §5.3: il messaggio corrente è l'ultimo entry del transcript → compare una volta sola
     const messages: ChatMessage[] = buildMessages(systemPrompt(agent), getEntries(agentId), images)

@@ -3,7 +3,7 @@
 //   processo sia vivo, per lock stanti dopo un crash);
 // - daemon.json: pid, porta, token, startedAt con permessi 0600 — lo stesso
 //   schema di ~/.grokbot/local-exec-daemon.json dell'originale.
-import { existsSync, readFileSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 
 export interface DaemonInfo {
@@ -28,6 +28,22 @@ const LOCK = 'daemon.lock'
 const INFO = 'daemon.json'
 
 /**
+ * Scrive un file GIÀ ristretto e in modo atomico: file temporaneo nella
+ * stessa directory creato con 0600 (il contenuto non è mai leggibile ad
+ * altri utenti, nemmeno per un istante) e rename sopra la destinazione.
+ */
+function writePrivateFileSync(path: string, data: string): void {
+  const tmp = `${path}.tmp`
+  try {
+    unlinkSync(tmp) // residuo di un crash precedente: si ricrea subito dopo
+  } catch {
+    // non esiste: bene
+  }
+  writeFileSync(tmp, data, { mode: 0o600 })
+  renameSync(tmp, path)
+}
+
+/**
  * Acquisisce il lock della directory dati: fallisce se un daemon vivo lo
  * tiene già. Un lock con pid morto (crash) viene sovrascritto.
  */
@@ -41,7 +57,7 @@ export function acquireDaemonLock(dataDir: string): { ok: boolean; pid?: number 
       // lock illeggibile: lo sovrascriviamo
     }
   }
-  writeFileSync(lockPath, JSON.stringify({ pid: process.pid }), { mode: 0o644 })
+  writePrivateFileSync(lockPath, JSON.stringify({ pid: process.pid }))
   return { ok: true }
 }
 
@@ -53,11 +69,12 @@ export function releaseDaemonLock(dataDir: string): void {
   }
 }
 
-/** Scrive daemon.json con permessi 0600 (il token non deve essere leggibile ad altri utenti). */
+/**
+ * Scrive daemon.json col token: file che nasce già 0600 (temp + rename
+ * atomico) — il token non deve mai essere leggibile ad altri utenti.
+ */
 export function writeDaemonInfo(dataDir: string, info: DaemonInfo): void {
-  const p = join(dataDir, INFO)
-  writeFileSync(p, JSON.stringify(info, null, 2))
-  chmodSync(p, 0o600)
+  writePrivateFileSync(join(dataDir, INFO), JSON.stringify(info, null, 2))
 }
 
 export function readDaemonInfo(dataDir: string): DaemonInfo | null {

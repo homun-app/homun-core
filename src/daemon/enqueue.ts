@@ -13,24 +13,28 @@ const MAX_QUEUE = 10
 
 type Emitter = (e: SandbotEvent) => void
 
-/** Accoda un messaggio utente: parte subito se l'agente è libero, altrimenti resta in coda con notice. */
+/**
+ * Accoda un messaggio utente: parte subito se l'agente è libero, altrimenti
+ * resta in coda con notice. Se la coda è al tetto il messaggio è SCARTATO:
+ * la notice "Coda piena" viene scritta e nessun job viene creato (null).
+ */
 export function enqueueUserMessage(
   db: DatabaseSync,
   agentId: string,
   text: string,
   images: string[] | undefined,
   emit: Emitter
-): Job {
+): Job | null {
   updateAgent(agentId, { unread: 0 })
   if (activeJobForAgent(db, agentId)) {
     const waiting = pendingUserMessages(db, agentId)
     if (waiting >= MAX_QUEUE) {
       appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Coda piena: messaggio scartato.' })
       emitLastEntry(agentId, emit)
-    } else {
-      appendEntry({ agentId, kind: 'notice', role: 'system', content: `Agente occupato: messaggio in coda (posizione ${waiting + 1}).` })
-      emitLastEntry(agentId, emit)
+      return null
     }
+    appendEntry({ agentId, kind: 'notice', role: 'system', content: `Agente occupato: messaggio in coda (posizione ${waiting + 1}).` })
+    emitLastEntry(agentId, emit)
   }
   const now = Date.now()
   return enqueueJob(db, {

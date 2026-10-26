@@ -15,8 +15,7 @@ import { buildApiMethods } from './api'
 import { JobWorker } from './worker'
 import { tickScheduler } from './scheduler'
 import { attachHostBridge } from './host-bridge'
-import { runTurn } from '../main/agent/loop'
-import type { Job } from '../main/store/jobs'
+import { makeJobRunner } from './run-job'
 import type { SandbotEvent } from '../shared/types'
 
 function resolveDataDirArgv(argv: string[]): string | null {
@@ -59,15 +58,7 @@ async function main(): Promise<void> {
     database,
     {
       now: () => Date.now(),
-      runJob: async (job: Job, emitTurn) => {
-        if (job.kind === 'user-message') {
-          const p = job.payload as { text: string; images?: string[] }
-          await runTurn(job.agent_id, p.text, emitTurn, p.images, { source: 'user' })
-          return
-        }
-        const p = job.payload as { routineId: number; title: string; prompt: string }
-        await runTurn(job.agent_id, `[routine ricorrente: ${p.title}] ${p.prompt}`, emitTurn, undefined, { source: 'routine', title: p.title })
-      }
+      runJob: makeJobRunner(database)
     },
     emit
   )

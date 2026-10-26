@@ -335,3 +335,71 @@ describe('§5.1+approval: gate asincrono e standing grant esatta', () => {
     expect(h.sandboxMock.exec.calls).toBe(0) // scaduta → mai eseguita
   })
 })
+
+describe('R1: ripresa del turno dopo crash/retry (payload.entryId)', () => {
+  /** Entry del transcript costruita a mano (stato "post-crash"). */
+  const mkEntry = (
+    id: number, kind: TranscriptEntry['kind'], role: TranscriptEntry['role'],
+    content: string, meta: Record<string, unknown> | null = null
+  ): TranscriptEntry & { id: number } => ({ id, agentId: AGENT, kind, role, content, meta, createdAt: 1 })
+
+  it('primo tentativo: l\'id dell\'entry utente viene salvato PRIMA di chiamare il modello', async () => {
+    h.llm.queue = [{ text: 'ok' }]
+    let savedAtLlmCalls = -1
+    let savedId = -1
+    await runTurn(AGENT, 'ciao', emit, undefined, {
+      onTurnEntry: (id) => { savedAtLlmCalls = h.llm.calls.length; savedId = id }
+    })
+    expect(savedId).toBe(h.db.entries.find((e) => e.kind === 'message' && e.role === 'user')!.id)
+    expect(savedAtLlmCalls).toBe(0) // salvato prima della prima chiamata al modello
+    expect(h.llm.calls).toHaveLength(1)
+    // il messaggio utente compare UNA volta sola nella storia del modello
+    expect(h.llm.calls[0]!.filter((m) => m.role === 'user' && m.content === 'ciao')).toHaveLength(1)
+  })
+
+  it('ripresa dopo crash: un solo messaggio utente, tool-result "interrotto da un riavvio", approval expired, tool non rieseguito', async () => {
+    // transcript post-crash: messaggio utente, tool-call il cui esito è andato
+    // perso (nessun tool-result) e approval rimasta pending
+    h.db.entries.push(
+      mkEntry(1, 'message', 'user', 'fai il deploy'),
+      mkEntry(2, 'message', 'assistant', ''),
+      mkEntry(3, 'tool-call', 'assistant', 'run-command', { id: 'c1', name: 'run-command', arguments: '{"command":"deploy"}' }),
+      mkEntry(4, 'approval', 'system', 'run-command: comando fuori box', { approvalId: 'ap1', tool: 'run-command', input: { command: 'deploy' }, status: 'pending' })
+    )
+    h.db.nextId = 5
+    h.llm.queue = [{ text: 'verifico lo stato e proseguo' }]
+
+    await runTurn(AGENT, 'fai il deploy', emit, undefined, { resume: { entryId: 1 } })
+
+    // il messaggio utente NON è stato riscritto
+    expect(h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user')).toHaveLength(1)
+    // la tool-call orfana ha ricevuto un tool-result PERSISTITO
+    const res = h.db.entries.find((e) => e.kind === 'tool-result')!
+    expect(res.content).toContain('interrotto da un riavvio')
+    expect(res.content).toContain('esito è sconosciuto')
+    expect(res.meta?.callId).toBe('c1')
+    // l'approval pending è scaduta e c'è la notice di ripresa
+    expect(h.db.entries.find((e) => e.kind === 'approval')!.meta?.status).toBe('expired')
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('Turno ripreso dopo un'))).toBe(true)
+    // il tool NON è stato rieseguito (il modello non l'ha richiamato)
+    expect(h.sandboxMock.exec.calls).toBe(0)
+    // al modello è arrivato il result sintetico e un solo messaggio utente
+    const first = h.llm.calls[0]!
+    expect(first.filter((m) => m.role === 'user' && m.content === 'fai il deploy')).toHaveLength(1)
+    expect(first.find((m) => m.role === 'tool')?.content).toContain('interrotto da un riavvio')
+  })
+
+  it('turno già concluso: la ripresa NON chiama il modello', async () => {
+    h.db.entries.push(
+      mkEntry(1, 'message', 'user', 'stato?'),
+      mkEntry(2, 'message', 'assistant', 'tutto a posto')
+    )
+    h.db.nextId = 3
+
+    await runTurn(AGENT, 'stato?', emit, undefined, { resume: { entryId: 1 } })
+
+    expect(h.llm.calls).toHaveLength(0)
+    expect(h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user')).toHaveLength(1)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('Turno ripreso'))).toBe(false)
+  })
+})
