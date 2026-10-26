@@ -1,0 +1,151 @@
+// State renderer: agenti, transcript dell'agente attivo, eventi dal main.
+import { create } from 'zustand'
+import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig } from '../../shared/types'
+
+const api = (window as unknown as { sandbot: import('../../shared/types').SandbotApi }).sandbot
+
+interface Store {
+  agents: Agent[]
+  activeId: string | null
+  entries: TranscriptEntry[]
+  reasoning: Record<number, string>
+  providers: ProviderConfig[]
+  permissions: PermissionsConfig | null
+  settingsOpen: boolean
+  init(): Promise<void>
+  select(agentId: string): Promise<void>
+  send(text: string, images?: string[]): Promise<void>
+  interrupt(): void
+  resolveApproval(approvalId: string, decision: 'allow' | 'deny', always: boolean): void
+  createAgent(name: string): Promise<void>
+  refreshProviders(): Promise<void>
+  refreshPermissions(): Promise<void>
+  setSettingsOpen(v: boolean): void
+}
+
+export const useStore = create<Store>((set, get) => ({
+  agents: [],
+  activeId: null,
+  entries: [],
+  reasoning: {},
+  providers: [],
+  permissions: null,
+  settingsOpen: false,
+
+  async init() {
+    const agents = await api.listAgents()
+    const providers = await api.listProviders()
+    const permissions = await api.getPermissions()
+    const activeId = agents[0]?.id ?? null
+    set({ agents, providers, permissions, activeId })
+    if (activeId) {
+      set({ entries: await api.getEntries(activeId) })
+    }
+    api.onEvent((e: SandbotEvent) => {
+      const s = get()
+      switch (e.type) {
+        case 'agents':
+          void api.listAgents().then((agents2) => set({ agents: agents2 }))
+          break
+        case 'status': {
+          set({ agents: s.agents.map((a) => (a.id === e.agentId ? { ...a, status: e.status } : a)) })
+          break
+        }
+        case 'entries': {
+          if (e.agentId !== s.activeId) {
+            set({ agents: s.agents.map((a) => (a.id === e.agentId ? { ...a, unread: a.unread + 1 } : a)) })
+            break
+          }
+          const merged = [...s.entries]
+          for (const en of e.entries) {
+            const i = merged.findIndex((x) => x.id === en.id)
+            if (i >= 0) merged[i] = en
+            else merged.push(en)
+          }
+          set({ entries: merged })
+          break
+        }
+        case 'delta': {
+          if (e.agentId !== s.activeId) break
+          if (e.reasoning) {
+            set({ reasoning: { ...s.reasoning, [e.entryId]: (s.reasoning[e.entryId] ?? '') + e.text } })
+            break
+          }
+          set({
+            entries: s.entries.map((en) =>
+              en.id === e.entryId ? { ...en, content: en.content + e.text } : en
+            )
+          })
+          break
+        }
+        case 'approval': {
+          if (e.agentId === s.activeId) {
+            const merged = [...s.entries]
+            const i = merged.findIndex((x) => x.meta?.approvalId === e.approval.id)
+            if (i >= 0) merged[i] = { ...merged[i], meta: { ...merged[i].meta!, status: e.approval.status } }
+            set({ entries: merged })
+          }
+          break
+        }
+        case 'open-agent': {
+          if (e.agentId !== s.activeId) {
+            void s.select(e.agentId)
+          } else {
+            const w = window as unknown as { focus?: () => void }
+            w.focus?.()
+          }
+          break
+        }
+      }
+    })
+  },
+
+  async select(agentId) {
+    set({ activeId: agentId, entries: [] })
+    set({ entries: await api.getEntries(agentId) })
+    await api.updateAgent(agentId, {})
+  },
+
+  async send(text, images) {
+    const id = get().activeId
+    if (!id || !text.trim()) return
+    await api.sendMessage(id, text.trim(), images)
+  },
+
+  interrupt() {
+    const id = get().activeId
+    if (id) api.interrupt(id)
+  },
+
+  resolveApproval(approvalId, decision, always) {
+    const id = get().activeId
+    if (!id) return
+    const s = get()
+    set({
+      entries: s.entries.map((en) =>
+        en.meta?.approvalId === approvalId ? { ...en, meta: { ...en.meta!, status: decision === 'allow' ? 'allowed' : 'denied' } } : en
+      )
+    })
+    void api.resolveApproval(id, approvalId, decision, always)
+  },
+
+  async createAgent(name) {
+    await api.createAgent(name)
+    const agents = await api.listAgents()
+    set({ agents })
+  },
+
+  async refreshProviders() {
+    set({ providers: await api.listProviders() })
+  },
+
+  async refreshPermissions() {
+    set({ permissions: await api.getPermissions() })
+  },
+
+  setSettingsOpen(v) {
+    set({ settingsOpen: v })
+  }
+}))
+
+export { api }
