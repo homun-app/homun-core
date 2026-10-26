@@ -9,7 +9,7 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { JOBS_DDL } from './jobs'
-import type { Agent, TranscriptEntry, PermissionsConfig } from '../../shared/types'
+import type { Agent, TranscriptEntry, PermissionsConfig, RoutineTrigger } from '../../shared/types'
 
 let _dir: string | null = null
 
@@ -75,19 +75,32 @@ function open(): DatabaseSync {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       description TEXT DEFAULT '',
       timezone TEXT DEFAULT '',
-      provenance TEXT DEFAULT 'user'
+      provenance TEXT DEFAULT 'user',
+      trigger_json TEXT,
+      paused_for_away INTEGER DEFAULT 0,
+      last_poll INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS outbox (
+      entry_id INTEGER PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL
     );
     ${JOBS_DDL}
   `)
   // fase 4: colonne nuove delle routine per i DB esistenti (CREATE TABLE IF
   // NOT EXISTS non le aggiunge); provenance distingue le routine dell'utente
-  // da quelle create dall'agente via update_state
+  // da quelle create dall'agente via update_state.
+  // fase 6: trigger_json (trigger esteso), paused_for_away (pausa per
+  // assenza), last_poll (ultimo poll dei trigger connector_poll)
   const routineCols = db.prepare("SELECT name FROM pragma_table_info('routines')").all() as Array<{ name: string }>
   const present = new Set(routineCols.map((c) => c.name))
   for (const [col, ddl] of [
     ['description', "ALTER TABLE routines ADD COLUMN description TEXT DEFAULT ''"],
     ['timezone', "ALTER TABLE routines ADD COLUMN timezone TEXT DEFAULT ''"],
-    ['provenance', "ALTER TABLE routines ADD COLUMN provenance TEXT DEFAULT 'user'"]
+    ['provenance', "ALTER TABLE routines ADD COLUMN provenance TEXT DEFAULT 'user'"],
+    ['trigger_json', 'ALTER TABLE routines ADD COLUMN trigger_json TEXT'],
+    ['paused_for_away', 'ALTER TABLE routines ADD COLUMN paused_for_away INTEGER DEFAULT 0'],
+    ['last_poll', 'ALTER TABLE routines ADD COLUMN last_poll INTEGER']
   ] as const) {
     if (!present.has(col)) db.exec(ddl)
   }
@@ -276,20 +289,51 @@ export function saveProviders(ps: import('../../shared/types').ProviderConfig[])
 }
 
 // ---- routines (attività ricorrenti, come le "Routines" dell'originale) ----
+// fase 6: trigger esteso in trigger_json (schedule every, connector_poll,
+// webhook, presence_return); la colonna schedule resta il cron delle routine
+// pre-fase 6 e dei trigger cron.
+
 export interface Routine {
   id: number; agent_id: string; title: string; prompt: string
   schedule: string; enabled: number; last_run: number | null; created_at: number
   /** fase 4: descrizione e fuso orario (update_state), chi ha creato la routine */
   description?: string; timezone?: string; provenance?: 'user' | 'agent'
+  /** fase 6: trigger esteso (null = cron della colonna schedule) */
+  trigger?: RoutineTrigger | null
+  /** fase 6: 1 = in pausa perché l'utente è via (riattivata solo al rientro) */
+  paused_for_away?: number
+  /** fase 6: ultimo poll eseguito (trigger connector_poll) */
+  last_poll?: number | null
+}
+
+interface RoutineRow {
+  id: number; agent_id: string; title: string; prompt: string; schedule: string
+  enabled: number; last_run: number | null; created_at: number
+  description?: string | null; timezone?: string | null; provenance?: string | null
+  trigger_json?: string | null; paused_for_away?: number | null; last_poll?: number | null
+}
+
+function rowToRoutine(r: RoutineRow): Routine {
+  return {
+    id: r.id, agent_id: r.agent_id, title: r.title, prompt: r.prompt, schedule: r.schedule,
+    enabled: r.enabled, last_run: r.last_run, created_at: r.created_at,
+    description: r.description ?? '', timezone: r.timezone ?? '',
+    provenance: (r.provenance as Routine['provenance']) ?? 'user',
+    trigger: r.trigger_json ? (JSON.parse(r.trigger_json) as RoutineTrigger) : null,
+    paused_for_away: r.paused_for_away ?? 0,
+    last_poll: r.last_poll ?? null
+  }
 }
 
 export function listRoutines(agentId?: string): Routine[] {
   const q = agentId ? 'SELECT * FROM routines WHERE agent_id = ? ORDER BY id' : 'SELECT * FROM routines ORDER BY id'
-  return (agentId ? db().prepare(q).all(agentId) : db().prepare(q).all()) as unknown as Routine[]
+  const rows = (agentId ? db().prepare(q).all(agentId) : db().prepare(q).all()) as unknown as RoutineRow[]
+  return rows.map(rowToRoutine)
 }
 
 export function getRoutine(id: number): Routine | null {
-  return (db().prepare('SELECT * FROM routines WHERE id = ?').get(id) as unknown as Routine | undefined) ?? null
+  const r = db().prepare('SELECT * FROM routines WHERE id = ?').get(id) as RoutineRow | undefined
+  return r ? rowToRoutine(r) : null
 }
 
 /** Campi opzionali alla creazione: le routine dell'agente (update_state) nascono in pausa con provenance 'agent'. */
@@ -298,29 +342,40 @@ export interface CreateRoutineOpts {
   provenance?: 'user' | 'agent'
   description?: string
   timezone?: string
+  trigger?: RoutineTrigger
 }
 
 export function createRoutine(agentId: string, title: string, prompt: string, schedule: string, opts: CreateRoutineOpts = {}): Routine {
   const now = Date.now()
   const r = db()
-    .prepare('INSERT INTO routines(agent_id, title, prompt, schedule, enabled, created_at, description, timezone, provenance) VALUES(?,?,?,?,?,?,?,?,?)')
-    .run(agentId, title, prompt, schedule, opts.enabled ?? 1, now, opts.description ?? '', opts.timezone ?? '', opts.provenance ?? 'user')
+    .prepare('INSERT INTO routines(agent_id, title, prompt, schedule, enabled, created_at, description, timezone, provenance, trigger_json) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .run(
+      agentId, title, prompt, schedule, opts.enabled ?? 1, now, opts.description ?? '', opts.timezone ?? '',
+      opts.provenance ?? 'user', opts.trigger ? JSON.stringify(opts.trigger) : null
+    )
   return {
     id: Number(r.lastInsertRowid), agent_id: agentId, title, prompt, schedule,
     enabled: opts.enabled ?? 1, last_run: null, created_at: now,
-    description: opts.description ?? '', timezone: opts.timezone ?? '', provenance: opts.provenance ?? 'user'
+    description: opts.description ?? '', timezone: opts.timezone ?? '', provenance: opts.provenance ?? 'user',
+    trigger: opts.trigger ?? null, paused_for_away: 0, last_poll: null
   }
 }
 
-export function updateRoutine(id: number, patch: Partial<Pick<Routine, 'enabled' | 'schedule' | 'title' | 'prompt' | 'description' | 'timezone' | 'provenance'>>): void {
-  const cur = db().prepare('SELECT * FROM routines WHERE id = ?').get(id) as unknown as Routine | undefined
-  if (!cur) return
+export function updateRoutine(
+  id: number,
+  patch: Partial<Pick<Routine, 'enabled' | 'schedule' | 'title' | 'prompt' | 'description' | 'timezone' | 'provenance' | 'trigger' | 'paused_for_away'>>
+): void {
+  const row = db().prepare('SELECT * FROM routines WHERE id = ?').get(id) as RoutineRow | undefined
+  if (!row) return
+  const cur = rowToRoutine(row)
   db()
-    .prepare('UPDATE routines SET enabled=?, schedule=?, title=?, prompt=?, description=?, timezone=?, provenance=? WHERE id=?')
+    .prepare('UPDATE routines SET enabled=?, schedule=?, title=?, prompt=?, description=?, timezone=?, provenance=?, trigger_json=?, paused_for_away=? WHERE id=?')
     .run(
       patch.enabled ?? cur.enabled, patch.schedule ?? cur.schedule, patch.title ?? cur.title,
       patch.prompt ?? cur.prompt, patch.description ?? cur.description ?? '', patch.timezone ?? cur.timezone ?? '',
-      patch.provenance ?? cur.provenance ?? 'user', id
+      patch.provenance ?? cur.provenance ?? 'user',
+      patch.trigger !== undefined ? (patch.trigger ? JSON.stringify(patch.trigger) : null) : (cur.trigger ? JSON.stringify(cur.trigger) : null),
+      patch.paused_for_away ?? cur.paused_for_away ?? 0, id
     )
 }
 
@@ -328,6 +383,39 @@ export function touchRoutineRun(id: number): void {
   db().prepare('UPDATE routines SET last_run = ? WHERE id = ?').run(Date.now(), id)
 }
 
+/** Registra l'ultimo poll di un trigger connector_poll (il claim del poll). */
+export function touchRoutinePoll(id: number, at: number): void {
+  db().prepare('UPDATE routines SET last_poll = ? WHERE id = ?').run(at, id)
+}
+
 export function deleteRoutine(id: number): void {
   db().prepare('DELETE FROM routines WHERE id=?').run(id)
+}
+
+// ---- outbox (fase 6, finestre di consegna) ----
+
+export interface OutboxRow {
+  entry_id: number
+  agent_id: string
+  created_at: number
+}
+
+/** Trattiene l'entry di un messaggio send_to_user (consegnato alla prossima finestra). */
+export function holdOutboxEntry(entryId: number, agentId: string, createdAt: number): void {
+  db().prepare('INSERT OR REPLACE INTO outbox(entry_id, agent_id, created_at) VALUES(?,?,?)').run(entryId, agentId, createdAt)
+}
+
+/** Le entry trattenute di un agente, in ordine. */
+export function heldOutboxForAgent(agentId: string): OutboxRow[] {
+  return db().prepare('SELECT * FROM outbox WHERE agent_id = ? ORDER BY entry_id').all(agentId) as unknown as OutboxRow[]
+}
+
+/** Tutte le entry trattenute, raggruppate per agente (consegna a finestra). */
+export function allHeldOutbox(): OutboxRow[] {
+  return db().prepare('SELECT * FROM outbox ORDER BY agent_id, entry_id').all() as unknown as OutboxRow[]
+}
+
+/** Segna consegnata (rimuove dalla outbox). */
+export function releaseOutboxEntry(entryId: number): void {
+  db().prepare('DELETE FROM outbox WHERE entry_id = ?').run(entryId)
 }

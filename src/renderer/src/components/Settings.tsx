@@ -1,7 +1,9 @@
 // Impostazioni: provider (modelli personalizzati), modello per agente, permessi, routine, connettori, generale.
 import { useEffect, useState } from 'react'
 import { api, useStore } from '../store'
-import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret } from '../../../shared/types'
+import { describeTrigger } from '../../../shared/cron-human'
+import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
+import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger } from '../../../shared/types'
 
 const KINDS: ProviderKind[] = [
   'ollama', 'lmstudio', 'anthropic', 'mistral', 'openrouter', 'zai', 'xai', 'deepseek', 'groq', 'openai-compatible'
@@ -328,12 +330,33 @@ function ManualServers() {
 
 // Il runtime dei bot vive in un daemon separato: può partire all'accesso del
 // Mac e sopravvivere alla finestra chiusa (LaunchAgent con riavvio sui crash).
+// Fase 6: fuso orario, finestre di consegna, rientro/pausa per assenza e
+// notifiche per agente.
 function GeneralTab() {
+  const agents = useStore((s) => s.agents)
   const [atLogin, setAtLogin] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [tz, setTz] = useState('')
+  const [winMode, setWinMode] = useState<'morning' | 'working'>('morning')
+  const [morning, setMorning] = useState({ start: '08:30', end: '09:30' })
+  const [working, setWorking] = useState({ start: '09:00', end: '19:00' })
+  const [minAwayHours, setMinAwayHours] = useState(12)
+  const [awayPauseDays, setAwayPauseDays] = useState(7)
+  const [disabledNotifications, setDisabledNotifications] = useState<string[]>([])
 
   useEffect(() => {
     void api.getLaunchAtLogin().then(setAtLogin)
+    void api.settingsGet('userTimeZone', '').then(setTz)
+    void api.settingsGet('deliveryWindow', { mode: 'morning', morning: { start: '08:30', end: '09:30' }, working: { start: '09:00', end: '19:00' } })
+      .then((w) => {
+        const cfg = w as { mode: 'morning' | 'working'; morning: { start: string; end: string }; working: { start: string; end: string } }
+        setWinMode(cfg.mode)
+        setMorning(cfg.morning)
+        setWorking(cfg.working)
+      })
+    void api.settingsGet('minAwayHours', 12).then((v) => setMinAwayHours(Number(v) || 12))
+    void api.settingsGet('awayPauseDays', 7).then((v) => setAwayPauseDays(Number(v) || 7))
+    void api.settingsGet('notifications.disabledAgents', []).then((v) => setDisabledNotifications(Array.isArray(v) ? (v as string[]) : []))
   }, [])
 
   async function toggle(enabled: boolean) {
@@ -344,6 +367,16 @@ function GeneralTab() {
     } finally {
       setBusy(false)
     }
+  }
+
+  const inputCls = 'rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none'
+  const saveWindow = async (): Promise<void> => {
+    await api.settingsSet('deliveryWindow', { mode: winMode, morning, working })
+  }
+  const toggleAgentNotification = async (agentId: string, off: boolean): Promise<void> => {
+    const next = off ? disabledNotifications.filter((a) => a !== agentId) : [...disabledNotifications, agentId]
+    setDisabledNotifications(next)
+    await api.settingsSet('notifications.disabledAgents', next)
   }
 
   return (
@@ -364,6 +397,78 @@ function GeneralTab() {
           </span>
         </span>
       </label>
+
+      <div className="space-y-2 rounded-xl border border-neutral-800 px-4 py-3">
+        <p className="text-sm text-neutral-100">Consegna e presenza</p>
+        <label className="flex items-center justify-between text-xs text-neutral-400">
+          Fuso orario
+          <input
+            className={`w-44 ${inputCls}`}
+            placeholder={Intl.DateTimeFormat().resolvedOptions().timeZone}
+            value={tz}
+            onChange={(e) => setTz(e.target.value)}
+            onBlur={() => void api.settingsSet('userTimeZone', tz.trim())}
+          />
+        </label>
+        <div className="flex items-center justify-between gap-2 text-xs text-neutral-400">
+          <span>Finestra di consegna</span>
+          <div className="flex items-center gap-2">
+            <select
+              className={inputCls}
+              value={winMode}
+              onChange={(e) => { setWinMode(e.target.value as 'morning' | 'working'); void saveWindow() }}
+            >
+              <option value="morning">mattina</option>
+              <option value="working">orario lavorativo</option>
+            </select>
+            {winMode === 'morning' ? (
+              <>
+                <input className={`w-16 ${inputCls}`} value={morning.start} onChange={(e) => setMorning({ ...morning, start: e.target.value })} onBlur={() => void saveWindow()} />
+                <span>–</span>
+                <input className={`w-16 ${inputCls}`} value={morning.end} onChange={(e) => setMorning({ ...morning, end: e.target.value })} onBlur={() => void saveWindow()} />
+              </>
+            ) : (
+              <>
+                <span>lun–ven</span>
+                <input className={`w-16 ${inputCls}`} value={working.start} onChange={(e) => setWorking({ ...working, start: e.target.value })} onBlur={() => void saveWindow()} />
+                <span>–</span>
+                <input className={`w-16 ${inputCls}`} value={working.end} onChange={(e) => setWorking({ ...working, end: e.target.value })} onBlur={() => void saveWindow()} />
+              </>
+            )}
+          </div>
+        </div>
+        <p className="text-[10px] text-neutral-600">I messaggi non urgenti delle routine aspettano questa finestra (o l'apertura della chat del bot).</p>
+        <label className="flex items-center justify-between text-xs text-neutral-400">
+          Look-around al rientro dopo (ore di assenza)
+          <input className={`w-16 ${inputCls}`} type="number" min={1} value={minAwayHours}
+            onChange={(e) => setMinAwayHours(Number(e.target.value))}
+            onBlur={() => void api.settingsSet('minAwayHours', Math.max(1, Number(minAwayHours) || 12))} />
+        </label>
+        <label className="flex items-center justify-between text-xs text-neutral-400">
+          Pausa delle routine dopo (giorni di assenza)
+          <input className={`w-16 ${inputCls}`} type="number" min={1} value={awayPauseDays}
+            onChange={(e) => setAwayPauseDays(Number(e.target.value))}
+            onBlur={() => void api.settingsSet('awayPauseDays', Math.max(1, Number(awayPauseDays) || 7))} />
+        </label>
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-neutral-800 px-4 py-3">
+        <p className="text-sm text-neutral-100">Notifiche per agente</p>
+        {agents.map((a) => {
+          const off = disabledNotifications.includes(a.id)
+          return (
+            <label key={a.id} className="flex items-center justify-between text-xs text-neutral-400">
+              <span className="text-neutral-300">{a.name}</span>
+              <button
+                className={`rounded-lg px-2 py-1 text-[11px] ${off ? 'bg-neutral-800 text-neutral-500' : 'bg-emerald-800/50 text-emerald-300'}`}
+                onClick={() => void toggleAgentNotification(a.id, off)}
+              >
+                {off ? 'disattivate' : 'attivate'}
+              </button>
+            </label>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -616,117 +721,425 @@ function PermissionsTab({ onChanged }: { onChanged: () => Promise<void> }) {
   )
 }
 
+// ---- fase 6: tab Routine con trigger in linguaggio naturale, prossima
+// esecuzione, stato (attiva / in pausa / in pausa per assenza) e editor dei
+// tipi di trigger (schedule, email, calendar_event, webhook, poll avanzato) ----
+
+type TriggerKind = 'schedule' | 'email' | 'calendar_event' | 'webhook' | 'connector_poll' | 'presence_return'
+
+function kindOf(t: RoutineTrigger | null | undefined, legacySchedule?: string): TriggerKind {
+  if (!t) return 'schedule'
+  if (t.type === 'schedule') return 'schedule'
+  if (t.type === 'connector_poll') return t.preset ?? 'connector_poll'
+  return t.type
+}
+
+const KIND_LABEL: Record<TriggerKind, string> = {
+  schedule: 'orario',
+  email: 'email in arrivo',
+  calendar_event: 'evento del calendario',
+  webhook: 'webhook',
+  connector_poll: 'poll di un connettore',
+  presence_return: 'quando torni al computer'
+}
+
 function RoutinesTab() {
   const activeId = useStore((s) => s.activeId)
+  const connectors = useStore((s) => s.connectors)
   const [routines, setRoutines] = useState<RoutineInfo[]>([])
-  const [title, setTitle] = useState('')
-  const [prompt, setPrompt] = useState('')
-  const [schedule, setSchedule] = useState('0 9 * * *')
+  const [editing, setEditing] = useState<RoutineInfo | null>(null)
+  const [err, setErr] = useState('')
   const [suggestions, setSuggestions] = useState<RoutineSuggestion[]>([])
   const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
 
   const refresh = async () => {
     if (activeId) setRoutines(await api.listRoutines(activeId))
   }
   useEffect(() => { void refresh() }, [activeId])
 
+  const pauseResume = async (r: RoutineInfo): Promise<void> => {
+    // la ripresa dalla UI è un'azione dell'utente: nessuna card di approvazione
+    await api.updateRoutineTrigger(r.id, r.enabled ? { enabled: 0 } : { enabled: 1, paused_for_away: 0 })
+    await refresh()
+  }
+
   return (
     <div className="space-y-3">
       <p className="text-xs text-neutral-500">
-        Le routine sono attività ricorrenti che il Bot esegue su una pianificazione (cron: "m h g mese settimana", es. <code>0 9 * * *</code> = ogni giorno alle 9).
+        Le routine sono attività automatiche del Bot: su orario (cron o "ogni giorno alle 9, circa"),
+        su un'email in arrivo, prima di un evento del calendario, da un webhook o quando torni al computer.
+        I loro messaggi non urgenti aspettano la finestra di consegna.
       </p>
 
-      {routines.map((r) => (
-        <div key={r.id} className="rounded-xl border border-neutral-800 px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <span className={`h-2 w-2 rounded-full ${r.enabled ? 'bg-emerald-500' : 'bg-neutral-600'}`} />
-            <span className="text-sm text-neutral-100">{r.title}</span>
-            <code className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-400">{r.schedule}</code>
-            <div className="flex-1" />
-            <button
-              className="text-xs text-neutral-400 hover:text-neutral-200"
-              onClick={async () => { await api.updateRoutine(r.id, { enabled: r.enabled ? 0 : 1 }); await refresh() }}
-            >
-              {r.enabled ? 'disabilita' : 'abilita'}
-            </button>
-            <button
-              className="text-xs text-neutral-500 hover:text-red-400"
-              onClick={async () => { await api.deleteRoutine(r.id); await refresh() }}
-            >
-              elimina
-            </button>
-          </div>
-          <p className="mt-1 text-xs text-neutral-500">{r.prompt}</p>
-          {r.last_run && <p className="mt-1 text-[10px] text-neutral-600">ultima esecuzione: {new Date(r.last_run).toLocaleString('it-IT')}</p>}
-        </div>
-      ))}
-
-      <div className="space-y-2 rounded-xl border border-neutral-700 bg-neutral-900 p-3">
-        <input
-          className="w-full rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none"
-          placeholder="Titolo (es. Riepilogo email del mattino)"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-        <input
-          className="w-full rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none"
-          placeholder="Cosa deve fare il Bot a ogni esecuzione"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-        />
-        <div className="flex gap-2">
-          <input
-            className="w-36 rounded-lg bg-neutral-800 px-2.5 py-1.5 font-mono text-xs outline-none"
-            value={schedule}
-            onChange={(e) => setSchedule(e.target.value)}
-          />
-          <button
-            className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40"
-            disabled={!title.trim() || !prompt.trim() || !activeId}
-            onClick={async () => {
-              await api.createRoutine(activeId!, title.trim(), prompt.trim(), schedule.trim())
-              setTitle(''); setPrompt('')
-              await refresh()
-            }}
-          >
-            Aggiungi routine
-          </button>
-          <div className="flex-1" />
-          <button
-            className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs hover:bg-neutral-700 disabled:opacity-40"
-            disabled={busy || !activeId}
-            onClick={async () => {
-              setBusy(true); setErr(''); setSuggestions([])
-              try { setSuggestions(await api.suggestRoutines(activeId!)) }
-              catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
-              setBusy(false)
-            }}
-          >
-            {busy ? 'analizzo…' : '✨ Suggerisci dal transcript'}
-          </button>
-        </div>
-        {err && <p className="text-xs text-red-400">{err}</p>}
-        {suggestions.map((s, i) => (
-          <div key={i} className="rounded-lg border border-neutral-800 px-3 py-2">
+      {routines.map((r) => {
+        const state = r.enabled ? 'attiva' : r.paused_for_away ? 'in pausa per assenza' : 'in pausa'
+        const stateColor = r.enabled ? 'text-emerald-500' : r.paused_for_away ? 'text-amber-500' : 'text-neutral-500'
+        return (
+          <div key={r.id} className="rounded-xl border border-neutral-800 px-3 py-2.5">
             <div className="flex items-center gap-2">
-              <span className="text-sm text-neutral-100">{s.title}</span>
-              <code className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-400">{s.schedule}</code>
+              <span className={`h-2 w-2 rounded-full ${r.enabled ? 'bg-emerald-500' : r.paused_for_away ? 'bg-amber-500' : 'bg-neutral-600'}`} />
+              <span className="text-sm text-neutral-100">{r.title}</span>
+              <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-neutral-400">{KIND_LABEL[kindOf(r.trigger)]}</span>
               <div className="flex-1" />
-              <button
-                className="rounded-md bg-emerald-700/60 px-2 py-1 text-xs text-white hover:bg-emerald-600/60"
-                onClick={async () => {
-                  await api.createRoutine(activeId!, s.title, s.description, s.schedule)
-                  setSuggestions(suggestions.filter((_, j) => j !== i))
-                  await refresh()
-                }}
-              >
-                Aggiungi
+              <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={() => setEditing(r)}>modifica</button>
+              <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={() => void pauseResume(r)}>
+                {r.enabled ? 'metti in pausa' : 'riattiva'}
+              </button>
+              <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.deleteRoutine(r.id); await refresh() }}>
+                elimina
               </button>
             </div>
-            <p className="mt-1 text-xs text-neutral-500">{s.description}</p>
+            <p className="mt-1 text-xs text-neutral-500">{describeTrigger(r.trigger ?? null, r.schedule)}</p>
+            <div className="mt-1 flex items-center gap-3 text-[10px] text-neutral-600">
+              <span className={stateColor}>{state}</span>
+              {r.next_run && <span>prossima: {new Date(r.next_run).toLocaleString('it-IT')}</span>}
+              {r.last_run && <span>ultima: {new Date(r.last_run).toLocaleString('it-IT')}</span>}
+            </div>
+            {r.webhook_url && (
+              <div className="mt-1 flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900 px-2 py-1.5">
+                <code className="min-w-0 flex-1 truncate text-[10px] text-neutral-400">{r.webhook_url}</code>
+                <code className="hidden truncate text-[10px] text-neutral-600" title={`Authorization: Bearer ${r.trigger?.type === 'webhook' ? r.trigger.token : ''}`}>
+                  {r.trigger?.type === 'webhook' ? r.trigger.token.slice(0, 10) + '…' : ''}
+                </code>
+                <button
+                  className="text-[10px] text-sky-400 hover:text-sky-300"
+                  onClick={() => void navigator.clipboard?.writeText(
+                    `curl -X POST ${r.webhook_url} -H "Authorization: Bearer ${r.trigger?.type === 'webhook' ? r.trigger.token : ''}" -d '{"test":1}'`
+                  )}
+                >
+                  copia curl
+                </button>
+              </div>
+            )}
           </div>
+        )
+      })}
+
+      {editing ? (
+        <TriggerEditor
+          agentId={activeId}
+          routine={editing}
+          connectors={connectors}
+          onCancel={() => setEditing(null)}
+          onSaved={async () => { setEditing(null); await refresh() }}
+        />
+      ) : (
+        <>
+          <NewRoutinePicker
+            agentId={activeId}
+            connectors={connectors}
+            onCreate={async (title, prompt, trigger, timezone) => {
+              setErr('')
+              try {
+                await api.createRoutineTrigger(activeId!, title, prompt, trigger, timezone || undefined)
+                await refresh()
+              } catch (e) {
+                setErr(e instanceof Error ? e.message : String(e))
+              }
+            }}
+            err={err}
+          />
+          <div className="space-y-2 border-t border-neutral-800 pt-2">
+            <button
+              className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs hover:bg-neutral-700 disabled:opacity-40"
+              disabled={busy || !activeId}
+              onClick={async () => {
+                setBusy(true); setErr(''); setSuggestions([])
+                try { setSuggestions(await api.suggestRoutines(activeId!)) }
+                catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+                setBusy(false)
+              }}
+            >
+              {busy ? 'analizzo…' : '✨ Suggerisci dal transcript'}
+            </button>
+            {suggestions.map((s, i) => (
+              <div key={i} className="rounded-lg border border-neutral-800 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-neutral-100">{s.title}</span>
+                  <code className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-400">{s.schedule}</code>
+                  <div className="flex-1" />
+                  <button
+                    className="rounded-md bg-emerald-700/60 px-2 py-1 text-xs text-white hover:bg-emerald-600/60"
+                    onClick={async () => {
+                      await api.createRoutine(activeId!, s.title, s.description, s.schedule)
+                      setSuggestions(suggestions.filter((_, j) => j !== i))
+                      await refresh()
+                    }}
+                  >
+                    Aggiungi
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-neutral-500">{s.description}</p>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Bottone "+ routine" che apre l'editor con il tipo di trigger da scegliere. */
+function NewRoutinePicker(props: {
+  agentId: string | null
+  connectors: ConnectorInfo[]
+  onCreate(title: string, prompt: string, trigger: RoutineTrigger, timezone: string): Promise<void>
+  err: string
+}) {
+  const [kind, setKind] = useState<TriggerKind | null>(null)
+  if (!kind) {
+    return (
+      <div className="space-y-2">
+        <button
+          className="w-full rounded-xl border border-dashed border-neutral-700 px-3 py-2.5 text-sm text-neutral-500 hover:border-neutral-500 hover:text-neutral-300"
+          onClick={() => setKind('schedule')}
+        >
+          + Nuova routine
+        </button>
+        {props.err && <p className="text-xs text-red-400">{props.err}</p>}
+      </div>
+    )
+  }
+  return (
+    <TriggerEditor
+      agentId={props.agentId}
+      connectors={props.connectors}
+      initialKind={kind}
+      onCancel={() => setKind(null)}
+      onSaved={() => setKind(null)}
+      onCreate={props.onCreate}
+    />
+  )
+}
+
+/** L'editor dei trigger: campi comuni (titolo/prompt) + campi per tipo. */
+function TriggerEditor(props: {
+  agentId: string | null
+  routine?: RoutineInfo
+  initialKind?: TriggerKind
+  connectors: ConnectorInfo[]
+  onCancel(): void
+  onSaved(): void
+  onCreate?(title: string, prompt: string, trigger: RoutineTrigger, timezone: string): Promise<void>
+}) {
+  const r = props.routine
+  const [kind, setKind] = useState<TriggerKind>(props.initialKind ?? kindOf(r?.trigger, r?.schedule))
+  const [title, setTitle] = useState(r?.title ?? '')
+  const [prompt, setPrompt] = useState(r?.prompt ?? '')
+  const [timezone, setTimezone] = useState(r?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  // schedule
+  const [cron, setCron] = useState(r?.trigger?.type === 'schedule' && r.trigger.kind === 'cron' ? r.trigger.cron : r?.schedule || '0 9 * * *')
+  const [every, setEvery] = useState<'day' | 'weekday' | 'week' | 'month' | 'hour'>(
+    r?.trigger?.type === 'schedule' && r.trigger.kind === 'every' ? r.trigger.every : 'day'
+  )
+  const [at, setAt] = useState(r?.trigger?.type === 'schedule' && r.trigger.kind === 'every' ? (r.trigger.at ?? '09:00') : '09:00')
+  const [weekday, setWeekday] = useState(1)
+  const [monthDay, setMonthDay] = useState(1)
+  const [mode, setMode] = useState<'at' | 'around'>('at')
+  // poll (email/calendar/generico)
+  const [connectorId, setConnectorId] = useState('')
+  const [tool, setTool] = useState('')
+  const [idField, setIdField] = useState('')
+  const [intervalMin, setIntervalMin] = useState(5)
+  const [offsetMinutes, setOffsetMinutes] = useState(10)
+  const [query, setQuery] = useState('')
+  const [argsJson, setArgsJson] = useState('{}')
+
+  // preset: il tool lo sceglie l'euristica dai tool del connettore connesso
+  const presetConnectors = props.connectors.filter((c) => c.state.status === 'connected' && c.tools.length > 0)
+  const autoTool = (preset: 'email' | 'calendar_event', cid: string): { tool: string | null; argName: string | null } => {
+    const conn = presetConnectors.find((c) => c.id === (cid || (preset === 'email' ? 'gmail' : 'gcalendar')))
+    if (!conn) return { tool: null, argName: null }
+    const chosen = choosePollTool(
+      conn.tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        annotations: t.annotations,
+        inputProperties: undefined
+      })),
+      preset
+    )
+    const full = conn.tools.find((t) => t.name === chosen) ?? null
+    return { tool: chosen, argName: chooseQueryArgName(full ? { name: full.name, description: full.description, annotations: full.annotations } : null) }
+  }
+
+  const buildTrigger = (): RoutineTrigger | null => {
+    if (kind === 'schedule') {
+      // il toggle "ogni…" svuota il cron: i due modi di dire l'orario
+      return cron.trim()
+        ? { type: 'schedule', kind: 'cron', cron: cron.trim() }
+        : { type: 'schedule', kind: 'every', every, at, mode, ...(every === 'week' ? { weekday } : {}), ...(every === 'month' ? { monthDay } : {}) }
+    }
+    if (kind === 'webhook') return { type: 'webhook', token: r?.trigger?.type === 'webhook' ? r.trigger.token : '' }
+    if (kind === 'presence_return') return { type: 'presence_return' }
+    // email / calendar_event / connector_poll
+    const cid = connectorId || (kind === 'email' ? 'gmail' : kind === 'calendar_event' ? 'gcalendar' : '')
+    let args: Record<string, unknown>
+    try {
+      args = JSON.parse(argsJson || '{}') as Record<string, unknown>
+    } catch {
+      return null // args non validi: il salvataggio lo segnala
+    }
+    if (kind === 'email' && query.trim()) {
+      const { argName } = autoTool('email', cid)
+      if (argName) args = { ...args, [argName]: query.trim() }
+    }
+    return {
+      type: 'connector_poll',
+      connectorId: cid,
+      tool: tool.trim(),
+      args,
+      intervalMin: Math.max(2, Number(intervalMin) || 2),
+      idField: idField.trim(),
+      ...(kind === 'email' ? { preset: 'email' as const } : {}),
+      ...(kind === 'calendar_event' ? { preset: 'calendar_event' as const, offsetMinutes: Math.max(0, Number(offsetMinutes) || 0) } : {})
+    }
+  }
+
+  const save = async (): Promise<void> => {
+    setErr('')
+    setBusy(true)
+    try {
+      const trigger = buildTrigger()
+      if (!trigger) throw new Error('Argomenti (args) non sono JSON valido')
+      if (props.onCreate) await props.onCreate(title.trim(), prompt.trim(), trigger, timezone.trim())
+      else await api.updateRoutineTrigger(r!.id, { title: title.trim(), prompt: prompt.trim(), trigger, timezone: timezone.trim() })
+      props.onSaved()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // precompilazione dei preset alla scelta del tipo
+  useEffect(() => {
+    if (kind === 'email') {
+      const { tool: t, argName } = autoTool('email', connectorId)
+      if (t) setTool(t)
+      setIdField((v) => v || 'messages[].id')
+      void argName
+    } else if (kind === 'calendar_event') {
+      const { tool: t } = autoTool('calendar_event', connectorId)
+      if (t) setTool(t)
+      setIdField((v) => v || 'events[].id')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, connectorId])
+
+  const inputCls = 'rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none'
+  const presetHint = (preset: 'email' | 'calendar_event'): string => {
+    const { tool: t } = autoTool(preset, connectorId)
+    return t
+      ? `tool scelto dal connettore: ${t}`
+      : 'nessun tool riconosciuto nel connettore: configura tool e idField a mano'
+  }
+
+  return (
+    <div className="space-y-2 rounded-xl border border-neutral-700 bg-neutral-900 p-3">
+      <div className="flex gap-1">
+        {(Object.keys(KIND_LABEL) as TriggerKind[]).map((k) => (
+          <button
+            key={k}
+            className={`rounded-lg px-2 py-1 text-[11px] ${kind === k ? 'bg-neutral-700 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}
+            onClick={() => setKind(k)}
+          >
+            {KIND_LABEL[k]}
+          </button>
         ))}
+      </div>
+      <input className={`w-full ${inputCls} text-sm`} placeholder="Titolo (es. Riepilogo email del mattino)" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <input className={`w-full ${inputCls} text-sm`} placeholder="Cosa deve fare il Bot a ogni esecuzione" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+
+      {kind === 'schedule' && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-xs text-neutral-400">
+            <button className={`rounded-lg px-2 py-1 ${cron !== '' ? 'bg-neutral-700' : ''}`} onClick={() => { setCron('0 9 * * *') }}>cron</button>
+            <button className={`rounded-lg px-2 py-1 ${cron === '' ? 'bg-neutral-700' : ''}`} onClick={() => setCron('')}>ogni…</button>
+            {cron === '' && (
+              <>
+                <select className={inputCls} value={every} onChange={(e) => setEvery(e.target.value as typeof every)}>
+                  <option value="day">giorno</option>
+                  <option value="weekday">giorni feriali</option>
+                  <option value="week">settimana</option>
+                  <option value="month">mese</option>
+                  <option value="hour">ora</option>
+                </select>
+                {every === 'week' && (
+                  <select className={inputCls} value={weekday} onChange={(e) => setWeekday(Number(e.target.value))}>
+                    {['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'].map((d, i) => (
+                      <option key={d} value={i}>{d}</option>
+                    ))}
+                  </select>
+                )}
+                {every === 'month' && (
+                  <input className={`w-16 ${inputCls}`} type="number" min={1} max={31} value={monthDay} onChange={(e) => setMonthDay(Number(e.target.value))} />
+                )}
+                <input className={`w-20 ${inputCls}`} placeholder="HH:MM" value={at} onChange={(e) => setAt(e.target.value)} />
+                <select className={inputCls} value={mode} onChange={(e) => setMode(e.target.value as 'at' | 'around')}>
+                  <option value="at">preciso</option>
+                  <option value="around">circa (±15 min)</option>
+                </select>
+              </>
+            )}
+            {cron !== '' && <input className={`flex-1 font-mono ${inputCls}`} value={cron} onChange={(e) => setCron(e.target.value)} />}
+          </div>
+        </div>
+      )}
+
+      {(kind === 'email' || kind === 'calendar_event' || kind === 'connector_poll') && (
+        <div className="space-y-2">
+          {kind === 'connector_poll' && (
+            <select className={`w-full ${inputCls}`} value={connectorId} onChange={(e) => setConnectorId(e.target.value)}>
+              <option value="">— connettore —</option>
+              {presetConnectors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          )}
+          {(kind === 'email' || kind === 'calendar_event') && <p className="text-[11px] text-neutral-500">{presetHint(kind)}</p>}
+          {kind === 'email' && (
+            <input className={`w-full ${inputCls}`} placeholder="Quando arriva un'e-mail che corrisponde a… (query)" value={query} onChange={(e) => setQuery(e.target.value)} />
+          )}
+          {kind === 'calendar_event' && (
+            <label className="flex items-center gap-2 text-xs text-neutral-400">
+              avvisa
+              <input className={`w-16 ${inputCls}`} type="number" min={0} value={offsetMinutes} onChange={(e) => setOffsetMinutes(Number(e.target.value))} />
+              minuti prima dell'evento
+            </label>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <input className={`font-mono ${inputCls}`} placeholder="tool (mcp__…__…)" value={tool} onChange={(e) => setTool(e.target.value)} />
+            <input className={`font-mono ${inputCls}`} placeholder='idField (es. "messages[].id")' value={idField} onChange={(e) => setIdField(e.target.value)} />
+            <input className={inputCls} type="number" min={2} title="minuti tra i poll (minimo 2)" value={intervalMin} onChange={(e) => setIntervalMin(Number(e.target.value))} />
+            {kind === 'connector_poll' && (
+              <input className={`font-mono ${inputCls}`} placeholder='args JSON, es. {"query":"x"}' value={argsJson} onChange={(e) => setArgsJson(e.target.value)} />
+            )}
+          </div>
+        </div>
+      )}
+
+      {kind === 'webhook' && (
+        <p className="text-[11px] text-neutral-500">
+          All'uscita trovi l'URL con il token da copiare: qualunque sistema può far scattare la routine con un POST.
+        </p>
+      )}
+      {kind === 'presence_return' && (
+        <p className="text-[11px] text-neutral-500">La routine gira quando torni al computer dopo un'assenza lunga.</p>
+      )}
+
+      <input className={`w-full ${inputCls}`} placeholder="Fuso orario (es. Europe/Rome)" value={timezone} onChange={(e) => setTimezone(e.target.value)} />
+      {err && <p className="text-xs text-red-400">{err}</p>}
+      <div className="flex justify-end gap-2 pt-1">
+        <button className="rounded-lg px-3 py-1.5 text-xs text-neutral-400 hover:text-neutral-200" onClick={props.onCancel}>Annulla</button>
+        <button
+          className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40"
+          disabled={busy || !title.trim() || !prompt.trim() || !props.agentId}
+          onClick={() => void save()}
+        >
+          {r ? 'Salva' : 'Crea routine'}
+        </button>
       </div>
     </div>
   )

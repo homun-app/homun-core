@@ -3,10 +3,13 @@
 // viene salvato nel payload del job (payload.entryId) prima di chiamare il
 // modello; ai tentativi successivi (entryId già presente) torna indietro come
 // `resume`, così il turno riprende dal transcript invece di ripetere.
+// Fase 6: le routine scattate da un trigger portano l'evento nel payload:
+// entra nel prompt nel blocco <evento> come evidenza (dato, non istruzione).
 import type { DatabaseSync } from 'node:sqlite'
 import { setJobEntryId, type Job } from '../main/store/jobs'
 import { runTurn, type RunTurnOptions } from '../main/agent/loop'
-import type { SandbotEvent } from '../shared/types'
+import { formatTriggerEvent } from '../shared/triggers'
+import type { SandbotEvent, TriggerEventPayload } from '../shared/types'
 
 type Emitter = (e: SandbotEvent) => void
 type RunTurnFn = typeof runTurn
@@ -27,8 +30,13 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       })
       return
     }
-    const p = job.payload as { routineId: number; title: string; prompt: string }
-    await runTurnFn(job.agent_id, `[routine ricorrente: ${p.title}] ${p.prompt}`, emit, undefined, {
+    const p = job.payload as { routineId: number; title: string; prompt: string; event?: TriggerEventPayload }
+    // fase 6: il turno di un trigger parte dall'evento (evidenza nel blocco
+    // delimitato <evento>); le routine a schedule restano come prima
+    const text = p.event
+      ? formatTriggerEvent(p.title, p.prompt, p.event)
+      : `[routine ricorrente: ${p.title}] ${p.prompt}`
+    await runTurnFn(job.agent_id, text, emit, undefined, {
       source: 'routine', title: p.title, ...opts, onTurnEntry
     })
   }

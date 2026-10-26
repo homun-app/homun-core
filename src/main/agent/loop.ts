@@ -18,7 +18,7 @@
 // draft_external. Ogni turno si chiude con un evento meta.turnEnd ∈
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID } from 'node:crypto'
-import { getAgent, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting } from '../store/db'
+import { getAgent, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
 import { systemPrompt, secondaryPrompts } from './prompts'
 import { toolDefs, executeTool } from './tools'
@@ -86,6 +86,8 @@ function endTurn(agentId: string, outcome: TurnEnd, emit: Emitter): void {
  * Fase 3: appende una entry 'send-message' (l'UNICO contenuto visibile in chat)
  * con meta.call = la tool-call che l'ha prodotta, così la storia ricostruita
  * dal transcript mostra al modello la chiamata originale.
+ * Fase 6: ritorna l'entry (serve all'outbox per trattenere i messaggi non
+ * urgenti dei turni automatici, meta.held).
  */
 function appendSend(
   agentId: string,
@@ -93,7 +95,7 @@ function appendSend(
   message: SendMessagePayload,
   emit: Emitter,
   extra: Record<string, unknown> = {}
-): void {
+): import('../../shared/types').TranscriptEntry {
   const content = message.type === 'text' ? message.text
     : message.type === 'widget' ? message.prompt
     : message.type === 'connector' ? (message.reason || message.name)
@@ -103,6 +105,12 @@ function appendSend(
     meta: { call: { id: call.id, name: call.name, arguments: call.arguments }, message, ...extra }
   })
   emit({ type: 'entries', agentId, entries: [entry] })
+  return entry
+}
+
+/** Fase 6 (§3bis L9): l'agente aspetta l'utente (ask_user/approval/bozza) → evento di notifica. */
+function emitNeedsInput(agentId: string, entry: import('../../shared/types').TranscriptEntry, preview: string, emit: Emitter): void {
+  emit({ type: 'agent-notify', agentId, kind: 'needs-input', preview, at: entry.createdAt })
 }
 
 /**
@@ -336,7 +344,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
         // invio esterno chiamato direttamente: MAI eseguito, diventa una bozza
         if (isExternalSend(call.name, externalCfg)) {
-          appendSend(agentId, call, draftFromExternalCall(call.name, input), emit, { status: 'pending' })
+          const draft = appendSend(agentId, call, draftFromExternalCall(call.name, input), emit, { status: 'pending' })
+          emitNeedsInput(agentId, draft, `bozza in attesa: ${draft.content.slice(0, 80)}`, emit)
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: 'Invio esterno non eseguito: trasformato in una bozza in attesa della conferma dell’utente. Per gli invii usa draft_external.'
@@ -346,8 +355,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
         if (call.name === 'send_to_user') {
           const message: SendMessagePayload = { type: 'text', text: String(input.text ?? ''), ...(input.urgent ? { urgent: true } : {}) }
-          appendSend(agentId, call, message, emit)
-          messages.push({ role: 'tool', toolCallId: call.id, content: 'inviato all’utente' })
+          // fase 6 (§3bis L4): i messaggi NON urgenti dei turni automatici
+          // (routine/trigger) restano in outbox fino alla finestra di consegna
+          // o all'apertura della chat; urgent e turni utente passano subito
+          const hold = source === 'routine' && !input.urgent
+          const sent = appendSend(agentId, call, message, emit, hold ? { held: true } : {})
+          if (hold) holdOutboxEntry(sent.id, agentId, sent.createdAt)
+          messages.push({
+            role: 'tool', toolCallId: call.id,
+            content: hold
+              ? 'inviato all’utente: la consegna è rinviata alla prossima finestra di consegna (o a quando apre la chat), salvo urgenza'
+              : 'inviato all’utente'
+          })
           continue
         }
 
@@ -364,7 +383,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             via: input.via,
             cfg: externalCfg
           })
-          appendSend(agentId, call, prepared.message, emit, { status: 'pending' })
+          const draft = appendSend(agentId, call, prepared.message, emit, { status: 'pending' })
+          emitNeedsInput(agentId, draft, `bozza in attesa: ${draft.content.slice(0, 80)}`, emit)
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: prepared.viaRejected
@@ -383,7 +403,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             ...(input.allowCustom ? { allowCustom: true } : {}),
             ...(input.dismissOnMoveOn ? { dismissOnMoveOn: true } : {})
           }
-          appendSend(agentId, call, message, emit)
+          const widget = appendSend(agentId, call, message, emit)
+          emitNeedsInput(agentId, widget, String(input.prompt ?? ''), emit)
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: 'widget mostrato all’utente: il turno termina e la risposta arriverà come nuovo messaggio utente. Non ripetere la domanda.'
@@ -457,6 +478,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           setStatus(agentId, 'paused-for-approval', emit)
           emit({ type: 'entries', agentId, entries: [approvalEntry] })
           emit({ type: 'approval', agentId, approval })
+          // fase 6 (§3bis L9): l'agente è fermo su un'approval → notifica
+          emitNeedsInput(agentId, approvalEntry, `${call.name}: ${verdict.reason}`, emit)
 
           const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
             run.approvals.set(approval.id, (d) => resolve(d))
@@ -612,6 +635,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         }
       }
       endTurn(agentId, 'FINISHED', emit)
+      // fase 6 (§3bis L9): agent-done = turno finito con almeno un messaggio
+      // visibile (quelli trattenuti in outbox non contano: l'utente non lo
+      // ha ancora visto, la notifica arriverà alla consegna... o mai)
+      const visible = visibleReplyEntries(getEntries(agentId), turnEntryId).filter((e) => !e.meta?.held)
+      if (visible.length) {
+        const last = visible[visible.length - 1]!
+        emit({ type: 'agent-notify', agentId, kind: 'done', preview: last.content, at: last.createdAt })
+      }
     }
     setStatus(agentId, 'idle', emit)
     updateAgent(agentId, { unread: 0 })

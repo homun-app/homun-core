@@ -130,6 +130,13 @@ export const useStore = create<Store>((set, get) => ({
     set({ activeId: agentId, entries: [] })
     set({ entries: await api.getEntries(agentId) })
     await api.updateAgent(agentId, {})
+    // fase 6: l'utente sta guardando questa chat → notifiche soppresse per
+    // questo agente e la sua outbox si consegna subito (finestra bypassata)
+    void api.presenceViewing(agentId).catch(() => undefined)
+    void api.outboxOpened(agentId)
+      .then(() => api.getEntries(agentId))
+      .then((entries) => set({ entries }))
+      .catch(() => undefined)
   },
 
   async send(text, images) {

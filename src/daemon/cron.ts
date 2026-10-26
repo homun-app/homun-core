@@ -1,8 +1,12 @@
 // Calcolo del prossimo run per le routine: cron a 5 campi (con secondi
-// opzionali a 6 campi, come node-cron) valutato nel fuso orario locale.
+// opzionali a 6 campi, come node-cron).
 // Le routine smettono di usare node-cron in-process: lo scheduler chiama
 // nextCronRun per calcolare il run_at dei job nella coda durevole.
+// Fase 6: il calcolo rispetta il fuso orario della routine (parametro tz,
+// default il fuso locale del processo) — l'iterazione avviene sull'orologio
+// da parete del fuso (tz.ts), quindi l'ora legale è gestita da Intl.
 // Funzioni pure: stesso input → stesso output, nessun accesso a timer o rete.
+import { tzParts, wallToEpoch, localTimeZone } from './tz'
 
 export interface CronFields {
   /** null = espressione a 5 campi (granularità al minuto) */
@@ -90,55 +94,56 @@ export function parseCron(expr: string): CronFields | null {
 }
 
 /** Confronto del giorno con la semantica OR del cron standard (dom e dow entrambi ristretti). */
-function dayMatches(f: CronFields, d: Date): boolean {
-  const dom = f.daysOfMonth.has(d.getDate())
-  const dow = f.daysOfWeek.has(d.getDay())
-  return f.domRestricted && f.dowRestricted ? dom || dow : dom && dow
+function dayMatches(f: CronFields, dom: number, dow: number): boolean {
+  const dm = f.daysOfMonth.has(dom)
+  const dw = f.daysOfWeek.has(dow)
+  return f.domRestricted && f.dowRestricted ? dm || dw : dm && dw
 }
 
 /**
- * Prossima esecuzione strettamente successiva a `from` (ms epoch), in fuso
- * orario locale. Avanza campo per campo (mese → giorno → ora → minuto →
- * secondo) invece di scandire ogni minuto; null se l'espressione non ha mai
- * match (es. 30 febbraio) o non è valida.
+ * Prossima esecuzione strettamente successiva a `from` (ms epoch), nel fuso
+ * orario `tz` (default: fuso locale del processo). Itera sui giorni
+ * dell'orologio da parete del fuso e converte solo i candidati orario:minuto
+ * che matchano; null se l'espressione non è valida o non ha mai match
+ * (es. 30 febbraio). Le ore inesistenti per l'ora legale vengono saltate.
  */
-export function nextCronRun(expr: string, from: number): number | null {
+export function nextCronRun(expr: string, from: number, tz?: string): number | null {
   const f = parseCron(expr)
   if (!f) return null
-  const start = new Date(from)
-  const d = f.seconds
-    ? new Date(start.getFullYear(), start.getMonth(), start.getDate(), start.getHours(), start.getMinutes(), start.getSeconds() + 1)
-    : new Date(start.getFullYear(), start.getMonth(), start.getDate(), start.getHours(), start.getMinutes() + 1, 0)
+  const zone = tz ?? localTimeZone()
+  // partenza: minuto (o secondo) successivo a from
+  const t0 = f.seconds
+    ? Math.floor(from / 1000) * 1000 + 1000
+    : Math.floor(from / 60_000) * 60_000 + 60_000
+  const p0 = tzParts(t0, zone)
+  // giorno corrente dell'orologio da parete (iterato in UTC, indipendente dal fuso)
+  let day = Date.UTC(p0.year, p0.month - 1, p0.day)
+  const hours = [...f.hours].sort((a, b) => a - b)
+  const minutes = [...f.minutes].sort((a, b) => a - b)
+  const seconds = f.seconds ? [...f.seconds].sort((a, b) => a - b) : [0]
   for (let guard = 0; guard < 10_000; guard++) {
-    if (!f.months.has(d.getMonth() + 1)) {
-      let y = d.getFullYear()
-      let m = d.getMonth() + 1 // 1-12
-      do {
-        m++
-        if (m > 12) { m = 1; y++ }
-      } while (!f.months.has(m))
-      d.setFullYear(y, m - 1, 1)
-      d.setHours(0, 0, 0, 0)
+    const dc = new Date(day)
+    const y = dc.getUTCFullYear()
+    const mo = dc.getUTCMonth() + 1
+    const d = dc.getUTCDate()
+    if (!f.months.has(mo)) {
+      // salta al primo giorno del mese successivo (dell'orologio da parete)
+      day = Date.UTC(mo === 12 ? y + 1 : y, mo === 12 ? 0 : mo, 1)
       continue
     }
-    if (!dayMatches(f, d)) {
-      d.setDate(d.getDate() + 1)
-      d.setHours(0, 0, 0, 0)
+    if (!dayMatches(f, d, dc.getUTCDay())) {
+      day += 86_400_000
       continue
     }
-    if (!f.hours.has(d.getHours())) {
-      d.setHours(d.getHours() + 1, 0, 0, 0)
-      continue
+    for (const h of hours) {
+      for (const mi of minutes) {
+        for (const s of seconds) {
+          const epoch = wallToEpoch(y, mo, d, h, mi, zone, s)
+          if (epoch !== null && epoch > from) return epoch
+        }
+      }
     }
-    if (!f.minutes.has(d.getMinutes())) {
-      d.setMinutes(d.getMinutes() + 1, 0, 0)
-      continue
-    }
-    if (f.seconds && !f.seconds.has(d.getSeconds())) {
-      d.setSeconds(d.getSeconds() + 1, 0)
-      continue
-    }
-    return d.getTime()
+    day += 86_400_000
   }
   return null
 }

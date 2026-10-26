@@ -236,6 +236,9 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       // fase 3: l'UNICO contenuto visibile del bot — text | widget | draft
       const meta = (entry.meta ?? {}) as Partial<SendMessageMeta>
       const message = meta.message as SendMessagePayload | undefined
+      // fase 6: trattenuto nell'outbox (turno automatico non urgent, in
+      // attesa della finestra di consegna) — invisibile finché non consegnato
+      if (meta.held) return null
       if (message?.type === 'widget') return <WidgetCard entry={entry} />
       if (message?.type === 'draft') return <DraftCard entry={entry} />
       if (message?.type === 'connector') return <ConnectorCard entry={entry} />

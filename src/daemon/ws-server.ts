@@ -3,7 +3,7 @@
 // connessione viene chiusa e nessun metodo viene eseguito. Trasporta gli
 // eventi push (broadcast) e le RPC in entrambe le direzioni (il daemon
 // chiama la UI per le API host: notifiche, safeStorage, screen).
-import { createServer, type Server, type IncomingMessage } from 'node:http'
+import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import { encodeFrame, decodeFrame, acceptKey, OP_CLOSE, OP_PING, OP_PONG, OP_TEXT, OP_CONT, type WsFrame } from '../shared/ws'
@@ -187,6 +187,12 @@ export function startWsServer(opts: {
   authTimeoutMs?: number
   /** Tetto pre-autenticazione in byte, buffer + frammenti (default 64 KB). */
   preAuthMaxBytes?: number
+  /**
+   * Fase 6: gestore delle richieste HTTP ordinarie (i webhook dei trigger,
+   * POST /hooks/<routineId>) sulla stessa porta del WebSocket. true se ha
+   * risposto; false/undefined → la connessione viene chiusa come oggi.
+   */
+  httpHandler?: (req: IncomingMessage, res: ServerResponse) => boolean | Promise<boolean>
 }): Promise<WsRpcServer> {
   const host = opts.host ?? '127.0.0.1'
   const limits = {
@@ -197,8 +203,14 @@ export function startWsServer(opts: {
   let uiConn: Connection | null = null
   let nextCallId = 1
 
-  const server: Server = createServer((_req: IncomingMessage, res) => {
-    // nessuna pagina servita: solo WebSocket
+  const server: Server = createServer((req: IncomingMessage, res) => {
+    // nessuna pagina servita: solo WebSocket e i webhook dei trigger (fase 6)
+    if (opts.httpHandler) {
+      void Promise.resolve(opts.httpHandler(req, res)).then((handled) => {
+        if (!handled) res.destroy()
+      })
+      return
+    }
     res.destroy()
   })
 

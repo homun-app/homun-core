@@ -4,7 +4,6 @@
 // notifica via osascript, vault bloccato (mai chiavi in chiaro), scale factor
 // retina di default (coerente con gli screenshot nativi 2x).
 import { execFile } from 'node:child_process'
-import { getAgent, getEntries } from '../main/store/db'
 import { setScaleFactorProvider } from '../main/computeruse'
 import { setSafeStorage, type SafeStorageLike } from '../main/vault'
 
@@ -31,9 +30,10 @@ export function uiSafeStorage(deps: HostBridgeDeps): SafeStorageLike {
 
 /**
  * Collega il bridge al runtime: safeStorage del vault, scale factor del
- * computer use (cache 60s), notifica "bot ha risposto".
+ * computer use (cache 60s), notifiche (fase 6: titolo e corpo già decisi
+ * dalle regole di soppressione del daemon, agent-done/agent-needs-input).
  */
-export function attachHostBridge(deps: HostBridgeDeps): { notifyDone(agentId: string): void; refreshScale(): void } {
+export function attachHostBridge(deps: HostBridgeDeps): { notify(title: string, body: string): void; refreshScale(): void } {
   setSafeStorage(uiSafeStorage(deps))
 
   let scaleFactor = 2
@@ -51,17 +51,12 @@ export function attachHostBridge(deps: HostBridgeDeps): { notifyDone(agentId: st
 
   return {
     refreshScale,
-    /** Chiamato a fine turno: notifica l'utente se non sta già guardando (la UI decide come). */
-    notifyDone(agentId: string): void {
-      const agent = getAgent(agentId)
-      if (!agent) return
-      const last = getEntries(agentId).findLast((e) => e.kind === 'message' && e.role === 'assistant')
-      if (!last?.content) return
-      const body = last.content.replace(/[#*`>]/g, '').slice(0, 120)
+    /** Notifica nativa con la UI aperta (il click riporta alla finestra), osascript senza UI. */
+    notify(title: string, body: string): void {
       if (deps.hasUi()) {
-        void deps.callUi('host.notify', [agentId]).catch(() => osascriptNotify(`${agent.name} ha risposto`, body))
+        void deps.callUi('host.notify', [title, body]).catch(() => osascriptNotify(title, body))
       } else {
-        osascriptNotify(`${agent.name} ha risposto`, body)
+        osascriptNotify(title, body)
       }
     }
   }

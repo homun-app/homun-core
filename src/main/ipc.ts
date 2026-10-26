@@ -20,6 +20,8 @@ export const DAEMON_RPC_CHANNELS = [
   'widget:respond', 'draft:send', 'draft:discard', 'draft:update',
   'quickask',
   'routines:list', 'routines:create', 'routines:update', 'routines:delete', 'routines:suggest',
+  'routines:create-trigger', 'routines:update-trigger',
+  'presence:signal', 'presence:viewing', 'outbox:opened',
   'memory:list', 'memory:update', 'memory:delete',
   'skills:list', 'skills:delete',
   'mcp:list', 'mcp:save', 'mcp:delete', 'mcp:test',
@@ -75,20 +77,13 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
   })
 
   // ---- host API: il daemon chiama la UI quando è aperta ----
-  client.registerHost('host.notify', ([agentId]) => {
+  // fase 6: titolo/corpo già decisi dalle regole di soppressione del daemon
+  // (agent-done / agent-needs-input); qui resta solo la notifica nativa
+  client.registerHost('host.notify', ([title, body]) => {
     const windows = getWindows()
-    const focused = windows.some((w) => w.isFocused())
-    if (focused) return { shown: false }
-    const agent = db.getAgent(agentId as string)
-    // fase 3: l'ultimo messaggio visibile è una send-message (testo libero =
-    // ragionamento interno, mai notificato); ripiego sulle message pre-fase 3
-    const last = db.getEntries(agentId as string).findLast(
-      (x) => x.kind === 'send-message' || (x.kind === 'message' && x.role === 'assistant')
-    )
-    if (!agent || !last?.content) return { shown: false }
     const n = new Notification({
-      title: `${agent.name} ha risposto`,
-      body: last.content.replace(/[#*`>]/g, '').slice(0, 120)
+      title: String(title ?? 'SandBot'),
+      body: String(body ?? '').slice(0, 120)
     })
     n.on('click', () => { const w = windows[0]; w?.show(); w?.focus() })
     n.show()

@@ -107,6 +107,8 @@ export interface SendMessageMeta {
   widgetDismissed?: boolean
   status?: 'pending' | 'sent' | 'discarded' | 'error'
   fallback?: boolean
+  /** fase 6: true finché il messaggio è trattenuto nell'outbox (consegna alla finestra) */
+  held?: boolean
 }
 
 export interface TranscriptEntry {
@@ -188,6 +190,10 @@ export type SandbotEvent =
   // fase 5: lo stato di un connettore è cambiato (connesso, needs_auth, …) —
   // la vista "Connetti app" ricarica il catalogo
   | { type: 'connectors' }
+  // fase 6 (§3bis L9): il turno è finito con un messaggio visibile (done) o
+  // l'agente aspetta l'utente (needs-input: ask_user, approval, bozza) — la
+  // decisione se notificare (soppressioni) sta nel daemon
+  | { type: 'agent-notify'; agentId: string; kind: 'done' | 'needs-input'; preview: string; at: number }
 
 export interface SandbotApi {
   // agenti e transcript
@@ -216,6 +222,9 @@ export interface SandbotApi {
   // permessi
   getPermissions(): Promise<PermissionsConfig>
   setPermissions(cfg: PermissionsConfig): Promise<void>
+  // impostazioni generiche (fase 6: fuso orario, finestre di consegna, assenza, notifiche)
+  settingsGet<T>(key: string, fallback: T): Promise<T>
+  settingsSet(key: string, value: unknown): Promise<void>
   // quick-ask (domanda effimera)
   quickAsk(agentId: string, question: string): Promise<string>
   // allegati
@@ -223,9 +232,18 @@ export interface SandbotApi {
   // routine
   listRoutines(agentId?: string): Promise<RoutineInfo[]>
   createRoutine(agentId: string, title: string, prompt: string, schedule: string): Promise<RoutineInfo>
+  /** fase 6: creazione con trigger esteso (schedule every, email, calendar_event, webhook, connector_poll) */
+  createRoutineTrigger(agentId: string, title: string, prompt: string, trigger: RoutineTrigger, timezone?: string): Promise<RoutineInfo>
+  /** fase 6: aggiorna trigger/ora/prompt (il trigger sostituisce la schedule) */
+  updateRoutineTrigger(id: number, patch: { title?: string; prompt?: string; enabled?: number; paused_for_away?: number; trigger?: RoutineTrigger | null; timezone?: string }): Promise<void>
   updateRoutine(id: number, patch: Partial<Pick<RoutineInfo, 'enabled' | 'schedule' | 'title' | 'prompt'>>): Promise<void>
   deleteRoutine(id: number): Promise<void>
   suggestRoutines(agentId: string): Promise<RoutineSuggestion[]>
+  // fase 6: presenza (§3ter T2) — 'active' al massimo uno ogni 30s
+  presenceSignal(kind: 'active' | 'typing'): Promise<void>
+  presenceViewing(agentId: string | null): Promise<void>
+  // fase 6: consegna dell'outbox quando l'utente apre la chat dell'agente
+  outboxOpened(agentId: string): Promise<void>
   // memoria (fase 4): sezione nella vista dell'agente, modifica ed eliminazione
   listMemories(agentId: string): Promise<MemoryInfo[]>
   updateMemory(agentId: string, id: string, content: string): Promise<void>
@@ -269,6 +287,73 @@ export interface RoutineInfo {
   provenance?: 'user' | 'agent'
   description?: string
   timezone?: string
+  /** fase 6: trigger esteso (null = schedule cron classica nella colonna schedule) */
+  trigger?: RoutineTrigger | null
+  /** fase 6: la routine è in pausa perché l'utente è via (riattivabile solo al rientro) */
+  paused_for_away?: number
+  /** fase 6: prossimo run calcolato dal daemon (ms epoch; null se non schedulabile) */
+  next_run?: number | null
+  /** fase 6: URL del webhook (solo trigger webhook, per copiarlo dalla UI) */
+  webhook_url?: string
+}
+
+// ---- trigger delle routine (fase 6, §3bis L3) ----
+
+/** Schedule "ogni X alle HH:MM", precisa ('at') o circa ('around', ±15 min deterministici). */
+export interface EveryScheduleSpec {
+  every: 'day' | 'weekday' | 'week' | 'month' | 'hour'
+  /** 'HH:MM'; per every:'hour' conta solo il minuto */
+  at?: string
+  /** 0-6 (domenica 0) — per every:'week' */
+  weekday?: number
+  /** 1-31 — per every:'month' */
+  monthDay?: number
+  mode: 'at' | 'around'
+}
+
+export type ScheduleTrigger =
+  | { type: 'schedule'; kind: 'cron'; cron: string }
+  | ({ type: 'schedule'; kind: 'every' } & EveryScheduleSpec)
+
+/**
+ * Poll di un tool MCP in sola lettura di un connettore connesso: estrae gli
+ * id (idField = percorso semplice tipo "messages[].id") e produce un evento
+ * per ogni id NUOVO. preset email/calendar_event = le due automazioni con UI
+ * dedicata (il tool lo sceglie il preset da toolsOfServer, niente nomi cablati).
+ */
+export interface ConnectorPollTrigger {
+  type: 'connector_poll'
+  connectorId: string
+  tool: string
+  args?: Record<string, unknown>
+  intervalMin: number
+  idField: string
+  preset?: 'email' | 'calendar_event'
+  /** solo preset calendar_event: il job parte N minuti prima dell'evento */
+  offsetMinutes?: number
+}
+
+/** Webhook: POST http://127.0.0.1:<porta daemon>/hooks/<routineId> con Bearer <token>. */
+export interface WebhookTrigger {
+  type: 'webhook'
+  token: string
+}
+
+/** L'utente è tornato dopo un'assenza lunga (vedi presenza/look-around). */
+export interface PresenceReturnTrigger {
+  type: 'presence_return'
+}
+
+export type RoutineTrigger = ScheduleTrigger | ConnectorPollTrigger | WebhookTrigger | PresenceReturnTrigger
+
+/** L'evento che ha fatto scattare un job routine-run (entra nel prompt come <evento>). */
+export interface TriggerEventPayload {
+  source: 'connector_poll' | 'webhook' | 'presence_return' | 'calendar_event'
+  /** Riga sintetica per l'utente ("Nuova email da x", "Webhook ricevuto") */
+  title: string
+  /** Evidenza grezza (l'elemento nuovo, il corpo del webhook) */
+  data?: unknown
+  at?: number
 }
 
 // ---- memoria e skill (fase 4) ----

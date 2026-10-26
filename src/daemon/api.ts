@@ -16,16 +16,34 @@ import { suggestRoutines } from '../main/routines'
 import { llmStream } from '../main/agent/llm'
 import { secondaryPrompts } from '../main/agent/prompts'
 import { parseCron } from './cron'
+import { isValidTimeZone } from './tz'
+import { nextScheduleRun, nextPollAt } from './triggers'
+import { triggerShapeErrors } from '../shared/triggers'
+import { generateWebhookToken } from './webhooks'
 import { enqueueUserMessage, enqueueWidgetResponse } from './enqueue'
+import { deliverHeldForAgent } from './outbox'
 import type { JobWorker } from './worker'
 import type { ConnectorsManager } from '../main/connectors'
-import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret } from '../shared/types'
+import type { Presence } from './presence'
+import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger } from '../shared/types'
 
 type Emitter = (e: SandbotEvent) => void
 
-export function buildApiMethods(emit: Emitter, worker: JobWorker, connectors?: ConnectorsManager): Record<string, (params: unknown[]) => unknown> {
+export function buildApiMethods(
+  emit: Emitter,
+  worker: JobWorker,
+  connectors?: ConnectorsManager,
+  presence?: Presence,
+  opts: { webhookPort?: number } = {}
+): Record<string, (params: unknown[]) => unknown> {
   const mcp = () => import('../main/mcp')
   const vault = () => import('../main/vault')
+
+  /** URL del webhook di una routine (per copiarlo dalla UI). */
+  const webhookUrl = (r: { id: number; trigger?: RoutineTrigger | null }): string | undefined =>
+    r.trigger?.type === 'webhook' && opts.webhookPort
+      ? `http://127.0.0.1:${opts.webhookPort}/hooks/${r.id}`
+      : undefined
 
   // fase 3: notice di sistema e entry aggiornata, emesse alla UI come le altre
   const appendLocalNotice = (agentId: string, content: string): void => {
@@ -35,6 +53,42 @@ export function buildApiMethods(emit: Emitter, worker: JobWorker, connectors?: C
   const emitUpdatedEntry = (agentId: string, entryId: number): void => {
     const updated = store.getEntries(agentId).find((e) => e.id === entryId)
     if (updated) emit({ type: 'entries', agentId, entries: [updated] })
+  }
+
+  /** Il cron della colonna schedule per un trigger (i non-cron non ne hanno: stringa vuota). */
+  const cronOfTrigger = (t: RoutineTrigger | null): string =>
+    t?.type === 'schedule' && t.kind === 'cron' ? t.cron : ''
+
+  /**
+   * Validazione completa di un trigger: forma (triggerShapeErrors), cron,
+   * orari HH:MM e — per i connector_poll — il tool deve esistere sul server
+   * del connettore ed essere in SOLA LETTURA (readOnlyHint), altrimenti il
+   * trigger viene rifiutato (spec §fase 6 punto 1).
+   */
+  async function validateTrigger(t: RoutineTrigger): Promise<RoutineTrigger> {
+    if (!t || typeof t !== 'object' || typeof t.type !== 'string') throw new Error('Trigger non valido: oggetto mancante')
+    const errors = triggerShapeErrors(t)
+    if (t.type === 'schedule' && t.kind === 'cron' && !parseCron(t.cron)) {
+      errors.unshift(`cron non valido: "${t.cron}" (5 campi, es. "0 9 * * *")`)
+    }
+    if (t.type === 'connector_poll') {
+      const mcpMod = await mcp()
+      let tools: Awaited<ReturnType<typeof mcpMod.toolsOfServer>> | null = null
+      try {
+        tools = await mcpMod.toolsOfServer(t.connectorId)
+      } catch {
+        errors.push(`connettore "${t.connectorId}" non raggiungibile (va connesso prima di creare il trigger)`)
+      }
+      if (tools) {
+        const tool = tools.find((x) => x.name === t.tool)
+        if (!tool) errors.push(`tool "${t.tool}" non disponibile sul connettore ${t.connectorId}`)
+        else if (!tool.annotations?.readOnlyHint) {
+          errors.push(`il tool "${t.tool}" non è in sola lettura (readOnlyHint): il trigger viene rifiutato`)
+        }
+      }
+    }
+    if (errors.length) throw new Error(`Trigger non valido: ${errors.join('; ')}`)
+    return t
   }
 
   return {
@@ -68,6 +122,17 @@ export function buildApiMethods(emit: Emitter, worker: JobWorker, connectors?: C
 
     // ---- fase 3: risposta ai widget ask_user ----
     'widget:respond': ([agentId, entryId, value]) => {
+      // fase 6: risposta alla domanda sulle routine in pausa per assenza —
+      // "Riattiva tutte" riprende SOLO quelle con pausedForAway, in modo
+      // deterministico (non quelle fermate a mano dall'utente)
+      const widget = store.getEntries(agentId as string).find((e) => e.id === (entryId as number))
+      if (widget?.meta?.awayResume && presence) {
+        const chosen = Array.isArray(value) ? value : [value]
+        if (chosen.includes('resume-away')) {
+          const resumed = presence.resumeAwayPaused()
+          appendLocalNotice(agentId as string, resumed > 0 ? `Routine riattivate: ${resumed}.` : 'Nessuna routine da riattivare.')
+        }
+      }
       const job = enqueueWidgetResponse(db(), agentId as string, entryId as number, value as string | string[], emit)
       if (job) worker.poke()
       return { ok: !!job }
@@ -166,10 +231,68 @@ export function buildApiMethods(emit: Emitter, worker: JobWorker, connectors?: C
     },
 
     // ---- routine (la validazione della schedule è la stessa del parser cron dello scheduler) ----
-    'routines:list': ([agentId]) => store.listRoutines(agentId as string | undefined),
+    'routines:list': ([agentId]) => {
+      // fase 6: prossima esecuzione calcolata dal daemon (trigger e fuso orario)
+      const now = Date.now()
+      return store.listRoutines(agentId as string | undefined).map((r): RoutineInfo => {
+        const next = r.trigger?.type === 'connector_poll'
+          ? nextPollAt(r.last_poll ?? null, r.created_at, r.trigger.intervalMin)
+          : r.trigger?.type === 'webhook' || r.trigger?.type === 'presence_return'
+            ? null
+            : nextScheduleRun(r, now)
+        const url = webhookUrl(r)
+        return { ...r, next_run: next, ...(url ? { webhook_url: url } : {}) }
+      })
+    },
     'routines:create': ([agentId, title, prompt, schedule]) => {
       if (!parseCron(String(schedule))) throw new Error('Schedule non valida: usare un cron a 5 campi, es. "0 9 * * *"')
       return store.createRoutine(agentId as string, title as string, prompt as string, schedule as string)
+    },
+    'routines:create-trigger': async ([agentId, title, prompt, trigger, timezone]) => {
+      const t = await validateTrigger(trigger as RoutineTrigger)
+      const tz = timezone ? String(timezone) : ''
+      if (tz && !isValidTimeZone(tz)) throw new Error(`Fuso orario non valido: "${tz}"`)
+      // il webhook nasce col token generato dal server (copiabile dalla UI)
+      const final = t.type === 'webhook' ? { ...t, token: generateWebhookToken() } : t
+      const created = store.createRoutine(agentId as string, title as string, prompt as string, cronOfTrigger(final), {
+        timezone: tz,
+        trigger: final
+      })
+      const url = webhookUrl(created)
+      return { ...created, ...(url ? { webhook_url: url } : {}) }
+    },
+    'routines:update-trigger': async ([id, patch]) => {
+      const p = (patch ?? {}) as { title?: string; prompt?: string; enabled?: number; paused_for_away?: number; trigger?: RoutineTrigger | null; timezone?: string }
+      const cur = store.getRoutine(id as number)
+      if (!cur) throw new Error('Routine non trovata')
+      let final: RoutineTrigger | null | undefined
+      if (p.trigger !== undefined) {
+        if (!p.trigger) {
+          final = null // il trigger si toglie: la routine torna al cron della colonna schedule
+        } else {
+          let incoming = p.trigger
+          // il webhook senza token in arrivo mantiene il suo (non si rigenera a ogni modifica)
+          if (incoming.type === 'webhook' && !incoming.token) {
+            const old = cur.trigger?.type === 'webhook' ? cur.trigger.token : ''
+            incoming = { ...incoming, token: old || generateWebhookToken() }
+          }
+          final = await validateTrigger(incoming)
+        }
+      }
+      if (p.timezone !== undefined && p.timezone && !isValidTimeZone(p.timezone)) {
+        throw new Error(`Fuso orario non valido: "${p.timezone}"`)
+      }
+      store.updateRoutine(id as number, {
+        ...(p.title !== undefined ? { title: p.title } : {}),
+        ...(p.prompt !== undefined ? { prompt: p.prompt } : {}),
+        ...(p.enabled !== undefined ? { enabled: p.enabled } : {}),
+        ...(p.paused_for_away !== undefined ? { paused_for_away: p.paused_for_away } : {}),
+        ...(p.timezone !== undefined ? { timezone: p.timezone } : {}),
+        ...(final !== undefined ? { trigger: final, schedule: cronOfTrigger(final) } : {})
+      })
+      const updated = store.getRoutine(id as number)
+      const url = updated ? webhookUrl(updated) : undefined
+      return updated ? { ...updated, ...(url ? { webhook_url: url } : {}) } : null
     },
     'routines:update': ([id, patch]) => {
       if (patch && typeof patch === 'object' && 'schedule' in (patch as Record<string, unknown>) && !parseCron(String((patch as Record<string, unknown>).schedule))) {
@@ -181,6 +304,24 @@ export function buildApiMethods(emit: Emitter, worker: JobWorker, connectors?: C
       store.deleteRoutine(id as number)
     },
     'routines:suggest': ([agentId]) => suggestRoutines(agentId as string),
+
+    // ---- fase 6: presenza (§3ter T2) e consegna dell'outbox ----
+    'presence:signal': ([kind]) => {
+      if (!presence) throw new Error('presenza non disponibile')
+      presence.onSignal(kind === 'typing' ? 'typing' : 'active')
+    },
+    'presence:viewing': ([agentId]) => {
+      if (!presence) throw new Error('presenza non disponibile')
+      presence.onViewing(typeof agentId === 'string' && agentId ? agentId : null)
+    },
+    'outbox:opened': ([agentId]) => {
+      // l'utente ha aperto la chat di questo agente: la sua outbox si consegna subito
+      const delivered = deliverHeldForAgent(agentId as string, emit, {
+        now: Date.now(),
+        lastSeen: store.getSetting<number>('presence.lastSeen', 0)
+      })
+      return { delivered: delivered.length }
+    },
 
     // ---- memoria (fase 4): sezione nella vista dell'agente ----
     'memory:list': ([agentId]) => listMemories(agentId as string),

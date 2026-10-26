@@ -24,13 +24,23 @@ const api: SandbotApi = {
   listModels: (providerId) => ipcRenderer.invoke('models:list', providerId),
   getPermissions: () => ipcRenderer.invoke('permissions:get'),
   setPermissions: (cfg) => ipcRenderer.invoke('permissions:set', cfg),
+  settingsGet: <T,>(key: string, fallback: T) => ipcRenderer.invoke('settings:get', key, fallback) as Promise<T>,
+  settingsSet: (key, value) => ipcRenderer.invoke('settings:set', key, value),
   quickAsk: (agentId, question) => ipcRenderer.invoke('quickask', agentId, question),
   pickImage: () => ipcRenderer.invoke('dialog:pick-image'),
   listRoutines: (agentId) => ipcRenderer.invoke('routines:list', agentId),
   createRoutine: (agentId, title, prompt, schedule) => ipcRenderer.invoke('routines:create', agentId, title, prompt, schedule),
+  // fase 6: routine con trigger esteso (schedule every, email, calendar_event, webhook, poll)
+  createRoutineTrigger: (agentId, title, prompt, trigger, timezone) =>
+    ipcRenderer.invoke('routines:create-trigger', agentId, title, prompt, trigger, timezone),
+  updateRoutineTrigger: (id, patch) => ipcRenderer.invoke('routines:update-trigger', id, patch),
   updateRoutine: (id, patch) => ipcRenderer.invoke('routines:update', id, patch),
   deleteRoutine: (id) => ipcRenderer.invoke('routines:delete', id),
   suggestRoutines: (agentId) => ipcRenderer.invoke('routines:suggest', agentId),
+  // fase 6: presenza e consegna outbox
+  presenceSignal: (kind) => ipcRenderer.invoke('presence:signal', kind),
+  presenceViewing: (agentId) => ipcRenderer.invoke('presence:viewing', agentId),
+  outboxOpened: (agentId) => ipcRenderer.invoke('outbox:opened', agentId),
   // fase 4: memoria e skill dell'agente
   listMemories: (agentId) => ipcRenderer.invoke('memory:list', agentId),
   updateMemory: (agentId, id, content) => ipcRenderer.invoke('memory:update', agentId, id, content),
