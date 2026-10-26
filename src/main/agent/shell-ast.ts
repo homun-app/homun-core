@@ -19,18 +19,31 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Parser, Language, type Node as SyntaxNode, type Tree } from 'web-tree-sitter'
+import { SECRET_REF } from './secrets'
 
 export interface ShellCommand {
   name: string
   /** Primo argomento non-flag, solo per i tool a sottocomandi (git, npm, ...) */
   sub?: string
   argv: string[]
+  /** true se il comando è preceduto da una o più assegnazioni (FOO=x cmd): modifica l'ambiente del comando */
+  hasEnvPrefix?: boolean
 }
 
 export interface ShellAnalysis {
   commands: ShellCommand[]
   hasSubstitution: boolean
+  /**
+   * Destinazioni dei redirect di output verso FILE (>, >>, &>, &>> , >|, <>),
+   * compresi quelli in comando con heredoc. Le duplicazioni di fd (2>&1, >&2)
+   * NON compaiono: non scrivono su file. Il gate esclude le destinazioni
+   * innocue (/dev/null, /dev/stdout, /dev/stderr).
+   */
+  redirectTargets: string[]
+  /** Comodo: true se c'è almeno un redirect di output verso file. */
   hasRedirectToFile: boolean
+  /** Nomi dei segreti {{secret:NOME}} presenti nella riga (§5.6: mai auto-approvabili). */
+  secretRefs: string[]
   parseError: boolean
 }
 
@@ -123,19 +136,34 @@ function commandArgv(node: SyntaxNode): string[] {
 interface WalkAcc {
   commands: ShellCommand[]
   hasSubstitution: boolean
-  hasRedirectToFile: boolean
+  redirectTargets: string[]
 }
+
+// operatori di redirect che scrivono su file ('>&' con destinazione a parola
+// è comunque una scrittura; con fd numerico è una duplicazione, esclusa sotto)
+const OUTPUT_REDIRECT_OPS = new Set(['>', '>>', '&>', '&>>', '>|', '<>', '>&'])
 
 function walk(node: SyntaxNode, acc: WalkAcc): void {
   if (node.type === 'command_substitution' || node.type === 'process_substitution') {
     acc.hasSubstitution = true
   }
-  if (node.type === 'file_redirect' && />/.test(node.firstChild?.text ?? '')) {
-    acc.hasRedirectToFile = true
+  if (node.type === 'file_redirect') {
+    const dest = node.childForFieldName('destination')
+    // destination numerica = duplicazione di fd (2>&1, >&2): innocua, non è un file
+    if (dest && dest.type !== 'number') {
+      for (let i = 0; i < node.childCount; i++) {
+        if (OUTPUT_REDIRECT_OPS.has(node.child(i)!.text)) {
+          acc.redirectTargets.push(unquote(dest.text))
+          break
+        }
+      }
+    }
   }
   if (node.type === 'command') {
     const nameNode = node.childForFieldName('name')
     const argv = commandArgv(node)
+    // FOO=x cmd: le assegnazioni prima del nome modificano l'ambiente del comando
+    const hasEnvPrefix = node.namedChildren.some((c) => c.type === 'variable_assignment')
     if (nameNode) {
       const name = unquote(nameNode.text)
       let sub: string | undefined
@@ -143,16 +171,23 @@ function walk(node: SyntaxNode, acc: WalkAcc): void {
         const arg = argv.slice(1).find((a) => !a.startsWith('-'))
         if (arg) sub = arg
       }
-      acc.commands.push({ name, sub, argv })
+      acc.commands.push({ name, sub, argv, hasEnvPrefix })
     }
   }
   for (let i = 0; i < node.childCount; i++) walk(node.child(i)!, acc)
 }
 
-function analyzeTree(tree: Tree): ShellAnalysis {
-  const acc: WalkAcc = { commands: [], hasSubstitution: false, hasRedirectToFile: false }
+function analyzeTree(tree: Tree, secretRefs: string[]): ShellAnalysis {
+  const acc: WalkAcc = { commands: [], hasSubstitution: false, redirectTargets: [] }
   walk(tree.rootNode, acc)
-  return { ...acc, parseError: tree.rootNode.hasError }
+  return {
+    commands: acc.commands,
+    hasSubstitution: acc.hasSubstitution,
+    redirectTargets: acc.redirectTargets,
+    hasRedirectToFile: acc.redirectTargets.length > 0,
+    secretRefs,
+    parseError: tree.rootNode.hasError
+  }
 }
 
 /**
@@ -162,8 +197,12 @@ function analyzeTree(tree: Tree): ShellAnalysis {
  * (lazy) del parser.
  */
 export async function analyzeCommand(src: string): Promise<ShellAnalysis> {
+  // i riferimenti ai segreti vivono nella riga grezza, non nell'AST
+  const secretRefs = [...new Set([...src.matchAll(SECRET_REF)].map((m) => m[1]!))]
   const parser = await getParser()
   const tree = parser.parse(src)
-  if (!tree) return { commands: [], hasSubstitution: false, hasRedirectToFile: false, parseError: true }
-  return analyzeTree(tree)
+  if (!tree) {
+    return { commands: [], hasSubstitution: false, redirectTargets: [], hasRedirectToFile: false, secretRefs, parseError: true }
+  }
+  return analyzeTree(tree, secretRefs)
 }

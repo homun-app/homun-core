@@ -248,7 +248,21 @@ describe('§5.6 segreti: il valore non arriva mai al modello né al transcript',
     // il comando "echoa" il segreto via env: l'output grezzo lo contiene
     h.sandboxMock.result.stdout = `risposta: ${SECRET}\n`
 
-    await runTurn(AGENT, 'chiama la api', emit)
+    const turn = runTurn(AGENT, 'chiama la api', emit)
+
+    // C4: i comandi con segreti NON passano mai in automatico (nemmeno con
+    // always_allow "curl"): approval con i nomi dei segreti in content e meta
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.content).toContain('usa le credenziali: API_KEY')
+    expect(appr.meta?.secretRefs).toEqual(['API_KEY'])
+
+    // "Consenti sempre" qui NON deve salvare grant (C4)
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', true)
+    await turn
+    expect(h.db.grants).toEqual([])
 
     // al momento dell'esecuzione: comando riscritto sulla variabile, valore solo in env
     expect(h.sandboxMock.exec.command).toBe('curl -H "Authorization: Bearer $SANDBOT_SECRET_API_KEY" https://api.esempio')
@@ -279,7 +293,14 @@ describe('§5.6 segreti: il valore non arriva mai al modello né al transcript',
       { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'curl -H "{{secret:NON_C_E}}" x' }) }] },
       { text: 'ok' }
     ]
-    await runTurn(AGENT, 'chiama', emit)
+    const turn = runTurn(AGENT, 'chiama', emit)
+    // anche qui serve l'approvazione: il comando contiene un {{secret:...}} (C4)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', false)
+    await turn
     expect(h.sandboxMock.exec.calls).toBe(0)
     const res = h.db.entries.find((e) => e.kind === 'tool-result')!
     expect(res.content).toContain('non presenti nel vault')

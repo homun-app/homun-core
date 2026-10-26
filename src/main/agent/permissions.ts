@@ -2,9 +2,11 @@
 // always_allow | needs_approval | blocked, con standing grants persistenti.
 // Dal gate §5.1: run-command passa dall'analisi shell (tree-sitter), le grant
 // fanno match per chiave ESATTA ("name" o "name sub"), mai per prefisso.
+import { realpathSync } from 'node:fs'
 import { getPermissions, listGrants, addGrant } from '../store/db'
+import { sandboxMode, boxDir } from '../sandbox'
 import type { PermissionMode } from '../../shared/types'
-import { targetKey, runCommandVerdict, commandKey } from './permission-rules'
+import { targetKey, runCommandVerdict, commandKey, isNeverAuto, isInsideBox } from './permission-rules'
 import { analyzeCommand } from './shell-ast'
 
 // re-export: i consumer continuano a importare targetKey da qui (loop.ts usa permissions.targetKey)
@@ -12,7 +14,7 @@ export { targetKey }
 
 export type Verdict =
   | { kind: 'allow'; via: 'rule' | 'grant' }
-  | { kind: 'ask'; reason: string; keys?: string[] }
+  | { kind: 'ask'; reason: string; keys?: string[]; secretRefs?: string[] }
   | { kind: 'deny'; reason: string }
 
 function matchRule(tool: string, target: string, rules: ReturnType<typeof getPermissions>['rules']): PermissionMode | null {
@@ -32,8 +34,15 @@ function matchRule(tool: string, target: string, rules: ReturnType<typeof getPer
   return null
 }
 
-/** Verdetto per una chiamata tool. Async: run-command richiede l'analisi shell. */
-export async function check(tool: string, input: Record<string, unknown>): Promise<Verdict> {
+/**
+ * Verdetto per una chiamata tool. Async: run-command richiede l'analisi shell.
+ * `agentId` serve al gate C5 (lettura file dentro/fuori dalla box in host).
+ */
+export async function check(
+  tool: string,
+  input: Record<string, unknown>,
+  agentId?: string
+): Promise<Verdict> {
   const cfg = getPermissions()
 
   if (tool === 'run-command') {
@@ -44,12 +53,29 @@ export async function check(tool: string, input: Record<string, unknown>): Promi
     const d = runCommandVerdict(analysis, grants, cfg.rules, cfg.default)
     if (d.kind === 'deny') return { kind: 'deny', reason: d.reasons[0] ?? 'Command blocked by permissions configuration' }
     if (d.kind === 'allow') return { kind: 'allow', via: d.via ?? 'rule' }
-    return { kind: 'ask', reason: d.reasons.join('; '), keys: d.keys }
+    return {
+      kind: 'ask',
+      reason: d.reasons.join('; '),
+      keys: d.keys,
+      ...(d.secretRefs.length ? { secretRefs: d.secretRefs } : {})
+    }
   }
 
   const target = targetKey(tool, input)
   const mode = matchRule(tool, target, cfg.rules) ?? cfg.default
   if (mode === 'blocked') return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
+
+  // C5: in modalità host i tool di lettura sono always_allow (o coperti da
+  // grant) SOLO per i path dentro boxDir(agentId), dopo resolve+realpath
+  // (neutralizza ../ e symlink). Fuori dalla box → ask. In docker resta com'era.
+  if (
+    (tool === 'read-file' || tool === 'list-directory') &&
+    sandboxMode() === 'host' &&
+    agentId &&
+    !isInsideBox(String(input.path ?? ''), boxDir(agentId), realpathSync)
+  ) {
+    return { kind: 'ask', reason: 'legge fuori dalla cartella del bot' }
+  }
 
   // standing grant: match ESATTO tool+target ("Consenti sempre" su quel target)
   const grant = listGrants().find((g) => g.tool === tool && g.target === target)
@@ -61,12 +87,15 @@ export async function check(tool: string, input: Record<string, unknown>): Promi
 
 /**
  * Registra una standing grant dopo "Always allow".
- * Per run-command salva una grant per OGNI chiave estratta dal comando.
+ * Per run-command salva una grant per OGNI chiave estratta dal comando, MAI:
+ * - per comandi che usano segreti {{secret:...}} (C4: chiedono ogni volta);
+ * - per chiavi never-auto (C1: non sarebbero comunque utilizzabili).
  */
 export async function grantStanding(tool: string, input: Record<string, unknown>): Promise<void> {
   if (tool === 'run-command') {
     const analysis = await analyzeCommand(String(input.command ?? ''))
-    for (const key of new Set(analysis.commands.map(commandKey))) addGrant(tool, key)
+    if (analysis.secretRefs.length) return
+    for (const key of new Set(analysis.commands.filter((c) => !isNeverAuto(c)).map(commandKey))) addGrant(tool, key)
     return
   }
   addGrant(tool, targetKey(tool, input))

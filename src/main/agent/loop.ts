@@ -210,8 +210,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         })
         emit({ type: 'entries', agentId, entries: [callEntry] })
 
-        // §5.1: il gate run-command analizza OGNI comando della riga (tree-sitter)
-        const verdict = await permissions.check(call.name, input)
+        // §5.1: il gate run-command analizza OGNI comando della riga (tree-sitter);
+        // agentId serve al gate C5 (letture dentro/fuori dalla box in host)
+        const verdict = await permissions.check(call.name, input, agentId)
 
         if (verdict.kind === 'deny') {
           const denied = appendEntry({
@@ -232,7 +233,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const approvalEntry = appendEntry({
             agentId, kind: 'approval', role: 'system',
             content: `${call.name}: ${verdict.reason}`,
-            meta: { approvalId: approval.id, tool: call.name, input, status: 'pending', keys: verdict.keys }
+            // C4: la card mostra i nomi dei segreti usati dal comando
+            meta: {
+              approvalId: approval.id, tool: call.name, input, status: 'pending', keys: verdict.keys,
+              ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {})
+            }
           })
           setStatus(agentId, 'paused-for-approval', emit)
           emit({ type: 'entries', agentId, entries: [approvalEntry] })

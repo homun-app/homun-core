@@ -60,4 +60,16 @@ describe('redactSecrets', () => {
     ]
     expect(redactSecrets('aaa e bbb', used)).toBe('[redacted:A] e [redacted:B]')
   })
+
+  it('C4: oscura anche la codifica base64 e la URL-encoding del valore', () => {
+    const value = 'p@ss word/1=2'
+    const used = [{ name: 'API_KEY', envName: 'SANDBOT_SECRET_API_KEY', value }]
+    const b64 = Buffer.from(value, 'utf8').toString('base64')
+    const url = encodeURIComponent(value)
+    const out = redactSecrets(`lit ${value} | b64 ${b64} | url ${url}`, used)
+    expect(out).not.toContain(value)
+    expect(out).not.toContain(b64)
+    expect(out).not.toContain(url)
+    expect(out.split('[redacted:API_KEY]')).toHaveLength(4) // tre occorrenze sostituite
+  })
 })

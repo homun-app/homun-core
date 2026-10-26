@@ -8,6 +8,8 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
   const status = (entry.meta?.status as string | undefined) ?? 'pending'
 
   if (!approvalId) return null
+  // C4: nomi dei segreti usati dal comando (meta.secretRefs sull'entry approval)
+  const secretRefs = Array.isArray(entry.meta?.secretRefs) ? (entry.meta!.secretRefs as string[]) : []
 
   return (
     <div className="rounded-xl border border-orange-500/40 bg-orange-500/5 px-4 py-3">
@@ -18,6 +20,9 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
       <div className="mt-1 font-mono text-xs text-neutral-300">
         {String(entry.meta?.tool)} {entry.content && entry.content !== String(entry.meta?.tool) ? `— ${entry.content}` : ''}
       </div>
+      {secretRefs.length > 0 && (
+        <div className="mt-1 text-xs text-orange-200/90">Credenziali usate: {secretRefs.join(', ')}</div>
+      )}
       {status === 'pending' ? (
         <div className="mt-3 flex gap-2">
           <button

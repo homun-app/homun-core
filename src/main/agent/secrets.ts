@@ -57,12 +57,24 @@ export async function resolveSecretRefs(
   return { command: rewritten, env, used, missing }
 }
 
-/** Sostituisce ogni occorrenza dei valori dei segreti con [redacted:NOME]. */
+/**
+ * Sostituisce ogni occorrenza dei valori dei segreti con [redacted:NOME].
+ * Oltre al valore letterale oscura anche le codifiche più comuni (base64 e
+ * URL-encoding): un comando che stampa `echo $SANDBOT_SECRET_X | base64`
+ * non deve far uscire il segreto in forma codificata.
+ */
 export function redactSecrets(text: string, secrets: readonly ResolvedSecret[]): string {
   let out = text
   for (const s of secrets) {
     if (!s.value) continue
-    out = out.split(s.value).join(`[redacted:${s.name}]`)
+    const variants = [
+      s.value,
+      Buffer.from(s.value, 'utf8').toString('base64'),
+      encodeURIComponent(s.value)
+    ]
+    for (const v of variants) {
+      if (v) out = out.split(v).join(`[redacted:${s.name}]`)
+    }
   }
   return out
 }
