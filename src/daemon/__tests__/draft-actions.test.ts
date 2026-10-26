@@ -32,8 +32,11 @@ vi.mock('../../main/agent/tools', () => ({
 
 const { setDataDir, dataDir, db, getEntries, appendEntry } = await import('../../main/store/db')
 const { buildApiMethods } = await import('../api')
+// D1: prepareDraft è puro (importa solo i tipi shared) — costruisce le bozze
+// esattamente come le crea ora il loop per draft_external
+const { prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS } = await import('../../main/agent/external-send')
 import type { JobWorker } from '../worker'
-import type { SandbotEvent, TranscriptEntry } from '../../shared/types'
+import type { SandbotEvent, TranscriptEntry, SendMessagePayload } from '../../shared/types'
 
 const AGENT = 'agent_d'
 let events: SandbotEvent[]
@@ -78,8 +81,8 @@ describe('draft:send — l\'invio avviene SOLO al click, via gate', () => {
     const d = mkDraft()
     const r = await api['draft:send']!([AGENT, d.id, 'corpo modificato inline']) as { ok: boolean }
     expect(r.ok).toBe(true)
-    // il tool MCP è stato chiamato CON GLI ARGOMENTI ORIGINALI della bozza
-    expect(h.tools.calls).toEqual([{ tool: 'mcp__gmail__send_message', args: { to: 'x@esempio.it', subject: 'Oggetto di prova', body: 'corpo originale' } }])
+    // D1: il tool MCP riceve il body MODIFICATO — via.args aggiornato dal campo visibile
+    expect(h.tools.calls).toEqual([{ tool: 'mcp__gmail__send_message', args: { to: 'x@esempio.it', subject: 'Oggetto di prova', body: 'corpo modificato inline' } }])
     const after = getEntries(AGENT).find((e) => e.id === d.id)!
     expect(after.meta?.status).toBe('sent')
     expect((after.meta?.message as { body: string }).body).toBe('corpo modificato inline') // body editato persistito
@@ -142,5 +145,68 @@ describe('draft:discard / draft:update', () => {
     expect((after.meta?.message as { body: string }).body).toBe('nuovo corpo')
     expect(after.meta?.status).toBe('pending') // ancora in attesa
     expect(h.tools.calls).toHaveLength(0)
+  })
+})
+
+describe('D1 (review fase 3): via solo per tool di invio esterno — ciò che vedi è ciò che parte', () => {
+  /** Bozza nel transcript costruita da prepareDraft (il payload che ora salva il loop). */
+  function mkPreparedDraft(message: SendMessagePayload): TranscriptEntry {
+    return appendEntry({
+      agentId: AGENT, kind: 'send-message', role: 'assistant',
+      content: message.type === 'draft' ? (message.subject || message.to || '') : '',
+      meta: { message, status: 'pending' }
+    })
+  }
+
+  it('bozza nata da draft_external con via run-command (via scartato alla creazione): draft:send rifiuta, il tool NON viene eseguito', async () => {
+    const { message } = prepareDraft({
+      channel: 'email', to: 'x@y.it', body: 'ciao',
+      via: { tool: 'run-command', args: { command: 'rm -rf /' } },
+      cfg: DEFAULT_EXTERNAL_SEND_TOOLS
+    })
+    const d = mkPreparedDraft(message)
+    const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
+    expect(r.ok).toBe(false)
+    expect(h.tools.calls).toHaveLength(0) // il tool finto NON è mai stato eseguito
+    expect(getEntries(AGENT).findLast((e) => e.kind === 'notice')?.content).toContain('non ha un tool di invio')
+  })
+
+  it('bozza vecchia nel DB con via.tool non di invio (dato precedente alla correzione): draft:send rifiuta in difesa in profondità', async () => {
+    const d = appendEntry({
+      agentId: AGENT, kind: 'send-message', role: 'assistant', content: 'dato vecchio',
+      meta: {
+        message: { type: 'draft', channel: 'email', to: 'x@y.it', body: 'ciao', via: { tool: 'run-command', args: { command: 'curl https://esempio/fuga' } } },
+        status: 'pending'
+      }
+    })
+    const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
+    expect(r.ok).toBe(false)
+    expect(h.tools.calls).toHaveLength(0)
+    expect(getEntries(AGENT).findLast((e) => e.kind === 'notice')?.content).toContain('non è un tool di invio esterno')
+    // la bozza resta pending: rifiuto, non scarto
+    expect(getEntries(AGENT).find((e) => e.id === d.id)?.meta?.status).toBe('pending')
+  })
+
+  it('draft_external con to/body diversi da via.args: si eseguono esattamente gli argomenti salvati e mostrati', async () => {
+    const { message } = prepareDraft({
+      channel: 'email', to: 'visibile@esempio.it', subject: 'Oggetto', body: 'corpo visibile',
+      via: { tool: 'mcp__gmail__send_message', args: { to: 'nascosto@esempio.it', subject: 'Oggetto', body: 'corpo nascosto' } },
+      cfg: DEFAULT_EXTERNAL_SEND_TOOLS
+    })
+    const d = mkPreparedDraft(message)
+    const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
+    expect(r.ok).toBe(true)
+    // gli argomenti eseguiti coincidono col payload mostrato in card
+    expect(h.tools.calls).toEqual([{ tool: 'mcp__gmail__send_message', args: (message as { via: { args: Record<string, unknown> } }).via.args }])
+    expect(h.tools.calls[0]!.args).toMatchObject({ to: 'visibile@esempio.it', body: 'corpo visibile' })
+    expect(h.tools.calls[0]!.args).not.toMatchObject({ to: 'nascosto@esempio.it' })
+  })
+
+  it('body modificato con draft:update: il tool MCP finto riceve il body modificato', async () => {
+    const d = mkDraft()
+    await api['draft:update']!([AGENT, d.id, 'corpo ritoccato'])
+    const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
+    expect(r.ok).toBe(true)
+    expect(h.tools.calls).toEqual([{ tool: 'mcp__gmail__send_message', args: { to: 'x@esempio.it', subject: 'Oggetto di prova', body: 'corpo ritoccato' } }])
   })
 })

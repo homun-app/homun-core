@@ -1,6 +1,10 @@
 // Card bozza (§3bis L5): anteprima di un invio esterno con pulsanti
 // Invia / Scarta / Modifica (editing inline del body). L'invio vero avviene
 // SOLO al click su Invia: il daemon esegue via.tool passando dal gate.
+// Review fase 3 (D1): "ciò che l'utente vede è esattamente ciò che viene
+// inviato" — gli argomenti non mappati sui campi visibili sono sempre
+// mostrati in "Altri parametri", senza via la bozza è solo testo (Invia
+// disabilitato), con nomi di argomento sconosciuti la modifica è bloccata.
 import { useState } from 'react'
 import { useStore } from '../store'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
@@ -25,6 +29,10 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
   if (!draft) return null
   const status = meta.status ?? 'pending'
   const closed = status === 'sent' || status === 'discarded'
+  // D1: senza canale di invio la bozza è solo testo; senza un argomento
+  // mappato sul corpo la modifica non può restare coerente con via.args
+  const noChannel = !draft.via
+  const bodyLocked = draft.bodyLocked === true
 
   const startEdit = () => {
     setBody(draft.body)
@@ -44,6 +52,19 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
         {draft.subject && (<><br /><span className="text-neutral-500">Oggetto:</span> {draft.subject}</>)}
         {draft.via && (<><br /><span className="text-neutral-600 font-mono text-[10px]">via {draft.via.tool}</span></>)}
       </div>
+
+      {/* D1: argomenti di via.args non coperti dai campi visibili (bcc, cc,
+          thread_id, allegati…): sempre visibili, mai collassati */}
+      {draft.extraArgs?.length ? (
+        <div className="mt-2 rounded-lg bg-neutral-900/60 px-3 py-2">
+          <div className="text-[11px] text-neutral-500">Altri parametri (verranno inviati così):</div>
+          {draft.extraArgs.map((p) => (
+            <div key={p.key} className="mt-0.5 font-mono text-[11px] text-neutral-300">
+              <span className="text-neutral-500">{p.key}:</span> {p.value}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {editing ? (
         <div className="mt-2">
@@ -68,7 +89,7 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
             </button>
           </div>
         </div>
-      ) : (
+      ) : bodyLocked ? null : (
         <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-900/60 px-3 py-2 text-xs text-neutral-300">{draft.body}</pre>
       )}
 
@@ -77,28 +98,34 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
           {status === 'sent' ? '✓ Inviata' : 'Scartata'}
         </div>
       ) : (
-        <div className="mt-3 flex gap-2">
-          <button
-            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
-            onClick={() => send(entry.id, editing ? body : undefined)}
-          >
-            Invia
-          </button>
-          <button
-            className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-700"
-            onClick={() => discard(entry.id)}
-          >
-            Scarta
-          </button>
-          {!editing && (
+        <>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={noChannel}
+              onClick={() => send(entry.id, editing ? body : undefined)}
+            >
+              Invia
+            </button>
             <button
               className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-700"
-              onClick={startEdit}
+              onClick={() => discard(entry.id)}
             >
-              Modifica
+              Scarta
             </button>
+            {!editing && !bodyLocked && (
+              <button
+                className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-700"
+                onClick={startEdit}
+              >
+                Modifica
+              </button>
+            )}
+          </div>
+          {noChannel && (
+            <div className="mt-1 text-[11px] text-neutral-500">nessun canale di invio collegato</div>
           )}
-        </div>
+        </>
       )}
     </div>
   )

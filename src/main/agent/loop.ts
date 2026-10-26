@@ -26,9 +26,9 @@ import * as permissions from './permissions'
 import { getProvider } from './providers'
 import { buildMessages, visibleReplyEntries } from './history'
 import { planResume, INTERRUPTED_TOOL_RESULT, RESUME_NOTICE } from './resume'
-import { isExternalSend, draftFromExternalCall, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig } from './external-send'
+import { isExternalSend, draftFromExternalCall, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig } from './external-send'
 import { normalizeOptions, findDismissibleWidgets } from './widgets'
-import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd, DraftVia } from '../../shared/types'
+import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
 export { buildMessages } from './history'
@@ -317,14 +317,24 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
         if (call.name === 'draft_external') {
           const channel = input.channel === 'email' || input.channel === 'slack' ? input.channel : 'other'
-          const message: SendMessagePayload = {
-            type: 'draft', channel, to: String(input.to ?? ''),
+          // D1 (review fase 3): il via del modello è tenuto SOLO se è un invio
+          // esterno configurato; to/subject/body entrano in via.args secondo la
+          // fieldMap, così la card mostra esattamente ciò che verrà inviato
+          const prepared = prepareDraft({
+            channel,
+            to: String(input.to ?? ''),
             ...(input.subject !== undefined ? { subject: String(input.subject) } : {}),
             body: String(input.body ?? ''),
-            ...(input.via && typeof input.via === 'object' ? { via: input.via as DraftVia } : {})
-          }
-          appendSend(agentId, call, message, emit, { status: 'pending' })
-          messages.push({ role: 'tool', toolCallId: call.id, content: 'bozza creata e mostrata all’utente: l’invio avverrà solo se l’utente clicca Invia' })
+            via: input.via,
+            cfg: externalCfg
+          })
+          appendSend(agentId, call, prepared.message, emit, { status: 'pending' })
+          messages.push({
+            role: 'tool', toolCallId: call.id,
+            content: prepared.viaRejected
+              ? `bozza creata di solo testo: "via" scartato perché ${prepared.viaRejected} non è un tool di invio esterno configurato (nessun canale di invio collegato).`
+              : 'bozza creata e mostrata all’utente: l’invio avverrà solo se l’utente clicca Invia'
+          })
           continue
         }
 

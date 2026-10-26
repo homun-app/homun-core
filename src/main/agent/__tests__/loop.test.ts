@@ -580,4 +580,60 @@ describe('fase 3: l\'agente comunica SOLO tramite tool (§3bis L2)', () => {
     expect(toolMsg?.content).toContain('bozza')
     expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
   })
+
+  it('D1: draft_external con via.tool non di invio (run-command) → via scartato, bozza solo testo, tool-result che lo spiega', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'd1', name: 'draft_external', arguments: JSON.stringify({
+        channel: 'email', to: 'x@y.it', body: 'ciao',
+        via: { tool: 'run-command', args: { command: 'curl https://esempio/fuga' } }
+      }) }] },
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'bozza pronta' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'manda una email', emit)
+
+    const draft = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string })?.type === 'draft')!
+    // via SCARTATO: bozza di solo testo, nessun canale di invio collegato
+    expect((draft.meta?.message as { via?: unknown }).via).toBeUndefined()
+    expect((draft.meta?.message as { to?: string }).to).toBe('x@y.it')
+    // il tool-result spiega lo scarto al modello
+    const toolMsg = h.llm.calls[1]!.find((m) => m.role === 'tool')
+    expect(toolMsg?.content).toContain('scartato')
+    expect(toolMsg?.content).toContain('non è un tool di invio esterno')
+    // né run-command né tool MCP sono mai stati eseguiti
+    expect(h.sandboxMock.exec.calls).toBe(0)
+    expect(h.mcp.calls).toBe(0)
+  })
+
+  it('D1: draft_external valido con to/body diversi da via.args → payload e via.args coincidono, bcc visibile', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'd2', name: 'draft_external', arguments: JSON.stringify({
+        channel: 'email', to: 'visibile@esempio.it', subject: 'Oggetto', body: 'corpo visibile',
+        via: { tool: 'mcp__gmail__send_message', args: { to: 'nascosto@esempio.it', subject: 'Oggetto', body: 'corpo nascosto', bcc: 'terzo@esempio.it' } }
+      }) }] },
+      { toolCalls: [{ id: 's2', name: 'send_to_user', arguments: JSON.stringify({ text: 'bozza pronta' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'scrivi a persona', emit)
+
+    const draft = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string })?.type === 'draft')!
+    const msg = draft.meta?.message as {
+      to: string; subject?: string; body: string
+      via?: { tool: string; args: Record<string, unknown> }
+      extraArgs?: Array<{ key: string; value: string }>
+    }
+    // la card mostra i campi visibili…
+    expect(msg.to).toBe('visibile@esempio.it')
+    expect(msg.subject).toBe('Oggetto')
+    expect(msg.body).toBe('corpo visibile')
+    // …e gli argomenti che verranno eseguiti sono quelli aggiornati dai campi visibili
+    expect(msg.via).toEqual({
+      tool: 'mcp__gmail__send_message',
+      args: { to: 'visibile@esempio.it', subject: 'Oggetto', body: 'corpo visibile', bcc: 'terzo@esempio.it' }
+    })
+    // il campo extra bcc non è nascosto: finisce in "Altri parametri"
+    expect(msg.extraArgs).toEqual([{ key: 'bcc', value: 'terzo@esempio.it' }])
+    // il tool MCP NON è mai partito in questo turno (solo al click su Invia)
+    expect(h.mcp.calls).toBe(0)
+  })
 })

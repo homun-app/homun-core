@@ -41,6 +41,23 @@ export interface DraftVia {
   args: Record<string, unknown>
 }
 
+/**
+ * Review fase 3 (D1): quali argomenti di via.args alimentano i campi visibili
+ * to/subject/body della card (es. { to: 'to', subject: 'subject', body: 'text' }).
+ * Unica fonte di verità: via.args, ciò che verrà davvero inviato.
+ */
+export interface DraftFieldMap {
+  to?: string
+  subject?: string
+  body?: string
+}
+
+/** Review fase 3 (D1): argomento di via.args non mappato sui campi visibili, mostrato in "Altri parametri". */
+export interface DraftExtraArg {
+  key: string
+  value: string
+}
+
 export type SendMessagePayload =
   | { type: 'text'; text: string; urgent?: boolean }
   | {
@@ -59,6 +76,12 @@ export type SendMessagePayload =
       subject?: string
       body: string
       via?: DraftVia
+      /** D1: mappa campo visibile → argomento di via.args (calcolata alla creazione) */
+      fieldMap?: DraftFieldMap
+      /** D1: argomenti di via.args non coperti dalla fieldMap — sempre visibili in card ("Altri parametri") */
+      extraArgs?: DraftExtraArg[]
+      /** D1: true se nessun argomento è mappato sul corpo: modifica del testo disabilitata, argomenti grezzi */
+      bodyLocked?: true
     }
 
 /**
