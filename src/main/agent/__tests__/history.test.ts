@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildMessages } from '../history'
+import { buildMessages, visibleReplyEntries } from '../history'
 import type { TranscriptEntry } from '../../../shared/types'
 
 let nextId = 1
@@ -165,5 +165,92 @@ describe('buildMessages (§5.3)', () => {
     const asst = msgs.find((m) => m.role === 'assistant' && m.toolCalls?.length)
     expect(asst?.content).toBe('') // contenuto testo assente: solo tool_use
     expect(asst?.toolCalls?.[0]?.id).toBe('c9')
+  })
+})
+
+describe('fase 3 (§3bis L2): send-message e thinking nella storia del modello', () => {
+  it('send-message text → tool call send_to_user + tool result, non testo assistant', () => {
+    const entries = [
+      mk('message', 'user', 'ciao'),
+      mk('thinking', 'assistant', 'ragiono tra me'),
+      mk('send-message', 'assistant', 'Ecco la risposta', {
+        call: { id: 'call_1', name: 'send_to_user', arguments: '{"text":"Ecco la risposta"}' },
+        message: { type: 'text', text: 'Ecco la risposta' }
+      }),
+      mk('message', 'user', 'grazie')
+    ]
+    const sentId = entries[2]!.id
+    const msgs = buildMessages(sys, entries)
+    // thinking resta contenuto assistant…
+    expect(msgs[2]).toMatchObject({ role: 'assistant', content: 'ragiono tra me' })
+    // …e la send-message aggrega la sua call su quel messaggio assistant
+    expect(msgs[2].toolCalls?.[0]).toMatchObject({ id: `send_${sentId}`, name: 'send_to_user', arguments: '{"text":"Ecco la risposta"}' })
+    expect(msgs[3]).toEqual({ role: 'tool', toolCallId: `send_${sentId}`, content: "inviato all'utente" })
+    expect(msgs[4]).toEqual({ role: 'user', content: 'grazie' })
+  })
+
+  it('widget → call ask_user con esito "in attesa"; respondedValue/dismissed cambiano il result', () => {
+    const base = (extra: Record<string, unknown>): TranscriptEntry => mk('send-message', 'assistant', 'Sì o no?', {
+      call: { id: 'w', name: 'ask_user', arguments: '{"prompt":"Sì o no?"}' },
+      message: { type: 'widget', prompt: 'Sì o no?', options: [{ label: 'Sì', value: 'si' }] },
+      ...extra
+    })
+    const user = mk('message', 'user', 'x')
+    const widget = base({})
+    const waiting = buildMessages(sys, [user, widget])
+    expect(waiting[2]).toMatchObject({ role: 'assistant', content: '', toolCalls: [{ name: 'ask_user' }] })
+    expect(waiting[3]).toMatchObject({ role: 'tool', toolCallId: `send_${widget.id}` })
+    expect(waiting[3]?.content).toContain("turno terminato in attesa della risposta")
+
+    const answered = buildMessages(sys, [mk('message', 'user', 'x'), base({ respondedValue: 'si' })])
+    expect(answered[3]?.content).toContain('utente ha risposto: "si"')
+
+    const dismissed = buildMessages(sys, [mk('message', 'user', 'x'), base({ widgetDismissed: true })])
+    expect(dismissed[3]?.content).toContain('scartato')
+  })
+
+  it('bozza → call originale (meta.call) con esito dello stato; thinking vuoto escluso', () => {
+    const entries = [
+      mk('message', 'user', 'scrivi a x'),
+      mk('thinking', 'assistant', ''),
+      mk('send-message', 'assistant', 'Oggetto', {
+        call: { id: 'd1', name: 'mcp__gmail__send_message', arguments: '{"to":"x@y.it"}' },
+        message: { type: 'draft', channel: 'email', to: 'x@y.it', body: 'ciao', via: { tool: 'mcp__gmail__send_message', args: { to: 'x@y.it' } } },
+        status: 'sent'
+      })
+    ]
+    const draftId = entries[2]!.id
+    const msgs = buildMessages(sys, entries)
+    // thinking vuoto scartato; la call è quella ORIGINALE del modello
+    expect(msgs.filter((m) => m.role === 'assistant' && m.content)).toHaveLength(0)
+    expect(msgs[2]).toMatchObject({ role: 'assistant', content: '', toolCalls: [{ id: `send_${draftId}`, name: 'mcp__gmail__send_message' }] })
+    expect(msgs[3]).toMatchObject({ role: 'tool', toolCallId: `send_${draftId}`, content: "bozza inviata all'utente che l'ha confermata" })
+  })
+
+  it('send-message senza meta.call ricade sul tool del payload (ask_user/draft_external/send_to_user)', () => {
+    const entries = [
+      mk('send-message', 'assistant', 'domanda?', { message: { type: 'widget', prompt: 'domanda?', options: [] } })
+    ]
+    const msgs = buildMessages(sys, entries)
+    expect(msgs[1]?.toolCalls?.[0]).toMatchObject({ name: 'ask_user' })
+  })
+
+  it('visibleReplyEntries: estrae i messaggi visibili da una sequenza di tool call', () => {
+    const entries = [
+      mk('message', 'user', 'lavora'),            // apre il turno
+      mk('thinking', 'assistant', 'penso'),
+      mk('tool-call', 'assistant', 'run-command', { id: 'a', name: 'run-command', arguments: '{}' }),
+      mk('tool-result', 'system', 'out', { callId: 'a' }),
+      mk('thinking', 'assistant', 'ancora penso'),
+      mk('send-message', 'assistant', 'avanzamento', { message: { type: 'text', text: 'avanzamento' } }),
+      mk('tool-call', 'assistant', 'run-command', { id: 'b', name: 'run-command', arguments: '{}' }),
+      mk('tool-result', 'system', 'out2', { callId: 'b' }),
+      mk('send-message', 'assistant', 'risultato finale', { message: { type: 'text', text: 'risultato finale' } })
+    ]
+    // da una sequenza di tool call e thinking, l'utente vede SOLO le send-message
+    const visible = visibleReplyEntries(entries, entries[0]!.id)
+    expect(visible.map((e) => e.content)).toEqual(['avanzamento', 'risultato finale'])
+    // senza send-message (turno di routine silenzioso) → nessun messaggio visibile
+    expect(visibleReplyEntries(entries.slice(0, 5), entries[0]!.id)).toHaveLength(0)
   })
 })

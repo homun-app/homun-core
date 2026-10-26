@@ -203,6 +203,12 @@ export function getPermissions(): PermissionsConfig {
   return getSetting<PermissionsConfig>('permissions', {
     default: 'needs_approval',
     rules: [
+      // fase 3: i tool di comunicazione sono sempre consentiti (il gate non
+      // serve: sono l'unico modo che il modello ha di parlare con l'utente e
+      // non hanno effetti fuori dal transcript)
+      { tool: 'send_to_user', pattern: '*', mode: 'always_allow' },
+      { tool: 'ask_user', pattern: '*', mode: 'always_allow' },
+      { tool: 'draft_external', pattern: '*', mode: 'always_allow' },
       { tool: 'read-file', pattern: '*', mode: 'always_allow' },
       { tool: 'list-directory', pattern: '*', mode: 'always_allow' },
       { tool: 'write-file', pattern: '*', mode: 'needs_approval' },

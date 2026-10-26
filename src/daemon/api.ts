@@ -6,20 +6,32 @@ import { cancelAgentJobs } from '../main/store/jobs'
 import * as store from '../main/store/db'
 import { db } from '../main/store/db'
 import * as loop from '../main/agent/loop'
+import * as permissions from '../main/agent/permissions'
+import { executeTool } from '../main/agent/tools'
 import * as providers from '../main/agent/providers'
 import { suggestRoutines } from '../main/routines'
 import { llmStream } from '../main/agent/llm'
 import { secondaryPrompts } from '../main/agent/prompts'
 import { parseCron } from './cron'
-import { enqueueUserMessage } from './enqueue'
+import { enqueueUserMessage, enqueueWidgetResponse } from './enqueue'
 import type { JobWorker } from './worker'
-import type { SandbotEvent } from '../shared/types'
+import type { SandbotEvent, SendMessagePayload } from '../shared/types'
 
 type Emitter = (e: SandbotEvent) => void
 
 export function buildApiMethods(emit: Emitter, worker: JobWorker): Record<string, (params: unknown[]) => unknown> {
   const mcp = () => import('../main/mcp')
   const vault = () => import('../main/vault')
+
+  // fase 3: notice di sistema e entry aggiornata, emesse alla UI come le altre
+  const appendLocalNotice = (agentId: string, content: string): void => {
+    store.appendEntry({ agentId, kind: 'notice', role: 'system', content })
+    emit({ type: 'entries', agentId, entries: store.getEntries(agentId).slice(-1) })
+  }
+  const emitUpdatedEntry = (agentId: string, entryId: number): void => {
+    const updated = store.getEntries(agentId).find((e) => e.id === entryId)
+    if (updated) emit({ type: 'entries', agentId, entries: [updated] })
+  }
 
   return {
     // ---- agenti ----
@@ -50,15 +62,85 @@ export function buildApiMethods(emit: Emitter, worker: JobWorker): Record<string
       loop.interrupt(agentId as string)
     },
 
+    // ---- fase 3: risposta ai widget ask_user ----
+    'widget:respond': ([agentId, entryId, value]) => {
+      const job = enqueueWidgetResponse(db(), agentId as string, entryId as number, value as string | string[], emit)
+      if (job) worker.poke()
+      return { ok: !!job }
+    },
+
+    // ---- fase 3: azioni sulle bozze (l'invio vero avviene SOLO qui, al click) ----
+    'draft:send': async ([agentId, entryId, body]) => {
+      const aid = agentId as string
+      const entry = store.getEntries(aid).find((x) => x.id === (entryId as number))
+      const message = entry?.meta?.message as SendMessagePayload | undefined
+      if (!entry || entry.kind !== 'send-message' || message?.type !== 'draft') throw new Error('Bozza non trovata')
+      const meta = entry.meta ?? {}
+      if (meta.status === 'sent' || meta.status === 'discarded') throw new Error(`Bozza già ${meta.status === 'sent' ? 'inviata' : 'scartata'}`)
+      // body modificato inline nella card: persistito prima dell'invio
+      if (typeof body === 'string' && body.trim() && body !== message.body) message.body = body
+      const via = message.via
+      const notice = (content: string): void => {
+        appendLocalNotice(aid, content)
+      }
+      if (!via) {
+        notice('La bozza non ha un tool di invio associato: non può essere inviata automaticamente.')
+        return { ok: false }
+      }
+      // il click su Invia è il consenso esplicito dell'utente (ha visto tutto il
+      // contenuto), ma il gate dei permessi resta in mezzo: una regola blocked
+      // nega comunque l'invio
+      const verdict = await permissions.check(via.tool, via.args, aid)
+      if (verdict.kind === 'deny') {
+        notice(`Invio bloccato dai permessi: ${via.tool}`)
+        return { ok: false }
+      }
+      try {
+        const { output } = await executeTool(aid, via.tool, via.args)
+        store.updateEntryMeta(entry.id, { ...meta, message, status: 'sent' })
+        emitUpdatedEntry(aid, entry.id)
+        notice(`Bozza inviata (${via.tool}). Esito: ${output.slice(0, 300)}`)
+        return { ok: true }
+      } catch (e) {
+        store.updateEntryMeta(entry.id, { ...meta, message, status: 'error' })
+        emitUpdatedEntry(aid, entry.id)
+        notice(`Errore nell'invio della bozza: ${e instanceof Error ? e.message : String(e)}`)
+        return { ok: false }
+      }
+    },
+    'draft:discard': ([agentId, entryId]) => {
+      const aid = agentId as string
+      const entry = store.getEntries(aid).find((x) => x.id === (entryId as number))
+      const message = entry?.meta?.message as SendMessagePayload | undefined
+      if (!entry || entry.kind !== 'send-message' || message?.type !== 'draft') throw new Error('Bozza non trovata')
+      if (entry.meta?.status === 'sent') throw new Error('Bozza già inviata')
+      store.updateEntryMeta(entry.id, { ...(entry.meta ?? {}), status: 'discarded' })
+      emitUpdatedEntry(aid, entry.id)
+      return { ok: true }
+    },
+    'draft:update': ([agentId, entryId, body]) => {
+      const aid = agentId as string
+      const entry = store.getEntries(aid).find((x) => x.id === (entryId as number))
+      const message = entry?.meta?.message as SendMessagePayload | undefined
+      if (!entry || entry.kind !== 'send-message' || message?.type !== 'draft') throw new Error('Bozza non trovata')
+      if (entry.meta?.status === 'sent' || entry.meta?.status === 'discarded') throw new Error('Bozza già chiusa')
+      message.body = String(body ?? '')
+      store.updateEntryMeta(entry.id, { ...(entry.meta ?? {}), message })
+      emitUpdatedEntry(aid, entry.id)
+      return { ok: true }
+    },
+
     // ---- quick-ask (domanda effimera, non inquina il transcript) ----
     quickask: async ([agentId, question]) => {
       const agent = store.getAgent(agentId as string)
       if (!agent?.providerId || !agent.model) throw new Error('Configura prima provider e modello.')
       const provider = providers.getProvider(agent.providerId)
       if (!provider) throw new Error('Provider non trovato')
+      // fase 3: ciò che il bot ha DETTO all'utente sono le send-message (il
+      // testo libero è ragionamento interno e non entra nel contesto)
       const context = store.getEntries(agentId as string)
         .slice(-20)
-        .filter((e) => e.kind === 'message')
+        .filter((e) => e.kind === 'message' || e.kind === 'send-message')
         .map((e) => `${e.role === 'user' ? 'UTENTE' : 'BOT'}: ${e.content.slice(0, 400)}`)
         .join('\n')
       const prompt = secondaryPrompts.quickAsk(context, question as string)

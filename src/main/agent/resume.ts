@@ -32,9 +32,12 @@ export interface ResumePlan {
 export function planResume(entries: TranscriptEntry[], entryId: number): ResumePlan {
   const turn = entries.filter((e) => e.id > entryId)
   const last = turn[turn.length - 1]
-  // turno concluso: messaggio assistant finale, con testo e nessuna tool-call dopo
+  // turno concluso: evento di fine turno (fase 3, meta.turnEnd) oppure —
+  // transcript pre-fase 3 — messaggio assistant finale con testo e nessuna
+  // tool-call dopo
   const alreadyComplete =
-    !!last && last.kind === 'message' && last.role === 'assistant' && last.content.trim() !== ''
+    turn.some((e) => e.kind === 'event' && e.meta?.turnEnd) ||
+    (!!last && last.kind === 'message' && last.role === 'assistant' && last.content.trim() !== '')
   // ogni approval ancora pending dell'agente scade (anche di turni precedenti)
   const pendingApprovals = entries.filter((e) => e.kind === 'approval' && e.meta?.status === 'pending')
   // tool-call del turno senza tool-result: l'esito è andato perso con il crash

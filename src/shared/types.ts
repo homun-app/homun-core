@@ -14,12 +14,69 @@ export interface Agent {
 }
 
 export type EntryKind =
-  | 'message'        // messaggio user o assistant
+  | 'message'        // messaggio user o assistant (formato pre-fase 3)
+  | 'thinking'       // testo libero generato dal modello: NON arriva all'utente, nascosto di default (toggle "mostra ragionamento")
+  | 'send-message'   // messaggio del bot all'utente (message.type: text | widget | draft) — nasce SOLO da tool
   | 'tool-call'      // chiamata tool richiesta dal modello
   | 'tool-result'    // esito del tool
   | 'notice'         // nota di sistema (permesso negato, ecc.)
   | 'approval'       // card di approvazione
-  | 'event'          // evento (cambio stato, interrupt)
+  | 'event'          // evento (cambio stato, interrupt, fine turno con meta.turnEnd)
+
+/** Esito di fine turno (come GrokBotTaskListTurnEnd + awaiting_user dell'originale). */
+export type TurnEnd = 'FINISHED' | 'STOPPED' | 'SUPERSEDED' | 'AWAITING_USER'
+
+// ---- payload dei messaggi del bot (entry kind 'send-message', in meta.message) ----
+
+export interface WidgetOption {
+  label: string
+  value: string
+  description?: string
+  style?: 'primary' | 'default'
+}
+
+/** Il tool di invio associato a una bozza: eseguito SOLO al click dell'utente. */
+export interface DraftVia {
+  tool: string
+  args: Record<string, unknown>
+}
+
+export type SendMessagePayload =
+  | { type: 'text'; text: string; urgent?: boolean }
+  | {
+      type: 'widget'
+      prompt: string
+      helpText?: string
+      options: WidgetOption[]
+      multiSelect?: boolean
+      allowCustom?: boolean
+      dismissOnMoveOn?: boolean
+    }
+  | {
+      type: 'draft'
+      channel: 'email' | 'slack' | 'other'
+      to: string
+      subject?: string
+      body: string
+      via?: DraftVia
+    }
+
+/**
+ * meta di una entry 'send-message':
+ * - call: la tool-call che l'ha prodotta (per ricostruire la storia del modello)
+ * - message: il payload (text | widget | draft)
+ * - respondedValue / widgetDismissed: stato del widget dopo l'azione dell'utente
+ * - status: per le bozze, 'pending' → 'sent' | 'discarded' | 'error'
+ * - fallback: true se il testo è il recupero di un turno senza send_to_user
+ */
+export interface SendMessageMeta {
+  call?: { id: string; name: string; arguments: string }
+  message: SendMessagePayload
+  respondedValue?: string | string[]
+  widgetDismissed?: boolean
+  status?: 'pending' | 'sent' | 'discarded' | 'error'
+  fallback?: boolean
+}
 
 export interface TranscriptEntry {
   id: number
@@ -103,6 +160,12 @@ export interface SandbotApi {
   getEntries(agentId: string, afterId?: number): Promise<TranscriptEntry[]>
   sendMessage(agentId: string, text: string, images?: string[]): Promise<void>
   interrupt(agentId: string): Promise<void>
+  // risposta a un widget ask_user (click su un'opzione o testo libero se allowCustom)
+  widgetRespond(agentId: string, entryId: number, value: string | string[]): Promise<void>
+  // azioni sulla bozza: Invia (esegue via.tool passando dal gate), Scarta, Modifica (persiste il body)
+  draftSend(agentId: string, entryId: number, body?: string): Promise<void>
+  draftDiscard(agentId: string, entryId: number): Promise<void>
+  draftUpdate(agentId: string, entryId: number, body: string): Promise<void>
   // approvazioni
   resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', always: boolean): Promise<void>
   // provider e modelli

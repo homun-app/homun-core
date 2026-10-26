@@ -17,6 +17,7 @@ import type { SandbotEvent } from '../shared/types'
 export const DAEMON_RPC_CHANNELS = [
   'agents:list', 'agents:create', 'agents:update', 'agents:delete',
   'agents:entries', 'chat:send', 'chat:interrupt',
+  'widget:respond', 'draft:send', 'draft:discard', 'draft:update',
   'quickask',
   'routines:list', 'routines:create', 'routines:update', 'routines:delete', 'routines:suggest',
   'mcp:list', 'mcp:save', 'mcp:delete', 'mcp:test',
@@ -75,7 +76,11 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
     const focused = windows.some((w) => w.isFocused())
     if (focused) return { shown: false }
     const agent = db.getAgent(agentId as string)
-    const last = db.getEntries(agentId as string).findLast((x) => x.kind === 'message' && x.role === 'assistant')
+    // fase 3: l'ultimo messaggio visibile è una send-message (testo libero =
+    // ragionamento interno, mai notificato); ripiego sulle message pre-fase 3
+    const last = db.getEntries(agentId as string).findLast(
+      (x) => x.kind === 'send-message' || (x.kind === 'message' && x.role === 'assistant')
+    )
     if (!agent || !last?.content) return { shown: false }
     const n = new Notification({
       title: `${agent.name} ha risposto`,

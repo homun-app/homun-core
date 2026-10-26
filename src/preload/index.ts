@@ -9,6 +9,10 @@ const api: SandbotApi = {
   getEntries: (agentId, afterId) => ipcRenderer.invoke('agents:entries', agentId, afterId),
   sendMessage: (agentId, text, images) => ipcRenderer.invoke('chat:send', agentId, text, images),
   interrupt: (agentId) => ipcRenderer.invoke('chat:interrupt', agentId),
+  widgetRespond: (agentId, entryId, value) => ipcRenderer.invoke('widget:respond', agentId, entryId, value),
+  draftSend: (agentId, entryId, body) => ipcRenderer.invoke('draft:send', agentId, entryId, body),
+  draftDiscard: (agentId, entryId) => ipcRenderer.invoke('draft:discard', agentId, entryId),
+  draftUpdate: (agentId, entryId, body) => ipcRenderer.invoke('draft:update', agentId, entryId, body),
   resolveApproval: (agentId, approvalId, decision, always) =>
     ipcRenderer.invoke('approvals:resolve', agentId, approvalId, decision, always),
 

@@ -287,3 +287,88 @@ parametro `agentId` (opzionale, per non rompere chiamate legacy).
 - **Output typecheck/vitest/build:** `npm run typecheck` → `tsc --noEmit` pulito (exit 0); `npx vitest run` → `Test Files 19 passed (19)` / `Tests 198 passed (198)`; `npm run build` → `✓ built` ×3, `out/main/index.js 18.20 kB`, `out/main/daemon.js 96.84 kB`, preload 2.67 kB, renderer 1.179,95 kB (avvisi `INEFFECTIVE_DYNAMIC_IMPORT` preesistenti, cosmetici).
 - **Non verificato:** (1) la ripresa dal vivo con un crash REALE del daemon a metà turno (verificata a livello di loop con transcript post-crash e runner finti, più il wiring `makeJobRunner`; nessun `npm run dev` con kill -9 in questa ripassata); (2) i test ws usano frame non mascherati (il codec li accetta): il percorso mascherato client→server resta coperto dai test del codec in `rpc-protocol.test.ts`; (3) il pacchetto `dist`/dmg, invariato rispetto alla fase 2.
 - **Fuori scope notati:** (1) la registrazione dell'entry non è atomica con l'append del messaggio: un crash nella finestra tra le due scritture può duplicare il messaggio utente al retry (servirebbe una transazione SQLite condivisa tra transcript e payload del job); (2) la detection "turno già concluso" guarda l'ultimo entry dopo `entryId`: se dopo la risposta finale arrivano notice (es. "messaggio in coda") il turno completo viene ripreso chiamando comunque il modello — raro ed esito comunque corretto, solo una chiamata in più; (3) `node-cron` ancora in package.json e avvisi rollup (già notati in fase 2, invariati); (4) il ws-server risponde ai PING anche pre-autenticazione (innocuo: il timeout chiude comunque entro 5 s).
+
+---
+
+# Fase 3 — L'agente comunica solo tramite tool
+
+**Data:** 2026-10-26 · **Commit:** `fase 3: comunicazione via tool` · **Tag:** `fase-3`
+**Scope:** §3bis L2 (solo tool parlanti), L5 (drafting/invii esterni), L10 (widget) + §3ter T2/T3/T5 (evidenza e catalogo); prima del resto i residui fase 2 (commit `fase 3: residui`).
+**Verifica:** `npm run typecheck` pulito · `npx vitest run` **239 test, 22 file, tutti verdi** (206 post-residui + 33 nuovi) · `npm run build` verde · chat verificata dal vivo con `npm run dev` (vedi sotto).
+
+## Residui fase 2 (commit separato `fase 3: residui`)
+
+- **Entry assistant vuote:** `history.ts` scarta i messaggi assistant con contenuto vuoto/solo spazi (stream interrotto da crash/errore del modello); una tool-call seguente si aggrega da sola in un assistant con sole chiamate. Nell'adapter Anthropic la conversione è estratta in `toAnthropicMessages` (pura, esportata, testata): mai blocchi `text` vuoti o di soli spazi — un assistant con sole tool call ha solo blocchi `tool_use`, un messaggio che resterebbe senza blocchi viene scartato.
+- **Recupero lease all'avvio:** `requeueAllLeased` in `jobs.ts` rimette subito in `queued` TUTTI i job `leased` (il lock garantisce un solo daemon per directory dati: ogni lease appartiene a un processo morto), chiamata in `index.ts` prima di `worker.start()` — niente attesa dei 2 minuti di lease.
+
+## Il principio (§3bis L2)
+
+Il testo libero generato dal modello NON arriva più all'utente: viene salvato come entry `thinking` (nascosta di default in chat, toggle "🧠 Ragionamento" nell'header). L'agente parla SOLE tramite tre tool gestiti dal loop, sempre consentiti (regole `always_allow` di default in `db.ts`, ma il loop li intercetta PRIMA del gate: non hanno effetti fuori dal transcript):
+
+- **`send_to_user({text, urgent?})`** → entry `send-message` con `message.type='text'`. Chiamabile più volte in un turno (avanzamento + risultato). `urgent` finisce in `meta.message.urgent` (per la fase 6).
+- **`ask_user({prompt, helpText?, options, multiSelect?, allowCustom?, dismissOnMoveOn?})`** → entry `send-message` widget e il turno TERMINA con esito `AWAITING_USER`. La risposta dell'utente torna come nuovo messaggio utente con `meta.respondedTo=<entryId>` e il widget salva `respondedValue`; se l'utente scrive altro e il widget ha `dismissOnMoveOn`, viene marcato `widgetDismissed` (al momento dell'accodamento, `enqueue.ts`).
+- **`draft_external({channel, to, subject?, body, via?})`** → entry `send-message` draft con pulsanti Invia/Scarta/Modifica (`meta.status`: `pending → sent | discarded | error`). L'invio vero avviene SOLO al click: la RPC `draft:send` esegue `via.tool` con `via.args` passando dal gate dei permessi e il risultato diventa una notice nel transcript.
+
+Le chiamate del modello successive a una `ask_user` nella stessa risposta non vengono eseguite (il turno termina lì).
+
+## Esito del turno (entry `event` con `meta.turnEnd`)
+
+`FINISHED | STOPPED | SUPERSEDED | AWAITING_USER` salvato in un'entry event alla chiusura di OGNI turno:
+
+- **FINISHED** — completamento normale. Se un turno **utente** finisce senza nessuna `send-message` visibile (`visibleReplyEntries` in `history.ts`, pura), il runtime fa **UNA chiamata di recupero** con un sollecito dedicato (`RECOVERY_NUDGE`); se anche quella non produce `send_to_user`, il testo libero dell'ultima risposta viene mostrato come send-message con `meta.fallback=true`. I turni **routine** non fanno recupero: possono finire in silenzio.
+- **AWAITING_USER** — dopo `ask_user` (nessuna chiamata di recupero: la palla è dell'utente).
+- **SUPERSEDED** — se arriva un messaggio utente mentre l'agente è in `paused-for-approval`, `supersedeIfPaused` (loop) marca le approval pendenti `superseded`, abortisce il turno e `enqueueUserMessage` fa partire il nuovo messaggio subito invece di metterlo in coda. "In attesa di un ask_user" non serve gestione: `ask_user` TERMINA il turno, quindi l'agente è già libero e il messaggio parte comunque subito.
+- **STOPPED** — interrupt dell'utente, errore del modello, risposta vuota o limite di passi (bug preesistente corretto: prima l'abort mostrava la notice "limite di passi raggiunto").
+
+## Classificazione degli invii esterni (§3bis L5)
+
+Setting `externalSendTools` (mappa server-slug → nomi tool originali, default: gmail → send_message/reply/forward/send_email/send_draft; slack → slack_send_message/slack_schedule_message; la config utente sostituisce le default). `external-send.ts` (puro, testato): una chiamata diretta del modello a uno di questi tool MCP NON viene eseguita — diventa automaticamente una **bozza** (`draftFromExternalCall`: to/subject/body best-effort dai nomi di argomento comuni, `via` = la chiamata originale, canale dedotto dal server) e al modello torna "Invio esterno non eseguito: trasformato in una bozza in attesa della conferma dell'utente". Il tool MCP viene eseguito solo da `draft:send` al click dell'utente.
+
+## History per il modello (§3bis L2)
+
+`buildMessages` ricostruisce dal transcript: le entry `send-message` tornano come **tool call + tool result** (con `meta.call` la chiamata ORIGINALE — es. `mcp__gmail__send_message` — così il modello ricorda esattamente cosa ha fatto; il result dice come è finita: "inviato all'utente", "l'utente ha risposto: …", "bozza scartata dall'utente"…); le entry `thinking` tornano come contenuto assistant. Gli id delle call ricostruite sono `send_<entryId>` (univoci e deterministici); il pairing call/result resta coerente per `repairToolPairs`.
+
+## UI e RPC
+
+- **WidgetCard** (opzioni come bottoni, `style:'primary'`, multiSelect con conferma, campo libero se `allowCustom`, stato "✓ Hai risposto: …"/"scartato") e **DraftCard** (anteprima canale/destinatario/oggetto/body, Invia/Scarta/Modifica con editing inline persistito via `draft:update`) in `src/renderer/src/components/`.
+- Le RPC nuove (`widget:respond`, `draft:send`, `draft:discard`, `draft:update`) passano dal daemon come le altre (canali in `ipc.ts`, metodi in `api.ts`, binding in `preload`).
+- Il testo libero è visibile solo col toggle "🧠 Ragionamento" (insieme agli event di fine turno, che sono contabilità interna); la notifica "bot ha risposto" e il contesto quick-ask leggono ora le `send-message` (con ripiego sulle `message` assistant pre-fase 3).
+
+## Ripresa dopo crash (R1, aggiornata)
+
+`planResume` considera il turno "già concluso" anche se esiste un evento `meta.turnEnd` dopo l'entry di apertura (transcript di fase 3); il completamento senza modello non duplica l'evento se c'è già.
+
+## Verifica manuale (`npm run dev`, agente "Bot" su Ollama `gemma4:31b-cloud`)
+
+1. **Risposta con send_to_user:** "Ciao! Presentati in una riga." → entry `thinking` (vuota) + `send-message` "Ciao! Sono il tuo assistente personale sempre attivo." (call `send_to_user`) + event `FINISHED`. Nessuna chiamata di recupero (il tool era stato usato).
+2. **Widget:** "Fammi una domanda a opzioni…" → widget "Cosa preferisci bere?" (Tè/Caffè) + event `AWAITING_USER`. Click su "Caffè" via RPC `widget:respond` → `respondedValue` sul widget, messaggio utente "Caffè" con `meta.respondedTo`, risposta "Ottima scelta! Il caffè è un classico." via `send_to_user`, `FINISHED`.
+3. **UI vera:** messaggio scritto e inviato dal campo input dell'app (typing reale via computer use) → arrivato al daemon, widget "Domani dove lavorerai?" (Ufficio/Casa) **renderizzato nella finestra** con i due bottoni (verificato da screenshot analizzato) e comparso via eventi push. Il bottone chiama la stessa catena del punto 2 (stessa action store → stessa RPC).
+4. Daemon spento con SIGTERM: `daemon.json` e lock rimossi correttamente.
+
+Nota: nel transcript di sviluppo dell'app restano le voci di questi test (entry 126–146), come era già successo per il PONG della fase 2.
+
+## REPORT FASE 3
+
+- **File modificati/creati:**
+  - `src/main/agent/external-send.ts` — **nuovo** — classificazione invii esterni (puro): `isExternalSend`, `draftFromExternalCall`, default gmail/slack.
+  - `src/main/agent/widgets.ts` — **nuovo** — helper widget puri: `findDismissibleWidgets`, `responseDisplayText`, `normalizeOptions`, `widgetPayload`.
+  - `src/renderer/src/components/WidgetCard.tsx`, `DraftCard.tsx` — **nuovi** — card widget (opzioni/multiSelect/custom/stato) e bozza (Invia/Scarta/Modifica con editing inline).
+  - `src/main/agent/loop.ts` — il cuore: thinking al posto del testo libero, gestione loop dei tre tool, esito `turnEnd`, chiamata di recupero + fallback, `supersedeIfPaused`, `dismissPendingWidgets`, tool result "bozza" per gli invii esterni intercettati.
+  - `src/main/agent/history.ts` — send-message → tool call + result (meta.call), thinking → assistant, `visibleReplyEntries` (messaggi visibili), scarto assistant vuoti (residuo 2a).
+  - `src/main/agent/llm.ts` — `toAnthropicMessages` pura senza blocchi text vuoti (residuo 2a).
+  - `src/main/agent/tools.ts` — definizioni di send_to_user / ask_user / draft_external.
+  - `src/main/agent/prompts.ts` — regole di comunicazione (solo tool, avanzamento, opzioni cliccabili, silenzio nelle routine, mai dettagli interni, invii via bozza).
+  - `src/main/agent/resume.ts` — alreadyComplete anche con event turnEnd.
+  - `src/shared/types.ts` — kind `send-message`/`thinking`, `TurnEnd`, payload text/widget/draft, `respondedValue`/`widgetDismissed`, API widget/bozze.
+  - `src/main/store/jobs.ts` + `src/daemon/index.ts` — `requeueAllLeased` all'avvio (residuo 2b).
+  - `src/main/store/db.ts` — regole always_allow di default per i tre tool di comunicazione.
+  - `src/daemon/enqueue.ts` — supersede dei turni in approval, dismissal widget, `enqueueWidgetResponse` (respondedTo + testo leggibile).
+  - `src/daemon/run-job.ts` — pass-through `respondedTo` al loop.
+  - `src/daemon/api.ts` — RPC `widget:respond`/`draft:send`/`draft:discard`/`draft:update` (gate sull'invio, esito come notice), contesto quick-ask sulle send-message.
+  - `src/main/ipc.ts`, `src/preload/index.ts`, `src/renderer/src/store.ts`, `src/renderer/src/components/Chat.tsx` — canali, binding, azioni store, rendering nuovi kind + toggle ragionamento.
+  - test: **nuovi** `external-send.test.ts`, `widgets.test.ts`, `draft-actions.test.ts`; aggiornati `loop.test.ts` (7 nuovi), `history.test.ts` (6 nuovi), `jobs.test.ts`, `llm-toolcalls.test.ts` (residui), `queue.test.ts` (3 nuovi widget).
+- **Decisioni prese e perché:** (1) i tool di comunicazione sono intercettati nel loop PRIMA del gate (oltre che always_allow nelle regole di default): non hanno effetti fuori dal transcript e il gate non deve poter bloccare la parola; (2) per `draft:send` il click su Invia conta come consenso dell'utente (ha visto tutto il contenuto della bozza), ma una regola `blocked` nega comunque — è la semantica della DraftCard dell'originale ("Send / Discard / Always send"); (3) la chiamata di recupero NON è persistita nel transcript (il sollecito è un messaggio utente solo in memoria): al turno successivo la storia ricostruita resta pulita; (4) il fallback usa il testo dell'ultima risposta (recupero incluso) e se non c'è testo la fine resta silenziosa; (5) il widget rispondibile invia COME messaggio utente le etichette leggibili (`responseDisplayText`), non i value tecnici; (6) gli event turnEnd non vengono renderizzati (visibili solo col toggle ragionamento): le routine restano letteralmente silenziose in chat; (7) chiamate successive a ask_user nella stessa risposta del modello non vengono eseguite: il turno termina alla domanda, il prompt dice al modello di non ripetere la domanda; (8) le entry send-message non hanno entry tool-call/tool-result separate nel transcript (la coppia vive in `meta.call` + conversione in buildMessages): la chat resta pulita.
+- **Deviazioni dal prompt e perché:** (1) "in attesa di un ask_user" per SUPERSEDED non richiede codice dedicato: ask_user TERMINA il turno (come da specifica), quindi all'arrivo del messaggio l'agente è già libero e la coda jobs lo fa partire subito — SUPERSEDED serve solo per paused-for-approval; (2) il testo "TURN_END_LABELS" è in italiano negli event (coerente con le notice esistenti); (3) aggiunte RPC `draft:update` (persistere il body modificato senza inviare) e meta.status `error` sulle bozze con invio fallito (riprovabile): servite dall'editing inline richiesto; (4) i residui fase 2 in un commit separato come da convenzione delle fasi precedenti.
+- **Output di typecheck / vitest / build (ultime righe):** `tsc --noEmit` pulito (exit 0); vitest `Test Files 22 passed (22)` / `Tests 239 passed (239)`; build `out/main/index.js 18.30 kB`, `out/main/daemon.js 120.71 kB`, preload `3.07 kB`, renderer `1.191,64 kB`, `✓ built` ×3.
+- **Cosa NON è stato verificato:** (1) il **click fisico** sul bottone del widget nella finestra: i click sintetizzati di computer-use non raggiungono in modo affidabile i bottoni DOM di Electron (tre tentativi con coordinate derivate dall'analisi dello screenshot, incluse bounding box su crop; l'input di testo invece funziona). La catena dietro il bottone è verificata per intero: rendering della card con i bottoni (screenshot), action store → RPC `widget:respond` dal vivo con modello reale, `respondedValue`/`respondedTo`/turno di risposta nel transcript, più i test; (2) il rendering visivo di DraftCard non è stato visto dal vivo (nessuna bozza generata nella sessione: nessun server MCP gmail/slack configurato in dev) — logica verificata da `draft-actions.test.ts` su DB reale con gate e tool MCP finti; (3) il percorso impacchettato dist/dmg (invariato rispetto alla fase 2); (4) una routine reale silenziata dal vivo (il comportamento è coperto dal test loop con LLM finto, nessuna routine schedulata in dev).
+- **Problemi fuori scope notati:** (1) il ws-server accetta UNA sola UI: la seconda connessione calcia la prima e alla riconnessione NON c'è catch-up del transcript — during la verifica i client di probe lasciavano la finestra con la chat ferma al contenuto pre-kick finché non si ri-seleziona l'agente (andrebbe fatto un re-fetch delle entries alla riconnessione); (2) l'interrupt durante un'approval attende comunque il timeout dell'approval (`interrupt` abortisce lo stream ma la promise dell'approval resta appesa; preesistente); (3) le entry pre-fase 3 (assistant `message`) restano visibili come prima — nessuna migrazione del transcript storico; (4) il modello gemma4 risponde a volte con thinking "empty" letterale (contenuto della entry) — innocuo, resta nascosto; (5) `node-cron` inutilizzato e avvisi rollup (invariati dalle fasi precedenti).

@@ -6,9 +6,9 @@ import { describe, expect, it, beforeAll, beforeEach, afterAll, vi } from 'vites
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setDataDir, dataDir, db, createAgent, createRoutine, listRoutines, getEntries, type Routine } from '../../main/store/db'
+import { setDataDir, dataDir, db, createAgent, createRoutine, listRoutines, getEntries, appendEntry, type Routine } from '../../main/store/db'
 import { claimDueJobs, activeJobForAgent } from '../../main/store/jobs'
-import { enqueueUserMessage } from '../enqueue'
+import { enqueueUserMessage, enqueueWidgetResponse } from '../enqueue'
 import { dueRoutines, tickScheduler } from '../scheduler'
 import { nextCronRun } from '../cron'
 import type { SandbotEvent } from '../../shared/types'
@@ -82,6 +82,50 @@ describe('enqueueUserMessage: stessa semantica della coda della fase 1', () => {
     expect(withImg.payload).toEqual({ text: 'guarda', images: ['AAAA'] })
     const noImg = enqueueUserMessage(db(), AGENT, 'plain', undefined, emit)!
     expect(noImg.payload).toEqual({ text: 'plain' })
+  })
+})
+
+describe('fase 3: risposta ai widget ask_user (§3bis L10)', () => {
+  /** Crea una entry widget nel transcript reale e la ritorna. */
+  function mkWidget(dismissOnMoveOn: boolean): ReturnType<typeof getEntries>[number] {
+    return appendEntry({
+      agentId: AGENT, kind: 'send-message', role: 'assistant', content: 'Sì o no?',
+      meta: {
+        message: {
+          type: 'widget', prompt: 'Sì o no?',
+          options: [{ label: 'Sì', value: 'si' }, { label: 'No', value: 'no' }],
+          ...(dismissOnMoveOn ? { dismissOnMoveOn: true } : {})
+        }
+      }
+    })
+  }
+
+  it('enqueueWidgetResponse: respondedValue sul widget, job con respondedTo e testo leggibile', () => {
+    const w = mkWidget(true)
+    const job = enqueueWidgetResponse(db(), AGENT, w.id, 'si', emit)!
+    expect(job.kind).toBe('user-message')
+    // il testo del messaggio utente è l'ETICHETTA dell'opzione, non il value
+    expect(job.payload).toEqual({ text: 'Sì', respondedTo: w.id })
+    // il widget salva la risposta
+    expect(getEntries(AGENT).find((e) => e.id === w.id)?.meta?.respondedValue).toBe('si')
+    // una seconda risposta allo stesso widget è ignorata
+    expect(enqueueWidgetResponse(db(), AGENT, w.id, 'no', emit)).toBeNull()
+  })
+
+  it('un messaggio che NON risponde al widget lo marca widgetDismissed (solo con dismissOnMoveOn)', () => {
+    const dismissible = mkWidget(true)
+    const persistent = mkWidget(false)
+    enqueueUserMessage(db(), AGENT, 'lascia stare, fai quest\'altro', undefined, emit)
+    const entries = getEntries(AGENT)
+    expect(entries.find((e) => e.id === dismissible.id)?.meta?.widgetDismissed).toBe(true)
+    expect(entries.find((e) => e.id === persistent.id)?.meta?.widgetDismissed).toBeUndefined()
+  })
+
+  it('un messaggio CON respondedTo non scarta i widget (è la risposta, non un "vai avanti")', () => {
+    const w = mkWidget(true)
+    const job = enqueueWidgetResponse(db(), AGENT, w.id, ['si', 'no'], emit)! // multiSelect
+    expect(job.payload.text).toBe('Sì, No')
+    expect(getEntries(AGENT).find((e) => e.id === w.id)?.meta?.widgetDismissed).toBeUndefined()
   })
 })
 

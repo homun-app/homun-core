@@ -16,6 +16,11 @@ interface Store {
   select(agentId: string): Promise<void>
   send(text: string, images?: string[]): Promise<void>
   interrupt(): void
+  // fase 3: risposta a un widget e azioni sulle bozze
+  widgetRespond(entryId: number, value: string | string[]): void
+  draftSend(entryId: number, body?: string): void
+  draftDiscard(entryId: number): void
+  draftUpdate(entryId: number, body: string): void
   resolveApproval(approvalId: string, decision: 'allow' | 'deny', always: boolean): void
   createAgent(name: string): Promise<void>
   refreshProviders(): Promise<void>
@@ -115,6 +120,53 @@ export const useStore = create<Store>((set, get) => ({
   interrupt() {
     const id = get().activeId
     if (id) api.interrupt(id)
+  },
+
+  // fase 3: ottimistico sull'entry locale; il daemon rimanda l'entry aggiornata
+  widgetRespond(entryId, value) {
+    const id = get().activeId
+    if (!id) return
+    const s = get()
+    set({
+      entries: s.entries.map((en) =>
+        en.id === entryId ? { ...en, meta: { ...en.meta!, respondedValue: value } } : en
+      )
+    })
+    void api.widgetRespond(id, entryId, value)
+  },
+
+  draftSend(entryId, body) {
+    const id = get().activeId
+    if (!id) return
+    void api.draftSend(id, entryId, body).catch((err: unknown) =>
+      console.error('draftSend:', err instanceof Error ? err.message : err)
+    )
+  },
+
+  draftDiscard(entryId) {
+    const id = get().activeId
+    if (!id) return
+    const s = get()
+    set({
+      entries: s.entries.map((en) =>
+        en.id === entryId ? { ...en, meta: { ...en.meta!, status: 'discarded' } } : en
+      )
+    })
+    void api.draftDiscard(id, entryId)
+  },
+
+  draftUpdate(entryId, body) {
+    const id = get().activeId
+    if (!id) return
+    const s = get()
+    set({
+      entries: s.entries.map((en) =>
+        en.id === entryId && en.meta?.message
+          ? { ...en, meta: { ...en.meta, message: { ...(en.meta.message as Record<string, unknown>), body } } }
+          : en
+      )
+    })
+    void api.draftUpdate(id, entryId, body)
   },
 
   resolveApproval(approvalId, decision, always) {

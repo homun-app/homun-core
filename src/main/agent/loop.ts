@@ -9,8 +9,14 @@
 // running.set avviene solo quando non c'è già un run in corso per quell'agente.
 // Fase 2: la coda per agente non vive più in memoria qui — è la tabella jobs
 // del daemon (worker con lease) ad accodare i messaggi utente e a scartare le
-// routine; se runTurn viene chiamato su un agente occupato (invariante violato)
+// routine; se runTurn viene chiamato su un agente occupato (invariante violata)
 // il turno viene scartato con una notice, mai sovrascritto.
+//
+// Fase 3 (§3bis L2): l'agente comunica SOLO tramite tool. Il testo libero del
+// modello è ragionamento (entry 'thinking', nascosto in chat): all'utente
+// arrivano solo le entry 'send-message' create da send_to_user / ask_user /
+// draft_external. Ogni turno si chiude con un evento meta.turnEnd ∈
+// FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID } from 'node:crypto'
 import { getAgent, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
@@ -18,20 +24,28 @@ import { systemPrompt } from './prompts'
 import { toolDefs, executeTool } from './tools'
 import * as permissions from './permissions'
 import { getProvider } from './providers'
-import { buildMessages } from './history'
+import { buildMessages, visibleReplyEntries } from './history'
 import { planResume, INTERRUPTED_TOOL_RESULT, RESUME_NOTICE } from './resume'
-import type { Approval, SandbotEvent } from '../../shared/types'
+import { isExternalSend, draftFromExternalCall, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig } from './external-send'
+import { normalizeOptions, findDismissibleWidgets } from './widgets'
+import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd, DraftVia } from '../../shared/types'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
 export { buildMessages } from './history'
 
 const MAX_STEPS = 24
 
+/** Fase 3: il sollecito della chiamata di recupero quando un turno utente finisce senza send_to_user. */
+export const RECOVERY_NUDGE =
+  "Non hai chiamato né send_to_user né ask_user: l'utente non ha visto alcuna risposta. Rispondi ORA chiamando send_to_user (solo quello, nessun altro tool)."
+
 type Emitter = (e: SandbotEvent) => void
 
 interface Running {
   controller: AbortController
-  approvals: Map<string, (decision: 'allow' | 'deny') => void>
+  approvals: Map<string, (decision: 'allow' | 'deny' | 'superseded') => void>
+  /** true quando un nuovo messaggio utente ha sostituito il turno (solo supersedeIfPaused lo imposta). */
+  superseded?: boolean
 }
 const running = new Map<string, Running>()
 
@@ -49,6 +63,54 @@ export function isRunning(agentId: string): boolean {
   return running.has(agentId)
 }
 
+/** Etichette umane degli esiti di turno (la UI mostra gli event solo col toggle ragionamento). */
+const TURN_END_LABELS: Record<TurnEnd, string> = {
+  FINISHED: 'Turno completato',
+  STOPPED: 'Turno interrotto',
+  SUPERSEDED: 'Turno sostituito da un nuovo messaggio',
+  AWAITING_USER: 'In attesa della risposta dell’utente'
+}
+
+/** Chiude il turno con un evento meta.turnEnd (§3bis L2: esito del turno nel transcript). */
+function endTurn(agentId: string, outcome: TurnEnd, emit: Emitter): void {
+  appendEntry({ agentId, kind: 'event', role: 'system', content: TURN_END_LABELS[outcome], meta: { turnEnd: outcome } })
+  emitLastEntry(agentId, emit)
+}
+
+/**
+ * Fase 3: appende una entry 'send-message' (l'UNICO contenuto visibile in chat)
+ * con meta.call = la tool-call che l'ha prodotta, così la storia ricostruita
+ * dal transcript mostra al modello la chiamata originale.
+ */
+function appendSend(
+  agentId: string,
+  call: { id: string; name: string; arguments: string },
+  message: SendMessagePayload,
+  emit: Emitter,
+  extra: Record<string, unknown> = {}
+): void {
+  const content = message.type === 'text' ? message.text
+    : message.type === 'widget' ? message.prompt
+    : (message.subject || message.to || '')
+  const entry = appendEntry({
+    agentId, kind: 'send-message', role: 'assistant', content,
+    meta: { call: { id: call.id, name: call.name, arguments: call.arguments }, message, ...extra }
+  })
+  emit({ type: 'entries', agentId, entries: [entry] })
+}
+
+/**
+ * Fase 3 (§3bis L10): l'utente ha scritto altro senza rispondere → i widget
+ * pendenti con dismissOnMoveOn vengono marcati widgetDismissed.
+ */
+export function dismissPendingWidgets(agentId: string, emit: Emitter): void {
+  for (const w of findDismissibleWidgets(getEntries(agentId))) {
+    updateEntryMeta(w.id, { ...w.meta, widgetDismissed: true })
+    const updated = getEntries(agentId).find((e) => e.id === w.id)
+    if (updated) emit({ type: 'entries', agentId, entries: [updated] })
+  }
+}
+
 export interface RunTurnOptions {
   /** 'user' (default): accodato se l'agente è occupato; 'routine': scartato con notice. */
   source?: 'user' | 'routine'
@@ -62,6 +124,8 @@ export interface RunTurnOptions {
   resume?: { entryId: number }
   /** Primo tentativo: chiamato con l'id dell'entry utente appena aggiunta, PRIMA del modello. */
   onTurnEntry?: (entryId: number) => void
+  /** Fase 3: la risposta a un widget ask_user (meta.respondedTo sul messaggio utente). */
+  respondedTo?: number
 }
 
 export async function runTurn(agentId: string, userText: string, emit: Emitter, images?: string[], opts: RunTurnOptions = {}): Promise<void> {
@@ -94,13 +158,24 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   const run: Running = { controller, approvals: new Map() }
   running.set(agentId, run)
 
+  // id dell'entry che apre il turno: serve a decidere se l'utente ha VISTO qualcosa
+  let turnEntryId = 0
+  // ultimo testo libero non vuoto del modello nel turno (ripiego del fallback)
+  let lastFreeText = ''
+
   try {
     if (opts.resume) {
       // R1: ripresa dal transcript — il messaggio utente NON viene riscritto;
       // il turno interrotto viene riparato PRIMA di chiamare il modello
+      turnEntryId = opts.resume.entryId
       const plan = planResume(getEntries(agentId), opts.resume.entryId)
       if (plan.alreadyComplete) {
         // il turno era già concluso: completa senza chiamare il modello
+        // (l'evento di fine c'è già, a meno che il crash non precedesse la fase 3)
+        const alreadyEnded = getEntries(agentId).some(
+          (e) => e.id > opts.resume!.entryId && e.kind === 'event' && e.meta?.turnEnd
+        )
+        if (!alreadyEnded) endTurn(agentId, 'FINISHED', emit)
         setStatus(agentId, 'idle', emit)
         updateAgent(agentId, { unread: 0 })
         emit({ type: 'agents' })
@@ -121,8 +196,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       appendEntry({ agentId, kind: 'notice', role: 'system', content: RESUME_NOTICE })
       emitLastEntry(agentId, emit)
     } else {
-      const entry = appendEntry({ agentId, kind: 'message', role: 'user', content: userText, meta: images?.length ? { images: images.length } : undefined })
+      const entry = appendEntry({
+        agentId, kind: 'message', role: 'user', content: userText,
+        meta: {
+          ...(opts.respondedTo !== undefined ? { respondedTo: opts.respondedTo } : {}),
+          ...(images?.length ? { images: images.length } : {})
+        }
+      })
       emitLastEntry(agentId, emit)
+      turnEntryId = entry.id
       // R1: l'id dell'entry che apre il turno finisce nel payload del job,
       // PRIMA di chiamare il modello, per poter riprendere dopo un crash
       opts.onTurnEntry?.(entry.id)
@@ -141,12 +223,19 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // MCP non disponibile: prosegue coi tool base
     }
 
+    // fase 3 (§3bis L5): quali tool MCP sono invii verso l'esterno
+    const externalCfg = getSetting<ExternalSendConfig>('externalSendTools', DEFAULT_EXTERNAL_SEND_TOOLS)
+
     setStatus(agentId, 'thinking', emit)
+
+    let awaitingUser = false
+    let finished = false
 
     for (let step = 0; step < MAX_STEPS; step++) {
       if (controller.signal.aborted) break
       const stream = llmStream(provider, agent.model, messages, allTools, controller.signal)
-      const entry = appendEntry({ agentId, kind: 'message', role: 'assistant', content: '' })
+      // fase 3: il testo libero è ragionamento interno, non una risposta
+      const entry = appendEntry({ agentId, kind: 'thinking', role: 'assistant', content: '' })
       emit({ type: 'entries', agentId, entries: [entry] })
 
       let acc = ''
@@ -171,25 +260,26 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         updateEntryContent(entry.id, acc)
         appendEntry({ agentId, kind: 'notice', role: 'system', content: `Errore dal modello: ${msg}` })
         emitLastEntry(agentId, emit)
+        endTurn(agentId, 'STOPPED', emit)
         setStatus(agentId, 'idle', emit)
         return
       }
       const text = final.text
       updateEntryContent(entry.id, text)
+      if (text.trim()) lastFreeText = text
 
       if (!text && !final.toolCalls?.length) {
         appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Il modello non ha prodotto risposta (vuota).' })
         emitLastEntry(agentId, emit)
+        endTurn(agentId, 'STOPPED', emit)
         setStatus(agentId, 'idle', emit)
         return
       }
 
       if (!final.toolCalls?.length) {
         // turno concluso senza tool: fine
-        setStatus(agentId, 'idle', emit)
-        updateAgent(agentId, { unread: 0 })
-        emit({ type: 'agents' })
-        return
+        finished = true
+        break
       }
 
       messages.push({ role: 'assistant', content: text, toolCalls: final.toolCalls })
@@ -205,6 +295,59 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         } catch {
           input = {}
         }
+
+        // ---- fase 3 (§3bis L2/L5): comunicazione e invii esterni, gestiti dal loop ----
+
+        // invio esterno chiamato direttamente: MAI eseguito, diventa una bozza
+        if (isExternalSend(call.name, externalCfg)) {
+          appendSend(agentId, call, draftFromExternalCall(call.name, input), emit, { status: 'pending' })
+          messages.push({
+            role: 'tool', toolCallId: call.id,
+            content: 'Invio esterno non eseguito: trasformato in una bozza in attesa della conferma dell’utente. Per gli invii usa draft_external.'
+          })
+          continue
+        }
+
+        if (call.name === 'send_to_user') {
+          const message: SendMessagePayload = { type: 'text', text: String(input.text ?? ''), ...(input.urgent ? { urgent: true } : {}) }
+          appendSend(agentId, call, message, emit)
+          messages.push({ role: 'tool', toolCallId: call.id, content: 'inviato all’utente' })
+          continue
+        }
+
+        if (call.name === 'draft_external') {
+          const channel = input.channel === 'email' || input.channel === 'slack' ? input.channel : 'other'
+          const message: SendMessagePayload = {
+            type: 'draft', channel, to: String(input.to ?? ''),
+            ...(input.subject !== undefined ? { subject: String(input.subject) } : {}),
+            body: String(input.body ?? ''),
+            ...(input.via && typeof input.via === 'object' ? { via: input.via as DraftVia } : {})
+          }
+          appendSend(agentId, call, message, emit, { status: 'pending' })
+          messages.push({ role: 'tool', toolCallId: call.id, content: 'bozza creata e mostrata all’utente: l’invio avverrà solo se l’utente clicca Invia' })
+          continue
+        }
+
+        if (call.name === 'ask_user') {
+          const options = normalizeOptions(input.options)
+          const message: SendMessagePayload = {
+            type: 'widget', prompt: String(input.prompt ?? ''), options,
+            ...(input.helpText !== undefined ? { helpText: String(input.helpText) } : {}),
+            ...(input.multiSelect ? { multiSelect: true } : {}),
+            ...(input.allowCustom ? { allowCustom: true } : {}),
+            ...(input.dismissOnMoveOn ? { dismissOnMoveOn: true } : {})
+          }
+          appendSend(agentId, call, message, emit)
+          messages.push({
+            role: 'tool', toolCallId: call.id,
+            content: 'widget mostrato all’utente: il turno termina e la risposta arriverà come nuovo messaggio utente. Non ripetere la domanda.'
+          })
+          awaitingUser = true
+          break // il turno TERMINA: le chiamate successive della stessa risposta non vengono eseguite
+        }
+
+        // ---- tool normali: entry tool-call, gate permessi, esecuzione ----
+
         const callEntry = appendEntry({
           agentId, kind: 'tool-call', role: 'assistant', content: `${call.name}`,
           meta: { id: call.id, name: call.name, arguments: call.arguments }
@@ -244,17 +387,24 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'entries', agentId, entries: [approvalEntry] })
           emit({ type: 'approval', agentId, approval })
 
-          const decision = await new Promise<'allow' | 'deny' | 'timeout'>((resolve) => {
+          const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded'>((resolve) => {
             run.approvals.set(approval.id, (d) => resolve(d))
             setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
           })
           run.approvals.delete(approval.id)
           updateEntryMeta(approvalEntry.id, {
             ...approvalEntry.meta,
-            status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : 'denied'
+            status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : 'superseded'
           })
           const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
           if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+          if (decision === 'superseded') {
+            // fase 3: un nuovo messaggio utente ha sostituito il turno
+            messages.push({ role: 'tool', toolCallId: call.id, content: 'Sostituito da un nuovo messaggio dell’utente.' })
+            const res = appendEntry({ agentId, kind: 'tool-result', role: 'system', content: 'Sostituito da un nuovo messaggio utente', meta: { callId: call.id } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            break
+          }
           if (decision === 'timeout') {
             appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Approvazione scaduta.' })
             emitLastEntry(agentId, emit)
@@ -304,12 +454,67 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       if (paused && messages[messages.length - 1]?.role === 'tool') {
         // dopo un rifiuto il modello può decidere come proseguire: continua il loop
       }
+      if (awaitingUser || controller.signal.aborted) break
     }
 
-    // MAX_STEPS raggiunto
-    appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: limite di passi raggiunto.' })
-    emitLastEntry(agentId, emit)
+    // ---- fase 3: chiusura del turno con esito ----
+    if (awaitingUser) {
+      endTurn(agentId, 'AWAITING_USER', emit)
+    } else if (controller.signal.aborted) {
+      endTurn(agentId, run.superseded ? 'SUPERSEDED' : 'STOPPED', emit)
+    } else if (!finished) {
+      appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: limite di passi raggiunto.' })
+      emitLastEntry(agentId, emit)
+      endTurn(agentId, 'STOPPED', emit)
+    } else {
+      // turno FINISHED: se l'UTENTE non ha visto nulla (nessuna send-message nel
+      // turno) una chiamata di recupero chiede al modello send_to_user; se non
+      // lo fa nemmeno ora, il testo libero diventa send-message con fallback
+      if (source === 'user' && visibleReplyEntries(getEntries(agentId), turnEntryId).length === 0) {
+        messages.push({ role: 'user', content: RECOVERY_NUDGE })
+        setStatus(agentId, 'thinking', emit)
+        try {
+          const stream = llmStream(provider, agent.model, messages, allTools, controller.signal)
+          let acc = ''
+          let recoveryCalls: ToolCall[] = []
+          for await (const ch of stream) {
+            if (ch.textDelta) acc += ch.textDelta
+            if (ch.toolCalls) recoveryCalls = ch.toolCalls
+          }
+          const sends = recoveryCalls.filter((c) => c.name === 'send_to_user')
+          if (sends.length) {
+            for (const call of sends) {
+              let input: Record<string, unknown>
+              try { input = JSON.parse(call.arguments || '{}') } catch { input = {} }
+              const message: SendMessagePayload = { type: 'text', text: String(input.text ?? acc), ...(input.urgent ? { urgent: true } : {}) }
+              appendSend(agentId, call, message, emit)
+            }
+          } else {
+            const fallback = (acc.trim() ? acc : lastFreeText).trim()
+            if (fallback) {
+              appendEntry({
+                agentId, kind: 'send-message', role: 'assistant', content: fallback,
+                meta: { message: { type: 'text', text: fallback }, fallback: true }
+              })
+              emitLastEntry(agentId, emit)
+            }
+          }
+        } catch {
+          // la chiamata di recupero stessa fallisce: si prova il fallback col testo già avuto
+          if (lastFreeText.trim()) {
+            appendEntry({
+              agentId, kind: 'send-message', role: 'assistant', content: lastFreeText.trim(),
+              meta: { message: { type: 'text', text: lastFreeText.trim() }, fallback: true }
+            })
+            emitLastEntry(agentId, emit)
+          }
+        }
+      }
+      endTurn(agentId, 'FINISHED', emit)
+    }
     setStatus(agentId, 'idle', emit)
+    updateAgent(agentId, { unread: 0 })
+    emit({ type: 'agents' })
   } finally {
     running.delete(agentId)
     if (getAgent(agentId)?.status !== 'offline') setStatus(agentId, 'idle', emit)
@@ -319,6 +524,28 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
 export function interrupt(agentId: string): void {
   running.get(agentId)?.controller.abort()
+}
+
+/**
+ * Fase 3: un nuovo messaggio utente mentre l'agente è in paused-for-approval
+ * sostituisce il turno in corso (SUPERSEDED): le approval pendenti diventano
+ * 'superseded', il turno termina e il nuovo messaggio parte subito invece di
+ * restare in coda. True se il supersede è avvenuto.
+ */
+export function supersedeIfPaused(agentId: string): boolean {
+  const run = running.get(agentId)
+  if (!run) return false
+  const agent = getAgent(agentId)
+  if (!agent || agent.status !== 'paused-for-approval') return false
+  run.superseded = true
+  for (const e of getEntries(agentId)) {
+    if (e.kind === 'approval' && e.meta?.status === 'pending') {
+      updateEntryMeta(e.id, { ...e.meta, status: 'superseded' })
+      run.approvals.get(String(e.meta.approvalId))?.('superseded')
+    }
+  }
+  run.controller.abort()
+  return true
 }
 
 export function resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', always: boolean): void {

@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, useStore } from '../store'
-import type { TranscriptEntry } from '../../../shared/types'
+import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 import { ApprovalCard } from './ApprovalCard'
+import { WidgetCard } from './WidgetCard'
+import { DraftCard } from './DraftCard'
 
 export function Chat() {
   const agents = useStore((s) => s.agents)
@@ -17,6 +19,8 @@ export function Chat() {
   const [quickQ, setQuickQ] = useState('')
   const [quickA, setQuickA] = useState('')
   const [quickBusy, setQuickBusy] = useState(false)
+  // fase 3: il ragionamento del modello è nascosto di default (§3bis L2)
+  const [showReasoning, setShowReasoning] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const agent = agents.find((a) => a.id === activeId)
@@ -61,6 +65,13 @@ export function Chat() {
             {agent.providerId ? `${agent.providerId} · ${agent.model ?? ''}` : 'configura modello → Impostazioni'}
           </span>
           <button
+            className={`rounded-lg px-2 py-1 text-xs ${showReasoning ? 'bg-neutral-700 text-neutral-200' : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}`}
+            title="Mostra/nascondi il ragionamento del modello e gli eventi di turno"
+            onClick={() => setShowReasoning(!showReasoning)}
+          >
+            🧠 Ragionamento
+          </button>
+          <button
             className="rounded-lg px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
             title="Domanda effimera sul contesto (non entra nel transcript)"
             onClick={() => { setQuickOpen(!quickOpen); setQuickA('') }}
@@ -102,7 +113,7 @@ export function Chat() {
         )}
         <div className="mx-auto max-w-3xl space-y-3">
           {entries.map((e) => (
-            <EntryRow key={e.id} entry={e} />
+            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} />
           ))}
         </div>
       </div>
@@ -154,7 +165,7 @@ export function Chat() {
   )
 }
 
-function EntryRow({ entry }: { entry: TranscriptEntry }) {
+function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReasoning: boolean }) {
   const reasoning = useStore((s) => s.reasoning[entry.id])
   switch (entry.kind) {
     case 'message':
@@ -165,18 +176,42 @@ function EntryRow({ entry }: { entry: TranscriptEntry }) {
           </div>
         </div>
       ) : (
+        // messaggi assistant pre-fase 3 (transcript storici)
         <div className="max-w-[92%] text-sm leading-relaxed text-neutral-100">
-          {reasoning && (
-            <details className="mb-2 rounded-lg border border-neutral-800/60 bg-neutral-900/40 px-3 py-1.5" open={!entry.content}>
-              <summary className="cursor-pointer select-none text-xs text-neutral-500">Pensiero</summary>
-              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-neutral-500">{reasoning}</pre>
-            </details>
-          )}
           <div className="prose-invert max-w-none prose-pre:bg-neutral-900 prose-pre:border prose-pre:border-neutral-800 prose-code:text-neutral-300">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content || (reasoning ? '' : '…')}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content || '…'}</ReactMarkdown>
           </div>
         </div>
       )
+    case 'thinking': {
+      // fase 3 (§3bis L2): testo libero del modello = ragionamento interno,
+      // mai mostrato in chat a meno che l'utente non attivi il toggle
+      if (!showReasoning) return null
+      return (
+        <details className="rounded-lg border border-neutral-800/60 bg-neutral-900/40 px-3 py-1.5" open={!entry.content}>
+          <summary className="cursor-pointer select-none text-xs text-neutral-500">Ragionamento</summary>
+          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-neutral-500">
+            {entry.content || reasoning || '…'}
+          </pre>
+        </details>
+      )
+    }
+    case 'send-message': {
+      // fase 3: l'UNICO contenuto visibile del bot — text | widget | draft
+      const meta = (entry.meta ?? {}) as Partial<SendMessageMeta>
+      const message = meta.message as SendMessagePayload | undefined
+      if (message?.type === 'widget') return <WidgetCard entry={entry} />
+      if (message?.type === 'draft') return <DraftCard entry={entry} />
+      return (
+        <div className="max-w-[92%] text-sm leading-relaxed text-neutral-100">
+          <div className="prose-invert max-w-none prose-pre:bg-neutral-900 prose-pre:border prose-pre:border-neutral-800 prose-code:text-neutral-300">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content}</ReactMarkdown>
+          </div>
+          {meta.fallback && <p className="mt-1 text-[10px] text-neutral-600">risposta di ripiego</p>}
+          {message?.type === 'text' && message.urgent && <p className="mt-1 text-[10px] text-amber-500/80">urgente</p>}
+        </div>
+      )
+    }
     case 'tool-call': {
       const args = entry.meta?.arguments as string | undefined
       return (
@@ -206,6 +241,9 @@ function EntryRow({ entry }: { entry: TranscriptEntry }) {
     case 'notice':
       return <p className="text-center text-xs text-orange-400/80">{entry.content}</p>
     case 'event':
+      // gli esiti di turno (meta.turnEnd) sono dettaglio interno: visibili
+      // solo col toggle "mostra ragionamento"
+      if (entry.meta?.turnEnd && !showReasoning) return null
       return <p className="text-center text-xs text-neutral-600">{entry.content}</p>
     default:
       return null

@@ -5,6 +5,70 @@ import { resolveSecretRefs, redactSecrets } from './secrets'
 
 export const toolDefs: ToolDef[] = [
   {
+    name: 'send_to_user',
+    description: "Manda un messaggio all'utente in chat (markdown). È l'UNICO modo di parlare con l'utente: il testo che scrivi fuori dai tool non gli arriva. Puoi chiamarlo più volte in un turno: un messaggio breve di avanzamento prima di lavori lunghi, poi il risultato finale.",
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Il messaggio (markdown) da mostrare in chat' },
+        urgent: { type: 'boolean', description: 'True se l\'utente deve vederlo subito anche se è via (opzionale)' }
+      },
+      required: ['text']
+    }
+  },
+  {
+    name: 'ask_user',
+    description: "Poni una domanda all'utente con scelte cliccabili. Crea un widget in chat e TERMINA il turno: la risposta arriva come nuovo messaggio utente. Preferisci le opzioni a testo libero: non chiedere mai a testo libero quando puoi offrire delle scelte.",
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'La domanda da mostrare' },
+        helpText: { type: 'string', description: 'Spiegazione breve del perché della domanda (opzionale)' },
+        options: {
+          type: 'array',
+          description: 'Le opzioni cliccabili (2-4)',
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string', description: 'Etichetta del bottone' },
+              value: { type: 'string', description: 'Valore associato (default: label)' },
+              description: { type: 'string', description: 'Descrizione breve (opzionale)' },
+              style: { type: 'string', enum: ['primary', 'default'], description: '"primary" per l\'azione consigliata (opzionale)' }
+            },
+            required: ['label']
+          }
+        },
+        multiSelect: { type: 'boolean', description: 'True per permettere più selezioni con conferma (opzionale)' },
+        allowCustom: { type: 'boolean', description: 'True per aggiungere un campo di testo libero (opzionale)' },
+        dismissOnMoveOn: { type: 'boolean', description: 'True se il widget può essere scavalcato quando l\'utente scrive altro (opzionale)' }
+      },
+      required: ['prompt']
+    }
+  },
+  {
+    name: 'draft_external',
+    description: "Prepara un invio verso l'esterno (email, Slack, altro) come BOZZA con pulsanti Invia/Scarta/Modifica: l'invio vero avviene SOLO se l'utente clicca Invia. Gli invii verso l'esterno passano SEMPRE da una bozza.",
+    parameters: {
+      type: 'object',
+      properties: {
+        channel: { type: 'string', enum: ['email', 'slack', 'other'], description: 'Canale di invio' },
+        to: { type: 'string', description: 'Destinatario' },
+        subject: { type: 'string', description: 'Oggetto (email, opzionale)' },
+        body: { type: 'string', description: 'Corpo del messaggio' },
+        via: {
+          type: 'object',
+          description: 'Il tool di invio da eseguire alla conferma (opzionale: senza, la bozza è solo testo)',
+          properties: {
+            tool: { type: 'string', description: 'Nome del tool MCP di invio (es. mcp__gmail__send_message)' },
+            args: { type: 'object', description: 'Argomenti del tool di invio', additionalProperties: true }
+          },
+          required: ['tool', 'args']
+        }
+      },
+      required: ['channel', 'to', 'body']
+    }
+  },
+  {
     name: 'run-command',
     description: "Esegue un comando shell nel computer dell'agente (sandbox persistente). Restituisce stdout/stderr e exit code. Per usare una credenziale del vault scrivi {{secret:NOME}} dove serve il valore (es. `curl -H \"Authorization: Bearer {{secret:API_KEY}}\"`): viene sostituita al momento dell'esecuzione con la variabile d'ambiente $SANDBOT_SECRET_NOME e il valore non appare mai nel transcript.",
     parameters: {

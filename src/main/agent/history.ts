@@ -8,10 +8,49 @@
 // - il taglio avviene solo a confine di turno (un messaggio utente inizia un
 //   turno): mai un tool-result senza la sua tool-call, mai una tool-call senza
 //   result (in quel caso si aggiunge un result sintetico "interrupted")
+//
+// Fase 3 (§3bis L2): l'agente parla SOLO tramite tool. Le entry 'send-message'
+// tornano al modello come tool call + tool result (il modello vede COSA ha
+// detto all'utente, non un testo assistant); le entry 'thinking' (testo libero
+// generato dal modello) tornano come contenuto assistant.
 import type { ChatMessage } from './llm'
-import type { TranscriptEntry } from '../../shared/types'
+import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../shared/types'
 
 const DEFAULT_MAX_MESSAGES = 40
+
+/** meta.message di una entry send-message, se presente e ben formata. */
+function payloadOf(e: TranscriptEntry): SendMessageMeta | null {
+  if (e.kind !== 'send-message' || !e.meta) return null
+  const m = e.meta as Partial<SendMessageMeta>
+  return m.message ? (m as SendMessageMeta) : null
+}
+
+/** La tool-call che ha prodotto la entry send-message (meta.call, con ripiego sul payload). */
+function sendCallOf(e: TranscriptEntry): { name: string; arguments: string } {
+  const m = payloadOf(e)
+  if (m?.call) return { name: m.call.name, arguments: m.call.arguments }
+  const p = m?.message
+  if (p?.type === 'widget') return { name: 'ask_user', arguments: JSON.stringify(p) }
+  if (p?.type === 'draft') return { name: 'draft_external', arguments: JSON.stringify(p) }
+  return { name: 'send_to_user', arguments: JSON.stringify({ text: e.content }) }
+}
+
+/** Il tool result che il modello vede per una send-message: cosa sa l'utente e come è finita. */
+export function sendResultText(e: TranscriptEntry): string {
+  const m = payloadOf(e)
+  const p = m?.message
+  if (m && p?.type === 'widget') {
+    if (m.respondedValue !== undefined) return `l'utente ha risposto: ${JSON.stringify(m.respondedValue)}`
+    if (m.widgetDismissed) return "widget mostrato all'utente, poi scartato: l'utente ha proseguito senza rispondere"
+    return "widget mostrato all'utente: turno terminato in attesa della risposta"
+  }
+  if (m && p?.type === 'draft') {
+    if (m.status === 'sent') return "bozza inviata all'utente che l'ha confermata"
+    if (m.status === 'discarded') return "bozza scartata dall'utente"
+    return "bozza creata e mostrata all'utente: l'invio avverrà solo se l'utente lo conferma"
+  }
+  return "inviato all'utente"
+}
 
 /** entries → messaggi: i tool-call si aggregano al messaggio assistant, i result diventano messaggi tool. */
 function toMessages(entries: TranscriptEntry[]): ChatMessage[] {
@@ -25,6 +64,21 @@ function toMessages(entries: TranscriptEntry[]): ChatMessage[] {
       // in un assistant con sole chiamate (contenuto testo assente).
       if (e.role === 'assistant' && !e.content.trim()) continue
       msgs.push({ role: e.role === 'user' ? 'user' : 'assistant', content: e.content })
+    } else if (e.kind === 'thinking') {
+      // fase 3: il testo libero del modello è ragionamento interno — resta
+      // contenuto assistant per il modello, MAI visibile all'utente in chat
+      if (e.content.trim()) msgs.push({ role: 'assistant', content: e.content })
+    } else if (e.kind === 'send-message') {
+      // fase 3 (§3bis L2): ciò che il bot ha detto all'utente torna al modello
+      // come tool call + tool result, non come testo assistant
+      const call = { id: `send_${e.id}`, ...sendCallOf(e) }
+      const prev = msgs[msgs.length - 1]
+      if (prev && prev.role === 'assistant') {
+        prev.toolCalls = [...(prev.toolCalls ?? []), call]
+      } else {
+        msgs.push({ role: 'assistant', content: '', toolCalls: [call] })
+      }
+      msgs.push({ role: 'tool', toolCallId: call.id, content: sendResultText(e) })
     } else if (e.kind === 'tool-call') {
       const prev = msgs[msgs.length - 1]
       const call = { id: String(e.meta?.id ?? e.id), name: String(e.meta?.name ?? ''), arguments: String(e.meta?.arguments ?? '{}') }
@@ -117,4 +171,14 @@ export function buildMessages(
     }
   }
   return [{ role: 'system', content: system }, ...msgs]
+}
+
+/**
+ * Fase 3 (§3bis L2): estrae i messaggi che l'utente VEDE in chat da una
+ * sequenza di entry — solo le 'send-message' (text/widget/draft), MAI il
+ * testo libero del modello (kind 'thinking'). `sinceId` limita al turno
+ * corrente (le entry successive a quella che lo ha aperto).
+ */
+export function visibleReplyEntries(entries: TranscriptEntry[], sinceId = 0): TranscriptEntry[] {
+  return entries.filter((e) => e.id > sinceId && e.kind === 'send-message')
 }
