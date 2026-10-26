@@ -114,6 +114,11 @@ export function setSetting(key: string, value: unknown): void {
     .run(key, JSON.stringify(value))
 }
 
+/** Rimuove un setting (fase 6: migrazione della chiave del vault elimina il vecchio). */
+export function deleteSetting(key: string): void {
+  db().prepare('DELETE FROM settings WHERE key = ?').run(key)
+}
+
 // ---- agents ----
 interface AgentRow {
   id: string; name: string; description: string; provider_id: string | null

@@ -16,10 +16,16 @@ export { targetKey }
 /**
  * Fase 5: annotazioni dei tool MCP, fornite dal client MCP del daemon
  * (iniettate per non creare il collegamento inverso permissions→mcp).
+ * Fase 6 (residuo 0a): `catalogServer` dice se il tool appartiene a un server
+ * del catalogo — solo per quelli l'annotazione readOnlyHint dà auto-allow.
  */
-let mcpAnnotationsLookup: (tool: string) => McpAnnotationsLike | undefined = () => undefined
+export interface McpAnnotationInfo {
+  annotations: McpAnnotationsLike | undefined
+  catalogServer: boolean
+}
+let mcpAnnotationsLookup: (tool: string) => McpAnnotationInfo | undefined = () => undefined
 
-export function setMcpAnnotationsLookup(fn: (tool: string) => McpAnnotationsLike | undefined): void {
+export function setMcpAnnotationsLookup(fn: (tool: string) => McpAnnotationInfo | undefined): void {
   mcpAnnotationsLookup = fn
 }
 
@@ -156,7 +162,8 @@ export async function check(
     if (listGrants().some((g) => g.tool === tool && g.target === '*')) {
       return { kind: 'allow', via: 'grant' }
     }
-    const annotated = mcpAnnotationMode(mcpAnnotationsLookup(tool))
+    const info = mcpAnnotationsLookup(tool)
+    const annotated = mcpAnnotationMode(info?.annotations, info?.catalogServer ?? false)
     if (annotated === 'always_allow') return { kind: 'allow', via: 'rule' }
     if (annotated === 'needs_approval') {
       return { kind: 'ask', reason: `${tool} agisce verso l'esterno (annotazione del server MCP)` }

@@ -1,21 +1,18 @@
 // Credential vault — AES-256-GCM con lo stesso envelope "sealed" dell'originale
 // (sandVault: iv||authTag||ciphertext).
 //
-// §5.6: la chiave master vive in electron safeStorage (cifrata con la chiave di
-// sistema dell'OS e salvata nei settings): non sta mai in chiaro su disco col
-// dato e non passa mai dall'argv di un processo (il vecchio
-// `security add-generic-password -w <chiave>` la esponeva a `ps`).
-// Migrazione automatica dalla chiave Keychain pre-esistente: la si legge con
-// find-generic-password (il valore esce sullo stdout del processo, non
-// dall'argv), la si porta in safeStorage e la si elimina dal Keychain.
-//
-// Fase 2: safeStorage viene iniettata (l'app passa quella di Electron, il
-// daemon un proxy RPC verso la UI quando è aperta). Senza provider il vault
-// resta BLOCCATO — nessuna chiave in chiaro su disco — e il tool dice al
-// modello perché non può usare le credenziali.
+// Fase 6 (residuo 0b): la chiave master vive nel Keychain macOS con lo stesso
+// meccanismo dei connettori (src/daemon/keychain.ts: comandi `security -i` da
+// stdin, mai nell'argv di un processo), in una voce SEPARATA
+// (sandbot-vault-key). Le routine girano a finestra chiusa e un comando con
+// {{secret:NOME}} non deve più fallire perché safeStorage senza UI è bloccato.
+// Migrazione automatica: se esiste ancora la chiave cifrata con safeStorage
+// (setting vault.masterKeySafe, fasi 1–5), la UI appena aperta la decifra via
+// HostBridge, il daemon la porta nel Keychain e rimuove il setting.
+// Nessuna chiave in chiaro su disco, mai nell'argv di un processo.
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto'
-import { execFile } from 'node:child_process'
-import { getSetting, setSetting } from './store/db'
+import { getSetting, setSetting, deleteSetting } from './store/db'
+import { getKeychainKey, readKeychainKey, writeKeychainKey, VAULT_SERVICE, type SecurityRunner } from '../daemon/keychain'
 
 /** Subset di electron.safeStorage che serve al vault (encrypt/decrypt possono essere async nel daemon: passano dall'RPC). */
 export interface SafeStorageLike {
@@ -27,10 +24,17 @@ export interface SafeStorageLike {
 export const VAULT_LOCKED_MSG = 'Vault bloccato: safeStorage non disponibile (apri la finestra di SandBot per usare le credenziali)'
 
 let storage: SafeStorageLike | null = null
+/** Runner `security` del Keychain, iniettabile per i test. */
+let keychainRun: SecurityRunner | undefined
 
 /** Registra il backend safeStorage (main Electron o proxy RPC del daemon); null lo rimuove. */
 export function setSafeStorage(s: SafeStorageLike | null): void {
   storage = s
+}
+
+/** Registra il runner `security` del Keychain (test); senza si usa quello reale. */
+export function setVaultKeychainRunner(run: SecurityRunner | undefined): void {
+  keychainRun = run
 }
 
 function safe(): SafeStorageLike {
@@ -38,9 +42,7 @@ function safe(): SafeStorageLike {
   return storage
 }
 
-const KEYCHAIN_SERVICE = 'sandbot-vault-key'
-const KEYCHAIN_ACCOUNT = 'sandbot'
-/** base64(safeStorage.encryptString(base64(chiave))) */
+/** base64(safeStorage.encryptString(base64(chiave))) — chiave delle fasi 1–5, da migrare. */
 const KEY_SETTING = 'vault.masterKeySafe'
 
 interface Sealed {
@@ -54,53 +56,48 @@ interface StoredSecret {
   createdAt: number
 }
 
-function sh(args: string[]): Promise<{ out: string; err: string; code: number | null }> {
-  return new Promise((resolve) => {
-    execFile('security', args, { timeout: 5000 }, (err, stdout, stderr) => {
-      resolve({ out: String(stdout ?? ''), err: String(stderr ?? ''), code: err ? 1 : 0 })
-    })
-  })
-}
-
-/** Chiave legacy dal Keychain (nessun segreto nell'argv). */
-async function readLegacyKeychainKey(): Promise<Buffer | null> {
-  const found = await sh(['find-generic-password', '-a', KEYCHAIN_ACCOUNT, '-s', KEYCHAIN_SERVICE, '-w'])
-  if (found.code === 0 && found.out.trim()) return Buffer.from(found.out.trim(), 'base64')
-  return null
-}
-
-async function deleteLegacyKeychainKey(): Promise<void> {
-  await sh(['delete-generic-password', '-a', KEYCHAIN_ACCOUNT, '-s', KEYCHAIN_SERVICE])
-}
-
-/** Salva la chiave cifrata con safeStorage; false se safeStorage non è disponibile. */
-async function storeKeyViaSafeStorage(key: Buffer): Promise<boolean> {
-  if (!storage || !storage.isEncryptionAvailable()) return false
-  setSetting(KEY_SETTING, (await storage.encryptString(key.toString('base64'))).toString('base64'))
-  return true
+/**
+ * Migrazione della chiave safeStorage → Keychain: possibile solo con la UI
+ * aperta (la decifratura passa dall'HostBridge). True se la chiave ora sta
+ * nel Keychain (c'era già o la migrazione è riuscita).
+ */
+export async function migrateVaultKeyToKeychain(): Promise<boolean> {
+  if (await readKeychainKey(VAULT_SERVICE, keychainRun)) return true
+  const enc = getSetting<string | null>(KEY_SETTING, null)
+  if (!enc) return false
+  try {
+    const key = Buffer.from(await safe().decryptString(Buffer.from(enc, 'base64')), 'base64')
+    if (key.length !== 32) return false
+    if (!(await writeKeychainKey(VAULT_SERVICE, key, keychainRun))) return false
+    deleteSetting(KEY_SETTING)
+    return true
+  } catch {
+    // safeStorage non disponibile (finestra chiusa): la migrazione si riprova
+    // alla prossima apertura; nel frattempo il vault resta bloccato come prima
+    return false
+  }
 }
 
 async function getMasterKey(): Promise<Buffer> {
-  // 1. chiave già cifrata con safeStorage (o migrata in passato)
+  // 1. chiave già nel Keychain
+  const inKeychain = await readKeychainKey(VAULT_SERVICE, keychainRun)
+  if (inKeychain) return inKeychain
+  // 2. chiave legacy cifrata con safeStorage (fasi 1–5): si DEVE riutilizzare
+  //    quella — generarne una nuova renderebbe i segreti esistenti
+  //    indecifrabili. Serve la UI (decifratura via HostBridge); appena
+  //    riesce, la chiave passa nel Keychain e il setting viene rimosso
   const enc = getSetting<string | null>(KEY_SETTING, null)
   if (enc) {
-    // senza provider (daemon senza UI) il vault resta bloccato: la chiave si
-    // decifra solo con la safeStorage della finestra aperta
-    return Buffer.from(await safe().decryptString(Buffer.from(enc, 'base64')), 'base64')
+    const key = Buffer.from(await safe().decryptString(Buffer.from(enc, 'base64')), 'base64')
+    if (await writeKeychainKey(VAULT_SERVICE, key, keychainRun)) deleteSetting(KEY_SETTING)
+    return key
   }
-  // 2. migrazione dalla chiave Keychain esistente (stesso formato base64)
-  const legacy = await readLegacyKeychainKey()
-  if (legacy) {
-    if (await storeKeyViaSafeStorage(legacy)) await deleteLegacyKeychainKey()
-    // se safeStorage non c'è, si continua a usare la chiave legacy letta dal Keychain
-    return legacy
+  // 3. prima generazione: chiave nuova nel Keychain (funziona anche senza UI)
+  try {
+    return await getKeychainKey(VAULT_SERVICE, keychainRun)
+  } catch {
+    throw new Error('Vault bloccato: Keychain non disponibile (impossibile conservare la chiave master)')
   }
-  // 3. prima generazione
-  const key = randomBytes(32)
-  if (!(await storeKeyViaSafeStorage(key))) {
-    throw new Error(VAULT_LOCKED_MSG)
-  }
-  return key
 }
 
 function seal(key: Buffer, plaintext: string): Sealed {

@@ -145,10 +145,20 @@ export interface McpAnnotationsLike {
  * strumenti"): readOnlyHint=true → always_allow; destructiveHint=true oppure
  * openWorldHint=true → ask; annotazioni assenti → null (vale la regola di
  * default, needs_approval). Le regole blocked dell'utente vincono sempre.
+ *
+ * Fase 6 (residuo 0a): l'auto-allow da readOnlyHint vale SOLO per i server
+ * del catalogo ("Connetti app"): l'annotazione la dichiara il server stesso
+ * e un server manuale non verificato potrebbe marcare "sola lettura" un tool
+ * distruttivo. Per i server manuali readOnlyHint non dà allow (resta la
+ * regola di default needs_approval, salvo regole/grant esplicite);
+ * destructiveHint/openWorldHint → ask restano validi per tutti.
  */
-export function mcpAnnotationMode(a: McpAnnotationsLike | undefined): PermissionMode | null {
+export function mcpAnnotationMode(
+  a: McpAnnotationsLike | undefined,
+  catalogServer = false
+): PermissionMode | null {
   if (!a) return null
-  if (a.readOnlyHint === true) return 'always_allow'
+  if (a.readOnlyHint === true) return catalogServer ? 'always_allow' : null
   if (a.destructiveHint === true || a.openWorldHint === true) return 'needs_approval'
   return null
 }

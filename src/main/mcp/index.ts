@@ -7,6 +7,8 @@
 // dei tool (readOnlyHint/destructiveHint/openWorldHint) alimentano il gate dei
 // permessi (permissions.ts); i tool disattivati per connettore non vengono
 // offerti al modello; un token scaduto manda il connettore in 'needs_auth'.
+// Fase 6 (residuo 0a): l'auto-allow da readOnlyHint vale solo per i server
+// del catalogo (quelli con catalogId), non per i server manuali.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -222,11 +224,19 @@ export function toolNameToOriginal(fullName: string): string {
   return fullName.split('__').slice(2).join('__')
 }
 
-/** Annotazioni di un tool MCP (per il gate dei permessi); undefined se non in cache. */
-export function annotationsFor(fullName: string): McpAnnotations | undefined {
+/**
+ * Annotazioni di un tool MCP (per il gate dei permessi); undefined se non in
+ * cache. Fase 6 (residuo 0a): `catalogServer` è true solo per i server
+ * registrati dai connettori del catalogo (hanno catalogId, impostato da
+ * wireConnectors): per loro readOnlyHint dà auto-allow, per i server manuali
+ * no — l'annotazione la dichiara il server stesso e non è verificata.
+ */
+export function annotationsFor(
+  fullName: string
+): { annotations: McpAnnotations | undefined; catalogServer: boolean } | undefined {
   for (const c of cache.values()) {
     const t = c.tools.find((x) => x.def.name === fullName)
-    if (t) return t.annotations
+    if (t) return { annotations: t.annotations, catalogServer: !!c.config.catalogId }
   }
   return undefined
 }

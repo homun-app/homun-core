@@ -223,17 +223,38 @@ describe('fase 5: permessi dai tool MCP (annotazioni standard)', () => {
     state.rules.push({ tool: 'mcp__*', pattern: '*', mode: 'needs_approval' })
   })
 
-  it('readOnlyHint=true → allow anche senza regole specifiche', async () => {
-    setMcpAnnotationsLookup(() => ({ readOnlyHint: true }))
+  /** Lookup con annotazioni e flag "server del catalogo" (fase 6 residuo 0a). */
+  const annotations = (a: object | undefined, catalogServer: boolean) => () => ({ annotations: a, catalogServer })
+
+  it('readOnlyHint=true → allow anche senza regole specifiche (server del catalogo)', async () => {
+    setMcpAnnotationsLookup(annotations({ readOnlyHint: true }, true))
     expect(await check(TOOL, {})).toEqual({ kind: 'allow', via: 'rule' })
   })
 
+  it('fase 6 (0a): readOnlyHint di un server MANUALE non dà allow — vale la regola di default', async () => {
+    setMcpAnnotationsLookup(annotations({ readOnlyHint: true }, false))
+    expect((await check(TOOL, {})).kind).toBe('ask')
+    // una regola esplicita dell'utente o una grant continuano a valere
+    state.rules.push({ tool: TOOL, pattern: '*', mode: 'always_allow' })
+    expect(await check(TOOL, {})).toEqual({ kind: 'allow', via: 'rule' })
+    state.rules = state.rules.filter((r) => r.tool !== TOOL)
+    state.grants = [{ tool: TOOL, target: '*' }]
+    expect(await check(TOOL, {})).toEqual({ kind: 'allow', via: 'grant' })
+  })
+
+  it('fase 6 (0a): destructiveHint/openWorldHint → ask RESTANO validi anche per i server manuali', async () => {
+    setMcpAnnotationsLookup(annotations({ destructiveHint: true }, false))
+    expect((await check(TOOL, {})).kind).toBe('ask')
+    setMcpAnnotationsLookup(annotations({ openWorldHint: true }, false))
+    expect((await check(TOOL, {})).kind).toBe('ask')
+  })
+
   it('destructiveHint o openWorldHint=true → ask; assente → regola di default (needs_approval)', async () => {
-    setMcpAnnotationsLookup(() => ({ destructiveHint: true }))
+    setMcpAnnotationsLookup(annotations({ destructiveHint: true }, true))
     const d = await check(TOOL, {})
     expect(d.kind).toBe('ask')
     if (d.kind === 'ask') expect(d.reason).toContain('annotazione del server MCP')
-    setMcpAnnotationsLookup(() => ({ openWorldHint: true }))
+    setMcpAnnotationsLookup(annotations({ openWorldHint: true }, true))
     expect((await check(TOOL, {})).kind).toBe('ask')
     // nessuna annotazione: vale la regola di default mcp__* → needs_approval
     setMcpAnnotationsLookup(() => undefined)
@@ -244,7 +265,7 @@ describe('fase 5: permessi dai tool MCP (annotazioni standard)', () => {
   })
 
   it('le regole blocked dell\'utente vincono sempre; una regola specifica batte le annotazioni', async () => {
-    setMcpAnnotationsLookup(() => ({ readOnlyHint: true }))
+    setMcpAnnotationsLookup(annotations({ readOnlyHint: true }, true))
     state.rules.push({ tool: 'mcp__notion__*', pattern: '*', mode: 'blocked' })
     expect((await check(TOOL, {})).kind).toBe('deny')
     state.rules = state.rules.filter((r) => r.mode !== 'blocked')
@@ -259,7 +280,7 @@ describe('fase 5: permessi dai tool MCP (annotazioni standard)', () => {
   })
 
   it('idempotentHint da solo non autorizza (non è readOnly)', async () => {
-    setMcpAnnotationsLookup(() => ({ idempotentHint: true }))
+    setMcpAnnotationsLookup(annotations({ idempotentHint: true }, true))
     expect((await check(TOOL, {})).kind).toBe('ask')
   })
 

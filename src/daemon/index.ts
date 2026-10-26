@@ -49,6 +49,10 @@ async function main(): Promise<void> {
         // fase 5: con la finestra riaperta partono le autorizzazioni rimaste
         // in sospesa (i connettori in needs_auth aspettavano il browser)
         connectors.retryPendingAuth()
+        // fase 6 (residuo 0b): con la UI aperta la chiave master del vault
+        // migra dal setting safeStorage al Keychain, dove il daemon la legge
+        // anche a finestra chiusa (le routine usano {{secret:...}} di notte)
+        void import('../main/vault').then((v) => v.migrateVaultKeyToKeychain()).catch(() => undefined)
       }
     }
   })
