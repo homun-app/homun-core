@@ -46,7 +46,7 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
         </div>
       ) : (
         <div className={`mt-2 text-xs ${status === 'allowed' ? 'text-emerald-400' : 'text-neutral-500'}`}>
-          {status === 'allowed' ? '✓ Consentito' : status === 'denied' ? 'Negato' : status}
+          {status === 'allowed' ? '✓ Consentito' : status === 'denied' ? 'Negato' : status === 'cancelled' ? 'Annullata (interrupt)' : status}
         </div>
       )}
     </div>

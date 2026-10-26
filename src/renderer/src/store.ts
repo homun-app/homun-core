@@ -49,6 +49,16 @@ export const useStore = create<Store>((set, get) => ({
     api.onEvent((e: SandbotEvent) => {
       const s = get()
       switch (e.type) {
+        case 'reconnected': {
+          // residuo fase 4 (0b): il daemon potrebbe aver aggiunto entry
+          // (routine, approvazioni, risposte) mentre eravamo sconnessi —
+          // si ricaricano agenti e transcript dell'agente selezionato
+          void api.listAgents().then(async (agents2) => {
+            set({ agents: agents2 })
+            if (s.activeId) set({ entries: await api.getEntries(s.activeId) })
+          })
+          break
+        }
         case 'agents':
           void api.listAgents().then((agents2) => set({ agents: agents2 }))
           break

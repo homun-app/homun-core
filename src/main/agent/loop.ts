@@ -43,7 +43,8 @@ type Emitter = (e: SandbotEvent) => void
 
 interface Running {
   controller: AbortController
-  approvals: Map<string, (decision: 'allow' | 'deny' | 'superseded') => void>
+  // 'cancelled' = interrupt dell'utente (fase 4 0c): chiude l'approval in attesa
+  approvals: Map<string, (decision: 'allow' | 'deny' | 'superseded' | 'cancelled') => void>
   /** true quando un nuovo messaggio utente ha sostituito il turno (solo supersedeIfPaused lo imposta). */
   superseded?: boolean
 }
@@ -397,17 +398,25 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'entries', agentId, entries: [approvalEntry] })
           emit({ type: 'approval', agentId, approval })
 
-          const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded'>((resolve) => {
+          const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
             run.approvals.set(approval.id, (d) => resolve(d))
             setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
           })
           run.approvals.delete(approval.id)
           updateEntryMeta(approvalEntry.id, {
             ...approvalEntry.meta,
-            status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : 'superseded'
+            status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
           })
           const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
           if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+          if (decision === 'cancelled') {
+            // fase 4 (0c): interrupt dell'utente — l'approval si chiude subito,
+            // niente esecuzione, il turno finirà STOPPED (controller abortito)
+            messages.push({ role: 'tool', toolCallId: call.id, content: 'Interrotto dall’utente.' })
+            const res = appendEntry({ agentId, kind: 'tool-result', role: 'system', content: 'Interrotto dall’utente', meta: { callId: call.id } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            break
+          }
           if (decision === 'superseded') {
             // fase 3: un nuovo messaggio utente ha sostituito il turno
             messages.push({ role: 'tool', toolCallId: call.id, content: 'Sostituito da un nuovo messaggio dell’utente.' })
@@ -533,7 +542,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 }
 
 export function interrupt(agentId: string): void {
-  running.get(agentId)?.controller.abort()
+  const run = running.get(agentId)
+  if (!run) return
+  // fase 4 (0c): le approval in attesa si risolvono SUBITO con 'cancelled' —
+  // prima l'abort dello stream lasciava la promise appesa fino al timeout e
+  // l'entry restava pending. Le entry le marca il loop quando riprende.
+  for (const cb of run.approvals.values()) cb('cancelled')
+  run.approvals.clear()
+  run.controller.abort()
 }
 
 /**

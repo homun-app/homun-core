@@ -147,6 +147,39 @@ describe('D1: prepareDraft — via ammesso SOLO per i tool di invio esterno', ()
   })
 })
 
+describe('residuo fase 4 (0a): il campo visibile mantiene il tipo dell’argomento originale', () => {
+  it('to originale array + stringa visibile "a@x, b@y" → via.args riceve un array (split su virgola e trim)', () => {
+    const { message } = prepareDraft({
+      channel: 'email', to: 'a@x, b@y', body: 'ciao',
+      via: { tool: 'mcp__gmail__send_message', args: { to: ['a@x', 'b@y'], subject: 'Oggetto', body: 'ciao' } },
+      cfg: DEFAULT_EXTERNAL_SEND_TOOLS
+    })
+    expect(message.via?.args.to).toEqual(['a@x', 'b@y'])
+    // la card mostra la versione leggibile (readableArg unisce con virgole)
+    expect(message.to).toBe('a@x, b@y')
+  })
+
+  it('lo split funziona anche senza spazi e scarta le parti vuote', () => {
+    const { message } = prepareDraft({
+      channel: 'email', to: 'a@x,b@y, ,c@z', body: 'ciao',
+      via: { tool: 'mcp__gmail__send_message', args: { to: ['a@x'], body: 'ciao' } },
+      cfg: DEFAULT_EXTERNAL_SEND_TOOLS
+    })
+    expect(message.via?.args.to).toEqual(['a@x', 'b@y', 'c@z'])
+  })
+
+  it('argomento originale stringa: resta stringa (nessuna coercizione superflua)', () => {
+    const { message } = prepareDraft({
+      channel: 'email', to: 'solo@x', body: 'ciao',
+      via: { tool: 'mcp__gmail__send_message', args: { to: ['altro'], subject: 's', body: 'b' } },
+      cfg: DEFAULT_EXTERNAL_SEND_TOOLS
+    })
+    // subject era stringa: il valore visibile lo rimpiazza restando stringa
+    expect(message.via?.args.subject).toBe('s')
+    expect(typeof message.via?.args.to).toBe('object')
+  })
+})
+
 describe('D1: applyDraftBody — la modifica aggiorna anche gli argomenti che verranno inviati', () => {
   it('bozza con fieldMap: body nuovo in message.body E in via.args[fieldMap.body]', () => {
     const { message } = prepareDraft({

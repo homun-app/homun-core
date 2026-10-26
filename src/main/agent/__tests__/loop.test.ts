@@ -127,7 +127,7 @@ vi.mock('../../mcp', () => ({
   }
 }))
 
-const { runTurn, isRunning, resolveApproval, supersedeIfPaused, RECOVERY_NUDGE } = await import('../loop')
+const { runTurn, isRunning, resolveApproval, supersedeIfPaused, interrupt, RECOVERY_NUDGE } = await import('../loop')
 
 const emit = () => undefined
 const AGENT = 'agent_t'
@@ -635,5 +635,38 @@ describe('fase 3: l\'agente comunica SOLO tramite tool (§3bis L2)', () => {
     expect(msg.extraArgs).toEqual([{ key: 'bcc', value: 'terzo@esempio.it' }])
     // il tool MCP NON è mai partito in questo turno (solo al click su Invia)
     expect(h.mcp.calls).toBe(0)
+  })
+})
+
+describe('residuo fase 4 (0c): interrupt durante un’approval', () => {
+  it('interrupt → approval risolta SUBITO con cancelled (entry marcata) e turno STOPPED', async () => {
+    // timeout lungo: se l'interrupt non risolvesse la promise, il test
+    // resterebbe appeso fino alla scadenza vera
+    h.db.settings.set('permissions.timeoutMs', 300_000)
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'curl https://esempio' }) }] }
+    ]
+
+    const turn = runTurn(AGENT, 'scarica', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+
+    interrupt(AGENT)
+    // il turno si chiude SUBITO, senza aspettare il timeout da 5 minuti
+    await vi.waitFor(() => expect(isRunning(AGENT)).toBe(false), { timeout: 2000 })
+    await turn
+
+    // l'entry approval è marcata cancelled, il tool non è mai partito
+    const marked = h.db.entries.find((e) => e.id === appr.id)!
+    expect(marked.meta?.status).toBe('cancelled')
+    expect(h.sandboxMock.exec.calls).toBe(0)
+    // il modello vede l'esito dell'interrupt e il turno chiude STOPPED
+    const cancelledResult = h.db.entries.find((e) => e.kind === 'tool-result' && e.content === 'Interrotto dall’utente')
+    expect(cancelledResult).toBeTruthy()
+    expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('STOPPED')
+    // nessuna seconda chiamata al modello dopo l'interrupt
+    expect(h.llm.calls).toHaveLength(1)
   })
 })

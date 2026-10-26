@@ -78,6 +78,20 @@ export function fieldMapForArgs(args: Record<string, unknown>): DraftFieldMap {
 }
 
 /**
+ * Residuo fase 4 (0a): il valore visibile che sovrascrive un argomento di
+ * via.args mantiene il TIPO dell'argomento originale — se l'argomento era un
+ * array (es. to: ['a@x', 'b@y']) e il modello passa la stringa "a@x, b@y",
+ * viene riscritto come array (split su virgola e trim). Senza questo il tool
+ * di invio riceverebbe una stringa dove si aspetta una lista.
+ */
+function coerceVisibleValue(original: unknown, value: string): unknown {
+  if (Array.isArray(original)) {
+    return value.split(',').map((s) => s.trim()).filter(Boolean)
+  }
+  return value
+}
+
+/**
  * D1: payload di una bozza con via. I campi visibili passati dal chiamante
  * (to/subject/body del draft_external del modello) vengono scritti DENTRO
  * via.args secondo la fieldMap: c'è un'unica fonte di verità, gli argomenti
@@ -94,9 +108,9 @@ function draftPayloadFromVia(
 ): DraftMessage {
   const fieldMap = fieldMapForArgs(args)
   const merged = { ...args }
-  if (fieldMap.to && visible?.to) merged[fieldMap.to] = visible.to
-  if (fieldMap.subject && visible?.subject) merged[fieldMap.subject] = visible.subject
-  if (fieldMap.body && visible?.body) merged[fieldMap.body] = visible.body
+  if (fieldMap.to && visible?.to) merged[fieldMap.to] = coerceVisibleValue(args[fieldMap.to], visible.to)
+  if (fieldMap.subject && visible?.subject) merged[fieldMap.subject] = coerceVisibleValue(args[fieldMap.subject], visible.subject)
+  if (fieldMap.body && visible?.body) merged[fieldMap.body] = coerceVisibleValue(args[fieldMap.body], visible.body)
   const subject = fieldMap.subject ? readableArg(merged[fieldMap.subject]) : undefined
   const extraArgs: DraftExtraArg[] = Object.entries(merged)
     .filter(([k]) => k !== fieldMap.to && k !== fieldMap.subject && k !== fieldMap.body)

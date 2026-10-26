@@ -173,6 +173,10 @@ export type SandbotEvent =
   | { type: 'agents' }
   | { type: 'approval'; agentId: string; approval: Approval }
   | { type: 'open-agent'; agentId: string }
+  // residuo fase 4 (0b): il client del daemon si è RICONNESSO dopo una
+  // disconnessione — la UI ricarica agenti ed entry (il transcript può essere
+  // cambiato mentre eravamo sconnessi)
+  | { type: 'reconnected' }
 
 export interface SandbotApi {
   // agenti e transcript

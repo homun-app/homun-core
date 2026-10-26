@@ -86,12 +86,32 @@ export async function ensureDaemonRunning(): Promise<DaemonInfo> {
 
 type HostHandler = (params: unknown[]) => unknown
 
+/** Connessione ws verso il daemon (l'interfaccia di WsClient, iniettabile nei test). */
+export interface WsLike {
+  connect(): Promise<void>
+  send(text: string): void
+  close(): void
+  isConnected: boolean
+}
+
+export interface DaemonClientDeps {
+  /** Fabbrica della connessione ws (default: WsClient reale su 127.0.0.1). */
+  makeWs?: (opts: { host: string; port: number; onText: (text: string) => void; onClose: () => void }) => WsLike
+  /** Assicura il daemon attivo e ne restituisce indirizzo+token (default: ensureDaemonRunning). */
+  ensure?: () => Promise<DaemonInfo>
+}
+
 /**
  * Connessione al daemon. call() aspetta la connessione (e il daemon) prima
  * di inviare: la UI può invocare appena carica.
+ *
+ * Residuo fase 4 (0b): alla RICONNESSIONE (non alla prima connessione)
+ * dispatcha l'evento 'reconnected' — la UI ricarica agenti ed entry
+ * dell'agente selezionato, altrimenti resterebbe ferma al contenuto di
+ * prima della disconnessione finché non riselezioni l'agente.
  */
 export class DaemonClient {
-  private ws: WsClient | null = null
+  private ws: WsLike | null = null
   private nextId = 1
   private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>()
   private readonly listeners = new Set<(e: SandbotEvent) => void>()
@@ -100,6 +120,14 @@ export class DaemonClient {
   private stopped = false
   private helloDone: (() => void) | null = null
   private helloFail: ((e: Error) => void) | null = null
+  private everConnected = false
+  private readonly makeWs: NonNullable<DaemonClientDeps['makeWs']>
+  private readonly ensure: NonNullable<DaemonClientDeps['ensure']>
+
+  constructor(deps: DaemonClientDeps = {}) {
+    this.makeWs = deps.makeWs ?? ((opts) => new WsClient(opts))
+    this.ensure = deps.ensure ?? ensureDaemonRunning
+  }
 
   /** Registra un metodo host.* che il daemon può chiamare quando la UI è aperta. */
   registerHost(method: string, handler: HostHandler): void {
@@ -138,7 +166,7 @@ export class DaemonClient {
   private async connectWithRetry(): Promise<void> {
     while (!this.stopped) {
       try {
-        const info = await ensureDaemonRunning()
+        const info = await this.ensure()
         await this.connectOnce(info)
         return
       } catch (e) {
@@ -154,7 +182,7 @@ export class DaemonClient {
       this.helloDone = resolve
       this.helloFail = reject
     })
-    const ws = new WsClient({
+    const ws = this.makeWs({
       host: '127.0.0.1',
       port: info.port,
       onText: (text) => this.handleText(text),
@@ -167,6 +195,9 @@ export class DaemonClient {
     const guard = setTimeout(() => this.helloFail?.(new Error('handshake col daemon scaduto')), SPAWN_TIMEOUT_MS)
     try {
       await handshake
+      // 0b: alla riconnessione la UI ricarica transcript e agenti
+      if (this.everConnected) this.dispatchEvent({ type: 'reconnected' })
+      this.everConnected = true
     } finally {
       clearTimeout(guard)
       this.helloDone = null
