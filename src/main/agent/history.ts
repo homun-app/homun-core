@@ -18,6 +18,12 @@ function toMessages(entries: TranscriptEntry[]): ChatMessage[] {
   const msgs: ChatMessage[] = []
   for (const e of entries) {
     if (e.kind === 'message') {
+      // residuo fase 2a: un assistant vuoto (stream interrotto da crash/errore
+      // prima di qualsiasi token) non deve mai arrivare al modello — Anthropic
+      // e altri provider rifiutano i blocchi di testo vuoti. Se la risposta
+      // conteneva tool call, le entry tool-call seguenti si aggregano da sole
+      // in un assistant con sole chiamate (contenuto testo assente).
+      if (e.role === 'assistant' && !e.content.trim()) continue
       msgs.push({ role: e.role === 'user' ? 'user' : 'assistant', content: e.content })
     } else if (e.kind === 'tool-call') {
       const prev = msgs[msgs.length - 1]

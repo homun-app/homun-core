@@ -9,6 +9,7 @@
 // store, avvia il server WebSocket (porta casuale, token in daemon.json 0600)
 // e i tick di worker e scheduler.
 import { setDataDir, dataDir, db } from '../main/store/db'
+import { requeueAllLeased } from '../main/store/jobs'
 import { acquireDaemonLock, releaseDaemonLock, writeDaemonInfo, removeDaemonInfo } from './daemon-files'
 import { startWsServer, generateToken } from './ws-server'
 import { buildApiMethods } from './api'
@@ -76,6 +77,10 @@ async function main(): Promise<void> {
   schedulerTimer.unref()
   // tick immediato all'avvio: recupera anche le routine scadute mentre era giù
   tickScheduler(database, emit, Date.now())
+  // residuo fase 2b: il lock garantisce che ogni job 'leased' appartenga a un
+  // processo morto — subito in coda, prima che il worker claimi qualsiasi cosa
+  const requeued = requeueAllLeased(database)
+  if (requeued > 0) console.log(`[sandbotd] ${requeued} job con lease orfano rimessi in coda all'avvio`)
   worker.start()
 
   // autodiscovery dei provider locali silenziosa al boot (come faceva l'app)

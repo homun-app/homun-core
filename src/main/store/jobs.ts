@@ -105,6 +105,16 @@ export function recoverExpiredLeases(db: DatabaseSync, now: number): number {
 }
 
 /**
+ * All'avvio del daemon: il lock garantisce un solo daemon per directory dati,
+ * quindi OGNI job 'leased' appartiene a un processo morto — torna subito in
+ * 'queued' invece di aspettare la scadenza del lease (2 minuti).
+ */
+export function requeueAllLeased(db: DatabaseSync): number {
+  const r = db.prepare("UPDATE jobs SET status = 'queued', lease_until = NULL WHERE status = 'leased'").run()
+  return Number(r.changes)
+}
+
+/**
  * Prende in lease i job dovuti: candidate `queued` con run_at<=now per agenti
  * senza job attivi, poi claim atomico per riga con UPDATE … RETURNING. La
  * clausola "agente senza lease attivo" è ripetuta DENTRO l'UPDATE: due job

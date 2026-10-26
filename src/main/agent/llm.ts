@@ -167,37 +167,57 @@ function openAiStream(p: ProviderConfig, messages: ChatMessage[], tools: ToolDef
 }
 
 // ---- adapter Anthropic nativo ----
-function anthropicStream(p: ProviderConfig, messages: ChatMessage[], tools: ToolDef[], model: string, signal: AbortSignal): LlmStream {
-  const client = anthropicClient(p)
-  const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n')
-  const conv = messages.filter((m) => m.role !== 'system')
-  // converte il formato interno in blocchi content Anthropic
-  type Block =
-    | { type: 'text'; text: string }
-    | { type: 'tool_use'; id: string; name: string; input: unknown }
-    | { type: 'tool_result'; tool_use_id: string; content: string }
-  const aMsgs: Array<{ role: 'user' | 'assistant'; content: Block[] }> = []
-  for (const m of conv) {
+
+export type AnthropicBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | { type: 'tool_result'; tool_use_id: string; content: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+
+export interface AnthropicMessage { role: 'user' | 'assistant'; content: AnthropicBlock[] }
+
+/**
+ * Converte il formato interno in blocchi content Anthropic (puro, testabile).
+ * Residuo fase 2a: MAI blocchi text vuoti o di soli spazi — un assistant con
+ * sole tool call ha solo blocchi tool_use, e un messaggio che resterebbe senza
+ * alcun blocco viene scartato (Anthropic rifiuta i blocchi di testo vuoti).
+ */
+export function toAnthropicMessages(messages: ChatMessage[]): AnthropicMessage[] {
+  const aMsgs: AnthropicMessage[] = []
+  for (const m of messages) {
+    if (m.role === 'system') continue // il system prompt viaggia nel campo dedicato
     if (m.role === 'tool') {
-      const block: Block = { type: 'tool_result', tool_use_id: m.toolCallId!, content: m.content }
+      const block: AnthropicBlock = { type: 'tool_result', tool_use_id: m.toolCallId!, content: m.content }
       const last = aMsgs[aMsgs.length - 1]
       if (last?.role === 'user') last.content.push(block)
       else aMsgs.push({ role: 'user', content: [block] })
-    } else if (m.role === 'assistant' && m.toolCalls?.length) {
-      const blocks: Block[] = []
-      if (m.content) blocks.push({ type: 'text', text: m.content })
+      continue
+    }
+    if (m.role === 'assistant' && m.toolCalls?.length) {
+      const blocks: AnthropicBlock[] = []
+      if (m.content.trim()) blocks.push({ type: 'text', text: m.content })
       for (const tc of m.toolCalls) {
         blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: safeParse(tc.arguments) })
       }
       aMsgs.push({ role: 'assistant', content: blocks })
-    } else {
-      const blocks: Block[] = [{ type: 'text', text: m.content }]
-      for (const img of m.images ?? []) {
-        blocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: img } } as unknown as Block)
-      }
-      aMsgs.push({ role: m.role === 'user' ? 'user' : 'assistant', content: blocks })
+      continue
     }
+    const blocks: AnthropicBlock[] = []
+    if (m.content.trim()) blocks.push({ type: 'text', text: m.content })
+    for (const img of m.images ?? []) {
+      blocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: img } })
+    }
+    // residuo 2a: mai un messaggio con zero blocchi (testo vuoto e niente altro)
+    if (!blocks.length) continue
+    aMsgs.push({ role: m.role === 'user' ? 'user' : 'assistant', content: blocks })
   }
+  return aMsgs
+}
+
+function anthropicStream(p: ProviderConfig, messages: ChatMessage[], tools: ToolDef[], model: string, signal: AbortSignal): LlmStream {
+  const client = anthropicClient(p)
+  const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n')
+  const aMsgs = toAnthropicMessages(messages)
   const aTools = tools.map((t) => ({
     name: t.name,
     description: t.description,
@@ -209,7 +229,8 @@ function anthropicStream(p: ProviderConfig, messages: ChatMessage[], tools: Tool
       {
         model,
         system: system || undefined,
-        messages: aMsgs,
+        // i blocchi image hanno media_type letterale nell'SDK: il formato interno è più lasco
+        messages: aMsgs as unknown as Anthropic.MessageParam[],
         tools: aTools.length ? aTools : undefined,
         max_tokens: 8192
       },

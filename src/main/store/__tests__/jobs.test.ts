@@ -3,7 +3,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import {
-  JOBS_DDL, enqueueJob, claimDueJobs, recoverExpiredLeases, renewLease,
+  JOBS_DDL, enqueueJob, claimDueJobs, recoverExpiredLeases, requeueAllLeased, renewLease,
   completeJob, failJob, retryDelayMs, activeJobForAgent, pendingUserMessages,
   cancelAgentJobs, MAX_ATTEMPTS, getJobById
 } from '../jobs'
@@ -94,6 +94,28 @@ describe('lease: rinnovo, scadenza e ripresa dopo crash', () => {
     claimDueJobs(db, NOW, LEASE)
     recoverExpiredLeases(db, NOW + LEASE - 1)
     expect(claimDueJobs(db, NOW + LEASE - 1, LEASE)).toHaveLength(0)
+  })
+
+  it('residuo 2b: requeueAllLeased rimette in coda OGNI leased all\'avvio, anche non scaduto', () => {
+    userMsg('a1')
+    userMsg('a2')
+    const claimed = claimDueJobs(db, NOW, LEASE)
+    expect(claimed).toHaveLength(2)
+    // il daemon muore: al riavvio il lease è ancora vivo (scade tra 2 minuti)…
+    expect(recoverExpiredLeases(db, NOW + 1)).toBe(0)
+    // …ma requeueAllLeased non aspetta: tutti e due tornano subito queued
+    expect(requeueAllLeased(db)).toBe(2)
+    for (const j of claimed) {
+      const again = getJobById(db, j.id)!
+      expect(again.status).toBe('queued')
+      expect(again.lease_until).toBeNull()
+    }
+    // e il worker li reclama subito, senza aspettare la scadenza
+    const reclaimed = claimDueJobs(db, NOW + 1, LEASE)
+    expect(reclaimed.map((j) => j.id).sort()).toEqual(claimed.map((j) => j.id).sort())
+    // idempotente: senza leased attivi restituisce 0
+    for (const j of reclaimed) completeJob(db, j.id)
+    expect(requeueAllLeased(db)).toBe(0)
   })
 })
 

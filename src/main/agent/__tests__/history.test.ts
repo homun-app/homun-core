@@ -139,4 +139,31 @@ describe('buildMessages (§5.3)', () => {
     const msgs = buildMessages(sys, entries)
     expect(msgs.map((m) => m.role)).toEqual(['system', 'user', 'assistant'])
   })
+
+  it('residuo 2a: assistant vuoto senza tool call (stream interrotto) viene scartato', () => {
+    const entries = [
+      mk('message', 'user', 'ciao'),
+      mk('message', 'assistant', ''),           // stream interroto prima di un token
+      mk('message', 'assistant', '   '),        // solo spazi: stessa cosa
+      mk('message', 'user', 'ancora ciao'),
+      mk('message', 'assistant', 'ecco')
+    ]
+    const msgs = buildMessages(sys, entries)
+    expect(msgs.filter((m) => m.role === 'assistant').map((m) => m.content)).toEqual(['ecco'])
+    // nessun assistant con contenuto vuoto o di soli spazi
+    for (const m of msgs) if (m.role === 'assistant') expect(m.content.trim()).not.toBe('')
+  })
+
+  it('residuo 2a: assistant vuoto seguito da tool-call → assistant con SOLO la chiamata', () => {
+    const entries = [
+      mk('message', 'user', 'esegui'),
+      mk('message', 'assistant', ''), // il modello è passato dritto alla tool call
+      mk('tool-call', 'assistant', 'run-command', { id: 'c9', name: 'run-command', arguments: '{}' }),
+      mk('tool-result', 'system', 'ok', { callId: 'c9' })
+    ]
+    const msgs = buildMessages(sys, entries)
+    const asst = msgs.find((m) => m.role === 'assistant' && m.toolCalls?.length)
+    expect(asst?.content).toBe('') // contenuto testo assente: solo tool_use
+    expect(asst?.toolCalls?.[0]?.id).toBe('c9')
+  })
 })
