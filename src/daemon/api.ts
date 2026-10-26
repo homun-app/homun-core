@@ -249,14 +249,16 @@ export function buildApiMethods(
       return store.createRoutine(agentId as string, title as string, prompt as string, schedule as string)
     },
     'routines:create-trigger': async ([agentId, title, prompt, trigger, timezone]) => {
-      const t = await validateTrigger(trigger as RoutineTrigger)
+      let t = trigger as RoutineTrigger
+      // il webhook nasce col token generato dal server (prima della validazione:
+      // il client non lo manda, la UI lo copia dopo la creazione)
+      if (t?.type === 'webhook' && !t.token) t = { ...t, token: generateWebhookToken() }
+      t = await validateTrigger(t)
       const tz = timezone ? String(timezone) : ''
       if (tz && !isValidTimeZone(tz)) throw new Error(`Fuso orario non valido: "${tz}"`)
-      // il webhook nasce col token generato dal server (copiabile dalla UI)
-      const final = t.type === 'webhook' ? { ...t, token: generateWebhookToken() } : t
-      const created = store.createRoutine(agentId as string, title as string, prompt as string, cronOfTrigger(final), {
+      const created = store.createRoutine(agentId as string, title as string, prompt as string, cronOfTrigger(t), {
         timezone: tz,
-        trigger: final
+        trigger: t
       })
       const url = webhookUrl(created)
       return { ...created, ...(url ? { webhook_url: url } : {}) }

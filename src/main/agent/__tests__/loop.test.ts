@@ -12,6 +12,8 @@ const h = vi.hoisted(() => {
     settings: new Map<string, unknown>(),
     grants: [] as Array<{ tool: string; target: string }>,
     routines: [] as Array<{ id: number; agent_id: string; title: string; prompt: string; schedule: string; enabled: number; provenance?: string; description?: string; timezone?: string }>,
+    // fase 6: righe dell'outbox (le send-message trattenute dei turni automatici)
+    outbox: [] as Array<{ entry_id: number; agent_id: string; created_at: number }>,
     nextId: 1,
     nextRoutineId: 1,
     dataDir: '' // riempita nel beforeAll (mkdtemp): memoria/skill scrivono lì
@@ -63,6 +65,11 @@ vi.mock('../../store/db', () => ({
   },
   getSetting: (key: string, fallback: unknown) => (h.db.settings.has(key) ? h.db.settings.get(key) : fallback),
   setSetting: (key: string, value: unknown) => { h.db.settings.set(key, value) },
+  // fase 6: outbox (i messaggi non urgenti dei turni automatici restano trattenuti)
+  holdOutboxEntry: (entryId: number, agentId: string, createdAt: number) => {
+    h.db.outbox.push({ entry_id: entryId, agent_id: agentId, created_at: createdAt })
+  },
+  heldOutboxForAgent: (agentId: string) => h.db.outbox.filter((o) => o.agent_id === agentId),
   listGrants: () => h.db.grants.map((g, i) => ({ id: i + 1, tool: g.tool, target: g.target, createdAt: 0 })),
   addGrant: (tool: string, target: string) => { h.db.grants.push({ tool, target }) },
   // fase 4: CRUD routine per update_state (verdetto del gate + esecuzione)
@@ -199,6 +206,7 @@ beforeEach(() => {
   h.db.settings.clear()
   h.db.grants.length = 0
   h.db.routines.length = 0
+  h.db.outbox.length = 0
   h.db.nextId = 1
   h.db.nextRoutineId = 1
   // fase 4: memoria e skill scritte dai test non devono inquinare il dopo
@@ -941,5 +949,63 @@ describe('fase 5: funnel dei connettori (offer_connector) e card Riconnetti', ()
     expect(card.meta?.needsAuth).toBe(true)
     // ripristino del mock
     ;(mcpMock as unknown as { callTool: unknown }).callTool = prevCallTool
+  })
+})
+
+// ---- fase 6: outbox — i send_to_user non urgenti dei turni AUTOMATICI ----
+
+describe('fase 6: outbox dei turni automatici', () => {
+  const mkSend = (id: string, args: string): FakeToolCall => ({ id, name: 'send_to_user', arguments: args })
+
+  it('turno routine con send_to_user non urgente: entry trattenuta (meta.held) e in outbox', async () => {
+    h.llm.queue = [
+      { toolCalls: [mkSend('s1', '{"text":"riepilogo notturno"}')] },
+      { text: 'fatto' }
+    ]
+    await runTurn(AGENT, '[routine] notturna', emit, undefined, { source: 'routine', title: 'Notturna' })
+    const send = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(send.meta?.held).toBe(true)
+    expect(h.db.outbox).toEqual([{ entry_id: send.id, agent_id: AGENT, created_at: send.createdAt }])
+    // al modello è stato detto che la consegna è rinviata
+    const lastCall = h.llm.calls[h.llm.calls.length - 1]!
+    const toolResults = lastCall.filter((m) => m.role === 'tool')
+    expect(toolResults.some((m) => String(m.content).includes('finestra di consegna'))).toBe(true)
+    // nessun evento di notifica done: l'utente non ha visto nulla
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
+  })
+
+  it('urgent bypassa l\'outbox: entry visibile subito e notifica agent-done', async () => {
+    h.llm.queue = [
+      { toolCalls: [mkSend('s2', '{"text":"servono le credenziali SCADUTE","urgent":true}')] },
+      { text: 'ok' }
+    ]
+    const events: import('../../../shared/types').SandbotEvent[] = []
+    await runTurn(AGENT, '[routine] urgente', emit, undefined, { source: 'routine', title: 'Urgente' })
+    void events
+    const send = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(send.meta?.held).toBeUndefined()
+    expect(h.db.outbox).toHaveLength(0)
+  })
+
+  it('i turni avviati dall\'utente NON passano mai dall\'outbox', async () => {
+    h.llm.queue = [
+      { toolCalls: [mkSend('s3', '{"text":"ecco la risposta"}')] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'domanda normale', emit)
+    const send = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(send.meta?.held).toBeUndefined()
+    expect(h.db.outbox).toHaveLength(0)
+  })
+
+  it('i widget ask_user dei turni routine non vengono trattenuti (interattivi)', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'w1', name: 'ask_user', arguments: '{"prompt":"procedo?","options":[{"label":"Sì"}]}' }] }
+    ]
+    await runTurn(AGENT, '[routine] con domanda', emit, undefined, { source: 'routine', title: 'Domanda' })
+    const widget = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(widget.meta?.message).toMatchObject({ type: 'widget' })
+    expect(widget.meta?.held).toBeUndefined()
+    expect(h.db.outbox).toHaveLength(0)
   })
 })

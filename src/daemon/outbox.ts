@@ -66,7 +66,8 @@ export function deliverHeldForAgent(agentId: string, emit: Emitter, opts: { now:
   const rows = heldOutboxForAgent(agentId)
   if (!rows.length) return []
   if (opts.now - opts.lastSeen > AWAY_NOTICE_MS) {
-    appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Mentre eri via:' })
+    const notice = appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Mentre eri via:' })
+    emit({ type: 'entries', agentId, entries: [notice] })
   }
   const out: TranscriptEntry[] = []
   for (const row of rows) {
@@ -89,7 +90,8 @@ export function deliverDueHeld(emit: Emitter, now: number, getLastSeen: () => nu
   }
   for (const [agentId, rows] of byAgent) {
     if (now - getLastSeen() > AWAY_NOTICE_MS) {
-      appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Mentre eri via:' })
+      const notice = appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Mentre eri via:' })
+      emit({ type: 'entries', agentId, entries: [notice] })
     }
     for (const row of rows) deliverEntry(row, emit)
   }

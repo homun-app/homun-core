@@ -63,6 +63,7 @@ export function extractByPath(value: unknown, path: string): unknown[] {
     const s = seg(parts[i]!)
     if (!s || typeof v !== 'object' || v === null) return
     const cur = (v as Record<string, unknown>)[s.key]
+    if (cur === undefined) return // chiave assente: nessun match su questo ramo
     if (s.array) {
       if (Array.isArray(cur)) for (const el of cur) walk(el, i + 1, out)
       return

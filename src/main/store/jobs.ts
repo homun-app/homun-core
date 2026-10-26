@@ -71,6 +71,11 @@ export function getJobById(db: DatabaseSync, id: number): Job | null {
   return r ? rowToJob(r) : null
 }
 
+/** Tutti i job (debug/test). */
+export function listJobs(db: DatabaseSync): Job[] {
+  return (db.prepare('SELECT * FROM jobs ORDER BY id').all() as unknown as JobRow[]).map(rowToJob)
+}
+
 /**
  * Registra nel payload l'id dell'entry che apre il turno del job: al
  * tentativo successivo (crash/exception) il turno RIPRENDE da lì invece di

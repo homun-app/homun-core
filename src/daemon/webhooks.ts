@@ -35,22 +35,31 @@ export function webhookTokenOk(header: string | undefined, expected: string): bo
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-/** Legge il corpo rispettando il tetto: null se superato (→ 413). */
+/**
+ * Legge il corpo rispettando il tetto: oltre `max` scarta il resto e torna
+ * null (→ 413) SENZA chiudere la socket, così il cliente riceve davvero la
+ * risposta; un corpo oltre 10× il tetto spegne la connessione (protezione).
+ */
 function readBody(req: IncomingMessage, max: number): Promise<Buffer | null> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = []
     let size = 0
+    let overflow = false
     req.on('data', (c: Buffer) => {
       size += c.length
       if (size > max) {
-        req.destroy()
-        resolve(null)
+        overflow = true
+        chunks.length = 0
+        if (size > max * 10) {
+          req.destroy()
+          resolve(null)
+        }
         return
       }
       chunks.push(c)
     })
-    req.on('end', () => resolve(Buffer.concat(chunks)))
-    req.on('error', () => resolve(Buffer.concat(chunks)))
+    req.on('end', () => resolve(overflow ? null : Buffer.concat(chunks)))
+    req.on('error', () => resolve(overflow ? null : Buffer.concat(chunks)))
   })
 }
 

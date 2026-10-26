@@ -82,6 +82,10 @@ export function offsetMs(t: number, tz: string): number {
  * Epoch dell'orologio da parete (y,m,d,h,mi[,s]) nel fuso.
  * - ora AMBIGUA (due passaggi, fine ora legale): PRIMA occorrenza
  * - ora INESISTENTE (ora saltata, inizio ora legale): null
+ *
+ * Il two-pass semplice converge sulla SECONDA occorrenza delle ore ambigue,
+ * così si candidano gli offset prima e dopo la transizione (probe ±12 h) e
+ * si prende l'epoch minimo tra quelli che ricompongono l'orario richiesto.
  */
 export function wallToEpoch(
   year: number,
@@ -93,19 +97,18 @@ export function wallToEpoch(
   second = 0
 ): number | null {
   const guess = Date.UTC(year, month - 1, day, hour, minute, second)
-  const off1 = offsetMs(guess, tz)
-  const t1 = guess - off1
-  const off2 = offsetMs(t1, tz)
-  if (off1 === off2) return t1
-  // gli offset divergono: o l'ora è nel buco (saltata) o è ambigua
-  const t2 = guess - off2
   const same = (t: number): boolean => {
     const p = tzParts(t, tz)
     return p.hour === hour && p.minute === minute && (second === 0 || p.second === second)
   }
-  if (same(t1)) return t1 // prima occorrenza valida
-  if (same(t2)) return t2 // la seconda
-  return null // nel buco: l'orologio da parete non esiste in quel fuso
+  const offsets = new Set([offsetMs(guess - 12 * 3_600_000, tz), offsetMs(guess, tz), offsetMs(guess + 12 * 3_600_000, tz)])
+  const candidates: number[] = []
+  for (const off of offsets) {
+    const t = guess - off
+    if (same(t)) candidates.push(t)
+  }
+  if (!candidates.length) return null // nel buco: l'orologio da parete non esiste in quel fuso
+  return Math.min(...candidates) // prima occorrenza
 }
 
 /** 'HH:MM' → {h, m}; null se malformato. */
