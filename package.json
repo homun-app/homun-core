@@ -52,6 +52,7 @@
     "productName": "SandBot",
     "asar": "true",
     "files": "out/**/*",
+    "asarUnpack": ["out/main/daemon.js"],
     "extraResources": [
       {
         "from": "vendor",

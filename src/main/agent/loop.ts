@@ -5,10 +5,12 @@
 // puro): [system, ...history] in ordine cronologico, taglio solo a confine di
 // turno, nessuna coppia tool orfana, immagini sull'ultimo messaggio utente.
 //
-// §5.7: un turno per agente. Un nuovo runTurn mentre l'agente è occupato viene
-// accodato (messaggi utente) o scartato con una notice (routine). La mappa
-// `running` non viene MAI sovrascritta: running.set avviene solo quando non
-// c'è già un run in corso per quell'agente.
+// §5.7: un turno per agente. La mappa `running` non viene MAI sovrascritta:
+// running.set avviene solo quando non c'è già un run in corso per quell'agente.
+// Fase 2: la coda per agente non vive più in memoria qui — è la tabella jobs
+// del daemon (worker con lease) ad accodare i messaggi utente e a scartare le
+// routine; se runTurn viene chiamato su un agente occupato (invariante violato)
+// il turno viene scartato con una notice, mai sovrascritto.
 import { randomUUID } from 'node:crypto'
 import { getAgent, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
@@ -23,7 +25,6 @@ import type { Approval, SandbotEvent } from '../../shared/types'
 export { buildMessages } from './history'
 
 const MAX_STEPS = 24
-const MAX_QUEUE = 10
 
 type Emitter = (e: SandbotEvent) => void
 
@@ -33,15 +34,6 @@ interface Running {
 }
 const running = new Map<string, Running>()
 
-interface QueuedTurn {
-  text: string
-  images?: string[]
-  source: 'user' | 'routine'
-  title?: string
-}
-/** Una coda per agente: turni in attesa che quello in corso finisca. */
-const queues = new Map<string, QueuedTurn[]>()
-
 function setStatus(agentId: string, status: import('../../shared/types').AgentStatus, emit: Emitter): void {
   updateAgent(agentId, { status })
   emit({ type: 'status', agentId, status })
@@ -50,39 +42,10 @@ function setStatus(agentId: string, status: import('../../shared/types').AgentSt
 function emitLastEntry(agentId: string, emit: Emitter): void {
   emit({ type: 'entries', agentId, entries: getEntries(agentId).slice(-1) })
 }
+export { emitLastEntry }
 
 export function isRunning(agentId: string): boolean {
   return running.has(agentId)
-}
-
-export function queueLength(agentId: string): number {
-  return queues.get(agentId)?.length ?? 0
-}
-
-function enqueueTurn(agentId: string, turn: QueuedTurn, emit: Emitter): void {
-  const q = queues.get(agentId) ?? []
-  if (q.length >= MAX_QUEUE) {
-    appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Coda piena: messaggio scartato.' })
-    emitLastEntry(agentId, emit)
-    return
-  }
-  q.push(turn)
-  queues.set(agentId, q)
-  appendEntry({ agentId, kind: 'notice', role: 'system', content: `Agente occupato: messaggio in coda (posizione ${q.length}).` })
-  emitLastEntry(agentId, emit)
-}
-
-/** Avvia il prossimo turno in coda (se c'è) ora che l'agente è libero. */
-function startNextQueued(agentId: string, emit: Emitter): void {
-  const q = queues.get(agentId)
-  const next = q?.shift()
-  if (!next) {
-    queues.delete(agentId)
-    return
-  }
-  if (!q!.length) queues.delete(agentId)
-  void runTurn(agentId, next.text, emit, next.images, { source: next.source, title: next.title })
-    .catch((e) => console.error('[sandbot] turno in coda fallito:', e))
 }
 
 export interface RunTurnOptions {
@@ -95,17 +58,16 @@ export interface RunTurnOptions {
 export async function runTurn(agentId: string, userText: string, emit: Emitter, images?: string[], opts: RunTurnOptions = {}): Promise<void> {
   const source = opts.source ?? 'user'
 
-  // §5.7: un turno per agente — mai due run concurrently sulla stessa mappa
+  // §5.7: un turno per agente — mai due run concurrently sulla stessa mappa.
+  // In produzione il worker della coda jobs garantisce la serializzazione per
+  // agente; qui la guardia resta come rete di sicurezza: il turno in eccesso
+  // viene scartato con notice, non accodato né sovrascritto.
   if (running.has(agentId)) {
-    if (source === 'routine') {
-      appendEntry({
-        agentId, kind: 'notice', role: 'system',
-        content: `Routine "${opts.title ?? userText.slice(0, 40)}" saltata: l'agente è occupato.`
-      })
-      emitLastEntry(agentId, emit)
-      return
-    }
-    enqueueTurn(agentId, { text: userText, images, source }, emit)
+    const content = source === 'routine'
+      ? `Routine "${opts.title ?? userText.slice(0, 40)}" saltata: l'agente è occupato.`
+      : 'Agente occupato: messaggio scartato (la coda vive nella tabella jobs del daemon).'
+    appendEntry({ agentId, kind: 'notice', role: 'system', content })
+    emitLastEntry(agentId, emit)
     return
   }
 
@@ -313,8 +275,6 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     running.delete(agentId)
     if (getAgent(agentId)?.status !== 'offline') setStatus(agentId, 'idle', emit)
     emit({ type: 'agents' })
-    // §5.7: il prossimo turno in coda parte ora che l'agente è libero
-    startNextQueued(agentId, emit)
   }
 }
 

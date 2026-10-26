@@ -1,11 +1,22 @@
 // Computer use — mirror di CUGrokBotService (helper Swift dell'originale):
 // screenshot (vision) + azioni input via AppleScript System Events.
 // Permessi macOS richiesti: Screen Recording (screencapture) e Accessibility (eventi sintetici).
+//
+// Fase 2: il process è il daemon, non Electron — il scale factor dello schermo
+// arriva da un provider iniettato (l'app passa electron.screen, il daemon un
+// valore cache ottenuto via RPC verso la UI; default 2 = retina, coerente con
+// lo screenshot "risoluzione nativa retina" di screencapture).
 import { execFile } from 'node:child_process'
 import { readFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { screen } from 'electron'
+
+let scaleFactorProvider: () => number = () => 2
+
+/** Registra come ottenere il scale factor dello schermo primario. */
+export function setScaleFactorProvider(fn: () => number): void {
+  scaleFactorProvider = fn
+}
 
 export interface UseAppInput {
   action: string
@@ -28,7 +39,7 @@ function sh(script: string, timeoutMs = 10_000): Promise<{ stdout: string; stder
 /** Converte coordinate immagine (pixel, retina 2x) in punti schermo. */
 function toScreenPoints(x?: number, y?: number): { x: number; y: number } | null {
   if (typeof x !== 'number' || typeof y !== 'number') return null
-  const scale = screen.getPrimaryDisplay().scaleFactor || 1
+  const scale = scaleFactorProvider() || 1
   return { x: Math.round(x / scale), y: Math.round(y / scale) }
 }
 

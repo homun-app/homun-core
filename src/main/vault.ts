@@ -8,10 +8,35 @@
 // Migrazione automatica dalla chiave Keychain pre-esistente: la si legge con
 // find-generic-password (il valore esce sullo stdout del processo, non
 // dall'argv), la si porta in safeStorage e la si elimina dal Keychain.
+//
+// Fase 2: safeStorage viene iniettata (l'app passa quella di Electron, il
+// daemon un proxy RPC verso la UI quando è aperta). Senza provider il vault
+// resta BLOCCATO — nessuna chiave in chiaro su disco — e il tool dice al
+// modello perché non può usare le credenziali.
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { safeStorage } from 'electron'
 import { getSetting, setSetting } from './store/db'
+
+/** Subset di electron.safeStorage che serve al vault (encrypt/decrypt possono essere async nel daemon: passano dall'RPC). */
+export interface SafeStorageLike {
+  isEncryptionAvailable(): boolean
+  encryptString(plain: string): Buffer | Promise<Buffer>
+  decryptString(encrypted: Buffer): string | Promise<string>
+}
+
+export const VAULT_LOCKED_MSG = 'Vault bloccato: safeStorage non disponibile (apri la finestra di SandBot per usare le credenziali)'
+
+let storage: SafeStorageLike | null = null
+
+/** Registra il backend safeStorage (main Electron o proxy RPC del daemon); null lo rimuove. */
+export function setSafeStorage(s: SafeStorageLike | null): void {
+  storage = s
+}
+
+function safe(): SafeStorageLike {
+  if (!storage || !storage.isEncryptionAvailable()) throw new Error(VAULT_LOCKED_MSG)
+  return storage
+}
 
 const KEYCHAIN_SERVICE = 'sandbot-vault-key'
 const KEYCHAIN_ACCOUNT = 'sandbot'
@@ -49,9 +74,9 @@ async function deleteLegacyKeychainKey(): Promise<void> {
 }
 
 /** Salva la chiave cifrata con safeStorage; false se safeStorage non è disponibile. */
-function storeKeyViaSafeStorage(key: Buffer): boolean {
-  if (!safeStorage.isEncryptionAvailable()) return false
-  setSetting(KEY_SETTING, safeStorage.encryptString(key.toString('base64')).toString('base64'))
+async function storeKeyViaSafeStorage(key: Buffer): Promise<boolean> {
+  if (!storage || !storage.isEncryptionAvailable()) return false
+  setSetting(KEY_SETTING, (await storage.encryptString(key.toString('base64'))).toString('base64'))
   return true
 }
 
@@ -59,22 +84,21 @@ async function getMasterKey(): Promise<Buffer> {
   // 1. chiave già cifrata con safeStorage (o migrata in passato)
   const enc = getSetting<string | null>(KEY_SETTING, null)
   if (enc) {
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('Vault non leggibile: safeStorage non disponibile su questo sistema')
-    }
-    return Buffer.from(safeStorage.decryptString(Buffer.from(enc, 'base64')), 'base64')
+    // senza provider (daemon senza UI) il vault resta bloccato: la chiave si
+    // decifra solo con la safeStorage della finestra aperta
+    return Buffer.from(await safe().decryptString(Buffer.from(enc, 'base64')), 'base64')
   }
   // 2. migrazione dalla chiave Keychain esistente (stesso formato base64)
   const legacy = await readLegacyKeychainKey()
   if (legacy) {
-    if (storeKeyViaSafeStorage(legacy)) await deleteLegacyKeychainKey()
+    if (await storeKeyViaSafeStorage(legacy)) await deleteLegacyKeychainKey()
     // se safeStorage non c'è, si continua a usare la chiave legacy letta dal Keychain
     return legacy
   }
   // 3. prima generazione
   const key = randomBytes(32)
-  if (!storeKeyViaSafeStorage(key)) {
-    throw new Error('Vault non disponibile: impossibile cifrare la chiave master con safeStorage')
+  if (!(await storeKeyViaSafeStorage(key))) {
+    throw new Error(VAULT_LOCKED_MSG)
   }
   return key
 }

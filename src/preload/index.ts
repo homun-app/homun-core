@@ -34,6 +34,8 @@ const api: SandbotApi = {
   vaultList: () => ipcRenderer.invoke('vault:list'),
   vaultStore: (name, value) => ipcRenderer.invoke('vault:store', name, value),
   vaultDelete: (name) => ipcRenderer.invoke('vault:delete', name),
+  getLaunchAtLogin: () => ipcRenderer.invoke('launch-at-login:get'),
+  setLaunchAtLogin: (enabled) => ipcRenderer.invoke('launch-at-login:set', enabled),
   onEvent: (cb) => {
     const listener = (_e: unknown, ev: SandbotEvent) => cb(ev)
     ipcRenderer.on('sandbot:event', listener)

@@ -1,36 +1,12 @@
-// Routines: attività ricorrenti per agente (node-cron) + suggestion engine
-// con il prompt originale "repeated user behaviors" trovato nel client Grok Bot.
-import * as cron from 'node-cron'
-import { listRoutines, touchRoutineRun, getEntries, getAgent } from './store/db'
-import { runTurn } from './agent/loop'
+// Routines: attività ricorrenti per agente + suggestion engine con il prompt
+// originale "repeated user behaviors" trovato nel client Grok Bot.
+// Fase 2: niente più node-cron in-process — la pianificazione la calcola lo
+// scheduler del daemon (src/daemon/scheduler.ts) che accoda job 'routine-run'
+// nella tabella jobs quando scade il prossimo run.
+import { getEntries, getAgent } from './store/db'
 import { llmStream } from './agent/llm'
 import { getProvider } from './agent/providers'
 import { secondaryPrompts } from './agent/prompts'
-import type { SandbotEvent } from '../shared/types'
-
-const jobs = new Map<number, cron.ScheduledTask>()
-type Emitter = (e: SandbotEvent) => void
-let emit: Emitter = () => undefined
-
-function fireRoutine(routineId: number, agentId: string, title: string, prompt: string): void {
-  touchRoutineRun(routineId)
-  // source 'routine' (§5.7): se l'agente è occupato il turno viene scartato
-  // con una notice, non accodato
-  void runTurn(agentId, `[routine ricorrente: ${title}] ${prompt}`, emit, undefined, { source: 'routine', title })
-}
-
-/** (Ri)carica tutti i job cron dalle routine abilitate. */
-export function reloadScheduler(emitter: Emitter): void {
-  emit = emitter
-  for (const [, t] of jobs) t.stop()
-  jobs.clear()
-  for (const r of listRoutines()) {
-    if (!r.enabled) continue
-    if (!cron.validate(r.schedule)) continue
-    const t = cron.schedule(r.schedule, () => fireRoutine(r.id, r.agent_id, r.title, r.prompt))
-    jobs.set(r.id, t)
-  }
-}
 
 export interface RoutineSuggestion {
   title: string

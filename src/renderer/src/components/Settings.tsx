@@ -1,17 +1,17 @@
-// Impostazioni: provider (modelli personalizzati), modello per agente, permessi, routine.
+// Impostazioni: provider (modelli personalizzati), modello per agente, permessi, routine, generale.
 import { useEffect, useState } from 'react'
 import { api, useStore } from '../store'
 import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion } from '../../../shared/types'
 
 const KINDS: ProviderKind[] = [
-  'ollama', 'lmstudio', 'openai', 'anthropic', 'mistral', 'openrouter', 'zai', 'xai', 'deepseek', 'groq', 'openai-compatible'
+  'ollama', 'lmstudio', 'anthropic', 'mistral', 'openrouter', 'zai', 'xai', 'deepseek', 'groq', 'openai-compatible'
 ]
 
 export function Settings() {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const refreshProviders = useStore((s) => s.refreshProviders)
   const refreshPermissions = useStore((s) => s.refreshPermissions)
-  const [tab, setTab] = useState<'provider' | 'agenti' | 'permessi' | 'routine' | 'mcp'>('provider')
+  const [tab, setTab] = useState<'provider' | 'agenti' | 'permessi' | 'routine' | 'mcp' | 'generale'>('provider')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setSettingsOpen(false)}>
@@ -20,7 +20,7 @@ export function Settings() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-1 border-b border-neutral-800 px-4 pt-4 pb-2">
-          {(['provider', 'agenti', 'permessi', 'routine', 'mcp'] as const).map((t) => (
+          {(['provider', 'agenti', 'permessi', 'routine', 'mcp', 'generale'] as const).map((t) => (
             <button
               key={t}
               className={`rounded-lg px-3 py-1.5 text-sm capitalize ${tab === t ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}
@@ -40,8 +40,51 @@ export function Settings() {
           {tab === 'permessi' && <PermissionsTab onChanged={refreshPermissions} />}
           {tab === 'routine' && <RoutinesTab />}
           {tab === 'mcp' && <McpTab />}
+          {tab === 'generale' && <GeneralTab />}
         </div>
       </div>
+    </div>
+  )
+}
+
+// Il runtime dei bot vive in un daemon separato: può partire all'accesso del
+// Mac e sopravvivere alla finestra chiusa (LaunchAgent con riavvio sui crash).
+function GeneralTab() {
+  const [atLogin, setAtLogin] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    void api.getLaunchAtLogin().then(setAtLogin)
+  }, [])
+
+  async function toggle(enabled: boolean) {
+    setBusy(true)
+    try {
+      await api.setLaunchAtLogin(enabled)
+      setAtLogin(await api.getLaunchAtLogin())
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-800 px-4 py-3">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 accent-neutral-300"
+          checked={atLogin}
+          disabled={busy}
+          onChange={(e) => void toggle(e.target.checked)}
+        />
+        <span className="space-y-1">
+          <span className="block text-sm text-neutral-100">Avvia all'accesso</span>
+          <span className="block text-xs text-neutral-500">
+            Il daemon dei Bot parte quando accedi al Mac e resta attivo con la finestra chiusa
+            (LaunchAgent con riavvio automatico dopo un crash). Puoi disattivarlo qui.
+          </span>
+        </span>
+      </label>
     </div>
   )
 }

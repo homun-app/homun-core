@@ -114,7 +114,7 @@ vi.mock('../../vault', () => ({
   listSecretNames: () => ['API_KEY']
 }))
 
-const { runTurn, isRunning, queueLength, resolveApproval } = await import('../loop')
+const { runTurn, isRunning, resolveApproval } = await import('../loop')
 
 const emit = () => undefined
 const AGENT = 'agent_t'
@@ -158,44 +158,10 @@ afterEach(async () => {
   h.llm.gates.clear()
   await vi.waitFor(() => {
     expect(isRunning(AGENT)).toBe(false)
-    expect(queueLength(AGENT)).toBe(0)
   }, { timeout: 3000 })
 })
 
-describe('§5.7 concorrenza: un turno per agente', () => {
-  it('un secondo messaggio utente viene accodato e girato DOPO il primo; running mai sovrascritto', async () => {
-    const g = gated('primo fatto')
-    h.llm.queue = [g.response, { text: 'secondo fatto' }]
-
-    const first = runTurn(AGENT, 'primo', emit)
-    // aspetta che il modello sia stato chiamato davvero (non solo running.set)
-    await vi.waitFor(() => expect(h.llm.calls).toHaveLength(1))
-    expect(isRunning(AGENT)).toBe(true)
-
-    // secondo messaggio mentre il primo gira → in coda, non sovrascrive nulla
-    await runTurn(AGENT, 'secondo', emit)
-    expect(queueLength(AGENT)).toBe(1)
-    expect(isRunning(AGENT)).toBe(true)
-    expect(h.llm.calls).toHaveLength(1) // il secondo NON è partito
-
-    g.resolve()
-    await first
-    await vi.waitFor(() => {
-      expect(isRunning(AGENT)).toBe(false)
-      expect(queueLength(AGENT)).toBe(0)
-      expect(h.llm.calls).toHaveLength(2) // ora il secondo è girato
-    })
-
-    // ordine cronologico nel transcript: user primo → assistant → user secondo → assistant
-    const kinds = h.db.entries.filter((e) => e.kind === 'message').map((e) => `${e.role}:${e.content}`)
-    expect(kinds).toEqual(['user:primo', 'assistant:primo fatto', 'user:secondo', 'assistant:secondo fatto'])
-    // il secondo turno ha visto la storia giusta (il suo user message è l'ultimo)
-    const secondCall = h.llm.calls[1]!
-    const lastUser = [...secondCall].reverse().find((m) => m.role === 'user')!
-    expect(lastUser.content).toBe('secondo')
-    expect(secondCall.filter((m) => m.role === 'user' && m.content === 'secondo')).toHaveLength(1)
-  })
-
+describe('§5.7 concorrenza: un turno per agente (fase 2: la coda vive nella tabella jobs del daemon)', () => {
   it('una routine su agente occupato viene scartata con notice, non accodata', async () => {
     const g = gated('occupato')
     h.llm.queue = [g.response]
@@ -204,7 +170,6 @@ describe('§5.7 concorrenza: un turno per agente', () => {
     await vi.waitFor(() => expect(h.llm.calls).toHaveLength(1))
 
     await runTurn(AGENT, '[routine] backup', emit, undefined, { source: 'routine', title: 'Backup' })
-    expect(queueLength(AGENT)).toBe(0)
     const notice = h.db.entries.find((e) => e.kind === 'notice' && e.content.includes('Backup') && e.content.includes('saltata'))
     expect(notice).toBeTruthy()
 
@@ -214,18 +179,28 @@ describe('§5.7 concorrenza: un turno per agente', () => {
     expect(h.llm.calls).toHaveLength(1) // la routine non ha mai girato
   })
 
-  it('la coda ha un tetto: l’undicesimo messaggio viene scartato', async () => {
-    const g = gated('ok')
+  it('un secondo messaggio utente su agente occupato viene scartato con notice (nessuna coda qui)', async () => {
+    const g = gated('primo fatto')
     h.llm.queue = [g.response]
-    const first = runTurn(AGENT, 'base', emit)
+
+    const first = runTurn(AGENT, 'primo', emit)
     await vi.waitFor(() => expect(h.llm.calls).toHaveLength(1))
-    for (let i = 0; i < 12; i++) await runTurn(AGENT, `msg${i}`, emit)
-    expect(queueLength(AGENT)).toBe(10)
-    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('Coda piena'))).toBe(true)
+    expect(isRunning(AGENT)).toBe(true)
+
+    // secondo messaggio mentre il primo gira: runTurn non accoda più (è la
+    // tabella jobs a farlo, via enqueueUserMessage): notice e non gira
+    await runTurn(AGENT, 'secondo', emit)
+    expect(isRunning(AGENT)).toBe(true)
+    expect(h.llm.calls).toHaveLength(1) // il secondo NON è partito
+    const notice = h.db.entries.find((e) => e.kind === 'notice' && e.content.includes('Agente occupato'))
+    expect(notice).toBeTruthy()
 
     g.resolve()
     await first
-    await vi.waitFor(() => expect(queueLength(AGENT)).toBe(0))
+    await vi.waitFor(() => expect(isRunning(AGENT)).toBe(false))
+    // nel transcript resta un solo turno
+    const kinds = h.db.entries.filter((e) => e.kind === 'message').map((e) => `${e.role}:${e.content}`)
+    expect(kinds).toEqual(['user:primo', 'assistant:primo fatto'])
   })
 })
 

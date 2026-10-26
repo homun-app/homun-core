@@ -134,6 +134,9 @@ export interface SandbotApi {
   vaultList(): Promise<string[]>
   vaultStore(name: string, value: string): Promise<void>
   vaultDelete(name: string): Promise<void>
+  // daemon all'accesso (LaunchAgent)
+  getLaunchAtLogin(): Promise<boolean>
+  setLaunchAtLogin(enabled: boolean): Promise<void>
   // evento push
   onEvent(cb: (e: SandbotEvent) => void): () => void
 }

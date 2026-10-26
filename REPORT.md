@@ -172,3 +172,80 @@ parametro `agentId` (opzionale, per non rompere chiamate legacy).
 - Output typecheck/vitest/build: `npm run typecheck` pulito; `npx vitest run` → **114 test, 9 file, tutti verdi** (73 pre-fase + 41 nuovi; i soli 73 originali restano verdi); `npm run build` verde (preload 2.51 kB, renderer 1.178 kB). Verifica pre-fix: i nuovi test eseguiti sul tag `fase-1` (worktree) → 30 fallimenti, tutti i bypass C1–C5 confermati `allow`.
 - Non verificato: il percorso Electron impacchettato (dist/dmg) e il backend docker in esecuzione reale (come nella fase 1: argv e logica verificati a livello di funzioni pure); il rendering visivo della ApprovalCard (riga credenziali) non ispezionato a schermo.
 - Fuori scope notati: (1) `write-file` in host non ha il gate C5 (è `needs_approval` di default, quindi chiede comunque, ma una regola `always_allow` su write-file varrebbe anche fuori dal box); (2) la redazione dei segreti copre letterale/base64/URL-encoding ma non altre codifiche (hex, ROT13, reversed); (3) `hasEnvPrefix` non copre `export` usato come comando standalone (comunque never-auto via NEVER_AUTO); (4) le grant run-command restano salvate per chiavi con redirect su file o assegnazioni (il gate le chiede comunque ogni volta, ma il DB accumera grant inutilizzate); (5) `command <(cmd)` (process substitution) è già coperto da `hasSubstitution` → ask, ma `|&` (pipe stderr) non ha trattamento dedicato (equivale a una pipe normale).
+
+---
+
+# Fase 2 — Daemon e coda durevole
+
+**Data:** 2026-10-26 · **Commit:** `fase 2: daemon e coda durevole` · **Tag:** `fase-2`
+**Scope:** §6.2 (runtime separato dalla UI) + §3bis L1 (agenti sempre accesi); prima del resto i residui fase 1 (commit `fase 2: residui gate`).
+**Verifica:** `npm run typecheck` pulito · `npx vitest run` **179 test, 15 file, tutti verdi** (120 pre-fase + 59 nuovi) · `npm run build` verde · chat verificata dal vivo con `npm run dev` (vedi sotto).
+
+## Residui fase 1 (commit separato)
+
+- `isNeverAuto` confronta il **basename** del nome comando: `/usr/bin/env rm -rf ~`, `/bin/bash -c id`, `/usr/bin/find . -exec rm {} \;` ora sono never-auto anche via path assoluto; idem i casi condizionali find/git.
+- `FIND_EXEC_FLAGS` include le opzioni che scrivono file: `-fprint -fprint0 -fprintf -fls`.
+- Test: verdetto `ask` anche con grant sulla chiave esatta (`/usr/bin/env`, `/bin/bash`, `/usr/bin/find`, `find` per -fprint); `grantStanding` non salva grant per nessuno di questi.
+
+## Architettura
+
+```
+┌─ sandbotd (src/daemon/index.ts, Node puro, ELECTRON_RUN_AS_NODE) ─┐
+│ store SQLite (db.ts senza electron.app) · coda jobs (lease+retry) │
+│ worker (1 job per agente) · scheduler (nextCronRun → job)         │
+│ agent loop · sandbox · MCP · HostBridge (notify/safeStorage/screen)│
+│ WS 127.0.0.1 porta casuale, token 0600 in data/daemon.json        │
+└──────────── RPC JSON {id,method,params} + eventi push ────────────┘
+        ↑ Electron main = client sottile (ipc.ts inoltra 1:1)
+```
+
+- **Store senza Electron:** `db.ts` prende la directory dati da `setDataDir()` (main app), `--data`/`SANDBOT_DATA_DIR` (daemon) o default `~/.sandbot/data`. L'app continua a usare `userData/data`: stessi dati della fase 1. Le API Electron che il runtime usava passano da **HostBridge**: con la UI aperta diventano RPC (`host.notify`, `host.screen.scaleFactor`, `host.safeStorage.encrypt/decrypt`); senza UI la notifica degrada su `osascript display notification`, il vault resta **bloccato** con errore esplicito al modello (`Vault bloccato: … apri la finestra`), lo scale factor resta 2 (retina, coerente con gli screenshot 2x). Nessuna chiave in chiaro su disco.
+- **Coda durevole:** tabella `jobs(id, agent_id, kind, payload_json, run_at, status, lease_until, attempts, last_error, created_at)`. Worker: recovery dei lease scaduti, claim per riga con `UPDATE … WHERE status='queued' AND run_at<=? AND agent_id NOT IN (leased) … RETURNING` (la guardia "agente libero" è anche DENTRO l'UPDATE: due job dello stesso agente tra i candidati non vengono mai presi insieme), lease 2 minuti **rinnovato a ogni passo del loop** (heartbeat sugli eventi, throttle 10s, fallback timer 30s), retry backoff 30s·60s·120s·240s, max 5 tentativi poi `failed`; al riavvio i `leased` scaduti tornano `queued`.
+- **Un job attivo per agente:** la coda in memoria di `loop.ts` è sparita; `enqueueUserMessage` mantiene la semantica fase 1 (notice "in coda (posizione N)", tetto 10, "Coda piena"), le routine su agente occupato sono scartate con notice dallo scheduler. `running` in loop.ts resta come rete di sicurezza (turno in eccesso → notice, mai sovrascritto).
+- **Scheduler:** niente più node-cron in-process. `src/daemon/cron.ts` (puro, 5 campi + secondi, nomi mesi/giorni, semantica OR dom/dow) calcola il prossimo run; un tick ogni 30s accoda un job `routine-run` quando scade (e all'avvio recupera le routine scadute mentre il daemon era giù, una sola corsa di recupero).
+- **Trasporto UI↔daemon:** WebSocket su 127.0.0.1 porta casuale, codec RFC 6455 **scritto in casa** (`src/shared/ws.ts`: frame mascherati client→server, ping/pong, close; handshake `Sec-WebSocket-Accept` con vettore RFC verificato nel test). Token casuale in `data/daemon.json` (permessi **0600**, schema `pid, port, token, startedAt` come `~/.grokbot/local-exec-daemon.json`). Il primo messaggio deve essere `{hello, token}` (confronto timing-safe): token errato → `{hello:false}` + close, nessun metodo eseguito. RPC JSON `{rpc,id,method,params}` → `{rpc,id,ok,result|error}` in entrambe le direzioni; eventi push `{ev: SandbotEvent}` (stessi eventi di fase 1).
+- **Avvio:** l'app legge `daemon.json`, verifica pid vivo E (via `ps`) che sia davvero il nostro processo — un pid riusato dal SO dopo il reboot non inganna il riuso — altrimenti spawna `process.execPath` (Electron) con `ELECTRON_RUN_AS_NODE=1` su `out/main/daemon.js --data <dir>`, log in `data/daemon.log`, e aspetta il `daemon.json` fresco (15s). Lock file `daemon.lock` con pid: un secondo daemon sulla stessa directory esce subito. Se l'app muore, il client riconnette (e riavvia il daemon se serve).
+- **LaunchAgent:** "Avvia all'accesso" (nuovo tab *generale* delle impostazioni) installa/rimuove `~/Library/LaunchAgents/com.fabio.sandbot.daemon.plist` — `RunAtLoad` + `KeepAlive` (riavvio sui crash), env `ELECTRON_RUN_AS_NODE`/`SANDBOT_DATA_DIR`, XML generato da funzione pura testata (escaping incluso).
+- **Main Electron = client sottile:** `ipc.ts` inoltra 1:1 i canali di fase 1 al daemon (preload e renderer **non cambiano**); restano locali `dialog:pick-image`, `notify:test`, `launch-at-login:*`. Gli eventi del daemon vanno alle finestre e aggiornano il tray (che legge lo stesso DB in WAL).
+
+## Verifica manuale (npm run dev e non solo)
+
+1. **Daemon standalone** su dir temporanea: si attiva, scrive `daemon.json` 0600, risponde a `hello`+`ping`+`agents:list`+`permissions:get`; **token errato → `{hello:false}` + chiusura**; un secondo daemon sulla stessa dir esce per il lock; SIGTERM rimuove `daemon.json` e lock.
+2. **Chat end-to-end sul DB reale dell'app** (`Application Support/sandbot/data`, agente "Bot", provider Ollama locale): `chat:send` → job queued → worker claim → turno LLM con delta in streaming → risposta **"PONG"** nel transcript → job `done` (attempts 1); eventi `entries/delta/status/agents` ricevuti dal client. Nota: il modello configurato `gemma4:31b-cloud` non esiste più su Ollama; per il test è stato switchato temporaneamente a `glm-5.3-flash:cloud` e **ripristinato**. Nel transcript di sviluppo restano le due voci del test (PONG) e una riga `done` nella tabella jobs.
+3. **`npm run dev` con daemon già attivo:** l'app **riusa** il pid esistente (nessun doppio spawn), Electron si collega al WebSocket (verificato con `lsof`), nessun errore nei log; **chiusa l'app il daemon resta vivo** (i bot sopravvivono alla finestra chiusa, obiettivo della fase).
+4. **`npm run dev` senza daemon:** l'app spawna `node_modules/electron/dist/…/Electron` in `ELECTRON_RUN_AS_NODE=1` con `out/main/daemon.js --data …`, log scritto in `data/daemon.log`, connessione stabilita, il lock rifiuta un secondo daemon.
+
+## REPORT FASE 2
+
+- **File modificati/creati:**
+  - `src/daemon/index.ts` — **nuovo** entrypoint Node puro del daemon (lock, store, ws, worker, scheduler, host bridge, daemon.json).
+  - `src/daemon/ws-server.ts` — server WebSocket (127.0.0.1, auth hello+token, broadcast eventi, RPC bidirezionali, keepalive).
+  - `src/daemon/rpc.ts` — protocollo puro: envelope RPC/hello/eventi, `isHelloAuthorized` (token timing-safe).
+  - `src/shared/ws.ts` — **nuovo** codec WebSocket RFC 6455 puro (frame mascherati/no, ping/pong, acceptKey, tokenEquals).
+  - `src/daemon/worker.ts` — worker della coda: recovery, claim, lease con heartbeat sugli eventi, retry/backoff, `drain()` per i test.
+  - `src/daemon/scheduler.ts` — tick: routine dovute → job `routine-run` (o notice di scarto se l'agente è occupato), stateless.
+  - `src/daemon/cron.ts` — parser + calcolo puro del prossimo run (5 campi + secondi, OR dom/dow, nomi).
+  - `src/daemon/enqueue.ts` — policy di accodamento con la semantica fase 1 (notice posizione, tetto 10, "Coda piena").
+  - `src/daemon/daemon-files.ts` — lock con pid/liveness e `daemon.json` 0600 (pid, port, token, startedAt).
+  - `src/daemon/host-bridge.ts` — bridge notify/safeStorage/scale-factor: RPC alla UI o fallback (osascript / vault bloccato / 2x).
+  - `src/daemon/api.ts` — i metodi RPC già esposti da ipc.ts in fase 1, ora lato daemon (+validazione schedule routine).
+  - `src/main/store/jobs.ts` — SQL puro della coda (enqueue/claim RETURNING/renew/recover/fail/backoff/cancel) + `JOBS_DDL`.
+  - `src/main/store/db.ts` — senza `electron.app`: `setDataDir`/env/arg; tabella `jobs`; `busy_timeout` per due processi sullo stesso DB WAL.
+  - `src/main/ws-client.ts` — client WebSocket (upgrade HTTP, frame mascherati, pong).
+  - `src/main/daemon-client.ts` — ensureDaemonRunning (pid+ps, spawn `ELECTRON_RUN_AS_NODE`, attesa daemon.json) + client RPC con riconnessione e host handlers.
+  - `src/main/launchagent.ts` — plist puro (testato) + install/rimozione LaunchAgent con launchctl.
+  - `src/main/ipc.ts` — riscritto client sottile: inoltro 1:1 dei canali, eventi→finestre/tray, host.notify locale, pick-image/notify:test/launch-at-login.
+  - `src/main/index.ts` — solo UI: setDataDir, DaemonClient, host handlers (safeStorage, screen), finestra/tray/deep-link; il daemon non muore con l'app.
+  - `src/main/agent/loop.ts` — rimossa la coda in memoria (ora è la tabella jobs); `emitLastEntry` esportato; guardia anti-concorrenza invariata.
+  - `src/main/vault.ts` — safeStorage iniettabile (`setSafeStorage`), errori espliciti "Vault bloccato" senza mai scrivere chiavi in chiaro.
+  - `src/main/computeruse/index.ts` — scale factor da provider (electron.screen nell'app, cache RPC nel daemon, default 2).
+  - `src/main/routines.ts` — via node-cron; resta il suggestion engine.
+  - `src/main/agent/permission-rules.ts` — residui: basename in `isNeverAuto`, FIND_EXEC_FLAGS di scrittura.
+  - `src/shared/types.ts`, `src/preload/index.ts`, `src/renderer/src/components/Settings.tsx` — API + tab *generale* con "Avvia all'accesso".
+  - `electron.vite.config.ts`, `package.json` — entry `daemon` nella build main; `asarUnpack` per `out/main/daemon.js`.
+  - test nuovi: `jobs.test.ts`, `worker.test.ts`, `cron.test.ts`, `rpc-protocol.test.ts`, `queue.test.ts`, `launchagent.test.ts`; aggiornati `permission-rules.test.ts`, `permissions.test.ts`, `loop.test.ts`.
+- **Decisioni prese e perché:** (1) WebSocket scritto in casa invece della dipendenza `ws`: regola "niente dipendenze non richieste" e il canale serve solo a JSON locali su loopback (codec puro ben testato, zero superficie in più); (2) claim con la guardia agente-libero anche DENTRO l'UPDATE — i test hanno dimostrato che calcolare i candidati prima non basta (due job dello stesso agente venivano presi nello stesso batch); (3) parser cron scritto in casa perché node-cron non espone il calcolo del prossimo run (serve per `run_at`); (4) scheduler stateless (un solo timer da 30s che rilegge la tabella routine): CRUD e riavvii non richiedono ricaricamenti e i job pianificati sopravvivono al crash; (5) `daemon.json` include il token (l'originale lo tiene in un file gemello `local-exec-daemon-credential.json`): un solo file 0600 è sufficiente e equivalente; (6) riuso del daemon solo se pid vivo E riga di comando `ps` compatibile (mitiga il pid riusato dal SO dopo un reboot); (7) `agents:delete` cancella anche i job queued/leased dell'agente (nuovo, necessario con la coda durevole); (8) notifica "bot ha risposto": la decisione *se* mostrarla resta dove c'è la finestra (RPC host.notify, suppression se focalizzata, come fase 1), senza UI il daemon notifica via osascript; (9) `heartbeat` del lease cablato sull'emitter del turno: ogni passo del loop emette → rinnova, senza toccare l'interno di runTurn.
+- **Deviazioni dal prompt e perché:** (1) `routines:create/update` ora rifiutano schedule non valide (parseCron) invece di accettarle e saltarle silenziosamente allo schedule-time — più onesto verso l'utente, stessa grammatica cron; (2) runTurn chiamato direttamente su agente occupato (invariante violato) scarta con notice invece di accodare: la coda è solo quella durevole, il loop non ha più stato di coda; (3) il plist è installato/rimosso da un'azione esplicita nelle impostazioni come richiesto, ma `launchctl load/unload` non è stato eseguito su questa macchina (vedi "non verificato").
+- **Output typecheck / vitest / build (ultime righe):** `tsc --noEmit` pulito; vitest `Test Files 15 passed (15)` / `Tests 179 passed (179)`; build `out/main/index.js 18.20 kB` + `out/main/daemon.js 92.66 kB` + preload 2.67 kB + renderer 1.180 kB, `✓ built` per main/preload/renderer.
+- **Cosa NON è stato verificato:** (1) il pacchetto `dist`/dmg: il daemon è `asarUnpack`-ato ma le sue dipendenze esterne (openai, web-tree-sitter, SDK MCP) restano nell'asar e un processo `ELECTRON_RUN_AS_NODE` non legge gli asar — in dev tutto funziona, il percorso impacchettato va verificato/aggiustato quando si costruirà il dmg; (2) il toggle "Avvia all'accesso" non è stato attivato davvero (avrebbe registrato un LaunchAgent su questa macchina): solo generazione del plist testata; (3) il rendering visivo della chat/tray non è stato ispezionato a schermo (finestra aperta senza errori, catena renderer→preload→ipc→daemon verificata via RPC/wire); (4) vault bloccato senza UI e scale factor via RPC provati solo per costruzione, non dal vivo; (5) computer use completo non eseguito in questa fase.
+- **Problemi fuori scope notati:** (1) `node-cron`/`@types/node-cron` restano in package.json ormai inutilizzati; (2) avvisi rollup `INEFFECTIVE_DYNAMIC_IMPORT` (cosmetici, dovuti ai doppioni statico/dinamico preesistenti); (3) il server ws accetta una sola UI per volta: la seconda connessione calcia la prima (il client dell'app si riconnette da solo, ma due app aperte sulla stessa directory dati si contendono il canale); (4) se il daemon resta vivo con l'app chiusa, le routine continuano a consumare token del provider senza che nessuno guardi — servono le finestre di consegna di §3bis L4 (fase futura); (5) `write-file` in host senza gate C5 e redazioni non letterali (già notati in fase 1, invariati).

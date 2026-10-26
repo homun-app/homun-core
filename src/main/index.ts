@@ -1,9 +1,14 @@
-import { app, BrowserWindow } from 'electron'
+// Main Electron: solo UI. Il runtime degli agenti (loop, coda durevole,
+// scheduler, sandbox, MCP) vive nel daemon sandbotd — avviato qui sotto se
+// non è già attivo e riusato se lo è (LaunchAgent o avvio precedente). La
+// finestra chiusa non ferma più i bot: il main inoltra RPC ed eventi.
+import { app, BrowserWindow, safeStorage, screen } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { registerIpc } from './ipc'
-import { createAgent, listAgents } from './store/db'
+import { registerIpc, emitLocal } from './ipc'
+import { setDataDir, listAgents, createAgent } from './store/db'
 import { createTray, refreshTray } from './tray'
+import { DaemonClient } from './daemon-client'
 
 // con "type": "module" electron-vite emette il preload come .mjs (ESM, richiede sandbox:false)
 const preloadPath = join(__dirname, '../preload/index.mjs')
@@ -21,12 +26,6 @@ function openAgent(agentId: string): void {
   win.show()
   win.focus()
   win.webContents.send('sandbot:event', { type: 'open-agent', agentId })
-}
-
-// autodiscovery dei provider locali (Ollama/LM Studio) silenziosa al boot
-async function autoDiscover(): Promise<void> {
-  const p = await import('./agent/providers')
-  await p.discoverProviders().catch(() => undefined)
 }
 
 function createWindow(): void {
@@ -54,20 +53,34 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  registerIpc()
-  void autoDiscover()
+  // il path dati è quello storico dell'app (userData/data): app e daemon
+  // condividono lo stesso store
+  setDataDir(join(app.getPath('userData'), 'data'))
+
+  // client del daemon: lo avvia se non attivo, inoltra RPC/host API/eventi
+  const client = new DaemonClient()
+  client.registerHost('host.screen.scaleFactor', () => screen.getPrimaryDisplay().scaleFactor || 1)
+  client.registerHost('host.safeStorage.encrypt', ([plain]) =>
+    safeStorage.encryptString(String(plain)).toString('base64'))
+  client.registerHost('host.safeStorage.decrypt', ([b64]) =>
+    safeStorage.decryptString(Buffer.from(String(b64), 'base64')))
+  registerIpc(client, () => BrowserWindow.getAllWindows())
+  void client.start().catch((e) => console.error('[sandbot] daemon non avviabile:', e))
+
   if (listAgents().length === 0) {
     // primo avvio: agente principale, come il "Bot principale" dell'originale
     createAgent('Bot', 'Il mio assistente personale sempre attivo.')
   }
   createWindow()
   createTray(getMainWindow)
+  refreshTray()
+  emitLocal({ type: 'agents' }, () => BrowserWindow.getAllWindows())
 
   // deep link sandbot://agent/<id>
   app.setAsDefaultProtocolClient('sandbot')
   app.on('open-url', (_e, url) => {
     const m = url.match(/^sandbot:\/\/agent\/([A-Za-z0-9_-]+)$/)
-    if (m) openAgent(m[1])
+    if (m) openAgent(m[1]!)
     else { getMainWindow()?.show(); getMainWindow()?.focus() }
   })
 
@@ -77,5 +90,6 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  // il daemon resta attivo: chiudere la finestra non ferma i bot (§6.2)
   if (process.platform !== 'darwin') app.quit()
 })

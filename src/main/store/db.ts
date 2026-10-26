@@ -1,13 +1,25 @@
 // Store persistente: SQLite via node:sqlite (nativo, zero rebuild) — transcript event-sourced
 // come l'originale (CommitTranscriptEntries).
+//
+// Fase 2: nessuna dipendenza da electron.app — il path dei dati arriva
+// dall'esterno (arg --data del daemon, env SANDBOT_DATA_DIR, o setDataDir
+// chiamato dal main Electron), così lo stesso store serve app e daemon.
 import { DatabaseSync } from 'node:sqlite'
-import { app } from 'electron'
 import { mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { JOBS_DDL } from './jobs'
 import type { Agent, TranscriptEntry, PermissionsConfig } from '../../shared/types'
 
+let _dir: string | null = null
+
+/** Sostituisce la directory dati (main Electron: userData/data). */
+export function setDataDir(dir: string): void {
+  _dir = dir
+}
+
 export function dataDir(): string {
-  const dir = join(app.getPath('userData'), 'data')
+  const dir = _dir ?? process.env.SANDBOT_DATA_DIR ?? join(homedir(), '.sandbot', 'data')
   mkdirSync(dir, { recursive: true })
   return dir
 }
@@ -16,6 +28,7 @@ function open(): DatabaseSync {
   const db = new DatabaseSync(join(dataDir(), 'sandbot.db'))
   db.exec(`
     PRAGMA journal_mode = WAL;
+    PRAGMA busy_timeout = 5000;
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -61,6 +74,7 @@ function open(): DatabaseSync {
       last_run INTEGER,
       created_at INTEGER
     );
+    ${JOBS_DDL}
   `)
   return db
 }

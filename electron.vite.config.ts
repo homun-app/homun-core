@@ -9,7 +9,11 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
-      rollupOptions: { input: { index: resolve(here, 'src/main/index.ts') } }
+      rollupOptions: {
+        // due entry: index = main Electron (solo UI), daemon = runtime Node
+        // puro avviato con ELECTRON_RUN_AS_NODE (vedi src/daemon/index.ts)
+        input: { index: resolve(here, 'src/main/index.ts'), daemon: resolve(here, 'src/daemon/index.ts') }
+      }
     }
   },
   preload: {
