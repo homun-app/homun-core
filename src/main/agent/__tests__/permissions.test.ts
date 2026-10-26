@@ -82,6 +82,14 @@ describe('C1: grantStanding non salva mai chiavi never-auto', () => {
     expect(state.grants).toEqual([])
   })
 
+  it('residui: path assoluti e find che scrive file non producono grant', async () => {
+    await grantStanding('run-command', { command: '/usr/bin/env rm -rf ~' })
+    await grantStanding('run-command', { command: '/bin/bash -c id' })
+    await grantStanding('run-command', { command: '/usr/bin/find . -exec rm {} \\;' })
+    await grantStanding('run-command', { command: 'find . -fprint ~/f' })
+    expect(state.grants).toEqual([])
+  })
+
   it('una chiave pulita resta concedibile (controllo positivo)', async () => {
     await grantStanding('run-command', { command: 'git status' })
     expect(state.grants).toEqual([{ tool: 'run-command', target: 'git status' }])

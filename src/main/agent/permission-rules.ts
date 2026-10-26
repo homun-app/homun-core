@@ -95,16 +95,27 @@ export const NEVER_AUTO = new Set([
   'osascript', 'awk', 'gawk', 'lua'
 ])
 
-/** Opzioni di find che eseguono comandi o cancellano: con una di queste find è never-auto. */
-const FIND_EXEC_FLAGS = new Set(['-exec', '-execdir', '-ok', '-okdir', '-delete'])
+/**
+ * Basename del nome del comando ("/usr/bin/env" → "env"): il gate never-auto
+ * e i casi condizionali find/git confrontano il basename, altrimenti un path
+ * assoluto nasconde il comando reale (`/usr/bin/env rm -rf ~` non è "env").
+ */
+function commandBasename(name: string): string {
+  const i = name.lastIndexOf('/')
+  return i === -1 ? name : name.slice(i + 1)
+}
+
+/** Opzioni di find che eseguono comandi, cancellano o scrivono file: con una di queste find è never-auto. */
+const FIND_EXEC_FLAGS = new Set(['-exec', '-execdir', '-ok', '-okdir', '-delete', '-fprint', '-fprint0', '-fprintf', '-fls'])
 
 /** true se il comando non può MAI essere approvato automaticamente. */
 export function isNeverAuto(c: Pick<ShellCommand, 'name' | 'argv'>): boolean {
-  if (NEVER_AUTO.has(c.name)) return true
+  const name = commandBasename(c.name)
+  if (NEVER_AUTO.has(name)) return true
   const args = c.argv.slice(1)
-  if (c.name === 'find' && args.some((a) => FIND_EXEC_FLAGS.has(a))) return true
+  if (name === 'find' && args.some((a) => FIND_EXEC_FLAGS.has(a))) return true
   // git -c (config arbitraria, es. core.pager) e --exec-path (binario git alternativo)
-  if (c.name === 'git' && (args.includes('-c') || args.some((a) => a === '--exec-path' || a.startsWith('--exec-path=')))) return true
+  if (name === 'git' && (args.includes('-c') || args.some((a) => a === '--exec-path' || a.startsWith('--exec-path=')))) return true
   return false
 }
 

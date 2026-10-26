@@ -219,6 +219,57 @@ describe('C1: comandi che eseguono altri comandi → never-auto', () => {
   })
 })
 
+// ---- residui fase 1: basename del comando e find che scrive file ----
+
+describe('residui: il gate confronta il BASENAME del nome del comando', () => {
+  // ogni riga: con una grant sulla CHIAVE ESATTA estratta (il path completo)
+  // il verdetto resta ask, perché il basename è never-auto
+  const pathBypass: Array<[string, string]> = [
+    ['/usr/bin/env rm -rf ~', '/usr/bin/env'],
+    ['/bin/bash -c id', '/bin/bash'],
+    ['/usr/bin/find . -exec rm {} \\;', '/usr/bin/find'],
+    ['find . -fprint ~/f', 'find']
+  ]
+
+  it('path assoluti con grant sulla chiave esatta → ask "esegue altri comandi"', async () => {
+    for (const [cmd, key] of pathBypass) {
+      const v = await verdictOf(cmd, [key])
+      expect(v.kind, cmd).toBe('ask')
+      expect(v.reasons.join(' '), cmd).toContain('esegue altri comandi')
+    }
+  })
+
+  it('nemmeno una regola always_allow "*" li approva', async () => {
+    const rules = [{ tool: 'run-command', pattern: '*', mode: 'always_allow' as const }]
+    for (const [cmd] of pathBypass) {
+      expect((await verdictOf(cmd, [], rules)).kind, cmd).toBe('ask')
+    }
+  })
+
+  it('isNeverAuto (puro): basename per NEVER_AUTO, find e git condizionali', () => {
+    expect(isNeverAuto({ name: '/usr/bin/env', argv: ['/usr/bin/env', 'rm', '-rf', '~'] })).toBe(true)
+    expect(isNeverAuto({ name: '/bin/bash', argv: ['/bin/bash', '-c', 'id'] })).toBe(true)
+    expect(isNeverAuto({ name: '/usr/bin/find', argv: ['/usr/bin/find', '.', '-exec', 'rm', '{}', ';'] })).toBe(true)
+    expect(isNeverAuto({ name: '/usr/bin/git', argv: ['/usr/bin/git', '-c', 'x=y', 'status'] })).toBe(true)
+    // basename di un comando pulito resta approvabile
+    expect(isNeverAuto({ name: '/bin/ls', argv: ['/bin/ls', '-la'] })).toBe(false)
+    // find senza flag pericolose resta normale anche via path assoluto
+    expect(isNeverAuto({ name: '/usr/bin/find', argv: ['/usr/bin/find', '.', '-name', 'x'] })).toBe(false)
+  })
+
+  it('find con -fprint/-fprint0/-fprintf/-fls è never-auto (scrivono file)', () => {
+    for (const flag of ['-fprint', '-fprint0', '-fprintf', '-fls']) {
+      expect(isNeverAuto({ name: 'find', argv: ['find', '.', flag, 'out'] }), flag).toBe(true)
+    }
+    expect(isNeverAuto({ name: 'find', argv: ['find', '.', '-name', 'x'] })).toBe(false)
+  })
+
+  it('`/bin/ls` con grant "/bin/ls" → allow (la chiave esatta resta valida)', async () => {
+    const v = await verdictOf('/bin/ls -la', ['/bin/ls'])
+    expect(v.kind).toBe('allow')
+  })
+})
+
 describe('C2: redirect di output verso file', () => {
   it('`echo pwned > ~/.zshrc` con grant "echo" → ask "scrive su file"', async () => {
     const v = await verdictOf('echo pwned > ~/.zshrc', ['echo'])
