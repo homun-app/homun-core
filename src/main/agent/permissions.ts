@@ -2,27 +2,15 @@
 // always_allow | needs_approval | blocked, con standing grants persistenti.
 import { getPermissions, listGrants, addGrant } from '../store/db'
 import type { PermissionMode } from '../../shared/types'
+import { targetKey } from './permission-rules'
+
+// re-export: i consumer continuano a importare targetKey da qui (loop.ts usa permissions.targetKey)
+export { targetKey }
 
 export type Verdict =
   | { kind: 'allow'; via: 'rule' | 'grant' }
   | { kind: 'ask'; reason: string }
   | { kind: 'deny'; reason: string }
-
-/** Chiave target per tool: comando shell → prima parola+prefisso, file → path normalizzato. */
-export function targetKey(tool: string, input: Record<string, unknown>): string {
-  if (tool === 'run-command') {
-    const cmd = String(input.command ?? '')
-    const first = cmd.trim().split(/\s+/)[0] ?? ''
-    return first
-  }
-  if (tool === 'read-file' || tool === 'write-file' || tool === 'list-directory') {
-    return String(input.path ?? '')
-  }
-  if (tool === 'use-app') {
-    return String(input.action ?? '') // scope per azione, come l'originale
-  }
-  return '*'
-}
 
 function matchRule(tool: string, target: string, rules: ReturnType<typeof getPermissions>['rules']): PermissionMode | null {
   // regola più specifica vince: tool esatto prima di prefisso (*) prima di '*'
