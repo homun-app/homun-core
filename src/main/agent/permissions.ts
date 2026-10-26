@@ -1,15 +1,18 @@
 // Sistema permessi — replica del modello verificato nell'originale:
 // always_allow | needs_approval | blocked, con standing grants persistenti.
+// Dal gate §5.1: run-command passa dall'analisi shell (tree-sitter), le grant
+// fanno match per chiave ESATTA ("name" o "name sub"), mai per prefisso.
 import { getPermissions, listGrants, addGrant } from '../store/db'
 import type { PermissionMode } from '../../shared/types'
-import { targetKey } from './permission-rules'
+import { targetKey, runCommandVerdict, commandKey } from './permission-rules'
+import { analyzeCommand } from './shell-ast'
 
 // re-export: i consumer continuano a importare targetKey da qui (loop.ts usa permissions.targetKey)
 export { targetKey }
 
 export type Verdict =
   | { kind: 'allow'; via: 'rule' | 'grant' }
-  | { kind: 'ask'; reason: string }
+  | { kind: 'ask'; reason: string; keys?: string[] }
   | { kind: 'deny'; reason: string }
 
 function matchRule(tool: string, target: string, rules: ReturnType<typeof getPermissions>['rules']): PermissionMode | null {
@@ -29,22 +32,42 @@ function matchRule(tool: string, target: string, rules: ReturnType<typeof getPer
   return null
 }
 
-export function check(tool: string, input: Record<string, unknown>): Verdict {
-  const target = targetKey(tool, input)
+/** Verdetto per una chiamata tool. Async: run-command richiede l'analisi shell. */
+export async function check(tool: string, input: Record<string, unknown>): Promise<Verdict> {
   const cfg = getPermissions()
 
+  if (tool === 'run-command') {
+    const analysis = await analyzeCommand(String(input.command ?? ''))
+    // grant esatte per questo tool; le righe vecchie (prima parola, es. "git")
+    // restano nel DB ma ora fanno match solo sulla chiave identica
+    const grants = listGrants().filter((g) => g.tool === tool).map((g) => g.target)
+    const d = runCommandVerdict(analysis, grants, cfg.rules, cfg.default)
+    if (d.kind === 'deny') return { kind: 'deny', reason: d.reasons[0] ?? 'Command blocked by permissions configuration' }
+    if (d.kind === 'allow') return { kind: 'allow', via: d.via ?? 'rule' }
+    return { kind: 'ask', reason: d.reasons.join('; '), keys: d.keys }
+  }
+
+  const target = targetKey(tool, input)
   const mode = matchRule(tool, target, cfg.rules) ?? cfg.default
   if (mode === 'blocked') return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
 
-  // standing grant: l'utente ha detto "Always allow" per questo tool+target
-  const grant = listGrants().find((g) => g.tool === tool && (g.target === target || target.startsWith(g.target)))
+  // standing grant: match ESATTO tool+target ("Consenti sempre" su quel target)
+  const grant = listGrants().find((g) => g.tool === tool && g.target === target)
   if (grant) return { kind: 'allow', via: 'grant' }
 
   if (mode === 'always_allow') return { kind: 'allow', via: 'rule' }
-  return { kind: 'ask', reason: `${tool}${target !== '*' ? ` (${target})` : ''} richiede approvazione` }
+  return { kind: 'ask', reason: `${tool}${target !== '*' && target ? ` (${target})` : ''} richiede approvazione` }
 }
 
-/** Registra una standing grant dopo "Always allow". */
-export function grantStanding(tool: string, input: Record<string, unknown>): void {
+/**
+ * Registra una standing grant dopo "Always allow".
+ * Per run-command salva una grant per OGNI chiave estratta dal comando.
+ */
+export async function grantStanding(tool: string, input: Record<string, unknown>): Promise<void> {
+  if (tool === 'run-command') {
+    const analysis = await analyzeCommand(String(input.command ?? ''))
+    for (const key of new Set(analysis.commands.map(commandKey))) addGrant(tool, key)
+    return
+  }
   addGrant(tool, targetKey(tool, input))
 }

@@ -4,6 +4,10 @@
   "description": "Clone locale di Grok Bot con modelli personalizzati",
   "main": "./out/main/index.js",
   "scripts": {
+    "prepare-wasm": "node scripts/prepare-wasm.mjs",
+    "pretest": "node scripts/prepare-wasm.mjs",
+    "predev": "node scripts/prepare-wasm.mjs",
+    "predist": "node scripts/prepare-wasm.mjs",
     "test": "vitest run",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -24,6 +28,8 @@
     "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "tree-sitter-bash": "^0.25.1",
+    "web-tree-sitter": "^0.27.1",
     "zustand": "^5.0.16"
   },
   "devDependencies": {
@@ -46,6 +52,12 @@
     "productName": "SandBot",
     "asar": "true",
     "files": "out/**/*",
+    "extraResources": [
+      {
+        "from": "vendor",
+        "to": "vendor"
+      }
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "target": "dmg",

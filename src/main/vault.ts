@@ -1,12 +1,22 @@
 // Credential vault — AES-256-GCM con lo stesso envelope "sealed" dell'originale
-// (sand-sealedFile: iv||authTag||ciphertext). La chiave NON sta su disco col dato:
-// vive nel Keychain macOS via `security`.
+// (sandVault: iv||authTag||ciphertext).
+//
+// §5.6: la chiave master vive in electron safeStorage (cifrata con la chiave di
+// sistema dell'OS e salvata nei settings): non sta mai in chiaro su disco col
+// dato e non passa mai dall'argv di un processo (il vecchio
+// `security add-generic-password -w <chiave>` la esponeva a `ps`).
+// Migrazione automatica dalla chiave Keychain pre-esistente: la si legge con
+// find-generic-password (il valore esce sullo stdout del processo, non
+// dall'argv), la si porta in safeStorage e la si elimina dal Keychain.
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { safeStorage } from 'electron'
 import { getSetting, setSetting } from './store/db'
 
 const KEYCHAIN_SERVICE = 'sandbot-vault-key'
 const KEYCHAIN_ACCOUNT = 'sandbot'
+/** base64(safeStorage.encryptString(base64(chiave))) */
+const KEY_SETTING = 'vault.masterKeySafe'
 
 interface Sealed {
   sandVault: 1
@@ -27,12 +37,45 @@ function sh(args: string[]): Promise<{ out: string; err: string; code: number | 
   })
 }
 
-async function getMasterKey(): Promise<Buffer> {
+/** Chiave legacy dal Keychain (nessun segreto nell'argv). */
+async function readLegacyKeychainKey(): Promise<Buffer | null> {
   const found = await sh(['find-generic-password', '-a', KEYCHAIN_ACCOUNT, '-s', KEYCHAIN_SERVICE, '-w'])
   if (found.code === 0 && found.out.trim()) return Buffer.from(found.out.trim(), 'base64')
+  return null
+}
+
+async function deleteLegacyKeychainKey(): Promise<void> {
+  await sh(['delete-generic-password', '-a', KEYCHAIN_ACCOUNT, '-s', KEYCHAIN_SERVICE])
+}
+
+/** Salva la chiave cifrata con safeStorage; false se safeStorage non è disponibile. */
+function storeKeyViaSafeStorage(key: Buffer): boolean {
+  if (!safeStorage.isEncryptionAvailable()) return false
+  setSetting(KEY_SETTING, safeStorage.encryptString(key.toString('base64')).toString('base64'))
+  return true
+}
+
+async function getMasterKey(): Promise<Buffer> {
+  // 1. chiave già cifrata con safeStorage (o migrata in passato)
+  const enc = getSetting<string | null>(KEY_SETTING, null)
+  if (enc) {
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error('Vault non leggibile: safeStorage non disponibile su questo sistema')
+    }
+    return Buffer.from(safeStorage.decryptString(Buffer.from(enc, 'base64')), 'base64')
+  }
+  // 2. migrazione dalla chiave Keychain esistente (stesso formato base64)
+  const legacy = await readLegacyKeychainKey()
+  if (legacy) {
+    if (storeKeyViaSafeStorage(legacy)) await deleteLegacyKeychainKey()
+    // se safeStorage non c'è, si continua a usare la chiave legacy letta dal Keychain
+    return legacy
+  }
+  // 3. prima generazione
   const key = randomBytes(32)
-  const add = await sh(['add-generic-password', '-a', KEYCHAIN_ACCOUNT, '-s', KEYCHAIN_SERVICE, '-w', key.toString('base64'), '-U'])
-  if (add.code !== 0) throw new Error('Keychain non disponibile: ' + add.err.trim())
+  if (!storeKeyViaSafeStorage(key)) {
+    throw new Error('Vault non disponibile: impossibile cifrare la chiave master con safeStorage')
+  }
   return key
 }
 

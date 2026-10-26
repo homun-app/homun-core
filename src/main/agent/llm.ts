@@ -39,6 +39,43 @@ export interface LlmStream extends AsyncIterable<LlmChunk> {
   drain(): Promise<{ text: string; toolCalls: ToolCall[]; finishReason: string }>
 }
 
+// ---- accumulo dei tool-call in streaming (§5.4) ----
+
+/** Delta di un tool-call nello streaming OpenAI-compatible. */
+export interface ToolCallDelta {
+  index?: number
+  id?: string
+  type?: string
+  function?: { name?: string; arguments?: string }
+}
+
+export interface ToolCallAccumulator {
+  id: string
+  name: string
+  args: string
+}
+
+/**
+ * Accumula i delta dei tool-call PER INDICE (puro, testabile): itera TUTTI i
+ * delta del chunk (non solo il primo), gestendo più tool call nello stesso
+ * chunk e argomenti frammentati su più chunk. Restituisce gli accumulatori
+ * ordinati per indice.
+ */
+export function mergeToolCallDeltas(
+  acc: Map<number, ToolCallAccumulator>,
+  deltas: readonly ToolCallDelta[]
+): ToolCallAccumulator[] {
+  for (const d of deltas) {
+    const idx = d.index ?? 0
+    const slot = acc.get(idx) ?? { id: `call_${idx}`, name: '', args: '' }
+    if (d.id) slot.id = d.id
+    if (d.function?.name) slot.name += d.function.name
+    if (d.function?.arguments) slot.args += d.function.arguments
+    acc.set(idx, slot)
+  }
+  return [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v)
+}
+
 function openAiClient(p: ProviderConfig): OpenAI {
   return new OpenAI({
     baseURL: p.baseUrl.replace(/\/$/, '') + '/v1',
@@ -101,18 +138,14 @@ function openAiStream(p: ProviderConfig, messages: ChatMessage[], tools: ToolDef
       const reasoning = (c.delta as unknown as { reasoning?: string; reasoning_content?: string }).reasoning
         ?? (c.delta as unknown as { reasoning_content?: string }).reasoning_content
       if (reasoning) yield { reasoningDelta: reasoning }
-      const tc = c.delta?.tool_calls?.[0]
-      if (tc) {
-        const idx = tc.index ?? 0
-        const slot = acc.get(idx) ?? { id: tc.id ?? `call_${idx}`, name: '', args: '' }
-        if (tc.id) slot.id = tc.id
-        if (tc.function?.name) slot.name += tc.function.name
-        if (tc.function?.arguments) slot.args += tc.function.arguments
-        acc.set(idx, slot)
+      // §5.4: itera TUTTI i delta del chunk, accumulando per index
+      if (c.delta?.tool_calls?.length) {
+        mergeToolCallDeltas(acc, c.delta.tool_calls as ToolCallDelta[])
       }
       if (c.finish_reason) finish = c.finish_reason
     }
-    const toolCalls = [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => ({ id: v.id, name: v.name, arguments: v.args }))
+    const ordered = mergeToolCallDeltas(acc, [])
+    const toolCalls = ordered.map((v) => ({ id: v.id, name: v.name, arguments: v.args }))
     yield { toolCalls: toolCalls.length ? toolCalls : undefined, finishReason: finish }
   }
 

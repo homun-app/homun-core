@@ -195,7 +195,7 @@ export function getPermissions(): PermissionsConfig {
       { tool: 'run-command', pattern: '*', mode: 'needs_approval' },
       { tool: 'use-app', pattern: 'screenshot', mode: 'always_allow' },
       { tool: 'use-app', pattern: '*', mode: 'needs_approval' },
-      { tool: 'read-credential', pattern: '*', mode: 'needs_approval' },
+      { tool: 'list-credentials', pattern: '*', mode: 'always_allow' },
       { tool: 'mcp__*', pattern: '*', mode: 'needs_approval' }
     ]
   })

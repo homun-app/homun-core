@@ -1,5 +1,14 @@
 // Agent loop: messaggio → LLM streaming → tool-call → permessi → esecuzione → risultato.
 // Rispecchia la semantica dei turni dell'originale, con pause-for-approval.
+//
+// §5.3: la cronologia per il modello si costruisce con buildMessages (history.ts,
+// puro): [system, ...history] in ordine cronologico, taglio solo a confine di
+// turno, nessuna coppia tool orfana, immagini sull'ultimo messaggio utente.
+//
+// §5.7: un turno per agente. Un nuovo runTurn mentre l'agente è occupato viene
+// accodato (messaggi utente) o scartato con una notice (routine). La mappa
+// `running` non viene MAI sovrascritta: running.set avviene solo quando non
+// c'è già un run in corso per quell'agente.
 import { randomUUID } from 'node:crypto'
 import { getAgent, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
@@ -7,9 +16,14 @@ import { systemPrompt } from './prompts'
 import { toolDefs, executeTool } from './tools'
 import * as permissions from './permissions'
 import { getProvider } from './providers'
+import { buildMessages } from './history'
 import type { Approval, SandbotEvent } from '../../shared/types'
 
+// §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
+export { buildMessages } from './history'
+
 const MAX_STEPS = 24
+const MAX_QUEUE = 10
 
 type Emitter = (e: SandbotEvent) => void
 
@@ -19,39 +33,87 @@ interface Running {
 }
 const running = new Map<string, Running>()
 
+interface QueuedTurn {
+  text: string
+  images?: string[]
+  source: 'user' | 'routine'
+  title?: string
+}
+/** Una coda per agente: turni in attesa che quello in corso finisca. */
+const queues = new Map<string, QueuedTurn[]>()
+
 function setStatus(agentId: string, status: import('../../shared/types').AgentStatus, emit: Emitter): void {
   updateAgent(agentId, { status })
   emit({ type: 'status', agentId, status })
 }
 
-function historyToMessages(agentId: string, limit = 40): ChatMessage[] {
-  const entries = getEntries(agentId).slice(-limit)
-  const msgs: ChatMessage[] = []
-  for (const e of entries) {
-    if (e.kind === 'message') {
-      msgs.push({ role: e.role === 'user' ? 'user' : 'assistant', content: e.content })
-    } else if (e.kind === 'tool-call') {
-      const prev = msgs[msgs.length - 1]
-      const call = { id: String(e.meta?.id ?? e.id), name: String(e.meta?.name ?? ''), arguments: String(e.meta?.arguments ?? '{}') }
-      if (prev && prev.role === 'assistant') {
-        prev.toolCalls = [...(prev.toolCalls ?? []), call]
-      } else {
-        msgs.push({ role: 'assistant', content: '', toolCalls: [call] })
-      }
-    } else if (e.kind === 'tool-result') {
-      msgs.push({ role: 'tool', toolCallId: String(e.meta?.callId ?? ''), content: e.content })
-    }
-    // notice/approval/event non entrano nella storia del modello
-  }
-  return msgs
+function emitLastEntry(agentId: string, emit: Emitter): void {
+  emit({ type: 'entries', agentId, entries: getEntries(agentId).slice(-1) })
 }
 
-export async function runTurn(agentId: string, userText: string, emit: Emitter, images?: string[]): Promise<void> {
+export function isRunning(agentId: string): boolean {
+  return running.has(agentId)
+}
+
+export function queueLength(agentId: string): number {
+  return queues.get(agentId)?.length ?? 0
+}
+
+function enqueueTurn(agentId: string, turn: QueuedTurn, emit: Emitter): void {
+  const q = queues.get(agentId) ?? []
+  if (q.length >= MAX_QUEUE) {
+    appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Coda piena: messaggio scartato.' })
+    emitLastEntry(agentId, emit)
+    return
+  }
+  q.push(turn)
+  queues.set(agentId, q)
+  appendEntry({ agentId, kind: 'notice', role: 'system', content: `Agente occupato: messaggio in coda (posizione ${q.length}).` })
+  emitLastEntry(agentId, emit)
+}
+
+/** Avvia il prossimo turno in coda (se c'è) ora che l'agente è libero. */
+function startNextQueued(agentId: string, emit: Emitter): void {
+  const q = queues.get(agentId)
+  const next = q?.shift()
+  if (!next) {
+    queues.delete(agentId)
+    return
+  }
+  if (!q!.length) queues.delete(agentId)
+  void runTurn(agentId, next.text, emit, next.images, { source: next.source, title: next.title })
+    .catch((e) => console.error('[sandbot] turno in coda fallito:', e))
+}
+
+export interface RunTurnOptions {
+  /** 'user' (default): accodato se l'agente è occupato; 'routine': scartato con notice. */
+  source?: 'user' | 'routine'
+  /** Titolo routine per la notice di scarto. */
+  title?: string
+}
+
+export async function runTurn(agentId: string, userText: string, emit: Emitter, images?: string[], opts: RunTurnOptions = {}): Promise<void> {
+  const source = opts.source ?? 'user'
+
+  // §5.7: un turno per agente — mai due run concurrently sulla stessa mappa
+  if (running.has(agentId)) {
+    if (source === 'routine') {
+      appendEntry({
+        agentId, kind: 'notice', role: 'system',
+        content: `Routine "${opts.title ?? userText.slice(0, 40)}" saltata: l'agente è occupato.`
+      })
+      emitLastEntry(agentId, emit)
+      return
+    }
+    enqueueTurn(agentId, { text: userText, images, source }, emit)
+    return
+  }
+
   const agent = getAgent(agentId)
   if (!agent) throw new Error('Agente non trovato')
   if (!agent.providerId || !agent.model) {
     appendEntry({ agentId, kind: 'notice', role: 'system', content: "Configura prima un provider e un modello nelle impostazioni dell'agente." })
-    emit({ type: 'entries', agentId, entries: getEntries(agentId, Number.MAX_SAFE_INTEGER - 1).slice(-1) })
+    emitLastEntry(agentId, emit)
     return
   }
   const provider = getProvider(agent.providerId)
@@ -63,13 +125,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
   try {
     appendEntry({ agentId, kind: 'message', role: 'user', content: userText, meta: images?.length ? { images: images.length } : undefined })
-    emit({ type: 'entries', agentId, entries: getEntries(agentId).slice(-1) })
+    emitLastEntry(agentId, emit)
 
-    const messages: ChatMessage[] = [
-      { role: 'system', content: systemPrompt(agent) },
-      { role: 'user', content: userText, images },
-      ...historyToMessages(agentId)
-    ]
+    // §5.3: il messaggio corrente è l'ultimo entry del transcript → compare una volta sola
+    const messages: ChatMessage[] = buildMessages(systemPrompt(agent), getEntries(agentId), images)
 
     // tool statici + tool MCP attivi (server esterni → mcp__<server>__<tool>)
     const { toolDefs } = await import('./tools')
@@ -110,7 +169,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         const msg = err instanceof Error ? err.message : String(err)
         updateEntryContent(entry.id, acc)
         appendEntry({ agentId, kind: 'notice', role: 'system', content: `Errore dal modello: ${msg}` })
-        emit({ type: 'entries', agentId, entries: getEntries(agentId).slice(-1) })
+        emitLastEntry(agentId, emit)
         setStatus(agentId, 'idle', emit)
         return
       }
@@ -119,7 +178,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
       if (!text && !final.toolCalls?.length) {
         appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Il modello non ha prodotto risposta (vuota).' })
-        emit({ type: 'entries', agentId, entries: getEntries(agentId).slice(-1) })
+        emitLastEntry(agentId, emit)
         setStatus(agentId, 'idle', emit)
         return
       }
@@ -151,7 +210,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         })
         emit({ type: 'entries', agentId, entries: [callEntry] })
 
-        const verdict = permissions.check(call.name, input)
+        // §5.1: il gate run-command analizza OGNI comando della riga (tree-sitter)
+        const verdict = await permissions.check(call.name, input)
 
         if (verdict.kind === 'deny') {
           const denied = appendEntry({
@@ -171,8 +231,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           run.approvals.set(approval.id, () => undefined)
           const approvalEntry = appendEntry({
             agentId, kind: 'approval', role: 'system',
-            content: `${call.name}: ${permissions.targetKey(call.name, input)}`,
-            meta: { approvalId: approval.id, tool: call.name, input, status: 'pending' }
+            content: `${call.name}: ${verdict.reason}`,
+            meta: { approvalId: approval.id, tool: call.name, input, status: 'pending', keys: verdict.keys }
           })
           setStatus(agentId, 'paused-for-approval', emit)
           emit({ type: 'entries', agentId, entries: [approvalEntry] })
@@ -187,11 +247,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             ...approvalEntry.meta,
             status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : 'denied'
           })
-          const updatedApproval = getEntries(agentId).find((x) => x.id === approvalEntry.id)
+          const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
           if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
           if (decision === 'timeout') {
             appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Approvazione scaduta.' })
-            emit({ type: 'entries', agentId, entries: getEntries(agentId).slice(-1) })
+            emitLastEntry(agentId, emit)
           }
           if (decision !== 'allow') {
             messages.push({
@@ -210,14 +270,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
         // esecuzione
         try {
-          const { output, meta, images, redactedOutput } = await executeTool(agentId, call.name, input)
+          const { output, meta, images } = await executeTool(agentId, call.name, input)
           const res = appendEntry({
             agentId, kind: 'tool-result', role: 'system',
-            content: (redactedOutput ?? output).slice(0, 50_000),
+            content: output.slice(0, 50_000),
             meta: { callId: call.id, ...meta }
           })
           emit({ type: 'entries', agentId, entries: [res] })
-          // al modello va l'output completo; al transcript solo la versione redatta
+          // run-command restituisce output GIÀ redatto (§5.6): stesso testo al modello e al transcript
           messages.push({ role: 'tool', toolCallId: call.id, content: output.slice(0, 50_000) })
           // immagini (computer use): le inietta come messaggio vision — il formato
           // "immagine dentro il tool result" non è supportato ovunque, un user message sì
@@ -242,12 +302,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
     // MAX_STEPS raggiunto
     appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: limite di passi raggiunto.' })
-    emit({ type: 'entries', agentId, entries: getEntries(agentId).slice(-1) })
+    emitLastEntry(agentId, emit)
     setStatus(agentId, 'idle', emit)
   } finally {
     running.delete(agentId)
     if (getAgent(agentId)?.status !== 'offline') setStatus(agentId, 'idle', emit)
     emit({ type: 'agents' })
+    // §5.7: il prossimo turno in coda parte ora che l'agente è libero
+    startNextQueued(agentId, emit)
   }
 }
 
@@ -266,7 +328,7 @@ export function resolveApproval(agentId: string, approvalId: string, decision: '
     // registra standing grant per il tool+target dell'approval in sospeso
     const entry = getEntries(agentId).findLast((e: import('../../shared/types').TranscriptEntry) => e.kind === 'approval' && e.meta?.approvalId === approvalId)
     if (entry) {
-      permissions.grantStanding(String(entry.meta?.tool), entry.meta?.input as Record<string, unknown>)
+      void permissions.grantStanding(String(entry.meta?.tool), entry.meta?.input as Record<string, unknown>)
     }
   }
   cb(decision)

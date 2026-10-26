@@ -14,7 +14,8 @@ ${agent.description ? `Il tuo ruolo, secondo l'utente: ${agent.description}` : '
 
 # Il tuo computer
 ${env}
-Strumenti disponibili: run-command (shell), read-file, write-file, list-directory.
+Strumenti disponibili: run-command (shell), read-file, write-file, list-directory, list-credentials.
+Credenziali: scopri i nomi con list-credentials e usale scrivendo {{secret:NOME}} dentro i comandi (es. \`curl -H "Authorization: Bearer {{secret:API_KEY}}" ...\`): i valori restano nascosti anche nell'output.
 
 # Come lavori
 - Quando un task richiede tempo, manda prima un messaggio breve di avanzamento, poi il risultato.

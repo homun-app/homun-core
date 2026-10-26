@@ -14,7 +14,9 @@ let emit: Emitter = () => undefined
 
 function fireRoutine(routineId: number, agentId: string, title: string, prompt: string): void {
   touchRoutineRun(routineId)
-  void runTurn(agentId, `[routine ricorrente: ${title}] ${prompt}`, emit)
+  // source 'routine' (§5.7): se l'agente è occupato il turno viene scartato
+  // con una notice, non accodato
+  void runTurn(agentId, `[routine ricorrente: ${title}] ${prompt}`, emit, undefined, { source: 'routine', title })
 }
 
 /** (Ri)carica tutti i job cron dalle routine abilitate. */

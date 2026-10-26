@@ -480,7 +480,7 @@ function McpTab() {
       </div>
 
       <div className="space-y-2 border-t border-neutral-800 pt-3">
-        <p className="text-xs text-neutral-500">Vault credenziali (AES-256-GCM, chiave nel Keychain): il bot le legge col tool <code>read-credential</code>, con approvazione e senza mai scriverle nel transcript.</p>
+        <p className="text-xs text-neutral-500">Vault credenziali (AES-256-GCM, chiave master in safeStorage): il bot vede i nomi col tool <code>list-credentials</code> e li usa scrivendo <code>{'{{secret:NOME}}'}</code> nei comandi — i valori non compaiono mai nel transcript.</p>
         {secrets.map((n) => (
           <div key={n} className="flex items-center gap-2 rounded-lg border border-neutral-800 px-3 py-2">
             <span className="text-sm text-neutral-200">🔐 {n}</span>

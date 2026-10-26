@@ -1,11 +1,12 @@
 // Tool base — stessi nomi e semantica dei tool verificati nel local-exec-daemon originale.
 import type { ToolDef } from './llm'
 import * as sandbox from '../sandbox'
+import { resolveSecretRefs, redactSecrets } from './secrets'
 
 export const toolDefs: ToolDef[] = [
   {
     name: 'run-command',
-    description: "Esegue un comando shell nel computer dell'agente (sandbox persistente). Restituisce stdout/stderr e exit code.",
+    description: "Esegue un comando shell nel computer dell'agente (sandbox persistente). Restituisce stdout/stderr e exit code. Per usare una credenziale del vault scrivi {{secret:NOME}} dove serve il valore (es. `curl -H \"Authorization: Bearer {{secret:API_KEY}}\"`): viene sostituita al momento dell'esecuzione con la variabile d'ambiente $SANDBOT_SECRET_NOME e il valore non appare mai nel transcript.",
     parameters: {
       type: 'object',
       properties: {
@@ -69,21 +70,18 @@ export const toolDefs: ToolDef[] = [
     }
   },
   {
-    name: 'read-credential',
-    description: 'Legge una credenziale dal vault locale (AES-256-GCM). Il valore arriva a te ma NON viene scritto nel transcript visibile.',
+    name: 'list-credentials',
+    description: "Elenca i NOMI delle credenziali disponibili nel vault locale. Il valore non si legge mai direttamente: si usa scrivendo {{secret:NOME}} nell'argomento command di run-command.",
     parameters: {
       type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Nome della credenziale nel vault' }
-      },
-      required: ['name']
+      properties: {},
+      required: []
     }
   }
 ]
 
 export interface ToolExecResult {
   output: string
-  redactedOutput?: string // versione per il transcript (segreti mai in chiaro)
   meta: Record<string, unknown>
   images?: string[]  // base64 PNG per modelli vision
 }
@@ -91,14 +89,29 @@ export interface ToolExecResult {
 export async function executeTool(agentId: string, tool: string, input: Record<string, unknown>): Promise<ToolExecResult> {
   switch (tool) {
     case 'run-command': {
-      const r = await sandbox.execCommand(agentId, String(input.command ?? ''), {
-        timeoutMs: Math.min(600, Number(input.timeout ?? 120)) * 1000
-      })
+      const raw = String(input.command ?? '')
+      const timeoutMs = Math.min(600, Number(input.timeout ?? 120)) * 1000
+      // §5.6: i riferimenti {{secret:NOME}} si risolvono SOLO qui, al momento
+      // dell'esecuzione — il valore entra nell'env del processo, mai nel comando
+      const { revealSecret, listSecretNames } = await import('../vault')
+      const res = await resolveSecretRefs(raw, revealSecret)
+      if (res.missing.length) {
+        return {
+          output: `Credenziali non presenti nel vault: ${res.missing.join(', ')}. Nomi disponibili: ${listSecretNames().join(', ') || '(vuoto)'}`,
+          meta: { vault: true, missing: res.missing }
+        }
+      }
+      const r = await sandbox.execCommand(agentId, res.command, { timeoutMs, env: res.env })
+      const redact = (t: string) => redactSecrets(t, res.used)
       const parts: string[] = []
-      if (r.stdout) parts.push(r.stdout)
-      if (r.stderr) parts.push('[stderr]\n' + r.stderr)
+      if (r.stdout) parts.push(redact(r.stdout))
+      if (r.stderr) parts.push('[stderr]\n' + redact(r.stderr))
       parts.push(`[exit ${r.exitCode ?? 'killed'}${r.trimmed ? ' — output trimmed' : ''}]`)
-      return { output: parts.join('\n'), meta: { exitCode: r.exitCode, trimmed: r.trimmed } }
+      // output già redatto: lo stesso testo va al modello e al transcript
+      return {
+        output: parts.join('\n'),
+        meta: { exitCode: r.exitCode, trimmed: r.trimmed, secretRefs: res.used.map((s) => s.name) }
+      }
     }
     case 'read-file': {
       let content = await sandbox.readFileInBox(agentId, String(input.path ?? ''))
@@ -122,18 +135,10 @@ export async function executeTool(agentId: string, tool: string, input: Record<s
       const r = await executeUseApp(input as unknown as Parameters<typeof executeUseApp>[0])
       return { output: r.output, meta: { computerUse: true, error: r.error ?? false }, images: r.images }
     }
-    case 'read-credential': {
-      const { revealSecret, listSecretNames } = await import('../vault')
-      try {
-        const value = await revealSecret(String(input.name ?? ''))
-        return {
-          output: `Credenziale "${input.name}": ${value}`,
-          redactedOutput: `[credenziale "${input.name}" consegnata al modello — valore nascosto]`,
-          meta: { vault: true }
-        }
-      } catch (e) {
-        return { output: `${e instanceof Error ? e.message : String(e)}. Nomi disponibili: ${listSecretNames().join(', ') || '(vuoto)'}`, meta: { vault: true } }
-      }
+    case 'list-credentials': {
+      const { listSecretNames } = await import('../vault')
+      const names = listSecretNames()
+      return { output: names.length ? names.join('\n') : '(vault vuoto)', meta: { vault: true } }
     }
     default: {
       if (tool.startsWith('mcp__')) {
