@@ -198,6 +198,29 @@ export const toolDefs: ToolDef[] = [
     }
   },
   {
+    name: 'search_connectors',
+    description: "Cerca le app connettibili nel catalogo (\"Connetti app\") con lo stato di ciascuna: non connessa, connessa, da autorizzare. Usalo prima di offer_connector per trovare l'id esatto e per sapere se un connettore è già attivo.",
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Parole chiave (es. "email", "issue", "pagamenti"); vuoto = tutto il catalogo' }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'offer_connector',
+    description: "OFFRE all'utente la connessione di un'app del catalogo: mostra in chat una card con il bottone \"Connetti\" e il motivo per cui servirebbe. NON puoi connettere da solo: la connessione avviene solo dal click dell'utente; quando avviene ricevi un messaggio di sistema e puoi proseguire. Trova l'id con search_connectors.",
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Id del connettore dal catalogo (search_connectors)' },
+        reason: { type: 'string', description: 'Perché questa app aiuterebbe (una frase, mostrata nella card)' }
+      },
+      required: ['id', 'reason']
+    }
+  },
+  {
     name: 'update_state',
     description: "Modifica il tuo stato. target 'memory' → come update_memory (action write/update/delete). target 'routine' → action: create (campi name, description, prompt, schedule cron a 5 campi, timezone; la routine nasce SEMPRE in pausa: chiedi all'utente se attivarla, l'attivazione richiede la sua approvazione), update (id + campi da cambiare), pause, resume, delete (id).",
     parameters: {
@@ -396,6 +419,20 @@ export async function executeTool(agentId: string, tool: string, input: Record<s
       })
       return { output: `Skill "${s.name}" ${existed ? 'aggiornata' : 'creata'} (disponibile da subito in "# Skill disponibili").`, meta: { skill: s.name } }
     }
+    case 'search_connectors': {
+      // catalogo + stato di ogni connettore (il funnel §3ter T2-T3 parte da qui)
+      const { loadCatalog, searchCatalog, connectorStatusLine } = await import('../connectors')
+      type ConnectorState = import('../connectors').ConnectorState
+      const states = (await import('../store/db')).getSetting<Record<string, ConnectorState>>('connectors.state', {})
+      const found = searchCatalog(loadCatalog(), String(input.query ?? ''))
+      if (!found.length) return { output: 'Nessun connettore trovato per questa ricerca.', meta: {} }
+      return {
+        output: found
+          .map((e) => connectorStatusLine(e, states[e.id] ?? { status: 'not_connected', disabledTools: [], instructions: '' }))
+          .join('\n'),
+        meta: {}
+      }
+    }
     case 'update_state': {
       if (input.target === 'memory') return runMemoryAction(agentId, input)
       if (input.target === 'routine') return runRoutineAction(agentId, input)
@@ -403,9 +440,20 @@ export async function executeTool(agentId: string, tool: string, input: Record<s
     }
     default: {
       if (tool.startsWith('mcp__')) {
-        const { callTool } = await import('../mcp')
-        const out = await callTool(tool, input)
-        return { output: out.slice(0, 30_000), meta: { mcp: true } }
+        const { callTool, McpNeedsReconnectError } = await import('../mcp')
+        try {
+          const out = await callTool(tool, input)
+          return { output: out.slice(0, 30_000), meta: { mcp: true } }
+        } catch (e) {
+          // fase 5: token scaduto → il loop mostra la card "Riconnetti"
+          if (e instanceof McpNeedsReconnectError) {
+            return {
+              output: e.message,
+              meta: { mcp: true, needsReconnect: { serverName: e.serverName, connectorId: e.serverId } }
+            }
+          }
+          throw e
+        }
       }
       throw new Error(`Tool sconosciuto: ${tool}`)
     }

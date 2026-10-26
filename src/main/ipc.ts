@@ -23,6 +23,8 @@ export const DAEMON_RPC_CHANNELS = [
   'memory:list', 'memory:update', 'memory:delete',
   'skills:list', 'skills:delete',
   'mcp:list', 'mcp:save', 'mcp:delete', 'mcp:test',
+  'connectors:list', 'connectors:connect', 'connectors:disconnect',
+  'connectors:set-tools', 'connectors:set-instructions', 'connectors:save-static',
   'vault:list', 'vault:store', 'vault:delete',
   'approvals:resolve', 'approvals:resolve-latest',
   'providers:list', 'providers:save', 'providers:delete', 'providers:discover', 'providers:test', 'models:list',

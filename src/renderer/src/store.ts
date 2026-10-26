@@ -1,6 +1,6 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo } from '../../shared/types'
 
 const api = (window as unknown as { sandbot: import('../../shared/types').SandbotApi }).sandbot
 
@@ -11,6 +11,8 @@ interface Store {
   reasoning: Record<number, string>
   providers: ProviderConfig[]
   permissions: PermissionsConfig | null
+  /** fase 5: catalogo "Connetti app" con lo stato di ogni connettore */
+  connectors: ConnectorInfo[]
   settingsOpen: boolean
   init(): Promise<void>
   select(agentId: string): Promise<void>
@@ -25,6 +27,7 @@ interface Store {
   createAgent(name: string): Promise<void>
   refreshProviders(): Promise<void>
   refreshPermissions(): Promise<void>
+  refreshConnectors(): Promise<void>
   setSettingsOpen(v: boolean): void
 }
 
@@ -35,6 +38,7 @@ export const useStore = create<Store>((set, get) => ({
   reasoning: {},
   providers: [],
   permissions: null,
+  connectors: [],
   settingsOpen: false,
 
   async init() {
@@ -46,9 +50,16 @@ export const useStore = create<Store>((set, get) => ({
     if (activeId) {
       set({ entries: await api.getEntries(activeId) })
     }
+    // fase 5: catalogo connettori (per la vista Impostazioni e le card in chat)
+    api.connectorsList().then((connectors) => set({ connectors })).catch(() => undefined)
     api.onEvent((e: SandbotEvent) => {
       const s = get()
       switch (e.type) {
+        case 'connectors': {
+          // fase 5: lo stato di un connettore è cambiato (OAuth completato, …)
+          api.connectorsList().then((connectors) => set({ connectors })).catch(() => undefined)
+          break
+        }
         case 'reconnected': {
           // residuo fase 4 (0b): il daemon potrebbe aver aggiunto entry
           // (routine, approvazioni, risposte) mentre eravamo sconnessi —
@@ -203,6 +214,10 @@ export const useStore = create<Store>((set, get) => ({
 
   async refreshPermissions() {
     set({ permissions: await api.getPermissions() })
+  },
+
+  async refreshConnectors() {
+    set({ connectors: await api.connectorsList() })
   },
 
   setSettingsOpen(v) {

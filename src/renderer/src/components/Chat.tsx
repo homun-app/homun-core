@@ -6,6 +6,7 @@ import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../..
 import { ApprovalCard } from './ApprovalCard'
 import { WidgetCard } from './WidgetCard'
 import { DraftCard } from './DraftCard'
+import { ConnectorCard } from './ConnectorCard'
 import { MemoryPanel } from './MemoryPanel'
 import { SkillsPanel } from './SkillsPanel'
 
@@ -237,6 +238,7 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       const message = meta.message as SendMessagePayload | undefined
       if (message?.type === 'widget') return <WidgetCard entry={entry} />
       if (message?.type === 'draft') return <DraftCard entry={entry} />
+      if (message?.type === 'connector') return <ConnectorCard entry={entry} />
       return (
         <div className="max-w-[92%] text-sm leading-relaxed text-neutral-100">
           <div className="prose-invert max-w-none prose-pre:bg-neutral-900 prose-pre:border prose-pre:border-neutral-800 prose-code:text-neutral-300">

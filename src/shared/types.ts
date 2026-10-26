@@ -84,6 +84,13 @@ export type SendMessagePayload =
       /** D1: true se nessun argomento è mappato sul corpo: modifica del testo disabilitata, argomenti grezzi */
       bodyLocked?: true
     }
+  | {
+      /** fase 5: offerta di connessione (funnel §3ter T2-T3) — il bottone "Connetti" è dell'utente */
+      type: 'connector'
+      connectorId: string
+      name: string
+      reason?: string
+    }
 
 /**
  * meta di una entry 'send-message':
@@ -178,6 +185,9 @@ export type SandbotEvent =
   // disconnessione — la UI ricarica agenti ed entry (il transcript può essere
   // cambiato mentre eravamo sconnessi)
   | { type: 'reconnected' }
+  // fase 5: lo stato di un connettore è cambiato (connesso, needs_auth, …) —
+  // la vista "Connetti app" ricarica il catalogo
+  | { type: 'connectors' }
 
 export interface SandbotApi {
   // agenti e transcript
@@ -225,9 +235,16 @@ export interface SandbotApi {
   deleteSkill(agentId: string, name: string): Promise<void>
   // MCP
   mcpList(): Promise<McpServerInfo[]>
-  mcpSave(s: McpServerInfo): Promise<McpServerInfo[]>
+  mcpSave(s: McpServerInfo, secret?: McpServerSecret): Promise<McpServerInfo[]>
   mcpDelete(id: string): Promise<void>
   mcpTest(id: string): Promise<{ ok: boolean; error?: string; tools?: string[] }>
+  // fase 5: connettori del catalogo ("Connetti app")
+  connectorsList(): Promise<ConnectorInfo[]>
+  connectorsConnect(id: string): Promise<{ started: boolean; status: string; message?: string }>
+  connectorsDisconnect(id: string): Promise<void>
+  connectorsSetTools(id: string, disabledTools: string[]): Promise<void>
+  connectorsSetInstructions(id: string, instructions: string): Promise<void>
+  connectorsSaveStaticClient(id: string, clientId: string, clientSecret: string): Promise<void>
   // vault
   vaultList(): Promise<string[]>
   vaultStore(name: string, value: string): Promise<void>
@@ -288,4 +305,48 @@ export interface McpServerInfo {
   args?: string[]
   url?: string
   enabled: boolean
+  /** fase 5: autenticazione http — i valori segreti vivono cifrati, non qui */
+  auth?: { kind: 'oauth' | 'bearer' | 'headers' }
+  /** fase 5: id del connettore del catalogo che ha creato questo server */
+  catalogId?: string
+}
+
+/**
+ * Segreto di un server MCP manuale (fase 5): bearer token o header statici.
+ * Viaggia una sola volta dal renderer al daemon e viene conservato CIFRATO
+ * (mai nei settings in chiaro).
+ */
+export interface McpServerSecret {
+  bearerToken?: string
+  headers?: Record<string, string>
+}
+
+// ---- connettori del catalogo (fase 5: "Connetti app") ----
+
+export type ConnectorStatusInfo = 'not_connected' | 'connected' | 'needs_auth' | 'error'
+
+export interface ConnectorToolInfoShared {
+  name: string
+  description: string
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean }
+}
+
+/** Un connettore del catalogo come lo vede la UI (catalogo + stato + tool). */
+export interface ConnectorInfo {
+  id: string
+  name: string
+  logo: string
+  mcpUrl: string
+  clientRegistration: 'dynamic' | 'static'
+  scopes?: string[]
+  docsUrl: string
+  notes: string
+  state: {
+    status: ConnectorStatusInfo
+    error?: string
+    disabledTools: string[]
+    instructions: string
+  }
+  tools: ConnectorToolInfoShared[]
+  hasStaticCredentials?: boolean
 }

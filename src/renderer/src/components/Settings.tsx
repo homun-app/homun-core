@@ -1,7 +1,7 @@
-// Impostazioni: provider (modelli personalizzati), modello per agente, permessi, routine, generale.
+// Impostazioni: provider (modelli personalizzati), modello per agente, permessi, routine, connettori, generale.
 import { useEffect, useState } from 'react'
 import { api, useStore } from '../store'
-import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion } from '../../../shared/types'
+import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret } from '../../../shared/types'
 
 const KINDS: ProviderKind[] = [
   'ollama', 'lmstudio', 'anthropic', 'mistral', 'openrouter', 'zai', 'xai', 'deepseek', 'groq', 'openai-compatible'
@@ -11,7 +11,7 @@ export function Settings() {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const refreshProviders = useStore((s) => s.refreshProviders)
   const refreshPermissions = useStore((s) => s.refreshPermissions)
-  const [tab, setTab] = useState<'provider' | 'agenti' | 'permessi' | 'routine' | 'mcp' | 'generale'>('provider')
+  const [tab, setTab] = useState<'provider' | 'agenti' | 'permessi' | 'routine' | 'connettori' | 'generale'>('provider')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setSettingsOpen(false)}>
@@ -20,13 +20,13 @@ export function Settings() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-1 border-b border-neutral-800 px-4 pt-4 pb-2">
-          {(['provider', 'agenti', 'permessi', 'routine', 'mcp', 'generale'] as const).map((t) => (
+          {(['provider', 'agenti', 'permessi', 'routine', 'connettori', 'generale'] as const).map((t) => (
             <button
               key={t}
               className={`rounded-lg px-3 py-1.5 text-sm capitalize ${tab === t ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}
               onClick={() => setTab(t)}
             >
-              {t}
+              {t === 'connettori' ? 'connetti app' : t}
             </button>
           ))}
           <div className="flex-1" />
@@ -39,8 +39,287 @@ export function Settings() {
           {tab === 'agenti' && <AgentsTab />}
           {tab === 'permessi' && <PermissionsTab onChanged={refreshPermissions} />}
           {tab === 'routine' && <RoutinesTab />}
-          {tab === 'mcp' && <McpTab />}
+          {tab === 'connettori' && <ConnectorsTab />}
           {tab === 'generale' && <GeneralTab />}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---- fase 5: "Connetti app" — catalogo con stato + server MCP manuali ----
+
+const STATUS_DOT: Record<string, string> = {
+  not_connected: 'bg-neutral-600',
+  connected: 'bg-emerald-500',
+  needs_auth: 'bg-amber-500',
+  error: 'bg-red-500'
+}
+const STATUS_LABEL: Record<string, string> = {
+  not_connected: 'non connesso',
+  connected: 'connesso',
+  needs_auth: 'da autorizzare',
+  error: 'errore'
+}
+
+function ConnectorsTab() {
+  const connectors = useStore((s) => s.connectors)
+  const refreshConnectors = useStore((s) => s.refreshConnectors)
+  useEffect(() => { void refreshConnectors() }, [refreshConnectors])
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-neutral-500">
+        Le app si collegano come server MCP con OAuth: i loro tool diventano <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>.
+        I token stanno cifrati nel Keychain. Il bot può proporre un'app in chat, ma la connessione parte solo dal tuo click.
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        {connectors.map((c) => (
+          <ConnectorTile key={c.id} c={c} />
+        ))}
+      </div>
+      <ManualServers />
+    </div>
+  )
+}
+
+function ConnectorTile({ c }: { c: ConnectorInfo }) {
+  const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [clientId, setClientId] = useState('')
+  const [clientSecret, setClientSecret] = useState('')
+  const [instructions, setInstructions] = useState(c.state.instructions)
+
+  const toggleTool = async (tool: string, disabled: boolean): Promise<void> => {
+    const next = disabled
+      ? c.state.disabledTools.filter((t) => t !== tool)
+      : [...c.state.disabledTools, tool]
+    await api.connectorsSetTools(c.id, next)
+  }
+
+  return (
+    <div className="rounded-xl border border-neutral-800 px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <span className="text-base">{c.logo}</span>
+        <span className="text-sm text-neutral-100">{c.name}</span>
+        <span className={`h-2 w-2 rounded-full ${STATUS_DOT[c.state.status]}`} title={c.state.error ?? STATUS_LABEL[c.state.status]} />
+        <span className="text-[10px] uppercase text-neutral-500">{STATUS_LABEL[c.state.status]}</span>
+        <div className="flex-1" />
+        {c.state.status === 'connected' ? (
+          <>
+            <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={() => setOpen(!open)}>
+              {open ? 'chiudi' : 'tool'}
+            </button>
+            <button
+              className="text-xs text-neutral-500 hover:text-red-400"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                try { await api.connectorsDisconnect(c.id) } finally { setBusy(false) }
+              }}
+            >
+              disconnetti
+            </button>
+          </>
+        ) : (
+          <button
+            className="rounded-lg bg-sky-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              try { await api.connectorsConnect(c.id) } finally { setBusy(false) }
+            }}
+          >
+            {busy ? 'autorizza nel browser…' : c.state.status === 'needs_auth' ? 'riconnetti' : 'connetti'}
+          </button>
+        )}
+      </div>
+      {c.state.error && <p className="mt-1 text-[11px] text-amber-500/80">{c.state.error}</p>}
+      {c.state.status !== 'connected' && c.notes && (
+        <p className="mt-1 line-clamp-2 text-[11px] text-neutral-600">{c.notes}</p>
+      )}
+
+      {/* client OAuth statico (Google): credenziali cifrate, guida in docs/google-oauth.md */}
+      {c.clientRegistration === 'static' && c.state.status !== 'connected' && (
+        <div className="mt-2 space-y-1 border-t border-neutral-800 pt-2">
+          {c.hasStaticCredentials ? (
+            <p className="text-[11px] text-neutral-500">Client OAuth configurato ✓</p>
+          ) : (
+            <>
+              <p className="text-[11px] text-neutral-500">
+                Serve un client OAuth tuo (tipo "Desktop app"):{' '}
+                <a className="text-sky-400 hover:underline" href={c.docsUrl} target="_blank" rel="noreferrer">guida</a>{' '}
+                · docs/google-oauth.md
+              </p>
+              <div className="flex gap-1">
+                <input
+                  className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2 py-1 text-xs outline-none"
+                  placeholder="client_id"
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                />
+                <input
+                  className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2 py-1 text-xs outline-none"
+                  type="password"
+                  placeholder="client_secret"
+                  value={clientSecret}
+                  onChange={(e) => setClientSecret(e.target.value)}
+                />
+                <button
+                  className="rounded-lg bg-neutral-700 px-2 py-1 text-xs text-white hover:bg-neutral-600 disabled:opacity-40"
+                  disabled={!clientId.trim() || !clientSecret.trim()}
+                  onClick={() => void api.connectorsSaveStaticClient(c.id, clientId.trim(), clientSecret.trim())}
+                >
+                  salva
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {open && (
+        <div className="mt-2 space-y-2 border-t border-neutral-800 pt-2">
+          {/* tool del connettore: interruttore per ognuno (i disattivati non sono offerti al modello) */}
+          {c.tools.length === 0 && <p className="text-[11px] text-neutral-600">nessun tool elencato</p>}
+          {c.tools.map((t) => {
+            const disabled = c.state.disabledTools.includes(t.name)
+            return (
+              <label key={t.name} className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-3.5 w-3.5 accent-neutral-300"
+                  checked={!disabled}
+                  onChange={() => void toggleTool(t.name, disabled)}
+                />
+                <span className="min-w-0">
+                  <span className="block truncate font-mono text-[11px] text-neutral-300">{t.name}</span>
+                  <span className="block text-[10px] text-neutral-600">{t.description}</span>
+                </span>
+              </label>
+            )
+          })}
+          {/* istruzioni personalizzate: iniettate nel system prompt quando il connettore è attivo */}
+          <div>
+            <p className="mb-1 text-[11px] text-neutral-500">Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)</p>
+            <textarea
+              className="w-full resize-none rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none"
+              rows={3}
+              placeholder="es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              onBlur={() => void api.connectorsSetInstructions(c.id, instructions)}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Server MCP aggiunti a mano: restano nella stessa vista "Connetti app". */
+function ManualServers() {
+  const [servers, setServers] = useState<McpServerInfo[]>([])
+  const [secrets, setSecrets] = useState<string[]>([])
+  const [edit, setEdit] = useState<McpServerInfo | null>(null)
+  // fase 5: bearer token del server manuale (salvato CIFRATO, mai nei settings)
+  const [editBearer, setEditBearer] = useState('')
+  const [tests, setTests] = useState<Record<string, { ok: boolean; error?: string; tools?: string[] }>>({})
+  const [secName, setSecName] = useState('')
+  const [secValue, setSecValue] = useState('')
+
+  const refresh = async () => {
+    setServers(await api.mcpList())
+    setSecrets(await api.vaultList())
+  }
+  useEffect(() => { void refresh() }, [])
+
+  return (
+    <div className="space-y-3 border-t border-neutral-800 pt-3">
+      <p className="text-xs text-neutral-500">Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati).</p>
+      {servers.map((s) => (
+        <div key={s.id} className="rounded-xl border border-neutral-800 px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className={`h-2 w-2 rounded-full ${s.enabled ? 'bg-emerald-500' : 'bg-neutral-600'}`} />
+            <span className="text-sm text-neutral-100">{s.name}</span>
+            <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-neutral-400">{s.transport}</span>
+            {s.auth && <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-sky-400">{s.auth.kind}</span>}
+            <span className="flex-1 truncate text-xs text-neutral-600">{s.transport === 'stdio' ? `${s.command} ${(s.args ?? []).join(' ')}` : s.url}</span>
+            <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={async () => {
+              setTests((p) => ({ ...p, [s.id]: { ok: true, tools: ['test…'] } }))
+              const r = await api.mcpTest(s.id)
+              setTests((p) => ({ ...p, [s.id]: r }))
+            }}>test</button>
+            <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={() => { setEdit(s); setEditBearer('') }}>modifica</button>
+            <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.mcpDelete(s.id); await refresh() }}>elimina</button>
+          </div>
+          {tests[s.id] && (
+            <div className={`mt-2 text-xs ${tests[s.id].ok ? 'text-emerald-400' : 'text-red-400'}`}>
+              {tests[s.id].ok ? `✓ ${tests[s.id].tools?.length ?? 0} tool: ${tests[s.id].tools?.join(', ').slice(0, 200)}` : `✕ ${tests[s.id].error}`}
+            </div>
+          )}
+        </div>
+      ))}
+      {edit ? (
+        <div className="space-y-2 rounded-xl border border-neutral-700 bg-neutral-900 p-3">
+          <div className="grid grid-cols-2 gap-2">
+            <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. weather)" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+            <select className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" value={edit.transport} onChange={(e) => setEdit({ ...edit, transport: e.target.value as 'stdio' | 'http' })}>
+              <option value="stdio">stdio (comando locale)</option>
+              <option value="http">http (URL)</option>
+            </select>
+          </div>
+          {edit.transport === 'stdio' ? (
+            <div className="grid grid-cols-2 gap-2">
+              <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Comando (es. node)" value={edit.command ?? ''} onChange={(e) => setEdit({ ...edit, command: e.target.value })} />
+              <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Argomenti separati da spazio" value={(edit.args ?? []).join(' ')} onChange={(e) => setEdit({ ...edit, args: e.target.value ? e.target.value.split(/\s+/) : [] })} />
+            </div>
+          ) : (
+            <>
+              <input className="w-full rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="URL (es. http://localhost:3001/mcp)" value={edit.url ?? ''} onChange={(e) => setEdit({ ...edit, url: e.target.value })} />
+              <input
+                className="w-full rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none"
+                type="password"
+                placeholder="Bearer token (opzionale — salvato cifrato)"
+                value={editBearer}
+                onChange={(e) => setEditBearer(e.target.value)}
+              />
+            </>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <button className="rounded-lg px-3 py-1.5 text-xs text-neutral-400 hover:text-neutral-200" onClick={() => setEdit(null)}>Annulla</button>
+            <button
+              className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500"
+              onClick={async () => {
+                const secret: McpServerSecret | undefined = edit.transport === 'http' && editBearer.trim() ? { bearerToken: editBearer.trim() } : undefined
+                await api.mcpSave({ ...edit, id: edit.id || 'mcp_' + Date.now() }, secret)
+                setEdit(null); setEditBearer('')
+                await refresh()
+              }}
+            >
+              Salva
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button className="w-full rounded-xl border border-dashed border-neutral-700 px-3 py-2.5 text-sm text-neutral-500 hover:border-neutral-500 hover:text-neutral-300" onClick={() => { setEdit({ id: '', name: '', transport: 'stdio', command: '', args: [], enabled: true }); setEditBearer('') }}>
+          + Aggiungi server MCP
+        </button>
+      )}
+
+      <div className="space-y-2 border-t border-neutral-800 pt-3">
+        <p className="text-xs text-neutral-500">Vault credenziali (AES-256-GCM, chiave master in safeStorage): il bot vede i nomi col tool <code>list-credentials</code> e li usa scrivendo <code>{'{{secret:NOME}}'}</code> nei comandi — i valori non compaiono mai nel transcript.</p>
+        {secrets.map((n) => (
+          <div key={n} className="flex items-center gap-2 rounded-lg border border-neutral-800 px-2 py-2">
+            <span className="text-sm text-neutral-200">🔐 {n}</span>
+            <div className="flex-1" />
+            <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.vaultDelete(n); await refresh() }}>elimina</button>
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <input className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. api_key_github)" value={secName} onChange={(e) => setSecName(e.target.value)} />
+          <input className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" type="password" placeholder="Valore" value={secValue} onChange={(e) => setSecValue(e.target.value)} />
+          <button className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40" disabled={!secName.trim() || !secValue} onClick={async () => { await api.vaultStore(secName.trim(), secValue); setSecName(''); setSecValue(''); await refresh() }}>Salva</button>
         </div>
       </div>
     </div>
@@ -448,94 +727,6 @@ function RoutinesTab() {
             <p className="mt-1 text-xs text-neutral-500">{s.description}</p>
           </div>
         ))}
-      </div>
-    </div>
-  )
-}
-
-function McpTab() {
-  const [servers, setServers] = useState<import('../../../shared/types').McpServerInfo[]>([])
-  const [secrets, setSecrets] = useState<string[]>([])
-  const [edit, setEdit] = useState<import('../../../shared/types').McpServerInfo | null>(null)
-  const [tests, setTests] = useState<Record<string, { ok: boolean; error?: string; tools?: string[] }>>({})
-  const [secName, setSecName] = useState('')
-  const [secValue, setSecValue] = useState('')
-
-  const refresh = async () => {
-    setServers(await api.mcpList())
-    setSecrets(await api.vaultList())
-  }
-  useEffect(() => { void refresh() }, [])
-
-  return (
-    <div className="space-y-4">
-      <div className="space-y-3">
-        <p className="text-xs text-neutral-500">Server MCP: i loro tool diventano disponibili al bot come <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> (ogni chiamata chiede approvazione).</p>
-        {servers.map((s) => (
-          <div key={s.id} className="rounded-xl border border-neutral-800 px-3 py-2.5">
-            <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${s.enabled ? 'bg-emerald-500' : 'bg-neutral-600'}`} />
-              <span className="text-sm text-neutral-100">{s.name}</span>
-              <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-neutral-400">{s.transport}</span>
-              <span className="flex-1 truncate text-xs text-neutral-600">{s.transport === 'stdio' ? `${s.command} ${(s.args ?? []).join(' ')}` : s.url}</span>
-              <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={async () => {
-                setTests((p) => ({ ...p, [s.id]: { ok: true, tools: ['test…'] } }))
-                const r = await api.mcpTest(s.id)
-                setTests((p) => ({ ...p, [s.id]: r }))
-              }}>test</button>
-              <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={() => setEdit(s)}>modifica</button>
-              <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.mcpDelete(s.id); await refresh() }}>elimina</button>
-            </div>
-            {tests[s.id] && (
-              <div className={`mt-2 text-xs ${tests[s.id].ok ? 'text-emerald-400' : 'text-red-400'}`}>
-                {tests[s.id].ok ? `✓ ${tests[s.id].tools?.length ?? 0} tool: ${tests[s.id].tools?.join(', ').slice(0, 200)}` : `✕ ${tests[s.id].error}`}
-              </div>
-            )}
-          </div>
-        ))}
-        {edit ? (
-          <div className="space-y-2 rounded-xl border border-neutral-700 bg-neutral-900 p-3">
-            <div className="grid grid-cols-2 gap-2">
-              <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. weather)" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
-              <select className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" value={edit.transport} onChange={(e) => setEdit({ ...edit, transport: e.target.value as 'stdio' | 'http' })}>
-                <option value="stdio">stdio (comando locale)</option>
-                <option value="http">http (URL)</option>
-              </select>
-            </div>
-            {edit.transport === 'stdio' ? (
-              <div className="grid grid-cols-2 gap-2">
-                <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Comando (es. node)" value={edit.command ?? ''} onChange={(e) => setEdit({ ...edit, command: e.target.value })} />
-                <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Argomenti separati da spazio" value={(edit.args ?? []).join(' ')} onChange={(e) => setEdit({ ...edit, args: e.target.value ? e.target.value.split(/\s+/) : [] })} />
-              </div>
-            ) : (
-              <input className="w-full rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="URL (es. http://localhost:3001/mcp)" value={edit.url ?? ''} onChange={(e) => setEdit({ ...edit, url: e.target.value })} />
-            )}
-            <div className="flex justify-end gap-2 pt-1">
-              <button className="rounded-lg px-3 py-1.5 text-xs text-neutral-400 hover:text-neutral-200" onClick={() => setEdit(null)}>Annulla</button>
-              <button className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500" onClick={async () => { await api.mcpSave({ ...edit, id: edit.id || 'mcp_' + Date.now() }); setEdit(null); await refresh() }}>Salva</button>
-            </div>
-          </div>
-        ) : (
-          <button className="w-full rounded-xl border border-dashed border-neutral-700 px-3 py-2.5 text-sm text-neutral-500 hover:border-neutral-500 hover:text-neutral-300" onClick={() => setEdit({ id: '', name: '', transport: 'stdio', command: '', args: [], enabled: true })}>
-            + Aggiungi server MCP
-          </button>
-        )}
-      </div>
-
-      <div className="space-y-2 border-t border-neutral-800 pt-3">
-        <p className="text-xs text-neutral-500">Vault credenziali (AES-256-GCM, chiave master in safeStorage): il bot vede i nomi col tool <code>list-credentials</code> e li usa scrivendo <code>{'{{secret:NOME}}'}</code> nei comandi — i valori non compaiono mai nel transcript.</p>
-        {secrets.map((n) => (
-          <div key={n} className="flex items-center gap-2 rounded-lg border border-neutral-800 px-3 py-2">
-            <span className="text-sm text-neutral-200">🔐 {n}</span>
-            <div className="flex-1" />
-            <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.vaultDelete(n); await refresh() }}>elimina</button>
-          </div>
-        ))}
-        <div className="flex gap-2">
-          <input className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. api_key_github)" value={secName} onChange={(e) => setSecName(e.target.value)} />
-          <input className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" type="password" placeholder="Valore" value={secValue} onChange={(e) => setSecValue(e.target.value)} />
-          <button className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40" disabled={!secName.trim() || !secValue} onClick={async () => { await api.vaultStore(secName.trim(), secValue); setSecName(''); setSecValue(''); await refresh() }}>Salva</button>
-        </div>
       </div>
     </div>
   )

@@ -38,9 +38,17 @@ const api: SandbotApi = {
   listSkills: (agentId) => ipcRenderer.invoke('skills:list', agentId),
   deleteSkill: (agentId, name) => ipcRenderer.invoke('skills:delete', agentId, name),
   mcpList: () => ipcRenderer.invoke('mcp:list'),
-  mcpSave: (s) => ipcRenderer.invoke('mcp:save', s),
+  mcpSave: (s, secret) => ipcRenderer.invoke('mcp:save', s, secret),
   mcpDelete: (id) => ipcRenderer.invoke('mcp:delete', id),
   mcpTest: (id) => ipcRenderer.invoke('mcp:test', id),
+  // fase 5: connettori del catalogo ("Connetti app")
+  connectorsList: () => ipcRenderer.invoke('connectors:list'),
+  connectorsConnect: (id) => ipcRenderer.invoke('connectors:connect', id),
+  connectorsDisconnect: (id) => ipcRenderer.invoke('connectors:disconnect', id),
+  connectorsSetTools: (id, disabledTools) => ipcRenderer.invoke('connectors:set-tools', id, disabledTools),
+  connectorsSetInstructions: (id, instructions) => ipcRenderer.invoke('connectors:set-instructions', id, instructions),
+  connectorsSaveStaticClient: (id, clientId, clientSecret) =>
+    ipcRenderer.invoke('connectors:save-static', id, clientId, clientSecret),
   vaultList: () => ipcRenderer.invoke('vault:list'),
   vaultStore: (name, value) => ipcRenderer.invoke('vault:store', name, value),
   vaultDelete: (name) => ipcRenderer.invoke('vault:delete', name),

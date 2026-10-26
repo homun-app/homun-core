@@ -19,10 +19,11 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     // al primo tentativo l'id dell'entry utente finisce nel payload del job
     const onTurnEntry = (entryId: number): void => setJobEntryId(db, job.id, entryId)
     if (job.kind === 'user-message') {
-      const p = job.payload as { text: string; images?: string[]; respondedTo?: number }
+      const p = job.payload as { text: string; images?: string[]; respondedTo?: number; initiator?: string }
       await runTurnFn(job.agent_id, p.text, emit, p.images, {
         source: 'user', ...opts, onTurnEntry,
-        ...(p.respondedTo !== undefined ? { respondedTo: p.respondedTo } : {})
+        ...(p.respondedTo !== undefined ? { respondedTo: p.respondedTo } : {}),
+        ...(p.initiator ? { initiator: p.initiator } : {})
       })
       return
     }

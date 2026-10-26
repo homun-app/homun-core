@@ -96,6 +96,7 @@ function appendSend(
 ): void {
   const content = message.type === 'text' ? message.text
     : message.type === 'widget' ? message.prompt
+    : message.type === 'connector' ? (message.reason || message.name)
     : (message.subject || message.to || '')
   const entry = appendEntry({
     agentId, kind: 'send-message', role: 'assistant', content,
@@ -131,6 +132,8 @@ export interface RunTurnOptions {
   onTurnEntry?: (entryId: number) => void
   /** Fase 3: la risposta a un widget ask_user (meta.respondedTo sul messaggio utente). */
   respondedTo?: number
+  /** Fase 5: chi ha avviato il turno (es. 'CONNECTOR_CONNECTED' dopo la connessione di un connettore offerto). */
+  initiator?: string
 }
 
 export async function runTurn(agentId: string, userText: string, emit: Emitter, images?: string[], opts: RunTurnOptions = {}): Promise<void> {
@@ -205,6 +208,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         agentId, kind: 'message', role: 'user', content: userText,
         meta: {
           ...(opts.respondedTo !== undefined ? { respondedTo: opts.respondedTo } : {}),
+          ...(opts.initiator ? { initiator: opts.initiator } : {}),
           ...(images?.length ? { images: images.length } : {})
         }
       })
@@ -226,9 +230,21 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     )
 
     // §5.3: il messaggio corrente è l'ultimo entry del transcript → compare una volta sola.
-    // Fase 4: il system prompt include memoria (§3bis L6) e skill disponibili
+    // Fase 4: il system prompt include memoria (§3bis L6) e skill disponibili.
+    // Fase 5: include le istruzioni personalizzate dei connettori connessi.
+    let connectorsSection = ''
+    try {
+      const { connectorInstructionsFromSettings } = await import('../connectors')
+      const { listServers } = await import('../mcp')
+      connectorsSection = connectorInstructionsFromSettings(
+        listServers(),
+        getSetting<Record<string, import('../connectors').ConnectorState>>('connectors.state', {})
+      )
+    } catch {
+      // connettori non disponibili: il system prompt resta quello di base
+    }
     const messages: ChatMessage[] = buildMessages(
-      systemPrompt(agent) + buildMemorySection(agentId) + buildSkillsSection(agentId),
+      systemPrompt(agent) + buildMemorySection(agentId) + buildSkillsSection(agentId) + connectorsSection,
       getEntries(agentId),
       images
     )
@@ -376,6 +392,31 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           break // il turno TERMINA: le chiamate successive della stessa risposta non vengono eseguite
         }
 
+        // fase 5 (§3ter T2-T3, funnel): OFFERTA di connessione — l'agente NON
+        // può connettere da solo, crea solo la card col bottone "Connetti";
+        // quando l'utente connette, arriverà un messaggio di sistema
+        // (meta.initiator CONNECTOR_CONNECTED) per proseguire
+        if (call.name === 'offer_connector') {
+          const entry2 = (await import('../connectors')).loadCatalog().find((c) => c.id === String(input.id ?? ''))
+          if (!entry2) {
+            messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: `Connettore "${String(input.id ?? '')}" non esistente: cerca quello giusto con search_connectors.`
+            })
+            continue
+          }
+          const message: SendMessagePayload = {
+            type: 'connector', connectorId: entry2.id, name: entry2.name,
+            ...(input.reason !== undefined ? { reason: String(input.reason) } : {})
+          }
+          appendSend(agentId, call, message, emit, { status: 'pending' })
+          messages.push({
+            role: 'tool', toolCallId: call.id,
+            content: `offerta mostrata all'utente: la connessione di ${entry2.name} avviene SOLO dal suo click sul bottone Connetti. Quando l'utente connette riceverai un messaggio di sistema e potrai usare i tool mcp__${entry2.id}__*.`
+          })
+          continue
+        }
+
         // ---- tool normali: entry tool-call, gate permessi, esecuzione ----
 
         const callEntry = appendEntry({
@@ -471,6 +512,17 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             meta: { callId: call.id, ...meta }
           })
           emit({ type: 'entries', agentId, entries: [res] })
+          // fase 5: il tool MCP ha rifiutato perché il connettore ha il token
+          // scaduto → card "Riconnetti" in chat (il click dell'utente riavvia l'OAuth)
+          const reconnect = meta.needsReconnect as { serverName: string; connectorId: string } | undefined
+          if (reconnect) {
+            appendSend(
+              agentId, call,
+              { type: 'connector', connectorId: reconnect.connectorId, name: reconnect.serverName },
+              emit,
+              { status: 'pending', needsAuth: true }
+            )
+          }
           // fase 4 (§3ter T2/T4): ogni azione su routine produce l'evento
           // "automation-changed" in chat (meta.automation: azione, id, nome)
           if (meta.automation && typeof meta.automation === 'object') {

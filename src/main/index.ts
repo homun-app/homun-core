@@ -2,7 +2,7 @@
 // scheduler, sandbox, MCP) vive nel daemon sandbotd — avviato qui sotto se
 // non è già attivo e riusato se lo è (LaunchAgent o avvio precedente). La
 // finestra chiusa non ferma più i bot: il main inoltra RPC ed eventi.
-import { app, BrowserWindow, safeStorage, screen } from 'electron'
+import { app, BrowserWindow, safeStorage, screen, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { registerIpc, emitLocal } from './ipc'
@@ -64,6 +64,8 @@ app.whenReady().then(() => {
     safeStorage.encryptString(String(plain)).toString('base64'))
   client.registerHost('host.safeStorage.decrypt', ([b64]) =>
     safeStorage.decryptString(Buffer.from(String(b64), 'base64')))
+  // fase 5: apre il browser di sistema per l'autorizzazione OAuth dei connettori
+  client.registerHost('host.openExternal', ([url]) => shell.openExternal(String(url)))
   registerIpc(client, () => BrowserWindow.getAllWindows())
   void client.start().catch((e) => console.error('[sandbot] daemon non avviabile:', e))
 

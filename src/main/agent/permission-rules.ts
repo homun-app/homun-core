@@ -129,6 +129,30 @@ export function isNeverAuto(c: Pick<ShellCommand, 'name' | 'argv'>): boolean {
 /** Redirect verso queste destinazioni è innocuo (discard o fd standard). */
 const HARMLESS_REDIRECT_TARGETS = new Set(['/dev/null', '/dev/stdout', '/dev/stderr'])
 
+// ---- fase 5: annotazioni MCP → permessi ----
+
+/** Annotazioni MCP standard che interessano il gate (readOnly/destructive/openWorld). */
+export interface McpAnnotationsLike {
+  readOnlyHint?: boolean
+  destructiveHint?: boolean
+  idempotentHint?: boolean
+  openWorldHint?: boolean
+}
+
+/**
+ * Fase 5: modo derivato dalle annotazioni MCP per i tool dei server connessi,
+ * quando l'utente non ha regole specifiche (§3.6d "governance degli
+ * strumenti"): readOnlyHint=true → always_allow; destructiveHint=true oppure
+ * openWorldHint=true → ask; annotazioni assenti → null (vale la regola di
+ * default, needs_approval). Le regole blocked dell'utente vincono sempre.
+ */
+export function mcpAnnotationMode(a: McpAnnotationsLike | undefined): PermissionMode | null {
+  if (!a) return null
+  if (a.readOnlyHint === true) return 'always_allow'
+  if (a.destructiveHint === true || a.openWorldHint === true) return 'needs_approval'
+  return null
+}
+
 /**
  * C5 (lettura file): il path sta dentro la cartella del bot? Funzione PURA:
  * il filesystem passa da parametro (realpath per neutralizzare ../ e i

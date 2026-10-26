@@ -6,12 +6,22 @@ import { realpathSync } from 'node:fs'
 import { getPermissions, listGrants, addGrant, getRoutine } from '../store/db'
 import { sandboxMode, boxDir } from '../sandbox'
 import type { PermissionMode } from '../../shared/types'
-import { targetKey, runCommandVerdict, commandKey, isNeverAuto, isInsideBox } from './permission-rules'
+import { targetKey, runCommandVerdict, commandKey, isNeverAuto, isInsideBox, ruleToolMatches, mcpAnnotationMode, type McpAnnotationsLike } from './permission-rules'
 import { analyzeCommand } from './shell-ast'
 import { updateStateVerdict, memoryScopeVerdict, type UpdateStateArgs } from './update-state'
 
 // re-export: i consumer continuano a importare targetKey da qui (loop.ts usa permissions.targetKey)
 export { targetKey }
+
+/**
+ * Fase 5: annotazioni dei tool MCP, fornite dal client MCP del daemon
+ * (iniettate per non creare il collegamento inverso permissions→mcp).
+ */
+let mcpAnnotationsLookup: (tool: string) => McpAnnotationsLike | undefined = () => undefined
+
+export function setMcpAnnotationsLookup(fn: (tool: string) => McpAnnotationsLike | undefined): void {
+  mcpAnnotationsLookup = fn
+}
 
 export type Verdict =
   | { kind: 'allow'; via: 'rule' | 'grant' }
@@ -69,6 +79,13 @@ export async function check(
     return { kind: 'allow', via: 'rule' }
   }
 
+  // fase 5: il funnel dei connettori — search_connectors è una lettura del
+  // catalogo, offer_connector crea solo una entry nel transcript (la
+  // connessione vera parte dal click dell'utente)
+  if (tool === 'search_connectors' || tool === 'offer_connector') {
+    return { kind: 'allow', via: 'rule' }
+  }
+
   // fase 5 (residuo M3): scrivere memorie — lo scope del bot resta sempre
   // consentito; lo scope CONDIVISO 'user' (prompt di tutti i bot) chiede
   // all'utente con il contenuto in card
@@ -117,6 +134,37 @@ export async function check(
       keys: d.keys,
       ...(d.secretRefs.length ? { secretRefs: d.secretRefs } : {})
     }
+  }
+
+  // fase 5 (punto 4): i tool MCP senza regole specifiche dell'utente derivano
+  // il modo dalle annotazioni standard del server — readOnlyHint → sempre
+  // consentito, destructiveHint/openWorldHint → chiede. Le regole blocked
+  // vincono sempre; una regola specifica dell'utente batte le annotazioni;
+  // gli invii esterni (externalSendTools) restano bozze a monte del gate.
+  if (tool.startsWith('mcp__')) {
+    const matching = cfg.rules.filter((r) => ruleToolMatches(r.tool, tool))
+    if (matching.some((r) => r.mode === 'blocked')) {
+      return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
+    }
+    // regola specifica per QUESTO tool (o suo prefisso), non i wildcard generici
+    const specific = matching.find((r) => r.tool !== '*' && r.tool !== 'mcp__*')
+    if (specific) {
+      return specific.mode === 'always_allow'
+        ? { kind: 'allow', via: 'rule' }
+        : { kind: 'ask', reason: `${tool} richiede approvazione` }
+    }
+    if (listGrants().some((g) => g.tool === tool && g.target === '*')) {
+      return { kind: 'allow', via: 'grant' }
+    }
+    const annotated = mcpAnnotationMode(mcpAnnotationsLookup(tool))
+    if (annotated === 'always_allow') return { kind: 'allow', via: 'rule' }
+    if (annotated === 'needs_approval') {
+      return { kind: 'ask', reason: `${tool} agisce verso l'esterno (annotazione del server MCP)` }
+    }
+    // annotazioni assenti: regola di default (mcp__* → needs_approval) o default globale
+    const mode = matchRule(tool, '*', cfg.rules) ?? cfg.default
+    if (mode === 'always_allow') return { kind: 'allow', via: 'rule' }
+    return { kind: 'ask', reason: `${tool} richiede approvazione` }
   }
 
   const target = targetKey(tool, input)

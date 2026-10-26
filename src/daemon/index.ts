@@ -17,6 +17,7 @@ import { JobWorker } from './worker'
 import { tickScheduler } from './scheduler'
 import { attachHostBridge } from './host-bridge'
 import { makeJobRunner } from './run-job'
+import { wireConnectors } from '../main/connectors/wiring'
 import type { SandbotEvent } from '../shared/types'
 
 function resolveDataDirArgv(argv: string[]): string | null {
@@ -43,7 +44,12 @@ async function main(): Promise<void> {
   const server = await startWsServer({
     token,
     onUiChange: (connected) => {
-      if (connected) bridge?.refreshScale()
+      if (connected) {
+        bridge?.refreshScale()
+        // fase 5: con la finestra riaperta partono le autorizzazioni rimaste
+        // in sospesa (i connettori in needs_auth aspettavano il browser)
+        connectors.retryPendingAuth()
+      }
     }
   })
   bridge = attachHostBridge({ callUi: (m, p) => server.callUi(m, p), hasUi: () => server.hasUi() })
@@ -55,6 +61,14 @@ async function main(): Promise<void> {
     if (e.type === 'status' && e.status === 'idle') bridge?.notifyDone(e.agentId)
   }
 
+  // fase 5: connettori MCP+OAuth (store cifrato con chiave Keychain, catalogo,
+  // resolver d'autenticazione del client MCP); gli eventi {type:'connectors'}
+  // dicono alla UI di ricaricare la vista "Connetti app"
+  const connectors = wireConnectors(
+    { callUi: (m, p) => server.callUi(m, p), hasUi: () => server.hasUi() },
+    () => emit({ type: 'connectors' })
+  )
+
   const worker = new JobWorker(
     database,
     {
@@ -63,7 +77,7 @@ async function main(): Promise<void> {
     },
     emit
   )
-  server.methods = buildApiMethods(emit, worker)
+  server.methods = buildApiMethods(emit, worker, connectors)
 
   // scheduler: ogni 30s calcola le routine dovute e accoda i job
   const schedulerTimer = setInterval(() => {

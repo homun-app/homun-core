@@ -18,11 +18,12 @@ import { secondaryPrompts } from '../main/agent/prompts'
 import { parseCron } from './cron'
 import { enqueueUserMessage, enqueueWidgetResponse } from './enqueue'
 import type { JobWorker } from './worker'
-import type { SandbotEvent, SendMessagePayload } from '../shared/types'
+import type { ConnectorsManager } from '../main/connectors'
+import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret } from '../shared/types'
 
 type Emitter = (e: SandbotEvent) => void
 
-export function buildApiMethods(emit: Emitter, worker: JobWorker): Record<string, (params: unknown[]) => unknown> {
+export function buildApiMethods(emit: Emitter, worker: JobWorker, connectors?: ConnectorsManager): Record<string, (params: unknown[]) => unknown> {
   const mcp = () => import('../main/mcp')
   const vault = () => import('../main/vault')
 
@@ -198,9 +199,37 @@ export function buildApiMethods(emit: Emitter, worker: JobWorker): Record<string
 
     // ---- MCP ----
     'mcp:list': () => mcp().then((x) => x.listServers()),
-    'mcp:save': async ([s]) => {
+    'mcp:save': async ([s, secret]) => {
       const x = await mcp()
       x.saveServers([...x.listServers().filter((y) => y.id !== (s as { id: string }).id), s as Parameters<typeof x.saveServers>[0][number]])
+      // fase 5: bearer/header statici del server manuale → store CIFRATO (mai nei settings)
+      const cfg = s as McpServerInfo
+      const sec = secret as McpServerSecret | undefined
+      if (sec) {
+        const storeMod = await import('../main/connectors/sealed-store')
+        // il daemon reale ha il wiring con la chiave Keychain; nei test senza
+        // chiave il salvataggio segreto fallisce e il server resta senza auth
+        try {
+          const { createConnectorsSecretStore } = storeMod
+          const { getConnectorsKey } = await import('./keychain')
+          const sealed = createConnectorsSecretStore({
+            getKey: () => getConnectorsKey(),
+            getSetting: store.getSetting,
+            setSetting: store.setSetting
+          })
+          if (sec.bearerToken) {
+            await sealed.write(cfg.id, 'bearer', sec.bearerToken)
+            cfg.auth = { kind: 'bearer' }
+            x.saveServers(x.listServers())
+          } else if (sec.headers) {
+            await sealed.write(cfg.id, 'staticHeaders', sec.headers)
+            cfg.auth = { kind: 'headers' }
+            x.saveServers(x.listServers())
+          }
+        } catch (e) {
+          throw new Error(`impossibile salvare il segreto del server (Keychain non disponibile): ${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
       return x.listServers()
     },
     'mcp:delete': async ([id]) => {
@@ -208,6 +237,41 @@ export function buildApiMethods(emit: Emitter, worker: JobWorker): Record<string
       x.saveServers(x.listServers().filter((y) => y.id !== id))
     },
     'mcp:test': ([id]) => mcp().then((x) => x.testServer(id as string)),
+
+    // ---- fase 5: connettori del catalogo ("Connetti app") ----
+    'connectors:list': () => {
+      if (!connectors) throw new Error('connettori non disponibili')
+      return connectors.list()
+    },
+    'connectors:connect': ([id]) => {
+      if (!connectors) throw new Error('connettori non disponibili')
+      const entry = connectors.catalog.find((e) => e.id === id)
+      if (!entry) throw new Error(`connettore sconosciuto: ${String(id)}`)
+      // il flusso OAuth dura fino a 10 minuti (browser): parte in parallelo e
+      // la UI segue gli eventi {type:'connectors'}
+      void connectors.runConnect(entry).then(async (r) => {
+        // il connettore è attivo: gli agenti con offerte pendenti ricevono un
+        // messaggio di sistema (meta.initiator CONNECTOR_CONNECTED)
+        if (r.status === 'connected') await notifyConnectorConnected(entry.id, entry.name, emit, worker)
+      })
+      return { started: true }
+    },
+    'connectors:disconnect': ([id]) => {
+      if (!connectors) throw new Error('connettori non disponibili')
+      return connectors.disconnect(String(id))
+    },
+    'connectors:set-tools': ([id, disabledTools]) => {
+      if (!connectors) throw new Error('connettori non disponibili')
+      connectors.setDisabledTools(String(id), (disabledTools as string[]) ?? [])
+    },
+    'connectors:set-instructions': ([id, instructions]) => {
+      if (!connectors) throw new Error('connettori non disponibili')
+      connectors.setInstructions(String(id), String(instructions ?? ''))
+    },
+    'connectors:save-static': ([id, clientId, clientSecret]) => {
+      if (!connectors) throw new Error('connettori non disponibili')
+      return connectors.saveStaticClient(String(id), String(clientId ?? ''), String(clientSecret ?? ''))
+    },
 
     // ---- vault credenziali ----
     'vault:list': () => vault().then((x) => x.listSecretNames()),
@@ -256,5 +320,41 @@ export function buildApiMethods(emit: Emitter, worker: JobWorker): Record<string
 
     // diagnostica
     ping: () => ({ pong: true, pid: process.pid })
+  }
+}
+
+/**
+ * Fase 5: un connettore offerto dal bot è stato connesso dall'utente. Ogni
+ * agente con un'offerta ancora pendente per quel connettore riceve un job
+ * 'user-message' con meta.initiator 'CONNECTOR_CONNECTED' (specifica §3ter
+ * T2-T3) così può proseguire ("Fatto, ora posso…"). Le offerte soddisfatte
+ * vengono marcate meta.connected per non ri-notificare.
+ */
+export async function notifyConnectorConnected(
+  connectorId: string,
+  name: string,
+  emit: Emitter,
+  worker: JobWorker
+): Promise<void> {
+  for (const agent of store.listAgents()) {
+    const offers = store.getEntries(agent.id).filter(
+      (e) =>
+        e.kind === 'send-message' &&
+        (e.meta?.message as SendMessagePayload | undefined)?.type === 'connector' &&
+        ((e.meta?.message as { connectorId?: string }).connectorId === connectorId) &&
+        !e.meta?.connected
+    )
+    if (!offers.length) continue
+    for (const e of offers) store.updateEntryMeta(e.id, { ...e.meta, connected: true })
+    enqueueUserMessage(
+      db(),
+      agent.id,
+      `[sistema] L'utente ha connesso ${name}: i suoi tool mcp__${connectorId}__* sono ora disponibili (cerca i nomi esatti con i tuoi tool o chiedendo all'utente).`,
+      undefined,
+      emit,
+      undefined,
+      'CONNECTOR_CONNECTED'
+    )
+    worker.poke()
   }
 }

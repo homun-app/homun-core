@@ -34,7 +34,8 @@ export function enqueueUserMessage(
   text: string,
   images: string[] | undefined,
   emit: Emitter,
-  respondedTo?: number
+  respondedTo?: number,
+  initiator?: string
 ): Job | null {
   updateAgent(agentId, { unread: 0 })
   // un messaggio che NON risponde a un widget scarta i widget "muoviti oltre"
@@ -61,6 +62,9 @@ export function enqueueUserMessage(
   const now = Date.now()
   const payload: Record<string, unknown> = images?.length ? { text, images } : { text }
   if (respondedTo !== undefined) payload.respondedTo = respondedTo
+  // fase 5: chi ha avviato il turno (es. CONNECTOR_CONNECTED dopo il click su
+  // "Connetti" di una card offerta dal bot) — finisce in meta.initiator
+  if (initiator) payload.initiator = initiator
   return enqueueJob(db, {
     agentId,
     kind: 'user-message',

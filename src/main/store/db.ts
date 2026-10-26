@@ -248,6 +248,10 @@ export function getPermissions(): PermissionsConfig {
       { tool: 'recall_memory', pattern: '*', mode: 'always_allow' },
       { tool: 'skill', pattern: '*', mode: 'always_allow' },
       { tool: 'update_skill', pattern: '*', mode: 'needs_approval' },
+      // fase 5: il funnel dei connettori (search/offer) non ha effetti fuori
+      // dal transcript; offer_connector è intercettato dal loop prima del gate
+      { tool: 'search_connectors', pattern: '*', mode: 'always_allow' },
+      { tool: 'offer_connector', pattern: '*', mode: 'always_allow' },
       { tool: 'mcp__*', pattern: '*', mode: 'needs_approval' }
     ]
   })
