@@ -931,7 +931,13 @@ function TriggerEditor(props: {
   const [busy, setBusy] = useState(false)
 
   // schedule
-  const [cron, setCron] = useState(r?.trigger?.type === 'schedule' && r.trigger.kind === 'cron' ? r.trigger.cron : r?.schedule || '0 9 * * *')
+  // schedule: il toggle è "cron" se c'è un'espressione, "ogni…" se vuota
+  // (le routine every hanno la colonna schedule vuota)
+  const [cron, setCron] = useState(
+    r?.trigger?.type === 'schedule'
+      ? (r.trigger.kind === 'cron' ? r.trigger.cron : '')
+      : (r?.schedule && kindOf(r.trigger) === 'schedule' ? r.schedule : r?.trigger ? '' : '0 9 * * *')
+  )
   const [every, setEvery] = useState<'day' | 'weekday' | 'week' | 'month' | 'hour'>(
     r?.trigger?.type === 'schedule' && r.trigger.kind === 'every' ? r.trigger.every : 'day'
   )
