@@ -208,4 +208,17 @@ describe('D1: applyDraftBody — la modifica aggiorna anche gli argomenti che ve
     expect(message.body).toBe('nuovo')
     expect(message.via).toBeUndefined()
   })
+
+  it('fase 5 (0c): applyDraftBody mantiene il TIPO dell\'argomento originale (array → split su virgola)', () => {
+    const message = {
+      type: 'draft' as const, channel: 'email' as const, to: 'a@x, b@y', body: 'testo',
+      via: { tool: 'mcp__gmail__send_message', args: { to: ['a@x', 'b@y'], body: ['riga 1', 'riga 2'] } }
+    }
+    applyDraftBody(message, 'a@z, c@w non è il body — nuovo testo')
+    // il body era un array: la stringa modificata torna array (split su virgola)
+    expect(message.via.args.body).toEqual(['a@z', 'c@w non è il body — nuovo testo'])
+    // to non è toccato da applyDraftBody e resta array
+    expect(message.via.args.to).toEqual(['a@x', 'b@y'])
+    expect(message.body).toBe('a@z, c@w non è il body — nuovo testo')
+  })
 })

@@ -78,13 +78,14 @@ export function fieldMapForArgs(args: Record<string, unknown>): DraftFieldMap {
 }
 
 /**
- * Residuo fase 4 (0a): il valore visibile che sovrascrive un argomento di
- * via.args mantiene il TIPO dell'argomento originale — se l'argomento era un
- * array (es. to: ['a@x', 'b@y']) e il modello passa la stringa "a@x, b@y",
- * viene riscritto come array (split su virgola e trim). Senza questo il tool
- * di invio riceverebbe una stringa dove si aspetta una lista.
+ * Residuo fase 4 (0a) + fase 5 (0c): il valore visibile che sovrascrive un
+ * argomento di via.args mantiene il TIPO dell'argomento originale — se
+ * l'argomento era un array (es. to: ['a@x', 'b@y']) e il modello passa la
+ * stringa "a@x, b@y", viene riscritto come array (split su virgola e trim).
+ * Senza questo il tool di invio riceverebbe una stringa dove si aspetta una
+ * lista. Vale per la creazione (draftPayloadFromVia) e per applyDraftBody.
  */
-function coerceVisibleValue(original: unknown, value: string): unknown {
+export function coerceVisibleValue(original: unknown, value: string): unknown {
   if (Array.isArray(original)) {
     return value.split(',').map((s) => s.trim()).filter(Boolean)
   }
@@ -171,18 +172,22 @@ export function prepareDraft(input: {
 }
 
 /**
- * D1: aggiorna il corpo di una bozza in modo coerente — il testo visibile
- * (message.body) E l'argomento di via.args che verrà davvero inviato
- * (fieldMap.body; se la bozza non ha fieldMap, cioè è stata salvata prima
- * della correzione, la ricalcola dagli argomenti). Senza un argomento
- * mappato sul corpo tocca solo il testo visibile.
+ * D1 + residuo fase 5 (0c): aggiorna il corpo di una bozza in modo coerente —
+ * il testo visibile (message.body) E l'argomento di via.args che verrà davvero
+ * inviato (fieldMap.body; se la bozza non ha fieldMap, cioè è stata salvata
+ * prima della correzione, la ricalcola dagli argomenti), mantenendo il TIPO
+ * dell'argomento originale. Senza un argomento mappato sul corpo tocca solo
+ * il testo visibile.
  */
 export function applyDraftBody(message: DraftMessage, body: string): void {
   message.body = body
   if (!message.via) return
   const fieldMap = message.fieldMap ?? fieldMapForArgs(message.via.args)
   if (fieldMap.body) {
-    message.via = { ...message.via, args: { ...message.via.args, [fieldMap.body]: body } }
+    message.via = {
+      ...message.via,
+      args: { ...message.via.args, [fieldMap.body]: coerceVisibleValue(message.via.args[fieldMap.body], body) }
+    }
   }
 }
 

@@ -58,6 +58,28 @@ export function updateStateVerdict(args: UpdateStateArgs, routine: Routine | nul
   return { kind: 'allow' }
 }
 
+/**
+ * Fase 5 (residuo M3): verdetto per una scrittura in memoria. Le memorie
+ * CONDIVISE (scope 'user') entrano nel prompt di TUTTI i bot: scriverle,
+ * aggiornarle o eliminarle chiede all'utente (la card mostra il contenuto) —
+ * un'istruzione iniettata, es. letta in un'email, non può diventare una regola
+ * permanente per ogni agente senza conferma. Lo scope 'agent' resta consentito.
+ * `currentScope` è lo scope della memoria esistente per update/delete (serve
+ * quando l'argomento non lo riporta); null se assente/sconosciuto.
+ */
+export function memoryScopeVerdict(
+  args: UpdateStateArgs,
+  currentScope: 'agent' | 'user' | null
+): StateVerdict {
+  const action = String(args.action ?? '')
+  if (action !== 'write' && action !== 'update' && action !== 'delete') return { kind: 'allow' }
+  const scope = args.scope === 'user' || args.scope === 'agent' ? args.scope : currentScope ?? 'agent'
+  if (scope !== 'user') return { kind: 'allow' }
+  const verb = action === 'write' ? 'creare una' : action === 'update' ? 'modificare una' : 'eliminare una'
+  const content = typeof args.content === 'string' && args.content.trim() ? ` — contenuto: ${promptPreview(args.content)}` : ''
+  return { kind: 'ask', reason: `${verb} memoria condivisa da tutti i bot (scope user)${content}` }
+}
+
 /** Testo dell'entry event meta.automation per un'azione su routine (§3ter T2/T4). */
 export function automationEventText(action: string, name: string): string {
   const labels: Record<string, string> = {

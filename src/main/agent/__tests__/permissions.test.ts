@@ -170,15 +170,41 @@ describe('fase 4: memoria, skill e update_state', () => {
     expect(await check('update_state', { target: 'routine', action: 'update', id: 7, name: 'Altro' })).toEqual({ kind: 'allow', via: 'rule' })
   })
 
-  it('update_state resume: "Consenti sempre" salva una grant per routine e la copre al prossimo giro', async () => {
+  it('update_state resume: fase 5 (M1) "Consenti sempre" NON salva grant e le grant vecchie non coprono più', async () => {
     state.routines = [{ id: 7, title: 'Riepilogo', prompt: 'p', schedule: '30 8 * * 1-5', enabled: 1 }]
     await grantStanding('update_state', { target: 'routine', action: 'resume', id: 7 })
-    expect(state.grants).toContainEqual({ tool: 'update_state', target: 'routine 7' })
+    expect(state.grants).toEqual([])
+    // una grant "routine 7" salvata prima della fase 5 resta nel DB ma è ignorata
+    state.grants = [{ tool: 'update_state', target: 'routine 7' }]
+    expect(await check('update_state', { target: 'routine', action: 'resume', id: 7 })).toMatchObject({ kind: 'ask' })
+  })
+
+  it('fase 5 (M1): pausa → update del prompt → resume chiede SEMPRE la card sul resume', async () => {
+    state.routines = [{ id: 7, title: 'Riepilogo', prompt: 'p', schedule: '30 8 * * 1-5', enabled: 1 }]
+    state.grants = [{ tool: 'update_state', target: 'routine 7' }]
+    // pausa: allow
+    expect(await check('update_state', { target: 'routine', action: 'pause', id: 7 })).toEqual({ kind: 'allow', via: 'rule' })
+    // in pausa il update del prompt non tocca un'esecuzione attiva: allow
+    state.routines[0]!.enabled = 0
+    expect(await check('update_state', { target: 'routine', action: 'update', id: 7, prompt: 'prompt manipolato' })).toEqual({ kind: 'allow', via: 'rule' })
+    state.routines[0]!.enabled = 0
+    // il resume riattiva la routine col prompt cambiato: card SEMPRE, grant o no
     const v = await check('update_state', { target: 'routine', action: 'resume', id: 7 })
-    expect(v).toEqual({ kind: 'allow', via: 'grant' })
-    // un\'altra routine NON è coperta dalla grant
-    state.routines.push({ id: 8, title: 'Altra', prompt: 'p', schedule: '0 9 * * *', enabled: 1 })
-    expect((await check('update_state', { target: 'routine', action: 'resume', id: 8 })).kind).toBe('ask')
+    expect(v.kind).toBe('ask')
+    if (v.kind === 'ask') expect(v.reason).toContain('attivare la routine "Riepilogo"')
+  })
+
+  it('fase 5 (M3): memorie condivise — write/update/delete con scope user chiedono, scope agent resta allow', async () => {
+    const write = await check('update_memory', { action: 'write', content: 'regola per tutti i bot', tier: 'core', scope: 'user' })
+    expect(write.kind).toBe('ask')
+    if (write.kind === 'ask') expect(write.reason).toContain('scope user')
+    if (write.kind === 'ask') expect(write.reason).toContain('regola per tutti i bot')
+    expect(await check('update_memory', { action: 'write', content: 'fatto mio', tier: 'core', scope: 'agent' })).toEqual({ kind: 'allow', via: 'rule' })
+    // senza scope dichiarato vale lo scope del bot (default agent)
+    expect(await check('update_memory', { action: 'write', content: 'x', tier: 'log' })).toEqual({ kind: 'allow', via: 'rule' })
+    expect((await check('update_memory', { action: 'delete', id: 'mem_x', scope: 'user' })).kind).toBe('ask')
+    // anche update_state target memory con scope user chiede
+    expect((await check('update_state', { target: 'memory', action: 'write', content: 'x', tier: 'log', scope: 'user' })).kind).toBe('ask')
   })
 
   it('una regola blocked dell\'utente vince sui tool di stato', async () => {

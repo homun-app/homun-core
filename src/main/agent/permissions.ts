@@ -8,7 +8,7 @@ import { sandboxMode, boxDir } from '../sandbox'
 import type { PermissionMode } from '../../shared/types'
 import { targetKey, runCommandVerdict, commandKey, isNeverAuto, isInsideBox } from './permission-rules'
 import { analyzeCommand } from './shell-ast'
-import { updateStateVerdict, type UpdateStateArgs } from './update-state'
+import { updateStateVerdict, memoryScopeVerdict, type UpdateStateArgs } from './update-state'
 
 // re-export: i consumer continuano a importare targetKey da qui (loop.ts usa permissions.targetKey)
 export { targetKey }
@@ -36,6 +36,22 @@ function matchRule(tool: string, target: string, rules: ReturnType<typeof getPer
 }
 
 /**
+ * Scope della memoria esistente per update/delete (M3): l'argomento può non
+ * riportarlo, ma modificare una memoria GIÀ condivisa chiede comunque. Lettura
+ * best-effort: se la memoria non si trova (assente, id malformato, store non
+ * disponibile) resta null → vale lo scope dell'argomento (default agent).
+ */
+async function currentMemoryScope(agentId: string | undefined, id: unknown): Promise<'agent' | 'user' | null> {
+  if (typeof id !== 'string' || !id) return null
+  try {
+    const { listMemories } = await import('./memory')
+    return listMemories(agentId ?? '').find((m) => m.id === id)?.scope ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Verdetto per una chiamata tool. Async: run-command richiede l'analisi shell.
  * `agentId` serve al gate C5 (lettura file dentro/fuori dalla box in host).
  */
@@ -46,31 +62,44 @@ export async function check(
 ): Promise<Verdict> {
   const cfg = getPermissions()
 
-  // fase 4: memoria e LETTURA skill toccano solo i file dell'agente → sempre
-  // consentiti, anche con config utente personalizzata (vengono prima delle
-  // regole perché non hanno effetti fuori dai file del bot)
-  if (tool === 'update_memory' || tool === 'recall_memory' || tool === 'skill') {
+  // fase 4: la LETTURA di memoria e skill tocca solo i file dell'agente →
+  // sempre consentita, anche con config utente personalizzata (viene prima
+  // delle regole perché non ha effetti fuori dai file del bot)
+  if (tool === 'recall_memory' || tool === 'skill') {
+    return { kind: 'allow', via: 'rule' }
+  }
+
+  // fase 5 (residuo M3): scrivere memorie — lo scope del bot resta sempre
+  // consentito; lo scope CONDIVISO 'user' (prompt di tutti i bot) chiede
+  // all'utente con il contenuto in card
+  if (tool === 'update_memory') {
+    const v = memoryScopeVerdict(input as UpdateStateArgs, await currentMemoryScope(agentId, input.id))
+    if (v.kind === 'ask') return v
     return { kind: 'allow', via: 'rule' }
   }
 
   // fase 4: update_state decide per azione — create/pause/delete sempre;
   // resume e update di schedule/prompt su una routine ATTIVA chiedono
-  // all'utente (cambiano ciò che il bot eseguirà da solo in futuro)
+  // all'utente (cambiano ciò che il bot eseguirà da solo in futuro).
+  // Fase 5 (residuo M1): le ask di update_state NON sono coperte da grant
+  // ("Consenti sempre" non viene offerto e grantStanding non salva): una
+  // grant su una routine autorizzerebbe anche il cambio del prompt di una
+  // routine attiva senza più nessuna card.
   if (tool === 'update_state') {
     const target = targetKey(tool, input)
     const mode = matchRule(tool, target, cfg.rules) ?? cfg.default
     if (mode === 'blocked') return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
-    const routine = input.target === 'routine' && Number.isInteger(Number(input.id)) && Number(input.id) > 0
+    if (input.target !== 'routine') {
+      // target memory: stesso verdetto di update_memory (M3)
+      const v = memoryScopeVerdict(input as UpdateStateArgs, await currentMemoryScope(agentId, input.id))
+      if (v.kind === 'ask') return v
+      return { kind: 'allow', via: 'rule' }
+    }
+    const routine = Number.isInteger(Number(input.id)) && Number(input.id) > 0
       ? getRoutine(Number(input.id))
       : null
     const v = updateStateVerdict(input as UpdateStateArgs, routine)
-    if (v.kind === 'ask') {
-      // una standing grant "Consenti sempre" su questa routine copre l'ask
-      if (listGrants().some((g) => g.tool === tool && g.target === target)) {
-        return { kind: 'allow', via: 'grant' }
-      }
-      return { kind: 'ask', reason: v.reason }
-    }
+    if (v.kind === 'ask') return { kind: 'ask', reason: v.reason }
     return { kind: 'allow', via: 'rule' }
   }
 
@@ -118,9 +147,13 @@ export async function check(
  * Registra una standing grant dopo "Always allow".
  * Per run-command salva una grant per OGNI chiave estratta dal comando, MAI:
  * - per comandi che usano segreti {{secret:...}} (C4: chiedono ogni volta);
- * - per chiavi never-auto (C1: non sarebbero comunque utilizzabili).
+ * - per chiavi never-auto (C1: non sarebbero comunque utilizzabili);
+ * - per update_state (M1): una grant per routine coprirebbe anche i cambi
+ *   futuri del prompt di una routine attiva — le sue card non offrono
+ *   "Consenti sempre" e il gate non consulta più le grant già salvate.
  */
 export async function grantStanding(tool: string, input: Record<string, unknown>): Promise<void> {
+  if (tool === 'update_state') return
   if (tool === 'run-command') {
     const analysis = await analyzeCommand(String(input.command ?? ''))
     if (analysis.secretRefs.length) return

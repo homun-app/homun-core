@@ -18,6 +18,9 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
     | { target?: string; action?: string; name?: string; schedule?: string; prompt?: string; id?: number }
     | undefined
   const isRoutine = String(entry.meta?.tool) === 'update_state' && st?.target === 'routine'
+  // fase 5 (M1): update_state non offre "Consenti sempre" — una grant per
+  // routine coprirebbe anche il cambio del prompt di una routine attiva
+  const noAlways = String(entry.meta?.tool) === 'update_state'
 
   return (
     <div className="rounded-xl border border-orange-500/40 bg-orange-500/5 px-4 py-3">
@@ -52,7 +55,9 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
             Consenti una volta
           </button>
           <button
-            className="rounded-lg bg-emerald-700/60 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600/60"
+            className="rounded-lg bg-emerald-700/60 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600/60 disabled:hidden"
+            disabled={noAlways}
+            title={noAlways ? 'Le modifiche di automazione chiedono ogni volta' : undefined}
             onClick={() => resolve(approvalId, 'allow', true)}
           >
             Consenti sempre

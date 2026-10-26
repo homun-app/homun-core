@@ -3,7 +3,7 @@
 // esecuzione con store reale (routine che nasce in pausa con provenance
 // 'agent', cron non valido → errore leggibile, evento automation).
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -126,5 +126,55 @@ describe('esecuzione (store reale)', () => {
     expect(output).toContain('Memoria creata')
     const { listMemories } = await import('../memory')
     expect(listMemories(AGENT).some((m) => m.id === meta.memoryId && m.content === 'preferenza ricordata')).toBe(true)
+  })
+})
+
+// import a livello modulo (dentro describe non è consentito await); updateRoutine
+// e createRoutine sono già importati in testa al file
+const { addGrant, createAgent, deleteAgent, getAgent } = await import('../../store/db')
+const { writeMemory, listMemories } = await import('../memory')
+const { writeSkill } = await import('../skills')
+const { check } = await import('../permissions')
+
+describe('fase 5 — residui (M1, M3, 0d) con store reale', () => {
+
+  it('M1: pausa → update del prompt → resume: la card arriva SEMPRE sul resume (grant vecchia nel DB)', async () => {
+    const r = createRoutine(AGENT, 'Riepilogo', 'p', '30 8 * * 1-5', { enabled: 1 })
+    // grant salvata prima della fase 5 (oggi ignorata dal gate)
+    addGrant('update_state', `routine ${r.id}`)
+    expect((await check('update_state', { target: 'routine', action: 'pause', id: r.id }, AGENT)).kind).toBe('allow')
+    updateRoutine(r.id, { enabled: 0 })
+    expect((await check('update_state', { target: 'routine', action: 'update', id: r.id, prompt: 'prompt cambiato in pausa' }, AGENT)).kind).toBe('allow')
+    const v = await check('update_state', { target: 'routine', action: 'resume', id: r.id }, AGENT)
+    expect(v.kind).toBe('ask')
+    if (v.kind === 'ask') expect(v.reason).toContain('Riepilogo')
+  })
+
+  it('M3: update/delete di una memoria ESISTENTE di scope user chiede anche senza scope nell\'argomento', async () => {
+    const shared = writeMemory(AGENT, { content: 'regola condivisa', tier: 'core', scope: 'user' })
+    const own = writeMemory(AGENT, { content: 'fatto privato', tier: 'core', scope: 'agent' })
+    // update senza scope nell'argomento: lo scope reale della memoria decide
+    const v = await check('update_memory', { action: 'update', id: shared.id, content: 'regola manipolata' }, AGENT)
+    expect(v.kind).toBe('ask')
+    if (v.kind === 'ask') expect(v.reason).toContain('regola manipolata')
+    // la memoria dello scope agente resta always_allow
+    expect(await check('update_memory', { action: 'update', id: own.id, content: 'aggiornato' }, AGENT)).toEqual({ kind: 'allow', via: 'rule' })
+    // delete di una condivisa chiede; delete di una privata no
+    expect((await check('update_memory', { action: 'delete', id: shared.id }, AGENT)).kind).toBe('ask')
+    expect(await check('update_memory', { action: 'delete', id: own.id }, AGENT)).toEqual({ kind: 'allow', via: 'rule' })
+    expect(listMemories(AGENT).some((m) => m.id === shared.id)).toBe(true) // ask ≠ eseguito
+  })
+
+  it('0d: agents:delete rimuove anche la directory agents/<id>/ (memoria e skill)', async () => {
+    const a = createAgent('Eliminami')
+    writeMemory(a.id, { content: 'ricordo', tier: 'core' })
+    writeSkill(a.id, { name: 'prova', description: 'd', content: 'istruzioni' })
+    const dir = join(root, 'agents', a.id)
+    expect(existsSync(dir)).toBe(true)
+    deleteAgent(a.id)
+    expect(getAgent(a.id)).toBeNull()
+    expect(existsSync(dir)).toBe(false)
+    // id inesistente: no-op senza errori
+    deleteAgent('agent_inesistente')
   })
 })

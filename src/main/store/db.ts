@@ -5,7 +5,7 @@
 // dall'esterno (arg --data del daemon, env SANDBOT_DATA_DIR, o setDataDir
 // chiamato dal main Electron), così lo stesso store serve app e daemon.
 import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { JOBS_DDL } from './jobs'
@@ -158,8 +158,17 @@ export function updateAgent(id: string, patch: Partial<Pick<Agent, 'name' | 'des
 }
 
 export function deleteAgent(id: string): void {
+  // fase 5 (residuo 0d): si rimuove solo un agente ESISTENTE (il path della
+  // directory si costruisce dal suo id, mai da input libero)
+  if (!getAgent(id)) return
   db().prepare('DELETE FROM agents WHERE id=?').run(id)
   db().prepare('DELETE FROM entries WHERE agent_id=?').run(id)
+  // memoria e skill su disco non restano orfane
+  try {
+    rmSync(join(dataDir(), 'agents', id), { recursive: true, force: true })
+  } catch {
+    // directory assente o non eliminabile: le righe sono già via
+  }
 }
 
 // ---- transcript (event-sourced) ----
