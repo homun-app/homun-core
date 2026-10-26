@@ -38,7 +38,7 @@ vi.mock('../../sandbox', () => ({
   boxDir: () => BOX
 }))
 
-const { check, grantStanding } = await import('../permissions')
+const { check, grantStanding, setMcpAnnotationsLookup } = await import('../permissions')
 
 beforeAll(() => {
   mkdirSync(BOX, { recursive: true })
@@ -212,5 +212,58 @@ describe('fase 4: memoria, skill e update_state', () => {
     expect((await check('update_state', { target: 'routine', action: 'create', name: 'X' })).kind).toBe('deny')
     state.rules.push({ tool: 'update_skill', pattern: '*', mode: 'blocked' })
     expect((await check('update_skill', { name: 'x', description: 'd', content: 'c' })).kind).toBe('deny')
+  })
+})
+
+describe('fase 5: permessi dai tool MCP (annotazioni standard)', () => {
+  const TOOL = 'mcp__notion__search_documents'
+
+  beforeEach(() => {
+    state.rules = DEFAULT_RULES.map((r) => ({ ...r }))
+    state.rules.push({ tool: 'mcp__*', pattern: '*', mode: 'needs_approval' })
+  })
+
+  it('readOnlyHint=true → allow anche senza regole specifiche', async () => {
+    setMcpAnnotationsLookup(() => ({ readOnlyHint: true }))
+    expect(await check(TOOL, {})).toEqual({ kind: 'allow', via: 'rule' })
+  })
+
+  it('destructiveHint o openWorldHint=true → ask; assente → regola di default (needs_approval)', async () => {
+    setMcpAnnotationsLookup(() => ({ destructiveHint: true }))
+    const d = await check(TOOL, {})
+    expect(d.kind).toBe('ask')
+    if (d.kind === 'ask') expect(d.reason).toContain('annotazione del server MCP')
+    setMcpAnnotationsLookup(() => ({ openWorldHint: true }))
+    expect((await check(TOOL, {})).kind).toBe('ask')
+    // nessuna annotazione: vale la regola di default mcp__* → needs_approval
+    setMcpAnnotationsLookup(() => undefined)
+    expect((await check(TOOL, {})).kind).toBe('ask')
+    // e anche col default globale permissivo vale la regola mcp__* needs_approval
+    state.rules.push({ tool: '*', pattern: '*', mode: 'always_allow' })
+    expect((await check(TOOL, {})).kind).toBe('ask')
+  })
+
+  it('le regole blocked dell\'utente vincono sempre; una regola specifica batte le annotazioni', async () => {
+    setMcpAnnotationsLookup(() => ({ readOnlyHint: true }))
+    state.rules.push({ tool: 'mcp__notion__*', pattern: '*', mode: 'blocked' })
+    expect((await check(TOOL, {})).kind).toBe('deny')
+    state.rules = state.rules.filter((r) => r.mode !== 'blocked')
+    state.rules.push({ tool: 'mcp__notion__search_documents', pattern: '*', mode: 'needs_approval' })
+    expect((await check(TOOL, {})).kind).toBe('ask')
+  })
+
+  it('standing grant esatta sul tool MCP → allow', async () => {
+    setMcpAnnotationsLookup(() => undefined)
+    state.grants = [{ tool: TOOL, target: '*' }]
+    expect(await check(TOOL, {})).toEqual({ kind: 'allow', via: 'grant' })
+  })
+
+  it('idempotentHint da solo non autorizza (non è readOnly)', async () => {
+    setMcpAnnotationsLookup(() => ({ idempotentHint: true }))
+    expect((await check(TOOL, {})).kind).toBe('ask')
+  })
+
+  afterAll(() => {
+    setMcpAnnotationsLookup(() => undefined)
   })
 })

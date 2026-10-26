@@ -154,6 +154,8 @@ vi.mock('../../mcp', () => ({
   activeTools: async () => [{
     name: 'mcp__gmail__send_message', description: 'invia email', parameters: { type: 'object', properties: {} }
   }],
+  listServers: () => [],
+  McpNeedsReconnectError: class extends Error {},
   callTool: async () => {
     h.mcp.calls++
     return 'email inviata'
@@ -161,6 +163,8 @@ vi.mock('../../mcp', () => ({
 }))
 
 const { runTurn, isRunning, resolveApproval, supersedeIfPaused, interrupt, RECOVERY_NUDGE } = await import('../loop')
+// il modulo mcp mockato (per patcharne callTool nel test della card Riconnetti)
+const mcpMock = await import('../../mcp')
 
 const emit = () => undefined
 const AGENT = 'agent_t'
@@ -858,5 +862,84 @@ describe('fase 4: compaction della history nel loop', () => {
     expect(h.db.entries.some((e) => e.kind === 'summary')).toBe(false)
     // entrambi i turni sono girati lo stesso (2 chiamate ciascuno)
     expect(h.llm.calls.filter((c) => c.length > 1)).toHaveLength(4)
+  })
+})
+
+describe('fase 5: funnel dei connettori (offer_connector) e card Riconnetti', () => {
+  it('offer_connector → entry send-message type connector, NESSUNA connessione automatica', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'oc1', name: 'offer_connector', arguments: JSON.stringify({ id: 'gmail', reason: 'per riassumerti le email in arrivo' }) }] },
+      { text: 'fatto' }
+    ]
+    await runTurn(AGENT, 'ricordami le email', emit)
+
+    const offer = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(offer.meta?.message).toMatchObject({
+      type: 'connector', connectorId: 'gmail', name: 'Gmail', reason: 'per riassumerti le email in arrivo'
+    })
+    expect(offer.meta?.status).toBe('pending')
+    // nessuna chiamata ai connettori: la connessione parte SOLO dal click utente
+    expect(h.mcp.calls).toBe(0)
+    // al modello torna la spiegazione del funnel (nella chiamata SUCCESSIVA)
+    const second = h.llm.calls[1]!
+    expect(second.some((m) => m.role === 'tool' && String(m.content).includes("offerta mostrata"))).toBe(true)
+    expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
+  })
+
+  it('offer_connector con id inesistente → tool-result di errore, nessuna entry', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'oc2', name: 'offer_connector', arguments: JSON.stringify({ id: 'inesistente', reason: 'x' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'collega', emit)
+    // nessuna CARD connector (il fallback di recupero può creare una send-message di testo)
+    expect(h.db.entries.some((e) => (e.meta?.message as { type?: string } | undefined)?.type === 'connector')).toBe(false)
+    const second = h.llm.calls[1]!
+    expect(second.some((m) => m.role === 'tool' && String(m.content).includes('search_connectors'))).toBe(true)
+  })
+
+  it('search_connectors è SEMPRE consentito (lettura del catalogo, nessuna approval)', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'sc1', name: 'search_connectors', arguments: JSON.stringify({ query: 'gmail' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'cosa puoi collegare', emit)
+    // eseguito come tool normale SENZA approval entry
+    expect(h.db.entries.some((e) => e.kind === 'approval')).toBe(false)
+    expect(h.db.entries.some((e) => e.kind === 'tool-call' && e.content === 'search_connectors')).toBe(true)
+    const result = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'sc1')
+    expect(result?.content).toContain('Gmail')
+  })
+
+  it('tool MCP con token scaduto → tool-result con meta.needsReconnect e card connector (needsAuth)', async () => {
+    class FakeReconnectError extends Error {
+      constructor(
+        public serverName: string,
+        public serverId: string
+      ) {
+        super('Il connettore "FakeApp" richiede la riconnessione')
+      }
+    }
+    // il mock mcp espone la classe e fallisce con l'errore di riconnessione
+    ;(mcpMock as unknown as Record<string, unknown>).McpNeedsReconnectError = FakeReconnectError
+    const prevCallTool = (mcpMock as unknown as { callTool: unknown }).callTool
+    ;(mcpMock as unknown as { callTool: unknown }).callTool = async () => {
+      throw new FakeReconnectError('FakeApp', 'fake')
+    }
+    // i tool mcp__ passano il gate senza approval (regola del mock db)
+    h.db.settings.set('permissions', { default: 'needs_approval', rules: [{ tool: 'mcp__*', pattern: '*', mode: 'always_allow' }] })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'mc1', name: 'mcp__fake__search', arguments: '{}' }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'cerca', emit)
+
+    const result = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'mc1')
+    expect(result?.meta?.needsReconnect).toEqual({ serverName: 'FakeApp', connectorId: 'fake' })
+    const card = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(card.meta?.message).toMatchObject({ type: 'connector', connectorId: 'fake', name: 'FakeApp' })
+    expect(card.meta?.needsAuth).toBe(true)
+    // ripristino del mock
+    ;(mcpMock as unknown as { callTool: unknown }).callTool = prevCallTool
   })
 })

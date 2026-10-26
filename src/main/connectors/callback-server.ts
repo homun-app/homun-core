@@ -17,11 +17,11 @@ export interface CallbackServer {
 const PAGE_OK = '<html><body style="font-family:system-ui;background:#0b0d10;color:#e5e5e5;display:flex;align-items:center;justify-content:center;height:100vh"><p>✓ Connettore autorizzato — puoi tornare su SandBot.</p></body></html>'
 const PAGE_ERR = '<html><body style="font-family:system-ui;background:#0b0d10;color:#f87171;display:flex;align-items:center;justify-content:center;height:100vh"><p>Richiesta non valida (state errato): riprova la connessione da SandBot.</p></body></html>'
 
-export function startCallbackServer(opts: {
+export async function startCallbackServer(opts: {
   expectedState: string
   timeoutMs?: number
   host?: string
-}): CallbackServer {
+}): Promise<CallbackServer> {
   const timeoutMs = opts.timeoutMs ?? 10 * 60_000
   let settled = false
   let resolveCode: ((v: { code: string }) => void) | null = null
@@ -59,12 +59,17 @@ export function startCallbackServer(opts: {
   const timer = setTimeout(() => {
     if (!settled) {
       settled = true
-      rejectCode?.(new Error('autorizzazione non completata entro 10 minuti'))
+      rejectCode?.(new Error(`autorizzazione non completata entro ${Math.round(timeoutMs / 60_000)} minuti`))
     }
   }, timeoutMs)
   timer.unref()
 
   server.listen(0, opts.host ?? '127.0.0.1')
+  // si attende il listener: prima di quel momento address() è null
+  await new Promise<void>((resolve, reject) => {
+    server.once('listening', resolve)
+    server.once('error', reject)
+  })
   const address = server.address()
   const port = typeof address === 'object' && address ? address.port : 0
 

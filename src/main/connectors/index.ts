@@ -159,8 +159,12 @@ function emptyState(): ConnectorState {
 
 export function createConnectorsManager(deps: ConnectorsManagerDeps) {
   const catalog = loadCatalog()
-  /** Connettori con autorizzazione in sospeso: ripartono quando si apre la UI. */
-  const pendingAuth = new Set<string>()
+  /**
+   * Connettori con autorizzazione in sospesa (UI chiusa): si tiene L'ENTRY
+   * richiesta, così il ripasso usa esattamente quella quando la finestra
+   * viene aperta.
+   */
+  const pendingAuth = new Map<string, CatalogEntry>()
 
   const states = (): Record<string, ConnectorState> => deps.getSetting(STATE_SETTING, {})
   const setState = (id: string, patch: Partial<ConnectorState>): void => {
@@ -267,12 +271,12 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
       // senza UI non si può aprire il browser: resta needs_auth, la
       // connessione riparte quando l'utente apre l'app
       if (!deps.hasUi() && !(await deps.store.read(entry.id, 'oauth.tokens'))) {
-        pendingAuth.add(entry.id)
+        pendingAuth.set(entry.id, entry)
         setState(entry.id, { status: 'needs_auth', error: 'Apri la finestra di SandBot per autorizzare' })
         return { status: 'needs_auth', message: 'finestra chiusa: autorizzazione rinviata' }
       }
       const state = randomBytes(16).toString('hex')
-      const cb = startCallbackServer({ expectedState: state })
+      const cb = await startCallbackServer({ expectedState: state })
       const provider = providerFor(entry, cb.url, () => state)
       try {
         // discovery/DCR/PKCE/refresh li guida l'orchestratore auth() dell'SDK
@@ -294,7 +298,7 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
         const message = e instanceof Error ? e.message : String(e)
         // apertura del browser fallita (UI chiusa): autorizzazione rinviata
         if (!deps.hasUi()) {
-          pendingAuth.add(entry.id)
+          pendingAuth.set(entry.id, entry)
           setState(entry.id, { status: 'needs_auth', error: message })
           return { status: 'needs_auth', message }
         }
@@ -307,10 +311,7 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
 
     /** Riprova le connessioni rimaste in needs_auth per UI chiusa. */
     retryPendingAuth(): void {
-      for (const id of [...pendingAuth]) {
-        const entry = catalog.find((e) => e.id === id)
-        if (entry) void this.runConnect(entry)
-      }
+      for (const entry of [...pendingAuth.values()]) void this.runConnect(entry)
     },
 
     /** Disconnette: revoca LOCALE dei token (nessuna chiamata al server). */
