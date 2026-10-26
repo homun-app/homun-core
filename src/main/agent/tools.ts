@@ -16,7 +16,7 @@ export const toolDefs: ToolDef[] = [
       type: 'object',
       properties: {
         text: { type: 'string', description: 'Il messaggio (markdown) da mostrare in chat' },
-        urgent: { type: 'boolean', description: 'True se l\'utente deve vederlo subito anche se è via (opzionale)' }
+        urgent: { type: 'boolean', description: 'True solo se l\'utente deve agire entro poche ore; i messaggi non urgenti dei turni automatici aspettano la finestra di consegna' }
       },
       required: ['text']
     }

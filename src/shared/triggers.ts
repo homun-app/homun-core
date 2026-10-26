@@ -184,6 +184,23 @@ export function chooseQueryArgName(tool: PollToolCandidate | null): string | nul
 
 // ---- validazione della forma (la validazione del cron sta nel daemon) ----
 
+/**
+ * Fase 7 (residuo 0a): un connector_poll su un server NON del catalogo
+ * (aggiunto a mano) richiede la conferma esplicita dell'utente che il tool
+ * legga soltanto — readOnlyHint di un server manuale è una autodichiarazione
+ * non verificata. Torna il messaggio d'errore, o null se il trigger è ammesso.
+ */
+export function manualServerPollError(
+  t: { type: string; userConfirmedReadOnly?: boolean },
+  catalogServer: boolean
+): string | null {
+  if (catalogServer || t.userConfirmedReadOnly === true) return null
+  return (
+    'connector_poll su un server aggiunto a mano: serve la conferma esplicita ' +
+    'dell\'utente che il tool legga soltanto e non modifichi nulla (userConfirmedReadOnly)'
+  )
+}
+
 /** Errori di forma di un trigger (il cron e il readOnly del tool si verificano lato daemon). */
 export function triggerShapeErrors(t: RoutineTrigger): string[] {
   const errors: string[] = []

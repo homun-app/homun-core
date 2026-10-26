@@ -178,6 +178,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   let turnEntryId = 0
   // ultimo testo libero non vuoto del modello nel turno (ripiego del fallback)
   let lastFreeText = ''
+  // fase 7 (residuo 0b): nei turni automatici al massimo UN urgent per esecuzione
+  let urgentUsed = false
 
   try {
     if (opts.resume) {
@@ -354,11 +356,20 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         }
 
         if (call.name === 'send_to_user') {
-          const message: SendMessagePayload = { type: 'text', text: String(input.text ?? ''), ...(input.urgent ? { urgent: true } : {}) }
+          // fase 7 (residuo 0b): alcuni modelli mettono urgent a OGNI
+          // send_to_user dei turni automatici, svuotando l'outbox: nei turni
+          // di routine il primo urgent passa, i successivi diventano non
+          // urgenti (e finiscono trattenuti come gli altri)
+          let urgent = input.urgent === true
+          if (urgent && source === 'routine') {
+            if (urgentUsed) urgent = false
+            else urgentUsed = true
+          }
+          const message: SendMessagePayload = { type: 'text', text: String(input.text ?? ''), ...(urgent ? { urgent: true } : {}) }
           // fase 6 (§3bis L4): i messaggi NON urgenti dei turni automatici
           // (routine/trigger) restano in outbox fino alla finestra di consegna
           // o all'apertura della chat; urgent e turni utente passano subito
-          const hold = source === 'routine' && !input.urgent
+          const hold = source === 'routine' && !urgent
           const sent = appendSend(agentId, call, message, emit, hold ? { held: true } : {})
           if (hold) holdOutboxEntry(sent.id, agentId, sent.createdAt)
           messages.push({

@@ -987,6 +987,39 @@ describe('fase 6: outbox dei turni automatici', () => {
     expect(h.db.outbox).toHaveLength(0)
   })
 
+  it('fase 7 (residuo 0b): nei turni automatici solo il PRIMO urgent passa, i successivi sono trattenuti', async () => {
+    h.llm.queue = [
+      { toolCalls: [mkSend('u1', '{"text":"primo: agisci entro stasera","urgent":true}')] },
+      { toolCalls: [mkSend('u2', '{"text":"secondo: altro avviso","urgent":true}'), mkSend('u3', '{"text":"terzo: ancora","urgent":true}')] },
+      { text: 'fatto' }
+    ]
+    await runTurn(AGENT, '[routine] due urgent', emit, undefined, { source: 'routine', title: 'Urgentissime' })
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends).toHaveLength(3)
+    expect(sends[0]!.meta?.held).toBeUndefined() // il primo urgent passa subito
+    expect((sends[0]!.meta?.message as { urgent?: boolean }).urgent).toBe(true)
+    // i successivi urgent diventano NON urgenti e finiscono in outbox
+    expect(sends[1]!.meta?.held).toBe(true)
+    expect(sends[2]!.meta?.held).toBe(true)
+    expect((sends[1]!.meta?.message as { urgent?: boolean }).urgent).toBeUndefined()
+    expect(h.db.outbox).toEqual([
+      { entry_id: sends[1]!.id, agent_id: AGENT, created_at: sends[1]!.createdAt },
+      { entry_id: sends[2]!.id, agent_id: AGENT, created_at: sends[2]!.createdAt }
+    ])
+  })
+
+  it('fase 7 (residuo 0b): nei turni UTENTE più urgent restano urgent (l\'outbox non c\'entra)', async () => {
+    h.llm.queue = [
+      { toolCalls: [mkSend('v1', '{"text":"uno","urgent":true}'), mkSend('v2', '{"text":"due","urgent":true}')] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'domanda con urgenze', emit)
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends).toHaveLength(2)
+    expect(sends.every((s) => s.meta?.held === undefined)).toBe(true)
+    expect((sends[1]!.meta?.message as { urgent?: boolean }).urgent).toBe(true)
+  })
+
   it('i turni avviati dall\'utente NON passano mai dall\'outbox', async () => {
     h.llm.queue = [
       { toolCalls: [mkSend('s3', '{"text":"ecco la risposta"}')] },

@@ -331,6 +331,12 @@ export interface ConnectorPollTrigger {
   preset?: 'email' | 'calendar_event'
   /** solo preset calendar_event: il job parte N minuti prima dell'evento */
   offsetMinutes?: number
+  /**
+   * Fase 7 (residuo 0a): obbligatorio per i poll su server NON del catalogo
+   * (aggiunti a mano): l'utente conferma in UI che il tool legge soltanto.
+   * L'annotazione readOnlyHint di un server manuale non è verificata.
+   */
+  userConfirmedReadOnly?: boolean
 }
 
 /** Webhook: POST http://127.0.0.1:<porta daemon>/hooks/<routineId> con Bearer <token>. */

@@ -179,6 +179,14 @@ export function deleteAgent(id: string): void {
   // fase 5 (residuo 0d): si rimuove solo un agente ESISTENTE (il path della
   // directory si costruisce dal suo id, mai da input libero)
   if (!getAgent(id)) return
+  // fase 7 (residuo 0c): pulizia di tutto ciò che resta dell'agente — le
+  // routine (con i loro setting trigger.seen.<id>, altrimenti orfani nei
+  // settings) e le righe outbox trattenute; le entry muoiono col DELETE sotto
+  for (const r of db().prepare('SELECT id FROM routines WHERE agent_id = ?').all(id) as Array<{ id: number }>) {
+    db().prepare('DELETE FROM settings WHERE key = ?').run(`trigger.seen.${r.id}`)
+  }
+  db().prepare('DELETE FROM routines WHERE agent_id = ?').run(id)
+  db().prepare('DELETE FROM outbox WHERE agent_id = ?').run(id)
   db().prepare('DELETE FROM agents WHERE id=?').run(id)
   db().prepare('DELETE FROM entries WHERE agent_id=?').run(id)
   // memoria e skill su disco non restano orfane

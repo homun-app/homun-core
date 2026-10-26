@@ -751,11 +751,19 @@ function RoutinesTab() {
   const [err, setErr] = useState('')
   const [suggestions, setSuggestions] = useState<RoutineSuggestion[]>([])
   const [busy, setBusy] = useState(false)
+  // fase 7 (residuo 0a): i server MCP manuali sono ammessi come fonte dei
+  // poll (con conferma esplicita di sola lettura)
+  const [manualServers, setManualServers] = useState<McpServerInfo[]>([])
 
   const refresh = async () => {
     if (activeId) setRoutines(await api.listRoutines(activeId))
   }
   useEffect(() => { void refresh() }, [activeId])
+  useEffect(() => {
+    api.mcpList()
+      .then((all) => setManualServers(all.filter((s) => s.enabled && !s.catalogId)))
+      .catch(() => undefined)
+  }, [])
 
   const pauseResume = async (r: RoutineInfo): Promise<void> => {
     // la ripresa dalla UI è un'azione dell'utente: nessuna card di approvazione
@@ -820,6 +828,7 @@ function RoutinesTab() {
           agentId={activeId}
           routine={editing}
           connectors={connectors}
+          manualServers={manualServers}
           onCancel={() => setEditing(null)}
           onSaved={async () => { setEditing(null); await refresh() }}
         />
@@ -828,6 +837,7 @@ function RoutinesTab() {
           <NewRoutinePicker
             agentId={activeId}
             connectors={connectors}
+            manualServers={manualServers}
             onCreate={async (title, prompt, trigger, timezone) => {
               setErr('')
               try {
@@ -883,6 +893,7 @@ function RoutinesTab() {
 function NewRoutinePicker(props: {
   agentId: string | null
   connectors: ConnectorInfo[]
+  manualServers: McpServerInfo[]
   onCreate(title: string, prompt: string, trigger: RoutineTrigger, timezone: string): Promise<void>
   err: string
 }) {
@@ -904,6 +915,7 @@ function NewRoutinePicker(props: {
     <TriggerEditor
       agentId={props.agentId}
       connectors={props.connectors}
+      manualServers={props.manualServers}
       initialKind={kind}
       onCancel={() => setKind(null)}
       onSaved={() => setKind(null)}
@@ -918,6 +930,7 @@ function TriggerEditor(props: {
   routine?: RoutineInfo
   initialKind?: TriggerKind
   connectors: ConnectorInfo[]
+  manualServers: McpServerInfo[]
   onCancel(): void
   onSaved(): void
   onCreate?(title: string, prompt: string, trigger: RoutineTrigger, timezone: string): Promise<void>
@@ -953,6 +966,8 @@ function TriggerEditor(props: {
   const [offsetMinutes, setOffsetMinutes] = useState(10)
   const [query, setQuery] = useState('')
   const [argsJson, setArgsJson] = useState('{}')
+  // fase 7 (residuo 0a): conferma esplicita per i poll su server NON del catalogo
+  const [confirmReadOnly, setConfirmReadOnly] = useState(r?.trigger?.type === 'connector_poll' ? !!r.trigger.userConfirmedReadOnly : false)
 
   // preset: il tool lo sceglie l'euristica dai tool del connettore connesso
   const presetConnectors = props.connectors.filter((c) => c.state.status === 'connected' && c.tools.length > 0)
@@ -983,6 +998,9 @@ function TriggerEditor(props: {
     if (kind === 'presence_return') return { type: 'presence_return' }
     // email / calendar_event / connector_poll
     const cid = connectorId || (kind === 'email' ? 'gmail' : kind === 'calendar_event' ? 'gcalendar' : '')
+    // fase 7 (residuo 0a): server manuale (non del catalogo) → serve la
+    // conferma esplicita che il tool legge soltanto
+    const isManual = props.manualServers.some((s) => s.id === cid)
     let args: Record<string, unknown>
     try {
       args = JSON.parse(argsJson || '{}') as Record<string, unknown>
@@ -1001,7 +1019,8 @@ function TriggerEditor(props: {
       intervalMin: Math.max(2, Number(intervalMin) || 2),
       idField: idField.trim(),
       ...(kind === 'email' ? { preset: 'email' as const } : {}),
-      ...(kind === 'calendar_event' ? { preset: 'calendar_event' as const, offsetMinutes: Math.max(0, Number(offsetMinutes) || 0) } : {})
+      ...(kind === 'calendar_event' ? { preset: 'calendar_event' as const, offsetMinutes: Math.max(0, Number(offsetMinutes) || 0) } : {}),
+      ...(isManual ? { userConfirmedReadOnly: confirmReadOnly } : {})
     }
   }
 
@@ -1099,10 +1118,26 @@ function TriggerEditor(props: {
       {(kind === 'email' || kind === 'calendar_event' || kind === 'connector_poll') && (
         <div className="space-y-2">
           {kind === 'connector_poll' && (
-            <select className={`w-full ${inputCls}`} value={connectorId} onChange={(e) => setConnectorId(e.target.value)}>
-              <option value="">— connettore —</option>
-              {presetConnectors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <>
+              <select className={`w-full ${inputCls}`} value={connectorId} onChange={(e) => setConnectorId(e.target.value)}>
+                <option value="">— connettore —</option>
+                {presetConnectors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {props.manualServers.map((s) => <option key={s.id} value={s.id}>{s.name} (server manuale)</option>)}
+              </select>
+              {props.manualServers.some((s) => s.id === connectorId) && (
+                // fase 7 (residuo 0a): readOnlyHint di un server manuale è
+                // autodichiarato — serve la spunta esplicita dell'utente
+                <label className="flex items-start gap-2 rounded-lg border border-amber-800/50 bg-amber-950/20 px-2 py-1.5 text-[11px] text-amber-200/90">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={confirmReadOnly}
+                    onChange={(e) => setConfirmReadOnly(e.target.checked)}
+                  />
+                  Confermo che questo tool legge soltanto e non modifica nulla (server aggiunto a mano: la dichiarazione "sola lettura" non è verificata)
+                </label>
+              )}
+            </>
           )}
           {(kind === 'email' || kind === 'calendar_event') && <p className="text-[11px] text-neutral-500">{presetHint(kind)}</p>}
           {kind === 'email' && (

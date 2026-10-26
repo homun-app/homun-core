@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   extractByPath, extractIds, splitIdField, guessEventStart, guessItemTitle,
-  choosePollTool, chooseQueryArgName, triggerShapeErrors, formatTriggerEvent,
+  choosePollTool, chooseQueryArgName, triggerShapeErrors, formatTriggerEvent, manualServerPollError,
   aroundJitterMinutes, mergeSeenIds, SEEN_IDS_CAP
 } from '../triggers'
 import type { RoutineTrigger, TriggerEventPayload } from '../types'
@@ -164,5 +164,25 @@ describe('formatTriggerEvent: l\'evento entra come evidenza, non come istruzione
     expect(text).toContain('<evento>')
     expect(text).toContain('</evento>')
     expect(text).not.toContain('undefined')
+  })
+})
+
+// fase 7 (residuo 0a): i poll su server NON del catalogo richiedono la
+// conferma esplicita dell'utente che il tool legga soltanto
+describe('manualServerPollError (residuo 0a)', () => {
+  const poll = { type: 'connector_poll' }
+
+  it('server del catalogo: nessuna conferma richiesta (readOnlyHint verificato dal vendor)', () => {
+    expect(manualServerPollError({ ...poll }, true)).toBeNull()
+  })
+
+  it('server manuale senza conferma: errore leggibile', () => {
+    const err = manualServerPollError({ ...poll }, false)
+    expect(err).toBeTruthy()
+    expect(err).toContain('userConfirmedReadOnly')
+  })
+
+  it('server manuale CON conferma esplicita: ammesso', () => {
+    expect(manualServerPollError({ ...poll, userConfirmedReadOnly: true }, false)).toBeNull()
   })
 })

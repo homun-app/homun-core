@@ -18,7 +18,7 @@ import { secondaryPrompts } from '../main/agent/prompts'
 import { parseCron } from './cron'
 import { isValidTimeZone } from './tz'
 import { nextScheduleRun, nextPollAt } from './triggers'
-import { triggerShapeErrors } from '../shared/triggers'
+import { triggerShapeErrors, manualServerPollError } from '../shared/triggers'
 import { generateWebhookToken } from './webhooks'
 import { enqueueUserMessage, enqueueWidgetResponse } from './enqueue'
 import { deliverHeldForAgent } from './outbox'
@@ -85,6 +85,13 @@ export function buildApiMethods(
         else if (!tool.annotations?.readOnlyHint) {
           errors.push(`il tool "${t.tool}" non è in sola lettura (readOnlyHint): il trigger viene rifiutato`)
         }
+      }
+      // fase 7 (residuo 0a): poll su un server NON del catalogo → serve la
+      // conferma esplicita dell'utente (readOnlyHint lì è autodichiarato)
+      const server = mcpMod.listServers().find((s) => s.id === t.connectorId)
+      if (server) {
+        const manual = manualServerPollError(t, !!server.catalogId)
+        if (manual) errors.push(manual)
       }
     }
     if (errors.length) throw new Error(`Trigger non valido: ${errors.join('; ')}`)
