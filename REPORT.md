@@ -1002,6 +1002,10 @@ Directory dati temporanea, provider Ollama locale, nessun account autorizzato, n
 | **7** test vitest dell'elenco | fatto | `group-turns.test.ts` (24), `groups.test.ts` (11), `group-runner.test.ts` (8), +17 in `loop.test.ts`, +3 `prompts.test.ts`, +4 `turn-sends.test.ts` |
 | **Scenario** dal vivo con daemon reale e kimi-k3:cloud | fatto | tabella sotto |
 
+## Verifica d'integrazione preliminare (provider finto locale, zero quota)
+
+Prima di spendere la finestra di quota Ollama, l'intera catena è stata validata con un mini-provider OpenAI-compatible scriptato su 127.0.0.1 (risposte coreografate per agente, daemon REALE): 3 bot creati dal principale (provider+modello ereditati, sezione assegnata), gruppo da 4 bot, kickoff con @menzioni e @tutti, fan-out con esiti SENT/PASS/CANCELLED nel registro, consegna dello specialista, UN riepilogo del coordinatore in chat diretta, messaggio utente "@Coordinatore …" servito SOLO al coordinatore, catena chiusa senza job in sospeso. La corsa ha anche confermato sul campo i permessi per origine (un create_agent tentato DA UN TURNO DI GRUPPO dal provider finto è stato fermato con card di approvazione) e la loop detection (il terzo `pass` identico del finto pianificatore → STOPPED → CANCELLED).
+
 ## Verifica manuale (scenario a scenario, daemon reale + probe ws)
 
 Directory dati temporanea, provider Ollama locale (kimi-k3:cloud), nessun account esterno autorizzato, nessun browser usato. Richiesta al bot principale: *"Fammi una demo: crea un gruppo di bot coordinati da un agente, con una chat, che organizza una cena di compleanno per 8 persone (menu, lista della spesa, scaletta della serata)."* → [TABELLA SCENARIO]
