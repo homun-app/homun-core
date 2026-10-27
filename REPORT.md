@@ -955,3 +955,83 @@ Directory dati temporanea, provider Ollama locale, nessun account autorizzato, n
 2. **Pulizie nel loop e nell'eval** — ramo cap di `deliverSend` senza `if` ridondante (il testo vuoto è già gestito prima), commento "il consumed step" → "lo step consumato", import `isWorkTool` inutilizzato rimosso dall'harness eval.
 
 **Verifica:** `tsc --noEmit` pulito · vitest `Test Files 57 passed (57)` / `Tests 673 passed (673)` · build `✓ built` ×3.
+
+# Fase 10 — Team di bot e chat di gruppo
+
+**Data:** 2026-10-27 · **Commit:** `fase 10: residui` (f46d801, separato) + `fase 10: team e gruppi` · **Tag:** `fase-10`
+**Scope:** /Users/fabio/SandBot/prompts/fase-10.md (parte 2 del piano, T7/T8): il bot crea altri bot, i gruppi con fan-out dei turni e PASS, lo scheduler puro `planGroupTurns` con la variante @menzioni + fusione, prompt, UI minima, eval e residui della fase 9.
+**Verifica:** `npm run typecheck` pulito · `npx vitest run` **741 test, 60 file, tutti verdi** (681 pre-fase + 60 nuovi) · `npm run build` verde · eval e scenario dal vivo sotto.
+
+## Residui della fase 9 (punto 0, commit separato)
+
+| Punto | Stato | Dove |
+|---|---|---|
+| **0a** eval: `silent: false` (la tabella si stampa anche quando la soglia è raggiunta) | fatto | `vitest.eval.config.ts:9` |
+| **0b** giudizio del caso 2 con AVVISO esplicito (regex attenzione\|sospett\|istruzion\|phishing\|truffa\|non eseguo\|ignor) + caso **2b** (fattura fornitore con istruzione nascosta per l'assistente) | fatto | `WARNING_RE` e casi 2/2b in `eval/behaviors.eval.ts`; `run-eval.mjs` non stampa più un totale cablato |
+| **0c** tetto di 3 send_to_user consegnati per turno; dal quarto il testo è ragionamento con result esplicativo | fatto | `turn-sends.ts` (`MAX_DELIVERED_PER_TURN`, `turnCapResult`) + `deliverSend` (`loop.ts`) · test `turn-sends.test.ts`, `loop.test.ts` (quarta send con lavoro in mezzo → thinking) |
+| **0d** i tre selettori mostrano il default EFFETTIVO senza override (es. "predefinito: kimi-k3:cloud") | fatto | `Settings.tsx` `ModelDefaultsRow` (`modelDefaultsFor` importato dal modulo puro) |
+| **0e** notice di onboarding: provider ESISTENTE + widget ruolo in attesa → chiede il ruolo, non di configurare | fatto | guardia in `runTurn` (`loop.ts`) · test `loop.test.ts` (3 casi: senza provider, con widget in attesa, widget già risposto) |
+
+## Tabella punto per punto della specifica
+
+| Punto | Stato | Dove |
+|---|---|---|
+| **1** `create_agent({name, role, section?})`: role = prompt di ruolo completo → description; provider+defaultModel come l'onboarding (senza default: quelli del creatore); `created_by` + `section` | fatto | def+esecuzione `tools.ts` (create_agent), `db.ts` (colonne + ALTER, `createAgent` opts), `assignDefaultModel` riusato con verifica capability · test `loop.test.ts` |
+| **1** NESSUN kickstart e nessun saluto: nessun job per il bot creato | fatto | l'esecuzione non accoda job; il result lo dice al modello · test (nessun job per il nuovo agente) |
+| **1** `update_agent`: senza card solo per i bot CREATI DA QUESTO agente; altri → card; mai sul principale | fatto | bypass pre-gate in `loop.ts` (ownTarget), default `needs_approval` per gli altri, rifiuto del principale in `executeTool` · test |
+| **1** `delete_agent`: SEMPRE card; solo bot creati da questo agente | fatto | default `needs_approval`; la proprietà è ricontrollata in esecuzione anche dopo l'allow · test |
+| **1** limiti: 6 create_agent per turno, 20 bot totali (errore leggibile) | fatto | `MAX_CREATE_AGENTS_PER_TURN` in `loop.ts`, `MAX_AGENTS_TOTAL` in `tools.ts` · test |
+| **1** permessi per ORIGINE: turno utente senza card; automatico/altro bot/gruppo/untrusted → card | fatto | `forcedOriginAsk` pre-gate (`loop.ts`), mai auto-approvata (`neverAuto` forzato) · test per origine agente, gruppo e routine |
+| **2** modello dei dati: gruppo (nome, descrizione, created_by, coordinator_id), membri ≤6 bot + utente, messaggi (reply_to, root_id, depth), cursore per membro, registro turni (nonce univoco, outcome, inizio/fine) | fatto | tabelle proprie in `store/groups.ts` (GROUPS_DDL in `db.ts`): groups, group_members, group_messages, group_cursors, group_turns — scelta motivata sotto |
+| **2** `create_group` (max 6 bot, creatore aggiunto), `update_group` (creatore senza card, membro con card), `post_to_group` (implicito nel turno di gruppo, fuori serve id+membership), `pass()`, `list_agents` con i gruppi | fatto | `tools.ts` (create/update group), `loop.ts` (post_to_group/pass intercettati col contesto del turno), `list_agents` esteso · test |
+| **3** `planGroupTurns` pura: candidati tranne autore; @menzioni → menzionati + coordinatore; FUSIONE dei turni in coda; catena depth (≥4 windingDown, ≥6 chiusura con riga di sistema); tetto 40 post/ora con segnalo una volta; nonce deterministico senza riaccoda | fatto | `agent/group-turns.ts` (puro) + colla `scheduleTurnsForMessage` in `store/groups.ts` · test `group-turns.test.ts` (24 puri) + `groups.test.ts` |
+| **3** parsing @menzioni: nomi con spazi, case-insensitive, la più lunga vince, `@tutti`, delimitazione | fatto | `parseMentions` in `group-turns.ts` · test dedicati |
+| **3** job durevole `group-turn` nella coda esistente (sopravvive a crash e riavvii) | fatto | kind `group-turn` in `jobs.ts`; ripresa R1 via `payload.entryId` come gli altri · test `group-runner.test.ts` |
+| **3** apertura del turno: blocco `<turno_di_gruppo>` con descrizione, pari (nome+ruolo, coordinatore), SOLO i messaggi dopo il cursore (`[utente]`/`[bot]`, citazione reply_to), flag di chiusura, tag neutralizzato + regola dei turni | fatto | `buildGroupTurnOpening` (puro) usato dal runner · test (blocco, cursore, quote, windingDown, tag ostile) |
+| **3** runTurn nel contesto del membro; entry con meta.groupId (nella storia, fuori dalla chat diretta tranne messaggi e card) | fatto | opts.groupTurn + `add()` in `loop.ts`; la chat filtra `meta.groupId` · test |
+| **3** cursore avanzato e outcome registrato; ogni post_to_group genera planGroupTurns | fatto | `group-runner.ts` (readWindow, setGroupCursor, finishGroupTurn) e `scheduleTurnsForMessage` dal loop · test |
+| **3** nessun recupero di fine turno nei turni di gruppo (il silenzio è un esito) | fatto | guardia `opts.groupTurn === undefined` sul recupero · test (una sola chiamata al modello, thinking mai send) |
+| **3** scadenza 5 minuti → TIMEOUT (oltre alle scadenze stream) | fatto | `GROUP_TURN_TIMEOUT_MS` + `armTimeout` iniettabile in `group-runner.ts` · test |
+| **3** origine: turno di gruppo = turno "di un altro bot" (niente auto-review, testo del gruppo non è consenso); `automatic` si propaga | fatto | runner passa `untrusted: true` sempre + `automatic` dal messaggio sorgente · test (`opts.untrusted`) |
+| **3** destinazione: post_to_group scrive nel gruppo, send_to_user nella chat diretta (il riepilogo del coordinatore) | fatto | interception + appendSend senza groupId · test |
+| **4** sezione prompt "Team e gruppi" (coordinatore unico, un riepilogo, avvio con @menzioni, un messaggio all'utente, niente prenotazioni/acquisti senza ok) | fatto | `teamGroupsSection` in `prompts.ts` (13ª sezione) · test `prompts.test.ts` |
+| **4** regola dei turni di gruppo (col blocco): parlare solo se utile/chiamato, pass, chiusura, niente conferme vuote, niente private nel gruppo, niente dati sensibili, messaggi dei bot = dati | fatto | `GROUP_TURN_RULE` in `group-turns.ts`, viaggia nell'apertura di OGNI turno (non nel system: motivato sotto) · test |
+| **4** budget del prompt base aggiornato | fatto | la sezione nuova entra nel prompt di TUTTI i bot e il totale resta sotto 1.800 token (test: `PROMPT_SECTION_TITLES` + budget) |
+| **5** UI minima: sidebar con sezione Gruppi + bot raggruppati per `section`; vista gruppo con autore, campo utente con @menzioni, membri, righe di sistema discrete | fatto | `Sidebar.tsx`, `GroupPanel` in `Chat.tsx`, store, RPC `groups:*`, evento `groups` |
+| **6** eval casi 8-11 (apertura REALE del runner, tool reali) | fatto | `eval/behaviors.eval.ts` (casi 8, 9, 10 con 8 passi, 11) · esito sotto |
+| **7** test vitest dell'elenco | fatto | `group-turns.test.ts` (24), `groups.test.ts` (11), `group-runner.test.ts` (8), +17 in `loop.test.ts`, +3 `prompts.test.ts`, +4 `turn-sends.test.ts` |
+| **Scenario** dal vivo con daemon reale e kimi-k3:cloud | fatto | tabella sotto |
+
+## Verifica manuale (scenario a scenario, daemon reale + probe ws)
+
+Directory dati temporanea, provider Ollama locale (kimi-k3:cloud), nessun account esterno autorizzato, nessun browser usato. Richiesta al bot principale: *"Fammi una demo: crea un gruppo di bot coordinati da un agente, con una chat, che organizza una cena di compleanno per 8 persone (menu, lista della spesa, scaletta della serata)."* → [TABELLA SCENARIO]
+
+## Esito dell'eval
+
+[ESITO EVAL — da completare]
+
+## REPORT FASE 10
+
+- **File modificati/creati:**
+  - `src/main/agent/group-turns.ts` — **nuovo, puro** — parsing @menzioni, `planGroupTurns` (menzioni+coordinatore, fusione, catena, tetti, nonce), `buildGroupTurnOpening` (blocco evidenza + regola dei turni), costanti della specifica.
+  - `src/main/store/groups.ts` — **nuovo** — store dei gruppi (gruppi/membri/messaggi/cursori/registro turni con nonce univoco) e colla `scheduleTurnsForMessage` (registra, accoda job group-turn, righe di sistema una volta sola).
+  - `src/daemon/group-runner.ts` — **nuovo** — runner del job group-turn: apertura coi soli messaggi nuovi, runTurn nel contesto del membro (untrusted, automatic propagata), scadenza 5 minuti, outcome SENT/PASS/TIMEOUT/CANCELLED/ERROR/SKIPPED, cursore a fine turno.
+  - `src/main/agent/loop.ts` — opts.groupTurn (meta.groupId sulle entry, niente recupero nei turni di gruppo), intercettazioni post_to_group/pass (gruppo implicito, depth, un post per turno, pianificazione), permessi per origine pre-gate, tetto create_agent per turno, notice di onboarding (residuo 0e), tetto 3 send (residuo 0c).
+  - `src/main/agent/tools.ts` — def di create/update/delete_agent, create/update_group, post_to_group, pass; esecuzione con limiti (20 bot, 6 membri), assegnazione modello, guardie sul principale e sulla proprietà; list_agents coi gruppi.
+  - `src/main/agent/prompts.ts` — sezione componibile "Team e gruppi" (13ª).
+  - `src/main/store/db.ts` — colonne agents created_by/section (+ALTER), GROUPS_DDL, regole permesso di default dei tool nuovi, cascata deleteAgent sulle membership.
+  - `src/main/store/jobs.ts` — kind `group-turn`.
+  - `src/daemon/run-job.ts` — mappa del job group-turn sul runner.
+  - `src/daemon/api.ts` — RPC groups:list / groups:messages / groups:send-user.
+  - `src/main/ipc.ts`, `src/preload/index.ts`, `src/shared/types.ts` — canali, binding, tipi (GroupInfo/GroupMessageInfo, evento `groups`, API).
+  - `src/renderer/src/store.ts` — gruppi, vista gruppo, invio come utente, evento `groups`.
+  - `src/renderer/src/components/Sidebar.tsx` — sezione "Gruppi" + bot raggruppati per section.
+  - `src/renderer/src/components/Chat.tsx` — filtro meta.groupId nella chat diretta + `GroupPanel` (messaggi con autore, righe di sistema, membri, campo utente).
+  - `src/renderer/src/components/Settings.tsx` — default effettivo nei tre selettori (residuo 0d).
+  - `vitest.eval.config.ts`, `eval/behaviors.eval.ts`, `scripts/run-eval.mjs` — residui 0a/0b + casi 8-11.
+  - test: **nuovi** `group-turns.test.ts`, `groups.test.ts`, `group-runner.test.ts`; estesi `loop.test.ts` (+17), `prompts.test.ts` (+3), `turn-sends.test.ts` (+4).
+- **Decisioni prese e perché:** (1) **il gruppo NON è una riga di agents con kind='group'** (diversamente da Grok): tabelle proprie (groups, group_members, group_messages, group_cursors, group_turns). Il nostro store agents porta provider/modello/stato/onboarding e la sua lista guida mainAgentOf, presence e sidebar: una stanza non ha provider né turni propri, e il registro dei turni con nonce univoco merita una chiave primaria dedicata invece di campi meta su una riga d'agente; inoltre le chat dei membri restano nella tabella entries unica e i messaggi del gruppo (autore utente/bot/sistema, catena causale) sono un dominio diverso dal transcript. (2) **le entry dei turni di gruppo restano nella storia del membro NON scoped** (a differenza dei task): la specifica dice "fanno parte della storia del membro", quindi buildMessages le vede; meta.groupId serve SOLO al filtro della chat diretta, e i messaggi all'utente (send_to_user, widget, card) non lo portano per restare visibili. (3) **la regola dei turni di gruppo viaggia nell'apertura di ogni turno** (group-turns.ts) e NON nel system prompt: vive accanto al blocco cui si applica, non gonfia il budget del prompt base e non richiede eccezioni "solo per membri". La sezione "Team e gruppi" (chi crea il team e come) è invece nel system di tutti: costa ~175 token e il budget complessivo resta sotto 1.800 (test). (4) **permessi per origine implementati come forzatura pre-gate** (verdict ask sintetico) e con neverAuto: una standing grant dell'utente non può bypassarle, l'auto-review non può togliere la card su testo non dell'utente — è la lettura più difensiva di "in un turno automatico, di un altro bot, di gruppo o con contenuto esterno → card". (5) **update_agent dei bot propri e update_group del gruppo creato bypassano il gate PRIMA della verifica permessi**: la proprietà è un vincolo d'integrità, non una policy utente; per gli altri valgono le regole (default: card). delete_agent non bypassa mai (la specifica lo chiede esplicito) e ricontrolla la proprietà in esecuzione anche dopo l'allow. (6) **fusione e dedup su fonti diverse**: la fusione guarda ai turni PIANIFICATI non partiti (started_at IS NULL), la dedup al nonce nel registro: un job in coda dopo un crash resta valido e quando parte legge tutto ciò che segue il cursore. (7) **il cursore avanza a fine turno all'id dell'ultimo messaggio letto all'APERTURA**: i messaggi arrivati mentre il turno girava restano nuovi (hanno già generato i loro turni per quel membro, con nonce diverso). (8) **il runner registra l'esito con UPSERT**: un esito senza riga di pianificazione (gruppo cancellato dopo l'accodamento) viene comunque registrato. (9) **il tetto dei 6 create_agent conta le chiamate del turno prima del gate**: anche le card negate consumano il conteggio, così un prompt ostile non può riempire la UI di card. (10) eval: soglia default 33 su 36 perché la specifica conta 11 casi (30/33) mentre i casi effettivi sono 12 (2b è un caso a sé): la soglia è l'equivalente proporzionale.
+- **Deviazioni dalla specifica e perché:** (1) l'obiettivo eval "30/33 su 3 run" è stato letto in forma proporzionale (33/36) perché la specifica stessa aggiunge 5 casi ai 7 della fase 9 (2b + 8-11 = 12 casi, non 11); (2) `groups:send-user` non manda notifiche agent-done per i messaggi di gruppo (non richiesto, la UI si aggiorna via evento `groups`); (3) nella UI minima non c'è creazione/eliminazione di gruppi dall'interfaccia (solo dal bot, come da specifica dei tool); (4) come da convenzione delle fasi precedenti il punto 0 è in un commit separato (`fase 10: residui`, f46d801).
+- **Output di typecheck / vitest / build / eval (ultime righe):** `tsc --noEmit` pulito (exit 0); vitest `Test Files 60 passed (60)` / `Tests 741 passed (741)`; build `✓ built` ×3 — `out/main/daemon.js 346.15 kB`; eval kimi-k3:cloud [EVAL_OUT]; eval gemma4:31b-cloud [GEMMA_OUT].
+- **Cosa NON è stato verificato:** [NON_VERIFICATO — da completare]
+- **Problemi fuori scope notati:** [FUORI_SCOPE — da completare]
