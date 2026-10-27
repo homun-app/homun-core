@@ -92,7 +92,9 @@ function open(): DatabaseSync {
       status TEXT NOT NULL DEFAULT 'working',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
-      summary TEXT
+      summary TEXT,
+      untrusted INTEGER DEFAULT 0,
+      automatic INTEGER DEFAULT 0
     );
     ${JOBS_DDL}
   `)
@@ -112,6 +114,17 @@ function open(): DatabaseSync {
     ['last_poll', 'ALTER TABLE routines ADD COLUMN last_poll INTEGER']
   ] as const) {
     if (!present.has(col)) db.exec(ddl)
+  }
+  // fase 8 (correzione B1): colonne dell'origine del turno che ha creato il
+  // task — untrusted (altro bot o evento esterno) e automatic (routine): si
+  // propagano a TUTTI i turni del task e al TASK_DONE
+  const taskCols = db.prepare("SELECT name FROM pragma_table_info('tasks')").all() as Array<{ name: string }>
+  const taskPresent = new Set(taskCols.map((c) => c.name))
+  for (const [col, ddl] of [
+    ['untrusted', 'ALTER TABLE tasks ADD COLUMN untrusted INTEGER DEFAULT 0'],
+    ['automatic', 'ALTER TABLE tasks ADD COLUMN automatic INTEGER DEFAULT 0']
+  ] as const) {
+    if (!taskPresent.has(col)) db.exec(ddl)
   }
   return db
 }
@@ -460,27 +473,44 @@ export interface Task {
   created_at: number
   updated_at: number
   summary: string | null
+  /** fase 8 (B1): nato da un turno non fidato (altro bot o evento esterno) */
+  untrusted?: number
+  /** fase 8 (B1): nato da un turno automatico (routine/trigger): outbox e tetto urgent anche nei suoi turni */
+  automatic?: number
 }
 
 interface TaskRow {
   id: number; agent_id: string; title: string; status: string
   created_at: number; updated_at: number; summary: string | null
+  untrusted?: number | null
+  automatic?: number | null
 }
 
 function rowToTask(r: TaskRow): Task {
   return {
     id: r.id, agent_id: r.agent_id, title: r.title,
     status: r.status as TaskStatus,
-    created_at: r.created_at, updated_at: r.updated_at, summary: r.summary
+    created_at: r.created_at, updated_at: r.updated_at, summary: r.summary,
+    untrusted: r.untrusted ?? 0,
+    automatic: r.automatic ?? 0
   }
 }
 
-export function createTask(agentId: string, title: string): Task {
+/** Origine del turno che crea il task (fase 8, correzione B1): si propaga a tutti i turni del task. */
+export interface CreateTaskOpts {
+  untrusted?: boolean
+  automatic?: boolean
+}
+
+export function createTask(agentId: string, title: string, opts: CreateTaskOpts = {}): Task {
   const now = Date.now()
   const r = db()
-    .prepare("INSERT INTO tasks(agent_id, title, status, created_at, updated_at) VALUES(?,?, 'working', ?, ?)")
-    .run(agentId, title, now, now)
-  return { id: Number(r.lastInsertRowid), agent_id: agentId, title, status: 'working', created_at: now, updated_at: now, summary: null }
+    .prepare("INSERT INTO tasks(agent_id, title, status, created_at, updated_at, untrusted, automatic) VALUES(?,?, 'working', ?, ?, ?, ?)")
+    .run(agentId, title, now, now, opts.untrusted ? 1 : 0, opts.automatic ? 1 : 0)
+  return {
+    id: Number(r.lastInsertRowid), agent_id: agentId, title, status: 'working', created_at: now, updated_at: now, summary: null,
+    untrusted: opts.untrusted ? 1 : 0, automatic: opts.automatic ? 1 : 0
+  }
 }
 
 export function getTask(id: number): Task | null {
@@ -492,6 +522,20 @@ export function listTasks(agentId?: string): Task[] {
   const q = agentId ? 'SELECT * FROM tasks WHERE agent_id = ? ORDER BY id DESC' : 'SELECT * FROM tasks ORDER BY id DESC'
   const rows = (agentId ? db().prepare(q).all(agentId) : db().prepare(q).all()) as unknown as TaskRow[]
   return rows.map(rowToTask)
+}
+
+/**
+ * Fase 8 (correzione B2): task APERTI (working o needs_input) di un agente —
+ * crea_task rifiuta oltre il tetto (5): senza limite un modello crea catene
+ * di task annidati che girano all'infinito.
+ */
+export const MAX_OPEN_TASKS = 5
+
+export function openTasksOf(agentId: string): number {
+  const r = db()
+    .prepare("SELECT COUNT(*) AS n FROM tasks WHERE agent_id = ? AND status IN ('working', 'needs_input')")
+    .get(agentId) as { n: number }
+  return r.n
 }
 
 /** Aggiorna stato/summary (touch di updated_at); stato finale solo transizioni valide. */

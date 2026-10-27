@@ -25,8 +25,9 @@ let db: DatabaseSync
 beforeEach(() => {
   db = new DatabaseSync(':memory:')
   db.exec(JOBS_DDL)
-  // fase 8: il runner legge il titolo del task dalla propria connessione
-  db.exec("CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, agent_id TEXT, title TEXT, status TEXT DEFAULT 'working', created_at INTEGER, updated_at INTEGER, summary TEXT)")
+  // fase 8: il runner legge titolo e ORIGINE del task (correzione B1) dalla
+  // propria connessione
+  db.exec("CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, agent_id TEXT, title TEXT, status TEXT DEFAULT 'working', created_at INTEGER, updated_at INTEGER, summary TEXT, untrusted INTEGER DEFAULT 0, automatic INTEGER DEFAULT 0)")
 })
 
 describe('makeJobRunner: user-message', () => {
@@ -124,6 +125,37 @@ describe('makeJobRunner: task-run (fase 8, §3bis L7)', () => {
     // il modello del task sa chi è e come chiudersi (contesto separato)
     expect(log[0]!.text).toBe('[task n. 7 "Verifica controlli" — per chiuderlo: update_task con id 7]\nfai la verifica')
     expect(log[0]!.opts).toMatchObject({ source: 'user', taskId: 7, respondedTo: 55 })
+    // niente origine sulla riga: nessun flag (turno utente ordinario)
+    expect(log[0]!.opts.untrusted).toBeUndefined()
+    expect(log[0]!.opts.automatic).toBeUndefined()
+  })
+
+  it('correzione B1: origine del task (untrusted/automatic) propagata a OGNI turno, continuazioni incluse', async () => {
+    // task nato da un turno AGENT (untrusted) e da una routine (automatic)
+    db.prepare("INSERT INTO tasks(id, agent_id, title, untrusted, automatic) VALUES(8, 'a3', 'Analisi posta', 1, 1)").run()
+    for (const payload of [{ taskId: 8, brief: 'analizza' }, { taskId: 8, brief: 'si, procedi', respondedTo: 12 }]) {
+      const job = enqueueJob(db, { agentId: 'a3', kind: 'task-run', payload, runAt: 0, now: 0 })
+      const log: Seen[] = []
+      await makeJobRunner(db, fakeTurn(log))(job, emit)
+      expect(log[0]!.opts).toMatchObject({ taskId: 8, untrusted: true, automatic: true, source: 'user' })
+    }
+  })
+
+  it('correzione B1: il TASK_DONE eredita origine e automaticità dal payload del job', async () => {
+    const job = enqueueJob(db, {
+      agentId: 'a3', kind: 'user-message',
+      payload: {
+        text: '<task_done title="X" id="8" esito="done">ok</task_done>',
+        initiator: 'TASK_DONE',
+        automatic: true,
+        untrusted: true,
+        entryId: 4
+      },
+      runAt: 0, now: 0
+    })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.opts).toMatchObject({ initiator: 'TASK_DONE', automatic: true, untrusted: true })
   })
 
   it('task senza riga (eliminato): il prefisso resta senza titolo', async () => {

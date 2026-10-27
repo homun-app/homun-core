@@ -28,6 +28,8 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
         fromAgentId?: string; fromAgentName?: string; hop?: number
         // fase 7 (correzione A3): la catena eredita l'automaticità del mittente
         automatic?: boolean
+        // fase 8 (correzione B1): l'origine del task arriva anche al TASK_DONE
+        untrusted?: boolean
         // fase 7: meta extra del messaggio che apre il turno (es. templateName)
         extraMeta?: Record<string, unknown>
       }
@@ -42,20 +44,28 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
           ? { agentMessage: { fromAgentId: p.fromAgentId, fromAgentName: p.fromAgentName, hop: p.hop } }
           : {}),
         ...(p.automatic ? { automatic: true } : {}),
+        ...(p.untrusted ? { untrusted: true } : {}),
         ...(p.extraMeta ? { extraMeta: p.extraMeta } : {})
       })
       return
     }
     // fase 8 (§3bis L7): il task gira nel proprio sotto-transcript (meta.taskId
     // su ogni entry). Il brief apre il turno PREFIXATO con l'identità del task:
-    // il contesto è separato, ma update_task({id}) richiede di sapere il proprio id
+    // il contesto è separato, ma update_task({id}) richiede di sapere il proprio id.
+    // Correzione B1: l'origine del turno che ha creato il task (untrusted /
+    // automatic, salvata sulla riga) vale per TUTTI i turni del task — anche
+    // le continuazioni dopo ask_user o approval ripartono da qui.
     if (job.kind === 'task-run') {
       const p = job.payload as { taskId: number; brief: string; respondedTo?: number }
-      const row = db.prepare('SELECT title FROM tasks WHERE id = ?').get(p.taskId) as { title?: string } | undefined
+      const row = db.prepare('SELECT title, untrusted, automatic FROM tasks WHERE id = ?').get(p.taskId) as
+        | { title?: string; untrusted?: number; automatic?: number }
+        | undefined
       const opening = `[task n. ${p.taskId}${row?.title ? ` "${row.title}"` : ''} — per chiuderlo: update_task con id ${p.taskId}]\n${p.brief}`
       await runTurnFn(job.agent_id, opening, emit, undefined, {
         source: 'user', taskId: p.taskId, ...opts, onTurnEntry,
-        ...(p.respondedTo !== undefined ? { respondedTo: p.respondedTo } : {})
+        ...(p.respondedTo !== undefined ? { respondedTo: p.respondedTo } : {}),
+        ...(row?.untrusted ? { untrusted: true } : {}),
+        ...(row?.automatic ? { automatic: true } : {})
       })
       return
     }

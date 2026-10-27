@@ -18,7 +18,7 @@
 // draft_external. Ogni turno si chiude con un evento meta.turnEnd ∈
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID } from 'node:crypto'
-import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, type AppendEntry } from '../store/db'
+import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, type AppendEntry } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
 import { systemPrompt, secondaryPrompts, mainAgentSection } from './prompts'
 import { toolDefs, executeTool } from './tools'
@@ -182,6 +182,13 @@ export interface RunTurnOptions {
    * dell'utente — l'auto-review non può togliergli l'ultimo controllo.
    */
   externalEvent?: boolean
+  /**
+   * Fase 8 (correzione B1): origine salvata sulla riga del task alla creazione
+   * e ripropagata dal runner a OGNI turno del task (continuazioni incluse) e
+   * al TASK_DONE — un task nato da un turno non fidato non torna approvabile
+   * in automatico solo perché il suo job gira con source 'user'.
+   */
+  untrusted?: boolean
   /** Fase 8 (§3bis L7): il turno gira nel sotto-transcript di questo task. */
   taskId?: number
 }
@@ -241,8 +248,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
   // fase 8 (punto 1): i turni aperti da un altro bot o da un evento esterno
   // restano fuori dall'auto-review (prompt injection: l'ultimo controllo
-  // umano non si toglie su testo che non è dell'utente)
-  const untrustedTurn = opts.agentMessage !== undefined || opts.initiator === 'AGENT' || opts.externalEvent === true
+  // umano non si toglie su testo che non è dell'utente). Correzione B1: vale
+  // anche per l'origine propagata dai turni di task e dal TASK_DONE
+  const untrustedTurn =
+    opts.agentMessage !== undefined || opts.initiator === 'AGENT' || opts.externalEvent === true || opts.untrusted === true
   // fase 8 (punto 1): approvazioni automatiche concesse in questo turno (tetto 20)
   let autoApprovals = 0
 
@@ -728,7 +737,27 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             })
             continue
           }
-          const task = createTask(agentId, title)
+          // correzione B2: niente task dentro un task — senza limite un modello
+          // apre catene annidate che girano all'infinito
+          if (opts.taskId !== undefined) {
+            messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: 'Non puoi aprire un task da dentro un altro task: sei già in un task, fai il lavoro qui (chiudilo con update_task quando hai finito).'
+            })
+            continue
+          }
+          // correzione B2: al massimo 5 task aperti (working o needs_input)
+          if (openTasksOf(agentId) >= MAX_OPEN_TASKS) {
+            messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: `Non puoi aprire altri task: ci sono già ${MAX_OPEN_TASKS} task aperti (in corso o in attesa di una risposta). Chiudine qualcuno con update_task o parlane con l'utente.`
+            })
+            continue
+          }
+          // correzione B1: l'origine del turno che crea il task si salva sulla
+          // riga — untrusted (altro bot/evento esterno: nel task l'auto-review
+          // resta esclusa) e automatic (routine: outbox e tetto urgent)
+          const task = createTask(agentId, title, { untrusted: untrustedTurn, automatic })
           // card nella chat principale (entry SENZA taskId: è il punto d'ingresso)
           appendSend(agentId, call, { type: 'task', taskId: task.id, title }, emit)
           const { enqueueJob } = await import('../store/jobs')
@@ -964,8 +993,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // esecuzione
         try {
           // correzione A5: il contesto del turno (chi lo ha aperto) serve a
-          // update_state per decidere se accettare la provenance 'template'
-          const { output, meta, images } = await executeTool(agentId, call.name, input, { turnInitiator: opts.initiator })
+          // update_state per decidere se accettare la provenance 'template';
+          // correzione B3: il task corrente serve a update_task (dentro un
+          // task si chiude SOLO quello)
+          const { output, meta, images } = await executeTool(agentId, call.name, input, {
+            turnInitiator: opts.initiator,
+            ...(opts.taskId !== undefined ? { taskId: opts.taskId } : {})
+          })
           const res = add({
             agentId, kind: 'tool-result', role: 'system',
             content: output.slice(0, 50_000),

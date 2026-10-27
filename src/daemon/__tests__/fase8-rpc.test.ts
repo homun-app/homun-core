@@ -26,7 +26,7 @@ vi.mock('../../main/agent/tools', () => ({
 
 const {
   setDataDir, dataDir, db, getEntries, appendEntry, getSetting,
-  createTask, getTask, listTasks, updateTask
+  createTask, getTask, listTasks, updateTask, openTasksOf, MAX_OPEN_TASKS
 } = await import('../../main/store/db')
 const { enqueueJob, listJobs } = await import('../../main/store/jobs')
 const { buildApiMethods } = await import('../api')
@@ -128,5 +128,28 @@ describe('tasks:list / tasks:cancel (§3bis L7)', () => {
     updateTask(t.id, { status: 'working' })
     expect(getTask(t.id)?.status).toBe('done')
     expect(listTasks(AGENT)).toHaveLength(1)
+  })
+})
+
+describe('correzioni B1/B2: origine del task e task aperti (store reale)', () => {
+  it('createTask salva l\'origine del turno sulla riga (untrusted/automatic)', () => {
+    const t = createTask(AGENT, 'Analisi posta', { untrusted: true, automatic: true })
+    expect(getTask(t.id)).toMatchObject({ title: 'Analisi posta', untrusted: 1, automatic: 1 })
+    // default: turno utente ordinario
+    const t2 = createTask(AGENT, 'Verifica')
+    expect(getTask(t2.id)).toMatchObject({ untrusted: 0, automatic: 0 })
+  })
+
+  it('openTasksOf conta solo working/needs_input; MAX_OPEN_TASKS è 5', () => {
+    expect(MAX_OPEN_TASKS).toBe(5)
+    const ts = [createTask(AGENT, 'T1'), createTask(AGENT, 'T2'), createTask(AGENT, 'T3'), createTask(AGENT, 'In attesa')]
+    expect(openTasksOf(AGENT)).toBe(4)
+    updateTask(ts[1]!.id, { status: 'needs_input' })
+    expect(openTasksOf(AGENT)).toBe(4) // needs_input resta aperto
+    updateTask(ts[2]!.id, { status: 'done', summary: 'x' })
+    expect(openTasksOf(AGENT)).toBe(3)
+    // i task di altri agenti non contano
+    createTask('agent_altro', 'Altro')
+    expect(openTasksOf(AGENT)).toBe(3)
   })
 })

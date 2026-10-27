@@ -2,6 +2,7 @@
 import type { ToolDef } from './llm'
 import * as sandbox from '../sandbox'
 import { resolveSecretRefs, redactSecrets } from './secrets'
+import { formatTaskDone } from '../../shared/agent-message'
 import {
   writeMemory, updateMemory, deleteMemory, listMemories, searchMemoriesByQuery,
   type MemoryTier, type MemoryScope
@@ -256,7 +257,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'create_task',
-    description: "Apre un TASK per un lavoro LUNGO in un thread separato: la chat principale resta pulita e il task ha un proprio contesto (solo il brief e le proprie entry). Usalo per ricerche, analisi o verifiche che richiedono molti passi; il task parte quando finisce il turno corrente (stessa coda, in serie). Il task NON vede questa conversazione: metti nel brief tutto il contesto (obiettivo, vincoli, dove cercare). Le domande che fai nel task (ask_user) arrivano comunque all'utente dalla vista del task.",
+    description: "Apre un TASK per un lavoro LUNGO in un thread separato: la chat principale resta pulita e il task ha un proprio contesto (solo il brief e le proprie entry). Usalo per ricerche, analisi o verifiche che richiedono molti passi; il task parte quando finisce il turno corrente (stessa coda, in serie). Il task NON vede questa conversazione: metti nel brief tutto il contesto (obiettivo, vincoli, dove cercare). Le domande che fai nel task (ask_user) arrivano comunque all'utente dalla vista del task. Solo dalla chat principale e con meno di 5 task già aperti: da dentro un task non si aprono altri task.",
     parameters: {
       type: 'object',
       properties: {
@@ -343,6 +344,8 @@ function runMemoryAction(agentId: string, input: Record<string, unknown>): ToolE
 /** Contesto del turno in cui gira il tool (correzione A5): chi ha aperto il turno. */
 export interface ToolTurnContext {
   turnInitiator?: string
+  /** fase 8 (correzione B3): il turno gira nel sotto-transcript di questo task (dentro un task si chiude SOLO quello). */
+  taskId?: number
 }
 
 /** Azione su una routine (update_state target 'routine'): validazione cron con parseCron del daemon. */
@@ -552,6 +555,15 @@ export async function executeTool(
       const { enqueueJob } = await import('../store/jobs')
       const t = getTask(id)
       if (!t) return { output: `Task ${id} non trovato.`, meta: {} }
+      // correzione B3: solo task PROPRI (chiudere il task di un altro bot
+      // manderebbe il summary nella SUA chat, senza le protezioni di
+      // send_to_agent) e, dentro un task, solo quello CORRENTE
+      if (t.agent_id !== agentId) {
+        return { output: `Il task "${t.title}" (id ${id}) non è tuo: non puoi chiuderlo. Se serve, parlane con l'utente o col bot che lo ha aperto.`, meta: {} }
+      }
+      if (ctx.taskId !== undefined && ctx.taskId !== id) {
+        return { output: `Sei nel task n. ${ctx.taskId}: da qui puoi chiudere SOLO quello (update_task con id ${ctx.taskId}).`, meta: {} }
+      }
       if (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled') {
         return { output: `Task "${t.title}" è già ${t.status}: non si riapre.`, meta: {} }
       }
@@ -562,16 +574,21 @@ export async function executeTool(
         agentId: t.agent_id,
         kind: 'user-message',
         payload: {
+          // correzione B1: il summary in un blocco EVIDENZA delimitato, con il
+          // tag di chiusura neutralizzato (il task può aver letto testo
+          // esterno) — come per <messaggio_da_agente>
           text: [
-            `<task_done title="${t.title.replace(/"/g, "'")}" id="${id}" esito="${status}">`,
-            summary || '(nessun summary)',
-            '</task_done>',
+            formatTaskDone(t.title, id, status, summary),
             'Il task è finito: riferisci all\'utente con un MESSAGGIO BREVE (send_to_user) sull\'esito e al massimo un prossimo passo, senza ripetere tutto il lavoro.'
           ].join('\n'),
           initiator: 'TASK_DONE',
           // taskRef (NON taskId): il loop filtra le entry dei task per
           // meta.taskId e questo messaggio deve restare nella chat principale
-          extraMeta: { taskTitle: t.title, taskRef: id }
+          extraMeta: { taskTitle: t.title, taskRef: id },
+          // correzione B1: l'origine del task arriva anche al turno TASK_DONE
+          // (automatic → outbox/tetto urgent; untrusted → niente auto-review)
+          ...(t.automatic ? { automatic: true } : {}),
+          ...(t.untrusted ? { untrusted: true } : {})
         },
         runAt: now,
         now

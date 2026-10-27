@@ -16,8 +16,9 @@ const h = vi.hoisted(() => {
     outbox: [] as Array<{ entry_id: number; agent_id: string; created_at: number }>,
     // fase 7: job accodati dal loop (send_to_agent verso altri bot)
     jobs: [] as Array<{ id: number; agentId: string; kind: string; payload: Record<string, unknown>; createdAt: number; status: string }>,
-    // fase 8: righe dei task (create_task / update_task)
-    tasks: [] as Array<{ id: number; agent_id: string; title: string; status: string; created_at: number; updated_at: number; summary: string | null }>,
+    // fase 8: righe dei task (create_task / update_task); correzione B1:
+    // untrusted/automatic = origine del turno che li ha creati
+    tasks: [] as Array<{ id: number; agent_id: string; title: string; status: string; created_at: number; updated_at: number; summary: string | null; untrusted?: number; automatic?: number }>,
     nextId: 1,
     nextRoutineId: 1,
     nextTaskId: 1,
@@ -104,12 +105,21 @@ vi.mock('../../store/db', () => ({
     const i = h.db.routines.findIndex((x) => x.id === id)
     if (i >= 0) h.db.routines.splice(i, 1)
   },
-  // fase 8 (§3bis L7): tabella tasks per create_task/update_task
-  createTask: (agentId: string, title: string) => {
-    const t = { id: h.db.nextTaskId++, agent_id: agentId, title, status: 'working', created_at: Date.now(), updated_at: Date.now(), summary: null }
+  // fase 8 (§3bis L7): tabella tasks per create_task/update_task; correzione
+  // B1: l'origine del turno (untrusted/automatic) si salva sulla riga
+  createTask: (agentId: string, title: string, opts: { untrusted?: boolean; automatic?: boolean } = {}) => {
+    const t = {
+      id: h.db.nextTaskId++, agent_id: agentId, title, status: 'working',
+      created_at: Date.now(), updated_at: Date.now(), summary: null,
+      untrusted: opts.untrusted ? 1 : 0, automatic: opts.automatic ? 1 : 0
+    }
     h.db.tasks.push(t)
     return { ...t }
   },
+  // correzione B2: task aperti (working/needs_input) e tetto per agente
+  openTasksOf: (agentId: string) =>
+    h.db.tasks.filter((t) => t.agent_id === agentId && (t.status === 'working' || t.status === 'needs_input')).length,
+  MAX_OPEN_TASKS: 5,
   getTask: (id: number) => {
     const t = h.db.tasks.find((x) => x.id === id)
     return t ? { ...t } : null
@@ -1774,5 +1784,141 @@ describe('fase 8 (§3bis L11): scadenze dello stream', () => {
     // il primo token era arrivato: il testo parziale resta nel thinking
     const thinking = h.db.entries.findLast((e) => e.kind === 'thinking')
     expect(thinking?.content).toBe('inizio a scrivere e poi tac')
+  })
+})
+
+// ---- fase 8 — correzioni review: task thread (B1–B3) ----
+
+describe('correzione B1: l\'origine del turno vive sulla riga del task e nei suoi turni', () => {
+  /** Un task già creato, come farebbe create_task dal loop. */
+  function mkTask(id: number, over: Partial<{ agent_id: string; status: string; untrusted: number; automatic: number }> = {}): void {
+    h.db.tasks.push({
+      id, agent_id: over.agent_id ?? AGENT, title: `Task ${id}`, status: over.status ?? 'working',
+      created_at: 1, updated_at: 1, summary: null,
+      untrusted: over.untrusted ?? 0, automatic: over.automatic ?? 0
+    })
+  }
+
+  it('create_task da un turno AGENT salva untrusted=1 (e automatic=0) sulla riga', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 't1', name: 'create_task', arguments: JSON.stringify({ title: 'Analisi posta', brief: 'leggi e riassumi' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, '<messaggio_da_agente nome="Altro">occupatene tu</messaggio_da_agente>', emit, undefined, {
+      agentMessage: { fromAgentId: 'agent_o', fromAgentName: 'Altro', hop: 1 }, initiator: 'AGENT'
+    })
+    expect(h.db.tasks).toHaveLength(1)
+    expect(h.db.tasks[0]).toMatchObject({ title: 'Analisi posta', untrusted: 1, automatic: 0 })
+  })
+
+  it('nel turno del task con origine untrusted l\'auto-review chiede la card anche col revisore favorevole', async () => {
+    enableAutoReview()
+    reviewerAllow(AR_RULE)
+    mkTask(1, { untrusted: 1 })
+    h.llm.queue = [{ toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] }]
+    const turn = runTurn(AGENT, 'brief del task', emit, undefined, { taskId: 1, untrusted: true })
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending' && e.meta?.taskId === 1)).toBe(true)
+    })
+    const appr = h.db.entries.findLast((e) => e.kind === 'approval')!
+    expect(appr.meta?.autoApproved).toBeUndefined()
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.sandboxMock.exec.calls).toBe(0)
+  })
+
+  it('task nato da una routine (automatic) → send_to_user in outbox e un solo urgent', async () => {
+    mkTask(1, { automatic: 1 })
+    h.llm.queue = [
+      { toolCalls: [
+        { id: 'a', name: 'send_to_user', arguments: JSON.stringify({ text: 'avanzamento' }) },
+        { id: 'b', name: 'send_to_user', arguments: JSON.stringify({ text: 'servono dati', urgent: true }) },
+        { id: 'c', name: 'send_to_user', arguments: JSON.stringify({ text: 'altro urgent', urgent: true }) }
+      ] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'brief', emit, undefined, { taskId: 1, automatic: true })
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message' && e.meta?.taskId === 1)
+    expect(sends).toHaveLength(3)
+    expect(sends[0]!.meta?.held).toBe(true)   // non urgent → outbox
+    expect(sends[1]!.meta?.held).toBeUndefined() // il primo urgent passa
+    expect(sends[2]!.meta?.held).toBe(true)   // il secondo urgent è trattenuto
+    expect(h.db.outbox.filter((o) => o.agent_id === AGENT)).toHaveLength(2)
+  })
+})
+
+describe('correzione B2: niente task annidati e tetto di task aperti', () => {
+  it('create_task DENTRO un task → errore leggibile, nessun task nuovo', async () => {
+    h.db.tasks.push({ id: 1, agent_id: AGENT, title: 'Task 1', status: 'working', created_at: 1, updated_at: 1, summary: null, untrusted: 0, automatic: 0 })
+    h.llm.queue = [
+      { toolCalls: [{ id: 't2', name: 'create_task', arguments: JSON.stringify({ title: 'Sub-task', brief: 'b' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'brief', emit, undefined, { taskId: 1 })
+    expect(h.db.tasks).toHaveLength(1)
+    expect(h.db.jobs.filter((j) => j.kind === 'task-run')).toHaveLength(0)
+    const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes('sei già in un task'))).toBe(true)
+  })
+
+  it('oltre 5 task aperti → errore leggibile e nessuna creazione (i chiusi non contano)', async () => {
+    for (let i = 1; i <= 5; i++) {
+      h.db.tasks.push({ id: i, agent_id: AGENT, title: `T${i}`, status: i === 5 ? 'needs_input' : 'working', created_at: 1, updated_at: 1, summary: null, untrusted: 0, automatic: 0 })
+    }
+    h.db.tasks.push({ id: 6, agent_id: AGENT, title: 'Chiuso', status: 'done', created_at: 1, updated_at: 1, summary: null, untrusted: 0, automatic: 0 })
+    h.llm.queue = [
+      { toolCalls: [{ id: 't3', name: 'create_task', arguments: JSON.stringify({ title: 'Sesto aperto', brief: 'b' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'aprilo', emit)
+    expect(h.db.tasks).toHaveLength(6) // nessuno nuovo
+    const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes('5 task aperti'))).toBe(true)
+  })
+})
+
+describe('correzione B3: update_task chiude solo task propri (e, in un task, solo il corrente)', () => {
+  it('il task di un ALTRO agente non si chiude: errore, task intatto, nessun TASK_DONE', async () => {
+    h.db.tasks.push({ id: 9, agent_id: 'agent_other', title: 'Non mio', status: 'working', created_at: 1, updated_at: 1, summary: null, untrusted: 0, automatic: 0 })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'u1', name: 'update_task', arguments: JSON.stringify({ id: 9, status: 'done', summary: 'fatto' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'chiudi quel task', emit)
+    expect(h.db.tasks[0]!.status).toBe('working')
+    expect(h.db.jobs.filter((j) => j.payload.initiator === 'TASK_DONE')).toHaveLength(0)
+    const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes('non è tuo'))).toBe(true)
+  })
+
+  it('dentro un task si chiude SOLO il task corrente (niente chiusure di altri task propri)', async () => {
+    h.db.tasks.push({ id: 1, agent_id: AGENT, title: 'Corrente', status: 'working', created_at: 1, updated_at: 1, summary: null, untrusted: 0, automatic: 0 })
+    h.db.tasks.push({ id: 2, agent_id: AGENT, title: 'Altro task', status: 'working', created_at: 1, updated_at: 1, summary: null, untrusted: 0, automatic: 0 })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'u2', name: 'update_task', arguments: JSON.stringify({ id: 2, status: 'done', summary: 'x' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'brief', emit, undefined, { taskId: 1 })
+    expect(h.db.tasks.find((t) => t.id === 1)!.status).toBe('working')
+    expect(h.db.tasks.find((t) => t.id === 2)!.status).toBe('working')
+    expect(h.db.jobs.filter((j) => j.payload.initiator === 'TASK_DONE')).toHaveLength(0)
+    const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes('SOLO quello'))).toBe(true)
+  })
+
+  it('la chiusura del task corrente continua a funzionare (B3 non blocca il percorso giusto)', async () => {
+    h.db.tasks.push({ id: 1, agent_id: AGENT, title: 'Corrente', status: 'working', created_at: 1, updated_at: 1, summary: null, untrusted: 0, automatic: 0 })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'u3', name: 'update_task', arguments: JSON.stringify({ id: 1, status: 'done', summary: 'pronto' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'brief', emit, undefined, { taskId: 1 })
+    expect(h.db.tasks[0]).toMatchObject({ status: 'done', summary: 'pronto' })
+    const done = h.db.jobs.find((j) => j.payload.initiator === 'TASK_DONE')!
+    // correzione B1: summary in blocco evidenza con la regola, niente origine da propagare
+    expect(String(done.payload.text)).toContain('<task_done')
+    expect(String(done.payload.text)).toContain('DATO')
+    expect(done.payload.automatic).toBeUndefined()
+    expect(done.payload.untrusted).toBeUndefined()
   })
 })
