@@ -1209,13 +1209,13 @@ describe('fase 7: send_to_agent', () => {
       id: `m${i + 1}`, name: 'send_to_agent',
       arguments: JSON.stringify({ agentId: OTHER, text: `msg ${i + 1}` })
     }))
-    h.llm.queue = [{ toolCalls: calls }, { text: 'ok' }]
+    h.llm.queue = [{ toolCalls: calls }, { text: 'ok' }, { toolCalls: [{ id: 'r1', name: 'send_to_user', arguments: JSON.stringify({ text: 'ho delegato a Specialista' }) }] }]
     await runTurn(AGENT, 'delega a raffica', emit)
     expect(h.db.jobs).toHaveLength(10)
-    // le 10 deleghe lasciano traccia lato mittente (A2): l'utente ha visto,
-    // quindi NESSUNA chiamata di recupero — la seconda chiamata è solo il
-    // proseguimento del turno, e lì stanno i tool result delle 11 call
-    expect(h.llm.calls).toHaveLength(2)
+    // fase 8 (residuo 0a): le deleghe non sono messaggi all'utente → la
+    // chiamata di recupero PARTE anche in un turno che ha solo delegato
+    // (terza chiamata); i tool result delle 11 call stanno nella seconda
+    expect(h.llm.calls).toHaveLength(3)
     const toolResults = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
     expect(toolResults.filter((c) => c.includes('in coda per Specialista'))).toHaveLength(10)
     expect(toolResults.some((c) => c.includes('ultima ora'))).toBe(true)

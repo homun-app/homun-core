@@ -197,7 +197,10 @@ export function buildMessages(
  * sequenza di entry — solo le 'send-message' (text/widget/draft), MAI il
  * testo libero del modello (kind 'thinking'). `sinceId` limita al turno
  * corrente (le entry successive a quella che lo ha aperto).
+ * Fase 8 (residuo 0a): le deleghe send_to_agent (meta.agentSend, "A <nome
+ * bot>") NON sono messaggi all'utente — non contano come risposta visibile
+ * e non producono notifiche agent-done di un turno che ha solo delegato.
  */
 export function visibleReplyEntries(entries: TranscriptEntry[], sinceId = 0): TranscriptEntry[] {
-  return entries.filter((e) => e.id > sinceId && e.kind === 'send-message')
+  return entries.filter((e) => e.id > sinceId && e.kind === 'send-message' && !(e.meta as Partial<SendMessageMeta> | null)?.agentSend)
 }

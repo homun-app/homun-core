@@ -253,6 +253,23 @@ describe('fase 3 (§3bis L2): send-message e thinking nella storia del modello',
     // senza send-message (turno di routine silenzioso) → nessun messaggio visibile
     expect(visibleReplyEntries(entries.slice(0, 5), entries[0]!.id)).toHaveLength(0)
   })
+
+  // fase 8 (residuo 0a): la delega send_to_agent non è un messaggio all'utente
+  it('visibleReplyEntries: le deleghe "A <nome bot>" (meta.agentSend) non contano come risposta visibile', () => {
+    const entries = [
+      mk('message', 'user', 'occupatene tu'),
+      mk('send-message', 'assistant', 'delego al Gestore', {
+        message: { type: 'text', text: 'delego al Gestore' },
+        agentSend: true, toAgentId: 'agent_x', toAgentName: 'Gestore', hop: 1
+      })
+    ]
+    // un turno notturno che ha SOLO delegato non ha risposto all'utente:
+    // niente risposta visibile (e quindi niente notifica agent-done)
+    expect(visibleReplyEntries(entries, entries[0]!.id)).toHaveLength(0)
+    // le send-message normali restano visibili insieme alle deleghe escluse
+    const withReply = [...entries, mk('send-message', 'assistant', 'fatto', { message: { type: 'text', text: 'fatto' } })]
+    expect(visibleReplyEntries(withReply, withReply[0]!.id).map((e) => e.content)).toEqual(['fatto'])
+  })
 })
 
 // correzione A2: la delega send_to_agent persistita lato mittente torna al

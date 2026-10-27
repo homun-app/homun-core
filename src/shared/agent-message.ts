@@ -23,9 +23,12 @@ export const AGENT_MESSAGE_RULE =
  * Correzione A4: il testo può venire da fuori (es. un bot che ha appena letto
  * un'email ostile): un tag di chiusura dentro il testo non deve poter chiudere
  * il blocco evidenza in anticipo — viene rinominato, così resta testo innocuo.
+ * Fase 8 (residuo 0b): il confronto è case-insensitive e tollerante agli spazi
+ * prima di `>` (`</EVENTO >`, `</Messaggio_Da_Agente>`): il match esatto
+ * lasciava passare le varianti che HTML tratta come equivalenti.
  */
 export function neutralizeClosingTag(text: string, tag: string): string {
-  return text.split(`</${tag}>`).join(`</${tag}_neutralizzato>`)
+  return text.replace(new RegExp(`</${escapeRegExp(tag)}\\s*>`, 'gi'), `</${tag}_neutralizzato>`)
 }
 
 /**
