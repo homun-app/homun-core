@@ -4,6 +4,8 @@
 // Correzioni fase 10: C4 (instradamento verso il coordinatore, tetto per
 // catena), C2 (shouldScheduleClosingTurn, nonce di chiusura, apertura con
 // chiusura="true"), C3 (una send per catena), C6a (testo dell'apertura).
+// Correzioni 2: D1 (profondità per catena in readChainDepth), D2 (tetto per
+// catena dichiarato quando chiama il coordinatore), D3 (attesa da inizio catena).
 import { describe, expect, it } from 'vitest'
 import {
   parseMentions, planGroupTurns, groupTurnNonce, memberOfNonce, buildGroupTurnOpening,
@@ -11,7 +13,7 @@ import {
   GROUP_CHAIN_CLOSED_TEXT, GROUP_HOURLY_CAP_TEXT, GROUP_TURN_RULE,
   GROUP_MEMBER_CHAIN_POSTS_MAX, GROUP_CLOSING_LINE,
   shouldScheduleClosingTurn, closingTurnNonce, isClosingNonce, memberWaitingForUser,
-  hasSentToUserInChain, alreadySentToUserResult
+  hasSentToUserInChain, alreadySentToUserResult, readChainDepth
 } from '../group-turns'
 
 const MEMBERS = [
@@ -221,6 +223,90 @@ describe('correzione C4: instradamento verso il coordinatore e tetto per catena'
     })
     expect(r.turns.map((t) => t.memberId)).toContain('agent_cerca')
   })
+
+  it('D2: il tetto per catena NON vale quando chiama il coordinatore (regola dichiarata)', () => {
+    // il post del COORDINATORE genera il turno: lo specialista ha già il
+    // massimo di post nella catena, ma la richiesta di revisione del
+    // coordinatore merita risposta — resta la profondità a chiudere il giro
+    const r = plan({
+      message: { id: 39, authorKind: 'agent', authorId: 'agent_coord', text: '@Cercatore Cena rivedi il menu', depth: 2 },
+      memberChainPosts: { agent_cerca: GROUP_MEMBER_CHAIN_POSTS_MAX }
+    })
+    expect(r.turns.map((t) => t.memberId)).toEqual(['agent_cerca'])
+    expect(r.skipped).toHaveLength(0)
+    // dal messaggio dell'utente (o di un altro membro) il tetto torna a valere
+    const u = plan({
+      message: { id: 40, authorKind: 'user', authorId: null, text: 'e adesso?', depth: 2 },
+      memberChainPosts: { agent_cerca: GROUP_MEMBER_CHAIN_POSTS_MAX }
+    })
+    expect(u.turns.map((t) => t.memberId)).not.toContain('agent_cerca')
+    expect(u.skipped.find((s) => s.memberId === 'agent_cerca')?.reason).toContain('tetto per catena')
+  })
+})
+
+describe('correzione D1: readChainDepth (puro) — la profondità resta nella catena del turno', () => {
+  // la finestra del coordinatore nella corsa del revisore: il SUO post a
+  // depth 4 della catena vecchia (r1) è oltre il cursore, poi la richiesta
+  // nuova dell'utente (catena r7, depth 0)
+  const revisore = [
+    { id: 6, author_kind: 'agent', author_id: 'agent_coord', depth: 4, root_id: 1 },
+    { id: 7, author_kind: 'user', author_id: null, depth: 0, root_id: 7 }
+  ]
+
+  it('il post del membro e le catene vecchie non alzano la profondità della catena nuova', () => {
+    // catena del turno = ultima letta (r7); depth solo dei suoi messaggi,
+    // senza i post del membro: 0 (prima era 4 → windingDown a tradimento)
+    expect(readChainDepth({ messages: revisore, memberId: 'agent_coord', sourceDepth: 0 })).toEqual({ rootId: 7, maxDepth: 0 })
+  })
+
+  it('una vecchia catena a depth 6 nella finestra non chiude la catena nuova', () => {
+    const msgs = [
+      { id: 5, author_kind: 'agent', author_id: 'agent_coord', depth: 6, root_id: 1 },
+      { id: 8, author_kind: 'user', author_id: null, depth: 0, root_id: 8 }
+    ]
+    // il membro (uno specialista) leggerà entrambi, ma la profondità della
+    // catena nuova è 0: il suo post uscirà a depth 1, non a 7
+    expect(readChainDepth({ messages: msgs, memberId: 'agent_cerca', sourceDepth: 0 })).toEqual({ rootId: 8, maxDepth: 0 })
+  })
+
+  it('i post del membro STESSO non alzano la depth, nemmeno nella catena del turno', () => {
+    const msgs = [
+      { id: 2, author_kind: 'user', author_id: null, depth: 0, root_id: 2 },
+      { id: 3, author_kind: 'agent', author_id: 'agent_cerca', depth: 2, root_id: 2 }
+    ]
+    // il post a depth 2 è del membro: non conta (prima la finestra diceva 2)
+    expect(readChainDepth({ messages: msgs, memberId: 'agent_cerca', sourceDepth: 0 })).toEqual({ rootId: 2, maxDepth: 0 })
+  })
+
+  it('i messaggi degli ALTRI nella catena del turno contano come prima', () => {
+    const msgs = [
+      { id: 2, author_kind: 'user', author_id: null, depth: 0, root_id: 2 },
+      { id: 3, author_kind: 'agent', author_id: 'agent_coord', depth: 4, root_id: 2 }
+    ]
+    expect(readChainDepth({ messages: msgs, memberId: 'agent_cerca', sourceDepth: 0 })).toEqual({ rootId: 2, maxDepth: 4 })
+  })
+
+  it('le righe di sistema non scelgono la catena e non contano per la depth', () => {
+    const msgs = [
+      { id: 3, author_kind: 'agent', author_id: 'agent_coord', depth: 1, root_id: 2 },
+      { id: 4, author_kind: 'system', author_id: null, depth: 0, root_id: 4 }
+    ]
+    // l'ultima riga è di sistema: la catena resta quella del messaggio prima
+    expect(readChainDepth({ messages: msgs, memberId: 'agent_cerca', sourceDepth: 0 })).toEqual({ rootId: 2, maxDepth: 1 })
+  })
+
+  it('catena senza messaggi che contano → la depth del messaggio che ha generato il turno', () => {
+    // nella catena del turno resta SOLO il post del membro: vale sourceDepth
+    const only = [
+      { id: 3, author_kind: 'agent', author_id: 'agent_coord', depth: 3, root_id: 1 }
+    ]
+    expect(readChainDepth({ messages: only, memberId: 'agent_coord', sourceDepth: 1 })).toEqual({ rootId: 1, maxDepth: 1 })
+    // finestra vuota (o solo righe di sistema) senza fallback → −1 (post a 0)
+    expect(readChainDepth({ messages: [], memberId: 'agent_coord', sourceDepth: null })).toEqual({ rootId: null, maxDepth: -1 })
+    expect(
+      readChainDepth({ messages: [{ id: 9, author_kind: 'system', author_id: null, depth: 0, root_id: 9 }], memberId: 'agent_coord', sourceDepth: null })
+    ).toEqual({ rootId: null, maxDepth: -1 })
+  })
 })
 
 describe('correzione C2: shouldScheduleClosingTurn (puro)', () => {
@@ -279,19 +365,35 @@ describe('correzione C2: shouldScheduleClosingTurn (puro)', () => {
 
 describe('correzione C2/C3: funzioni pure di supporto', () => {
   it('memberWaitingForUser: card pendente o widget senza risposta, non quelli risolti', () => {
-    const approval = { id: 1, kind: 'approval', role: 'system', meta: { status: 'pending' } }
-    expect(memberWaitingForUser([approval])).toBe(true)
-    expect(memberWaitingForUser([{ id: 2, kind: 'approval', role: 'system', meta: { status: 'allowed' } }])).toBe(false)
+    const approval = { id: 1, kind: 'approval', role: 'system', createdAt: 1_000, meta: { status: 'pending' } }
+    expect(memberWaitingForUser([approval], 0)).toBe(true)
+    expect(memberWaitingForUser([{ id: 2, kind: 'approval', role: 'system', createdAt: 1_000, meta: { status: 'allowed' } }], 0)).toBe(false)
 
-    const widget = { id: 3, kind: 'send-message', role: 'assistant', meta: { message: { type: 'widget' } } }
-    expect(memberWaitingForUser([widget])).toBe(true)
+    const widget = { id: 3, kind: 'send-message', role: 'assistant', createdAt: 1_000, meta: { message: { type: 'widget' } } }
+    expect(memberWaitingForUser([widget], 0)).toBe(true)
     // risposta dell'utente arrivata (meta.respondedTo) → non più in attesa
-    const answered = { id: 4, kind: 'message', role: 'user', meta: { respondedTo: 3 } }
-    expect(memberWaitingForUser([widget, answered])).toBe(false)
+    const answered = { id: 4, kind: 'message', role: 'user', createdAt: 1_100, meta: { respondedTo: 3 } }
+    expect(memberWaitingForUser([widget, answered], 0)).toBe(false)
     // widget scavalcato (dismissOnMoveOn) → non più in attesa
-    const dismissed = { id: 5, kind: 'send-message', role: 'assistant', meta: { message: { type: 'widget' }, widgetDismissed: true } }
-    expect(memberWaitingForUser([dismissed])).toBe(false)
-    expect(memberWaitingForUser([])).toBe(false)
+    const dismissed = { id: 5, kind: 'send-message', role: 'assistant', createdAt: 1_000, meta: { message: { type: 'widget' }, widgetDismissed: true } }
+    expect(memberWaitingForUser([dismissed], 0)).toBe(false)
+    expect(memberWaitingForUser([], 0)).toBe(false)
+  })
+
+  it('D3: contano solo le domande e le card nate DA inizio catena in poi', () => {
+    // l'attesa vecchia (widget di settimane prima mai risposto, card pendente):
+    // la catena inizia a 2_000 e quelle lì non bloccano più la chiusura
+    const oldWidget = { id: 1, kind: 'send-message', role: 'assistant', createdAt: 1_000, meta: { message: { type: 'widget' } } }
+    const oldCard = { id: 2, kind: 'approval', role: 'system', createdAt: 1_100, meta: { status: 'pending' } }
+    expect(memberWaitingForUser([oldWidget, oldCard], 2_000)).toBe(false)
+    // nate DOPO l'inizio della catena: contano come prima
+    const newCard = { id: 3, kind: 'approval', role: 'system', createdAt: 2_100, meta: { status: 'pending' } }
+    expect(memberWaitingForUser([oldWidget, newCard], 2_000)).toBe(true)
+    const newWidget = { id: 4, kind: 'send-message', role: 'assistant', createdAt: 2_200, meta: { message: { type: 'widget' } } }
+    expect(memberWaitingForUser([oldWidget, newWidget], 2_000)).toBe(true)
+    // la risposta dell'utente all'attesa NUOVA chiude l'attesa
+    const answered = { id: 5, kind: 'message', role: 'user', createdAt: 2_300, meta: { respondedTo: 4 } }
+    expect(memberWaitingForUser([oldWidget, newWidget, answered], 2_000)).toBe(false)
   })
 
   it('hasSentToUserInChain: solo le send con la STESSA catena contano', () => {

@@ -8,7 +8,10 @@
 // mai); C5 — gli STOPPED col motivo in meta.stopReason diventano ERROR
 // (model-error/rate-limit) invece di CANCELLED, e sul rate limit il cursore
 // resta fermo, la coda del gruppo si svuota e nel gruppo compare una riga di
-// sistema. Le dipendenze sono iniettabili: nei test LLM finto e orologio finto.
+// sistema. Correzioni 2: D1 — la profondità della finestra conta SOLO la
+// catena del turno, senza i post del membro (readChainDepth, pura); D3 —
+// l'attesa del coordinatore conta da quando è nata la catena.
+// Le dipendenze sono iniettabili: nei test LLM finto e orologio finto.
 import type { DatabaseSync } from 'node:sqlite'
 import { getAgent, getEntries } from '../main/store/db'
 import {
@@ -20,7 +23,7 @@ import {
 } from '../main/store/groups'
 import {
   buildGroupTurnOpening, GROUP_WINDING_DOWN_DEPTH, GROUP_RATE_LIMIT_TEXT,
-  shouldScheduleClosingTurn, memberWaitingForUser, closingTurnNonce
+  shouldScheduleClosingTurn, memberWaitingForUser, closingTurnNonce, readChainDepth
 } from '../main/agent/group-turns'
 import { setJobEntryId, getJobById, type Job } from '../main/store/jobs'
 import type { runTurn, RunTurnOptions } from '../main/agent/loop'
@@ -47,26 +50,22 @@ export const defaultArmTimeout = (cb: () => void, ms: number): (() => void) => {
   return () => clearTimeout(t)
 }
 
-/** Cursore e finestra di lettura di un membro (pura rispetto allo store passato). */
+/**
+ * Cursore e finestra di lettura di un membro (pura rispetto allo store
+ * passato). Correzione D1: catena e profondità le calcola readChainDepth
+ * (pura, in group-turns) — contano solo i messaggi della catena del turno,
+ * senza i post del membro stesso; le catene vecchie restano nell'apertura.
+ */
 export function readWindow(
   groupId: number,
-  memberId: string
+  memberId: string,
+  sourceDepth: number | null = null
 ): { messages: ReturnType<typeof groupMessages>; lastId: number; maxDepth: number; rootId: number | null } {
   const after = getGroupCursor(groupId, memberId)
   const messages = groupMessages(groupId, after)
   let lastId = after
-  let maxDepth = -1
-  // la catena è quella dell'ULTIMO messaggio letto (non del più profondo: con
-  // parità di depth il più profondo resterebbe su una catena vecchia e il
-  // turno di chiusura non troverebbe mai quella nuova)
-  let rootId: number | null = null
-  for (const m of messages) {
-    lastId = Math.max(lastId, m.id)
-    if (m.author_kind !== 'system') {
-      maxDepth = Math.max(maxDepth, m.depth)
-      rootId = m.root_id ?? m.id
-    }
-  }
+  for (const m of messages) lastId = Math.max(lastId, m.id)
+  const { rootId, maxDepth } = readChainDepth({ messages, memberId, sourceDepth })
   return { messages, lastId, maxDepth, rootId }
 }
 
@@ -100,8 +99,11 @@ export async function runGroupTurnJob(
 
   // la finestra di lettura: i messaggi DOPO il cursore del membro. Il turno di
   // CHIUSURA parte anche a finestra vuota (C2): il coordinatore ha già letto
-  // le consegne nei turni precedenti — quel turno è il passo del riepilogo
-  const win = readWindow(group.id, p.memberId)
+  // le consegne nei turni precedenti — quel turno è il passo del riepilogo.
+  // Correzione D1: la depth del messaggio che ha generato il turno è il
+  // fallback quando della catena non resta nulla da leggere
+  const sourceDepth = getGroupMessage(p.sourceMessageId)?.depth ?? null
+  const win = readWindow(group.id, p.memberId, sourceDepth)
   if (!win.messages.length && !p.closing) return finish('SKIPPED')
 
   startGroupTurn(p.nonce, deps.now())
@@ -237,7 +239,10 @@ export async function runGroupTurnJob(
       coordinatorId,
       chainEnded: activeGroupTurnCount(group.id) === 0,
       newsForCoordinator: lastBotPost !== null && lastBotPost > (lastSend ?? 0),
-      coordinatorWaiting: memberWaitingForUser(getEntries(coordinatorId)),
+      // correzione D3: l'attesa conta solo da quando è NATA la catena (il
+      // created_at del suo messaggio root) — un widget di settimane prima mai
+      // risposto non blocca per sempre i turni di chiusura
+      coordinatorWaiting: memberWaitingForUser(getEntries(coordinatorId), getGroupMessage(chainRootId)?.created_at ?? 0),
       closeTurnExists: groupTurnByNonce(closingTurnNonce(group.id, coordinatorId, chainRootId)) !== null
     })
     if (decision.schedule) {

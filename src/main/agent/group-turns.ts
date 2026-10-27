@@ -171,7 +171,8 @@ export function groupTurnNonce(groupId: number, memberId: string, messageId: num
  * 4. catena: depth ≥ 4 → windingDown; depth ≥ 6 → la catena si chiude (nessun
  *    turno, riga di sistema nel gruppo);
  * 5. tetto orario: ≥ 40 post di bot nell'ora → nessun turno, riga di sistema;
- *    C4: tetto per catena — uno specialista con 3 post nella catena è escluso;
+ *    C4: tetto per catena — uno specialista con 3 post nella catena è escluso
+ *    (D2: il tetto non vale quando chiama il coordinatore);
  * 6. nonce deterministico: un nonce già nel registro non si riaccoda.
  */
 export function planGroupTurns(input: GroupPlanInput): GroupPlanResult {
@@ -187,10 +188,14 @@ export function planGroupTurns(input: GroupPlanInput): GroupPlanResult {
   const candidates = members.filter((m) => m.id !== message.authorId)
   // regola 2: le menzioni restringono il giro (più il coordinatore)
   const mentions = parseMentions(message.text, members)
-  const coordinator =
-    group.coordinatorId && message.authorId !== group.coordinatorId && members.some((m) => m.id === group.coordinatorId)
-      ? group.coordinatorId
-      : null
+  // correzione D2: due concetti separati — il gruppo HA un coordinatore (il
+  // membro che smista e chiude) e il coordinatore RICEVE il turno (solo se
+  // non è lui l'autore del messaggio). La differenza dichiara la regola del
+  // tetto per catena (qui sotto): il tetto non vale quando chiama il
+  // coordinatore, perché è lui a chiedere la revisione e la profondità resta
+  // il limite
+  const hasCoordinator = group.coordinatorId !== null && members.some((m) => m.id === group.coordinatorId)
+  const coordinator = hasCoordinator && message.authorId !== group.coordinatorId ? group.coordinatorId : null
   // C4: con un coordinatore, il post di uno specialista SENZA menzioni non
   // riempie la stanza di rumore: va riferito a lui, che smista
   const specialistPost = message.authorKind === 'agent' && coordinator !== null && message.authorId !== group.coordinatorId
@@ -229,7 +234,9 @@ export function planGroupTurns(input: GroupPlanInput): GroupPlanResult {
     }
     // C4: tetto per catena — lo specialista che ha già pubblicato il massimo
     // di post in QUESTA catena non riceve altri turni lì (il coordinatore no:
-    // lui smista e chiude, lo frena la profondità)
+    // lui smista e chiude, lo frena la profondità). D2, regola esplicita: il
+    // tetto NON vale quando chiama il coordinatore — coordinator è null anche
+    // per quello, e la sua richiesta di revisione merita risposta lo stesso
     if (
       coordinator !== null && memberId !== coordinator &&
       (input.memberChainPosts?.[memberId] ?? 0) >= GROUP_MEMBER_CHAIN_POSTS_MAX
@@ -316,11 +323,16 @@ export function shouldScheduleClosingTurn(input: ClosingTurnInput): ClosingTurnD
  * pendente o un widget ask_user senza risposta (e non scavalcato). In quel
  * caso non si accoda il turno di chiusura: sarà il messaggio dell'utente a
  * riprenderlo.
+ * Correzione D3: contano solo le domande e le card nate DA qui in poi — il
+ * created_at del messaggio root della catena. Un widget di settimane prima
+ * mai risposto non blocca per sempre i turni di chiusura delle catene nuove.
  */
 export function memberWaitingForUser(
-  entries: ReadonlyArray<{ id: number; kind: string; role: string; meta?: Record<string, unknown> | null }>
+  entries: ReadonlyArray<{ id: number; kind: string; role: string; createdAt: number; meta?: Record<string, unknown> | null }>,
+  since: number
 ): boolean {
   return entries.some((e) => {
+    if (e.createdAt < since) return false
     if (e.kind === 'approval' && e.meta?.status === 'pending') return true
     if (e.kind !== 'send-message') return false
     const msg = e.meta?.message as { type?: string } | undefined
@@ -412,4 +424,50 @@ export function buildGroupTurnOpening(ev: GroupTurnEvidence): string {
 /** La profondità del prossimo post: max(depth dei messaggi letti) + 1 (nessuno → 0). */
 export function nextPostDepth(readMaxDepth: number): number {
   return readMaxDepth + 1
+}
+
+// ---- correzione D1 (secondo giro): catena e profondità della finestra letta ----
+
+export interface ReadChainInput {
+  /** i messaggi DOPO il cursore del membro (la finestra di lettura), in ordine */
+  messages: ReadonlyArray<{ id: number; author_kind: string; author_id: string | null; depth: number; root_id: number | null }>
+  /** il membro che riceve il turno: i SUOI post non alzano la profondità */
+  memberId: string
+  /** la depth del messaggio che ha generato il turno (catena senza nulla da leggere) */
+  sourceDepth: number | null
+}
+
+export interface ReadChainResult {
+  /** la catena del turno: root dell'ULTIMO messaggio letto (non di sistema) */
+  rootId: number | null
+  /** la profondità letta della catena del turno (−1 se non c'è nulla) */
+  maxDepth: number
+}
+
+/**
+ * readChainDepth (pura, D1): catena e profondità della finestra di lettura di
+ * un membro. La catena resta quella dell'ULTIMO messaggio letto (non di
+ * sistema), come prima; la profondità conta SOLO i messaggi di quella catena,
+ * SENZA i post del membro stesso: le catene vecchie rimaste nella finestra si
+ * leggono (restano nell'apertura) ma non trascinano windingDown e depth della
+ * catena nuova — un post a depth 6 di una catena finita non deve far uscire
+ * la prima risposta a una richiesta nuova a depth 7, dove il planner
+ * chiuderebbe subito la catena e la richiesta resterebbe senza specialisti.
+ * Se della catena non resta nessun messaggio che conti (solo i post del
+ * membro, o finestra senza messaggi di membri), vale la depth del messaggio
+ * che ha generato il turno.
+ */
+export function readChainDepth(input: ReadChainInput): ReadChainResult {
+  let rootId: number | null = null
+  for (const m of input.messages) {
+    if (m.author_kind !== 'system') rootId = m.root_id ?? m.id
+  }
+  let maxDepth: number | null = null
+  for (const m of input.messages) {
+    if (rootId === null || (m.root_id ?? m.id) !== rootId) continue
+    if (m.author_kind === 'system') continue
+    if (m.author_kind === 'agent' && m.author_id === input.memberId) continue
+    maxDepth = Math.max(maxDepth ?? -1, m.depth)
+  }
+  return { rootId, maxDepth: maxDepth ?? input.sourceDepth ?? -1 }
 }

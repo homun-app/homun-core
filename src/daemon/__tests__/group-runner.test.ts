@@ -6,6 +6,9 @@
 // Correzioni fase 10: C2 — il turno di chiusura del coordinatore accodato
 // quando la catena si spegne/si chiude; C5 — stopReason: rate-limit/model-error
 // → ERROR, sul rate limit cursore fermo, coda annullata e UNA riga di sistema.
+// Correzioni 2: D1 — la profondità della finestra conta SOLO la catena del
+// turno, senza i post del membro (le catene vecchie non trascinano windingDown
+// né depth); D3 — l'attesa del coordinatore conta da inizio catena.
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -13,7 +16,8 @@ import { join } from 'node:path'
 import { setDataDir, db, createAgent, updateAgent, appendEntry } from '../../main/store/db'
 import { enqueueJob, getJobById, listJobs } from '../../main/store/jobs'
 import {
-  createGroup, addGroupMessage, groupMessages, getGroupCursor, groupTurnByNonce, setGroupCursor
+  createGroup, addGroupMessage, groupMessages, getGroupCursor, groupTurnByNonce, setGroupCursor,
+  addGroupMember, scheduleTurnsForMessage
 } from '../../main/store/groups'
 import { runGroupTurnJob, GROUP_TURN_TIMEOUT_MS, type GroupRunnerDeps } from '../group-runner'
 import { closingTurnNonce, GROUP_RATE_LIMIT_TEXT, GROUP_CLOSING_LINE } from '../../main/agent/group-turns'
@@ -411,5 +415,79 @@ describe('correzione C5: errori del modello nei turni di gruppo', () => {
     expect(lines()).toHaveLength(1)
     // niente turno di chiusura: il giro è sospeso, non finito
     expect(listJobs(db()).some((j) => j.kind === 'group-turn' && j.payload.closing === true && j.payload.groupId === g.id)).toBe(false)
+  })
+})
+
+describe('correzione D1: la profondità conta SOLO la catena del turno', () => {
+  it("il post del turno precedente non apre col windingDown: la risposta alla richiesta NUOVA esce a depth 1", async () => {
+    const { coord, g, u1 } = fixture()
+    // il post del TURNO PRECEDENTE del coordinatore resta oltre il suo cursore
+    // (il cursore avanza all'ultimo letto all'APERTURA): depth 4, catena vecchia
+    addGroupMessage({ groupId: g.id, authorKind: 'agent', authorId: coord.id, authorName: 'Coordinatore', text: 'passaggio 4 (catena vecchia)', depth: 4, rootId: u1.id })
+    setGroupCursor(g.id, coord.id, u1.id)
+    // la richiesta nuova dell'utente: catena NUOVA (depth 0) con @menzione
+    const u7 = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: "@Coordinatore aggiungi un'opzione vegetariana", depth: 0 })
+    const seen: Seen[] = []
+    await runGroupTurnJob(db(), scriptedDeps(seen, { post: 'chiamo lo chef' }), jobFor(coord.id, g, u7.id), emit)
+    // catena del turno = quella dell'ULTIMO messaggio (la nuova), depth 0
+    expect(seen[0]!.opts.groupTurn).toEqual({ groupId: g.id, readMaxDepth: 0, rootId: u7.id })
+    // nessun windingDown: è la prima risposta a una richiesta nuova
+    expect(seen[0]!.text).not.toContain('Il giro sta CHIUDENDO')
+    // il post esce a depth 1 nella catena nuova (prima: 5, con windingDown)
+    const post = groupMessages(g.id).findLast((m) => m.author_kind === 'agent' && m.author_id === coord.id && m.id > u7.id)!
+    expect(post.depth).toBe(1)
+    expect(post.root_id).toBe(u7.id)
+  })
+
+  it('una vecchia catena a depth 6 nella finestra + messaggio nuovo: la catena NUOVA parte da 0 e i menzionati ricevono il turno', async () => {
+    const { bot, coord, g, u1 } = fixture()
+    // un terzo membro da menzionare nella risposta dello specialista
+    const chef = createAgent('Chef Menu', 'Il menu')
+    updateAgent(chef.id, { providerId: 'prov', model: 'm1' })
+    addGroupMember(g.id, chef.id)
+    // catena VECCHIA finita a depth 6, ancora oltre il cursore dello specialista
+    addGroupMessage({ groupId: g.id, authorKind: 'agent', authorId: coord.id, authorName: 'Coordinatore', text: 'fine del giro (depth 6)', depth: 6, rootId: u1.id })
+    // la richiesta nuova dell'utente allo specialista
+    const u2 = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: "@Cercatore Cena un'alternativa?", depth: 0 })
+    const seen: Seen[] = []
+    await runGroupTurnJob(db(), scriptedDeps(seen, { post: '@Chef Menu aggiorniamo il menu' }), jobFor(bot.id, g, u2.id), emit)
+    expect(seen[0]!.opts.groupTurn).toEqual({ groupId: g.id, readMaxDepth: 0, rootId: u2.id })
+    // il post esce a depth 1 (prima: 7 → planGroupTurns chiudeva SUBITO la catena)
+    const post = groupMessages(g.id).findLast((m) => m.author_kind === 'agent' && m.author_id === bot.id)!
+    expect(post.depth).toBe(1)
+    expect(post.root_id).toBe(u2.id)
+    // il post genera i turni (come fa l'intercettazione del loop): lo
+    // specialista MENZIONATO riceve il turno, la catena nuova non si chiude
+    scheduleTurnsForMessage(post, emit)
+    expect(listJobs(db()).some((j) => j.kind === 'group-turn' && j.payload.nonce === `g${g.id}:${chef.id}:msg${post.id}`)).toBe(true)
+    expect(groupMessages(g.id).filter((m) => m.author_kind === 'system' && m.id > u2.id)).toHaveLength(0)
+  })
+
+  it('i post del MEMBRO nella finestra non alzano la depth', async () => {
+    const { bot, g } = fixture()
+    // cursore fermo: nella finestra c'è anche un post del membro stesso a
+    // depth 3 della catena corrente (letto, ma non conta per la profondità)
+    const u2 = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: 'e la spesa?', depth: 0 })
+    addGroupMessage({ groupId: g.id, authorKind: 'agent', authorId: bot.id, authorName: 'Cercatore Cena', text: 'già risposto (depth 3)', depth: 3, rootId: u2.id })
+    const seen: Seen[] = []
+    await runGroupTurnJob(db(), deps(seen), jobFor(bot.id, g, u2.id), emit)
+    // il post del membro non conta: la depth letta è quella dell'utente (0)
+    expect(seen[0]!.opts.groupTurn).toEqual({ groupId: g.id, readMaxDepth: 0, rootId: u2.id })
+  })
+})
+
+describe('correzione D3: attesa del coordinatore limitata alla catena', () => {
+  it("un widget nato PRIMA della catena non blocca il turno di chiusura", async () => {
+    const { bot, coord, g, u1 } = fixture()
+    // un widget del coordinatore di settimane fa, mai risposto: senza D3 la
+    // sua presenza bloccava per sempre OGNI turno di chiusura
+    const oldWidget = appendEntry({
+      agentId: coord.id, kind: 'send-message', role: 'assistant', content: 'che budget?',
+      meta: { message: { type: 'widget', prompt: 'che budget?', options: [] } }
+    })
+    db().prepare('UPDATE entries SET created_at = ? WHERE id = ?').run(u1.created_at - 7 * 24 * 3_600_000, oldWidget.id)
+    await runGroupTurnJob(db(), scriptedDeps([], { post: 'CONSEGNA: menu pronto.' }), jobFor(bot.id, g, u1.id), emit)
+    // l'attesa è VECCHIA (prima dell'inizio della catena): la chiusura parte
+    expect(closingJob(g, coord.id, u1.id)).toBeTruthy()
   })
 })
