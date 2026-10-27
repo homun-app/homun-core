@@ -194,3 +194,56 @@ describe('scheduleTurnsForMessage (la colla)', () => {
     expect(listJobs(db()).some((j) => j.kind === 'group-turn' && (j.payload as { groupId: number }).groupId === g.id)).toBe(false)
   })
 })
+
+describe('correzioni fase 10: instradamento C4 e sospensione C5', () => {
+  it('C4: il post dello specialista senza menzioni va SOLO al coordinatore; con 3 post nella catena non riceve più turni', async () => {
+    const main = createAgent('Main9', '')
+    const coord = createAgent('Coord9', '')
+    const spec = createAgent('Spec9', '')
+    const g = createGroup('G9', 'd', main.id, [coord.id, spec.id], coord.id)
+    // il post dello specialista SENZA menzioni: turno solo al coordinatore
+    const m1 = addGroupMessage({ groupId: g.id, authorKind: 'agent', authorId: spec.id, authorName: 'Spec9', text: 'consegno il menu', depth: 1, rootId: 1 })
+    const jobsBefore = listJobs(db()).length
+    const r1 = scheduleTurnsForMessage(m1, () => undefined, Date.now())
+    expect(r1.jobs.map((j) => j.agentId)).toEqual([coord.id])
+    expect(listJobs(db())).toHaveLength(jobsBefore + 1)
+
+    // il tetto per catena: lo specialista ha già 3 post nella catena → escluso
+    // (gruppo a parte: il coordinatore qui sopra ha ancora un turno in coda e
+    // la fusione lo salterebbe per un'altra ragione)
+    const main2 = createAgent('Main9b', '')
+    const coord2 = createAgent('Coord9b', '')
+    const spec2 = createAgent('Spec9b', '')
+    const g2 = createGroup('G9b', 'd', main2.id, [coord2.id, spec2.id], coord2.id)
+    for (let i = 0; i < 3; i++) {
+      addGroupMessage({ groupId: g2.id, authorKind: 'agent', authorId: spec2.id, authorName: 'Spec9b', text: `v${i}`, depth: 1, rootId: 2 })
+    }
+    const m2 = addGroupMessage({ groupId: g2.id, authorKind: 'user', authorId: null, authorName: 'utente', text: 'come va?', depth: 1, rootId: 2 })
+    const r2 = scheduleTurnsForMessage(m2, () => undefined, Date.now())
+    const planned = r2.jobs.map((j) => j.agentId)
+    expect(planned).not.toContain(spec2.id)
+    // il coordinatore e chi è sotto il tetto restano
+    expect(planned).toContain(coord2.id)
+    expect(r2.plan.skipped.find((s) => s.memberId === spec2.id)?.reason).toContain('tetto per catena')
+  })
+
+  it('C5: suspendGroupTurns annulla i job del gruppo e registra SKIPPED col motivo (il job in corso si esclude)', async () => {
+    const a1 = createAgent('Bot10', '')
+    const g = createGroup('G10', 'd', a1.id, [])
+    const u = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'utente', text: 'x', depth: 0 })
+    scheduleTurnsForMessage(u, () => undefined, Date.now())
+    const jobs = listJobs(db()).filter((j) => j.kind === 'group-turn' && j.payload.groupId === g.id)
+    expect(jobs.length).toBeGreaterThan(0)
+    const { suspendGroupTurns, groupTurnByNonce } = await import('../groups')
+    // il primo job è "in corso": si esclude, gli altri si annullano
+    const n = suspendGroupTurns(db(), g.id, 'rate limit del provider: giro sospeso', jobs[0]!.id)
+    expect(n).toBe(jobs.length - 1)
+    const remaining = listJobs(db()).filter((j) => j.kind === 'group-turn' && j.payload.groupId === g.id)
+    expect(remaining.map((j) => j.id)).toEqual([jobs[0]!.id])
+    for (const j of jobs.slice(1)) {
+      const row = groupTurnByNonce(String(j.payload.nonce))
+      expect(row?.outcome).toBe('SKIPPED')
+      expect(row?.reason).toContain('rate limit')
+    }
+  })
+})

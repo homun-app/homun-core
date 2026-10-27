@@ -37,7 +37,7 @@ import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto } from './permission-rules'
 import { autoReviewDecision, reviewWithConfiguredModel, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
-import { activityOf, isToolLoop } from './loop-guard'
+import { activityOf, isToolLoop, stopReasonOfError } from './loop-guard'
 import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from './stream-deadline'
 // fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
 // avanzamenti, result col testo consegnato)
@@ -45,9 +45,9 @@ import { deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkToo
 // fase 9 (punto 1): modello di riserva quando il principale non risponde
 import { fallbackModelFor, type ModelDefaultsMap } from './model-defaults'
 import { shouldUseFallback } from './model-fallback'
-// fase 10: gruppi (store) e regole del turno di gruppo (puro)
+// fase 10: gruppi (store) e regole del turno di gruppo (puro); correzioni C1-C3
 import { getGroup, getGroupMessage, isGroupMember, addGroupMessage, scheduleTurnsForMessage } from '../store/groups'
-import { nextPostDepth } from './group-turns'
+import { nextPostDepth, hasSentToUserInChain, alreadySentToUserResult } from './group-turns'
 import { MAX_CREATE_AGENTS_PER_TURN } from './tools'
 import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 
@@ -99,11 +99,26 @@ const TURN_END_LABELS: Record<TurnEnd, string> = {
   AWAITING_USER: 'In attesa della risposta dell’utente'
 }
 
-/** Chiude il turno con un evento meta.turnEnd (§3bis L2: esito del turno nel transcript). */
-function endTurn(agentId: string, outcome: TurnEnd, emit: Emitter, taskId?: number): void {
+/**
+ * Chiude il turno con un evento meta.turnEnd (§3bis L2: esito del turno nel
+ * transcript). Correzione C5: gli STOPPED portano anche il motivo in
+ * meta.stopReason ∈ loop | interrupt | model-error | rate-limit (il runner
+ * dei turni di gruppo lo usa per l'esito nel registro).
+ */
+function endTurn(
+  agentId: string,
+  outcome: TurnEnd,
+  emit: Emitter,
+  taskId?: number,
+  stopReason?: 'loop' | 'interrupt' | 'model-error' | 'rate-limit'
+): void {
   appendEntry({
     agentId, kind: 'event', role: 'system', content: TURN_END_LABELS[outcome],
-    meta: { turnEnd: outcome, ...(taskId !== undefined ? { taskId } : {}) }
+    meta: {
+      turnEnd: outcome,
+      ...(taskId !== undefined ? { taskId } : {}),
+      ...(outcome === 'STOPPED' && stopReason ? { stopReason } : {})
+    }
   })
   emitLastEntry(agentId, emit)
 }
@@ -214,6 +229,12 @@ export interface RunTurnOptions {
     readMaxDepth: number
     /** root della catena letta nell'apertura (i post ereditano la root) */
     rootId: number | null
+    /**
+     * Correzione C2: è il turno di CHIUSURA del coordinatore — post_to_group
+     * è rifiutato, la send all'utente non ha il tetto di catena (C3) e
+     * l'apertura porta il flag chiusura="true".
+     */
+    closing?: boolean
   }
 }
 
@@ -302,8 +323,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // (più messaggi di fila senza lavoro in mezzo non diventano chat)
   let sendsSinceWork = 0
   // fase 10 (§3): un solo post_to_group per membro per turno (il secondo ha un
-  // result esplicito che lo spiega)
+  // result esplicito che lo spiega); correzione C1: il silenzio esplicito
+  // (pass) CHIUDE il turno di gruppo
   let groupPosted = false
+  let passedSilence = false
 
   // fase 8 (§3bis L7): ogni entry scritta da un turno di TASK porta meta.taskId —
   // vive nel sotto-transcript del task, esclusa dalla chat principale.
@@ -351,7 +374,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     }
     const message: SendMessagePayload = { type: 'text', text: String(input.text ?? ''), ...(urgent ? { urgent: true } : {}) }
     const hold = automatic && !urgent
-    const sent = appendSend(agentId, call, message, emit, hold ? { held: true } : {}, opts.taskId)
+    // correzione C3: le send dei turni di gruppo portano la CATENA (chiave
+    // diversa da meta.groupId: i messaggi all'utente restano visibili in chat)
+    const extra: Record<string, unknown> = { ...(hold ? { held: true } : {}) }
+    if (opts.groupTurn) {
+      extra.groupChain = { groupId: opts.groupTurn.groupId, rootId: opts.groupTurn.rootId ?? null }
+    }
+    const sent = appendSend(agentId, call, message, emit, extra, opts.taskId)
     if (hold) holdOutboxEntry(sent.id, agentId, sent.createdAt)
     return hold
   }
@@ -369,6 +398,17 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // testo vuoto: niente messaggio vuoto in chat (visto nell'eval: un modello
     // a volte chiama send_to_user senza text)
     if (!text.trim()) return emptySendResult()
+    // correzione C3: nei turni di gruppo NON di chiusura al massimo UN
+    // messaggio per membro per catena — dal secondo il testo è ragionamento,
+    // il riepilogo arriva alla chiusura. La chiusura ha sempre il suo messaggio.
+    if (
+      opts.groupTurn && !opts.groupTurn.closing &&
+      hasSentToUserInChain(getEntries(agentId), { groupId: opts.groupTurn.groupId, rootId: opts.groupTurn.rootId ?? null })
+    ) {
+      add({ agentId, kind: 'thinking', role: 'assistant', content: text })
+      emitLastEntry(agentId, emit)
+      return alreadySentToUserResult()
+    }
     if (isDuplicateSend(deliveredTexts, text)) return alreadyDeliveredResult(text)
     // fase 10 (residuo 0c): dal quarto send_to_user consegnato del turno il
     // testo è ragionamento — tre messaggi bastano per un turno di lavoro
@@ -606,14 +646,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // fase 8 (§3bis L11): il modello non risponde — abort del solo stream
           add({ agentId, kind: 'notice', role: 'system', content: `Il modello non risponde (${err.message}): turno interrotto.` })
           emitLastEntry(agentId, emit)
-          endTurn(agentId, 'STOPPED', emit, opts.taskId)
+          endTurn(agentId, 'STOPPED', emit, opts.taskId, 'model-error')
           setStatus(agentId, 'idle', emit)
           return
         }
         const msg = err instanceof Error ? err.message : String(err)
         add({ agentId, kind: 'notice', role: 'system', content: `Errore dal modello: ${msg}` })
         emitLastEntry(agentId, emit)
-        endTurn(agentId, 'STOPPED', emit, opts.taskId)
+        // correzione C5: il motivo distingue il limite d'uso del provider (429)
+        // dagli altri errori; se il turno era già stato interrotto è un interrupt
+        endTurn(agentId, 'STOPPED', emit, opts.taskId, controller.signal.aborted ? 'interrupt' : stopReasonOfError(err))
         setStatus(agentId, 'idle', emit)
         return
       } finally {
@@ -626,7 +668,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       if (!text && !final.toolCalls?.length) {
         add({ agentId, kind: 'notice', role: 'system', content: 'Il modello non ha prodotto risposta (vuota).' })
         emitLastEntry(agentId, emit)
-        endTurn(agentId, 'STOPPED', emit, opts.taskId)
+        endTurn(agentId, 'STOPPED', emit, opts.taskId, 'model-error')
         setStatus(agentId, 'idle', emit)
         return
       }
@@ -657,7 +699,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (isToolLoop(executedCalls, { name: call.name, args: call.arguments })) {
           add({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: la stessa identica chiamata si ripete (loop).' })
           emitLastEntry(agentId, emit)
-          endTurn(agentId, 'STOPPED', emit, opts.taskId)
+          endTurn(agentId, 'STOPPED', emit, opts.taskId, 'loop')
           setStatus(agentId, 'idle', emit)
           return
         }
@@ -970,6 +1012,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const g = gid ? getGroup(gid) : null
           if (!g) {
             result = 'Gruppo mancante: dentro un turno di gruppo è implicito; fuori serve groupId (i tuoi gruppi sono in list_agents).'
+          } else if (opts.groupTurn?.closing) {
+            // correzione C2: nel turno di chiusura non si pubblica più nel
+            // gruppo — resta solo il riepilogo all'utente (o pass)
+            result = "Il giro è chiuso: ora solo il riepilogo all'utente (send_to_user). Se l'hai già mandato, chiudi con pass."
           } else if (!opts.groupTurn && !isGroupMember(gid, agentId)) {
             result = `Non fai parte del gruppo "${g.name}": nel gruppo scrivono solo i membri.`
           } else if (!text) {
@@ -1009,10 +1055,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         }
 
         // tacere è un esito esplicito del turno di gruppo (vale anche chiudere
-        // senza scrivere, ma così il modello lo dichiara e non riempie il gruppo)
+        // senza scrivere, ma così il modello lo dichiara e non riempie il gruppo).
+        // Correzione C1: nei turni di gruppo pass è TERMINALE — registra il
+        // silenzio e il turno finisce SUBITO (nessun'altra chiamata al modello;
+        // i tool chiesti dopo pass nella stessa risposta non vengono eseguiti)
         if (call.name === 'pass') {
-          const result = opts.groupTurn
-            ? 'Silenzio registrato: resti fuori da questo giro del gruppo.'
+          const terminal = opts.groupTurn !== undefined
+          const result = terminal
+            ? 'Silenzio registrato: il tuo turno nel gruppo finisce qui.'
             : 'pass vale solo dentro i turni di gruppo: fuori puoi semplicemente non scrivere nulla.'
           const passEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: 'pass',
@@ -1021,6 +1071,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const passRes = add({ agentId, kind: 'tool-result', role: 'system', content: result, meta: { callId: call.id } })
           emit({ type: 'entries', agentId, entries: [passEntry, passRes] })
           messages.push({ role: 'tool', toolCallId: call.id, content: result })
+          if (terminal) {
+            passedSilence = true
+            finished = true
+            break
+          }
           continue
         }
 
@@ -1263,18 +1318,19 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       if (paused && messages[messages.length - 1]?.role === 'tool') {
         // dopo un rifiuto il modello può decidere come proseguire: continua il loop
       }
-      if (awaitingUser || controller.signal.aborted) break
+      // correzione C1: pass ha chiuso il turno di gruppo (niente altre chiamate)
+      if (awaitingUser || passedSilence || controller.signal.aborted) break
     }
 
     // ---- fase 3: chiusura del turno con esito ----
     if (awaitingUser) {
       endTurn(agentId, 'AWAITING_USER', emit, opts.taskId)
     } else if (controller.signal.aborted) {
-      endTurn(agentId, run.superseded ? 'SUPERSEDED' : 'STOPPED', emit, opts.taskId)
+      endTurn(agentId, run.superseded ? 'SUPERSEDED' : 'STOPPED', emit, opts.taskId, 'interrupt')
     } else if (!finished) {
       add({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: limite di passi raggiunto.' })
       emitLastEntry(agentId, emit)
-      endTurn(agentId, 'STOPPED', emit, opts.taskId)
+      endTurn(agentId, 'STOPPED', emit, opts.taskId, 'loop')
     } else {
       // turno FINISHED: se l'UTENTE non ha visto nulla (nessuna send-message nel
       // turno) una chiamata di recupero chiede al modello send_to_user; se non

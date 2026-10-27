@@ -2,15 +2,26 @@
 // (blocco evidenza con i SOLI messaggi nuovi dopo il cursore, i pari e la
 // descrizione del gruppo), gira runTurn nel contesto del MEMBRO, avanza il
 // cursore e registra l'esito nel registro dei turni. Scadenza: 5 minuti per
-// turno, poi TIMEOUT (oltre alle scadenze dello stream della fase 8). Le
-// dipendenze sono iniettabili: nei test LLM finto e orologio finto.
+// turno, poi TIMEOUT (oltre alle scadenze dello stream della fase 8).
+// Correzioni fase 10: C2 — a fine turno, se la catena si è spenta, il turno di
+// CHIUSURA del coordinatore (il riepilogo all'utente che prima non arrivava
+// mai); C5 — gli STOPPED col motivo in meta.stopReason diventano ERROR
+// (model-error/rate-limit) invece di CANCELLED, e sul rate limit il cursore
+// resta fermo, la coda del gruppo si svuota e nel gruppo compare una riga di
+// sistema. Le dipendenze sono iniettabili: nei test LLM finto e orologio finto.
 import type { DatabaseSync } from 'node:sqlite'
 import { getAgent, getEntries } from '../main/store/db'
 import {
   getGroup, groupMemberIds, groupMessages, getGroupCursor, setGroupCursor,
-  getGroupMessage, startGroupTurn, finishGroupTurn, type GroupTurnOutcome
+  getGroupMessage, startGroupTurn, finishGroupTurn, addGroupMessage,
+  activeGroupTurnCount, lastBotPostAtInChain, coordinatorLastSendAt,
+  scheduleClosingTurn, suspendGroupTurns, groupTurnByNonce,
+  type GroupTurnOutcome
 } from '../main/store/groups'
-import { buildGroupTurnOpening, GROUP_WINDING_DOWN_DEPTH } from '../main/agent/group-turns'
+import {
+  buildGroupTurnOpening, GROUP_WINDING_DOWN_DEPTH, GROUP_RATE_LIMIT_TEXT,
+  shouldScheduleClosingTurn, memberWaitingForUser, closingTurnNonce
+} from '../main/agent/group-turns'
 import { setJobEntryId, getJobById, type Job } from '../main/store/jobs'
 import type { runTurn, RunTurnOptions } from '../main/agent/loop'
 import type { SandbotEvent } from '../shared/types'
@@ -45,11 +56,14 @@ export function readWindow(
   const messages = groupMessages(groupId, after)
   let lastId = after
   let maxDepth = -1
+  // la catena è quella dell'ULTIMO messaggio letto (non del più profondo: con
+  // parità di depth il più profondo resterebbe su una catena vecchia e il
+  // turno di chiusura non troverebbe mai quella nuova)
   let rootId: number | null = null
   for (const m of messages) {
     lastId = Math.max(lastId, m.id)
-    if (m.author_kind !== 'system' && m.depth > maxDepth) {
-      maxDepth = m.depth
+    if (m.author_kind !== 'system') {
+      maxDepth = Math.max(maxDepth, m.depth)
       rootId = m.root_id ?? m.id
     }
   }
@@ -58,9 +72,11 @@ export function readWindow(
 
 /**
  * Esegue un job group-turn. Esiti nel registro: SENT (almeno un post del
- * membro), PASS (silenzio), TIMEOUT (scadenza dei 5 minuti), CANCELLED (turno
- * interrotto senza post), ERROR (runTurn ha lanciato), SKIPPED (gruppo/membro
- * spariti o nessun messaggio nuovo).
+ * membro — o, nel turno di chiusura, un messaggio all'utente), PASS
+ * (silenzio), TIMEOUT (scadenza dei 5 minuti), CANCELLED (turno interrotto
+ * senza post: loop o interrupt), ERROR (errore del modello o limite d'uso del
+ * provider, correzione C5), SKIPPED (gruppo/membro spariti o nessun messaggio
+ * nuovo).
  */
 export async function runGroupTurnJob(
   db: DatabaseSync,
@@ -71,6 +87,8 @@ export async function runGroupTurnJob(
   const p = job.payload as {
     groupId: number; memberId: string; nonce: string; sourceMessageId: number
     automatic?: boolean; entryId?: number
+    /** correzione C2: è il turno di CHIUSURA del coordinatore di questa catena */
+    closing?: boolean; rootId?: number
   }
   const finish = (outcome: GroupTurnOutcome): void => finishGroupTurn(p.nonce, outcome, deps.now())
   const group = getGroup(p.groupId)
@@ -80,13 +98,18 @@ export async function runGroupTurnJob(
   const me = getAgent(p.memberId)
   if (!me || !me.providerId || !me.model) return finish('SKIPPED')
 
-  // la finestra di lettura: i messaggi DOPO il cursore del membro
+  // la finestra di lettura: i messaggi DOPO il cursore del membro. Il turno di
+  // CHIUSURA parte anche a finestra vuota (C2): il coordinatore ha già letto
+  // le consegne nei turni precedenti — quel turno è il passo del riepilogo
   const win = readWindow(group.id, p.memberId)
-  if (!win.messages.length) return finish('SKIPPED')
+  if (!win.messages.length && !p.closing) return finish('SKIPPED')
 
   startGroupTurn(p.nonce, deps.now())
 
-  // l'apertura: blocco evidenza con pari, messaggi nuovi e flag di chiusura
+  // l'apertura: blocco evidenza con pari, messaggi nuovi e flag di chiusura;
+  // nel turno di CHIUSURA (C2) la catena è quella del payload (quella che si
+  // sta chiudendo), non l'ultima arrivata nella finestra
+  const chainRootId = p.closing && typeof p.rootId === 'number' ? p.rootId : win.rootId
   const agents = memberIds.map((id) => getAgent(id)).filter((a): a is NonNullable<typeof a> => !!a)
   const opening = buildGroupTurnOpening({
     group: { id: group.id, name: group.name, description: group.description },
@@ -106,20 +129,33 @@ export async function runGroupTurnJob(
           })()
         : null
     })),
-    windingDown: win.maxDepth >= GROUP_WINDING_DOWN_DEPTH
+    windingDown: win.maxDepth >= GROUP_WINDING_DOWN_DEPTH,
+    ...(p.closing ? { closing: true } : {})
   })
 
   // il turno è un turno "di un altro bot" (fase 7): niente auto-review, il
   // testo del gruppo non è consenso dell'utente; l'automaticità della catena
   // si propaga (outbox e tetto urgent)
+  // l'id dell'entry che apre il turno si ricava da onTurnEntry (la rilettura
+  // dal job non basta: la sospensione C5 può cancellare la riga del job mentre
+  // il turno gira ancora)
+  let turnEntryId: number | null = typeof job.payload.entryId === 'number' ? job.payload.entryId : null
   const opts: RunTurnOptions = {
     source: 'user',
     initiator: 'GROUP_TURN',
     untrusted: true,
     ...(p.automatic ? { automatic: true } : {}),
-    groupTurn: { groupId: group.id, readMaxDepth: win.maxDepth, rootId: win.rootId },
+    groupTurn: {
+      groupId: group.id,
+      readMaxDepth: win.maxDepth,
+      rootId: chainRootId,
+      ...(p.closing ? { closing: true } : {})
+    },
     ...(typeof job.payload.entryId === 'number' ? { resume: { entryId: job.payload.entryId } } : {}),
-    onTurnEntry: (entryId: number): void => setJobEntryId(db, job.id, entryId),
+    onTurnEntry: (entryId: number): void => {
+      turnEntryId = entryId
+      setJobEntryId(db, job.id, entryId)
+    },
     extraMeta: { groupId: group.id, groupTurnNonce: p.nonce }
   }
 
@@ -140,28 +176,79 @@ export async function runGroupTurnJob(
   }
   cancelTimer()
 
-  // esito: un post del membro nella finestra del turno → SENT; scadenza →
-  // TIMEOUT; interrotto senza post → CANCELLED; altrimenti il silenzio è PASS
+  // l'entryId del turno: da onTurnEntry se questo tentativo ha aperto il
+  // turno, altrimenti si rilegge dal job (ripresa R1)
+  const entryId = turnEntryId ??
+    (getJobById(db, job.id)?.payload as { entryId?: number } | undefined)?.entryId ?? null
+  const turnEntry = entryId !== null ? getEntries(p.memberId, entryId) : []
+  const turnEnd = turnEntry.find((e) => e.kind === 'event' && e.meta?.turnEnd) ?? null
+  const stopReason = (turnEnd?.meta?.stopReason as string | undefined) ?? null
+
+  // esito (C2/C5): un post del membro nella finestra del turno → SENT; la
+  // scadenza → TIMEOUT; il turno di chiusura vale SENT se ha scritto
+  // all'utente; model-error/rate-limit → ERROR; interrotto senza consegne →
+  // CANCELLED; altrimenti il silenzio è PASS
   const posted = groupMessages(group.id, postsBefore).some(
     (m) => m.author_kind === 'agent' && m.author_id === p.memberId
   )
+  // la consegna all'utente del turno di chiusura: un messaggio di TESTO (le
+  // bozze e le card sono attese, non consegne)
+  const sentToUser = turnEntry.some((e) => {
+    if (e.kind !== 'send-message') return false
+    return ((e.meta?.message ?? null) as { type?: string } | null)?.type === 'text'
+  })
   let outcome: GroupTurnOutcome = 'PASS'
-  if (posted) outcome = 'SENT'
-  else if (timedOut) outcome = 'TIMEOUT'
-  else {
-    // l'entryId sta nel payload aggiornato del job (onTurnEntry lo scrive nel
-    // DB, non nell'oggetto in memoria): si rilegge per trovare il turnEnd
-    const entryId = typeof job.payload.entryId === 'number'
-      ? job.payload.entryId
-      : (getJobById(db, job.id)?.payload as { entryId?: number } | undefined)?.entryId ?? null
-    const turnEnd = entryId !== null
-      ? getEntries(p.memberId, entryId).find((e) => e.kind === 'event' && e.meta?.turnEnd)
-      : null
-    if (turnEnd?.meta?.turnEnd === 'STOPPED') outcome = 'CANCELLED'
-  }
+  if (timedOut) outcome = 'TIMEOUT'
+  else if (posted || sentToUser) outcome = 'SENT'
+  else if (stopReason === 'rate-limit' || stopReason === 'model-error') outcome = 'ERROR'
+  else if (turnEnd?.meta?.turnEnd === 'STOPPED') outcome = 'CANCELLED'
   finish(outcome)
+
+  // correzione C5: limite d'uso del provider — il cursore NON avanza (i
+  // messaggi restano da leggere), i job group-turn del gruppo ancora in coda
+  // si annullano (SKIPPED col motivo) e nel gruppo compare UNA riga di
+  // sistema; niente turno di chiusura: il giro riprende al prossimo messaggio
+  if (stopReason === 'rate-limit') {
+    suspendGroupTurns(db, group.id, 'rate limit del provider: giro sospeso', job.id)
+    const now = deps.now()
+    const recent = groupMessages(group.id).filter(
+      (m) => m.author_kind === 'system' && m.text === GROUP_RATE_LIMIT_TEXT && m.created_at > now - 3_600_000
+    )
+    if (!recent.length) {
+      addGroupMessage({ groupId: group.id, authorKind: 'system', authorId: null, authorName: 'sistema', text: GROUP_RATE_LIMIT_TEXT })
+      emit({ type: 'groups' })
+    }
+    return
+  }
 
   // il cursore avanza a fine turno: i messaggi arrivati MENTRE girava restano
   // nuovi (hanno già generato i loro turni per questo membro)
   setGroupCursor(group.id, p.memberId, win.lastId)
+
+  // correzione C2: la catena si è SPENTA (nessun turno pianificato o in corso
+  // per il gruppo) → il runner accoda UN turno di chiusura per il
+  // coordinatore, se ha consegne da riportare che non ha già riportato
+  // (rootId nullo = finestra senza messaggi di membri: non è una catena)
+  const coordinatorId = group.coordinator_id
+  if (coordinatorId && memberIds.includes(coordinatorId) && chainRootId !== null) {
+    const lastBotPost = lastBotPostAtInChain(group.id, chainRootId, coordinatorId)
+    const lastSend = coordinatorLastSendAt(group.id, chainRootId, coordinatorId)
+    const decision = shouldScheduleClosingTurn({
+      coordinatorId,
+      chainEnded: activeGroupTurnCount(group.id) === 0,
+      newsForCoordinator: lastBotPost !== null && lastBotPost > (lastSend ?? 0),
+      coordinatorWaiting: memberWaitingForUser(getEntries(coordinatorId)),
+      closeTurnExists: groupTurnByNonce(closingTurnNonce(group.id, coordinatorId, chainRootId)) !== null
+    })
+    if (decision.schedule) {
+      scheduleClosingTurn({
+        groupId: group.id,
+        coordinatorId,
+        rootId: chainRootId,
+        sourceMessageId: p.sourceMessageId,
+        ...(p.automatic ? { automatic: true } : {}),
+        emit
+      })
+    }
+  }
 }

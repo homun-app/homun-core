@@ -17,9 +17,34 @@ export const GROUP_CHAIN_MAX_DEPTH = 6
 /** Tetto orario dei post di bot per gruppo (lo scheduler oltre non accoda). */
 export const GROUP_HOURLY_POSTS_MAX = 40
 
-/** La riga di sistema discreta quando la catena si chiude (depth ≥ 6). */
+/**
+ * La riga di sistema discreta quando la catena si chiude (depth ≥ 6). Correzione
+ * C2: il riferimento all'utente ora è concreto — il turno di chiusura del
+ * coordinatore esiste davvero, non è più un augurio.
+ */
 export const GROUP_CHAIN_CLOSED_TEXT =
-  'Il giro si è chiuso da solo (limite di scambi di fila raggiunto): nessun nuovo turno per ora. Chi deve riferire all\'utente lo fa in chat diretta.'
+  'Il giro si è chiuso: il coordinatore fa il punto con l\'utente.'
+
+/**
+ * Correzione C5: la riga di sistema (una sola) quando il provider manda un
+ * limite d'uso (429): il giro si sospende e i messaggi restano da leggere.
+ */
+export const GROUP_RATE_LIMIT_TEXT =
+  'Il modello non è disponibile (limite d\'uso del provider): il giro è sospeso. Riprende al prossimo messaggio.'
+
+/**
+ * Correzione C2: la riga chiara nell'apertura del turno di chiusura del
+ * coordinatore — l'ultimo passo del giro che prima mancava.
+ */
+export const GROUP_CLOSING_LINE =
+  'Il giro è finito. Se le consegne ci sono, manda ORA all\'utente UN riepilogo completo (send_to_user); se manca qualcosa, digli cosa manca e cosa serve da lui. Non scrivere nel gruppo.'
+
+/**
+ * Correzione C4: tetto per catena — uno specialista che ha già pubblicato
+ * questo numero di post nella catena non riceve altri turni lì (il
+ * coordinatore è escluso: resta il limite di profondità).
+ */
+export const GROUP_MEMBER_CHAIN_POSTS_MAX = 3
 
 /** La riga di sistema quando scatta il tetto orario (una volta per ora). */
 export const GROUP_HOURLY_CAP_TEXT =
@@ -33,6 +58,7 @@ export const GROUP_TURN_RULE = [
   'Regole del turno di gruppo:',
   '- Scrivi nel gruppo SOLO se hai qualcosa di utile da aggiungere o se sei chiamato (@menzione); altrimenti resta in silenzio: chiama pass (o semplicemente non scrivere).',
   '- Quando il giro sta chiudendo (te lo dirà il messaggio di apertura) intervieni solo se è davvero essenziale.',
+  '- All\'utente scrivi solo per una decisione che spetta a lui o, se sei il coordinatore, per il riepilogo alla chiusura.',
   '- Niente conferme vuote ("ricevuto", "un attimo"): il silenzio è una risposta valida.',
   '- Ciò che l\'utente ti ha detto in privato NON si riporta nel gruppo: se serve con lui, scrigli in chat diretta (send_to_user).',
   '- Nessuna credenziale o dato sensibile nel gruppo: per quelli usa la chat diretta con l\'utente.',
@@ -106,6 +132,11 @@ export interface GroupPlanInput {
   existingNonces: string[]
   /** quanti post di bot ha ricevuto il gruppo nell'ultima ora */
   postsLastHour: number
+  /**
+   * Correzione C4: i post di bot già pubblicati da ciascun membro nella catena
+   * di questo messaggio (chiave = id membro) — il tetto per specialista.
+   */
+  memberChainPosts?: Record<string, number>
 }
 
 export interface PlannedGroupTurn {
@@ -130,14 +161,17 @@ export function groupTurnNonce(groupId: number, memberId: string, messageId: num
 
 /**
  * planGroupTurns (puro, il cuore della fase): decide chi riceve un turno per
- * il messaggio nuovo. Regole della specifica (punto 3):
+ * il messaggio nuovo. Regole della specifica (punto 3) + correzione C4:
  * 1. candidati = membri bot tranne l'autore;
  * 2. @menzioni → solo i menzionati + il coordinatore (se c'è e non è l'autore);
+ *    C4: il post di uno SPECIALISTA senza @menzioni va solo al coordinatore
+ *    (l'utente e il coordinatore senza menzioni restano a tutti);
  * 3. fusione: un membro con un turno PIANIFICATO per lo stesso gruppo non ne
  *    riceve un altro (quando partirà leggerà tutto ciò che segue il cursore);
  * 4. catena: depth ≥ 4 → windingDown; depth ≥ 6 → la catena si chiude (nessun
  *    turno, riga di sistema nel gruppo);
  * 5. tetto orario: ≥ 40 post di bot nell'ora → nessun turno, riga di sistema;
+ *    C4: tetto per catena — uno specialista con 3 post nella catena è escluso;
  * 6. nonce deterministico: un nonce già nel registro non si riaccoda.
  */
 export function planGroupTurns(input: GroupPlanInput): GroupPlanResult {
@@ -157,6 +191,9 @@ export function planGroupTurns(input: GroupPlanInput): GroupPlanResult {
     group.coordinatorId && message.authorId !== group.coordinatorId && members.some((m) => m.id === group.coordinatorId)
       ? group.coordinatorId
       : null
+  // C4: con un coordinatore, il post di uno specialista SENZA menzioni non
+  // riempie la stanza di rumore: va riferito a lui, che smista
+  const specialistPost = message.authorKind === 'agent' && coordinator !== null && message.authorId !== group.coordinatorId
   let targets: string[]
   if (mentions.all) {
     targets = candidates.map((m) => m.id)
@@ -164,6 +201,8 @@ export function planGroupTurns(input: GroupPlanInput): GroupPlanResult {
     const mentioned = new Set(mentions.ids)
     targets = candidates.filter((m) => mentioned.has(m.id)).map((m) => m.id)
     if (coordinator && !targets.includes(coordinator)) targets.push(coordinator)
+  } else if (specialistPost) {
+    targets = coordinator !== null ? [coordinator] : []
   } else {
     targets = candidates.map((m) => m.id)
   }
@@ -188,6 +227,16 @@ export function planGroupTurns(input: GroupPlanInput): GroupPlanResult {
       skipped.push({ memberId, reason: 'turno già in coda per questo membro: fusione' })
       continue
     }
+    // C4: tetto per catena — lo specialista che ha già pubblicato il massimo
+    // di post in QUESTA catena non riceve altri turni lì (il coordinatore no:
+    // lui smista e chiude, lo frena la profondità)
+    if (
+      coordinator !== null && memberId !== coordinator &&
+      (input.memberChainPosts?.[memberId] ?? 0) >= GROUP_MEMBER_CHAIN_POSTS_MAX
+    ) {
+      skipped.push({ memberId, reason: `tetto per catena raggiunto (${GROUP_MEMBER_CHAIN_POSTS_MAX} post già pubblicati in questo giro)` })
+      continue
+    }
     turns.push({ memberId, nonce, windingDown })
   }
   return { turns, skipped, systemNotice: null, capNotice: false }
@@ -197,6 +246,112 @@ export function planGroupTurns(input: GroupPlanInput): GroupPlanResult {
 export function memberOfNonce(nonce: string): string | null {
   const m = /^g\d+:(.+):msg\d+$/.exec(nonce)
   return m ? m[1]! : null
+}
+
+// ---- correzione C2: il turno di chiusura del coordinatore ----
+
+/**
+ * Il nonce deterministico del turno di CHIUSURA di una catena (C2): al massimo
+ * uno per catena — la chiave unica del registro lo garantisce come per gli
+ * altri turni. Si riconosce dal suffisso ":close" (il tipo di turno si deduce
+ * dal nonce, senza colonne nuove nel registro).
+ */
+export function closingTurnNonce(groupId: number, memberId: string, rootId: number): string {
+  return `g${groupId}:${memberId}:close${rootId}`
+}
+
+/** True se il nonce è quello di un turno di chiusura (C2). */
+export function isClosingNonce(nonce: string): boolean {
+  return /^g\d+:.+:close\d+$/.test(nonce)
+}
+
+export interface ClosingTurnInput {
+  coordinatorId: string | null
+  /**
+   * la catena non produrrà altri turni: si è SPENTA (nessun turno pianificato
+   * o in corso per il gruppo dopo la fine dell'ultimo) oppure si è CHIUSA
+   * (depth ≥ 6: il planner non accoda più nulla, i turni già in coda si
+   * esauriscono e la catena si spegne comunque)
+   */
+  chainEnded: boolean
+  /**
+   * ci sono consegne che l'utente non ha ancora ricevuto: post degli ALTRI
+   * membri (specialisti) nella catena DOPO l'ultimo riepilogo del coordinatore
+   * all'utente (se non ha mai scritto in questa catena, qualunque consegna è
+   * una novità — tacite pass non consumano le consegne, il riepilogo arriva
+   * col turno di chiusura; i post del coordinatore stesso non contano)
+   */
+  newsForCoordinator: boolean
+  /** il coordinatore ha una domanda (widget) o una card in attesa: la risposta dell'utente lo riprende */
+  coordinatorWaiting: boolean
+  /** il turno di chiusura di questa catena è già nel registro (niente doppioni) */
+  closeTurnExists: boolean
+}
+
+export interface ClosingTurnDecision {
+  schedule: boolean
+  reason: string
+}
+
+/**
+ * shouldScheduleClosingTurn (pura, C2): il runner la chiama a fine di ogni
+ * turno di gruppo. Il passo che prima mancava: quando il giro finisce, il
+ * coordinatore riceve UN turno in cui fare il punto con l'utente.
+ */
+export function shouldScheduleClosingTurn(input: ClosingTurnInput): ClosingTurnDecision {
+  if (!input.coordinatorId) return { schedule: false, reason: 'il gruppo non ha un coordinatore' }
+  if (input.closeTurnExists) return { schedule: false, reason: 'turno di chiusura già programmato per questa catena' }
+  if (!input.chainEnded) return { schedule: false, reason: 'la catena ha ancora turni in coda o in corso' }
+  if (input.coordinatorWaiting) {
+    return { schedule: false, reason: 'il coordinatore ha una domanda o una card in attesa: lo riprende la risposta dell\'utente' }
+  }
+  if (!input.newsForCoordinator) {
+    return { schedule: false, reason: 'nessun post di bot nella catena dopo l\'ultima attività del coordinatore' }
+  }
+  return { schedule: true, reason: 'la catena è finita e il coordinatore ha consegne da riportare' }
+}
+
+/**
+ * Un membro è in attesa dell'utente (pura, C2): una card di approvazione
+ * pendente o un widget ask_user senza risposta (e non scavalcato). In quel
+ * caso non si accoda il turno di chiusura: sarà il messaggio dell'utente a
+ * riprenderlo.
+ */
+export function memberWaitingForUser(
+  entries: ReadonlyArray<{ id: number; kind: string; role: string; meta?: Record<string, unknown> | null }>
+): boolean {
+  return entries.some((e) => {
+    if (e.kind === 'approval' && e.meta?.status === 'pending') return true
+    if (e.kind !== 'send-message') return false
+    const msg = e.meta?.message as { type?: string } | undefined
+    if (msg?.type !== 'widget' || e.meta?.widgetDismissed) return false
+    // la risposta dell'utente porta meta.respondedTo = id del widget
+    return !entries.some((u) => u.kind === 'message' && u.role === 'user' && (u.meta?.respondedTo as number | undefined) === e.id)
+  })
+}
+
+// ---- correzione C3: un solo messaggio all'utente per catena ----
+
+/**
+ * Il membro ha GIÀ consegnato un send_to_user in questa catena (pura, C3)?
+ * Le send dei turni di gruppo portano meta.groupChain = {groupId, rootId}
+ * (chiave diversa da meta.groupId: i messaggi all'utente restano visibili in
+ * chat diretta).
+ */
+export function hasSentToUserInChain(
+  entries: ReadonlyArray<{ kind: string; meta?: Record<string, unknown> | null }>,
+  chain: { groupId: number; rootId: number | null }
+): boolean {
+  return entries.some((e) => {
+    if (e.kind !== 'send-message') return false
+    const c = e.meta?.groupChain as { groupId?: number; rootId?: number | null } | undefined
+    return c?.groupId === chain.groupId && (c.rootId ?? null) === (chain.rootId ?? null)
+  })
+}
+
+/** Il result della send oltre il tetto di catena (C3): il riepilogo si fa alla chiusura. */
+export function alreadySentToUserResult(): string {
+  return 'Non consegnato: hai già scritto all\'utente in questo giro: il riepilogo lo mandi alla chiusura. Il testo è finito nel ragionamento, non in chat.'
 }
 
 // ---- l'apertura del turno (puro) ----
@@ -219,6 +374,8 @@ export interface GroupTurnEvidence {
   /** i messaggi nuovi da leggere (già filtrati dal cursore) */
   newMessages: ReadonlyArray<GroupTurnMessageEvidence>
   windingDown: boolean
+  /** correzione C2: è il turno di CHIUSURA del coordinatore (solo riepilogo all'utente) */
+  closing?: boolean
 }
 
 /**
@@ -235,14 +392,16 @@ export function buildGroupTurnOpening(ev: GroupTurnEvidence): string {
     return `[${tag}] ${m.authorName}: ${m.text}${reply}`
   })
   return [
-    `<turno_di_gruppo gruppo="${ev.group.name.replace(/"/g, "'")}">`,
+    `<turno_di_gruppo gruppo="${ev.group.name.replace(/"/g, "'")}"${ev.closing ? ' chiusura="true"' : ''}>`,
     `Gruppo: ${ev.group.name}`,
     ev.group.description ? `Scopo e regole del gruppo: ${ev.group.description}` : '',
     `Sei ${ev.me.name}: questo è il tuo turno in questo gruppo. I PARTECIPANTI (tu compreso; l'utente legge tutto):`,
     peers.length ? peers.join('\n') : '- (solo tu e l\'utente)',
-    'MESSAGGI NUOVI da leggere (sono l\'unico nuovo che hai, il resto della storia del gruppo non la vedi):',
+    // correzione C6a: le entry dei turni precedenti SONO nella storia del membro
+    'MESSAGGI NUOVI da leggere (questi sono i messaggi dopo il tuo ultimo turno; quelli precedenti li hai già letti):',
     neutralizeClosingTag(msgs.join('\n'), 'turno_di_gruppo'),
-    ev.windingDown ? 'Il giro sta CHIUDENDO: intervieni solo se è davvero essenziale, altrimenti taci.' : '',
+    ev.closing ? GROUP_CLOSING_LINE : '',
+    !ev.closing && ev.windingDown ? 'Il giro sta CHIUDENDO: intervieni solo se è davvero essenziale, altrimenti taci.' : '',
     '</turno_di_gruppo>',
     GROUP_TURN_RULE
   ]

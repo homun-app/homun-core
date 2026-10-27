@@ -2795,7 +2795,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     expect(h.db.entries.find((e) => e.kind === 'tool-result')!.content).toContain('Non fai parte')
   })
 
-  it('pass: dentro il turno di gruppo registra il silenzio; fuori spiega che non serve', async () => {
+  it('pass: dentro il turno di gruppo registra il silenzio e CHIUDE il turno; fuori spiega che non serve', async () => {
     setupGroup()
     h.llm.queue = [
       { toolCalls: [{ id: 'ps1', name: 'pass', arguments: '{}' }] },
@@ -2804,8 +2804,11 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
       groupTurn: { groupId: 1, readMaxDepth: 0, rootId: 1 }, untrusted: true
     })
-    const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    // correzione C1: il turno finisce con pass — UNA sola chiamata al modello
+    expect(h.llm.calls).toHaveLength(1)
+    const results = h.db.entries.filter((e) => e.kind === 'tool-result').map((e) => e.content)
     expect(results.some((c) => c.includes('Silenzio registrato'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
 
     h.db.entries.length = 0
     h.llm.queue = [
@@ -2848,5 +2851,119 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     // le altre entry del turno portano il gruppo
     const openMsg = h.db.entries.find((e) => e.kind === 'message')
     expect(openMsg?.meta?.groupId).toBe(1)
+  })
+
+  // ---- correzioni fase 10 ----
+
+  it('C1: pass è TERMINALE nel turno di gruppo — una sola chiamata al modello, i tool dopo pass non vengono eseguiti', async () => {
+    setupGroup()
+    h.llm.queue = [
+      // pass seguito da un post_to_group nella STESSA risposta: il post non deve essere eseguito
+      { toolCalls: [{ id: 'pt1', name: 'pass', arguments: '{}' }, { id: 'pt2', name: 'post_to_group', arguments: JSON.stringify({ text: 'non dovresti vedermi' }) }] },
+      { text: 'mai chiamata' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 0, rootId: 1 }, untrusted: true
+    })
+    // UNA sola chiamata al modello: il turno finisce con pass
+    expect(h.llm.calls).toHaveLength(1)
+    expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
+    // il post_to_group dopo pass non ha né entry né result
+    expect(h.db.entries.some((e) => e.kind === 'tool-call' && e.content === 'post_to_group')).toBe(false)
+    // un solo tool result: il silenzio registrato di pass
+    const results = h.db.entries.filter((e) => e.kind === 'tool-result').map((e) => e.content)
+    expect(results).toHaveLength(1)
+    expect(results[0]).toContain('il tuo turno nel gruppo finisce qui')
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
+  })
+
+  it('C1: pass DOPO un post_to_group chiude comunque il turno (esito SENT nel registro)', async () => {
+    setupGroup()
+    h.llm.queue = [
+      { toolCalls: [{ id: 'pp1', name: 'post_to_group', arguments: JSON.stringify({ text: 'la mia consegna' }) }, { id: 'pp2', name: 'pass', arguments: '{}' }] },
+      { text: 'mai chiamata' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 0, rootId: 1 }, untrusted: true
+    })
+    expect(h.llm.calls).toHaveLength(1)
+    const msgs = h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0]!.text).toBe('la mia consegna')
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
+  })
+
+  it('C2: nel turno di CHIUSURA post_to_group è rifiutato e la send all\'utente passa', async () => {
+    setupGroup()
+    h.llm.queue = [
+      {
+        toolCalls: [
+          { id: 'cl1', name: 'post_to_group', arguments: JSON.stringify({ text: 'non si publica più' }) },
+          { id: 'cl2', name: 'send_to_user', arguments: JSON.stringify({ text: 'RIEPILOGO: menu, spesa e scaletta pronti.' }) }
+        ]
+      },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno" chiusura="true">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 5, rootId: 1, closing: true }, untrusted: true
+    })
+    // il post è rifiutato con il result esplicito
+    expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
+    const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes('Il giro è chiuso'))).toBe(true)
+    // la send all'utente invece passa
+    const send = h.db.entries.find((e) => e.kind === 'send-message')
+    expect(send?.content).toContain('RIEPILOGO')
+  })
+
+  it('C3: nei turni di gruppo al massimo UN messaggio all\'utente per catena; la chiusura ha sempre il suo', async () => {
+    setupGroup()
+    // primo turno della catena (root 50): la send passa e porta meta.groupChain
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c3a', name: 'send_to_user', arguments: JSON.stringify({ text: 'avanzamento: chef scelto.' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 1, rootId: 50 }, untrusted: true
+    })
+    const first = h.db.entries.findLast((e) => e.kind === 'send-message')!
+    expect(first.meta?.groupChain).toEqual({ groupId: 1, rootId: 50 })
+    expect(first.meta?.groupId).toBeUndefined() // resta visibile in chat diretta
+
+    // secondo turno, STESSA catena: la send diventa ragionamento col result che spiega
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c3b', name: 'send_to_user', arguments: JSON.stringify({ text: 'altro messaggio all\'utente.' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 2, rootId: 50 }, untrusted: true
+    })
+    expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(1) // nessuna nuova
+    const results2 = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results2.some((c) => c.includes('il riepilogo lo mandi alla chiusura'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'thinking' && (e.content as string).includes('altro messaggio'))).toBe(true)
+
+    // catena DIVERSA (root 60): la send passa di nuovo
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c3c', name: 'send_to_user', arguments: JSON.stringify({ text: 'nuova richiesta dell\'utente.' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 0, rootId: 60 }, untrusted: true
+    })
+    expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(2)
+    expect(h.db.entries.findLast((e) => e.kind === 'send-message')!.meta?.groupChain).toEqual({ groupId: 1, rootId: 60 })
+
+    // turno di CHIUSURA (stessa catena 50): il riepilogo passa sempre
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c3d', name: 'send_to_user', arguments: JSON.stringify({ text: 'RIEPILOGO FINALE della cena.' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno" chiusura="true">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 5, rootId: 50, closing: true }, untrusted: true
+    })
+    const finale = h.db.entries.findLast((e) => e.kind === 'send-message')!
+    expect(finale.content).toContain('RIEPILOGO FINALE')
+    expect(finale.meta?.groupChain).toEqual({ groupId: 1, rootId: 50 })
   })
 })

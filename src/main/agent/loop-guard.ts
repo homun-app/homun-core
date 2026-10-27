@@ -41,3 +41,17 @@ export function isToolLoop(
   return last.length === TOOL_LOOP_REPEATS - 1 &&
     last.every((c) => c.name === next.name && c.args === next.args)
 }
+
+/**
+ * Correzione C5 (fase 10): il motivo per cui un turno finisce STOPPED per un
+ * errore del modello. 429 (o il testo "usage limit"/"rate limit", come scrive
+ * Ollama cloud quando la sessione è esaurita) è un limite d'uso del provider:
+ * va distinto dagli altri errori perché il gruppo si sospende, non fallisce.
+ */
+export type ModelStopReason = 'model-error' | 'rate-limit'
+
+export function stopReasonOfError(err: unknown): ModelStopReason {
+  const status = (err as { status?: number } | null)?.status
+  const msg = err instanceof Error ? err.message : String(err ?? '')
+  return status === 429 || /429|usage limit|rate limit/i.test(msg) ? 'rate-limit' : 'model-error'
+}

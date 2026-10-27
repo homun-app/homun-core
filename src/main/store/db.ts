@@ -133,11 +133,15 @@ function open(): DatabaseSync {
   const agentCols = db.prepare("SELECT name FROM pragma_table_info('agents')").all() as Array<{ name: string }>
   const agentPresent = new Set(agentCols.map((c) => c.name))
   for (const [col, ddl] of [
-    ['created_by', 'ALTER TABLE agents ADD COLUMN created_by TEXT'],
+    ['created_by', "ALTER TABLE agents ADD COLUMN created_by TEXT"],
     ['section', "ALTER TABLE agents ADD COLUMN section TEXT DEFAULT ''"]
   ] as const) {
     if (!agentPresent.has(col)) db.exec(ddl)
   }
+  // fase 10 (correzione C5): il motivo di uno SKIPPED di gruppo (il giro
+  // sospeso per limite d'uso del provider) vive accanto all'esito
+  const turnCols = db.prepare("SELECT name FROM pragma_table_info('group_turns')").all() as Array<{ name: string }>
+  if (!turnCols.some((c) => c.name === 'reason')) db.exec('ALTER TABLE group_turns ADD COLUMN reason TEXT')
   return db
 }
 

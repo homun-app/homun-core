@@ -3,14 +3,20 @@
 // SENT/PASS/TIMEOUT/SKIPPED/ERROR, cursore avanzato a fine turno, scadenza dei
 // 5 minuti e ripresa dopo un crash (payload.entryId → resume). Store reale su
 // directory temporanea, runTurn e orologio finti.
+// Correzioni fase 10: C2 — il turno di chiusura del coordinatore accodato
+// quando la catena si spegne/si chiude; C5 — stopReason: rate-limit/model-error
+// → ERROR, sul rate limit cursore fermo, coda annullata e UNA riga di sistema.
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setDataDir, db, createAgent, updateAgent } from '../../main/store/db'
-import { enqueueJob, getJobById } from '../../main/store/jobs'
-import { createGroup, addGroupMessage, groupMessages, getGroupCursor, groupTurnByNonce, setGroupCursor } from '../../main/store/groups'
+import { setDataDir, db, createAgent, updateAgent, appendEntry } from '../../main/store/db'
+import { enqueueJob, getJobById, listJobs } from '../../main/store/jobs'
+import {
+  createGroup, addGroupMessage, groupMessages, getGroupCursor, groupTurnByNonce, setGroupCursor
+} from '../../main/store/groups'
 import { runGroupTurnJob, GROUP_TURN_TIMEOUT_MS, type GroupRunnerDeps } from '../group-runner'
+import { closingTurnNonce, GROUP_RATE_LIMIT_TEXT, GROUP_CLOSING_LINE } from '../../main/agent/group-turns'
 import type { RunTurnOptions } from '../../main/agent/loop'
 import type { Job } from '../../main/store/jobs'
 import type { SandbotEvent } from '../../shared/types'
@@ -200,5 +206,210 @@ describe('ripresa dopo un crash', () => {
     await runGroupTurnJob(db(), deps(second), reloaded, emit)
     expect(second[0]!.opts.resume).toEqual({ entryId: 77 })
     expect(second[0]!.text).toContain('<turno_di_gruppo')
+  })
+})
+
+// ---- correzioni fase 10 ----
+
+/**
+ * runTurn finto che scrive nel transcript del membro COME il loop reale
+ * (apertura → onTurnEntry, poi il copione) così il runner trova entry e
+ * turnEnd con meta.stopReason.
+ */
+function scriptedDeps(
+  seen: Seen[],
+  script: { post?: string; send?: string; stopReason?: 'model-error' | 'rate-limit' } = {}
+): GroupRunnerDeps {
+  return {
+    runTurn: async (agentId, text, _e, _i, opts = {}) => {
+      seen.push({ agentId, text, opts })
+      const open = appendEntry({ agentId, kind: 'message', role: 'user', content: text })
+      opts.onTurnEntry?.(open.id)
+      const gt = opts.groupTurn as { groupId: number; readMaxDepth: number; rootId: number | null } | undefined
+      if (script.post !== undefined && gt) {
+        addGroupMessage({
+          groupId: gt.groupId, authorKind: 'agent', authorId: agentId, authorName: 'Bot',
+          text: script.post, depth: gt.readMaxDepth + 1, rootId: gt.rootId
+        })
+      }
+      if (script.send !== undefined) {
+        appendEntry({ agentId, kind: 'send-message', role: 'assistant', content: script.send, meta: { message: { type: 'text', text: script.send } } })
+      }
+      if (script.stopReason) {
+        appendEntry({ agentId, kind: 'event', role: 'system', content: 'Turno interrotto', meta: { turnEnd: 'STOPPED', stopReason: script.stopReason } })
+      }
+    },
+    interrupt: () => undefined,
+    now: () => Date.now(),
+    armTimeout: () => () => undefined
+  }
+}
+
+/** Il job di chiusura accodato dal runner per QUESTA catena (payload.closing, nonce close<root>). */
+function closingJob(g: { id: number }, coordId: string, rootId: number): Job | undefined {
+  return listJobs(db()).find(
+    (j) => j.kind === 'group-turn' && j.payload.closing === true && j.payload.nonce === closingTurnNonce(g.id, coordId, rootId)
+  )
+}
+
+describe('correzione C2: il turno di chiusura del coordinatore', () => {
+  it('la catena si SPEGNE (nessun turno in coda) con post di bot nuovi → UN turno di chiusura', async () => {
+    const { bot, coord, g, u1 } = fixture()
+    const seen: Seen[] = []
+    await runGroupTurnJob(db(), scriptedDeps(seen, { post: 'CONSEGNA: menu pronto.' }), jobFor(bot.id, g, u1.id), emit)
+    const job = closingJob(g, coord.id, u1.id)
+    expect(job).toBeTruthy()
+    expect(job!.agent_id).toBe(coord.id)
+    expect((job!.payload as { rootId: number }).rootId).toBe(u1.id)
+    // un solo job di chiusura per catena in questo gruppo
+    expect(listJobs(db()).filter((j) => j.kind === 'group-turn' && j.payload.closing === true && j.payload.groupId === g.id)).toHaveLength(1)
+    // il nonce è registrato: un'altra fine turno non lo riaccoda (niente doppioni)
+    const seen2: Seen[] = []
+    const u2 = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: 'grazie', depth: 0 })
+    await runGroupTurnJob(db(), scriptedDeps(seen2, { post: 'nulla di nuovo' }), jobFor(bot.id, g, u2.id), emit)
+    expect(listJobs(db()).filter((j) => j.kind === 'group-turn' && j.payload.closing === true && j.payload.nonce === closingTurnNonce(g.id, coord.id, u1.id))).toHaveLength(1)
+  })
+
+  it('la catena si CHIUDE a depth 6 (post a profondità massima) → il turno di chiusura parte comunque', async () => {
+    const { bot, coord, g, u1 } = fixture()
+    // il membro legge fino a depth 5 e pubblica il post che CHIUDE la catena (6)
+    for (let d = 1; d <= 5; d++) {
+      addGroupMessage({ groupId: g.id, authorKind: 'agent', authorId: coord.id, authorName: 'Coordinatore', text: `passaggio ${d}`, depth: d, rootId: u1.id })
+    }
+    const seen: Seen[] = []
+    await runGroupTurnJob(db(), scriptedDeps(seen, { post: 'consegna finale' }), jobFor(bot.id, g, u1.id), emit)
+    expect(closingJob(g, coord.id, u1.id)).toBeTruthy()
+    // il post è finito a depth 6
+    expect(groupMessages(g.id).findLast((m) => m.author_kind === 'agent' && m.author_id === bot.id)!.depth).toBe(6)
+  })
+
+  it('coordinatore in attesa (widget) o senza consegne nuove → NESSUN turno di chiusura', async () => {
+    // niente consegne nuove: il membro tace → nessun post di bot nella catena
+    const { bot, g, u1 } = fixture()
+    await runGroupTurnJob(db(), scriptedDeps([]), jobFor(bot.id, g, u1.id), emit)
+    expect(listJobs(db()).some((j) => j.kind === 'group-turn' && j.payload.closing === true && j.payload.groupId === g.id)).toBe(false)
+
+    // il coordinatore ha un widget senza risposta: lo riprende l'utente
+    const f2 = fixture()
+    appendEntry({
+      agentId: f2.coord.id, kind: 'send-message', role: 'assistant', content: 'che budget?',
+      meta: { message: { type: 'widget', prompt: 'che budget?', options: [] } }
+    })
+    await runGroupTurnJob(db(), scriptedDeps([], { post: 'consegna comunque' }), jobFor(f2.bot.id, f2.g, f2.u1.id), emit)
+    expect(listJobs(db()).some((j) => j.kind === 'group-turn' && j.payload.closing === true && j.payload.groupId === f2.g.id)).toBe(false)
+  })
+
+  it('gruppo SENZA coordinatore → nessun turno di chiusura (resta tutto com\'è)', async () => {
+    const bot = createAgent('Solo', 'fa tutto lui')
+    updateAgent(bot.id, { providerId: 'prov', model: 'm1' })
+    const g = createGroup('Senza coord', 'd', bot.id, [bot.id], null)
+    const u1 = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: 'voi due', depth: 0 })
+    await runGroupTurnJob(db(), scriptedDeps([], { post: 'consegna' }), jobFor(bot.id, g, u1.id), emit)
+    expect(listJobs(db()).some((j) => j.kind === 'group-turn' && j.payload.closing === true && j.payload.groupId === g.id)).toBe(false)
+  })
+
+  it('il turno di chiusura: apertura con chiusura="true" e la riga del riepilogo; SENT se scrive all\'utente, PASS altrimenti', async () => {
+    const { bot, coord, g, u1 } = fixture()
+    // il membro consegna e il runner accoda la chiusura
+    await runGroupTurnJob(db(), scriptedDeps([], { post: 'CONSEGNA: tutto pronto.' }), jobFor(bot.id, g, u1.id), emit)
+    const job = closingJob(g, coord.id, u1.id)!
+    // lo esegue il coordinatore e scrive il riepilogo all'utente
+    const seen: Seen[] = []
+    await runGroupTurnJob(db(), scriptedDeps(seen, { send: 'RIEPILOGO: menu, spesa e scaletta.' }), job, emit)
+    expect(seen[0]!.text).toContain('chiusura="true"')
+    expect(seen[0]!.text).toContain(GROUP_CLOSING_LINE)
+    expect(seen[0]!.opts.groupTurn).toMatchObject({ groupId: g.id, rootId: u1.id, closing: true })
+    expect(groupTurnByNonce((job.payload as { nonce: string }).nonce)!.outcome).toBe('SENT')
+    // cursore del coordinatore avanzato
+    expect(getGroupCursor(g.id, coord.id)).toBeGreaterThan(0)
+
+    // senza riepilogo: PASS
+    const f2 = fixture()
+    await runGroupTurnJob(db(), scriptedDeps([], { post: 'CONSEGNA' }), jobFor(f2.bot.id, f2.g, f2.u1.id), emit)
+    const job2 = closingJob(f2.g, f2.coord.id, f2.u1.id)!
+    await runGroupTurnJob(db(), scriptedDeps([]), job2, emit)
+    expect(groupTurnByNonce((job2.payload as { nonce: string }).nonce)!.outcome).toBe('PASS')
+  })
+
+  it('il turno di chiusura parte ANCHE a finestra vuota (il coordinatore ha già letto tutto: è il passo del riepilogo)', async () => {
+    const { bot, coord, g, u1 } = fixture()
+    await runGroupTurnJob(db(), scriptedDeps([], { post: 'CONSEGNA' }), jobFor(bot.id, g, u1.id), emit)
+    const job = closingJob(g, coord.id, u1.id)!
+    // il coordinatore ha già letto TUTTO (cursore a fine catena): niente SKIPPED
+    setGroupCursor(g.id, coord.id, u1.id)
+    const seen: Seen[] = []
+    await runGroupTurnJob(db(), scriptedDeps(seen, { send: 'RIEPILOGO: tutto arrivato.' }), job, emit)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!.text).toContain(GROUP_CLOSING_LINE)
+    expect(groupTurnByNonce((job.payload as { nonce: string }).nonce)!.outcome).toBe('SENT')
+  })
+
+  it('readWindow: la catena è quella dell\'ULTIMO messaggio letto (parità di depth inclusa), la profondità resta il massimo', async () => {
+    const { bot, coord, g, u1 } = fixture()
+    // catena vecchia (root u1) a depth 1, poi una catena NUOVA dell'utente e
+    // il post del coordinatore: stessa depth massima, root diversa
+    addGroupMessage({ groupId: g.id, authorKind: 'agent', authorId: coord.id, authorName: 'Coordinatore', text: 'vecchia catena', depth: 1, rootId: u1.id })
+    const u2 = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: 'nuova richiesta', depth: 0 })
+    addGroupMessage({ groupId: g.id, authorKind: 'agent', authorId: coord.id, authorName: 'Coordinatore', text: 'risposta nuova', depth: 1, rootId: u2.id })
+    const seen: Seen[] = []
+    await runGroupTurnJob(db(), scriptedDeps(seen, { post: 'consegna nella catena nuova' }), jobFor(bot.id, g, u2.id), emit)
+    // il post del membro eredita la root dell'ULTIMO messaggio (catena nuova)
+    expect(groupMessages(g.id).findLast((m) => m.author_id === bot.id)!.root_id).toBe(u2.id)
+    expect(seen[0]!.opts.groupTurn?.rootId).toBe(u2.id)
+    expect(seen[0]!.opts.groupTurn?.readMaxDepth).toBe(1)
+  })
+})
+
+describe('correzione C5: errori del modello nei turni di gruppo', () => {
+  it('model-error → ERROR (non più CANCELLED)', async () => {
+    const { bot, g, u1 } = fixture()
+    const job = jobFor(bot.id, g, u1.id)
+    await runGroupTurnJob(db(), scriptedDeps([], { stopReason: 'model-error' }), job, emit)
+    expect(groupTurnByNonce((job.payload as { nonce: string }).nonce)!.outcome).toBe('ERROR')
+  })
+
+  it('loop/interrupt (STOPPED senza stopReason di modello) restano CANCELLED', async () => {
+    const { bot, g, u1 } = fixture()
+    const job = jobFor(bot.id, g, u1.id)
+    const d: GroupRunnerDeps = {
+      ...scriptedDeps([]),
+      runTurn: async (agentId, text, _e, _i, opts = {}) => {
+        const open = appendEntry({ agentId, kind: 'message', role: 'user', content: text })
+        opts.onTurnEntry?.(open.id)
+        appendEntry({ agentId, kind: 'event', role: 'system', content: 'Turno interrotto', meta: { turnEnd: 'STOPPED' } })
+      }
+    }
+    await runGroupTurnJob(db(), d, job, emit)
+    expect(groupTurnByNonce((job.payload as { nonce: string }).nonce)!.outcome).toBe('CANCELLED')
+  })
+
+  it('rate-limit simulato (429): ERROR, cursore FERMO, coda del gruppo annullata (SKIPPED col motivo), UNA riga di sistema, niente chiusura', async () => {
+    const { bot, coord, g, u1 } = fixture()
+    // altri due turni del gruppo ancora in coda (coordinatore e un secondo messaggio)
+    const j2 = jobFor(coord.id, g, u1.id)
+    const u2 = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: 'altro messaggio', depth: 0 })
+    const j3 = jobFor(bot.id, g, u2.id)
+    const job = jobFor(bot.id, g, u1.id)
+    await runGroupTurnJob(db(), scriptedDeps([], { stopReason: 'rate-limit' }), job, emit)
+    // esito ERROR nel registro
+    expect(groupTurnByNonce((job.payload as { nonce: string }).nonce)!.outcome).toBe('ERROR')
+    // il cursore NON avanza: i messaggi restano da leggere
+    expect(getGroupCursor(g.id, bot.id)).toBe(0)
+    // i job group-turn del gruppo ancora in coda sono annullati e registrati SKIPPED col motivo
+    const remaining = listJobs(db()).filter((j) => j.kind === 'group-turn' && j.payload.groupId === g.id && j.id !== job.id)
+    expect(remaining).toHaveLength(0)
+    for (const j of [j2, j3]) {
+      const row = groupTurnByNonce((j.payload as { nonce: string }).nonce)
+      expect(row!.outcome).toBe('SKIPPED')
+      expect(row!.reason).toContain('rate limit')
+    }
+    // UNA riga di sistema nel gruppo (e una sola anche a un secondo 429)
+    const lines = () => groupMessages(g.id).filter((m) => m.author_kind === 'system' && m.text === GROUP_RATE_LIMIT_TEXT)
+    expect(lines()).toHaveLength(1)
+    const u3 = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: 'riprova', depth: 0 })
+    await runGroupTurnJob(db(), scriptedDeps([], { stopReason: 'rate-limit' }), jobFor(bot.id, g, u3.id), emit)
+    expect(lines()).toHaveLength(1)
+    // niente turno di chiusura: il giro è sospeso, non finito
+    expect(listJobs(db()).some((j) => j.kind === 'group-turn' && j.payload.closing === true && j.payload.groupId === g.id)).toBe(false)
   })
 })

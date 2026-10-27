@@ -57,3 +57,28 @@ describe('activityOf: nome del tool e target, mai testo del modello', () => {
     expect(abbreviateCommand('a'.repeat(60), 10)).toBe('aaaaaaaaaa…')
   })
 })
+
+// Correzione C5 (fase 10): il motivo di uno STOPPED da errore del modello —
+// il 429 (o il testo "usage limit"/"rate limit" con cui Ollama cloud segnala
+// la sessione esaurita) va distinto dagli altri errori.
+import { stopReasonOfError } from '../loop-guard'
+
+describe('stopReasonOfError: rate limit del provider vs errore del modello', () => {
+  it('status 429 → rate-limit (qualunque il testo)', () => {
+    const err = Object.assign(new Error('Too Many Requests'), { status: 429 })
+    expect(stopReasonOfError(err)).toBe('rate-limit')
+  })
+
+  it('il testo del provider ("usage limit", "rate limit", 429) → rate-limit', () => {
+    expect(stopReasonOfError(new Error('session usage limit reached'))).toBe('rate-limit')
+    expect(stopReasonOfError(new Error('429 Too Many Requests'))).toBe('rate-limit')
+    expect(stopReasonOfError(new Error('Rate limit exceeded, retry later'))).toBe('rate-limit')
+  })
+
+  it('gli altri errori del modello restano model-error', () => {
+    expect(stopReasonOfError(new Error('connection reset'))).toBe('model-error')
+    expect(stopReasonOfError(Object.assign(new Error('Bad Request'), { status: 400 }))).toBe('model-error')
+    expect(stopReasonOfError('boom')).toBe('model-error')
+    expect(stopReasonOfError(null)).toBe('model-error')
+  })
+})

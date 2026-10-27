@@ -1,11 +1,17 @@
 // Fase 10 (punto 7) — test PURI dello scheduler dei turni di gruppo: parsing
 // delle @menzioni, planGroupTurns (menzioni, coordinatore, fusione, catena,
 // tetti, nonce) e l'apertura del turno (blocco evidenza, tag neutralizzato).
+// Correzioni fase 10: C4 (instradamento verso il coordinatore, tetto per
+// catena), C2 (shouldScheduleClosingTurn, nonce di chiusura, apertura con
+// chiusura="true"), C3 (una send per catena), C6a (testo dell'apertura).
 import { describe, expect, it } from 'vitest'
 import {
   parseMentions, planGroupTurns, groupTurnNonce, memberOfNonce, buildGroupTurnOpening,
   GROUP_WINDING_DOWN_DEPTH, GROUP_CHAIN_MAX_DEPTH, GROUP_HOURLY_POSTS_MAX,
-  GROUP_CHAIN_CLOSED_TEXT, GROUP_HOURLY_CAP_TEXT, GROUP_TURN_RULE
+  GROUP_CHAIN_CLOSED_TEXT, GROUP_HOURLY_CAP_TEXT, GROUP_TURN_RULE,
+  GROUP_MEMBER_CHAIN_POSTS_MAX, GROUP_CLOSING_LINE,
+  shouldScheduleClosingTurn, closingTurnNonce, isClosingNonce, memberWaitingForUser,
+  hasSentToUserInChain, alreadySentToUserResult
 } from '../group-turns'
 
 const MEMBERS = [
@@ -155,6 +161,161 @@ describe('planGroupTurns (puro, il cuore della fase)', () => {
   })
 })
 
+describe('correzione C4: instradamento verso il coordinatore e tetto per catena', () => {
+  it('il post di uno SPECIALISTA senza @menzioni va SOLO al coordinatore', () => {
+    const r = plan({ message: { id: 30, authorKind: 'agent', authorId: 'agent_cerca', text: 'consegno il menu completo', depth: 1 } })
+    expect(r.turns.map((t) => t.memberId)).toEqual(['agent_coord'])
+  })
+
+  it('il post di uno specialista CON @menzioni resta menzionati + coordinatore', () => {
+    const r = plan({ message: { id: 31, authorKind: 'agent', authorId: 'agent_cerca', text: '@Pianificatore monta la scaletta', depth: 1 } })
+    expect(r.turns.map((t) => t.memberId).sort()).toEqual(['agent_coord', 'agent_piano'])
+  })
+
+  it('@tutti da uno specialista va a tutti i candidati (la menzione esplicita vince)', () => {
+    const r = plan({ message: { id: 32, authorKind: 'agent', authorId: 'agent_cerca', text: 'riunione: @tutti', depth: 1 } })
+    expect(r.turns.map((t) => t.memberId).sort()).toEqual(['agent_bot', 'agent_coord', 'agent_piano'])
+  })
+
+  it('i messaggi dell\'utente e del COORDINATORE senza menzioni vanno a tutti come oggi', () => {
+    const u = plan({ message: { id: 33, authorKind: 'user', authorId: null, text: 'a che punto siamo?', depth: 0 } })
+    expect(u.turns).toHaveLength(4)
+    const c = plan({ message: { id: 34, authorKind: 'agent', authorId: 'agent_coord', text: 'bravi, proseguite', depth: 1 } })
+    expect(c.turns.map((t) => t.memberId).sort()).toEqual(['agent_bot', 'agent_cerca', 'agent_piano'])
+  })
+
+  it('SENZA coordinatore il post di uno specialista senza menzioni va a tutti (comportamento di oggi)', () => {
+    const r = plan({
+      group: { id: 3, coordinatorId: null },
+      message: { id: 35, authorKind: 'agent', authorId: 'agent_cerca', text: 'consegno', depth: 1 }
+    })
+    // nessun coordinatore: tutti i candidati tranne l'autore (il membro che si
+    // chiama "Coordinatore" qui è un pari qualunque)
+    expect(r.turns.map((t) => t.memberId).sort()).toEqual(['agent_bot', 'agent_coord', 'agent_piano'])
+  })
+
+  it(`tetto per catena: lo specialista con ${GROUP_MEMBER_CHAIN_POSTS_MAX} post nella catena è escluso (con motivo)`, () => {
+    const r = plan({
+      message: { id: 36, authorKind: 'user', authorId: null, text: 'aggiornamenti?', depth: 1 },
+      memberChainPosts: { agent_cerca: GROUP_MEMBER_CHAIN_POSTS_MAX, agent_piano: 1 }
+    })
+    expect(r.turns.map((t) => t.memberId)).not.toContain('agent_cerca')
+    expect(r.skipped.find((s) => s.memberId === 'agent_cerca')?.reason).toContain('tetto per catena')
+    // chi è sotto il tetto resta
+    expect(r.turns.map((t) => t.memberId)).toContain('agent_piano')
+  })
+
+  it('il coordinatore è ESCLUSO dal tetto per catena (lo frena la profondità)', () => {
+    const r = plan({
+      message: { id: 37, authorKind: 'user', authorId: null, text: 'riassumi', depth: 1 },
+      memberChainPosts: { agent_coord: 10 }
+    })
+    expect(r.turns.map((t) => t.memberId)).toContain('agent_coord')
+  })
+
+  it('senza coordinatore il tetto per catena non si applica (comportamento di oggi)', () => {
+    const r = plan({
+      group: { id: 3, coordinatorId: null },
+      message: { id: 38, authorKind: 'user', authorId: null, text: 'avanti', depth: 1 },
+      memberChainPosts: { agent_cerca: 10 }
+    })
+    expect(r.turns.map((t) => t.memberId)).toContain('agent_cerca')
+  })
+})
+
+describe('correzione C2: shouldScheduleClosingTurn (puro)', () => {
+  const ok = {
+    coordinatorId: 'agent_coord',
+    chainEnded: true,
+    newsForCoordinator: true,
+    coordinatorWaiting: false,
+    closeTurnExists: false
+  }
+
+  it('catena spenta o chiusa con consegne nuove → UN turno di chiusura', () => {
+    expect(shouldScheduleClosingTurn(ok)).toEqual({ schedule: true, reason: expect.any(String) })
+    // catena CHIUSA a depth 6: stesso verdetto (il chiamante dice perché è finita)
+    expect(shouldScheduleClosingTurn({ ...ok, chainEnded: true }).schedule).toBe(true)
+  })
+
+  it('nessun coordinatore → niente turno di chiusura', () => {
+    const r = shouldScheduleClosingTurn({ ...ok, coordinatorId: null })
+    expect(r.schedule).toBe(false)
+    expect(r.reason).toContain('coordinatore')
+  })
+
+  it('niente doppioni: il turno di chiusura già programmato non si riaccoda', () => {
+    const r = shouldScheduleClosingTurn({ ...ok, closeTurnExists: true })
+    expect(r.schedule).toBe(false)
+    expect(r.reason).toContain('già programmato')
+  })
+
+  it('la catena ha ancora turni in coda o in corso → si aspetta', () => {
+    const r = shouldScheduleClosingTurn({ ...ok, chainEnded: false })
+    expect(r.schedule).toBe(false)
+    expect(r.reason).toContain('in coda')
+  })
+
+  it('il coordinatore con una domanda o card in attesa NON riceve il turno di chiusura', () => {
+    const r = shouldScheduleClosingTurn({ ...ok, coordinatorWaiting: true })
+    expect(r.schedule).toBe(false)
+    expect(r.reason).toContain('risposta')
+  })
+
+  it('nessuna novità dopo l\'ultima attività del coordinatore → niente riepilogo', () => {
+    const r = shouldScheduleClosingTurn({ ...ok, newsForCoordinator: false })
+    expect(r.schedule).toBe(false)
+    expect(r.reason).toContain('nessun post')
+  })
+
+  it('il nonce di chiusura è deterministico per catena e si riconosce', () => {
+    const n = closingTurnNonce(3, 'agent_coord', 50)
+    expect(n).toBe('g3:agent_coord:close50')
+    expect(isClosingNonce(n)).toBe(true)
+    expect(isClosingNonce(groupTurnNonce(3, 'agent_coord', 50))).toBe(false)
+    expect(memberOfNonce(n)).toBeNull()
+  })
+})
+
+describe('correzione C2/C3: funzioni pure di supporto', () => {
+  it('memberWaitingForUser: card pendente o widget senza risposta, non quelli risolti', () => {
+    const approval = { id: 1, kind: 'approval', role: 'system', meta: { status: 'pending' } }
+    expect(memberWaitingForUser([approval])).toBe(true)
+    expect(memberWaitingForUser([{ id: 2, kind: 'approval', role: 'system', meta: { status: 'allowed' } }])).toBe(false)
+
+    const widget = { id: 3, kind: 'send-message', role: 'assistant', meta: { message: { type: 'widget' } } }
+    expect(memberWaitingForUser([widget])).toBe(true)
+    // risposta dell'utente arrivata (meta.respondedTo) → non più in attesa
+    const answered = { id: 4, kind: 'message', role: 'user', meta: { respondedTo: 3 } }
+    expect(memberWaitingForUser([widget, answered])).toBe(false)
+    // widget scavalcato (dismissOnMoveOn) → non più in attesa
+    const dismissed = { id: 5, kind: 'send-message', role: 'assistant', meta: { message: { type: 'widget' }, widgetDismissed: true } }
+    expect(memberWaitingForUser([dismissed])).toBe(false)
+    expect(memberWaitingForUser([])).toBe(false)
+  })
+
+  it('hasSentToUserInChain: solo le send con la STESSA catena contano', () => {
+    const entries = [
+      { kind: 'send-message', meta: { groupChain: { groupId: 1, rootId: 50 } } },
+      { kind: 'send-message', meta: { groupChain: { groupId: 1, rootId: 99 } } },
+      { kind: 'send-message', meta: { groupChain: { groupId: 2, rootId: 50 } } },
+      { kind: 'thinking', meta: { groupChain: { groupId: 1, rootId: 50 } } },
+      { kind: 'send-message', meta: null }
+    ]
+    expect(hasSentToUserInChain(entries, { groupId: 1, rootId: 50 })).toBe(true)
+    expect(hasSentToUserInChain(entries, { groupId: 1, rootId: 77 })).toBe(false)
+    expect(hasSentToUserInChain(entries, { groupId: 3, rootId: 50 })).toBe(false)
+    expect(hasSentToUserInChain([], { groupId: 1, rootId: 50 })).toBe(false)
+    // root null (finestra senza catena) confrontata come null
+    expect(hasSentToUserInChain([{ kind: 'send-message', meta: { groupChain: { groupId: 1, rootId: null } } }], { groupId: 1, rootId: null })).toBe(true)
+  })
+
+  it('alreadySentToUserResult dice che il riepilogo va fatto alla chiusura', () => {
+    expect(alreadySentToUserResult()).toContain('riepilogo')
+    expect(alreadySentToUserResult()).toContain('chiusura')
+  })
+})
+
 describe('buildGroupTurnOpening (puro)', () => {
   const ev = {
     group: { id: 3, name: 'Cena compleanno', description: 'Organizzare la cena di compleanno per 8.' },
@@ -187,6 +348,8 @@ describe('buildGroupTurnOpening (puro)', () => {
     expect(o).toContain(GROUP_TURN_RULE)
     expect(o).toContain('pass')
     expect(o).toContain('NON si riporta nel gruppo')
+    // correzione C3: la regola dice QUANDO si scrive all'utente
+    expect(o).toContain('solo per una decisione che spetta a lui')
   })
 
   it('windingDown: la riga di chiusura compare solo quando richiesta', () => {
@@ -202,5 +365,21 @@ describe('buildGroupTurnOpening (puro)', () => {
     // il tag è neutralizzato e il blocco si chiude UNA volta sola
     expect(hostile).toContain('</turno_di_gruppo_neutralizzato>')
     expect(hostile.split('</turno_di_gruppo>').length - 1).toBe(1)
+  })
+
+  it('correzione C6a: l\'apertura dice che i messaggi PRECEDENTI sono già stati letti', () => {
+    const o = buildGroupTurnOpening(ev)
+    expect(o).toContain('quelli precedenti li hai già letti')
+    expect(o).not.toContain('non la vedi')
+  })
+
+  it('correzione C2: il turno di CHIUSURA porta chiusura="true" e la riga del riepilogo', () => {
+    const o = buildGroupTurnOpening({ ...ev, windingDown: true, closing: true })
+    expect(o).toContain('<turno_di_gruppo gruppo="Cena compleanno" chiusura="true">')
+    expect(o).toContain(GROUP_CLOSING_LINE)
+    expect(o).toContain('manda ORA all\'utente UN riepilogo completo')
+    expect(o).not.toContain('Il giro sta CHIUDENDO')
+    // senza closing il flag non c'è
+    expect(buildGroupTurnOpening(ev)).not.toContain('chiusura="true"')
   })
 })

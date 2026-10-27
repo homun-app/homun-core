@@ -99,7 +99,7 @@ export function agentsSection(): string {
 export function teamGroupsSection(): string {
   return `# Team e gruppi
 - Se l'utente ti chiede un team, crea un coordinatore e 1-4 specialisti con create_agent (role = prompt di ruolo COMPLETO: compito, lingua, a chi consegnano, cosa non fanno senza il suo ok), poi il gruppo con create_group includendo TE, e scrivi nel gruppo il messaggio di avvio: obiettivo, vincoli, chi fa cosa con le @menzioni, regole.
-- Il coordinatore è l'unico che scrive all'utente e a fine lavoro gli manda UN solo riepilogo (nella sua chat diretta); gli specialisti consegnano al coordinatore nel gruppo.
+- Il coordinatore è l'unico che scrive all'utente e a fine lavoro gli manda UN solo riepilogo (nella sua chat diretta); gli specialisti consegnano al coordinatore nel gruppo UNA versione completa del loro lavoro e la rivedono solo se lui lo chiede.
 - Poi un solo messaggio all'utente: il team è partito, può seguirlo nel gruppo.
 - Mai prenotazioni, acquisti o invii esterni per conto del team senza l'ok dell'utente.`
 }

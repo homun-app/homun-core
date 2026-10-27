@@ -5,9 +5,11 @@
 // La programmazione dei turni è in agent/group-turns.ts (puro): qui c'è la
 // colla che registra, accoda job e scrive le righe di sistema.
 import type { DatabaseSync } from 'node:sqlite'
-import { db, getAgent, listAgents } from './db'
+import { db, getAgent, listAgents, getEntries } from './db'
 import { enqueueJob } from './jobs'
-import { planGroupTurns, GROUP_HOURLY_CAP_TEXT, type GroupPlanResult } from '../agent/group-turns'
+import {
+  planGroupTurns, GROUP_HOURLY_CAP_TEXT, closingTurnNonce, type GroupPlanResult
+} from '../agent/group-turns'
 
 export const GROUPS_DDL = `
     CREATE TABLE IF NOT EXISTS groups (
@@ -51,7 +53,8 @@ export const GROUPS_DDL = `
       source_message_id INTEGER NOT NULL,
       outcome TEXT,
       started_at INTEGER,
-      ended_at INTEGER
+      ended_at INTEGER,
+      reason TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_group_turns_member ON group_turns(group_id, member_id);
   `
@@ -102,6 +105,8 @@ export interface GroupTurn {
   outcome: GroupTurnOutcome | null
   started_at: number | null
   ended_at: number | null
+  /** correzione C5: il motivo di uno SKIPPED (giro sospeso per rate limit) */
+  reason?: string | null
 }
 
 function rowToGroup(r: GroupRow): Group {
@@ -270,7 +275,7 @@ export function registerPlannedTurn(input: { nonce: string; groupId: number; mem
 
 export function groupTurnByNonce(nonce: string): GroupTurn | null {
   const r = db().prepare('SELECT * FROM group_turns WHERE nonce = ?').get(nonce) as
-    | { nonce: string; group_id: number; member_id: string; source_message_id: number; outcome: string | null; started_at: number | null; ended_at: number | null }
+    | { nonce: string; group_id: number; member_id: string; source_message_id: number; outcome: string | null; started_at: number | null; ended_at: number | null; reason?: string | null }
     | undefined
   return r ? { ...r, outcome: (r.outcome as GroupTurnOutcome | null) ?? null } : null
 }
@@ -300,6 +305,125 @@ export function pendingTurnNonces(groupId: number): string[] {
 /** Tutti i nonce del gruppo (la dedup del planner). */
 export function groupTurnNonces(groupId: number): string[] {
   return (db().prepare('SELECT nonce FROM group_turns WHERE group_id = ?').all(groupId) as Array<{ nonce: string }>).map((r) => r.nonce)
+}
+
+/** Correzione C5: chiude un turno pianificato come SKIPPED col motivo (giro sospeso). */
+export function skipGroupTurn(nonce: string, reason: string, at: number): void {
+  db().prepare(`
+    INSERT INTO group_turns(nonce, group_id, member_id, source_message_id, outcome, ended_at, reason)
+    VALUES(?, 0, '', 0, 'SKIPPED', ?, ?)
+    ON CONFLICT(nonce) DO UPDATE SET outcome = 'SKIPPED', ended_at = excluded.ended_at, reason = excluded.reason
+  `).run(nonce, at, reason)
+}
+
+// ---- correzione C2: i dati del turno di chiusura del coordinatore ----
+
+/**
+ * Correzione C2: l'ultimo post di bot della catena, escluso un autore (i post
+ * DEL COORDINATORE non sono consegne da riportare: le decide lui, in gruppo o
+ * in chat diretta). Null se nella catena non ci sono consegne d'altri.
+ */
+export function lastBotPostAtInChain(groupId: number, rootId: number, exceptAuthorId?: string): number | null {
+  const r = db().prepare(`
+    SELECT MAX(created_at) AS t FROM group_messages
+    WHERE group_id = ? AND root_id = ? AND author_kind = 'agent' AND author_id IS NOT ?
+  `).get(groupId, rootId, exceptAuthorId ?? null) as { t: number | null }
+  return r.t ?? null
+}
+
+/**
+ * Correzione C2: l'ultimo riepilogo del coordinatore all'utente nella catena
+ * (meta.groupChain). È ciò che "consuma" le consegne: se dopo la sua ultima
+ * send arrivano altri post di bot, c'è qualcosa di nuovo da riportare. Un
+ * coordinatore che ha solo tacito (pass) NON ha ancora riferito: il turno di
+ * chiusura è esattamente per quello.
+ */
+export function coordinatorLastSendAt(groupId: number, rootId: number, coordinatorId: string): number | null {
+  let sentAt: number | null = null
+  for (const e of getEntries(coordinatorId)) {
+    if (e.kind !== 'send-message') continue
+    const c = (e.meta?.groupChain ?? null) as { groupId?: number; rootId?: number | null } | null
+    if (c?.groupId === groupId && (c.rootId ?? null) === rootId) sentAt = Math.max(sentAt ?? 0, e.createdAt)
+  }
+  return sentAt
+}
+
+/**
+ * Correzione C2: turni del gruppo PIANIFICATI (non partiti) o IN CORSO — il
+ * turno appena chiuso ha già l'esito e non conta: se qui è 0, la catena si è
+ * spenta.
+ */
+export function activeGroupTurnCount(groupId: number): number {
+  const r = db().prepare('SELECT COUNT(*) AS n FROM group_turns WHERE group_id = ? AND outcome IS NULL').get(groupId) as { n: number }
+  return r.n
+}
+
+/**
+ * Correzione C2: accoda il turno di CHIUSURA del coordinatore per la catena
+ * (nonce deterministico g<gruppo>:<coordinatore>:close<rootId>: al massimo uno
+ * per catena, garantito dalla chiave unica del registro).
+ */
+export function scheduleClosingTurn(input: {
+  groupId: number
+  coordinatorId: string
+  rootId: number
+  sourceMessageId: number
+  automatic?: boolean
+  emit: (e: { type: 'groups' }) => void
+  now?: number
+}): boolean {
+  const now = input.now ?? Date.now()
+  const nonce = closingTurnNonce(input.groupId, input.coordinatorId, input.rootId)
+  if (!registerPlannedTurn({ nonce, groupId: input.groupId, memberId: input.coordinatorId, sourceMessageId: input.sourceMessageId })) {
+    return false
+  }
+  enqueueJob(db(), {
+    agentId: input.coordinatorId,
+    kind: 'group-turn',
+    payload: {
+      groupId: input.groupId,
+      memberId: input.coordinatorId,
+      nonce,
+      sourceMessageId: input.sourceMessageId,
+      rootId: input.rootId,
+      closing: true,
+      ...(input.automatic ? { automatic: true } : {})
+    },
+    runAt: now,
+    now
+  })
+  input.emit({ type: 'groups' })
+  return true
+}
+
+/**
+ * Correzione C5: sospende il giro per limite d'uso del provider — i job
+ * group-turn ANCORA IN CODA per il gruppo vengono annullati e i loro turni
+ * registrati SKIPPED col motivo. I job già in esecuzione (leased) no: il loro
+ * turno sta già gestendo il proprio rate limit. Torna i job annullati.
+ */
+export function suspendGroupTurns(dbs: DatabaseSync, groupId: number, reason: string, exceptJobId?: number): number {
+  const rows = dbs.prepare(`
+    SELECT id, json_extract(payload_json, '$.nonce') AS nonce FROM jobs
+    WHERE kind = 'group-turn' AND status = 'queued'
+      AND json_extract(payload_json, '$.groupId') = ?
+      ${exceptJobId !== undefined ? 'AND id != ?' : ''}
+  `).all(...(exceptJobId !== undefined ? [groupId, exceptJobId] : [groupId])) as Array<{ id: number; nonce: string | null }>
+  for (const r of rows) {
+    if (r.nonce) skipGroupTurn(r.nonce, reason, Date.now())
+    dbs.prepare('DELETE FROM jobs WHERE id = ?').run(r.id)
+  }
+  return rows.length
+}
+
+/** Correzione C4: i post di bot per membro nella catena di root (input del planner). */
+export function memberChainPosts(groupId: number, rootId: number): Record<string, number> {
+  const rows = db().prepare(`
+    SELECT author_id, COUNT(*) AS n FROM group_messages
+    WHERE group_id = ? AND root_id = ? AND author_kind = 'agent' AND author_id IS NOT NULL
+    GROUP BY author_id
+  `).all(groupId, rootId) as Array<{ author_id: string; n: number }>
+  return Object.fromEntries(rows.map((r) => [r.author_id, r.n]))
 }
 
 // ---- la colla: pianificare i turni per un messaggio nuovo ----
@@ -338,7 +462,9 @@ export function scheduleTurnsForMessage(message: GroupMessage, emit: (e: { type:
     members,
     pendingNonces: pendingTurnNonces(group.id),
     existingNonces: groupTurnNonces(group.id),
-    postsLastHour: botPostsLastHour(group.id, now)
+    postsLastHour: botPostsLastHour(group.id, now),
+    // correzione C4: il tetto per specialista conta i post della catena
+    memberChainPosts: memberChainPosts(group.id, message.root_id ?? message.id)
   })
   result.plan = plan
   // le righe di sistema NON generano turni (autore sistema)

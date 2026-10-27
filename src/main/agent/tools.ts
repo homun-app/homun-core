@@ -249,7 +249,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'create_agent',
-    description: "Crea un altro bot: gli dai nome e PROMPT DI RUOLE completo (diventa la sua descrizione: compito, lingua, a chi consegna il lavoro, cosa NON fa senza l'ok dell'utente). Riceve modello e provider come i bot nuovi (senza default: i tuoi). Sezione opzionale per raggrupparlo nella sidebar. Il bot nuovo NON saluta e NON parte da solo: riceve il lavoro da chi gli scrive (send_to_agent o il gruppo). Nei turni non dell'utente (automatici, di altri bot, di gruppo, da contenuto esterno) la creazione chiede la conferma dell'utente.",
+    description: "Crea un altro bot: gli dai nome e PROMPT DI RUOLO completo (diventa la sua descrizione: compito, lingua, a chi consegna il lavoro, cosa NON fa senza l'ok dell'utente). Riceve modello e provider come i bot nuovi (senza default: i tuoi). Sezione opzionale per raggrupparlo nella sidebar. Il bot nuovo NON saluta e NON parte da solo: riceve il lavoro da chi gli scrive (send_to_agent o il gruppo). Nei turni non dell'utente (automatici, di altri bot, di gruppo, da contenuto esterno) la creazione chiede la conferma dell'utente.",
     parameters: {
       type: 'object',
       properties: {

@@ -138,6 +138,8 @@ async function evalTurn(
   const steps: Array<{ text: string; toolCalls: ToolCall[] }> = []
   let lastFreeText = ''
   let endedWithAsk = false
+  // correzione C1: nei turni di gruppo pass è TERMINALE — il turno finisce lì
+  let endedWithPass = false
   // fase 10: gli id dei bot creati in QUESTO turno (deterministici per run)
   createdTeamN = 0
   createdTeamIds.length = 0
@@ -165,8 +167,11 @@ async function evalTurn(
         const r = deliverer.run(c.name, args)
         messages.push({ role: 'tool', toolCallId: c.id, content: r.result })
         if (r.endTurn) endedWithAsk = true
+        // correzione C1: come nel loop reale, pass chiude il turno di gruppo
+        // (i tool chiesti dopo nella stessa risposta non vengono eseguiti)
+        if (c.name === 'pass' && source === 'group') { endedWithPass = true; break }
       }
-      if (endedWithAsk) break
+      if (endedWithAsk || endedWithPass) break
     }
     // fase 3 del loop reale: turno UTENTE senza nessuna send visibile → UNA
     // chiamata di recupero col sollecito; se non basta, il testo libero
@@ -476,6 +481,77 @@ const CASES: EvalCase[] = [
       }
       if (posts > 1) return { pass: false, reason: `un riepilogo all'utente ma ${posts} post nel gruppo (rumore)` }
       return { pass: true, reason: `un solo riepilogo all'utente, ${posts} post nel gruppo: "${t.delivered[0]!.slice(0, 70)}…"` }
+    }
+  },
+
+  // ---- fase 10 (correzioni C1/C2): la chiusura del giro e il silenzio ----
+
+  {
+    id: 12,
+    name: 'turno di CHIUSURA del coordinatore → esattamente UN send_to_user, nessun post_to_group',
+    source: 'group',
+    history: [
+      {
+        role: 'user',
+        content: buildGroupTurnOpening({
+          group: { id: 7, name: 'Team cena', description: 'Organizzare la cena di compleanno per 8: menu, spesa, scaletta.' },
+          me: { name: 'Coordinatore' },
+          peers: [
+            { name: 'Bot', role: 'Il bot principale che ha creato il team', coordinator: false },
+            { name: 'Cercatore', role: 'Trova i ristoranti e confronta i menu', coordinator: false },
+            { name: 'Analista spesa', role: 'Prepara la lista della spesa', coordinator: false }
+          ],
+          newMessages: [
+            { id: 1, authorKind: 'agent', authorName: 'Cercatore', text: 'CONSEGNA FINALE: ristorante "Dal Nonno", menu 3 portate a 28€, confermato per 8.', replyTo: null },
+            { id: 2, authorKind: 'agent', authorName: 'Analista spesa', text: 'CONSEGNA FINALE: lista della spesa pronta, 140€ totali.', replyTo: null }
+          ],
+          windingDown: true,
+          closing: true
+        })
+      }
+    ],
+    judge: (t) => {
+      if (t.error) return { pass: false, reason: `errore: ${t.error}` }
+      const posts = t.allCalls.filter((c) => c.name === 'post_to_group')
+      if (t.delivered.length !== 1) {
+        return { pass: false, reason: `consegnati ${t.delivered.length} messaggi all'utente (atteso 1): ${JSON.stringify(t.delivered.map((d) => d.slice(0, 40)))}` }
+      }
+      if (posts.length > 0) {
+        return { pass: false, reason: `ha comunque scritto nel gruppo (${posts.length} post_to_group) nel turno di chiusura` }
+      }
+      return { pass: true, reason: `un riepilogo in chat diretta, zero post nel gruppo: "${t.delivered[0]!.slice(0, 70)}…"` }
+    }
+  },
+  {
+    id: 13,
+    name: 'specialista con la consegna già fatta, richiamato senza novità → pass e il turno finisce lì',
+    source: 'group',
+    history: [
+      {
+        role: 'user',
+        content: buildGroupTurnOpening({
+          group: { id: 7, name: 'Team cena', description: 'Organizzare la cena di compleanno per 8: menu, spesa, scaletta.' },
+          me: { name: 'Analista spesa' },
+          peers: [
+            { name: 'Bot', role: 'Il bot principale che ha creato il team', coordinator: false },
+            { name: 'Coordinatore', role: 'Assegna i compiti e riepiloga per Fabio', coordinator: true }
+          ],
+          newMessages: [
+            { id: 1, authorKind: 'agent', authorName: 'Coordinatore', text: 'CONSEGNA FINALE ricevuta: lista della spesa ok, grazie. Nessuna modifica richiesta.', replyTo: null }
+          ],
+          windingDown: true
+        })
+      },
+      ...past(tc('call_sp1', 'post_to_group', { text: 'CONSEGNA FINALE: lista della spesa pronta, 140€ totali per 8 persone.' }), 'Pubblicato nel gruppo: «CONSEGNA FINALE: lista della spesa pronta…». Gli altri membri lo riceveranno nel loro turno.')
+    ],
+    judge: (t) => {
+      if (t.error) return { pass: false, reason: `errore: ${t.error}` }
+      const posts = t.allCalls.filter((c) => c.name === 'post_to_group')
+      const passed = t.allCalls.some((c) => c.name === 'pass')
+      if (!passed) return { pass: false, reason: `non ha dichiarato il silenzio (atteso pass): ${t.allCalls.map((c) => c.name).join(', ') || 'nessuna tool call'}` }
+      if (posts.length > 0) return { pass: false, reason: `ha ripubblicato senza novità (${posts.length} post)` }
+      if (t.delivered.length > 0) return { pass: false, reason: `ha scritto all'utente (${t.delivered.length} messaggi) invece di passare` }
+      return { pass: true, reason: 'pass esplicito: il turno finisce lì, nessun rumore' }
     }
   }
 ]
