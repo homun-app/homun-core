@@ -9,6 +9,7 @@
     "predev": "node scripts/prepare-wasm.mjs",
     "predist": "node scripts/prepare-wasm.mjs",
     "test": "vitest run",
+    "eval": "node scripts/run-eval.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",

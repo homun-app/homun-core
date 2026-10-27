@@ -69,3 +69,12 @@ export function isWorkTool(name: string): boolean {
 export function messageCapResult(): string {
   return 'Non consegnato: in questo turno è già arrivato all’utente un messaggio non seguito da lavoro. Il testo è finito nel ragionamento, non in chat. Non ripetere: se hai finito, chiudi il turno; se devi aggiungere qualcosa di NUOVO, fondilo in un solo messaggio.'
 }
+
+/**
+ * Il result per una send SENZA testo (visto nel valutare i comportamenti:
+ * un modello a volte chiama send_to_user con text vuoto): niente consegna,
+ * la chat non deve riempirsi di messaggi vuoti.
+ */
+export function emptySendResult(): string {
+  return 'Non consegnato: il campo text è vuoto. Scrivi il messaggio nel campo text di send_to_user, oppure non chiamarlo se non hai nulla da dire.'
+}

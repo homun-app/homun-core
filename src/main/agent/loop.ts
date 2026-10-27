@@ -41,7 +41,7 @@ import { activityOf, isToolLoop } from './loop-guard'
 import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from './stream-deadline'
 // fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
 // avanzamenti, result col testo consegnato)
-import { deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkTool, messageCapResult } from './turn-sends'
+import { deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkTool, messageCapResult, emptySendResult } from './turn-sends'
 // fase 9 (punto 1): modello di riserva quando il principale non risponde
 import { fallbackModelFor, type ModelDefaultsMap } from './model-defaults'
 import { shouldUseFallback } from './model-fallback'
@@ -320,6 +320,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
    */
   const deliverSend = (call: { id: string; name: string; arguments: string }, input: Record<string, unknown>): string => {
     const text = String(input.text ?? '')
+    // testo vuoto: niente messaggio vuoto in chat (visto nell'eval: un modello
+    // a volte chiama send_to_user senza text)
+    if (!text.trim()) return emptySendResult()
     if (isDuplicateSend(deliveredTexts, text)) return alreadyDeliveredResult(text)
     if (sendsSinceWork >= 1) {
       if (text.trim()) {

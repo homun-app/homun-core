@@ -2117,3 +2117,20 @@ describe('fase 9 (punto 1): riserva del modello', () => {
     expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
   })
 })
+
+describe('fase 9: send senza testo', () => {
+  it('una send_to_user con text vuoto NON crea messaggi vuoti in chat', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'e1', name: 'send_to_user', arguments: '{"text":""}' }] },
+      { toolCalls: [{ id: 'e2', name: 'send_to_user', arguments: '{}' }, { id: 'e3', name: 'send_to_user', arguments: '{"text":"   "}' }] },
+      { toolCalls: [{ id: 'e4', name: 'send_to_user', arguments: '{"text":"adesso sul serio"}' }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends.map((s) => s.content)).toEqual(['adesso sul serio'])
+    const lastCall = h.llm.calls[h.llm.calls.length - 1]!
+    const results = lastCall.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.filter((c) => c.includes('campo text è vuoto'))).toHaveLength(3)
+  })
+})
