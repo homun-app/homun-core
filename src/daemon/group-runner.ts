@@ -11,7 +11,7 @@ import {
   getGroupMessage, startGroupTurn, finishGroupTurn, type GroupTurnOutcome
 } from '../main/store/groups'
 import { buildGroupTurnOpening, GROUP_WINDING_DOWN_DEPTH } from '../main/agent/group-turns'
-import { setJobEntryId, type Job } from '../main/store/jobs'
+import { setJobEntryId, getJobById, type Job } from '../main/store/jobs'
 import type { runTurn, RunTurnOptions } from '../main/agent/loop'
 import type { SandbotEvent } from '../shared/types'
 
@@ -149,7 +149,11 @@ export async function runGroupTurnJob(
   if (posted) outcome = 'SENT'
   else if (timedOut) outcome = 'TIMEOUT'
   else {
-    const entryId = typeof job.payload.entryId === 'number' ? job.payload.entryId : null
+    // l'entryId sta nel payload aggiornato del job (onTurnEntry lo scrive nel
+    // DB, non nell'oggetto in memoria): si rilegge per trovare il turnEnd
+    const entryId = typeof job.payload.entryId === 'number'
+      ? job.payload.entryId
+      : (getJobById(db, job.id)?.payload as { entryId?: number } | undefined)?.entryId ?? null
     const turnEnd = entryId !== null
       ? getEntries(p.memberId, entryId).find((e) => e.kind === 'event' && e.meta?.turnEnd)
       : null
