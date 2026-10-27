@@ -292,8 +292,12 @@ export function getPermissions(): PermissionsConfig {
       { tool: 'send_to_agent', pattern: '*', mode: 'always_allow' },
       { tool: 'list_agents', pattern: '*', mode: 'always_allow' },
       // fase 8: la proposta di regola di auto-review crea SOLO una card (la
-      // regola si salva al click dell'utente); è intercettata dal loop
+      // regola si salva al click dell'utente); è intercettata dal loop.
+      // I task girano nella stessa coda dell'agente e update_task chiude con
+      // un job TASK_DONE interno: nessun effetto fuori dal sistema
       { tool: 'propose_rule_change', pattern: '*', mode: 'always_allow' },
+      { tool: 'create_task', pattern: '*', mode: 'always_allow' },
+      { tool: 'update_task', pattern: '*', mode: 'always_allow' },
       { tool: 'mcp__*', pattern: '*', mode: 'needs_approval' }
     ]
   })

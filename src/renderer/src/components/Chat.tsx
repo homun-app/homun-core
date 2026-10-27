@@ -9,6 +9,7 @@ import { WidgetCard } from './WidgetCard'
 import { DraftCard } from './DraftCard'
 import { ConnectorCard } from './ConnectorCard'
 import { RuleProposalCard } from './RuleProposalCard'
+import { TaskCard } from './TaskCard'
 import { MemoryPanel } from './MemoryPanel'
 import { SkillsPanel } from './SkillsPanel'
 
@@ -29,6 +30,9 @@ export function Chat() {
   // fase 4: sezioni memoria e skill della vista dell'agente
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [skillsOpen, setSkillsOpen] = useState(false)
+  // fase 8 (§3bis L7): task aperto nella vista del sotto-transcript
+  const openTaskId = useStore((s) => s.openTaskId)
+  const setOpenTask = useStore((s) => s.openTask)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const agent = agents.find((a) => a.id === activeId)
@@ -62,7 +66,7 @@ export function Chat() {
   }
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col">
+    <main className="relative flex min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between border-b border-neutral-800 px-6 pt-9 pb-3">
         <div>
           <h1 className="text-base font-semibold text-neutral-100">{agent.name}</h1>
@@ -137,11 +141,18 @@ export function Chat() {
           </p>
         )}
         <div className="mx-auto max-w-3xl space-y-3">
-          {entries.map((e) => (
+          {/*
+            fase 8 (§3bis L7): la chat principale mostra SOLO le entry senza
+            meta.taskId — le entry dei task vivono nella vista del sotto-transcript
+          */}
+          {entries.filter((e) => !e.meta?.taskId).map((e) => (
             <EntryRow key={e.id} entry={e} showReasoning={showReasoning} />
           ))}
         </div>
       </div>
+
+      {/* fase 8 (§3bis L7): vista del sotto-transcript del task aperto */}
+      {openTaskId !== null && <TaskPanel onClose={() => setOpenTask(null)} />}
 
       <footer className="border-t border-neutral-800 px-6 py-4">
         <div className="mx-auto flex max-w-3xl items-end gap-2">
@@ -220,6 +231,20 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
           </details>
         )
       }
+      // fase 8 (§3bis L7): il summary di chiusura di un task (TASK_DONE) non è
+      // scritto dall'utente: riga espandibile col report
+      if (entry.role === 'user' && entry.meta?.initiator === 'TASK_DONE') {
+        return (
+          <details className="rounded-lg border border-sky-900/50 bg-sky-950/10 px-3 py-1.5">
+            <summary className="cursor-pointer select-none text-xs text-sky-300/70">
+              Report del task: {String(entry.meta?.taskTitle ?? '')} ({String(entry.meta?.taskId ?? '')})
+            </summary>
+            <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-neutral-500">
+              {entry.content}
+            </pre>
+          </details>
+        )
+      }
       return entry.role === 'user' ? (
         <div className="flex justify-end">
           <div className="max-w-[80%] rounded-2xl rounded-br-md bg-sky-700/40 px-4 py-2.5 text-sm text-neutral-100 whitespace-pre-wrap">
@@ -290,6 +315,8 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       // fase 8 (§3bis L5): regola di auto-review proposta dal bot — si salva
       // solo al click dell'utente
       if (message?.type === 'rule') return <RuleProposalCard entry={entry} />
+      // fase 8 (§3bis L7): card del task (unica riga del task in chat principale)
+      if (message?.type === 'task') return <TaskCard entry={entry} />
       return (
         <div className="max-w-[92%] text-sm leading-relaxed text-neutral-100">
           <div className="prose-invert max-w-none prose-pre:bg-neutral-900 prose-pre:border prose-pre:border-neutral-800 prose-code:text-neutral-300">
@@ -371,6 +398,69 @@ function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
           Apri le impostazioni del provider
         </button>
       )}
+    </div>
+  )
+}
+
+/**
+ * Fase 8 (§3bis L7): vista del sotto-transcript di un task — le entry con
+ * meta.taskId, con le stesse card della chat principale (widget e approval si
+ * rispondono da qui). Il task non vede la conversazione principale e viceversa.
+ */
+function TaskPanel({ onClose }: { onClose: () => void }) {
+  const entries = useStore((s) => s.entries)
+  const tasks = useStore((s) => s.tasks)
+  const openTaskId = useStore((s) => s.openTaskId)
+  const cancelTask = useStore((s) => s.cancelTask)
+  const [showReasoning, setShowReasoning] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const task = tasks.find((t) => t.id === openTaskId)
+  const taskEntries = entries.filter((e) => e.meta?.taskId === openTaskId)
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+  }, [taskEntries.length])
+
+  if (openTaskId === null) return null
+  const open = task?.status === 'working' || task?.status === 'needs_input'
+
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col bg-neutral-950/95 backdrop-blur-sm">
+      <header className="flex items-center justify-between border-b border-neutral-800 px-6 py-3">
+        <div>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-sky-300/80">Task</p>
+          <h2 className="text-base font-semibold text-neutral-100">{task?.title ?? `#${openTaskId}`}</h2>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            className={`rounded-lg px-2 py-1 text-xs ${showReasoning ? 'bg-neutral-700 text-neutral-200' : 'text-neutral-400 hover:bg-neutral-800'}`}
+            onClick={() => setShowReasoning(!showReasoning)}
+          >
+            🧠 Ragionamento
+          </button>
+          {open && (
+            <button
+              className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-700"
+              onClick={() => cancelTask(openTaskId)}
+            >
+              Interrompi task
+            </button>
+          )}
+          <button className="rounded-md px-2 py-1 text-neutral-500 hover:text-neutral-200" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+      </header>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 py-4">
+        <div className="mx-auto max-w-3xl space-y-3">
+          {taskEntries.length === 0 && (
+            <p className="mt-16 text-center text-sm text-neutral-600">Il task non ha ancora attività.</p>
+          )}
+          {taskEntries.map((e) => (
+            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} />
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

@@ -46,6 +46,16 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       })
       return
     }
+    // fase 8 (§3bis L7): il task gira nel proprio sotto-transcript (meta.taskId
+    // su ogni entry); il brief è il messaggio che lo apre
+    if (job.kind === 'task-run') {
+      const p = job.payload as { taskId: number; brief: string; respondedTo?: number }
+      await runTurnFn(job.agent_id, p.brief, emit, undefined, {
+        source: 'user', taskId: p.taskId, ...opts, onTurnEntry,
+        ...(p.respondedTo !== undefined ? { respondedTo: p.respondedTo } : {})
+      })
+      return
+    }
     const p = job.payload as { routineId: number; title: string; prompt: string; event?: TriggerEventPayload }
     // fase 6: il turno di un trigger parte dall'evento (evidenza nel blocco
     // delimitato <evento>); le routine a schedule restano come prima.

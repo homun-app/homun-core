@@ -1,0 +1,59 @@
+// Test delle protezioni di runtime pure (fase 8, §3bis L11): loop detection
+// e stato live (nome del tool + target, senza testo generato dal modello).
+import { describe, expect, it } from 'vitest'
+import { activityOf, abbreviateCommand, isToolLoop, TOOL_LOOP_REPEATS } from '../loop-guard'
+
+describe('isToolLoop: la stessa tool call ripetuta 3 volte di fila', () => {
+  const same = { name: 'run-command', args: '{"command":"ls"}' }
+
+  it('la terza identica di fila è un loop (nome + argomenti identici)', () => {
+    expect(isToolLoop([same, same], same)).toBe(true)
+  })
+
+  it('due sole ripetizioni non bastano; la terza chiamata diversa resetta', () => {
+    expect(isToolLoop([same], same)).toBe(false)
+    expect(isToolLoop([same, { name: 'run-command', args: '{"command":"ls -la"}' }], same)).toBe(false)
+    expect(isToolLoop([{ ...same, name: 'read-file' }, { ...same, name: 'read-file' }], { ...same, name: 'read-file' })).toBe(true)
+  })
+
+  it('argomenti diversi non sono un loop, nemmeno a nome uguale', () => {
+    const a = { name: 'send_to_user', args: '{"text":"ciao"}' }
+    const b = { name: 'send_to_user', args: '{"text":"ancora ciao"}' }
+    expect(isToolLoop([a, a], b)).toBe(false)
+    expect(isToolLoop([a, b], a)).toBe(false)
+  })
+
+  it('le chiamate di ritorno dopo una diversa non contano', () => {
+    const other = { name: 'read-file', args: '{"path":"/x"}' }
+    expect(isToolLoop([same, other, same], same)).toBe(false)
+    expect(isToolLoop([other, same, same], same)).toBe(true)
+  })
+
+  it('la soglia è 3 (TOOL_LOOP_REPEATS)', () => {
+    expect(TOOL_LOOP_REPEATS).toBe(3)
+  })
+})
+
+describe('activityOf: nome del tool e target, mai testo del modello', () => {
+  it('run-command → comando abbreviato su una riga', () => {
+    const a = activityOf('run-command', { command: 'git log --oneline | head -20' })
+    expect(a).toEqual({ tool: 'run-command', target: 'git log --oneline | head -20' })
+    const long = activityOf('run-command', { command: 'x'.repeat(200) })
+    expect(long.target.length).toBeLessThanOrEqual(49)
+    expect(long.target.endsWith('…')).toBe(true)
+    // solo la prima riga di un comando multilinea
+    expect(activityOf('run-command', { command: 'echo a\necho b' }).target).toBe('echo a')
+  })
+
+  it('file → path; mcp → nome del connettore; use-app → azione', () => {
+    expect(activityOf('read-file', { path: '/home/box/appunti.md' })).toEqual({ tool: 'read-file', target: '/home/box/appunti.md' })
+    expect(activityOf('mcp__gmail__send_message', {})).toEqual({ tool: 'mcp__gmail__send_message', target: 'gmail' })
+    expect(activityOf('use-app', { action: 'click' })).toEqual({ tool: 'use-app', target: 'click' })
+    expect(activityOf('recall_memory', { query: 'x' })).toEqual({ tool: 'recall_memory', target: '' })
+  })
+
+  it('abbreviateCommand tronca oltre il massimo', () => {
+    expect(abbreviateCommand('ls')).toBe('ls')
+    expect(abbreviateCommand('a'.repeat(60), 10)).toBe('aaaaaaaaaa…')
+  })
+})

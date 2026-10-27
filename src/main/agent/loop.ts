@@ -18,7 +18,7 @@
 // draft_external. Ogni turno si chiude con un evento meta.turnEnd ∈
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID } from 'node:crypto'
-import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db } from '../store/db'
+import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, type AppendEntry } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
 import { systemPrompt, secondaryPrompts, mainAgentSection } from './prompts'
 import { toolDefs, executeTool } from './tools'
@@ -37,6 +37,8 @@ import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto } from './permission-rules'
 import { autoReviewDecision, reviewWithConfiguredModel, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
+import { activityOf, isToolLoop } from './loop-guard'
+import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from './stream-deadline'
 import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
@@ -88,8 +90,11 @@ const TURN_END_LABELS: Record<TurnEnd, string> = {
 }
 
 /** Chiude il turno con un evento meta.turnEnd (§3bis L2: esito del turno nel transcript). */
-function endTurn(agentId: string, outcome: TurnEnd, emit: Emitter): void {
-  appendEntry({ agentId, kind: 'event', role: 'system', content: TURN_END_LABELS[outcome], meta: { turnEnd: outcome } })
+function endTurn(agentId: string, outcome: TurnEnd, emit: Emitter, taskId?: number): void {
+  appendEntry({
+    agentId, kind: 'event', role: 'system', content: TURN_END_LABELS[outcome],
+    meta: { turnEnd: outcome, ...(taskId !== undefined ? { taskId } : {}) }
+  })
   emitLastEntry(agentId, emit)
 }
 
@@ -105,7 +110,8 @@ function appendSend(
   call: { id: string; name: string; arguments: string },
   message: SendMessagePayload,
   emit: Emitter,
-  extra: Record<string, unknown> = {}
+  extra: Record<string, unknown> = {},
+  taskId?: number
 ): import('../../shared/types').TranscriptEntry {
   const content = message.type === 'text' ? message.text
     : message.type === 'widget' ? message.prompt
@@ -115,7 +121,7 @@ function appendSend(
     : (message.subject || message.to || '')
   const entry = appendEntry({
     agentId, kind: 'send-message', role: 'assistant', content,
-    meta: { call: { id: call.id, name: call.name, arguments: call.arguments }, message, ...extra }
+    meta: { call: { id: call.id, name: call.name, arguments: call.arguments }, message, ...extra, ...(taskId !== undefined ? { taskId } : {}) }
   })
   emit({ type: 'entries', agentId, entries: [entry] })
   return entry
@@ -247,6 +253,23 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // fase 7 (residuo 0b): nei turni automatici al massimo UN urgent per esecuzione
   let urgentUsed = false
 
+  // fase 8 (§3bis L7): ogni entry scritta da un turno di TASK porta meta.taskId —
+  // vive nel sotto-transcript del task, esclusa dalla chat principale
+  const add = (e: AppendEntry): import('../../shared/types').TranscriptEntry =>
+    appendEntry(opts.taskId === undefined ? e : { ...e, meta: { ...(e.meta ?? {}), taskId: opts.taskId } })
+  // le approval e gli ask_user dentro un task portano lo stato a needs_input
+  // (la card in chat principale lo segnala); le risposte lo riportano a working
+  const taskNeedsInput = (): void => {
+    if (opts.taskId === undefined) return
+    updateTask(opts.taskId, { status: 'needs_input' })
+    emit({ type: 'tasks' })
+  }
+  const taskWorking = (): void => {
+    if (opts.taskId === undefined) return
+    updateTask(opts.taskId, { status: 'working' })
+    emit({ type: 'tasks' })
+  }
+
   /**
    * Un send_to_user con le regole dei turni automatici (residuo 0b + §3bis L4):
    * il primo urgent passa, i successivi diventano non urgenti, e i non urgenti
@@ -262,24 +285,44 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     }
     const message: SendMessagePayload = { type: 'text', text: String(input.text ?? ''), ...(urgent ? { urgent: true } : {}) }
     const hold = automatic && !urgent
-    const sent = appendSend(agentId, call, message, emit, hold ? { held: true } : {})
+    const sent = appendSend(agentId, call, message, emit, hold ? { held: true } : {}, opts.taskId)
     if (hold) holdOutboxEntry(sent.id, agentId, sent.createdAt)
     return hold
   }
 
   try {
+    // fase 8 (§3bis L7): il turno di un task rimosso o annullato dall'utente
+    // mentre era in coda non parte; ogni avvio di job del task lo riporta working
+    if (opts.taskId !== undefined) {
+      const t = getTask(opts.taskId)
+      if (!t || t.status === 'cancelled') {
+        appendEntry({ agentId, kind: 'notice', role: 'system', content: `Task ${opts.taskId} annullato: esecuzione saltata.` })
+        emitLastEntry(agentId, emit)
+        return
+      }
+      updateTask(opts.taskId, { status: 'working' })
+      emit({ type: 'tasks' })
+    }
+    // fase 8 (§3bis L7): contesto SEPARATO — il task vede solo il brief (il
+    // messaggio che lo apre) e le proprie entry; la chat principale non vede
+    // le entry dei task (e viceversa)
+    const scopedEntries = () =>
+      opts.taskId === undefined
+        ? getEntries(agentId).filter((e) => e.meta?.taskId === undefined)
+        : getEntries(agentId).filter((e) => e.meta?.taskId === opts.taskId)
+
     if (opts.resume) {
       // R1: ripresa dal transcript — il messaggio utente NON viene riscritto;
       // il turno interrotto viene riparato PRIMA di chiamare il modello
       turnEntryId = opts.resume.entryId
-      const plan = planResume(getEntries(agentId), opts.resume.entryId)
+      const plan = planResume(scopedEntries(), opts.resume.entryId)
       if (plan.alreadyComplete) {
         // il turno era già concluso: completa senza chiamare il modello
         // (l'evento di fine c'è già, a meno che il crash non precedesse la fase 3)
-        const alreadyEnded = getEntries(agentId).some(
+        const alreadyEnded = scopedEntries().some(
           (e) => e.id > opts.resume!.entryId && e.kind === 'event' && e.meta?.turnEnd
         )
-        if (!alreadyEnded) endTurn(agentId, 'FINISHED', emit)
+        if (!alreadyEnded) endTurn(agentId, 'FINISHED', emit, opts.taskId)
         setStatus(agentId, 'idle', emit)
         updateAgent(agentId, { unread: 0 })
         emit({ type: 'agents' })
@@ -291,16 +334,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (updated) emit({ type: 'entries', agentId, entries: [updated] })
       }
       for (const call of plan.interruptedToolCalls) {
-        const res = appendEntry({
+        const res = add({
           agentId, kind: 'tool-result', role: 'system', content: INTERRUPTED_TOOL_RESULT,
           meta: { callId: String(call.meta?.id ?? call.id) }
         })
         emit({ type: 'entries', agentId, entries: [res] })
       }
-      appendEntry({ agentId, kind: 'notice', role: 'system', content: RESUME_NOTICE })
+      add({ agentId, kind: 'notice', role: 'system', content: RESUME_NOTICE })
       emitLastEntry(agentId, emit)
     } else {
-      const entry = appendEntry({
+      const entry = add({
         agentId, kind: 'message', role: 'user', content: userText,
         meta: {
           ...(opts.respondedTo !== undefined ? { respondedTo: opts.respondedTo } : {}),
@@ -321,12 +364,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // fase 4: compaction della history PRIMA di costruire i messaggi — se la
     // storia stimata supera il 70% del budget di contesto, i turni più vecchi
     // diventano un'entry summary (se la chiamata LLM fallisce si prosegue col
-    // taglio a confine di turno già fatto da buildMessages)
-    await maybeCompactHistory(
-      agentId, provider.id, agent.model,
-      (digest) => summarizeWithLlm(provider, agent.model!, digest, secondaryPrompts.compaction),
-      emit
-    )
+    // taglio a confine di turno già fatto da buildMessages).
+    // Fase 8: i task hanno un contesto separato (brief + entry del task): la
+    // compaction della chat principale non li tocca
+    if (opts.taskId === undefined) {
+      await maybeCompactHistory(
+        agentId, provider.id, agent.model,
+        (digest) => summarizeWithLlm(provider, agent.model!, digest, secondaryPrompts.compaction),
+        emit
+      )
+    }
 
     // §5.3: il messaggio corrente è l'ultimo entry del transcript → compare una volta sola.
     // Fase 4: il system prompt include memoria (§3bis L6) e skill disponibili.
@@ -363,7 +410,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     }
     const messages: ChatMessage[] = buildMessages(
       systemPrompt(agent) + mainSection + buildMemorySection(agentId) + buildSkillsSection(agentId) + connectorsSection,
-      getEntries(agentId),
+      scopedEntries(),
       images
     )
 
@@ -380,16 +427,31 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // fase 3 (§3bis L5): quali tool MCP sono invii verso l'esterno
     const externalCfg = getSetting<ExternalSendConfig>('externalSendTools', DEFAULT_EXTERNAL_SEND_TOOLS)
 
+    // fase 8 (§3bis L11): scadenze dello stream — 150 s per il primo token,
+    // 90 s di inattività tra due chunk (configurabili): scaduto si abortisce
+    // il SOLO stream e il turno chiude STOPPED (ripresa normale al messaggio
+    // successivo)
+    const deadlines = {
+      firstTokenMs: getSetting<number>('llm.firstTokenMs', DEFAULT_STREAM_DEADLINES.firstTokenMs),
+      idleMs: getSetting<number>('llm.streamIdleMs', DEFAULT_STREAM_DEADLINES.idleMs)
+    }
+
     setStatus(agentId, 'thinking', emit)
 
     let awaitingUser = false
     let finished = false
+    // fase 8 (§3bis L11): le tool call eseguite nel turno, per la loop detection
+    const executedCalls: Array<{ name: string; args: string }> = []
 
     for (let step = 0; step < MAX_STEPS; step++) {
       if (controller.signal.aborted) break
-      const stream = llmStream(provider, agent.model, messages, allTools, controller.signal)
+      // lo stream ha un abort dedicato: la scadenza ferma SOLO lui, non il turno
+      const streamAbort = new AbortController()
+      const onTurnAbort = (): void => streamAbort.abort()
+      controller.signal.addEventListener('abort', onTurnAbort)
+      const stream = llmStream(provider, agent.model, messages, allTools, AbortSignal.any([controller.signal, streamAbort.signal]))
       // fase 3: il testo libero è ragionamento interno, non una risposta
-      const entry = appendEntry({ agentId, kind: 'thinking', role: 'assistant', content: '' })
+      const entry = add({ agentId, kind: 'thinking', role: 'assistant', content: '' })
       emit({ type: 'entries', agentId, entries: [entry] })
 
       let acc = ''
@@ -397,7 +459,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       let finalToolCalls: ToolCall[] = []
       let finalFinish = 'stop'
       try {
-        for await (const ch of stream) {
+        const it = stream[Symbol.asyncIterator]()
+        let firstChunk = false
+        for (;;) {
+          const r = await nextWithDeadline(it, firstChunk, deadlines)
+          if (r.done) break
+          const ch = r.value
+          firstChunk = true
           if (ch.textDelta) {
             acc += ch.textDelta
             emit({ type: 'delta', agentId, entryId: entry.id, text: ch.textDelta })
@@ -410,22 +478,33 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         }
         final = { text: acc, toolCalls: finalToolCalls, finishReason: finalFinish }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
+        streamAbort.abort()
         updateEntryContent(entry.id, acc)
-        appendEntry({ agentId, kind: 'notice', role: 'system', content: `Errore dal modello: ${msg}` })
+        if (err instanceof StreamDeadlineError) {
+          // fase 8 (§3bis L11): il modello non risponde — abort del solo stream
+          add({ agentId, kind: 'notice', role: 'system', content: `Il modello non risponde (${err.message}): turno interrotto.` })
+          emitLastEntry(agentId, emit)
+          endTurn(agentId, 'STOPPED', emit, opts.taskId)
+          setStatus(agentId, 'idle', emit)
+          return
+        }
+        const msg = err instanceof Error ? err.message : String(err)
+        add({ agentId, kind: 'notice', role: 'system', content: `Errore dal modello: ${msg}` })
         emitLastEntry(agentId, emit)
-        endTurn(agentId, 'STOPPED', emit)
+        endTurn(agentId, 'STOPPED', emit, opts.taskId)
         setStatus(agentId, 'idle', emit)
         return
+      } finally {
+        controller.signal.removeEventListener('abort', onTurnAbort)
       }
       const text = final.text
       updateEntryContent(entry.id, text)
       if (text.trim()) lastFreeText = text
 
       if (!text && !final.toolCalls?.length) {
-        appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Il modello non ha prodotto risposta (vuota).' })
+        add({ agentId, kind: 'notice', role: 'system', content: 'Il modello non ha prodotto risposta (vuota).' })
         emitLastEntry(agentId, emit)
-        endTurn(agentId, 'STOPPED', emit)
+        endTurn(agentId, 'STOPPED', emit, opts.taskId)
         setStatus(agentId, 'idle', emit)
         return
       }
@@ -450,12 +529,25 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           input = {}
         }
 
+        // fase 8 (§3bis L11): loop detection — la stessa identica chiamata
+        // (nome + argomenti) per la TERZA volta di fila ferma il turno con una
+        // notice leggibile, invece di consumare tutti i MAX_STEPS
+        if (isToolLoop(executedCalls, { name: call.name, args: call.arguments })) {
+          add({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: la stessa identica chiamata si ripete (loop).' })
+          emitLastEntry(agentId, emit)
+          endTurn(agentId, 'STOPPED', emit, opts.taskId)
+          setStatus(agentId, 'idle', emit)
+          return
+        }
+        executedCalls.push({ name: call.name, args: call.arguments })
+
         // ---- fase 3 (§3bis L2/L5): comunicazione e invii esterni, gestiti dal loop ----
 
         // invio esterno chiamato direttamente: MAI eseguito, diventa una bozza
         if (isExternalSend(call.name, externalCfg)) {
-          const draft = appendSend(agentId, call, draftFromExternalCall(call.name, input), emit, { status: 'pending' })
+          const draft = appendSend(agentId, call, draftFromExternalCall(call.name, input), emit, { status: 'pending' }, opts.taskId)
           emitNeedsInput(agentId, draft, `bozza in attesa: ${draft.content.slice(0, 80)}`, emit)
+          taskNeedsInput()
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: 'Invio esterno non eseguito: trasformato in una bozza in attesa della conferma dell’utente. Per gli invii usa draft_external.'
@@ -489,7 +581,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             via: input.via,
             cfg: externalCfg
           })
-          const draft = appendSend(agentId, call, prepared.message, emit, { status: 'pending' })
+          const draft = appendSend(agentId, call, prepared.message, emit, { status: 'pending' }, opts.taskId)
           // fase 8 (punto 1): l'auto-review può approvare l'INVIO della bozza
           // con le regole dell'utente ("Continua da solo quando…"); tutto ciò
           // che non convince il revisore resta card come prima
@@ -524,7 +616,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                     })
                     const updated = getEntries(agentId).find((e) => e.id === draft.id)
                     if (updated) emit({ type: 'entries', agentId, entries: [updated] })
-                    appendEntry({ agentId, kind: 'notice', role: 'system', content: `Bozza inviata automaticamente (${via.tool}). Esito: ${output.slice(0, 300)}` })
+                    add({ agentId, kind: 'notice', role: 'system', content: `Bozza inviata automaticamente (${via.tool}). Esito: ${output.slice(0, 300)}` })
                     emitLastEntry(agentId, emit)
                     autoSend = { ok: true, ruleMatched: decision.ruleMatched }
                   } catch (e) {
@@ -541,6 +633,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (!autoSend?.ok) {
             // niente invio automatico (o fallito): la bozza aspetta l'utente
             emitNeedsInput(agentId, draft, `bozza in attesa: ${draft.content.slice(0, 80)}`, emit)
+            taskNeedsInput()
           }
           messages.push({
             role: 'tool', toolCallId: call.id,
@@ -564,8 +657,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             ...(input.allowCustom ? { allowCustom: true } : {}),
             ...(input.dismissOnMoveOn ? { dismissOnMoveOn: true } : {})
           }
-          const widget = appendSend(agentId, call, message, emit)
+          const widget = appendSend(agentId, call, message, emit, {}, opts.taskId)
           emitNeedsInput(agentId, widget, String(input.prompt ?? ''), emit)
+          taskNeedsInput()
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: 'widget mostrato all’utente: il turno termina e la risposta arriverà come nuovo messaggio utente. Non ripetere la domanda.'
@@ -591,7 +685,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             type: 'connector', connectorId: entry2.id, name: entry2.name,
             ...(input.reason !== undefined ? { reason: String(input.reason) } : {})
           }
-          appendSend(agentId, call, message, emit, { status: 'pending' })
+          appendSend(agentId, call, message, emit, { status: 'pending' }, opts.taskId)
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: `offerta mostrata all'utente: la connessione di ${entry2.name} avviene SOLO dal suo click sul bottone Connetti. Quando l'utente connette riceverai un messaggio di sistema e potrai usare i tool mcp__${entry2.id}__*.`
@@ -613,10 +707,41 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             continue
           }
           const message: SendMessagePayload = { type: 'rule', kind, text, ...(input.why !== undefined ? { why: String(input.why) } : {}) }
-          appendSend(agentId, call, message, emit)
+          appendSend(agentId, call, message, emit, {}, opts.taskId)
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: 'Proposta mostrata all\'utente: la regola verrà salvata solo se lui la accetta dalla card (Impostazioni → Approvazione automatica).'
+          })
+          continue
+        }
+
+        // fase 8 (§3bis L7): apertura di un TASK THREAD — lavoro lungo in un
+        // contesto separato: la chat principale resta pulita, il task gira
+        // come job della stessa coda per agente (in serie con gli altri turni)
+        if (call.name === 'create_task') {
+          const title = String(input.title ?? '').trim()
+          const brief = String(input.brief ?? '').trim()
+          if (!title || !brief) {
+            messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: 'Task non creato: servono title e brief (obiettivo e contesto completo: il task NON vede questa conversazione).'
+            })
+            continue
+          }
+          const task = createTask(agentId, title)
+          // card nella chat principale (entry SENZA taskId: è il punto d'ingresso)
+          appendSend(agentId, call, { type: 'task', taskId: task.id, title }, emit)
+          const { enqueueJob } = await import('../store/jobs')
+          const now = Date.now()
+          enqueueJob(db(), {
+            agentId, kind: 'task-run',
+            payload: { taskId: task.id, brief },
+            runAt: now, now
+          })
+          emit({ type: 'tasks' })
+          messages.push({
+            role: 'tool', toolCallId: call.id,
+            content: `Task "${title}" creato (id ${task.id}): partirà alla fine di questo turno (stessa coda, in serie). Il task non vede questa conversazione: il contesto sta nel brief. Chiudilo con update_task({id: ${task.id}, status: 'done' | 'failed', summary}) quando hai finito.`
           })
           continue
         }
@@ -668,7 +793,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // come coppia send_to_agent + esito della coda nel turno successivo
           appendSend(agentId, call, { type: 'text', text }, emit, {
             toAgentId: toId, toAgentName: dest.name, hop: guard.hop, agentSend: true
-          })
+          }, opts.taskId)
           enqueueJob(db(), {
             agentId: toId,
             kind: 'user-message',
@@ -695,7 +820,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
         // ---- tool normali: entry tool-call, gate permessi, esecuzione ----
 
-        const callEntry = appendEntry({
+        // fase 8 (§3bis L7): stato live — nome del tool e target (dai SOLI
+        // argomenti, mai testo generato dal modello) per la sidebar
+        emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
+
+        const callEntry = add({
           agentId, kind: 'tool-call', role: 'assistant', content: `${call.name}`,
           meta: { id: call.id, name: call.name, arguments: call.arguments }
         })
@@ -706,7 +835,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         const verdict = await permissions.check(call.name, input, agentId)
 
         if (verdict.kind === 'deny') {
-          const denied = appendEntry({
+          const denied = add({
             agentId, kind: 'notice', role: 'system',
             content: `Bloccato dai permessi: ${call.name}`, meta: { callId: call.id, denied: true }
           })
@@ -747,7 +876,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (autoAllowed) {
             // tracciabilità: entry approval chiusa, la UI la mostra compressa
             // come "Approvato automaticamente dalla regola: …" ed espandibile
-            const approvalEntry = appendEntry({
+            const approvalEntry = add({
               agentId, kind: 'approval', role: 'system',
               content: `${call.name}: ${verdict.reason}`,
               meta: {
@@ -765,7 +894,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
             }
             run.approvals.set(approval.id, () => undefined)
-            const approvalEntry = appendEntry({
+            const approvalEntry = add({
               agentId, kind: 'approval', role: 'system',
               content: `${call.name}: ${verdict.reason}`,
               // C4: la card mostra i nomi dei segreti usati dal comando
@@ -780,6 +909,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             emit({ type: 'approval', agentId, approval })
             // fase 6 (§3bis L9): l'agente è fermo su un'approval → notifica
             emitNeedsInput(agentId, approvalEntry, `${call.name}: ${verdict.reason}`, emit)
+            // fase 8 (§3bis L7): un'approval dentro un task lo mette in needs_input
+            taskNeedsInput()
 
             const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
               run.approvals.set(approval.id, (d) => resolve(d))
@@ -792,23 +923,25 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             })
             const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
             if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+            // fase 8: la decisione dell'utente sblocca il task (working)
+            taskWorking()
             if (decision === 'cancelled') {
               // fase 4 (0c): interrupt dell'utente — l'approval si chiude subito,
               // niente esecuzione, il turno finirà STOPPED (controller abortito)
               messages.push({ role: 'tool', toolCallId: call.id, content: 'Interrotto dall’utente.' })
-              const res = appendEntry({ agentId, kind: 'tool-result', role: 'system', content: 'Interrotto dall’utente', meta: { callId: call.id } })
+              const res = add({ agentId, kind: 'tool-result', role: 'system', content: 'Interrotto dall’utente', meta: { callId: call.id } })
               emit({ type: 'entries', agentId, entries: [res] })
               break
             }
             if (decision === 'superseded') {
               // fase 3: un nuovo messaggio utente ha sostituito il turno
               messages.push({ role: 'tool', toolCallId: call.id, content: 'Sostituito da un nuovo messaggio dell’utente.' })
-              const res = appendEntry({ agentId, kind: 'tool-result', role: 'system', content: 'Sostituito da un nuovo messaggio utente', meta: { callId: call.id } })
+              const res = add({ agentId, kind: 'tool-result', role: 'system', content: 'Sostituito da un nuovo messaggio utente', meta: { callId: call.id } })
               emit({ type: 'entries', agentId, entries: [res] })
               break
             }
             if (decision === 'timeout') {
-              appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Approvazione scaduta.' })
+              add({ agentId, kind: 'notice', role: 'system', content: 'Approvazione scaduta.' })
               emitLastEntry(agentId, emit)
             }
             if (decision !== 'allow') {
@@ -816,7 +949,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 role: 'tool', toolCallId: call.id,
                 content: decision === 'deny' ? 'Denied by user: azione rifiutata.' : 'Approval expired.'
               })
-              const res = appendEntry({ agentId, kind: 'tool-result', role: 'system', content: "Rifiutato dall'utente", meta: { callId: call.id } })
+              const res = add({ agentId, kind: 'tool-result', role: 'system', content: "Rifiutato dall'utente", meta: { callId: call.id } })
               emit({ type: 'entries', agentId, entries: [res] })
               setStatus(agentId, 'thinking', emit)
               paused = true
@@ -833,7 +966,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // correzione A5: il contesto del turno (chi lo ha aperto) serve a
           // update_state per decidere se accettare la provenance 'template'
           const { output, meta, images } = await executeTool(agentId, call.name, input, { turnInitiator: opts.initiator })
-          const res = appendEntry({
+          const res = add({
             agentId, kind: 'tool-result', role: 'system',
             content: output.slice(0, 50_000),
             meta: { callId: call.id, ...meta }
@@ -847,14 +980,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               agentId, call,
               { type: 'connector', connectorId: reconnect.connectorId, name: reconnect.serverName },
               emit,
-              { status: 'pending', needsAuth: true }
+              { status: 'pending', needsAuth: true },
+              opts.taskId
             )
           }
           // fase 4 (§3ter T2/T4): ogni azione su routine produce l'evento
           // "automation-changed" in chat (meta.automation: azione, id, nome)
           if (meta.automation && typeof meta.automation === 'object') {
             const a = meta.automation as { action?: unknown; id?: unknown; name?: unknown }
-            appendEntry({
+            add({
               agentId, kind: 'event', role: 'system',
               content: automationEventText(String(a.action ?? ''), String(a.name ?? '')),
               meta: { automation: a }
@@ -874,7 +1008,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
-          const res = appendEntry({ agentId, kind: 'tool-result', role: 'system', content: `Errore: ${msg}`, meta: { callId: call.id, error: true } })
+          const res = add({ agentId, kind: 'tool-result', role: 'system', content: `Errore: ${msg}`, meta: { callId: call.id, error: true } })
           emit({ type: 'entries', agentId, entries: [res] })
           messages.push({ role: 'tool', toolCallId: call.id, content: `Error: ${msg}` })
         }
@@ -887,25 +1021,32 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
     // ---- fase 3: chiusura del turno con esito ----
     if (awaitingUser) {
-      endTurn(agentId, 'AWAITING_USER', emit)
+      endTurn(agentId, 'AWAITING_USER', emit, opts.taskId)
     } else if (controller.signal.aborted) {
-      endTurn(agentId, run.superseded ? 'SUPERSEDED' : 'STOPPED', emit)
+      endTurn(agentId, run.superseded ? 'SUPERSEDED' : 'STOPPED', emit, opts.taskId)
     } else if (!finished) {
-      appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: limite di passi raggiunto.' })
+      add({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: limite di passi raggiunto.' })
       emitLastEntry(agentId, emit)
-      endTurn(agentId, 'STOPPED', emit)
+      endTurn(agentId, 'STOPPED', emit, opts.taskId)
     } else {
       // turno FINISHED: se l'UTENTE non ha visto nulla (nessuna send-message nel
       // turno) una chiamata di recupero chiede al modello send_to_user; se non
-      // lo fa nemmeno ora, il testo libero diventa send-message con fallback
-      if (source === 'user' && visibleReplyEntries(getEntries(agentId), turnEntryId).length === 0) {
+      // lo fa nemmeno ora, il testo libero diventa send-message con fallback.
+      // Fase 8: nel contesto di un task valgono le SOLE entry del task
+      if (source === 'user' && visibleReplyEntries(scopedEntries(), turnEntryId).length === 0) {
         messages.push({ role: 'user', content: RECOVERY_NUDGE })
         setStatus(agentId, 'thinking', emit)
         try {
-          const stream = llmStream(provider, agent.model, messages, allTools, controller.signal)
+          const rstream = llmStream(provider, agent.model, messages, allTools, controller.signal)
           let acc = ''
           let recoveryCalls: ToolCall[] = []
-          for await (const ch of stream) {
+          const rit = rstream[Symbol.asyncIterator]()
+          let rfirst = false
+          for (;;) {
+            const r = await nextWithDeadline(rit, rfirst, deadlines)
+            if (r.done) break
+            const ch = r.value
+            rfirst = true
             if (ch.textDelta) acc += ch.textDelta
             if (ch.toolCalls) recoveryCalls = ch.toolCalls
           }
@@ -921,7 +1062,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           } else {
             const fallback = (acc.trim() ? acc : lastFreeText).trim()
             if (fallback) {
-              appendEntry({
+              add({
                 agentId, kind: 'send-message', role: 'assistant', content: fallback,
                 meta: { message: { type: 'text', text: fallback }, fallback: true }
               })
@@ -931,7 +1072,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         } catch {
           // la chiamata di recupero stessa fallisce: si prova il fallback col testo già avuto
           if (lastFreeText.trim()) {
-            appendEntry({
+            add({
               agentId, kind: 'send-message', role: 'assistant', content: lastFreeText.trim(),
               meta: { message: { type: 'text', text: lastFreeText.trim() }, fallback: true }
             })
@@ -939,11 +1080,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
         }
       }
-      endTurn(agentId, 'FINISHED', emit)
+      endTurn(agentId, 'FINISHED', emit, opts.taskId)
       // fase 6 (§3bis L9): agent-done = turno finito con almeno un messaggio
       // visibile (quelli trattenuti in outbox non contano: l'utente non lo
       // ha ancora visto, la notifica arriverà alla consegna... o mai)
-      const visible = visibleReplyEntries(getEntries(agentId), turnEntryId).filter((e) => !e.meta?.held)
+      const visible = visibleReplyEntries(scopedEntries(), turnEntryId).filter((e) => !e.meta?.held)
       if (visible.length) {
         const last = visible[visible.length - 1]!
         emit({ type: 'agent-notify', agentId, kind: 'done', preview: last.content, at: last.createdAt })
@@ -954,6 +1095,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     emit({ type: 'agents' })
   } finally {
     running.delete(agentId)
+    // fase 8 (§3bis L7): fine del turno = niente attività in corso
+    emit({ type: 'activity', agentId, activity: null })
     if (getAgent(agentId)?.status !== 'offline') setStatus(agentId, 'idle', emit)
     emit({ type: 'agents' })
   }

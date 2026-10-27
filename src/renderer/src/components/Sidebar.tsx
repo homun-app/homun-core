@@ -22,6 +22,9 @@ export function Sidebar() {
   const agents = useStore((s) => s.agents)
   const activeId = useStore((s) => s.activeId)
   const mainAgentId = useStore((s) => s.mainAgentId)
+  // fase 8 (§3bis L7): stato live (tool in corso) e task in corso per agente
+  const activity = useStore((s) => s.activity)
+  const tasks = useStore((s) => s.tasks)
   const select = useStore((s) => s.select)
   const createAgent = useStore((s) => s.createAgent)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
@@ -29,6 +32,7 @@ export function Sidebar() {
   const [creating, setCreating] = useState(false)
   // fase 7: senza setting mainAgentId il principale è il primo agente (il più vecchio)
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
+  const workingTasksOf = (agentId: string): number => tasks.filter((t) => t.agentId === agentId && t.status === 'working').length
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-neutral-800 bg-neutral-900/60">
@@ -64,7 +68,15 @@ export function Sidebar() {
               <span className="block truncate text-xs text-neutral-500">
                 {statusLabel[a.status]}
                 {a.model ? ` · ${a.model}` : ' · nessun modello'}
+                {workingTasksOf(a.id) > 0 ? ` · ${workingTasksOf(a.id)} task` : ''}
               </span>
+              {/* fase 8 (§3bis L7): stato live — nome del tool e target, mai testo del modello */}
+              {activity[a.id] && (
+                <span className="block truncate text-[10px] text-sky-400/80" title={`${activity[a.id]!.tool} ${activity[a.id]!.target}`}>
+                  sta facendo {activity[a.id]!.tool}
+                  {activity[a.id]!.target ? ` · ${activity[a.id]!.target}` : ''}…
+                </span>
+              )}
             </span>
             {a.unread > 0 && (
               <span className="rounded-full bg-sky-600 px-1.5 text-xs text-white">{a.unread}</span>

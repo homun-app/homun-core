@@ -1,6 +1,6 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo, TaskInfo } from '../../shared/types'
 
 const api = (window as unknown as { sandbot: import('../../shared/types').SandbotApi }).sandbot
 
@@ -20,6 +20,12 @@ interface Store {
   settingsTab: string | null
   /** fase 8: testo con cui precompilare l'editor delle regole di auto-review */
   autoreviewPrefill: string | null
+  /** fase 8 (§3bis L7): task di tutti gli agenti (card in chat + sidebar) */
+  tasks: TaskInfo[]
+  /** fase 8 (§3bis L7): task aperto nella vista del sotto-transcript */
+  openTaskId: number | null
+  /** fase 8 (§3bis L7): stato live "sta facendo X…" per agente */
+  activity: Record<string, { tool: string; target: string } | null>
   init(): Promise<void>
   select(agentId: string): Promise<void>
   send(text: string, images?: string[]): Promise<void>
@@ -41,6 +47,10 @@ interface Store {
   refreshProviders(): Promise<void>
   refreshPermissions(): Promise<void>
   refreshConnectors(): Promise<void>
+  /** fase 8 (§3bis L7): apre/chiude la vista del sotto-transcript di un task */
+  openTask(id: number | null): void
+  /** fase 8 (§3bis L7): interrompe un task dal bottone sulla card */
+  cancelTask(taskId: number): void
   setSettingsOpen(v: boolean): void
   setSettingsTab(v: string | null): void
 }
@@ -57,6 +67,9 @@ export const useStore = create<Store>((set, get) => ({
   settingsOpen: false,
   settingsTab: null,
   autoreviewPrefill: null,
+  tasks: [],
+  openTaskId: null,
+  activity: {},
 
   async init() {
     const agents = await api.listAgents()
@@ -71,6 +84,8 @@ export const useStore = create<Store>((set, get) => ({
     }
     // fase 5: catalogo connettori (per la vista Impostazioni e le card in chat)
     api.connectorsList().then((connectors) => set({ connectors })).catch(() => undefined)
+    // fase 8: i task (card in chat + stato live nella sidebar)
+    api.listTasks().then((tasks) => set({ tasks })).catch(() => undefined)
     api.onEvent((e: SandbotEvent) => {
       const s = get()
       switch (e.type) {
@@ -139,6 +154,16 @@ export const useStore = create<Store>((set, get) => ({
             const w = window as unknown as { focus?: () => void }
             w.focus?.()
           }
+          break
+        }
+        // fase 8 (§3bis L7): lo stato di un task è cambiato (card, sidebar)
+        case 'tasks': {
+          api.listTasks().then((tasks) => set({ tasks })).catch(() => undefined)
+          break
+        }
+        // fase 8 (§3bis L7): stato live — quale tool sta girando nel turno
+        case 'activity': {
+          set({ activity: { ...s.activity, [e.agentId]: e.activity } })
           break
         }
       }
@@ -264,6 +289,18 @@ export const useStore = create<Store>((set, get) => ({
 
   async refreshConnectors() {
     set({ connectors: await api.connectorsList() })
+  },
+
+  // fase 8 (§3bis L7): vista del sotto-transcript di un task
+  openTask(id) {
+    set({ openTaskId: id })
+  },
+
+  // fase 8 (§3bis L7): interruzione dal bottone sulla card del task
+  cancelTask(taskId) {
+    void api.cancelTask(taskId).catch((err: unknown) =>
+      console.error('cancelTask:', err instanceof Error ? err.message : err)
+    )
   },
 
   setSettingsOpen(v) {

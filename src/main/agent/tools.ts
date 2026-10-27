@@ -255,6 +255,31 @@ export const toolDefs: ToolDef[] = [
     }
   },
   {
+    name: 'create_task',
+    description: "Apre un TASK per un lavoro LUNGO in un thread separato: la chat principale resta pulita e il task ha un proprio contesto (solo il brief e le proprie entry). Usalo per ricerche, analisi o verifiche che richiedono molti passi; il task parte quando finisce il turno corrente (stessa coda, in serie). Il task NON vede questa conversazione: metti nel brief tutto il contesto (obiettivo, vincoli, dove cercare). Le domande che fai nel task (ask_user) arrivano comunque all'utente dalla vista del task.",
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Titolo breve del task (mostrato nella card in chat)' },
+        brief: { type: 'string', description: 'Il compito completo con il contesto necessario: è tutto ciò che il task vedrà di questa conversazione' }
+      },
+      required: ['title', 'brief']
+    }
+  },
+  {
+    name: 'update_task',
+    description: "Chiude un task tuo con l'esito: status 'done' (riuscito) o 'failed', con un summary BREVE di cosa è emerso o fatto. Il summary torna alla chat principale, che riferirà all'utente in un messaggio breve senza ripetere tutto il lavoro. Da chiamare SEMPRE quando un task finisce (o fallisce per un ostacolo).",
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Id del task (dalla creazione con create_task)' },
+        status: { type: 'string', enum: ['done', 'failed'], description: 'Esito finale' },
+        summary: { type: 'string', description: 'Riepilogo breve: risultato, dati chiave, ostacoli' }
+      },
+      required: ['id', 'status', 'summary']
+    }
+  },
+  {
     name: 'update_state',
     description: "Modifica il tuo stato. target 'memory' → come update_memory (action write/update/delete). target 'routine' → action: create (campi name, description, prompt, schedule cron a 5 campi OPPURE trigger di tipo schedule, timezone, provenance 'template' se crei le routine di un template; la routine nasce SEMPRE in pausa: chiedi all'utente se attivarla, l'attivazione richiede la sua approvazione), update (id + campi da cambiare), pause, resume, delete (id).",
     parameters: {
@@ -514,6 +539,42 @@ export async function executeTool(
         output: others.map((a) => `- ${a.name} (id ${a.id}) · stato: ${a.status}${a.description ? ` · ${a.description}` : ''}`).join('\n'),
         meta: {}
       }
+    }
+    case 'update_task': {
+      // fase 8 (§3bis L7): chiusura del task — il summary torna alla chat
+      // principale come job TASK_DONE (il bot riferisce in un messaggio breve)
+      const id = Number(input.id)
+      const status = input.status === 'failed' ? 'failed' : input.status === 'done' ? 'done' : null
+      if (!Number.isInteger(id) || id <= 0 || !status) {
+        return { output: 'update_task non valido: servono id, status ("done" | "failed") e summary.', meta: {} }
+      }
+      const { getTask, updateTask, db } = await import('../store/db')
+      const { enqueueJob } = await import('../store/jobs')
+      const t = getTask(id)
+      if (!t) return { output: `Task ${id} non trovato.`, meta: {} }
+      if (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled') {
+        return { output: `Task "${t.title}" è già ${t.status}: non si riapre.`, meta: {} }
+      }
+      const summary = String(input.summary ?? '')
+      updateTask(id, { status, ...(summary ? { summary } : {}) })
+      const now = Date.now()
+      enqueueJob(db(), {
+        agentId: t.agent_id,
+        kind: 'user-message',
+        payload: {
+          text: [
+            `<task_done title="${t.title.replace(/"/g, "'")}" id="${id}" esito="${status}">`,
+            summary || '(nessun summary)',
+            '</task_done>',
+            'Il task è finito: riferisci all\'utente con un MESSAGGIO BREVE (send_to_user) sull\'esito e al massimo un prossimo passo, senza ripetere tutto il lavoro.'
+          ].join('\n'),
+          initiator: 'TASK_DONE',
+          extraMeta: { taskTitle: t.title, taskId: id }
+        },
+        runAt: now,
+        now
+      })
+      return { output: `Task "${t.title}" chiuso (${status}): il summary è tornato alla chat principale, che riferirà all'utente.`, meta: { task: id } }
     }
     default: {
       if (tool.startsWith('mcp__')) {

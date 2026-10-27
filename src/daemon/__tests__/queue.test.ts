@@ -6,7 +6,7 @@ import { describe, expect, it, beforeAll, beforeEach, afterAll, vi } from 'vites
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setDataDir, dataDir, db, createAgent, createRoutine, listRoutines, getEntries, appendEntry, type Routine } from '../../main/store/db'
+import { setDataDir, dataDir, db, createAgent, createRoutine, listRoutines, getEntries, appendEntry, createTask, type Routine } from '../../main/store/db'
 import { claimDueJobs, activeJobForAgent, enqueueJob, pendingAgentPairJobs } from '../../main/store/jobs'
 import { enqueueUserMessage, enqueueWidgetResponse } from '../enqueue'
 import { dueRoutines, tickScheduler } from '../scheduler'
@@ -110,6 +110,22 @@ describe('fase 3: risposta ai widget ask_user (§3bis L10)', () => {
     expect(getEntries(AGENT).find((e) => e.id === w.id)?.meta?.respondedValue).toBe('si')
     // una seconda risposta allo stesso widget è ignorata
     expect(enqueueWidgetResponse(db(), AGENT, w.id, 'no', emit)).toBeNull()
+  })
+
+  it('fase 8: la risposta a un widget DENTRO un task prosegue lo STESSO task (job task-run)', () => {
+    createTask(AGENT, 'Ricerca')
+    const w = appendEntry({
+      agentId: AGENT, kind: 'send-message', role: 'assistant', content: 'Sì o no?',
+      meta: {
+        taskId: 1,
+        message: { type: 'widget', prompt: 'Sì o no?', options: [{ label: 'Sì', value: 'si' }, { label: 'No', value: 'no' }] }
+      }
+    })
+    const job = enqueueWidgetResponse(db(), AGENT, w.id, 'si', emit)!
+    // NON è un user-message della chat principale: continua il sotto-transcript
+    expect(job.kind).toBe('task-run')
+    expect(job.payload).toMatchObject({ taskId: 1, brief: 'Sì', respondedTo: w.id })
+    expect(getEntries(AGENT).find((e) => e.id === w.id)?.meta?.respondedValue).toBe('si')
   })
 
   it('un messaggio che NON risponde al widget lo marca widgetDismissed (solo con dismissOnMoveOn)', () => {

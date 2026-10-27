@@ -16,8 +16,11 @@ const h = vi.hoisted(() => {
     outbox: [] as Array<{ entry_id: number; agent_id: string; created_at: number }>,
     // fase 7: job accodati dal loop (send_to_agent verso altri bot)
     jobs: [] as Array<{ id: number; agentId: string; kind: string; payload: Record<string, unknown>; createdAt: number; status: string }>,
+    // fase 8: righe dei task (create_task / update_task)
+    tasks: [] as Array<{ id: number; agent_id: string; title: string; status: string; created_at: number; updated_at: number; summary: string | null }>,
     nextId: 1,
     nextRoutineId: 1,
+    nextTaskId: 1,
     dataDir: '' // riempita nel beforeAll (mkdtemp): memoria/skill scrivono lì
   }
   const llm = {
@@ -38,7 +41,7 @@ const h = vi.hoisted(() => {
 })
 
 interface FakeToolCall { id: string; name: string; arguments: string }
-interface FakeResp { text?: string; toolCalls?: FakeToolCall[] }
+interface FakeResp { text?: string; toolCalls?: FakeToolCall[]; /** fase 8: lo stream non risponde mai (test delle scadenze) */ hang?: true }
 /**
  * Risposta in coda: oggetto, oppure funzione che vede i messaggi e i tool
  * della chiamata (fase 4: distingue la chiamata di compaction — un solo
@@ -101,6 +104,26 @@ vi.mock('../../store/db', () => ({
     const i = h.db.routines.findIndex((x) => x.id === id)
     if (i >= 0) h.db.routines.splice(i, 1)
   },
+  // fase 8 (§3bis L7): tabella tasks per create_task/update_task
+  createTask: (agentId: string, title: string) => {
+    const t = { id: h.db.nextTaskId++, agent_id: agentId, title, status: 'working', created_at: Date.now(), updated_at: Date.now(), summary: null }
+    h.db.tasks.push(t)
+    return { ...t }
+  },
+  getTask: (id: number) => {
+    const t = h.db.tasks.find((x) => x.id === id)
+    return t ? { ...t } : null
+  },
+  updateTask: (id: number, patch: { status?: string; summary?: string }) => {
+    const t = h.db.tasks.find((x) => x.id === id)
+    if (!t) return null
+    // i task chiusi non riaprono (come lo store reale)
+    if (['done', 'failed', 'cancelled'].includes(t.status)) return { ...t }
+    if (patch.status !== undefined) t.status = patch.status
+    if (patch.summary !== undefined) t.summary = patch.summary
+    t.updated_at = Date.now()
+    return { ...t }
+  },
   getPermissions: () =>
     (h.db.settings.get('permissions') as PermissionsConfig | undefined) ?? {
       default: 'needs_approval',
@@ -109,7 +132,11 @@ vi.mock('../../store/db', () => ({
         { tool: 'list-directory', pattern: '*', mode: 'always_allow' },
         { tool: 'write-file', pattern: '*', mode: 'needs_approval' },
         { tool: 'run-command', pattern: '*', mode: 'needs_approval' },
-        { tool: 'list-credentials', pattern: '*', mode: 'always_allow' }
+        { tool: 'list-credentials', pattern: '*', mode: 'always_allow' },
+        // fase 8: task e proposte di regola (come le regole di default dello store)
+        { tool: 'create_task', pattern: '*', mode: 'always_allow' },
+        { tool: 'update_task', pattern: '*', mode: 'always_allow' },
+        { tool: 'propose_rule_change', pattern: '*', mode: 'always_allow' }
       ]
     }
 }))
@@ -177,6 +204,12 @@ vi.mock('../llm', () => ({
     return {
       async *[Symbol.asyncIterator]() {
         const r: FakeResp = typeof resp === 'function' ? await resp(messages, tools) : resp
+        // fase 8 (§3bis L11): stream appeso — nessun chunk mai (scadenze)
+        if (r.hang) {
+          if (r.text) yield { textDelta: r.text }
+          await new Promise(() => undefined)
+          return
+        }
         if (r.text) yield { textDelta: r.text }
         if (r.toolCalls) yield { toolCalls: r.toolCalls, finishReason: 'tool_calls' }
         else yield { finishReason: 'stop' }
@@ -262,8 +295,10 @@ beforeEach(() => {
   h.db.routines.length = 0
   h.db.outbox.length = 0
   h.db.jobs.length = 0
+  h.db.tasks.length = 0
   h.db.nextId = 1
   h.db.nextRoutineId = 1
+  h.db.nextTaskId = 1
   // fase 4: memoria e skill scritte dai test non devono inquinare il dopo
   rmSync(join(TMP, 'agents'), { recursive: true, force: true })
   h.llm.queue.length = 0
@@ -1582,5 +1617,162 @@ describe('fase 8 (punto 2): Consenti per questo turno', () => {
     })
     resolveApproval(AGENT, String(h.db.entries.findLast((e) => e.kind === 'approval')!.meta?.approvalId), 'deny', 'once')
     await turn2
+  })
+})
+
+// ---- fase 8 (§3bis L7): task thread ----
+
+describe('fase 8 (§3bis L7): ciclo di vita del task', () => {
+  it('create_task: task + card in chat principale + job task-run; il task non vede la chat principale', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 't1', name: 'create_task', arguments: JSON.stringify({ title: 'Ricerca prezzi', brief: 'Confronta i prezzi di X su 3 siti e prepara una tabella.' }) }] },
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'Ho aperto un task per la ricerca.' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'confronta i prezzi di X', emit)
+    expect(h.db.tasks).toHaveLength(1)
+    expect(h.db.tasks[0]).toMatchObject({ title: 'Ricerca prezzi', status: 'working' })
+    // card del task in chat PRINCIPALE: send-message type task, SENZA meta.taskId
+    const card = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'task')!
+    expect(card.meta?.message).toMatchObject({ taskId: 1, title: 'Ricerca prezzi' })
+    expect(card.meta?.taskId).toBeUndefined()
+    // job della stessa coda (in serie con gli altri turni dell'agente)
+    const job = h.db.jobs.find((j) => j.kind === 'task-run')!
+    expect(job.payload).toMatchObject({ taskId: 1, brief: 'Confronta i prezzi di X su 3 siti e prepara una tabella.' })
+    expect(job.agentId).toBe(AGENT)
+  })
+
+  it('working → needs_input (ask_user nel task) → done (update_task) con summary → TASK_DONE per la chat principale', async () => {
+    // il task esiste già (lo crea il primo test col suo create_task)
+    h.db.tasks.push({ id: 1, agent_id: AGENT, title: 'Ricerca prezzi', status: 'working', created_at: 1, updated_at: 1, summary: null })
+    // il turno del task: apre col brief, chiede all'utente → needs_input
+    h.llm.queue = [
+      { toolCalls: [{ id: 'q1', name: 'ask_user', arguments: JSON.stringify({ prompt: 'Quanti siti confronto?', options: [{ label: '3' }, { label: '5' }] }) }] }
+    ]
+    await runTurn(AGENT, 'Confronta i prezzi di X su 3 siti.', emit, undefined, { taskId: 1 })
+    expect(h.db.tasks[0]!.status).toBe('needs_input')
+    // TUTTE le entry del turno di task hanno meta.taskId
+    const widget = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'widget' && e.meta?.taskId === 1)!
+    expect(widget).toBeTruthy()
+    const taskEntries = h.db.entries.filter((e) => e.meta?.taskId === 1)
+    expect(taskEntries.length).toBeGreaterThan(1) // brief + thinking + widget…
+    // il contesto del task conteneva SOLO il brief (nessun messaggio della chat principale)
+    const taskCall = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && m.content === 'Confronta i prezzi di X su 3 siti.'))!
+    expect(taskCall.some((m) => m.content === 'confronta i prezzi di X')).toBe(false)
+
+    // la risposta dell'utente continua il task (come fa enqueueWidgetResponse)
+    h.llm.queue = [
+      { toolCalls: [{ id: 'u1', name: 'update_task', arguments: JSON.stringify({ id: 1, status: 'done', summary: 'Confrontati 3 siti: migliore Y a 10€.' }) }] }
+    ]
+    await runTurn(AGENT, '3', emit, undefined, { taskId: 1, respondedTo: widget.id })
+    expect(h.db.tasks[0]).toMatchObject({ status: 'done', summary: 'Confrontati 3 siti: migliore Y a 10€.' })
+    // il summary torna alla chat principale come job TASK_DONE
+    const done = h.db.jobs.find((j) => j.payload.initiator === 'TASK_DONE')!
+    expect(done.kind).toBe('user-message')
+    expect(done.agentId).toBe(AGENT)
+    expect(String(done.payload.text)).toContain('<task_done')
+    expect(String(done.payload.text)).toContain('Confrontati 3 siti: migliore Y a 10€.')
+
+    // la chat principale NON vede le entry del task: il turno dopo non riceve
+    // né il brief né la domanda del task
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'e adesso?', emit)
+    const mainCall = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && m.content === 'e adesso?'))!
+    expect(JSON.stringify(mainCall)).not.toContain('Quanti siti')
+    expect(JSON.stringify(mainCall)).not.toContain('Confronta i prezzi di X su 3 siti.')
+  })
+
+  it('approval dentro un task → needs_input, la decisione dell\'utente lo riporta working', async () => {
+    h.db.tasks.push({ id: 1, agent_id: AGENT, title: 'Ricerca prezzi', status: 'working', created_at: 1, updated_at: 1, summary: null })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] }
+    ]
+    const turn = runTurn(AGENT, 'brief del task', emit, undefined, { taskId: 1 })
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending' && e.meta?.taskId === 1)).toBe(true)
+    })
+    expect(h.db.tasks[0]!.status).toBe('needs_input')
+    resolveApproval(AGENT, String(h.db.entries.findLast((e) => e.kind === 'approval')!.meta?.approvalId), 'allow', 'once')
+    await turn
+    expect(h.db.tasks[0]!.status).toBe('working')
+    expect(h.sandboxMock.exec.calls).toBe(1)
+  })
+
+  it('interrupt del task annulla e il job successivo non parte', async () => {
+    h.db.tasks.push({ id: 1, agent_id: AGENT, title: 'Ricerca prezzi', status: 'working', created_at: 1, updated_at: 1, summary: null })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'sleep 1' }) }] },
+      { text: 'ok' }
+    ]
+    const turn = runTurn(AGENT, 'brief', emit, undefined, { taskId: 1 })
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'tool-call' && e.meta?.taskId === 1)).toBe(true)
+    })
+    const { interruptTask } = await import('../loop')
+    expect(interruptTask(AGENT, 1)).toBe(true)
+    await turn
+    // dopo l'interrupt il task è annullabile dal suo stato (la RPC lo farebbe);
+    // un nuovo job dello stesso task non parte
+    h.db.tasks[0]!.status = 'cancelled'
+    h.llm.queue = [{ text: 'non dovrei girare' }]
+    await runTurn(AGENT, 'brief', emit, undefined, { taskId: 1 })
+    expect(h.llm.calls[h.llm.calls.length - 1]!.some((m) => m.content === 'non dovrei girare')).toBe(false)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('annullato'))).toBe(true)
+  })
+})
+
+// ---- fase 8 (§3bis L11): protezioni di runtime ----
+
+describe('fase 8 (§3bis L11): loop detection', () => {
+  it('la stessa identica chiamata per la TERZA volta di fila ferma il turno con notice leggibile', async () => {
+    const resp = { toolCalls: [{ id: 'x', name: 'send_to_user', arguments: JSON.stringify({ text: 'ciao' }) }] }
+    h.llm.queue = [resp, resp, resp, resp]
+    await runTurn(AGENT, 'vai', emit)
+    // la terza identica NON è stata eseguita: due messaggi e una notice di loop
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message' && (e.meta?.call as { name?: string } | undefined)?.name === 'send_to_user')
+    expect(sends).toHaveLength(2)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('loop'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
+  })
+
+  it('due chiamate uguali e una diversa NON sono un loop', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'a', name: 'send_to_user', arguments: JSON.stringify({ text: 'ciao' }) }] },
+      { toolCalls: [{ id: 'b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ciao' }) }] },
+      { toolCalls: [{ id: 'c', name: 'send_to_user', arguments: JSON.stringify({ text: 'arrivederci' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'vai', emit)
+    expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(3)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('loop'))).toBe(false)
+  })
+})
+
+describe('fase 8 (§3bis L11): scadenze dello stream', () => {
+  it('nessun token entro la scadenza → notice "il modello non risponde", turno STOPPED, ripresa normale dopo', async () => {
+    h.db.settings.set('llm.firstTokenMs', 30)
+    h.llm.queue = [{ hang: true }]
+    await runTurn(AGENT, 'rispondi', emit)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('Il modello non risponde'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
+    // la ripresa è normale: il messaggio successivo gira senza tracce della scadenza
+    h.llm.queue = [
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'ora va' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'e ora?', emit)
+    expect(h.db.entries.filter((e) => e.kind === 'send-message' && (e.meta?.call as { name?: string } | undefined)?.name === 'send_to_user')).toHaveLength(1)
+  })
+
+  it('inattività tra due chunk oltre la soglia → stesso esito (abort del solo stream)', async () => {
+    h.db.settings.set('llm.firstTokenMs', 5_000)
+    h.db.settings.set('llm.streamIdleMs', 30)
+    h.llm.queue = [{ text: 'inizio a scrivere e poi tac', hang: true }]
+    await runTurn(AGENT, 'rispondi', emit)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('Il modello non risponde'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
+    // il primo token era arrivato: il testo parziale resta nel thinking
+    const thinking = h.db.entries.findLast((e) => e.kind === 'thinking')
+    expect(thinking?.content).toBe('inizio a scrivere e poi tac')
   })
 })

@@ -98,5 +98,19 @@ export function enqueueWidgetResponse(
   updateEntryMeta(entryId, { ...meta, respondedValue: value })
   const updated = getEntries(agentId).find((e) => e.id === entryId)
   if (updated) emit({ type: 'entries', agentId, entries: [updated] })
+  // fase 8 (§3bis L7): un widget DENTRO un task si risponde dalla vista del
+  // task — la risposta prosegue lo stesso task (contesto separato), non la
+  // chat principale
+  if (meta.taskId) {
+    const taskId = Number(meta.taskId)
+    const now = Date.now()
+    return enqueueJob(db, {
+      agentId,
+      kind: 'task-run',
+      payload: { taskId, brief: responseDisplayText(payload, value), respondedTo: entryId },
+      runAt: now,
+      now
+    })
+  }
   return enqueueUserMessage(db, agentId, responseDisplayText(payload, value), undefined, emit, entryId)
 }
