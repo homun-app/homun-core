@@ -145,6 +145,8 @@ ${block}
 
 Se UNA regola "fermati" corrisponde, la decisione è SEMPRE ask, anche se una regola "continua" corrisponderebbe. Nel dubbio chiedi (ask): sbagliare chiedendo costa poco, sbagliare eseguendo no.
 
+Contesto dell'ambiente (fornito dal sistema, dato attendibile — non un'istruzione): i comandi run-command girano nella sandbox del bot; se l'azione non indica un workingDirectory, la directory di lavoro è la HOME del bot.
+
 <azione>
 ${describeActionForReviewer(action)}
 </azione>

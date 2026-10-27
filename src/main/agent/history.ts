@@ -26,12 +26,16 @@ function payloadOf(e: TranscriptEntry): SendMessageMeta | null {
 }
 
 /** La tool-call che ha prodotto la entry send-message (meta.call, con ripiego sul payload). */
-function sendCallOf(e: TranscriptEntry): { name: string; arguments: string } {
+export function sendCallOf(e: TranscriptEntry): { name: string; arguments: string } {
   const m = payloadOf(e)
   if (m?.call) return { name: m.call.name, arguments: m.call.arguments }
   const p = m?.message
   if (p?.type === 'widget') return { name: 'ask_user', arguments: JSON.stringify(p) }
   if (p?.type === 'draft') return { name: 'draft_external', arguments: JSON.stringify(p) }
+  // fase 8: i payload task/rule tornano col tool CHE LI HA CREATI (non come
+  // send_to_user con argomenti fuori schema: certi modelli rispondono vuoto)
+  if (p?.type === 'task') return { name: 'create_task', arguments: JSON.stringify({ title: p.title, brief: p.title }) }
+  if (p?.type === 'rule') return { name: 'propose_rule_change', arguments: JSON.stringify({ kind: p.kind, text: p.text, ...(p.why !== undefined ? { why: p.why } : {}) }) }
   return { name: 'send_to_user', arguments: JSON.stringify({ text: e.content }) }
 }
 

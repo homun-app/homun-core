@@ -25,6 +25,8 @@ let db: DatabaseSync
 beforeEach(() => {
   db = new DatabaseSync(':memory:')
   db.exec(JOBS_DDL)
+  // fase 8: il runner legge il titolo del task dalla propria connessione
+  db.exec("CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, agent_id TEXT, title TEXT, status TEXT DEFAULT 'working', created_at INTEGER, updated_at INTEGER, summary TEXT)")
 })
 
 describe('makeJobRunner: user-message', () => {
@@ -106,6 +108,33 @@ describe('makeJobRunner: user-message', () => {
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.automatic).toBeUndefined()
+  })
+})
+
+describe('makeJobRunner: task-run (fase 8, §3bis L7)', () => {
+  it('il brief apre il turno con l\'identità del task (id per update_task), taskId e respondedTo passati', async () => {
+    db.prepare("INSERT INTO tasks(id, agent_id, title) VALUES(7, 'a3', 'Verifica controlli')").run()
+    const job = enqueueJob(db, {
+      agentId: 'a3', kind: 'task-run',
+      payload: { taskId: 7, brief: 'fai la verifica', respondedTo: 55 },
+      runAt: 0, now: 0
+    })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    // il modello del task sa chi è e come chiudersi (contesto separato)
+    expect(log[0]!.text).toBe('[task n. 7 "Verifica controlli" — per chiuderlo: update_task con id 7]\nfai la verifica')
+    expect(log[0]!.opts).toMatchObject({ source: 'user', taskId: 7, respondedTo: 55 })
+  })
+
+  it('task senza riga (eliminato): il prefisso resta senza titolo', async () => {
+    const job = enqueueJob(db, {
+      agentId: 'a3', kind: 'task-run',
+      payload: { taskId: 99, brief: 'b' },
+      runAt: 0, now: 0
+    })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.text).toBe('[task n. 99 — per chiuderlo: update_task con id 99]\nb')
   })
 })
 

@@ -47,10 +47,13 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       return
     }
     // fase 8 (§3bis L7): il task gira nel proprio sotto-transcript (meta.taskId
-    // su ogni entry); il brief è il messaggio che lo apre
+    // su ogni entry). Il brief apre il turno PREFIXATO con l'identità del task:
+    // il contesto è separato, ma update_task({id}) richiede di sapere il proprio id
     if (job.kind === 'task-run') {
       const p = job.payload as { taskId: number; brief: string; respondedTo?: number }
-      await runTurnFn(job.agent_id, p.brief, emit, undefined, {
+      const row = db.prepare('SELECT title FROM tasks WHERE id = ?').get(p.taskId) as { title?: string } | undefined
+      const opening = `[task n. ${p.taskId}${row?.title ? ` "${row.title}"` : ''} — per chiuderlo: update_task con id ${p.taskId}]\n${p.brief}`
+      await runTurnFn(job.agent_id, opening, emit, undefined, {
         source: 'user', taskId: p.taskId, ...opts, onTurnEntry,
         ...(p.respondedTo !== undefined ? { respondedTo: p.respondedTo } : {})
       })

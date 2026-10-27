@@ -569,7 +569,9 @@ export async function executeTool(
             'Il task è finito: riferisci all\'utente con un MESSAGGIO BREVE (send_to_user) sull\'esito e al massimo un prossimo passo, senza ripetere tutto il lavoro.'
           ].join('\n'),
           initiator: 'TASK_DONE',
-          extraMeta: { taskTitle: t.title, taskId: id }
+          // taskRef (NON taskId): il loop filtra le entry dei task per
+          // meta.taskId e questo messaggio deve restare nella chat principale
+          extraMeta: { taskTitle: t.title, taskRef: id }
         },
         runAt: now,
         now

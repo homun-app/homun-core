@@ -296,3 +296,17 @@ describe('fase 7 (A2): entry di delega send_to_agent nella storia del modello', 
     expect(sendResultText(delegation)).not.toContain('inviato all\'utente')
   })
 })
+
+// fase 8: i payload task/rule senza meta.call tornano col tool che li ha creati
+describe('fase 8: sendCallOf per card task e regole proposte', () => {
+  it('send-message type task → create_task (mai send_to_user con argomenti fuori schema)', async () => {
+    const { sendCallOf } = await import('../history')
+    const task = mk('send-message', 'assistant', 'Verifica', { message: { type: 'task', taskId: 3, title: 'Verifica' } })
+    expect(sendCallOf(task)).toEqual({ name: 'create_task', arguments: JSON.stringify({ title: 'Verifica', brief: 'Verifica' }) })
+    const rule = mk('send-message', 'assistant', 'leggere email', { message: { type: 'rule', kind: 'allow', text: 'leggere email', why: 'perché' } })
+    expect(sendCallOf(rule)).toEqual({ name: 'propose_rule_change', arguments: JSON.stringify({ kind: 'allow', text: 'leggere email', why: 'perché' }) })
+    // e buildMessages li usa come coppie chiamata/risultato coerenti
+    const msgs = buildMessages(sys, [task])
+    expect(msgs[1]?.toolCalls?.[0]?.name).toBe('create_task')
+  })
+})

@@ -237,7 +237,7 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
         return (
           <details className="rounded-lg border border-sky-900/50 bg-sky-950/10 px-3 py-1.5">
             <summary className="cursor-pointer select-none text-xs text-sky-300/70">
-              Report del task: {String(entry.meta?.taskTitle ?? '')} ({String(entry.meta?.taskId ?? '')})
+              Report del task: {String(entry.meta?.taskTitle ?? '')} ({String(entry.meta?.taskRef ?? '')})
             </summary>
             <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-neutral-500">
               {entry.content}

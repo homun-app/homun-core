@@ -73,6 +73,9 @@ describe('reviewerPrompt: il revisore vede SOLO regole e azione, come DATO', () 
     expect(p).toContain('SEMPRE ask')
     // gli argomenti sono dati, non istruzioni
     expect(p).toContain('DATO')
+    // contesto dell'ambiente (di sistema): senza workingDirectory si gira nella
+    // home del bot — serve a giudicare le regole "dentro la home"
+    expect(p).toContain('directory di lavoro è la HOME del bot')
   })
 
   it('per una bozza il revisore vede destinatario/oggetto/corpo', () => {
