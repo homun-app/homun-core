@@ -185,7 +185,7 @@ describe('fase 3 (§3bis L2): send-message e thinking nella storia del modello',
     expect(msgs[2]).toMatchObject({ role: 'assistant', content: 'ragiono tra me' })
     // …e la send-message aggrega la sua call su quel messaggio assistant
     expect(msgs[2].toolCalls?.[0]).toMatchObject({ id: `send_${sentId}`, name: 'send_to_user', arguments: '{"text":"Ecco la risposta"}' })
-    expect(msgs[3]).toEqual({ role: 'tool', toolCallId: `send_${sentId}`, content: "inviato all'utente" })
+    expect(msgs[3]).toEqual({ role: 'tool', toolCallId: `send_${sentId}`, content: "consegnato all'utente: «Ecco la risposta». Non ripeterlo." })
     expect(msgs[4]).toEqual({ role: 'user', content: 'grazie' })
   })
 
@@ -291,9 +291,27 @@ describe('fase 7 (A2): entry di delega send_to_agent nella storia del modello', 
     expect(msgs[3]?.content).toContain('passaggio 1')
   })
 
-  it('sendResultText: la delega NON è "inviato all\'utente"', () => {
+  it('sendResultText: la delega NON è "consegnato all\'utente"', () => {
     expect(sendResultText(delegation)).toContain('in coda per Specialista')
-    expect(sendResultText(delegation)).not.toContain('inviato all\'utente')
+    expect(sendResultText(delegation)).not.toContain('consegnato all\'utente')
+  })
+
+  // fase 9 (punto 0b): il result di una send di testo riporta l'inizio del testo
+  it('sendResultText: la send di testo riporta l\'inizio di ciò che l\'utente ha ricevuto', () => {
+    const sent = mk('send-message', 'assistant', 'Routine "Riepilogo mattina" creata in pausa.\nAttivala quando vuoi.', {
+      call: { id: 'c1', name: 'send_to_user', arguments: '{"text":"Routine \\"Riepilogo mattina\\" creata in pausa.\\nAttivala quando vuoi."}' },
+      message: { type: 'text', text: 'Routine "Riepilogo mattina" creata in pausa.\nAttivala quando vuoi.' }
+    })
+    expect(sendResultText(sent)).toBe('consegnato all\'utente: «Routine "Riepilogo mattina" creata in pausa.\nAttivala quando vuoi.». Non ripeterlo.')
+    // held (outbox, fase 6): stessa conferma con la nota sulla consegna rinviata
+    const held = mk('send-message', 'assistant', 'riepilogo notturno', {
+      message: { type: 'text', text: 'riepilogo notturno' }, held: true
+    })
+    expect(sendResultText(held)).toContain('consegnato all\'utente: «riepilogo notturno»')
+    expect(sendResultText(held)).toContain('rinviata alla prossima finestra')
+    // oltre 120 caratteri la preview è troncata
+    const lungo = mk('send-message', 'assistant', 'L'.repeat(200), { message: { type: 'text', text: 'L'.repeat(200) } })
+    expect(sendResultText(lungo)).toContain('«' + 'L'.repeat(120) + '…»')
   })
 })
 

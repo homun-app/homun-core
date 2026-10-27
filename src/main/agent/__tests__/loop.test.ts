@@ -1089,29 +1089,32 @@ describe('fase 6: outbox dei turni automatici', () => {
   })
 
   it('fase 7 (residuo 0b): nei turni automatici solo il PRIMO urgent passa, i successivi sono trattenuti', async () => {
+    // fase 9 (0d): più send di FILA senza lavoro in mezzo non si consegnano,
+    // quindi il secondo urgent arriva dopo un tool di lavoro
     h.llm.queue = [
       { toolCalls: [mkSend('u1', '{"text":"primo: agisci entro stasera","urgent":true}')] },
-      { toolCalls: [mkSend('u2', '{"text":"secondo: altro avviso","urgent":true}'), mkSend('u3', '{"text":"terzo: ancora","urgent":true}')] },
+      { toolCalls: [{ id: 'lc1', name: 'list-credentials', arguments: '{}' }, mkSend('u2', '{"text":"secondo: altro avviso","urgent":true}')] },
       { text: 'fatto' }
     ]
     await runTurn(AGENT, '[routine] due urgent', emit, undefined, { source: 'routine', title: 'Urgentissime' })
     const sends = h.db.entries.filter((e) => e.kind === 'send-message')
-    expect(sends).toHaveLength(3)
+    expect(sends).toHaveLength(2)
     expect(sends[0]!.meta?.held).toBeUndefined() // il primo urgent passa subito
     expect((sends[0]!.meta?.message as { urgent?: boolean }).urgent).toBe(true)
-    // i successivi urgent diventano NON urgenti e finiscono in outbox
+    // il secondo urgent diventa NON urgente e finisce in outbox
     expect(sends[1]!.meta?.held).toBe(true)
-    expect(sends[2]!.meta?.held).toBe(true)
     expect((sends[1]!.meta?.message as { urgent?: boolean }).urgent).toBeUndefined()
     expect(h.db.outbox).toEqual([
-      { entry_id: sends[1]!.id, agent_id: AGENT, created_at: sends[1]!.createdAt },
-      { entry_id: sends[2]!.id, agent_id: AGENT, created_at: sends[2]!.createdAt }
+      { entry_id: sends[1]!.id, agent_id: AGENT, created_at: sends[1]!.createdAt }
     ])
   })
 
   it('fase 7 (residuo 0b): nei turni UTENTE più urgent restano urgent (l\'outbox non c\'entra)', async () => {
+    // fase 9 (0d): le due send sono separate da un tool di lavoro (senza, la
+    // seconda non verrebbe consegnata: vedi il blocco fase 9 qui sotto)
     h.llm.queue = [
-      { toolCalls: [mkSend('v1', '{"text":"uno","urgent":true}'), mkSend('v2', '{"text":"due","urgent":true}')] },
+      { toolCalls: [mkSend('v1', '{"text":"uno","urgent":true}')] },
+      { toolCalls: [{ id: 'lc2', name: 'list-credentials', arguments: '{}' }, mkSend('v2', '{"text":"due","urgent":true}')] },
       { text: 'ok' }
     ]
     await runTurn(AGENT, 'domanda con urgenze', emit)
@@ -1350,11 +1353,19 @@ describe('fase 7: send_to_agent', () => {
     expect(h.db.jobs[0]!.payload.automatic).toBe(true)
 
     // il turno del destinatario, aperto dal job automatico: send_to_user come
-    // nei turni di routine (outbox + al massimo un urgent)
+    // nei turni di routine (outbox + al massimo un urgent); fase 9 (0d): più
+    // send di fila senza lavoro non si consegnano, quindi un lavoro le separa
     h.llm.queue = [
       { toolCalls: [
-        { id: 'b1', name: 'send_to_user', arguments: JSON.stringify({ text: 'riepilogo notturno' }) },
-        { id: 'b2', name: 'send_to_user', arguments: JSON.stringify({ text: 'primo urgent', urgent: true }) },
+        { id: 'b0', name: 'list-credentials', arguments: '{}' },
+        { id: 'b1', name: 'send_to_user', arguments: JSON.stringify({ text: 'riepilogo notturno' }) }
+      ] },
+      { toolCalls: [
+        { id: 'b0b', name: 'list-credentials', arguments: '{}' },
+        { id: 'b2', name: 'send_to_user', arguments: JSON.stringify({ text: 'primo urgent', urgent: true }) }
+      ] },
+      { toolCalls: [
+        { id: 'b0c', name: 'list-credentials', arguments: '{}' },
         { id: 'b3', name: 'send_to_user', arguments: JSON.stringify({ text: 'secondo urgent', urgent: true }) }
       ] },
       { text: 'fatto' }
@@ -1735,25 +1746,27 @@ describe('fase 8 (§3bis L7): ciclo di vita del task', () => {
 
 describe('fase 8 (§3bis L11): loop detection', () => {
   it('la stessa identica chiamata per la TERZA volta di fila ferma il turno con notice leggibile', async () => {
-    const resp = { toolCalls: [{ id: 'x', name: 'send_to_user', arguments: JSON.stringify({ text: 'ciao' }) }] }
+    // fase 9 (0c): le send identiche vengono intercettate dalla dedup prima
+    // della loop detection, quindi il veicolo qui è un tool di lavoro
+    const resp = { toolCalls: [{ id: 'x', name: 'list-credentials', arguments: '{}' }] }
     h.llm.queue = [resp, resp, resp, resp]
     await runTurn(AGENT, 'vai', emit)
-    // la terza identica NON è stata eseguita: due messaggi e una notice di loop
-    const sends = h.db.entries.filter((e) => e.kind === 'send-message' && (e.meta?.call as { name?: string } | undefined)?.name === 'send_to_user')
-    expect(sends).toHaveLength(2)
+    // la terza identica NON è stata eseguita: due esecuzioni e una notice di loop
+    const calls = h.db.entries.filter((e) => e.kind === 'tool-call' && e.meta?.name === 'list-credentials')
+    expect(calls).toHaveLength(2)
     expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('loop'))).toBe(true)
     expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
   })
 
   it('due chiamate uguali e una diversa NON sono un loop', async () => {
     h.llm.queue = [
-      { toolCalls: [{ id: 'a', name: 'send_to_user', arguments: JSON.stringify({ text: 'ciao' }) }] },
-      { toolCalls: [{ id: 'b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ciao' }) }] },
-      { toolCalls: [{ id: 'c', name: 'send_to_user', arguments: JSON.stringify({ text: 'arrivederci' }) }] },
+      { toolCalls: [{ id: 'a', name: 'list-credentials', arguments: '{}' }] },
+      { toolCalls: [{ id: 'b', name: 'list-credentials', arguments: '{}' }] },
+      { toolCalls: [{ id: 'c', name: 'list-credentials', arguments: '{"x":1}' }] },
       { text: '.' }
     ]
     await runTurn(AGENT, 'vai', emit)
-    expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(3)
+    expect(h.db.entries.filter((e) => e.kind === 'tool-call' && e.meta?.name === 'list-credentials')).toHaveLength(3)
     expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('loop'))).toBe(false)
   })
 })
@@ -1829,10 +1842,18 @@ describe('correzione B1: l\'origine del turno vive sulla riga del task e nei suo
 
   it('task nato da una routine (automatic) → send_to_user in outbox e un solo urgent', async () => {
     mkTask(1, { automatic: 1 })
+    // fase 9 (0d): un lavoro separa le send (senza, dalla seconda non si consegnano)
     h.llm.queue = [
       { toolCalls: [
-        { id: 'a', name: 'send_to_user', arguments: JSON.stringify({ text: 'avanzamento' }) },
-        { id: 'b', name: 'send_to_user', arguments: JSON.stringify({ text: 'servono dati', urgent: true }) },
+        { id: 'w1', name: 'list-credentials', arguments: '{}' },
+        { id: 'a', name: 'send_to_user', arguments: JSON.stringify({ text: 'avanzamento' }) }
+      ] },
+      { toolCalls: [
+        { id: 'w2', name: 'list-credentials', arguments: '{}' },
+        { id: 'b', name: 'send_to_user', arguments: JSON.stringify({ text: 'servono dati', urgent: true }) }
+      ] },
+      { toolCalls: [
+        { id: 'w3', name: 'list-credentials', arguments: '{}' },
         { id: 'c', name: 'send_to_user', arguments: JSON.stringify({ text: 'altro urgent', urgent: true }) }
       ] },
       { text: '.' }
@@ -1920,5 +1941,90 @@ describe('correzione B3: update_task chiude solo task propri (e, in un task, sol
     expect(String(done.payload.text)).toContain('DATO')
     expect(done.payload.automatic).toBeUndefined()
     expect(done.payload.untrusted).toBeUndefined()
+  })
+})
+
+// ---- fase 9 (punto 0): un messaggio per risultato — riproduzione del bug ----
+
+describe('fase 9 (punto 0): più messaggi per una sola azione', () => {
+  const mkSend = (id: string, args: string): FakeToolCall => ({ id, name: 'send_to_user', arguments: args })
+  // il messaggio del DB di sviluppo: virgolette E a capo negli argomenti
+  const TESTO = 'Routine "Riepilogo mattina" creata in pausa.\nAttivala quando vuoi.'
+  const ARGS = JSON.stringify({ text: TESTO })
+
+  it('la sequenza del DB: send integra, congettura nel ragionamento, ripetizione e riempitivi', async () => {
+    h.llm.queue = [
+      // passo 1: la send buona (nel DB reale è arrivata integra, arguments validi)
+      { toolCalls: [mkSend('s1', ARGS)] },
+      // passo 2: il modello si convince che sia stata troncata e ripete lo stesso testo
+      { text: 'Routine\n\nThe final message got cut again: "Routine ". Maybe the quotes cause issue.', toolCalls: [mkSend('s2', ARGS)] },
+      // passi 3-4: i riempitivi del DB ("Attivata." / "OK.")
+      { toolCalls: [mkSend('s3', '{"text":"Attivata."}')] },
+      { toolCalls: [mkSend('s4', '{"text":"OK."}')] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'Per favore crea una routine chiamata "Riepilogo mattina"', emit)
+    // UNA sola send visibile: quella buona, col testo integro (virgolette e a capo)
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends).toHaveLength(1)
+    expect(sends[0]!.content).toBe(TESTO)
+    // la ripetizione non ha creato entry; i riempitivi sono diventati ragionamento
+    expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content === 'Attivata.')).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content === 'OK.')).toBe(true)
+    // i result che il modello ha ricevuto (l'ultima chiamata li vede tutti):
+    // consegna con riscontro, già consegnato, non consegnato ×2
+    const lastCall = h.llm.calls[h.llm.calls.length - 1]!
+    const results = lastCall.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes("consegnato all'utente: «Routine \"Riepilogo mattina\" creata in pausa."))).toBe(true)
+    expect(results.some((c) => c.includes('già consegnato'))).toBe(true)
+    expect(results.filter((c) => c.includes('Non consegnato'))).toHaveLength(2)
+  })
+
+  it('il turno successivo rivede la chiamata INTATTA: arguments identici con virgolette e a capo', async () => {
+    h.llm.queue = [
+      { toolCalls: [mkSend('s1', ARGS)] },
+      { text: 'fatto' }
+    ]
+    await runTurn(AGENT, 'crea la routine', emit)
+    h.llm.queue.length = 0
+    h.llm.calls.length = 0
+    h.llm.queue = [{ text: 'grazie' }]
+    await runTurn(AGENT, 'e adesso?', emit)
+    // la chiamata ricostruita dal transcript ha gli ARGOMENTI identici…
+    const call2 = h.llm.calls[0]!
+    const calls = call2.flatMap(
+      (m) => ((m.toolCalls as Array<{ id: string; name: string; arguments: string }> | undefined) ?? [])
+    )
+    const sendCall = calls.find((tc) => tc.name === 'send_to_user')
+    expect(sendCall?.arguments).toBe(ARGS)
+    // …e il result della ricostruzione riporta l'inizio del testo consegnato
+    expect(call2.some((m) => m.role === 'tool' && String(m.content).includes("consegnato all'utente: «Routine"))).toBe(true)
+  })
+
+  it('avanzamento legittimo: annuncio, lavoro, risultato — entrambi i messaggi consegnati', async () => {
+    h.llm.queue = [
+      { toolCalls: [mkSend('a1', '{"text":"Sto controllando la posta, un attimo."}')] },
+      { toolCalls: [{ id: 'lc3', name: 'list-credentials', arguments: '{}' }] },
+      { toolCalls: [mkSend('a2', '{"text":"Fatto: nessuna email in sospeso."}')] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'controlla la posta', emit)
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends.map((s) => s.content)).toEqual(['Sto controllando la posta, un attimo.', 'Fatto: nessuna email in sospeso.'])
+    expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content.includes('Fatto:'))).toBe(false)
+  })
+
+  it('la chiamata di recupero segue le stesse regole: due send dal recupero → solo la prima è in chat', async () => {
+    h.llm.queue = [
+      // il turno risponde senza send: scatta il recupero
+      { text: 'ho pensato molto' },
+      // il recupero prova a mandare DUE messaggi (il caso "esattamente UN send")
+      { toolCalls: [mkSend('r1', '{"text":"Routine attivata."}'), mkSend('r2', '{"text":"Fatto."}')] }
+    ]
+    await runTurn(AGENT, 'attiva la routine', emit)
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends.map((s) => s.content)).toEqual(['Routine attivata.'])
+    // il secondo è diventato ragionamento, non chat
+    expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content === 'Fatto.')).toBe(true)
   })
 })

@@ -15,6 +15,8 @@
 // generato dal modello) tornano come contenuto assistant.
 import type { ChatMessage } from './llm'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../shared/types'
+// fase 9 (punto 0b): il result di una send di testo riporta l'inizio del testo
+import { deliveredResultText } from './turn-sends'
 
 const DEFAULT_MAX_MESSAGES = 40
 
@@ -58,7 +60,11 @@ export function sendResultText(e: TranscriptEntry): string {
     if (m.status === 'discarded') return "bozza scartata dall'utente"
     return "bozza creata e mostrata all'utente: l'invio avverrà solo se l'utente lo conferma"
   }
-  return "inviato all'utente"
+  // fase 9 (punto 0b): per le send di TESTO il result riporta l'inizio di ciò
+  // che l'utente ha ricevuto — il modello può verificare che è arrivato intero
+  // (il bug dei messaggi multipli nasceva da un result senza riscontro);
+  // held = entry trattenuta nell'outbox di un turno automatico (fase 6)
+  return deliveredResultText(e.content, { held: m?.held === true })
 }
 
 /** entries → messaggi: i tool-call si aggregano al messaggio assistant, i result diventano messaggi tool. */

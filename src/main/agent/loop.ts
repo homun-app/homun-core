@@ -39,6 +39,9 @@ import { commandKey, isNeverAuto } from './permission-rules'
 import { autoReviewDecision, reviewWithConfiguredModel, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
 import { activityOf, isToolLoop } from './loop-guard'
 import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from './stream-deadline'
+// fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
+// avanzamenti, result col testo consegnato)
+import { deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkTool, messageCapResult } from './turn-sends'
 import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
@@ -261,6 +264,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   let lastFreeText = ''
   // fase 7 (residuo 0b): nei turni automatici al massimo UN urgent per esecuzione
   let urgentUsed = false
+  // fase 9 (punto 0c): i testi consegnati in questo turno, per la dedup
+  const deliveredTexts: string[] = []
+  // fase 9 (punto 0d): send_to_user consegnati dall'ultima tool call di lavoro
+  // (più messaggi di fila senza lavoro in mezzo non diventano chat)
+  let sendsSinceWork = 0
 
   // fase 8 (§3bis L7): ogni entry scritta da un turno di TASK porta meta.taskId —
   // vive nel sotto-transcript del task, esclusa dalla chat principale
@@ -297,6 +305,30 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     const sent = appendSend(agentId, call, message, emit, hold ? { held: true } : {}, opts.taskId)
     if (hold) holdOutboxEntry(sent.id, agentId, sent.createdAt)
     return hold
+  }
+
+  /**
+   * Fase 9 (punto 0): consegna una send_to_user con le regole del turno — un
+   * testo uguale o contenuto in uno già consegnato NON viene riconsegnato
+   * (0c) e dopo un messaggio non seguito da lavoro il testo diventa
+   * ragionamento, non chat (0d). Il result riporta sempre l'inizio del testo
+   * consegnato (0b), così il modello può verificare che è arrivato intero.
+   * La usa anche la chiamata di recupero: stesse regole a fine turno.
+   */
+  const deliverSend = (call: { id: string; name: string; arguments: string }, input: Record<string, unknown>): string => {
+    const text = String(input.text ?? '')
+    if (isDuplicateSend(deliveredTexts, text)) return alreadyDeliveredResult(text)
+    if (sendsSinceWork >= 1) {
+      if (text.trim()) {
+        add({ agentId, kind: 'thinking', role: 'assistant', content: text })
+        emitLastEntry(agentId, emit)
+      }
+      return messageCapResult()
+    }
+    const hold = sendToUser(call, input)
+    deliveredTexts.push(text)
+    sendsSinceWork++
+    return deliveredResultText(text, { held: hold })
   }
 
   try {
@@ -549,6 +581,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           return
         }
         executedCalls.push({ name: call.name, args: call.arguments })
+        // fase 9 (punto 0d): ogni tool che non è "parlare" è lavoro — azzera
+        // il conteggio dei messaggi consecutivi senza lavoro in mezzo
+        if (isWorkTool(call.name)) sendsSinceWork = 0
 
         // ---- fase 3 (§3bis L2/L5): comunicazione e invii esterni, gestiti dal loop ----
 
@@ -566,14 +601,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
         if (call.name === 'send_to_user') {
           // fase 6/7: tetto urgent e outbox dei turni automatici vivono in
-          // sendToUser (le stesse regole anche per la chiamata di recupero)
-          const hold = sendToUser(call, input)
-          messages.push({
-            role: 'tool', toolCallId: call.id,
-            content: hold
-              ? 'inviato all’utente: la consegna è rinviata alla prossima finestra di consegna (o a quando apre la chat), salvo urgenza'
-              : 'inviato all’utente'
-          })
+          // sendToUser (dentro deliverSend); fase 9 (0b/0c/0d): result col
+          // testo consegnato, dedup e tetto degli avanzamenti
+          messages.push({ role: 'tool', toolCallId: call.id, content: deliverSend(call, input) })
           continue
         }
 
@@ -1090,8 +1120,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               let input: Record<string, unknown>
               try { input = JSON.parse(call.arguments || '{}') } catch { input = {} }
               // correzione A3: anche il recupero di una catena automatica passa
-              // dall'outbox (stesso tetto urgent dei turni di routine)
-              sendToUser(call, { ...input, text: String(input.text ?? acc) })
+              // dall'outbox (stesso tetto urgent dei turni di routine);
+              // fase 9 (0c/0d): stesse regole di consegna del turno
+              deliverSend(call, { ...input, text: String(input.text ?? acc) })
             }
           } else {
             const fallback = (acc.trim() ? acc : lastFreeText).trim()
