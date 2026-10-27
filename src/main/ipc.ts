@@ -22,6 +22,8 @@ export const DAEMON_RPC_CHANNELS = [
   'routines:list', 'routines:create', 'routines:update', 'routines:delete', 'routines:suggest',
   'routines:create-trigger', 'routines:update-trigger',
   'presence:signal', 'presence:viewing', 'outbox:opened',
+  // fase 8 (§3bis L7): task thread
+  'tasks:list', 'tasks:cancel',
   'memory:list', 'memory:update', 'memory:delete',
   'skills:list', 'skills:delete',
   'mcp:list', 'mcp:save', 'mcp:delete', 'mcp:test',
@@ -29,6 +31,8 @@ export const DAEMON_RPC_CHANNELS = [
   'connectors:set-tools', 'connectors:set-instructions', 'connectors:save-static',
   'vault:list', 'vault:store', 'vault:delete',
   'approvals:resolve', 'approvals:resolve-latest',
+  // fase 8: regole di auto-review proposte dal bot (salvataggio SOLO al click)
+  'autoreview:rule-decision',
   'providers:list', 'providers:save', 'providers:delete', 'providers:discover', 'providers:test', 'models:list',
   'permissions:get', 'permissions:set', 'settings:get', 'settings:set',
   // fase 7: template dei bot (catalogo + creazione col kickstart)

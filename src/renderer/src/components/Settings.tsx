@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react'
 import { api, useStore } from '../store'
 import { describeTrigger } from '../../../shared/cron-human'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
-import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo } from '../../../shared/types'
+import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo, AutoReviewSettings } from '../../../shared/types'
+import { DEFAULT_AUTO_REVIEW } from '../../../shared/types'
 
 const KINDS: ProviderKind[] = [
   'ollama', 'lmstudio', 'anthropic', 'mistral', 'openrouter', 'zai', 'xai', 'deepseek', 'groq', 'openai-compatible'
@@ -15,7 +16,7 @@ export function Settings() {
   const pendingTab = useStore((s) => s.settingsTab)
   const refreshProviders = useStore((s) => s.refreshProviders)
   const refreshPermissions = useStore((s) => s.refreshPermissions)
-  const [tab, setTab] = useState<'provider' | 'agenti' | 'permessi' | 'routine' | 'connettori' | 'generale'>('provider')
+  const [tab, setTab] = useState<'provider' | 'agenti' | 'permessi' | 'routine' | 'connettori' | 'autoreview' | 'generale'>('provider')
 
   // fase 7: un widget può chiedere di aprire un tab preciso (es. il provider
   // durante l'onboarding): lo si applica una volta e si consuma
@@ -33,13 +34,13 @@ export function Settings() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-1 border-b border-neutral-800 px-4 pt-4 pb-2">
-          {(['provider', 'agenti', 'permessi', 'routine', 'connettori', 'generale'] as const).map((t) => (
+          {(['provider', 'agenti', 'permessi', 'routine', 'connettori', 'autoreview', 'generale'] as const).map((t) => (
             <button
               key={t}
               className={`rounded-lg px-3 py-1.5 text-sm capitalize ${tab === t ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}
               onClick={() => setTab(t)}
             >
-              {t === 'connettori' ? 'connetti app' : t}
+              {t === 'connettori' ? 'connetti app' : t === 'autoreview' ? 'approvazione automatica' : t}
             </button>
           ))}
           <div className="flex-1" />
@@ -53,9 +54,142 @@ export function Settings() {
           {tab === 'permessi' && <PermissionsTab onChanged={refreshPermissions} />}
           {tab === 'routine' && <RoutinesTab />}
           {tab === 'connettori' && <ConnectorsTab />}
+          {tab === 'autoreview' && <AutoReviewTab />}
           {tab === 'generale' && <GeneralTab />}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ---- fase 8 (§3bis L5): auto-review delle approvazioni ----
+
+function AutoReviewTab() {
+  const providers = useStore((s) => s.providers)
+  const prefill = useStore((s) => s.autoreviewPrefill)
+  const [cfg, setCfg] = useState<AutoReviewSettings | null>(null)
+  const [models, setModels] = useState<ModelInfo[]>([])
+  const [newAllow, setNewAllow] = useState('')
+  const [newBlock, setNewBlock] = useState('')
+
+  useEffect(() => {
+    void api.settingsGet<AutoReviewSettings>('autoReview', DEFAULT_AUTO_REVIEW).then(setCfg)
+  }, [])
+  // fase 8: "Crea regola da questa azione" arriva con un testo precompilato
+  useEffect(() => {
+    if (prefill) {
+      setNewAllow(prefill)
+      useStore.setState({ autoreviewPrefill: null })
+    }
+  }, [prefill])
+  // i modelli del provider scelto (per il revisore)
+  useEffect(() => {
+    if (cfg?.providerId) void api.listModels(cfg.providerId).then(setModels).catch(() => setModels([]))
+    else setModels([])
+  }, [cfg?.providerId])
+
+  if (!cfg) return <p className="text-xs text-neutral-500">caricamento…</p>
+  const save = (next: AutoReviewSettings): void => {
+    setCfg(next)
+    void api.settingsSet('autoReview', next)
+  }
+  const inputCls = 'flex-1 rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none'
+
+  const RuleList = ({ title, hint, rules, onAdd, onRemove, value, setValue }: {
+    title: string
+    hint: string
+    rules: string[]
+    onAdd(): void
+    onRemove(i: number): void
+    value: string
+    setValue(v: string): void
+  }) => (
+    <div className="rounded-xl border border-neutral-800 px-3 py-2.5">
+      <div className="text-sm text-neutral-100">{title}</div>
+      <div className="mt-0.5 text-[11px] text-neutral-500">{hint}</div>
+      <ul className="mt-2 space-y-1">
+        {rules.length === 0 && <li className="text-xs text-neutral-600">(nessuna regola)</li>}
+        {rules.map((r, i) => (
+          <li key={`${r}-${i}`} className="flex items-start gap-2 text-xs text-neutral-200">
+            <span className="flex-1">{r}</span>
+            <button className="shrink-0 text-neutral-500 hover:text-red-400" onClick={() => onRemove(i)}>✕</button>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 flex gap-2">
+        <input
+          className={inputCls}
+          placeholder="es. comandi ls e cat dentro la home del bot"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && value.trim()) { onAdd(); setValue('') } }}
+        />
+        <button
+          className="rounded-lg bg-neutral-700 px-3 py-1.5 text-xs text-neutral-100 hover:bg-neutral-600 disabled:opacity-40"
+          disabled={!value.trim()}
+          onClick={() => { onAdd(); setValue('') }}
+        >
+          Aggiungi
+        </button>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-neutral-500">
+        Un modello piccolo rivede le azioni che chiedono approvazione secondo queste regole e può lasciarle passare da solo.
+        Sta dopo il gate dei permessi e non cambia mai i divieti: le azioni che modificano il comportamento futuro del bot, i comandi che eseguono altri comandi e i turni aperti da altri bot o da eventi esterni chiedono comunque.
+      </p>
+      <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-800 px-4 py-3">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 accent-neutral-300"
+          checked={cfg.enabled}
+          onChange={(e) => save({ ...cfg, enabled: e.target.checked })}
+        />
+        <span>
+          <span className="block text-sm text-neutral-100">Approvazione automatica</span>
+          <span className="block text-xs text-neutral-500">Al massimo 20 azioni approvate per turno; un dubbio del revisore diventa sempre una card.</span>
+        </span>
+      </label>
+      <div className="flex gap-2">
+        <select
+          className="rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none"
+          value={cfg.providerId ?? ''}
+          onChange={(e) => save({ ...cfg, providerId: e.target.value || null, model: null })}
+        >
+          <option value="">provider del revisore…</option>
+          {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select
+          className="rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none"
+          value={cfg.model ?? ''}
+          disabled={!cfg.providerId}
+          onChange={(e) => save({ ...cfg, model: e.target.value || null })}
+        >
+          <option value="">modello…</option>
+          {models.map((m) => <option key={m.id} value={m.id}>{m.label ?? m.id}</option>)}
+        </select>
+      </div>
+      <RuleList
+        title="⚡ Continua da solo quando l'azione rispetta queste regole"
+        hint="Se una regola corrisponde (e nessuna regola di fermata), il revisore può approvare l'azione o l'invio della bozza."
+        rules={cfg.allowRules}
+        value={newAllow}
+        setValue={setNewAllow}
+        onAdd={() => save({ ...cfg, allowRules: [...cfg.allowRules, newAllow.trim()] })}
+        onRemove={(i) => save({ ...cfg, allowRules: cfg.allowRules.filter((_, j) => j !== i) })}
+      />
+      <RuleList
+        title="⛔ Fermati e chiedimi sempre quando…"
+        hint="Una di queste regole vince sempre sulle altre: l'azione diventa una card."
+        rules={cfg.blockRules}
+        value={newBlock}
+        setValue={setNewBlock}
+        onAdd={() => save({ ...cfg, blockRules: [...cfg.blockRules, newBlock.trim()] })}
+        onRemove={(i) => save({ ...cfg, blockRules: cfg.blockRules.filter((_, j) => j !== i) })}
+      />
     </div>
   )
 }

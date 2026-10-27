@@ -2,7 +2,7 @@
 // raggiungibili dalla UI via WebSocket. I parametri viaggiano come array
 // posizionale (stessa firma degli ipcMain.handle), così preload e renderer
 // non cambiano. chat:send accoda un job invece di girare il turno in linea.
-import { cancelAgentJobs } from '../main/store/jobs'
+import { cancelAgentJobs, cancelTaskJobs } from '../main/store/jobs'
 import * as store from '../main/store/db'
 import { db } from '../main/store/db'
 import * as loop from '../main/agent/loop'
@@ -28,7 +28,8 @@ import type { JobWorker } from './worker'
 import type { ConnectorsManager } from '../main/connectors'
 import type { Presence } from './presence'
 import type { Onboarding } from './onboarding'
-import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger } from '../shared/types'
+import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings } from '../shared/types'
+import { DEFAULT_AUTO_REVIEW } from '../shared/types'
 
 type Emitter = (e: SandbotEvent) => void
 
@@ -382,6 +383,27 @@ export function buildApiMethods(
       return { delivered: delivered.length }
     },
 
+    // ---- fase 8 (§3bis L7): task thread ----
+    'tasks:list': ([agentId]) => {
+      const rows = store.listTasks(typeof agentId === 'string' && agentId ? agentId : undefined)
+      return rows.map((t): import('../shared/types').TaskInfo => ({
+        id: t.id, agentId: t.agent_id, title: t.title, status: t.status,
+        createdAt: t.created_at, updatedAt: t.updated_at, summary: t.summary
+      }))
+    },
+    'tasks:cancel': ([taskId]) => {
+      const t = store.getTask(taskId as number)
+      if (!t) throw new Error('Task non trovato')
+      if (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled') return { ok: true }
+      // prima si ferma il turno (se è quello del task), poi si tolgono i job
+      // in coda e infine lo stato: le transizioni dai task chiusi sono bloccate
+      loop.interruptTask(t.agent_id, taskId as number)
+      cancelTaskJobs(db(), taskId as number)
+      store.updateTask(taskId as number, { status: 'cancelled' })
+      emit({ type: 'tasks' })
+      return { ok: true }
+    },
+
     // ---- memoria (fase 4): sezione nella vista dell'agente ----
     'memory:list': ([agentId]) => listMemories(agentId as string),
     'memory:update': ([agentId, id, content]) => {
@@ -479,15 +501,43 @@ export function buildApiMethods(
     'vault:delete': ([name]) => vault().then((x) => x.deleteSecret(name as string)),
 
     // ---- approvazioni ----
-    'approvals:resolve': ([agentId, approvalId, decision, always]) => {
-      loop.resolveApproval(agentId as string, approvalId as string, decision as 'allow' | 'deny', Boolean(always))
+    // fase 8 (punto 2): mode 'once' | 'always' (standing grant) | 'turn' (fino a fine turno)
+    'approvals:resolve': ([agentId, approvalId, decision, mode]) => {
+      loop.resolveApproval(
+        agentId as string, approvalId as string, decision as 'allow' | 'deny',
+        mode === 'always' ? 'always' : mode === 'turn' ? 'turn' : 'once'
+      )
     },
     // debug/test: risolve l'approval pending più recente di un agente
     'approvals:resolve-latest': ([agentId, decision]) => {
       const pending = store.getEntries(agentId as string).findLast((x) => x.kind === 'approval' && x.meta?.status === 'pending')
       if (!pending) return null
-      loop.resolveApproval(agentId as string, String(pending.meta?.approvalId), decision as 'allow' | 'deny', false)
+      loop.resolveApproval(agentId as string, String(pending.meta?.approvalId), decision as 'allow' | 'deny', 'once')
       return String(pending.meta?.approvalId)
+    },
+
+    // ---- fase 8 (§3bis L5): regola di auto-review proposta dall'agente ----
+    // la regola si salva SOLO qui, al click dell'utente sulla card
+    'autoreview:rule-decision': ([agentId, entryId, action]) => {
+      const aid = agentId as string
+      const entry = store.getEntries(aid).find((e) => e.id === (entryId as number))
+      const message = entry?.meta?.message as SendMessagePayload | undefined
+      if (!entry || entry.kind !== 'send-message' || message?.type !== 'rule') throw new Error('Proposta di regola non trovata')
+      if (entry.meta?.ruleStatus) throw new Error('Proposta già gestita')
+      if (action === 'add') {
+        // copia difensiva: getSetting restituisce il DEFAULT per riferimento e
+        // il DEFAULT non si muta mai (è il fallback di ogni lettura)
+        const cur = store.getSetting<AutoReviewSettings>('autoReview', DEFAULT_AUTO_REVIEW)
+        const cfg: AutoReviewSettings = { ...cur, allowRules: [...cur.allowRules], blockRules: [...cur.blockRules] }
+        const list = message.kind === 'block' ? cfg.blockRules : cfg.allowRules
+        if (!list.includes(message.text)) list.push(message.text)
+        store.setSetting('autoReview', cfg)
+        store.updateEntryMeta(entry.id, { ...entry.meta, ruleStatus: 'added' })
+      } else {
+        store.updateEntryMeta(entry.id, { ...entry.meta, ruleStatus: 'dismissed' })
+      }
+      emitUpdatedEntry(aid, entry.id)
+      return { ok: true }
     },
 
     // ---- provider ----

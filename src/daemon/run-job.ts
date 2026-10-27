@@ -48,12 +48,15 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     }
     const p = job.payload as { routineId: number; title: string; prompt: string; event?: TriggerEventPayload }
     // fase 6: il turno di un trigger parte dall'evento (evidenza nel blocco
-    // delimitato <evento>); le routine a schedule restano come prima
+    // delimitato <evento>); le routine a schedule restano come prima.
+    // Fase 8 (punto 1): il flag dice al loop che il testo che apre il turno
+    // viene da un evento esterno — l'auto-review non lo tocca
     const text = p.event
       ? formatTriggerEvent(p.title, p.prompt, p.event)
       : `[routine ricorrente: ${p.title}] ${p.prompt}`
     await runTurnFn(job.agent_id, text, emit, undefined, {
-      source: 'routine', title: p.title, ...opts, onTurnEntry
+      source: 'routine', title: p.title, ...opts, onTurnEntry,
+      ...(p.event ? { externalEvent: true } : {})
     })
   }
 }

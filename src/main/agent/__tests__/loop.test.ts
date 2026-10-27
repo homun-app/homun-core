@@ -23,7 +23,11 @@ const h = vi.hoisted(() => {
   const llm = {
     queue: [] as unknown[],
     calls: [] as Array<Array<{ role: string; content: string; toolCallId?: string; images?: string[]; toolCalls?: unknown[] }>>,
-    gates: new Set<{ resolve: () => void }>()
+    gates: new Set<{ resolve: () => void }>(),
+    // fase 8: risposta del revisore delle approvazioni (chiamata separata col
+    // tool report_decision — non consuma la coda delle risposte del turno;
+    // default senza tool call → "revisore non disponibile" → card)
+    reviewer: { text: 'no' } as FakeResp
   }
   const sandboxMock = {
     exec: { command: '', env: {} as Record<string, string>, calls: 0 },
@@ -144,6 +148,31 @@ vi.mock('../llm', () => ({
     tools: unknown[] = []
   ) => {
     h.llm.calls.push(messages.map((m) => ({ role: m.role, content: m.content, toolCallId: m.toolCallId, images: m.images, toolCalls: m.toolCalls })))
+    // fase 8: la chiamata del REVISORE (solo tool report_decision) risponde da
+    // h.llm.reviewer senza toccare la coda del turno
+    if ((tools as Array<{ name?: string }>).some((t) => t?.name === 'report_decision')) {
+      const r = h.llm.reviewer
+      const iter = {
+        async *[Symbol.asyncIterator]() {
+          if (r.text) yield { textDelta: r.text }
+          if (r.toolCalls) yield { toolCalls: r.toolCalls, finishReason: 'tool_calls' }
+          else yield { finishReason: 'stop' }
+        }
+      }
+      return {
+        ...iter,
+        async drain() {
+          let text = ''
+          let toolCalls: FakeToolCall[] = []
+          for await (const ch of iter[Symbol.asyncIterator]()) {
+            const c = ch as { textDelta?: string; toolCalls?: FakeToolCall[] }
+            if (c.textDelta) text += c.textDelta
+            if (c.toolCalls) toolCalls = c.toolCalls
+          }
+          return { text, toolCalls, finishReason: 'stop' }
+        }
+      }
+    }
     const resp = (q().shift() ?? { text: 'ok' }) as FakeQueueItem
     return {
       async *[Symbol.asyncIterator]() {
@@ -239,6 +268,7 @@ beforeEach(() => {
   rmSync(join(TMP, 'agents'), { recursive: true, force: true })
   h.llm.queue.length = 0
   h.llm.calls.length = 0
+  h.llm.reviewer = { text: 'no' }
   h.sandboxMock.exec = { command: '', env: {}, calls: 0 }
   h.sandboxMock.result = { stdout: '', stderr: '', exitCode: 0, signal: null, trimmed: false }
   h.mcp.calls = 0
@@ -340,7 +370,7 @@ describe('§5.6 segreti: il valore non arriva mai al modello né al transcript',
     expect(appr.meta?.secretRefs).toEqual(['API_KEY'])
 
     // "Consenti sempre" qui NON deve salvare grant (C4)
-    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', true)
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', 'always')
     await turn
     expect(h.db.grants).toEqual([])
 
@@ -379,7 +409,7 @@ describe('§5.6 segreti: il valore non arriva mai al modello né al transcript',
       expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
     })
     const appr = h.db.entries.find((e) => e.kind === 'approval')!
-    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', false)
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', 'once')
     await turn
     expect(h.sandboxMock.exec.calls).toBe(0)
     const res = h.db.entries.find((e) => e.kind === 'tool-result')!
@@ -407,7 +437,7 @@ describe('§5.1+approval: gate asincrono e standing grant esatta', () => {
     const appr = h.db.entries.find((e) => e.kind === 'approval')!
     expect(appr.content).toContain('curl')
 
-    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', true)
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', 'always')
     await turn
     await vi.waitFor(() => expect(h.db.grants).toContainEqual({ tool: 'run-command', target: 'curl' }))
 
@@ -819,7 +849,7 @@ describe('fase 4: update_state nel loop', () => {
     const appr = h.db.entries.find((e) => e.kind === 'approval')!
     expect(appr.content).toContain('Backup')
     expect(appr.content).toContain('giorni feriali')
-    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', false)
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', 'once')
     await turn
     expect(h.db.routines[0]!.enabled).toBe(1)
     const ev = h.db.entries.find((e) => e.kind === 'event' && (e.meta?.automation as { action?: string } | undefined)?.action === 'resume')
@@ -1328,5 +1358,229 @@ describe('fase 7: send_to_agent', () => {
     expect(h.db.routines[0]).toMatchObject({ title: 'Da template', provenance: 'template', enabled: 0 })
     // stessa chiamata fuori dal kickstart: la routine è dell'agente
     expect(h.db.routines[1]).toMatchObject({ provenance: 'agent' })
+  })
+})
+
+// ---- fase 8 (punto 1): auto-review delle approvazioni ----
+
+const AR_RULE = 'comandi ls e cat dentro la home del bot'
+const AR_DRAFT_RULE = 'email in uscita verso team@example.com'
+
+function enableAutoReview(over: Partial<{ enabled: boolean; allowRules: string[]; blockRules: string[]; providerId: string; model: string }> = {}): void {
+  h.db.settings.set('autoReview', {
+    enabled: true, allowRules: [AR_RULE], blockRules: [],
+    providerId: 'prov', model: 'm1', ...over
+  })
+}
+
+/** Risposta del revisore che approva citando la regola. */
+function reviewerAllow(rule: string): void {
+  h.llm.reviewer = {
+    toolCalls: [{ id: 'rd1', name: 'report_decision', arguments: JSON.stringify({ decision: 'allow', ruleMatched: rule, reason: 'regola rispettata' }) }]
+  }
+}
+
+describe('fase 8 (punto 1): auto-review delle approvazioni', () => {
+  it('regola allow → il comando passa SENZA card, entry approval compressa con autoApproved e regola', async () => {
+    enableAutoReview()
+    reviewerAllow(AR_RULE)
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'ls -la' }) }] },
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'fatto' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'elenca i file', emit)
+    expect(h.sandboxMock.exec.calls).toBe(1)
+    const approvals = h.db.entries.filter((e) => e.kind === 'approval')
+    expect(approvals).toHaveLength(1)
+    expect(approvals[0]!.meta).toMatchObject({ autoApproved: true, ruleMatched: AR_RULE, status: 'allowed' })
+    // entry chiusa: niente approvalId da cliccare
+    expect(approvals[0]!.meta?.approvalId).toBeUndefined()
+    // il revisore ha visto SOLO regole e azione (nessun messaggio del transcript)
+    const reviewerCall = h.llm.calls.find((c) => c.length === 1 && c[0]!.role === 'user' && c[0]!.content.includes('<azione>'))!
+    expect(reviewerCall[0]!.content).toContain(AR_RULE)
+    expect(reviewerCall[0]!.content).toContain('elenca i file'.length > 0 ? 'tool: run-command' : '')
+    expect(reviewerCall[0]!.content).not.toContain('elenca i file')
+  })
+
+  it('revisore che chiede conferma (ask) → la card resta come senza auto-review', async () => {
+    enableAutoReview()
+    h.llm.reviewer = { toolCalls: [{ id: 'rd1', name: 'report_decision', arguments: JSON.stringify({ decision: 'ask', reason: 'nessuna regola corrisponde' }) }] }
+    h.llm.queue = [{ toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] }]
+    const turn = runTurn(AGENT, 'vai', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true)
+    })
+    const appr = h.db.entries.findLast((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.sandboxMock.exec.calls).toBe(0)
+    expect(appr.meta?.autoApproved).toBeUndefined()
+  })
+
+  it('esclusione: turno aperto da un ALTRO BOT — anche col revisore favorevole resta card', async () => {
+    enableAutoReview()
+    reviewerAllow(AR_RULE)
+    h.llm.queue = [{ toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] }, { text: 'ok' }]
+    const turn = runTurn(AGENT, '<messaggio_da_agente nome="Altro">controlla</messaggio_da_agente>', emit, undefined, {
+      agentMessage: { fromAgentId: 'agent_o', fromAgentName: 'Altro', hop: 1 }, initiator: 'AGENT'
+    })
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true)
+    })
+    const appr = h.db.entries.findLast((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.sandboxMock.exec.calls).toBe(0)
+    expect(appr.meta?.autoApproved).toBeUndefined()
+  })
+
+  it('esclusione: comando never-auto (bash -c) resta card anche col revisore favorevole', async () => {
+    enableAutoReview()
+    reviewerAllow(AR_RULE)
+    h.llm.queue = [{ toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'bash -c ls' }) }] }, { text: 'ok' }]
+    const turn = runTurn(AGENT, 'vai', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true)
+    })
+    const appr = h.db.entries.findLast((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.sandboxMock.exec.calls).toBe(0)
+  })
+
+  it('esclusione: update_state su routine attiva resta card anche col revisore favorevole', async () => {
+    enableAutoReview()
+    reviewerAllow(AR_RULE)
+    h.db.routines.push({ id: 1, agent_id: AGENT, title: 'Riepilogo', prompt: 'p', schedule: '0 9 * * *', enabled: 1 })
+    h.llm.queue = [{ toolCalls: [{ id: 'c1', name: 'update_state', arguments: JSON.stringify({ target: 'routine', action: 'resume', id: 1 }) }] }, { text: 'ok' }]
+    const turn = runTurn(AGENT, 'attiva la routine', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true)
+    })
+    const appr = h.db.entries.findLast((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.db.routines[0]!.enabled).toBe(1)
+  })
+
+  it('bozza: regola allow → inviata automaticamente (via il gate, tracciata con la regola)', async () => {
+    enableAutoReview({ allowRules: [AR_DRAFT_RULE] })
+    reviewerAllow(AR_DRAFT_RULE)
+    h.llm.queue = [
+      {
+        toolCalls: [{
+          id: 'd1', name: 'draft_external',
+          arguments: JSON.stringify({
+            channel: 'email', to: 'team@example.com', subject: 'report', body: 'ecco il report',
+            via: { tool: 'mcp__gmail__send_message', args: { to: 'team@example.com', body: 'ecco il report' } }
+          })
+        }]
+      },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'manda il report', emit)
+    expect(h.mcp.calls).toBe(1)
+    const draft = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'draft')!
+    expect(draft.meta?.status).toBe('sent')
+    expect(draft.meta).toMatchObject({ autoApproved: true, ruleMatched: AR_DRAFT_RULE })
+    // il modello sa che l'invio è avvenuto per la regola (l'ultima chiamata è
+    // il proseguimento: in mezzo c'è anche la chiamata del revisore)
+    const last = h.llm.calls[h.llm.calls.length - 1]!
+    const results = last.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes('INVIATA automaticamente'))).toBe(true)
+  })
+
+  it('bozza che non rispetta le regole → resta card (nessun invio)', async () => {
+    enableAutoReview({ allowRules: [AR_DRAFT_RULE] })
+    h.llm.reviewer = { toolCalls: [{ id: 'rd1', name: 'report_decision', arguments: JSON.stringify({ decision: 'ask' }) }] }
+    h.llm.queue = [
+      {
+        toolCalls: [{
+          id: 'd1', name: 'draft_external',
+          arguments: JSON.stringify({
+            channel: 'email', to: 'estraneo@example.com', body: 'ciao',
+            via: { tool: 'mcp__gmail__send_message', args: { to: 'estraneo@example.com', body: 'ciao' } }
+          })
+        }]
+      },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'manda', emit)
+    expect(h.mcp.calls).toBe(0)
+    const draft = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'draft')!
+    expect(draft.meta?.status).toBe('pending')
+    expect(draft.meta?.autoApproved).toBeUndefined()
+  })
+
+  it('propose_rule_change: card con la regola proposta, NIENTE salvato nei settings', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'pr1', name: 'propose_rule_change', arguments: JSON.stringify({ kind: 'allow', text: 'leggere le email di lavoro', why: 'le approvi sempre di persona' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'proponi una regola', emit)
+    const proposal = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'rule')!
+    expect(proposal.meta?.message).toMatchObject({ type: 'rule', kind: 'allow', text: 'leggere le email di lavoro', why: 'le approvi sempre di persona' })
+    // la regola si salva SOLO al click: nessun setting è stato toccato
+    expect(h.db.settings.has('autoReview')).toBe(false)
+    const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes('solo se lui la accetta'))).toBe(true)
+  })
+})
+
+// ---- fase 8 (punto 2): "Consenti per questo turno" ----
+
+describe('fase 8 (punto 2): Consenti per questo turno', () => {
+  it('la stessa chiave del gate non chiede più fino a fine turno; una chiave diversa chiede di nuovo', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'a1', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] },
+      { toolCalls: [{ id: 'a2', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] },
+      { toolCalls: [{ id: 'a3', name: 'run-command', arguments: JSON.stringify({ command: 'cat pippo.txt' }) }] },
+      { text: 'fatto' }
+    ]
+    const turn = runTurn(AGENT, 'vai', emit)
+    // prima card (ls): consenti PER QUESTO TURNO
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true)
+    })
+    const first = h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')!
+    resolveApproval(AGENT, String(first.meta?.approvalId), 'allow', 'turn')
+    // il secondo ls NON chiede (stessa chiave 'ls'); il cat sì (chiave diversa)
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending' &&
+        String((e.meta?.input as { command?: string } | undefined)?.command ?? '').startsWith('cat'))).toBe(true)
+    })
+    const second = h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending' && String((e.meta?.input as { command?: string })?.command ?? '').startsWith('cat'))!
+    resolveApproval(AGENT, String(second.meta?.approvalId), 'allow', 'once')
+    await turn
+    // una card sola per 'ls' (la seconda identica è passata), due in totale
+    const approvals = h.db.entries.filter((e) => e.kind === 'approval')
+    expect(approvals).toHaveLength(2)
+    // tutti e tre i comandi eseguiti
+    expect(h.sandboxMock.exec.calls).toBe(3)
+  })
+
+  it('la grant di turno NON si persiste: il turno dopo chiede di nuovo', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'a1', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] },
+      { text: 'ok' }
+    ]
+    const turn = runTurn(AGENT, 'vai', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true)
+    })
+    resolveApproval(AGENT, String(h.db.entries.findLast((e) => e.kind === 'approval')!.meta?.approvalId), 'allow', 'turn')
+    await turn
+    expect(h.db.grants).toEqual([]) // niente standing grant nel DB
+    // secondo turno, stesso comando: la card torna (la grant era solo di turno)
+    h.llm.queue = [{ toolCalls: [{ id: 'b1', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] }]
+    const turn2 = runTurn(AGENT, 'ancora', emit)
+    await vi.waitFor(() => {
+      // due approval in totale (una per turno): quella del secondo turno pendente
+      expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(2)
+      expect(h.db.entries.findLast((e) => e.kind === 'approval')!.meta?.status).toBe('pending')
+    })
+    resolveApproval(AGENT, String(h.db.entries.findLast((e) => e.kind === 'approval')!.meta?.approvalId), 'deny', 'once')
+    await turn2
   })
 })

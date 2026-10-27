@@ -18,6 +18,8 @@ interface Store {
   settingsOpen: boolean
   /** fase 7: tab da aprire alla prossima apertura delle Impostazioni (onboarding provider) */
   settingsTab: string | null
+  /** fase 8: testo con cui precompilare l'editor delle regole di auto-review */
+  autoreviewPrefill: string | null
   init(): Promise<void>
   select(agentId: string): Promise<void>
   send(text: string, images?: string[]): Promise<void>
@@ -27,7 +29,12 @@ interface Store {
   draftSend(entryId: number, body?: string): void
   draftDiscard(entryId: number): void
   draftUpdate(entryId: number, body: string): void
-  resolveApproval(approvalId: string, decision: 'allow' | 'deny', always: boolean): void
+  /** fase 8: mode 'once' | 'always' | 'turn' (fino a fine turno) */
+  resolveApproval(approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn'): void
+  /** fase 8: decisione sulla regola di auto-review proposta dal bot */
+  autoreviewRuleDecision(entryId: number, action: 'add' | 'dismiss'): void
+  /** fase 8: "Crea regola da questa azione" — apre l'editor precompilato */
+  proposeRule(text: string): void
   createAgent(name: string): Promise<void>
   /** fase 7: "Rendi principale" nelle impostazioni dell'agente */
   setMainAgent(id: string): Promise<void>
@@ -49,6 +56,7 @@ export const useStore = create<Store>((set, get) => ({
   mainAgentId: null,
   settingsOpen: false,
   settingsTab: null,
+  autoreviewPrefill: null,
 
   async init() {
     const agents = await api.listAgents()
@@ -208,7 +216,7 @@ export const useStore = create<Store>((set, get) => ({
     void api.draftUpdate(id, entryId, body)
   },
 
-  resolveApproval(approvalId, decision, always) {
+  resolveApproval(approvalId, decision, mode) {
     const id = get().activeId
     if (!id) return
     const s = get()
@@ -217,7 +225,22 @@ export const useStore = create<Store>((set, get) => ({
         en.meta?.approvalId === approvalId ? { ...en, meta: { ...en.meta!, status: decision === 'allow' ? 'allowed' : 'denied' } } : en
       )
     })
-    void api.resolveApproval(id, approvalId, decision, always)
+    void api.resolveApproval(id, approvalId, decision, mode)
+  },
+
+  // fase 8: la regola proposta si aggiunge SOLO al click (la RPC scrive nei
+  // settings); l'entry si aggiorna via evento entries dal daemon
+  autoreviewRuleDecision(entryId, action) {
+    const id = get().activeId
+    if (!id) return
+    void api.autoreviewRuleDecision(id, entryId, action).catch((err: unknown) =>
+      console.error('autoreviewRuleDecision:', err instanceof Error ? err.message : err)
+    )
+  },
+
+  // fase 8: apre Impostazioni → Approvazione automatica con il testo pronto
+  proposeRule(text) {
+    set({ autoreviewPrefill: text, settingsTab: 'autoreview', settingsOpen: true })
   },
 
   async createAgent(name) {

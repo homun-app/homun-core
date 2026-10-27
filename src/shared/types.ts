@@ -91,6 +91,19 @@ export type SendMessagePayload =
       name: string
       reason?: string
     }
+  | {
+      /** fase 8 (§3bis L7): apertura di un task thread — card nella chat principale */
+      type: 'task'
+      taskId: number
+      title: string
+    }
+  | {
+      /** fase 8 (§3bis L5): regola di auto-review proposta dall'agente — si salva SOLO al click dell'utente */
+      type: 'rule'
+      kind: 'allow' | 'block'
+      text: string
+      why?: string
+    }
 
 /**
  * meta di una entry 'send-message':
@@ -117,6 +130,17 @@ export interface SendMessageMeta {
   toAgentName?: string
   hop?: number
   agentSend?: boolean
+  /**
+   * Fase 8 (§3bis L5): l'azione è stata approvata/inviata dall'auto-review
+   * con una regola dell'utente (approvazioni e bozze auto-inviate).
+   */
+  autoApproved?: boolean
+  ruleMatched?: string
+  reason?: string
+  /** fase 8: esito della regola proposta dall'agente (aggiunta o scartata dall'utente) */
+  ruleStatus?: 'added' | 'dismissed'
+  /** fase 8 (§3bis L7): l'entry appartiene al sotto-transcript di questo task */
+  taskId?: number
 }
 
 export interface TranscriptEntry {
@@ -202,6 +226,11 @@ export type SandbotEvent =
   // l'agente aspetta l'utente (needs-input: ask_user, approval, bozza) — la
   // decisione se notificare (soppressioni) sta nel daemon
   | { type: 'agent-notify'; agentId: string; kind: 'done' | 'needs-input'; preview: string; at: number }
+  // fase 8 (§3bis L7): lo stato di un task è cambiato — la card in chat e la
+  // sidebar (task in corso) si aggiornano
+  | { type: 'tasks' }
+  // fase 8 (§3bis L7): stato live — quale tool sta girando nel turno dell'agente
+  | { type: 'activity'; agentId: string; activity: { tool: string; target: string } | null }
 
 export interface SandbotApi {
   // agenti e transcript
@@ -225,7 +254,8 @@ export interface SandbotApi {
   draftDiscard(agentId: string, entryId: number): Promise<void>
   draftUpdate(agentId: string, entryId: number, body: string): Promise<void>
   // approvazioni
-  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', always: boolean): Promise<void>
+  /** fase 8: mode 'once' (una volta), 'always' (standing grant), 'turn' (fino a fine turno, in memoria) */
+  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn'): Promise<void>
   // provider e modelli
   listProviders(): Promise<ProviderConfig[]>
   saveProvider(p: ProviderConfig): Promise<void>
@@ -258,6 +288,11 @@ export interface SandbotApi {
   presenceViewing(agentId: string | null): Promise<void>
   // fase 6: consegna dell'outbox quando l'utente apre la chat dell'agente
   outboxOpened(agentId: string): Promise<void>
+  // fase 8 (§3bis L7): task thread — elenco (tutti gli agenti se undefined) e interruzione
+  listTasks(agentId?: string): Promise<TaskInfo[]>
+  cancelTask(taskId: number): Promise<void>
+  // fase 8 (§3bis L5): decisione dell'utente sulla regola proposta dall'agente
+  autoreviewRuleDecision(agentId: string, entryId: number, action: 'add' | 'dismiss'): Promise<void>
   // memoria (fase 4): sezione nella vista dell'agente, modifica ed eliminazione
   listMemories(agentId: string): Promise<MemoryInfo[]>
   updateMemory(agentId: string, id: string, content: string): Promise<void>
@@ -400,6 +435,43 @@ export interface RoutineSuggestion {
   title: string
   schedule: string
   description: string
+}
+
+// ---- task thread (fase 8, §3bis L7) ----
+
+/** Un task thread: lavoro lungo in un contesto separato (sotto-transcript con meta.taskId). */
+export interface TaskInfo {
+  id: number
+  agentId: string
+  title: string
+  status: 'working' | 'needs_input' | 'done' | 'failed' | 'cancelled'
+  createdAt: number
+  updatedAt: number
+  summary: string | null
+}
+
+// ---- auto-review delle approvazioni (fase 8, §3bis L5) ----
+
+/**
+ * Regole di auto-review in linguaggio naturale (due liste, come l'originale):
+ * "Continua da solo quando l'azione rispetta queste regole" /
+ * "Fermati e chiedimi sempre quando…". Un modello piccolo giudica le azioni
+ * che il gate deterministico segna "ask"; può SOLO trasformare ask in allow.
+ */
+export interface AutoReviewSettings {
+  enabled: boolean
+  allowRules: string[]
+  blockRules: string[]
+  providerId: string | null
+  model: string | null
+}
+
+export const DEFAULT_AUTO_REVIEW: AutoReviewSettings = {
+  enabled: false,
+  allowRules: [],
+  blockRules: [],
+  providerId: null,
+  model: null
 }
 
 // ---- template dei bot (fase 7, §3ter T4 + Appendice A) ----

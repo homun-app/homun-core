@@ -21,6 +21,7 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
   const send = useStore((s) => s.draftSend)
   const discard = useStore((s) => s.draftDiscard)
   const update = useStore((s) => s.draftUpdate)
+  const proposeRule = useStore((s) => s.proposeRule)
   const meta = (entry.meta ?? {}) as Partial<SendMessageMeta>
   const draft = meta.message as Draft | undefined
   const [editing, setEditing] = useState(false)
@@ -29,8 +30,8 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
   if (!draft) return null
   const status = meta.status ?? 'pending'
   const closed = status === 'sent' || status === 'discarded'
-  // D1: senza canale di invio la bozza è solo testo; senza un argomento
-  // mappato sul corpo la modifica non può restare coerente con via.args
+  // fase 8: inviata dall'auto-review con una regola dell'utente
+  const autoSent = status === 'sent' && meta.autoApproved === true
   const noChannel = !draft.via
   const bodyLocked = draft.bodyLocked === true
 
@@ -95,7 +96,11 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
 
       {closed ? (
         <div className={`mt-2 text-xs ${status === 'sent' ? 'text-emerald-400' : 'text-neutral-500'}`}>
-          {status === 'sent' ? '✓ Inviata' : 'Scartata'}
+          {autoSent
+            ? `⚡ Inviata automaticamente dalla regola: ${meta.ruleMatched ?? ''}`
+            : status === 'sent'
+              ? '✓ Inviata'
+              : 'Scartata'}
         </div>
       ) : (
         <>
@@ -121,6 +126,20 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
                 Modifica
               </button>
             )}
+            {/* fase 8: crea una regola di auto-review per invii come questo */}
+            <button
+              className="rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
+              title="Apri Impostazioni → Approvazione automatica con una regola precompilata"
+              onClick={() =>
+                proposeRule(
+                  draft.channel === 'email'
+                    ? `email in uscita verso ${draft.to || '(destinatario della bozza)'}`
+                    : `invii ${draft.channel} verso ${draft.to || '(destinatario della bozza)'}`
+                )
+              }
+            >
+              Crea regola da questa azione
+            </button>
           </div>
           {noChannel && (
             <div className="mt-1 text-[11px] text-neutral-500">nessun canale di invio collegato</div>

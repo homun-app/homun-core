@@ -89,7 +89,12 @@ function anthropicClient(p: ProviderConfig): Anthropic {
 }
 
 // ---- adapter OpenAI-compatible (Ollama, LM Studio, Z.ai, OpenRouter, Mistral, xAI, ...) ----
-function openAiStream(p: ProviderConfig, messages: ChatMessage[], tools: ToolDef[], model: string, signal: AbortSignal): LlmStream {
+/** Opzioni facoltative dello stream (fase 8: temperatura 0 per il revisore delle approvazioni). */
+export interface StreamOptions {
+  temperature?: number
+}
+
+function openAiStream(p: ProviderConfig, messages: ChatMessage[], tools: ToolDef[], model: string, signal: AbortSignal, opts: StreamOptions = {}): LlmStream {
   const client = openAiClient(p)
   const oaiMessages = messages.map((m) => {
     if (m.role === 'tool') {
@@ -125,7 +130,7 @@ function openAiStream(p: ProviderConfig, messages: ChatMessage[], tools: ToolDef
 
   async function* iterate(): AsyncIterable<LlmChunk> {
     const stream = await client.chat.completions.create(
-      { model, messages: typedMessages, tools: oaiTools.length ? oaiTools : undefined, stream: true },
+      { model, messages: typedMessages, tools: oaiTools.length ? oaiTools : undefined, stream: true, ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}) },
       { signal }
     )
     const acc = new Map<number, { id: string; name: string; args: string }>()
@@ -214,7 +219,7 @@ export function toAnthropicMessages(messages: ChatMessage[]): AnthropicMessage[]
   return aMsgs
 }
 
-function anthropicStream(p: ProviderConfig, messages: ChatMessage[], tools: ToolDef[], model: string, signal: AbortSignal): LlmStream {
+function anthropicStream(p: ProviderConfig, messages: ChatMessage[], tools: ToolDef[], model: string, signal: AbortSignal, opts: StreamOptions = {}): LlmStream {
   const client = anthropicClient(p)
   const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n')
   const aMsgs = toAnthropicMessages(messages)
@@ -232,7 +237,8 @@ function anthropicStream(p: ProviderConfig, messages: ChatMessage[], tools: Tool
         // i blocchi image hanno media_type letterale nell'SDK: il formato interno è più lasco
         messages: aMsgs as unknown as Anthropic.MessageParam[],
         tools: aTools.length ? aTools : undefined,
-        max_tokens: 8192
+        max_tokens: 8192,
+        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {})
       },
       { signal }
     )
@@ -275,7 +281,14 @@ function safeParse(s: string): unknown {
 }
 
 /** Crea uno stream LLM dal provider indicato. */
-export function llmStream(p: ProviderConfig, model: string, messages: ChatMessage[], tools: ToolDef[], signal: AbortSignal): LlmStream {
-  if (p.kind === 'anthropic') return anthropicStream(p, messages, tools, model, signal)
-  return openAiStream(p, messages, tools, model, signal)
+export function llmStream(
+  p: ProviderConfig,
+  model: string,
+  messages: ChatMessage[],
+  tools: ToolDef[],
+  signal: AbortSignal,
+  opts: StreamOptions = {}
+): LlmStream {
+  if (p.kind === 'anthropic') return anthropicStream(p, messages, tools, model, signal, opts)
+  return openAiStream(p, messages, tools, model, signal, opts)
 }

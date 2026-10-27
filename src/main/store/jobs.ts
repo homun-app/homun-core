@@ -4,7 +4,7 @@
 // test girano su un :memory: senza Electron.
 import type { DatabaseSync } from 'node:sqlite'
 
-export type JobKind = 'user-message' | 'routine-run'
+export type JobKind = 'user-message' | 'routine-run' | 'task-run'
 export type JobStatus = 'queued' | 'leased' | 'done' | 'failed'
 
 export interface Job {
@@ -208,4 +208,17 @@ export function failJob(db: DatabaseSync, job: Job, now: number, error: string):
 /** Azzera i job di un agente eliminato (né eseguibili né recuperabili). */
 export function cancelAgentJobs(db: DatabaseSync, agentId: string): void {
   db.prepare("DELETE FROM jobs WHERE agent_id = ? AND status IN ('queued','leased')").run(agentId)
+}
+
+/**
+ * Fase 8 (§3bis L7): annulla i job di un task interrotto dall'utente (il
+ * task-run in coda non deve partire; quello in volo lo ferma interruptTask).
+ */
+export function cancelTaskJobs(dbs: DatabaseSync, taskId: number): number {
+  const r = dbs.prepare(`
+    DELETE FROM jobs
+    WHERE kind = 'task-run' AND status IN ('queued','leased')
+      AND json_extract(payload_json, '$.taskId') = ?
+  `).run(taskId)
+  return Number(r.changes)
 }

@@ -17,8 +17,12 @@ const api: SandbotApi = {
   draftSend: (agentId, entryId, body) => ipcRenderer.invoke('draft:send', agentId, entryId, body),
   draftDiscard: (agentId, entryId) => ipcRenderer.invoke('draft:discard', agentId, entryId),
   draftUpdate: (agentId, entryId, body) => ipcRenderer.invoke('draft:update', agentId, entryId, body),
-  resolveApproval: (agentId, approvalId, decision, always) =>
-    ipcRenderer.invoke('approvals:resolve', agentId, approvalId, decision, always),
+  // fase 8: mode 'once' | 'always' | 'turn' (fino a fine turno)
+  resolveApproval: (agentId, approvalId, decision, mode) =>
+    ipcRenderer.invoke('approvals:resolve', agentId, approvalId, decision, mode),
+  // fase 8 (§3bis L5): decisione dell'utente sulla regola proposta dal bot
+  autoreviewRuleDecision: (agentId, entryId, action) =>
+    ipcRenderer.invoke('autoreview:rule-decision', agentId, entryId, action),
 
   listProviders: () => ipcRenderer.invoke('providers:list'),
   saveProvider: (p) => ipcRenderer.invoke('providers:save', p),
@@ -45,6 +49,9 @@ const api: SandbotApi = {
   presenceSignal: (kind) => ipcRenderer.invoke('presence:signal', kind),
   presenceViewing: (agentId) => ipcRenderer.invoke('presence:viewing', agentId),
   outboxOpened: (agentId) => ipcRenderer.invoke('outbox:opened', agentId),
+  // fase 8 (§3bis L7): task thread
+  listTasks: (agentId) => ipcRenderer.invoke('tasks:list', agentId),
+  cancelTask: (taskId) => ipcRenderer.invoke('tasks:cancel', taskId),
   // fase 4: memoria e skill dell'agente
   listMemories: (agentId) => ipcRenderer.invoke('memory:list', agentId),
   updateMemory: (agentId, id, content) => ipcRenderer.invoke('memory:update', agentId, id, content),

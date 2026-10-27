@@ -34,6 +34,9 @@ import { maybeCompactHistory, summarizeWithLlm } from './compaction'
 import { automationEventText } from './update-state'
 import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX } from '../../shared/agent-message'
 import { mainAgentOf } from '../../daemon/presence'
+import { analyzeCommand } from './shell-ast'
+import { commandKey, isNeverAuto } from './permission-rules'
+import { autoReviewDecision, reviewWithConfiguredModel, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
 import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
@@ -53,6 +56,12 @@ interface Running {
   approvals: Map<string, (decision: 'allow' | 'deny' | 'superseded' | 'cancelled') => void>
   /** true quando un nuovo messaggio utente ha sostituito il turno (solo supersedeIfPaused lo imposta). */
   superseded?: boolean
+  /** fase 8 (punto 2): chiavi concesse "per questo turno" (in memoria, mai nel DB). */
+  turnAllows: Set<string>
+  /** fase 8 (punto 2): grant di turno in arrivo (l'analisi shell è async: il prossimo ask la aspetta). */
+  pendingTurnGrant?: Promise<void>
+  /** fase 8 (§3bis L7): il turno gira nel sotto-transcript di questo task. */
+  taskId?: number
 }
 const running = new Map<string, Running>()
 
@@ -101,6 +110,8 @@ function appendSend(
   const content = message.type === 'text' ? message.text
     : message.type === 'widget' ? message.prompt
     : message.type === 'connector' ? (message.reason || message.name)
+    : message.type === 'task' ? message.title
+    : message.type === 'rule' ? message.text
     : (message.subject || message.to || '')
   const entry = appendEntry({
     agentId, kind: 'send-message', role: 'assistant', content,
@@ -159,6 +170,31 @@ export interface RunTurnOptions {
   automatic?: boolean
   /** Fase 7: meta extra del messaggio che apre il turno (es. templateName per TEMPLATE_IMPORT). */
   extraMeta?: Record<string, unknown>
+  /**
+   * Fase 8 (punto 1): il turno di routine è stato aperto da un evento esterno
+   * (blocco <evento> di un trigger): il testo che ha generato le azioni non è
+   * dell'utente — l'auto-review non può togliergli l'ultimo controllo.
+   */
+  externalEvent?: boolean
+  /** Fase 8 (§3bis L7): il turno gira nel sotto-transcript di questo task. */
+  taskId?: number
+}
+
+/**
+ * Fase 8 (punto 2): chiave della grant "Consenti per questo turno" — lo stesso
+ * tool con la stessa chiave del gate fino a fine turno. Per run-command la
+ * chiave è l'insieme delle chiavi dei comandi della riga. null = azione non
+ * turn-grantabile (update_state come "Consenti sempre", comandi never-auto):
+ * il click ricade su "Consenti una volta".
+ */
+async function turnGrantKey(tool: string, input: Record<string, unknown>): Promise<string | null> {
+  if (tool === 'update_state') return null
+  if (tool === 'run-command') {
+    const analysis = await analyzeCommand(String(input.command ?? ''))
+    if (!analysis.commands.length || analysis.commands.some((c) => isNeverAuto(c))) return null
+    return [...new Set(analysis.commands.map(commandKey))].sort().join(';')
+  }
+  return `${tool}|${permissions.targetKey(tool, input)}`
 }
 
 export async function runTurn(agentId: string, userText: string, emit: Emitter, images?: string[], opts: RunTurnOptions = {}): Promise<void> {
@@ -188,13 +224,21 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   if (!provider) throw new Error('Provider non trovato')
 
   const controller = new AbortController()
-  const run: Running = { controller, approvals: new Map() }
+  const run: Running = { controller, approvals: new Map(), turnAllows: new Set() }
+  if (opts.taskId !== undefined) run.taskId = opts.taskId
   running.set(agentId, run)
 
   // fase 7 (correzione A3): un turno è AUTOMATICO se è di routine/trigger o
   // se è stato aperto da una catena tra bot a sua volta automatica: outbox e
   // tetto urgent valgono per TUTTI i suoi send_to_user (recupero compreso)
   const automatic = source === 'routine' || opts.automatic === true
+
+  // fase 8 (punto 1): i turni aperti da un altro bot o da un evento esterno
+  // restano fuori dall'auto-review (prompt injection: l'ultimo controllo
+  // umano non si toglie su testo che non è dell'utente)
+  const untrustedTurn = opts.agentMessage !== undefined || opts.initiator === 'AGENT' || opts.externalEvent === true
+  // fase 8 (punto 1): approvazioni automatiche concesse in questo turno (tetto 20)
+  let autoApprovals = 0
 
   // id dell'entry che apre il turno: serve a decidere se l'utente ha VISTO qualcosa
   let turnEntryId = 0
@@ -446,12 +490,67 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             cfg: externalCfg
           })
           const draft = appendSend(agentId, call, prepared.message, emit, { status: 'pending' })
-          emitNeedsInput(agentId, draft, `bozza in attesa: ${draft.content.slice(0, 80)}`, emit)
+          // fase 8 (punto 1): l'auto-review può approvare l'INVIO della bozza
+          // con le regole dell'utente ("Continua da solo quando…"); tutto ciò
+          // che non convince il revisore resta card come prima
+          const via = prepared.message.via
+          let autoSend: { ok: true; ruleMatched: string } | { ok: false; error: string } | null = null
+          if (via && !prepared.viaRejected && autoApprovals < AUTO_REVIEW_MAX_PER_TURN) {
+            const action: AutoReviewAction = {
+              tool: 'draft_external',
+              draft: {
+                channel: prepared.message.channel, to: prepared.message.to,
+                ...(prepared.message.subject !== undefined ? { subject: prepared.message.subject } : {}),
+                body: prepared.message.body
+              },
+              neverAuto: false, untrustedTurn
+            }
+            const review = await reviewWithConfiguredModel(action)
+            if (review) {
+              const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
+              if (decision.autoAllow) {
+                // come il click su Invia: il gate resta in mezzo (una regola
+                // blocked nega comunque l'invio)
+                const verdict = await permissions.check(via.tool, via.args, agentId)
+                if (verdict.kind === 'deny') {
+                  autoSend = { ok: false, error: 'invio bloccato dai permessi' }
+                } else {
+                  autoApprovals++
+                  try {
+                    const { output } = await executeTool(agentId, via.tool, via.args, { turnInitiator: opts.initiator })
+                    updateEntryMeta(draft.id, {
+                      ...draft.meta, status: 'sent',
+                      autoApproved: true, ruleMatched: decision.ruleMatched
+                    })
+                    const updated = getEntries(agentId).find((e) => e.id === draft.id)
+                    if (updated) emit({ type: 'entries', agentId, entries: [updated] })
+                    appendEntry({ agentId, kind: 'notice', role: 'system', content: `Bozza inviata automaticamente (${via.tool}). Esito: ${output.slice(0, 300)}` })
+                    emitLastEntry(agentId, emit)
+                    autoSend = { ok: true, ruleMatched: decision.ruleMatched }
+                  } catch (e) {
+                    const msg = e instanceof Error ? e.message : String(e)
+                    updateEntryMeta(draft.id, { ...draft.meta, status: 'error' })
+                    const updated = getEntries(agentId).find((e) => e.id === draft.id)
+                    if (updated) emit({ type: 'entries', agentId, entries: [updated] })
+                    autoSend = { ok: false, error: msg }
+                  }
+                }
+              }
+            }
+          }
+          if (!autoSend?.ok) {
+            // niente invio automatico (o fallito): la bozza aspetta l'utente
+            emitNeedsInput(agentId, draft, `bozza in attesa: ${draft.content.slice(0, 80)}`, emit)
+          }
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: prepared.viaRejected
               ? `bozza creata di solo testo: "via" scartato perché ${prepared.viaRejected} non è un tool di invio esterno configurato (nessun canale di invio collegato).`
-              : 'bozza creata e mostrata all’utente: l’invio avverrà solo se l’utente clicca Invia'
+              : autoSend?.ok
+                ? `bozza INVIATA automaticamente per la regola di auto-review "${autoSend.ruleMatched}" dell'utente: esito riportato in chat.`
+                : autoSend && !autoSend.ok
+                  ? `invio automatico della bozza non riuscito (${autoSend.error}): la bozza resta in attesa del click dell'utente.`
+                  : 'bozza creata e mostrata all’utente: l’invio avverrà solo se l’utente clicca Invia'
           })
           continue
         }
@@ -496,6 +595,28 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: `offerta mostrata all'utente: la connessione di ${entry2.name} avviene SOLO dal suo click sul bottone Connetti. Quando l'utente connette riceverai un messaggio di sistema e potrai usare i tool mcp__${entry2.id}__*.`
+          })
+          continue
+        }
+
+        // fase 8 (§3bis L5): proposta di regola di auto-review — l'agente NON
+        // può scriversi le regole da solo: la proposta diventa una card e la
+        // regola si salva SOLO al click dell'utente
+        if (call.name === 'propose_rule_change') {
+          const kind = input.kind === 'allow' ? 'allow' : input.kind === 'block' ? 'block' : null
+          const text = String(input.text ?? '').trim()
+          if (!kind || !text) {
+            messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: 'Proposta non valida: serve kind ("allow" o "block") e il testo della regola in linguaggio naturale.'
+            })
+            continue
+          }
+          const message: SendMessagePayload = { type: 'rule', kind, text, ...(input.why !== undefined ? { why: String(input.why) } : {}) }
+          appendSend(agentId, call, message, emit)
+          messages.push({
+            role: 'tool', toolCallId: call.id,
+            content: 'Proposta mostrata all\'utente: la regola verrà salvata solo se lui la accetta dalla card (Impostazioni → Approvazione automatica).'
           })
           continue
         }
@@ -595,69 +716,116 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         }
 
         if (verdict.kind === 'ask') {
-          // pause-for-approval: crea approval, attende decisione (come l'originale)
-          const approval: Approval = {
-            id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
+          // fase 8 (punto 2): una grant "per questo turno" appena concessa può
+          // essere ancora in fase di calcolo (l'analisi shell è async)
+          if (run.pendingTurnGrant) {
+            await run.pendingTurnGrant
+            run.pendingTurnGrant = undefined
           }
-          run.approvals.set(approval.id, () => undefined)
-          const approvalEntry = appendEntry({
-            agentId, kind: 'approval', role: 'system',
-            content: `${call.name}: ${verdict.reason}`,
-            // C4: la card mostra i nomi dei segreti usati dal comando
-            meta: {
-              approvalId: approval.id, tool: call.name, input, status: 'pending', keys: verdict.keys,
-              ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {})
+          // fase 8 (punto 2): "Consenti per questo turno" — stessa chiave del
+          // gate fino alla fine del turno (in memoria, mai nel DB), niente card
+          const tKey = await turnGrantKey(call.name, input)
+          const turnGranted = tKey !== null && run.turnAllows.has(tKey)
+          // fase 8 (punto 1): l'auto-review sta DOPO il gate e può SOLO
+          // trasformare ask in allow, secondo le regole dell'utente
+          let autoAllowed: { ruleMatched: string; reason?: string } | null = null
+          // per la UI: i comandi never-auto non offrono "per questo turno"
+          const neverAutoCmd = call.name === 'run-command'
+            ? (await analyzeCommand(String(input.command ?? ''))).commands.some((c) => isNeverAuto(c))
+            : false
+          if (!turnGranted) {
+            const action: AutoReviewAction = { tool: call.name, args: input, neverAuto: neverAutoCmd, untrustedTurn }
+            const review = await reviewWithConfiguredModel(action)
+            if (review) {
+              const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
+              if (decision.autoAllow) {
+                autoAllowed = { ruleMatched: decision.ruleMatched, ...(decision.reason ? { reason: decision.reason } : {}) }
+                autoApprovals++
+              }
             }
-          })
-          setStatus(agentId, 'paused-for-approval', emit)
-          emit({ type: 'entries', agentId, entries: [approvalEntry] })
-          emit({ type: 'approval', agentId, approval })
-          // fase 6 (§3bis L9): l'agente è fermo su un'approval → notifica
-          emitNeedsInput(agentId, approvalEntry, `${call.name}: ${verdict.reason}`, emit)
-
-          const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
-            run.approvals.set(approval.id, (d) => resolve(d))
-            setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
-          })
-          run.approvals.delete(approval.id)
-          updateEntryMeta(approvalEntry.id, {
-            ...approvalEntry.meta,
-            status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
-          })
-          const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
-          if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
-          if (decision === 'cancelled') {
-            // fase 4 (0c): interrupt dell'utente — l'approval si chiude subito,
-            // niente esecuzione, il turno finirà STOPPED (controller abortito)
-            messages.push({ role: 'tool', toolCallId: call.id, content: 'Interrotto dall’utente.' })
-            const res = appendEntry({ agentId, kind: 'tool-result', role: 'system', content: 'Interrotto dall’utente', meta: { callId: call.id } })
-            emit({ type: 'entries', agentId, entries: [res] })
-            break
           }
-          if (decision === 'superseded') {
-            // fase 3: un nuovo messaggio utente ha sostituito il turno
-            messages.push({ role: 'tool', toolCallId: call.id, content: 'Sostituito da un nuovo messaggio dell’utente.' })
-            const res = appendEntry({ agentId, kind: 'tool-result', role: 'system', content: 'Sostituito da un nuovo messaggio utente', meta: { callId: call.id } })
-            emit({ type: 'entries', agentId, entries: [res] })
-            break
-          }
-          if (decision === 'timeout') {
-            appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Approvazione scaduta.' })
-            emitLastEntry(agentId, emit)
-          }
-          if (decision !== 'allow') {
-            messages.push({
-              role: 'tool', toolCallId: call.id,
-              content: decision === 'deny' ? 'Denied by user: azione rifiutata.' : 'Approval expired.'
+          if (autoAllowed) {
+            // tracciabilità: entry approval chiusa, la UI la mostra compressa
+            // come "Approvato automaticamente dalla regola: …" ed espandibile
+            const approvalEntry = appendEntry({
+              agentId, kind: 'approval', role: 'system',
+              content: `${call.name}: ${verdict.reason}`,
+              meta: {
+                tool: call.name, input, status: 'allowed', keys: verdict.keys,
+                autoApproved: true, ruleMatched: autoAllowed.ruleMatched,
+                ...(autoAllowed.reason ? { reason: autoAllowed.reason } : {}),
+                ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {})
+              }
             })
-            const res = appendEntry({ agentId, kind: 'tool-result', role: 'system', content: "Rifiutato dall'utente", meta: { callId: call.id } })
-            emit({ type: 'entries', agentId, entries: [res] })
+            emit({ type: 'entries', agentId, entries: [approvalEntry] })
+            // fall through: esecuzione come dopo un "allow" dell'utente
+          } else if (!turnGranted) {
+            // pause-for-approval: crea approval, attende decisione (come l'originale)
+            const approval: Approval = {
+              id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
+            }
+            run.approvals.set(approval.id, () => undefined)
+            const approvalEntry = appendEntry({
+              agentId, kind: 'approval', role: 'system',
+              content: `${call.name}: ${verdict.reason}`,
+              // C4: la card mostra i nomi dei segreti usati dal comando
+              meta: {
+                approvalId: approval.id, tool: call.name, input, status: 'pending', keys: verdict.keys,
+                ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {}),
+                ...(neverAutoCmd ? { neverAuto: true } : {})
+              }
+            })
+            setStatus(agentId, 'paused-for-approval', emit)
+            emit({ type: 'entries', agentId, entries: [approvalEntry] })
+            emit({ type: 'approval', agentId, approval })
+            // fase 6 (§3bis L9): l'agente è fermo su un'approval → notifica
+            emitNeedsInput(agentId, approvalEntry, `${call.name}: ${verdict.reason}`, emit)
+
+            const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
+              run.approvals.set(approval.id, (d) => resolve(d))
+              setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
+            })
+            run.approvals.delete(approval.id)
+            updateEntryMeta(approvalEntry.id, {
+              ...approvalEntry.meta,
+              status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
+            })
+            const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
+            if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+            if (decision === 'cancelled') {
+              // fase 4 (0c): interrupt dell'utente — l'approval si chiude subito,
+              // niente esecuzione, il turno finirà STOPPED (controller abortito)
+              messages.push({ role: 'tool', toolCallId: call.id, content: 'Interrotto dall’utente.' })
+              const res = appendEntry({ agentId, kind: 'tool-result', role: 'system', content: 'Interrotto dall’utente', meta: { callId: call.id } })
+              emit({ type: 'entries', agentId, entries: [res] })
+              break
+            }
+            if (decision === 'superseded') {
+              // fase 3: un nuovo messaggio utente ha sostituito il turno
+              messages.push({ role: 'tool', toolCallId: call.id, content: 'Sostituito da un nuovo messaggio dell’utente.' })
+              const res = appendEntry({ agentId, kind: 'tool-result', role: 'system', content: 'Sostituito da un nuovo messaggio utente', meta: { callId: call.id } })
+              emit({ type: 'entries', agentId, entries: [res] })
+              break
+            }
+            if (decision === 'timeout') {
+              appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Approvazione scaduta.' })
+              emitLastEntry(agentId, emit)
+            }
+            if (decision !== 'allow') {
+              messages.push({
+                role: 'tool', toolCallId: call.id,
+                content: decision === 'deny' ? 'Denied by user: azione rifiutata.' : 'Approval expired.'
+              })
+              const res = appendEntry({ agentId, kind: 'tool-result', role: 'system', content: "Rifiutato dall'utente", meta: { callId: call.id } })
+              emit({ type: 'entries', agentId, entries: [res] })
+              setStatus(agentId, 'thinking', emit)
+              paused = true
+              continue
+            }
+            // allow: la standing grant la registra il resolver se "always"
             setStatus(agentId, 'thinking', emit)
-            paused = true
-            continue
           }
-          // allow: la standing grant la registra il resolver se "always"
-          setStatus(agentId, 'thinking', emit)
+          // turnGranted: esecuzione senza chiedere di nuovo (grant di turno)
         }
 
         // esecuzione
@@ -803,6 +971,17 @@ export function interrupt(agentId: string): void {
 }
 
 /**
+ * Fase 8 (§3bis L7): interrompe il turno di un SOLO task (bottone sulla card):
+ * stessa logica di interrupt, ma solo se il turno in corso è quello del task.
+ */
+export function interruptTask(agentId: string, taskId: number): boolean {
+  const run = running.get(agentId)
+  if (!run || run.taskId !== taskId) return false
+  interrupt(agentId)
+  return true
+}
+
+/**
  * Fase 3: un nuovo messaggio utente mentre l'agente è in paused-for-approval
  * sostituisce il turno in corso (SUPERSEDED): le approval pendenti diventano
  * 'superseded', il turno termina e il nuovo messaggio parte subito invece di
@@ -824,19 +1003,39 @@ export function supersedeIfPaused(agentId: string): boolean {
   return true
 }
 
-export function resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', always: boolean): void {
+/**
+ * Fase 8 (punto 2): mode 'once' = consentito una volta; 'always' = standing
+ * grant persistente; 'turn' = chiave in memoria fino alla fine del turno
+ * (mai nel DB). Per update_state e comandi never-auto 'turn' ricade su
+ * 'once' (turnGrantKey → null): valgono gli stessi divieti di "Consenti sempre".
+ */
+export function resolveApproval(
+  agentId: string,
+  approvalId: string,
+  decision: 'allow' | 'deny',
+  mode: 'once' | 'always' | 'turn' = 'once'
+): void {
   const run = running.get(agentId)
   const cb = run?.approvals.get(approvalId)
-  if (!cb) {
+  if (!run || !cb) {
     console.log(`[sandbot] approval ${approvalId.slice(0, 8)} non in attesa (click stantio o già risolta)`)
     return
   }
-  if (decision === 'allow' && always) {
+  const entry = getEntries(agentId).findLast((e: import('../../shared/types').TranscriptEntry) => e.kind === 'approval' && e.meta?.approvalId === approvalId)
+  if (decision === 'allow' && mode === 'always') {
     // registra standing grant per il tool+target dell'approval in sospeso
-    const entry = getEntries(agentId).findLast((e: import('../../shared/types').TranscriptEntry) => e.kind === 'approval' && e.meta?.approvalId === approvalId)
     if (entry) {
       void permissions.grantStanding(String(entry.meta?.tool), entry.meta?.input as Record<string, unknown>)
     }
+  }
+  if (decision === 'allow' && mode === 'turn' && entry) {
+    // la chiave è registrata appena l'analisi shell è pronta; il prossimo
+    // ramo ask attende la promise prima di controllare (niente race)
+    run.pendingTurnGrant = turnGrantKey(String(entry.meta?.tool), entry.meta?.input as Record<string, unknown>)
+      .then((key) => {
+        if (key) run.turnAllows.add(key)
+      })
+      .catch(() => undefined)
   }
   cb(decision)
 }

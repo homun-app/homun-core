@@ -85,6 +85,15 @@ function open(): DatabaseSync {
       agent_id TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'working',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      summary TEXT
+    );
     ${JOBS_DDL}
   `)
   // fase 4: colonne nuove delle routine per i DB esistenti (CREATE TABLE IF
@@ -282,6 +291,9 @@ export function getPermissions(): PermissionsConfig {
       // intercettato dal loop; list_agents è una lettura del roster)
       { tool: 'send_to_agent', pattern: '*', mode: 'always_allow' },
       { tool: 'list_agents', pattern: '*', mode: 'always_allow' },
+      // fase 8: la proposta di regola di auto-review crea SOLO una card (la
+      // regola si salva al click dell'utente); è intercettata dal loop
+      { tool: 'propose_rule_change', pattern: '*', mode: 'always_allow' },
       { tool: 'mcp__*', pattern: '*', mode: 'needs_approval' }
     ]
   })
@@ -430,4 +442,64 @@ export function allHeldOutbox(): OutboxRow[] {
 /** Segna consegnata (rimuove dalla outbox). */
 export function releaseOutboxEntry(entryId: number): void {
   db().prepare('DELETE FROM outbox WHERE entry_id = ?').run(entryId)
+}
+
+// ---- task thread (fase 8, §3bis L7) ----
+
+export type TaskStatus = 'working' | 'needs_input' | 'done' | 'failed' | 'cancelled'
+
+export interface Task {
+  id: number
+  agent_id: string
+  title: string
+  status: TaskStatus
+  created_at: number
+  updated_at: number
+  summary: string | null
+}
+
+interface TaskRow {
+  id: number; agent_id: string; title: string; status: string
+  created_at: number; updated_at: number; summary: string | null
+}
+
+function rowToTask(r: TaskRow): Task {
+  return {
+    id: r.id, agent_id: r.agent_id, title: r.title,
+    status: r.status as TaskStatus,
+    created_at: r.created_at, updated_at: r.updated_at, summary: r.summary
+  }
+}
+
+export function createTask(agentId: string, title: string): Task {
+  const now = Date.now()
+  const r = db()
+    .prepare("INSERT INTO tasks(agent_id, title, status, created_at, updated_at) VALUES(?,?, 'working', ?, ?)")
+    .run(agentId, title, now, now)
+  return { id: Number(r.lastInsertRowid), agent_id: agentId, title, status: 'working', created_at: now, updated_at: now, summary: null }
+}
+
+export function getTask(id: number): Task | null {
+  const r = db().prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRow | undefined
+  return r ? rowToTask(r) : null
+}
+
+export function listTasks(agentId?: string): Task[] {
+  const q = agentId ? 'SELECT * FROM tasks WHERE agent_id = ? ORDER BY id DESC' : 'SELECT * FROM tasks ORDER BY id DESC'
+  const rows = (agentId ? db().prepare(q).all(agentId) : db().prepare(q).all()) as unknown as TaskRow[]
+  return rows.map(rowToTask)
+}
+
+/** Aggiorna stato/summary (touch di updated_at); stato finale solo transizioni valide. */
+export function updateTask(id: number, patch: Partial<Pick<Task, 'status' | 'summary'>>): Task | null {
+  const cur = getTask(id)
+  if (!cur) return null
+  // i task chiusi non riaprono: done/failed/cancelled sono finali
+  const nextStatus = patch.status ?? cur.status
+  const closed = cur.status === 'done' || cur.status === 'failed' || cur.status === 'cancelled'
+  const status = closed ? cur.status : nextStatus
+  db()
+    .prepare('UPDATE tasks SET status = ?, summary = ?, updated_at = ? WHERE id = ?')
+    .run(status, patch.summary ?? cur.summary, Date.now(), id)
+  return getTask(id)
 }

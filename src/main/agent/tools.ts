@@ -242,6 +242,19 @@ export const toolDefs: ToolDef[] = [
     }
   },
   {
+    name: 'propose_rule_change',
+    description: "Proponi all'utente una regola di approvazione automatica (\"Continua da solo quando…\" / \"Fermati e chiedimi sempre quando…\") in linguaggio naturale, ad esempio dopo che ha approvato più volte la stessa azione. La regola NON viene salvata da te: l'utente la aggiunge solo se accetta la card. kind 'allow' = continua da solo, 'block' = chiedi sempre.",
+    parameters: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['allow', 'block'], description: "'allow' = continua da solo quando la regola è rispettata; 'block' = fermati e chiedi sempre" },
+        text: { type: 'string', description: 'La regola in linguaggio naturale (una frase)' },
+        why: { type: 'string', description: 'Perché questa regola aiuterebbe (una frase, mostrata nella card)' }
+      },
+      required: ['kind', 'text']
+    }
+  },
+  {
     name: 'update_state',
     description: "Modifica il tuo stato. target 'memory' → come update_memory (action write/update/delete). target 'routine' → action: create (campi name, description, prompt, schedule cron a 5 campi OPPURE trigger di tipo schedule, timezone, provenance 'template' se crei le routine di un template; la routine nasce SEMPRE in pausa: chiedi all'utente se attivarla, l'attivazione richiede la sua approvazione), update (id + campi da cambiare), pause, resume, delete (id).",
     parameters: {
