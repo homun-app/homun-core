@@ -325,10 +325,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     if (!text.trim()) return emptySendResult()
     if (isDuplicateSend(deliveredTexts, text)) return alreadyDeliveredResult(text)
     if (sendsSinceWork >= 1) {
-      if (text.trim()) {
-        add({ agentId, kind: 'thinking', role: 'assistant', content: text })
-        emitLastEntry(agentId, emit)
-      }
+      add({ agentId, kind: 'thinking', role: 'assistant', content: text })
+      emitLastEntry(agentId, emit)
       return messageCapResult()
     }
     const hold = sendToUser(call, input)
@@ -535,7 +533,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         streamAbort.abort()
         updateEntryContent(entry.id, acc)
         // fase 9 (punto 1): il modello principale non risponde → UNA riprova
-        // col modello di riserva (il consumed step conta nel tetto MAX_STEPS)
+        // col modello di riserva (lo step consumato conta nel tetto MAX_STEPS)
         if (
           shouldUseFallback(err, {
             fallbackModel, model: activeModel, fallbackUsed, aborted: controller.signal.aborted

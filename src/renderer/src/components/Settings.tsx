@@ -829,8 +829,16 @@ function AgentsTab() {
     api.listTemplates().then(setTemplates).catch(() => undefined)
   }, [])
 
+  // fase 9 (punto 1): il rifiuto della capability "tools" (o qualunque errore
+  // di agents:update) si mostra sotto la riga del bot, non si perde in console
+  const [agentError, setAgentError] = useState<Record<string, string>>({})
   async function patch(a: Agent, p: Partial<Agent>) {
-    await api.updateAgent(a.id, p)
+    try {
+      await api.updateAgent(a.id, p)
+      setAgentError((prev) => ({ ...prev, [a.id]: '' }))
+    } catch (e) {
+      setAgentError((prev) => ({ ...prev, [a.id]: e instanceof Error ? e.message : String(e) }))
+    }
   }
 
   // fase 7: senza setting mainAgentId il principale è il primo agente
@@ -889,6 +897,9 @@ function AgentsTab() {
             defaultValue={a.description}
             onBlur={async (e) => void patch(a, { description: e.target.value })}
           />
+          {agentError[a.id] ? (
+            <div className="mt-1.5 text-xs text-red-400">✕ {agentError[a.id]}</div>
+          ) : null}
         </div>
       ))}
 

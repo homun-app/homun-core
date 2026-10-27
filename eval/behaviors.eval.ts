@@ -28,7 +28,7 @@ import { toolDefs } from '../src/main/agent/tools'
 // comportamento del sistema, non solo il primo impulso del modello
 import { RECOVERY_NUDGE } from '../src/main/agent/loop'
 import {
-  deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkTool, messageCapResult, emptySendResult
+  deliveredResultText, alreadyDeliveredResult, isDuplicateSend, messageCapResult, emptySendResult
 } from '../src/main/agent/turn-sends'
 import type { ProviderConfig, Agent } from '../src/shared/types'
 
