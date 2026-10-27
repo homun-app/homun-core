@@ -9,6 +9,7 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { JOBS_DDL } from './jobs'
+import { GROUPS_DDL } from './groups'
 import type { Agent, TranscriptEntry, PermissionsConfig, RoutineTrigger } from '../../shared/types'
 
 let _dir: string | null = null
@@ -97,6 +98,7 @@ function open(): DatabaseSync {
       automatic INTEGER DEFAULT 0
     );
     ${JOBS_DDL}
+    ${GROUPS_DDL}
   `)
   // fase 4: colonne nuove delle routine per i DB esistenti (CREATE TABLE IF
   // NOT EXISTS non le aggiunge); provenance distingue le routine dell'utente
@@ -125,6 +127,16 @@ function open(): DatabaseSync {
     ['automatic', 'ALTER TABLE tasks ADD COLUMN automatic INTEGER DEFAULT 0']
   ] as const) {
     if (!taskPresent.has(col)) db.exec(ddl)
+  }
+  // fase 10: colonne degli agents — created_by (chi ha creato il bot) e
+  // section (raggruppamento della sidebar, testo libero)
+  const agentCols = db.prepare("SELECT name FROM pragma_table_info('agents')").all() as Array<{ name: string }>
+  const agentPresent = new Set(agentCols.map((c) => c.name))
+  for (const [col, ddl] of [
+    ['created_by', 'ALTER TABLE agents ADD COLUMN created_by TEXT'],
+    ['section', "ALTER TABLE agents ADD COLUMN section TEXT DEFAULT ''"]
+  ] as const) {
+    if (!agentPresent.has(col)) db.exec(ddl)
   }
   return db
 }
@@ -158,12 +170,14 @@ export function deleteSetting(key: string): void {
 interface AgentRow {
   id: string; name: string; description: string; provider_id: string | null
   model: string | null; status: string; unread: number; created_at: number
+  created_by?: string | null; section?: string | null
 }
 
 function rowToAgent(r: AgentRow): Agent {
   return {
     id: r.id, name: r.name, description: r.description, providerId: r.provider_id,
-    model: r.model, status: r.status as Agent['status'], unread: r.unread, createdAt: r.created_at
+    model: r.model, status: r.status as Agent['status'], unread: r.unread, createdAt: r.created_at,
+    createdBy: r.created_by ?? null, section: r.section ?? null
   }
 }
 
@@ -177,23 +191,36 @@ export function getAgent(id: string): Agent | null {
   return r ? rowToAgent(r) : null
 }
 
-export function createAgent(name: string, description = ''): Agent {
+/** Opzioni di creazione (fase 10): creatore e sezione della sidebar. */
+export interface CreateAgentOpts {
+  createdBy?: string
+  section?: string
+}
+
+export function createAgent(name: string, description = '', opts: CreateAgentOpts = {}): Agent {
   const id = 'agent_' + crypto.randomUUID().slice(0, 8)
   const now = Date.now()
   db()
-    .prepare('INSERT INTO agents(id, name, description, status, created_at) VALUES(?,?,?,?,?)')
-    .run(id, name, description, 'idle', now)
-  return { id, name, description, providerId: null, model: null, status: 'idle', unread: 0, createdAt: now }
+    .prepare('INSERT INTO agents(id, name, description, status, created_at, created_by, section) VALUES(?,?,?,?,?,?,?)')
+    .run(id, name, description, 'idle', now, opts.createdBy ?? null, opts.section ?? '')
+  return {
+    id, name, description, providerId: null, model: null, status: 'idle', unread: 0, createdAt: now,
+    createdBy: opts.createdBy ?? null, section: opts.section ?? ''
+  }
 }
 
-export function updateAgent(id: string, patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model' | 'status' | 'unread'>>): void {
+export function updateAgent(
+  id: string,
+  patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model' | 'status' | 'unread' | 'section'>>
+): void {
   const a = getAgent(id)
   if (!a) return
   db()
-    .prepare('UPDATE agents SET name=?, description=?, provider_id=?, model=?, status=?, unread=? WHERE id=?')
+    .prepare('UPDATE agents SET name=?, description=?, provider_id=?, model=?, status=?, unread=?, section=? WHERE id=?')
     .run(
       patch.name ?? a.name, patch.description ?? a.description, patch.providerId ?? a.providerId,
-      patch.model ?? a.model, patch.status ?? a.status, patch.unread ?? a.unread, id
+      patch.model ?? a.model, patch.status ?? a.status, patch.unread ?? a.unread,
+      patch.section ?? a.section ?? '', id
     )
 }
 
@@ -209,6 +236,9 @@ export function deleteAgent(id: string): void {
   }
   db().prepare('DELETE FROM routines WHERE agent_id = ?').run(id)
   db().prepare('DELETE FROM outbox WHERE agent_id = ?').run(id)
+  // fase 10: l'agente esce dai gruppi (i gruppi restano, senza di lui)
+  db().prepare('DELETE FROM group_members WHERE agent_id = ?').run(id)
+  db().prepare('DELETE FROM group_cursors WHERE agent_id = ?').run(id)
   db().prepare('DELETE FROM agents WHERE id=?').run(id)
   db().prepare('DELETE FROM entries WHERE agent_id=?').run(id)
   // memoria e skill su disco non restano orfane
@@ -311,6 +341,18 @@ export function getPermissions(): PermissionsConfig {
       { tool: 'propose_rule_change', pattern: '*', mode: 'always_allow' },
       { tool: 'create_task', pattern: '*', mode: 'always_allow' },
       { tool: 'update_task', pattern: '*', mode: 'always_allow' },
+      // fase 10: creare bot e gruppi nei turni dell'UTENTE parte senza card
+      // (il loop forza la card nei turni automatici/di altri bot/di gruppo/
+      // untrusted: permessi per origine, punto 1); aggiornare ed eliminare
+      // bot chiede SEMPRE (update_agent dei PROPRI bot lo bypassa pre-gate,
+      // delete_agent mai); i messaggi di gruppo sono interni all'utente
+      { tool: 'create_agent', pattern: '*', mode: 'always_allow' },
+      { tool: 'create_group', pattern: '*', mode: 'always_allow' },
+      { tool: 'update_agent', pattern: '*', mode: 'needs_approval' },
+      { tool: 'delete_agent', pattern: '*', mode: 'needs_approval' },
+      { tool: 'update_group', pattern: '*', mode: 'needs_approval' },
+      { tool: 'post_to_group', pattern: '*', mode: 'always_allow' },
+      { tool: 'pass', pattern: '*', mode: 'always_allow' },
       { tool: 'mcp__*', pattern: '*', mode: 'needs_approval' }
     ]
   })

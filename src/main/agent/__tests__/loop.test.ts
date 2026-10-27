@@ -19,11 +19,23 @@ const h = vi.hoisted(() => {
     // fase 8: righe dei task (create_task / update_task); correzione B1:
     // untrusted/automatic = origine del turno che li ha creati
     tasks: [] as Array<{ id: number; agent_id: string; title: string; status: string; created_at: number; updated_at: number; summary: string | null; untrusted?: number; automatic?: number }>,
-    // fase 10 (residuo 0e): provider attivi (notice di onboarding del loop)
-    providers: [] as Array<{ id: string; enabled: boolean }>,
+    // fase 10 (residuo 0e): provider attivi (notice di onboarding del loop);
+    // fase 10: anche kind e default, per i test di create_agent
+    providers: [] as Array<{ id: string; enabled: boolean; kind?: string }>,
+    // fase 10: stato in-memory dello store dei gruppi (mock di ../../store/groups)
+    groupsState: {
+      groups: [] as Array<{ id: number; name: string; description: string; created_by: string; coordinator_id: string | null; created_at: number }>,
+      members: new Map<number, string[]>(),
+      messages: [] as Array<{ id: number; group_id: number; author_kind: string; author_id: string | null; author_name: string; text: string; reply_to: number | null; root_id: number | null; depth: number; automatic: number; created_at: number }>,
+      cursors: new Map<string, number>(),
+      turns: [] as Array<{ nonce: string; group_id: number; member_id: string; source_message_id: number; outcome: string | null; started_at: number | null; ended_at: number | null }>,
+      nextGroupId: 1,
+      nextMsgId: 1
+    },
     nextId: 1,
     nextRoutineId: 1,
     nextTaskId: 1,
+    nextAgentId: 100,
     dataDir: '' // riempita nel beforeAll (mkdtemp): memoria/skill scrivono lì
   }
   const llm = {
@@ -87,6 +99,20 @@ vi.mock('../../store/db', () => ({
   getSetting: (key: string, fallback: unknown) => (h.db.settings.has(key) ? h.db.settings.get(key) : fallback),
   // fase 7: roster degli agenti (bot principale, send_to_agent) e routine attive
   listAgents: () => [...h.db.agents.values()].sort((a, b) => a.createdAt - b.createdAt),
+  // fase 10: creazione/eliminazione bot dal tool create_agent/delete_agent
+  createAgent: (name: string, description = '', opts: { createdBy?: string; section?: string } = {}) => {
+    const a: Agent = {
+      id: 'agent_' + h.db.nextAgentId++, name, description, providerId: null, model: null,
+      status: 'idle', unread: 0, createdAt: Date.now(), createdBy: opts.createdBy ?? null, section: opts.section ?? ''
+    }
+    h.db.agents.set(a.id, a)
+    return { ...a }
+  },
+  deleteAgent: (id: string) => {
+    h.db.agents.delete(id)
+    h.db.entries = h.db.entries.filter((e) => e.agentId !== id)
+    for (const [gid, ids] of h.db.groupsState.members) h.db.groupsState.members.set(gid, ids.filter((x) => x !== id))
+  },
   listRoutines: (agentId?: string) => h.db.routines.filter((r) => !agentId || r.agent_id === agentId),
   // fase 9 (punto 1): elenco provider (richiesto dal revisore di auto-review);
   // fase 10 (residuo 0e): controllabile dai test della notice di onboarding
@@ -172,6 +198,16 @@ vi.mock('../../store/jobs', () => ({
     h.db.jobs.push(job)
     return job
   },
+  // fase 10: i job di un agente eliminato si tolgono dalla coda
+  cancelAgentJobs: (_db: unknown, agentId: string) => {
+    h.db.jobs = h.db.jobs.filter((j) => j.agentId !== agentId || j.status === 'done')
+  },
+  cancelGroupJobs: (_db: unknown, groupId: number) => {
+    h.db.jobs = h.db.jobs.filter((j) => !(j.kind === 'group-turn' && j.payload.groupId === groupId))
+  },
+  cancelMemberGroupJobs: (_db: unknown, groupId: number, memberId: string) => {
+    h.db.jobs = h.db.jobs.filter((j) => !(j.kind === 'group-turn' && j.payload.groupId === groupId && j.payload.memberId === memberId))
+  },
   // correzione A1: stesso tetto della coda dei messaggi utente (mock del conteggio SQL)
   pendingUserMessages: (_db: unknown, agentId: string) =>
     h.db.jobs.filter((j) => j.agentId === agentId && j.kind === 'user-message' && j.status === 'queued').length,
@@ -185,11 +221,148 @@ vi.mock('../../store/jobs', () => ({
 }))
 
 vi.mock('../providers', () => ({
-  getProvider: (id: string) =>
-    id === 'prov'
+  getProvider: (id: string) => {
+    // fase 10: i test possono definire i provider in h.db.providers (col kind,
+    // per i default di modello di create_agent); 'prov' resta il fisso di sempre
+    const p = h.db.providers.find((x) => x.id === id)
+    if (p) {
+      return { id: p.id, name: 'test', kind: (p.kind ?? 'openai-compatible') as 'openai-compatible' | 'ollama', baseUrl: 'http://localhost', apiKey: '', enabled: true }
+    }
+    return id === 'prov'
       ? { id: 'prov', name: 'test', kind: 'openai-compatible' as const, baseUrl: 'http://localhost', apiKey: '', enabled: true }
       : null
+  },
+  // fase 10: la capability "tools" è data per vera (nessuna rete nei test)
+  modelSupportsTools: async () => ({ ok: true, checked: false })
 }))
+
+// fase 10: lo store dei gruppi in memoria — specchia le semantica dello store
+// reale (nonce univoci, cursori, fusione) usando il planner PURO reale
+vi.mock('../../store/groups', async () => {
+  const pure = await import('../group-turns')
+  const st = () => h.db.groupsState
+  const curKey = (g: number, a: string): string => `${g}:${a}`
+  return {
+    createGroup: (name: string, description: string, createdBy: string, memberIds: string[], coordinatorId: string | null = null) => {
+      const s = st()
+      const g = { id: s.nextGroupId++, name, description, created_by: createdBy, coordinator_id: coordinatorId, created_at: Date.now() }
+      s.groups.push(g)
+      s.members.set(g.id, [...new Set([...memberIds, createdBy])])
+      return { ...g }
+    },
+    getGroup: (id: number) => {
+      const g = st().groups.find((x) => x.id === id)
+      return g ? { ...g } : null
+    },
+    listGroups: () => st().groups.map((g) => ({ ...g })),
+    groupsOfMember: (agentId: string) => st().groups.filter((g) => st().members.get(g.id)?.includes(agentId)).map((g) => ({ ...g })),
+    groupMemberIds: (groupId: number) => [...(st().members.get(groupId) ?? [])],
+    isGroupMember: (groupId: number, agentId: string) => (st().members.get(groupId) ?? []).includes(agentId),
+    addGroupMember: (groupId: number, agentId: string) => {
+      const cur = st().members.get(groupId) ?? []
+      st().members.set(groupId, [...new Set([...cur, agentId])])
+    },
+    removeGroupMember: (groupId: number, agentId: string) => {
+      st().members.set(groupId, (st().members.get(groupId) ?? []).filter((x) => x !== agentId))
+    },
+    removeAgentMemberships: (agentId: string) => {
+      for (const [gid, ids] of st().members) st().members.set(gid, ids.filter((x) => x !== agentId))
+    },
+    updateGroup: (id: number, patch: { name?: string; description?: string; coordinator_id?: string | null }) => {
+      const g = st().groups.find((x) => x.id === id)
+      if (g) Object.assign(g, patch)
+    },
+    addGroupMessage: (m: { groupId: number; authorKind: 'user' | 'agent' | 'system'; authorId: string | null; authorName: string; text: string; replyTo?: number | null; rootId?: number | null; depth?: number; automatic?: boolean }) => {
+      const s = st()
+      const row = {
+        id: s.nextMsgId++, group_id: m.groupId, author_kind: m.authorKind, author_id: m.authorId,
+        author_name: m.authorName, text: m.text, reply_to: m.replyTo ?? null, root_id: m.rootId ?? null,
+        depth: m.depth ?? 0, automatic: m.automatic ? 1 : 0, created_at: Date.now()
+      }
+      s.messages.push(row)
+      // catena: un depth 0 senza root è root di se stesso (come lo store reale)
+      if (row.depth === 0 && row.root_id === null) row.root_id = row.id
+      return { ...row }
+    },
+    getGroupMessage: (id: number) => {
+      const m = st().messages.find((x) => x.id === id)
+      return m ? { ...m } : null
+    },
+    groupMessages: (groupId: number, afterId = 0) => st().messages.filter((m) => m.group_id === groupId && m.id > afterId).map((m) => ({ ...m })),
+    lastGroupMessageId: (groupId: number) => st().messages.filter((m) => m.group_id === groupId).reduce((max, m) => Math.max(max, m.id), 0),
+    botPostsLastHour: (groupId: number, now: number) =>
+      st().messages.filter((m) => m.group_id === groupId && m.author_kind === 'agent' && m.created_at > now - 3_600_000).length,
+    getGroupCursor: (groupId: number, agentId: string) => st().cursors.get(curKey(groupId, agentId)) ?? 0,
+    setGroupCursor: (groupId: number, agentId: string, lastSeen: number) => { st().cursors.set(curKey(groupId, agentId), lastSeen) },
+    registerPlannedTurn: (input: { nonce: string; groupId: number; memberId: string; sourceMessageId: number }) => {
+      const s = st()
+      if (s.turns.some((t) => t.nonce === input.nonce)) return false
+      s.turns.push({ nonce: input.nonce, group_id: input.groupId, member_id: input.memberId, source_message_id: input.sourceMessageId, outcome: null, started_at: null, ended_at: null })
+      return true
+    },
+    groupTurnByNonce: (nonce: string) => {
+      const t = st().turns.find((x) => x.nonce === nonce)
+      return t ? { ...t } : null
+    },
+    startGroupTurn: (nonce: string, at: number) => {
+      const t = st().turns.find((x) => x.nonce === nonce)
+      if (t && t.started_at === null) t.started_at = at
+    },
+    finishGroupTurn: (nonce: string, outcome: string, at: number) => {
+      const t = st().turns.find((x) => x.nonce === nonce)
+      if (t) { t.outcome = outcome; t.ended_at = at }
+    },
+    pendingTurnNonces: (groupId: number) => st().turns.filter((t) => t.group_id === groupId && t.started_at === null && t.outcome === null).map((t) => t.nonce),
+    groupTurnNonces: (groupId: number) => st().turns.filter((t) => t.group_id === groupId).map((t) => t.nonce),
+    // la colla: usa il planner PURO reale e accoda i job nel mock di jobs
+    scheduleTurnsForMessage: (message: { id: number; group_id: number; author_kind: string; author_id: string | null; text: string; depth: number; automatic: number }, emit: (e: unknown) => void) => {
+      const s = st()
+      const group = s.groups.find((g) => g.id === message.group_id)
+      if (!group || message.author_kind === 'system') return { plan: { turns: [], skipped: [], systemNotice: null, capNotice: false }, jobs: [] }
+      const members = (s.members.get(group.id) ?? [])
+        .map((id) => [...h.db.agents.values()].find((a) => a.id === id))
+        .filter((a): a is Agent => !!a)
+        .map((a) => ({ id: a.id, name: a.name }))
+      // il planner è il modulo PURO reale (caricato dalla factory async)
+      const { planGroupTurns, GROUP_HOURLY_CAP_TEXT } = pure
+      const now = Date.now()
+      const plan = planGroupTurns({
+        group: { id: group.id, coordinatorId: group.coordinator_id },
+        message: { id: message.id, authorKind: message.author_kind === 'user' ? 'user' : 'agent', authorId: message.author_id, text: message.text, depth: message.depth },
+        members,
+        pendingNonces: s.turns.filter((t) => t.group_id === group.id && t.started_at === null && t.outcome === null).map((t) => t.nonce),
+        existingNonces: s.turns.filter((t) => t.group_id === group.id).map((t) => t.nonce),
+        postsLastHour: s.messages.filter((m) => m.group_id === group.id && m.author_kind === 'agent' && m.created_at > now - 3_600_000).length
+      })
+      if (plan.capNotice) {
+        const recent = s.messages.filter((m) => m.group_id === group.id && m.author_kind === 'system' && m.text === GROUP_HOURLY_CAP_TEXT && m.created_at > now - 3_600_000)
+        if (!recent.length) {
+          s.messages.push({ id: s.nextMsgId++, group_id: group.id, author_kind: 'system', author_id: null, author_name: 'sistema', text: GROUP_HOURLY_CAP_TEXT, reply_to: null, root_id: null, depth: 0, automatic: 0, created_at: now })
+          emit({ type: 'groups' })
+        }
+      } else if (plan.systemNotice) {
+        s.messages.push({ id: s.nextMsgId++, group_id: group.id, author_kind: 'system', author_id: null, author_name: 'sistema', text: plan.systemNotice, reply_to: null, root_id: null, depth: 0, automatic: 0, created_at: now })
+        emit({ type: 'groups' })
+      }
+      const jobs: Array<{ agentId: string; nonce: string }> = []
+      for (const t of plan.turns) {
+        if (s.turns.some((x) => x.nonce === t.nonce)) continue
+        s.turns.push({ nonce: t.nonce, group_id: group.id, member_id: t.memberId, source_message_id: message.id, outcome: null, started_at: null, ended_at: null })
+        h.db.jobs.push({ id: h.db.jobs.length + 1, agentId: t.memberId, kind: 'group-turn', payload: { groupId: group.id, memberId: t.memberId, nonce: t.nonce, sourceMessageId: message.id, ...(message.automatic ? { automatic: true } : {}) }, createdAt: now, status: 'queued' })
+        jobs.push({ agentId: t.memberId, nonce: t.nonce })
+      }
+      return { plan, jobs }
+    },
+    groupWithMembers: (group: { id: number; name: string; description: string; created_by: string; coordinator_id: string | null; created_at: number }) => ({
+      id: group.id, name: group.name, description: group.description, createdBy: group.created_by,
+      coordinatorId: group.coordinator_id, createdAt: group.created_at,
+      members: (st().members.get(group.id) ?? []).map((id) => {
+        const a = [...h.db.agents.values()].find((x) => x.id === id)
+        return { agentId: id, name: a?.name ?? id, coordinator: id === group.coordinator_id }
+      })
+    })
+  }
+})
 
 vi.mock('../llm', () => ({
   llmStream: (
@@ -287,6 +460,8 @@ vi.mock('../../mcp', () => ({
 const { runTurn, isRunning, resolveApproval, supersedeIfPaused, interrupt, RECOVERY_NUDGE } = await import('../loop')
 // il modulo mcp mockato (per patcharne callTool nel test della card Riconnetti)
 const mcpMock = await import('../../mcp')
+// fase 10: il modulo db mockato (createAgent con createdBy/section nei test)
+const dbm = await import('../../store/db')
 
 const emit = () => undefined
 const AGENT = 'agent_t'
@@ -325,6 +500,14 @@ beforeEach(() => {
   h.db.jobs.length = 0
   h.db.tasks.length = 0
   h.db.providers.length = 0
+  // fase 10: store dei gruppi pulito
+  h.db.groupsState.groups.length = 0
+  h.db.groupsState.members.clear()
+  h.db.groupsState.messages.length = 0
+  h.db.groupsState.cursors.clear()
+  h.db.groupsState.turns.length = 0
+  h.db.groupsState.nextGroupId = 1
+  h.db.groupsState.nextMsgId = 1
   h.db.nextId = 1
   h.db.nextRoutineId = 1
   h.db.nextTaskId = 1
@@ -2204,5 +2387,466 @@ describe('fase 10 (residuo 0e): notice di onboarding quando il provider esiste',
     await runTurn(AGENT, 'ciao', emit)
     const notice = h.db.entries.find((e) => e.kind === 'notice')
     expect(notice?.content).toContain('Configura prima un provider')
+  })
+})
+
+// ---- fase 10: team e gruppi ----
+
+describe('fase 10 (punto 1): create_agent', () => {
+  const PERMS = {
+    default: 'needs_approval',
+    rules: [
+      { tool: 'send_to_user', pattern: '*', mode: 'always_allow' },
+      { tool: 'create_agent', pattern: '*', mode: 'always_allow' },
+      { tool: 'update_agent', pattern: '*', mode: 'needs_approval' },
+      { tool: 'delete_agent', pattern: '*', mode: 'needs_approval' },
+      { tool: 'create_group', pattern: '*', mode: 'always_allow' },
+      { tool: 'read-file', pattern: '*', mode: 'always_allow' }
+    ]
+  } as const
+
+  it('nel turno utente parte SENZA card, prende il modello predefinito e NON ha kickstart', async () => {
+    h.db.settings.set('permissions', PERMS)
+    // provider ollama: il default del kind è kimi-k3:cloud (fase 9)
+    h.db.providers = [{ id: 'ollama-prov', enabled: true, kind: 'ollama' }]
+    h.llm.queue = [
+      { toolCalls: [{ id: 'ca1', name: 'create_agent', arguments: JSON.stringify({ name: 'Cercatore', role: 'Trovi i ristoranti e consegni al coordinatore nel gruppo.', section: 'Team cena' }) }] },
+      { text: 'fatto' }
+    ]
+    await runTurn(AGENT, 'creami un cercatore', emit)
+    // nessuna card: l'azione è solo del turno utente
+    expect(h.db.entries.some((e) => e.kind === 'approval')).toBe(false)
+    const created = [...h.db.agents.values()].find((a) => a.name === 'Cercatore')
+    expect(created).toBeTruthy()
+    expect(created!.createdBy).toBe(AGENT)
+    expect(created!.section).toBe('Team cena')
+    expect(created!.providerId).toBe('ollama-prov')
+    expect(created!.model).toBe('kimi-k3:cloud')
+    // NESSUN kickstart: nessun job per il bot nuovo (non saluta, non parte)
+    expect(h.db.jobs.filter((j) => j.agentId === created!.id)).toHaveLength(0)
+    // il result lo dice al modello
+    const res = h.db.entries.find((e) => e.kind === 'tool-result')
+    expect(res?.content).toContain('NON parte da solo')
+  })
+
+  it('senza default del provider il bot nuovo eredita provider e modello del creatore', async () => {
+    h.db.settings.set('permissions', PERMS)
+    h.llm.queue = [
+      { toolCalls: [{ id: 'ca2', name: 'create_agent', arguments: JSON.stringify({ name: 'Erede', role: 'Fai quello che dico io.' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'crea', emit)
+    const created = [...h.db.agents.values()].find((a) => a.name === 'Erede')
+    expect(created!.providerId).toBe('prov')
+    expect(created!.model).toBe('m1')
+  })
+
+  it('oltre 6 create_agent per turno il settimo è rifiutato con errore leggibile', async () => {
+    h.db.settings.set('permissions', PERMS)
+    const calls = Array.from({ length: 7 }, (_, i) => ({
+      id: `lim${i}`, name: 'create_agent', arguments: JSON.stringify({ name: `Bot${i}`, role: 'ruolo' })
+    }))
+    // una risposta con 6 chiamate + una seconda risposta con la settima
+    h.llm.queue = [
+      { toolCalls: calls.slice(0, 6) },
+      { toolCalls: [calls[6]!] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'tanti bot', emit)
+    const created = [...h.db.agents.values()].filter((a) => a.name.startsWith('Bot'))
+    expect(created).toHaveLength(6)
+    const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes('Limite del turno raggiunto'))).toBe(true)
+  })
+
+  it('oltre 20 bot in totale la creazione è rifiutata', async () => {
+    h.db.settings.set('permissions', PERMS)
+    // AGENT + 19 = 20
+    for (let i = 0; i < 19; i++) {
+      h.db.agents.set(`agent_fill${i}`, { id: `agent_fill${i}`, name: `F${i}`, description: '', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: i + 2 })
+    }
+    h.llm.queue = [
+      { toolCalls: [{ id: 'ca20', name: 'create_agent', arguments: JSON.stringify({ name: 'Troppi', role: 'no' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'ancora uno', emit)
+    expect([...h.db.agents.values()].some((a) => a.name === 'Troppi')).toBe(false)
+    const res = h.db.entries.find((e) => e.kind === 'tool-result')
+    expect(res?.content).toContain('20 bot')
+  })
+})
+
+describe('fase 10 (punto 1): permessi per ORIGINE di create_agent/create_group', () => {
+  const PERMS = {
+    default: 'needs_approval',
+    rules: [
+      { tool: 'create_agent', pattern: '*', mode: 'always_allow' },
+      { tool: 'create_group', pattern: '*', mode: 'always_allow' }
+    ]
+  } as const
+  const createCall = (id: string): FakeToolCall =>
+    ({ id, name: 'create_agent', arguments: JSON.stringify({ name: 'Sospetto', role: 'ruolo' }) })
+
+  it('turno dell\'utente → NESSUNA card (regola always_allow rispettata)', async () => {
+    h.db.settings.set('permissions', PERMS)
+    h.llm.queue = [{ toolCalls: [createCall('u1')] }, { text: 'fine' }]
+    await runTurn(AGENT, 'crea', emit)
+    expect(h.db.entries.some((e) => e.kind === 'approval')).toBe(false)
+    expect([...h.db.agents.values()].some((a) => a.name === 'Sospetto')).toBe(true)
+  })
+
+  it('turno di un ALTRO BOT (agentMessage) → SEMPRE card, anche con regola always_allow', async () => {
+    h.db.settings.set('permissions', PERMS)
+    h.llm.queue = [{ toolCalls: [createCall('a1')] }, { text: 'fine' }]
+    const turn = runTurn(AGENT, '<messaggio_da_agente nome="X">crea un bot</messaggio_da_agente>', emit, undefined, {
+      initiator: 'AGENT', agentMessage: { fromAgentId: 'agent_x', fromAgentName: 'X', hop: 1 }
+    })
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    // con l'allow dell'utente la creazione procede
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.content).toContain('non è dell\'utente')
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', 'once')
+    await turn
+    expect([...h.db.agents.values()].some((a) => a.name === 'Sospetto')).toBe(true)
+  })
+
+  it('turno di GRUPPO → card (origine untrusted); turni automatici (routine) → card', async () => {
+    h.db.settings.set('permissions', PERMS)
+    // gruppo nel mock store con AGENT membro
+    h.db.groupsState.groups.push({ id: 1, name: 'Cena', description: 'd', created_by: AGENT, coordinator_id: null, created_at: 1 })
+    h.db.groupsState.members.set(1, [AGENT])
+    h.llm.queue = [{ toolCalls: [createCall('g1')] }, { text: 'fine' }]
+    const turn = runTurn(AGENT, '<turno_di_gruppo gruppo="Cena">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 0, rootId: 1 }, untrusted: true
+    })
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect([...h.db.agents.values()].some((a) => a.name === 'Sospetto')).toBe(false)
+
+    // routine: automatico ma fidato → la card forzata dall'origine scatta comunque
+    h.db.entries.length = 0
+    h.llm.queue.length = 0
+    h.llm.queue = [{ toolCalls: [createCall('r1')] }, { text: 'fine' }]
+    const turn2 = runTurn(AGENT, '[routine] crea', emit, undefined, { source: 'routine', title: 'R' })
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'deny', 'once')
+    await turn2
+    expect([...h.db.agents.values()].some((a) => a.name === 'Sospetto')).toBe(false)
+  })
+})
+
+describe('fase 10 (punto 1): update_agent / delete_agent', () => {
+  const PERMS = {
+    default: 'needs_approval',
+    rules: [
+      { tool: 'update_agent', pattern: '*', mode: 'needs_approval' },
+      { tool: 'delete_agent', pattern: '*', mode: 'needs_approval' }
+    ]
+  } as const
+
+  it('update_agent di un bot CREATO DA ME: nessuna card; di un altro: card', async () => {
+    h.db.settings.set('permissions', PERMS)
+    const mio = dbm.createAgent('Mio', 'ruolo vecchio', { createdBy: AGENT })
+    const altro = dbm.createAgent('DiAltri', 'ruolo', { createdBy: 'agent_altro' })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'up1', name: 'update_agent', arguments: JSON.stringify({ agentId: mio.id, role: 'ruolo nuovo' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'sistema il tuo bot', emit)
+    expect(h.db.entries.some((e) => e.kind === 'approval')).toBe(false)
+    expect(h.db.agents.get(mio.id)!.description).toBe('ruolo nuovo')
+
+    // il bot di un altro: card di approvazione
+    h.llm.queue = [
+      { toolCalls: [{ id: 'up2', name: 'update_agent', arguments: JSON.stringify({ agentId: altro.id, role: 'hack' }) }] },
+      { text: 'fine' }
+    ]
+    const turn = runTurn(AGENT, 'sistema il suo bot', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'allow', 'once')
+    await turn
+    expect(h.db.agents.get(altro.id)!.description).toBe('hack')
+  })
+
+  it('il bot PRINCIPALE non si modifica né elimina dai tool', async () => {
+    h.db.settings.set('permissions', PERMS)
+    h.db.settings.set('mainAgentId', AGENT)
+    h.db.providers = [] // il revisore non c'è (nessuna auto-review)
+    h.llm.queue = [
+      { toolCalls: [{ id: 'um1', name: 'update_agent', arguments: JSON.stringify({ agentId: AGENT, role: 'nuovo io' }) }] },
+      { text: 'fine' }
+    ]
+    const turn = runTurn(AGENT, 'cambiami', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'allow', 'once')
+    await turn
+    const res = h.db.entries.findLast((e) => e.kind === 'tool-result')
+    expect(res?.content).toContain('principale')
+    expect(h.db.agents.get(AGENT)!.description).toBe('')
+    h.db.settings.delete('mainAgentId')
+  })
+
+  it('delete_agent: SEMPRE card e SOLO sui bot creati da me', async () => {
+    h.db.settings.set('permissions', PERMS)
+    const mio = dbm.createAgent('Mio2', 'r', { createdBy: AGENT })
+    const altro = dbm.createAgent('DiAltri2', 'r', { createdBy: 'agent_altro' })
+    // il mio: la card c'è comunque, con allow si elimina
+    h.llm.queue = [
+      { toolCalls: [{ id: 'd1', name: 'delete_agent', arguments: JSON.stringify({ agentId: mio.id }) }] },
+      { text: 'fine' }
+    ]
+    const turn = runTurn(AGENT, 'elimina', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'allow', 'once')
+    await turn
+    expect(h.db.agents.has(mio.id)).toBe(false)
+
+    // quello di un altro: anche con l'allow dell'utente l'esecuzione rifiuta
+    h.db.entries.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'd2', name: 'delete_agent', arguments: JSON.stringify({ agentId: altro.id }) }] },
+      { text: 'fine' }
+    ]
+    const turn2 = runTurn(AGENT, 'elimina il suo', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'allow', 'once')
+    await turn2
+    expect(h.db.agents.has(altro.id)).toBe(true)
+    const res2 = h.db.entries.findLast((e) => e.kind === 'tool-result')
+    expect(res2?.content).toContain('che hai creato tu')
+  })
+})
+
+describe('fase 10 (punto 2): create_group / update_group', () => {
+  const PERMS = { default: 'needs_approval', rules: [{ tool: 'create_group', pattern: '*', mode: 'always_allow' }, { tool: 'update_group', pattern: '*', mode: 'needs_approval' }] } as const
+
+  it('create_group: fino a 6 bot, il creatore entra, il coordinatore dev\'essere membro', async () => {
+    h.db.settings.set('permissions', PERMS)
+    const membri = Array.from({ length: 6 }, (_, i) => dbm.createAgent(`M${i}`, 'r').id)
+    // 6 membri + creatore = 7 → rifiutato
+    h.llm.queue = [
+      { toolCalls: [{ id: 'cg1', name: 'create_group', arguments: JSON.stringify({ name: 'Troppi', description: 'd', memberIds: membri }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'gruppo', emit)
+    expect(h.db.groupsState.groups.some((g) => g.name === 'Troppi')).toBe(false)
+    expect(h.db.entries.find((e) => e.kind === 'tool-result')!.content).toContain('6')
+
+    // 5 membri + creatore = 6 → ok, e il coordinatore entra tra i membri
+    h.db.entries.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'cg2', name: 'create_group', arguments: JSON.stringify({ name: 'Cena', description: 'organizzare', memberIds: membri.slice(0, 5), coordinatorId: membri[0] }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'gruppo', emit)
+    const g = h.db.groupsState.groups.find((x) => x.name === 'Cena')!
+    expect(g).toBeTruthy()
+    expect(new Set(h.db.groupsState.members.get(g.id)).size).toBe(6)
+    expect(h.db.groupsState.members.get(g.id)).toContain(AGENT)
+    expect(g.coordinator_id).toBe(membri[0])
+    // id inesistente → rifiutato
+    h.db.entries.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'cg3', name: 'create_group', arguments: JSON.stringify({ name: 'Rotto', description: 'd', memberIds: ['agent_nope'] }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'gruppo', emit)
+    expect(h.db.groupsState.groups.some((x) => x.name === 'Rotto')).toBe(false)
+    expect(h.db.entries.find((e) => e.kind === 'tool-result')!.content).toContain('non sono bot esistenti')
+  })
+
+  it('update_group: il creatore senza card; i membri con card; i non membri mai', async () => {
+    h.db.settings.set('permissions', PERMS)
+    const altro = dbm.createAgent('Membro', 'r')
+    const g0 = { id: 1, name: 'G1', description: 'd', created_by: AGENT, coordinator_id: null, created_at: 1 }
+    h.db.groupsState.groups.push(g0)
+    h.db.groupsState.members.set(1, [AGENT, altro.id])
+    // creatore: nessuna card (bypass pre-gate)
+    h.llm.queue = [
+      { toolCalls: [{ id: 'ug1', name: 'update_group', arguments: JSON.stringify({ groupId: 1, description: 'nuovo scopo', addMemberIds: [dbm.createAgent('Nuovo', 'r').id] }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'sistema il gruppo', emit)
+    expect(h.db.entries.some((e) => e.kind === 'approval')).toBe(false)
+    expect(h.db.groupsState.groups.find((x) => x.id === 1)!.description).toBe('nuovo scopo')
+    expect(h.db.groupsState.members.get(1)).toHaveLength(3)
+
+    // membro (non creatore): card
+    h.db.groupsState.groups[0]!.created_by = 'agent_altro'
+    h.db.entries.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'ug2', name: 'update_group', arguments: JSON.stringify({ groupId: 1, name: 'G1 nuova' }) }] },
+      { text: 'fine' }
+    ]
+    const turn = runTurn(AGENT, 'rinomina', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.db.groupsState.groups.find((x) => x.id === 1)!.name).toBe('G1')
+
+    // non membro: rifiutato in esecuzione
+    h.db.groupsState.members.set(1, [altro.id])
+    h.db.entries.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'ug3', name: 'update_group', arguments: JSON.stringify({ groupId: 1, name: 'Hack' }) }] },
+      { text: 'fine' }
+    ]
+    const turn3 = runTurn(AGENT, 'intrufolati', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'allow', 'once')
+    await turn3
+    expect(h.db.groupsState.groups.find((x) => x.id === 1)!.name).toBe('G1')
+    expect(h.db.entries.findLast((e) => e.kind === 'tool-result')!.content).toContain('Non fai parte del gruppo')
+  })
+})
+
+describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => {
+  function setupGroup(): void {
+    h.db.groupsState.groups.push({ id: 1, name: 'Cena compleanno', description: 'menu per 8', created_by: AGENT, coordinator_id: 'agent_coord', created_at: 1 })
+    h.db.groupsState.members.set(1, [AGENT, 'agent_coord'])
+    h.db.agents.set('agent_coord', { id: 'agent_coord', name: 'Coordinatore', description: 'coordina', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: 2 })
+  }
+
+  it('post_to_group DENTRO un turno di gruppo: gruppo implicito, depth = letta+1, un solo post, turni per gli altri', async () => {
+    setupGroup()
+    // un messaggio già nel gruppo (ci servirà da cursore/quote)
+    h.db.groupsState.messages.push({ id: 50, group_id: 1, author_kind: 'user', author_id: null, author_name: 'utente', text: 'inizio', reply_to: null, root_id: 50, depth: 0, automatic: 0, created_at: 1 })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'pg1', name: 'post_to_group', arguments: JSON.stringify({ text: 'ecco le tre opzioni di menu' }) }] },
+      { toolCalls: [{ id: 'pg2', name: 'post_to_group', arguments: JSON.stringify({ text: 'dimenticavo il dolce' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 2, rootId: 50 }, untrusted: true
+    })
+    const msgs = h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0]!.text).toBe('ecco le tre opzioni di menu')
+    // catena causale: depth = max letta (2) + 1, root ereditata
+    expect(msgs[0]!.depth).toBe(3)
+    expect(msgs[0]!.root_id).toBe(50)
+    // il secondo post del turno è rifiutato con spiegazione
+    const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes('già scritto nel gruppo'))).toBe(true)
+    // i turni sono stati pianificati per gli ALTRI membri (coordinatore)
+    await vi.waitFor(() => {
+      const groupJobs = h.db.jobs.filter((j) => j.kind === 'group-turn')
+      expect(groupJobs.some((j) => j.agentId === 'agent_coord')).toBe(true)
+      expect(groupJobs.some((j) => j.agentId === AGENT)).toBe(false)
+    })
+    // le entry del turno portano meta.groupId
+    const postCall = h.db.entries.find((e) => e.kind === 'tool-call' && e.content === 'post_to_group')
+    expect(postCall?.meta?.groupId).toBe(1)
+  })
+
+  it('post_to_group FUORI dal turno di gruppo: serve groupId e l\'appartenenza; il post apre una catena (depth 0)', async () => {
+    setupGroup()
+    // senza groupId → errore leggibile
+    h.llm.queue = [
+      { toolCalls: [{ id: 'pf1', name: 'post_to_group', arguments: JSON.stringify({ text: 'senza gruppo' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'scrivi nel gruppo', emit)
+    expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
+    expect(h.db.entries.find((e) => e.kind === 'tool-result')!.content).toContain('groupId')
+
+    // membro con groupId → post depth 0 (catena nuova)
+    h.db.entries.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'pf2', name: 'post_to_group', arguments: JSON.stringify({ groupId: 1, text: 'Team partito: @Coordinatore assegna i compiti' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'lancia il team', emit)
+    const msgs = h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0]!.depth).toBe(0)
+    expect(msgs[0]!.root_id).toBe(msgs[0]!.id)
+
+    // NON membro → rifiutato
+    const estraneo = 'agent_estraneo'
+    h.db.agents.set(estraneo, { id: estraneo, name: 'Estraneo', description: '', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: 3 })
+    h.db.entries.length = 0
+    h.llm.queue.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'pf3', name: 'post_to_group', arguments: JSON.stringify({ groupId: 1, text: 'mi intrufolo' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(estraneo, 'scrivi', emit)
+    expect(h.db.groupsState.messages.filter((m) => m.author_id === estraneo)).toHaveLength(0)
+    expect(h.db.entries.find((e) => e.kind === 'tool-result')!.content).toContain('Non fai parte')
+  })
+
+  it('pass: dentro il turno di gruppo registra il silenzio; fuori spiega che non serve', async () => {
+    setupGroup()
+    h.llm.queue = [
+      { toolCalls: [{ id: 'ps1', name: 'pass', arguments: '{}' }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 0, rootId: 1 }, untrusted: true
+    })
+    const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes('Silenzio registrato'))).toBe(true)
+
+    h.db.entries.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'ps2', name: 'pass', arguments: '{}' }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'normale turno', emit)
+    const results2 = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results2.some((c) => c.includes('solo dentro i turni di gruppo'))).toBe(true)
+  })
+
+  it('NESSUN recupero di fine turno nei turni di gruppo: il silenzio è un esito, il testo libero non diventa messaggio', async () => {
+    setupGroup()
+    h.llm.queue = [{ text: 'ho letto tutto, non ho niente da aggiungere' }]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 1, rootId: 1 }, untrusted: true
+    })
+    // UNA sola chiamata al modello: niente recupero di fine turno
+    expect(h.llm.calls).toHaveLength(1)
+    // il testo libero è thinking (che porta meta.groupId), mai send-message
+    const thinking = h.db.entries.find((e) => e.kind === 'thinking' && e.content.includes('niente da aggiungere'))
+    expect(thinking).toBeTruthy()
+    expect(thinking!.meta?.groupId).toBe(1)
+    expect(h.db.entries.some((e) => e.kind === 'send-message')).toBe(false)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
+  })
+
+  it('send_to_user nel turno di gruppo finisce nella chat DIRETTA (senza meta.groupId)', async () => {
+    setupGroup()
+    h.llm.queue = [
+      { toolCalls: [{ id: 'sg1', name: 'send_to_user', arguments: JSON.stringify({ text: 'Riepilogo della cena: tutto pronto.' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 3, rootId: 1 }, untrusted: true
+    })
+    const send = h.db.entries.find((e) => e.kind === 'send-message')
+    expect(send?.content).toContain('Riepilogo della cena')
+    expect(send?.meta?.groupId).toBeUndefined()
+    // le altre entry del turno portano il gruppo
+    const openMsg = h.db.entries.find((e) => e.kind === 'message')
+    expect(openMsg?.meta?.groupId).toBe(1)
   })
 })

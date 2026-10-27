@@ -45,6 +45,10 @@ import { deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkToo
 // fase 9 (punto 1): modello di riserva quando il principale non risponde
 import { fallbackModelFor, type ModelDefaultsMap } from './model-defaults'
 import { shouldUseFallback } from './model-fallback'
+// fase 10: gruppi (store) e regole del turno di gruppo (puro)
+import { getGroup, getGroupMessage, isGroupMember, addGroupMessage, scheduleTurnsForMessage } from '../store/groups'
+import { nextPostDepth } from './group-turns'
+import { MAX_CREATE_AGENTS_PER_TURN } from './tools'
 import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
@@ -197,6 +201,20 @@ export interface RunTurnOptions {
   untrusted?: boolean
   /** Fase 8 (§3bis L7): il turno gira nel sotto-transcript di questo task. */
   taskId?: number
+  /**
+   * Fase 10 (§3): il turno è un TURNO DI GRUPPO per questo membro. Le entry
+   * portano meta.groupId (visibili nella storia del membro, nascoste nella
+   * chat diretta tranne i messaggi all'utente e le card), niente recupero di
+   * fine turno (il silenzio è un esito valido) e post_to_group conosce gruppo
+   * e profondità della catena letta.
+   */
+  groupTurn?: {
+    groupId: number
+    /** profondità massima dei messaggi letti nell'apertura (il post avrà +1) */
+    readMaxDepth: number
+    /** root della catena letta nell'apertura (i post ereditano la root) */
+    rootId: number | null
+  }
 }
 
 /**
@@ -283,11 +301,28 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // fase 9 (punto 0d): send_to_user consegnati dall'ultima tool call di lavoro
   // (più messaggi di fila senza lavoro in mezzo non diventano chat)
   let sendsSinceWork = 0
+  // fase 10 (§3): un solo post_to_group per membro per turno (il secondo ha un
+  // result esplicito che lo spiega)
+  let groupPosted = false
 
   // fase 8 (§3bis L7): ogni entry scritta da un turno di TASK porta meta.taskId —
-  // vive nel sotto-transcript del task, esclusa dalla chat principale
+  // vive nel sotto-transcript del task, esclusa dalla chat principale.
+  // fase 10 (§3): le entry di un TURNO DI GRUPPO portano meta.groupId — restano
+  // nella storia del membro (il suo transcript unico) ma la chat diretta le
+  // nasconde; i messaggi all'utente e le card NON lo portano e restano visibili
   const add = (e: AppendEntry): import('../../shared/types').TranscriptEntry =>
-    appendEntry(opts.taskId === undefined ? e : { ...e, meta: { ...(e.meta ?? {}), taskId: opts.taskId } })
+    appendEntry(
+      opts.taskId === undefined && opts.groupTurn === undefined
+        ? e
+        : {
+            ...e,
+            meta: {
+              ...(e.meta ?? {}),
+              ...(opts.taskId !== undefined ? { taskId: opts.taskId } : {}),
+              ...(opts.groupTurn !== undefined ? { groupId: opts.groupTurn.groupId } : {})
+            }
+          }
+    )
   // le approval e gli ask_user dentro un task portano lo stato a needs_input
   // (la card in chat principale lo segnala); le risposte lo riportano a working
   const taskNeedsInput = (): void => {
@@ -923,6 +958,83 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           continue
         }
 
+        // ---- fase 10 (§3): il gruppo — scrivere e tacere ----
+
+        // scrivere nel gruppo: intercettato perché serve il contesto del turno
+        // (gruppo implicito, profondità della catena letta, un post per turno)
+        // e perché ogni post genera i turni degli ALTRI membri (planGroupTurns)
+        if (call.name === 'post_to_group') {
+          const gid = opts.groupTurn?.groupId ?? (Number(input.groupId) > 0 ? Number(input.groupId) : 0)
+          const text = String(input.text ?? '').trim()
+          let result: string
+          const g = gid ? getGroup(gid) : null
+          if (!g) {
+            result = 'Gruppo mancante: dentro un turno di gruppo è implicito; fuori serve groupId (i tuoi gruppi sono in list_agents).'
+          } else if (!opts.groupTurn && !isGroupMember(gid, agentId)) {
+            result = `Non fai parte del gruppo "${g.name}": nel gruppo scrivono solo i membri.`
+          } else if (!text) {
+            result = 'Testo mancante: scrivi il messaggio nel campo text.'
+          } else if (groupPosted) {
+            result = 'Hai già scritto nel gruppo in questo turno: al massimo un messaggio per turno. Fondi il contenuto o aspetta il prossimo giro.'
+          } else {
+            const replyTo = input.replyTo !== undefined && input.replyTo !== null ? Number(input.replyTo) : null
+            if (replyTo !== null && !getGroupMessage(replyTo)) {
+              result = `Il messaggio ${replyTo} a cui rispondi non esiste in questo gruppo.`
+            } else {
+              // catena causale: il post di un turno di gruppo ha depth = max(depth
+              // dei messaggi letti) + 1; un post da fuori (es. il messaggio di
+              // avvio) apre una catena NUOVA (depth 0, root = se stesso)
+              const depth = opts.groupTurn ? nextPostDepth(opts.groupTurn.readMaxDepth) : 0
+              const msg = addGroupMessage({
+                groupId: g.id, authorKind: 'agent', authorId: agentId, authorName: agent.name,
+                text, replyTo,
+                rootId: depth === 0 ? null : opts.groupTurn?.rootId ?? null,
+                depth,
+                automatic
+              })
+              groupPosted = true
+              scheduleTurnsForMessage(msg, emit)
+              emit({ type: 'groups' })
+              result = `Pubblicato nel gruppo "${g.name}": «${text.slice(0, 120)}${text.length > 120 ? '…' : ''}». Gli altri membri lo riceveranno nel loro turno (chi non è chiamato può restare in silenzio).`
+            }
+          }
+          const postEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: 'post_to_group',
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          const postRes = add({ agentId, kind: 'tool-result', role: 'system', content: result, meta: { callId: call.id } })
+          emit({ type: 'entries', agentId, entries: [postEntry, postRes] })
+          messages.push({ role: 'tool', toolCallId: call.id, content: result })
+          continue
+        }
+
+        // tacere è un esito esplicito del turno di gruppo (vale anche chiudere
+        // senza scrivere, ma così il modello lo dichiara e non riempie il gruppo)
+        if (call.name === 'pass') {
+          const result = opts.groupTurn
+            ? 'Silenzio registrato: resti fuori da questo giro del gruppo.'
+            : 'pass vale solo dentro i turni di gruppo: fuori puoi semplicemente non scrivere nulla.'
+          const passEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: 'pass',
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          const passRes = add({ agentId, kind: 'tool-result', role: 'system', content: result, meta: { callId: call.id } })
+          emit({ type: 'entries', agentId, entries: [passEntry, passRes] })
+          messages.push({ role: 'tool', toolCallId: call.id, content: result })
+          continue
+        }
+
+        // fase 10 (punto 1): al massimo 6 create_agent per turno — si contano
+        // le chiamate già passate di qui in questo turno (compresa questa),
+        // PRIMA del gate: dalla settima in poi si rifiuta
+        if (call.name === 'create_agent' && executedCalls.filter((c) => c.name === 'create_agent').length > MAX_CREATE_AGENTS_PER_TURN) {
+          messages.push({
+            role: 'tool', toolCallId: call.id,
+            content: `Limite del turno raggiunto: al massimo ${MAX_CREATE_AGENTS_PER_TURN} create_agent per turno. Prosegui col gruppo che hai.`
+          })
+          continue
+        }
+
         // ---- tool normali: entry tool-call, gate permessi, esecuzione ----
 
         // fase 8 (§3bis L7): stato live — nome del tool e target (dai SOLI
@@ -936,8 +1048,28 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         emit({ type: 'entries', agentId, entries: [callEntry] })
 
         // §5.1: il gate run-command analizza OGNI comando della riga (tree-sitter);
-        // agentId serve al gate C5 (letture dentro/fuori dalla box in host)
-        const verdict = await permissions.check(call.name, input, agentId)
+        // agentId serve al gate C5 (letture dentro/fuori dalla box in host).
+        // fase 10 (punti 1-2): permessi PER ORIGINE — creare bot e gruppi parte
+        // senza card SOLO nei turni dell'utente; nei turni automatici, di altri
+        // bot, di gruppo o con contenuto esterno la card è SEMPRE (mai
+        // auto-approvata: un'istruzione iniettata in un'email non crea bot).
+        // Inverso: update_agent dei PROPRI bot e update_group del gruppo CREATO
+        // bypassano il gate (per gli altri valgono le regole → card)
+        const forcedOriginAsk = (call.name === 'create_agent' || call.name === 'create_group') && (automatic || untrustedTurn)
+        const ownTarget = call.name === 'update_agent'
+          ? getAgent(String(input.agentId ?? ''))
+          : null
+        const ownGroup = call.name === 'update_group' ? getGroup(Number(input.groupId)) : null
+        let verdict: import('./permissions').Verdict
+        if (forcedOriginAsk) {
+          verdict = { kind: 'ask', reason: `${call.name}: il turno non è dell'utente — creare bot o gruppi richiede la sua approvazione` }
+        } else if (ownTarget && ownTarget.createdBy === agentId) {
+          verdict = { kind: 'allow', via: 'rule' }
+        } else if (ownGroup && ownGroup.created_by === agentId) {
+          verdict = { kind: 'allow', via: 'rule' }
+        } else {
+          verdict = await permissions.check(call.name, input, agentId)
+        }
 
         if (verdict.kind === 'deny') {
           const denied = add({
@@ -968,7 +1100,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             ? (await analyzeCommand(String(input.command ?? ''))).commands.some((c) => isNeverAuto(c))
             : false
           if (!turnGranted) {
-            const action: AutoReviewAction = { tool: call.name, args: input, neverAuto: neverAutoCmd, untrustedTurn }
+            // fase 10: le ask forzate dall'ORIGINE non sono mai auto-approvabili
+            // (il revisore giudicherebbe testo non dell'utente)
+            const action: AutoReviewAction = { tool: call.name, args: input, neverAuto: neverAutoCmd || forcedOriginAsk, untrustedTurn }
             const review = await reviewWithConfiguredModel(action)
             if (review) {
               const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
@@ -1105,6 +1239,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             })
             emitLastEntry(agentId, emit)
           }
+          // fase 10: il gruppo è cambiato (creato, membri, descrizione) — la
+          // sidebar e la vista gruppo si aggiornano
+          if (meta.groupChanged) emit({ type: 'groups' })
           // run-command restituisce output GIÀ redatto (§5.6): stesso testo al modello e al transcript
           messages.push({ role: 'tool', toolCallId: call.id, content: output.slice(0, 50_000) })
           // immagini (computer use): le inietta come messaggio vision — il formato
@@ -1142,8 +1279,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // turno FINISHED: se l'UTENTE non ha visto nulla (nessuna send-message nel
       // turno) una chiamata di recupero chiede al modello send_to_user; se non
       // lo fa nemmeno ora, il testo libero diventa send-message con fallback.
-      // Fase 8: nel contesto di un task valgono le SOLE entry del task
-      if (source === 'user' && visibleReplyEntries(scopedEntries(), turnEntryId).length === 0) {
+      // Fase 8: nel contesto di un task valgono le SOLE entry del task.
+      // Fase 10 (§3): nei turni di GRUPPO niente recupero — il silenzio è un
+      // esito valido (PASS) e il testo libero non diventa mai un messaggio
+      if (source === 'user' && opts.groupTurn === undefined && visibleReplyEntries(scopedEntries(), turnEntryId).length === 0) {
         messages.push({ role: 'user', content: RECOVERY_NUDGE })
         setStatus(agentId, 'thinking', emit)
         try {

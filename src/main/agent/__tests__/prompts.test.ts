@@ -10,7 +10,7 @@ vi.mock('../../sandbox', () => ({ sandboxMode: () => mode.v }))
 import {
   systemPrompt, identitySection, computerSection, talkingSection, initiativeSection,
   externalContentSection, transparencySection, workSection, connectorsSection,
-  agentsSection, memorySkillsSection, tasksSection, limitsSection,
+  agentsSection, teamGroupsSection, memorySkillsSection, tasksSection, limitsSection,
   PROMPT_SECTION_TITLES, PROMPT_TOKEN_BUDGET
 } from '../prompts'
 import type { Agent } from '../../../shared/types'
@@ -107,5 +107,26 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(tasksSection()).toContain('create_task')
     expect(tasksSection()).toContain('update_task')
     expect(limitsSection()).toContain('documenti di sistema')
+  })
+
+  // fase 10 (punto 4): la sezione nuova entra nel prompt base (tutti i bot
+  // possono creare team) e il budget complessivo resta quello della fase 9
+  it('team e gruppi: coordinatore unico che parla all\'utente, avvio con @menzioni, un solo messaggio all\'utente', () => {
+    const s = teamGroupsSection()
+    expect(s).toContain('coordinatore e 1-4 specialisti')
+    expect(s).toContain('prompt di ruolo COMPLETO')
+    expect(s).toContain('UN solo riepilogo')
+    expect(s).toContain('@menzioni')
+    expect(s).toContain('senza l\'ok dell\'utente')
+    // la regola dei turni di gruppo NON è nel system: viaggia nell'apertura
+    // di ogni turno di gruppo (group-turns.ts), dove serve
+    expect(s).not.toContain('pass')
+  })
+
+  it('la sezione "Team e gruppi" è tra i titoli e il budget resta ~1.800 token (caratteri/4)', () => {
+    expect(PROMPT_SECTION_TITLES).toContain('# Team e gruppi')
+    const p = systemPrompt(agent)
+    expect(p.length / 4).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
+    expect(p).toContain('# Team e gruppi')
   })
 })

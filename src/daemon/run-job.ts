@@ -7,7 +7,8 @@
 // entra nel prompt nel blocco <evento> come evidenza (dato, non istruzione).
 import type { DatabaseSync } from 'node:sqlite'
 import { setJobEntryId, type Job } from '../main/store/jobs'
-import { runTurn, type RunTurnOptions } from '../main/agent/loop'
+import { runTurn, interrupt, type RunTurnOptions } from '../main/agent/loop'
+import { runGroupTurnJob, defaultArmTimeout } from './group-runner'
 import { formatTriggerEvent } from '../shared/triggers'
 import type { SandbotEvent, TriggerEventPayload } from '../shared/types'
 
@@ -67,6 +68,18 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
         ...(row?.untrusted ? { untrusted: true } : {}),
         ...(row?.automatic ? { automatic: true } : {})
       })
+      return
+    }
+    // fase 10 (§3): il turno di gruppo gira nel contesto del MEMBRO, con la
+    // sua apertura (blocco evidenza), la scadenza dei 5 minuti e l'esito nel
+    // registro (SENT | PASS | TIMEOUT | CANCELLED | ERROR | SKIPPED)
+    if (job.kind === 'group-turn') {
+      await runGroupTurnJob(
+        db,
+        { runTurn: runTurnFn, interrupt, now: Date.now, armTimeout: defaultArmTimeout },
+        job,
+        emit
+      )
       return
     }
     const p = job.payload as { routineId: number; title: string; prompt: string; event?: TriggerEventPayload }

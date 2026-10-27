@@ -3,11 +3,16 @@ import type { ToolDef } from './llm'
 import * as sandbox from '../sandbox'
 import { resolveSecretRefs, redactSecrets } from './secrets'
 import { formatTaskDone } from '../../shared/agent-message'
+import { MAX_GROUP_MEMBERS } from './group-turns'
 import {
   writeMemory, updateMemory, deleteMemory, listMemories, searchMemoriesByQuery,
   type MemoryTier, type MemoryScope
 } from './memory'
 import { readSkillBody, writeSkill, listSkills } from './skills'
+
+/** Fase 10 (punto 1): limiti della creazione di bot da parte di un bot. */
+export const MAX_CREATE_AGENTS_PER_TURN = 6
+export const MAX_AGENTS_TOTAL = 20
 
 export const toolDefs: ToolDef[] = [
   {
@@ -235,7 +240,97 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'list_agents',
-    description: "Elenca gli ALTRI bot dell'utente (nome, id, descrizione, stato): serve per decidere a chi delegare con send_to_agent.",
+    description: "Elenca gli ALTRI bot dell'utente (nome, id, descrizione, stato) e i GRUPPI di cui fai parte (id, membri, coordinatore): serve per decidere a chi delegare con send_to_agent e in quale gruppo scrivere con post_to_group.",
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: 'create_agent',
+    description: "Crea un altro bot: gli dai nome e PROMPT DI RUOLE completo (diventa la sua descrizione: compito, lingua, a chi consegna il lavoro, cosa NON fa senza l'ok dell'utente). Riceve modello e provider come i bot nuovi (senza default: i tuoi). Sezione opzionale per raggrupparlo nella sidebar. Il bot nuovo NON saluta e NON parte da solo: riceve il lavoro da chi gli scrive (send_to_agent o il gruppo). Nei turni non dell'utente (automatici, di altri bot, di gruppo, da contenuto esterno) la creazione chiede la conferma dell'utente.",
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Nome del bot (breve, come lo chiameresti in una squadra)' },
+        role: { type: 'string', description: 'Il prompt di ruolo COMPLETO: chi è, cosa fa, in che lingua lavora, a chi consegna, cosa non fa senza l\'ok dell\'utente' },
+        section: { type: 'string', description: 'Sezione della sidebar in cui raggrupparlo (opzionale, es. "Team cena")' }
+      },
+      required: ['name', 'role']
+    }
+  },
+  {
+    name: 'update_agent',
+    description: "Modifica un bot che HAI CREATO TU (nome, prompt di ruolo, sezione): per i tuoi bot nessuna conferma; per gli altri bot serve la card di approvazione dell'utente. Il bot principale non si tocca mai.",
+    parameters: {
+      type: 'object',
+      properties: {
+        agentId: { type: 'string', description: 'Id del bot (da list_agents o dalla creazione)' },
+        name: { type: 'string', description: 'Nuovo nome (opzionale)' },
+        role: { type: 'string', description: 'Nuovo prompt di ruolo completo (opzionale)' },
+        section: { type: 'string', description: 'Nuova sezione della sidebar (opzionale, vuoto = nessuna)' }
+      },
+      required: ['agentId']
+    }
+  },
+  {
+    name: 'delete_agent',
+    description: "Elimina un bot che HAI CREATO TU (con le sue chat, memorie e routine). Chiede SEMPRE la conferma dell'utente con una card. Il bot principale non si può eliminare.",
+    parameters: {
+      type: 'object',
+      properties: {
+        agentId: { type: 'string', description: 'Id del bot da eliminare (solo bot creati da te)' }
+      },
+      required: ['agentId']
+    }
+  },
+  {
+    name: 'create_group',
+    description: "Crea un gruppo di lavoro: una chat con fino a 6 bot + l'utente (che è sempre dentro e legge tutto). Tu che lo crei ne fai automaticamente parte. description = scopo e regole del gruppo (la leggono tutti i membri a ogni turno). coordinatorId opzionale: il bot che coordina gli altri. Dopo la creazione scrivi il messaggio di avvio nel gruppo con post_to_group (serve groupId).",
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Nome del gruppo' },
+        description: { type: 'string', description: 'Scopo e regole del gruppo (una frase o due: obiettivo, chi consegna cosa, vincoli)' },
+        memberIds: { type: 'array', items: { type: 'string' }, description: 'Id dei bot membri (max 6 bot in totale, te compreso; tu vieni aggiunto se manchi)' },
+        coordinatorId: { type: 'string', description: 'Id del bot coordinatore (opzionale, deve essere tra i membri)' }
+      },
+      required: ['name', 'description', 'memberIds']
+    }
+  },
+  {
+    name: 'update_group',
+    description: "Modifica un gruppo di cui fai parte: nome, descrizione, membri o coordinatore. Se l'hai creato tu nessuna conferma; altrimenti serve la card di approvazione dell'utente. Massimo 6 bot; il creatore non si rimuove.",
+    parameters: {
+      type: 'object',
+      properties: {
+        groupId: { type: 'number', description: 'Id del gruppo' },
+        name: { type: 'string', description: 'Nuovo nome (opzionale)' },
+        description: { type: 'string', description: 'Nuova descrizione/scopo (opzionale)' },
+        addMemberIds: { type: 'array', items: { type: 'string' }, description: 'Id dei bot da aggiungere (opzionale)' },
+        removeMemberIds: { type: 'array', items: { type: 'string' }, description: 'Id dei bot da rimuovere (opzionale)' },
+        coordinatorId: { type: 'string', description: 'Id del nuovo coordinatore, membro del gruppo (opzionale)' }
+      },
+      required: ['groupId']
+    }
+  },
+  {
+    name: 'post_to_group',
+    description: "Scrive un messaggio in un gruppo di cui sei membro. Dentro un turno di gruppo il gruppo è quello del turno (niente groupId); fuori (es. lanci il messaggio di avvio) serve l'id. Al massimo UN messaggio per turno: chi legge decide se rispondere. Con @nome chiami i membri specifici (@tutti = tutti).",
+    parameters: {
+      type: 'object',
+      properties: {
+        groupId: { type: 'number', description: 'Id del gruppo (fuori dai turni di gruppo; dentro è implicito)' },
+        text: { type: 'string', description: 'Il messaggio per il gruppo' },
+        replyTo: { type: 'number', description: 'Id del messaggio a cui rispondi (opzionale)' }
+      },
+      required: ['text']
+    }
+  },
+  {
+    name: 'pass',
+    description: "Nei turni di gruppo: resta in silenzio per questo turno. Chiamalo quando il messaggio non ti riguarda o non hai niente di utile da aggiungere (è una scelta esplicita, non un errore). Anche chiudere il turno senza scrivere vale come silenzio.",
     parameters: {
       type: 'object',
       properties: {},
@@ -534,14 +629,204 @@ export async function executeTool(
       return { output: `Target update_state non valido: ${JSON.stringify(input.target)} (routine | memory).`, meta: {} }
     }
     case 'list_agents': {
-      // fase 7: gli ALTRI bot dell'utente (nome, id, descrizione, stato)
-      const { listAgents } = await import('../store/db')
-      const others = listAgents().filter((a) => a.id !== agentId)
-      if (!others.length) return { output: 'Nessun altro bot: sei l\'unico agente dell\'utente.', meta: {} }
-      return {
-        output: others.map((a) => `- ${a.name} (id ${a.id}) · stato: ${a.status}${a.description ? ` · ${a.description}` : ''}`).join('\n'),
-        meta: {}
+      // fase 7: gli ALTRI bot dell'utente; fase 10: anche i gruppi di cui il
+      // bot è membro (id, membri, coordinatore) per post_to_group
+      const dbMod = await import('../store/db')
+      const groupsMod = await import('../store/groups')
+      const others = dbMod.listAgents().filter((a) => a.id !== agentId)
+      const lines = others.length
+        ? others.map((a) => `- ${a.name} (id ${a.id}) · stato: ${a.status}${a.description ? ` · ${a.description}` : ''}`)
+        : ['Nessun altro bot: sei l\'unico agente dell\'utente.']
+      const nameOf = (id: string): string => dbMod.listAgents().find((a) => a.id === id)?.name ?? id
+      const groups = groupsMod.groupsOfMember(agentId)
+      if (groups.length) {
+        lines.push('', 'GRUPPI di cui fai parte (scrivi con post_to_group; @nome chiama un membro, @tutti = tutti):')
+        for (const g of groups) {
+          const members = groupsMod.groupMemberIds(g.id).map(nameOf)
+          lines.push(`- ${g.name} (id gruppo ${g.id}, membri: ${members.join(', ')})${g.coordinator_id ? ` — coordinatore: ${nameOf(g.coordinator_id)}` : ''}`)
+        }
       }
+      return { output: lines.join('\n'), meta: {} }
+    }
+    case 'create_agent': {
+      // fase 10 (punto 1): il bot crea altri bot — role è il prompt di ruolo
+      // completo e diventa la description; NESSUN kickstart (difetto di Grok):
+      // il bot nuovo non riceve turni finché qualcuno non gli scrive
+      const name = String(input.name ?? '').trim()
+      const role = String(input.role ?? '').trim()
+      const section = input.section !== undefined ? String(input.section ?? '').trim() : ''
+      if (!name || !role) {
+        return { output: 'Bot non creato: servono name e role (il prompt di ruolo completo: compito, lingua, a chi consegna, cosa NON fare senza l\'ok dell\'utente).', meta: {} }
+      }
+      const dbMod = await import('../store/db')
+      if (dbMod.listAgents().length >= MAX_AGENTS_TOTAL) {
+        return { output: `Bot non creato: ci sono già ${MAX_AGENTS_TOTAL} bot (il tetto). Elimina qualcuno con delete_agent o parlane con l'utente.`, meta: {} }
+      }
+      const created = dbMod.createAgent(name, role, { createdBy: agentId, ...(section ? { section } : {}) })
+      // modello come l'onboarding: defaultModel del provider attivo (capability
+      // "tools" verificata); senza default → provider e modello del creatore
+      const { assignDefaultModel } = await import('./model-defaults')
+      type ModelDefaultsMap = import('./model-defaults').ModelDefaultsMap
+      let providerId: string | null = null
+      let model: string | null = null
+      try {
+        const providersMod = await import('./providers')
+        const assignment = await assignDefaultModel({
+          listProviders: dbMod.listProviders,
+          getOverrides: () => dbMod.getSetting<ModelDefaultsMap>('providers.modelDefaults', {}),
+          // come la RPC agents:create-from-template: il provider completo si
+          // risolve per id (la dipendenza accetta la forma ridotta)
+          supportsTools: (p, m) => {
+            const full = providersMod.getProvider(p.id)
+            return full
+              ? providersMod.modelSupportsTools(full, m)
+              : Promise.resolve({ ok: false, checked: false, error: 'provider non trovato' })
+          }
+        })
+        if (assignment?.model) {
+          providerId = assignment.providerId
+          model = assignment.model
+        }
+      } catch {
+        // verifica non disponibile: sotto col ripiego, i modelli del creatore
+      }
+      if (!model) {
+        const creator = dbMod.getAgent(agentId)
+        if (creator?.providerId && creator.model) {
+          providerId = creator.providerId
+          model = creator.model
+        }
+      }
+      if (providerId && model) dbMod.updateAgent(created.id, { providerId, model })
+      return {
+        output: `Bot "${name}" creato (id ${created.id}${section ? `, sezione "${section}"` : ''}), provider ${providerId ?? '—'} modello ${model ?? 'NON assegnato'}. Il ruolo che gli hai dato è la sua descrizione. NON parte da solo e NON saluta l'utente: scrivigli tu (send_to_agent) o assegnagli lavoro nel gruppo.`,
+        meta: { createdAgentId: created.id }
+      }
+    }
+    case 'update_agent': {
+      // fase 10 (punto 1): senza card solo per i PROPRI bot (il loop bypassa il
+      // gate); per gli altri la card è il consenso dell'utente. Il principale mai.
+      const dbMod = await import('../store/db')
+      const target = dbMod.getAgent(String(input.agentId ?? ''))
+      if (!target) return { output: `Bot non trovato ("${String(input.agentId ?? '')}"): cerca l'id esatto con list_agents.`, meta: {} }
+      const main = (await import('../../daemon/presence')).mainAgentOf(dbMod.listAgents(), dbMod.getSetting<string | null>('mainAgentId', null))
+      if (main?.id === target.id) {
+        return { output: 'Il bot principale non si modifica dai tool: è il punto di contatto dell\'utente.', meta: {} }
+      }
+      const patch: { name?: string; description?: string; section?: string } = {}
+      if (input.name !== undefined && String(input.name).trim()) patch.name = String(input.name).trim()
+      if (input.role !== undefined && String(input.role).trim()) patch.description = String(input.role).trim()
+      if (input.section !== undefined) patch.section = String(input.section ?? '').trim()
+      if (!Object.keys(patch).length) {
+        return { output: 'Niente da aggiornare: servono name, role o section.', meta: {} }
+      }
+      dbMod.updateAgent(target.id, patch)
+      return { output: `Bot "${target.name}" aggiornato (${Object.keys(patch).join(', ')}).`, meta: { updatedAgentId: target.id } }
+    }
+    case 'delete_agent': {
+      // fase 10 (punto 1): SEMPRE con card (il gate chiede) e SOLO bot creati
+      // da questo agente — l'esecuzione ricontrolla comunque la proprietà
+      const dbMod = await import('../store/db')
+      const { cancelAgentJobs } = await import('../store/jobs')
+      const target = dbMod.getAgent(String(input.agentId ?? ''))
+      if (!target) return { output: `Bot non trovato ("${String(input.agentId ?? '')}").`, meta: {} }
+      const main = (await import('../../daemon/presence')).mainAgentOf(dbMod.listAgents(), dbMod.getSetting<string | null>('mainAgentId', null))
+      if (main?.id === target.id) {
+        return { output: 'Il bot principale non si elimina.', meta: {} }
+      }
+      if (target.createdBy !== agentId) {
+        return { output: `"${target.name}" non è un bot che hai creato tu: puoi eliminare solo i tuoi. Parlane con l'utente o col creatore.`, meta: {} }
+      }
+      // come agents:delete della RPC: prima si ferma il turno, poi la coda
+      const loopMod = await import('./loop')
+      loopMod.interrupt(target.id)
+      cancelAgentJobs(dbMod.db(), target.id)
+      dbMod.deleteAgent(target.id)
+      return { output: `Bot "${target.name}" eliminato con le sue chat, memorie e routine.`, meta: { deletedAgentId: target.id } }
+    }
+    case 'create_group': {
+      // fase 10 (punto 2): max 6 bot + l'utente; il creatore entra se manca
+      const name = String(input.name ?? '').trim()
+      const description = String(input.description ?? '').trim()
+      const memberIds = [...new Set(Array.isArray(input.memberIds) ? input.memberIds.map((m) => String(m)) : [])]
+      if (!name || !description) {
+        return { output: 'Gruppo non creato: servono name e description (scopo e regole: li legge ogni membro a ogni turno).', meta: {} }
+      }
+      const dbMod = await import('../store/db')
+      const groupsMod = await import('../store/groups')
+      const agents = dbMod.listAgents()
+      const missing = memberIds.filter((id) => !agents.some((a) => a.id === id))
+      if (missing.length) {
+        return { output: `Gruppo non creato: questi id non sono bot esistenti (${missing.join(', ')}): cerca gli id con list_agents.`, meta: {} }
+      }
+      const coordinatorId = input.coordinatorId !== undefined && input.coordinatorId !== null ? String(input.coordinatorId) : null
+      const total = new Set([...memberIds, agentId])
+      if (coordinatorId && !total.has(coordinatorId)) {
+        return { output: 'Il coordinatore deve essere un membro del gruppo: aggiungilo ai memberIds.', meta: {} }
+      }
+      if (total.size > MAX_GROUP_MEMBERS) {
+        return { output: `Troppi membri: un gruppo ha al massimo ${MAX_GROUP_MEMBERS} bot (tu compreso) oltre all'utente.`, meta: {} }
+      }
+      const group = groupsMod.createGroup(name, description, agentId, memberIds, coordinatorId)
+      const nameOf = (id: string): string => agents.find((a) => a.id === id)?.name ?? id
+      const members = groupsMod.groupMemberIds(group.id).map(nameOf)
+      return {
+        output: `Gruppo "${name}" creato (id gruppo ${group.id}). Membri: ${members.join(', ')} + l'utente (sempre dentro).${coordinatorId ? ` Coordinatore: ${nameOf(coordinatorId)}.` : ''} Scrivi ora il messaggio di avvio con post_to_group({groupId: ${group.id}, text}): obiettivo, vincoli, chi fa cosa con @menzioni.`,
+        meta: { groupChanged: group.id }
+      }
+    }
+    case 'update_group': {
+      // fase 10 (punto 2): il creatore senza card (loop pre-gate), i membri con
+      // card; i non membri non possono toccare il gruppo
+      const dbMod = await import('../store/db')
+      const groupsMod = await import('../store/groups')
+      const groupId = Number(input.groupId)
+      const group = groupsMod.getGroup(groupId)
+      if (!group) return { output: `Gruppo ${Number.isFinite(groupId) ? groupId : JSON.stringify(input.groupId)} non trovato.`, meta: {} }
+      if (group.created_by !== agentId && !groupsMod.isGroupMember(groupId, agentId)) {
+        return { output: `Non fai parte del gruppo "${group.name}": non puoi modificarlo.`, meta: {} }
+      }
+      if (input.name !== undefined || input.description !== undefined) {
+        groupsMod.updateGroup(groupId, {
+          ...(input.name !== undefined && String(input.name).trim() ? { name: String(input.name).trim() } : {}),
+          ...(input.description !== undefined && String(input.description).trim() ? { description: String(input.description).trim() } : {})
+        })
+      }
+      const add = [...new Set(Array.isArray(input.addMemberIds) ? input.addMemberIds.map((m) => String(m)) : [])]
+      const remove = [...new Set(Array.isArray(input.removeMemberIds) ? input.removeMemberIds.map((m) => String(m)) : [])]
+      const agents = dbMod.listAgents()
+      if (add.length) {
+        const missing = add.filter((id) => !agents.some((a) => a.id === id))
+        if (missing.length) {
+          return { output: `Membri non aggiunti: id inesistenti (${missing.join(', ')}). Il resto dell'aggiornamento è già applicato.`, meta: { groupChanged: groupId } }
+        }
+        for (const id of add) groupsMod.addGroupMember(groupId, id)
+      }
+      if (remove.includes(group.created_by)) {
+        return { output: 'Il creatore del gruppo non si rimuove con i tool: se serve, parlane con l\'utente.', meta: { groupChanged: groupId } }
+      }
+      for (const id of remove) {
+        groupsMod.removeGroupMember(groupId, id)
+        groupsMod.cancelMemberGroupJobs(dbMod.db(), groupId, id)
+      }
+      const size = groupsMod.groupMemberIds(groupId).length
+      if (size > MAX_GROUP_MEMBERS) {
+        // si riportano le aggiunte dell'ultima riga: il tetto vale a fine giro
+        for (const id of add.reverse()) {
+          groupsMod.removeGroupMember(groupId, id)
+          groupsMod.cancelMemberGroupJobs(dbMod.db(), groupId, id)
+          if (groupsMod.groupMemberIds(groupId).length <= MAX_GROUP_MEMBERS) break
+        }
+        return { output: `Troppi membri: un gruppo ha al massimo ${MAX_GROUP_MEMBERS} bot. Le aggiunte sono state annullate; nome/descrizione e le rimozioni restano.`, meta: { groupChanged: groupId } }
+      }
+      if (input.coordinatorId !== undefined) {
+        const coord = input.coordinatorId === null ? null : String(input.coordinatorId)
+        if (coord && !groupsMod.isGroupMember(groupId, coord)) {
+          return { output: 'Il coordinatore deve essere un membro del gruppo (aggiungilo prima con addMemberIds).', meta: { groupChanged: groupId } }
+        }
+        groupsMod.updateGroup(groupId, { coordinator_id: coord })
+      }
+      return { output: `Gruppo "${groupsMod.getGroup(groupId)?.name ?? group.name}" aggiornato.`, meta: { groupChanged: groupId } }
     }
     case 'update_task': {
       // fase 8 (§3bis L7): chiusura del task — il summary torna alla chat

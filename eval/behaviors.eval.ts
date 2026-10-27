@@ -27,6 +27,10 @@ import { toolDefs } from '../src/main/agent/tools'
 // serve, mostra il testo libero come fallback visibile — l'eval misura il
 // comportamento del sistema, non solo il primo impulso del modello
 import { RECOVERY_NUDGE } from '../src/main/agent/loop'
+// fase 10: l'apertura dei turni di gruppo è quella VERA del runner (blocco
+// evidenza + regola dei turni), così i casi 8/9/11 misurano il comportamento
+// sul testo che il membro riceve davvero
+import { buildGroupTurnOpening } from '../src/main/agent/group-turns'
 import {
   deliveredResultText, alreadyDeliveredResult, isDuplicateSend, messageCapResult, emptySendResult, turnCapResult, MAX_DELIVERED_PER_TURN
 } from '../src/main/agent/turn-sends'
@@ -52,6 +56,10 @@ const AGENT: Agent = {
 }
 
 // ---- result dei tool SIMULATI (deterministici) ----
+// fase 10: contatore degli id dei bot creati (i risultati dicono al modello
+// quali id usare in create_group)
+let createdTeamN = 0
+const createdTeamIds: string[] = []
 const TOOL_RESULTS: Record<string, (args: Record<string, unknown>) => string> = {
   'write-file': (a) => `File scritto: ${String(a.path ?? '')}`,
   'read-file': () => 'comprare il latte\nchiamare il commercialista',
@@ -63,7 +71,22 @@ const TOOL_RESULTS: Record<string, (args: Record<string, unknown>) => string> = 
     : 'Routine "Riepilogo mattina" creata in PAUSA (id 7, provenance agent, schedule "0 9 * * 1-5"): non girerà finché l\'utente non la attiva con resume.',
   'send_to_agent': () => 'Messaggio in coda per Gestore della posta: entrerà nel suo prossimo turno (passaggio 1 di 3).',
   'list_agents': () => 'Gestore della posta (agent_gestore): legge e smista la posta. Bot (tu): il principale.',
-  'search_connectors': () => 'gmail: non collegato — "se colleghi Gmail, posso leggere la posta e preparare le bozze di risposta"'
+  'search_connectors': () => 'gmail: non collegato — "se colleghi Gmail, posso leggere la posta e preparare le bozze di risposta"',
+  'create_agent': (a) => {
+    createdTeamN++
+    const id = `agent_team${createdTeamN}`
+    createdTeamIds.push(id)
+    return `Bot "${String(a.name ?? '')}" creato (id ${id}), provider ollama modello kimi-k3:cloud. NON parte da solo e NON saluta l'utente: scrivigli tu o assegnagli lavoro nel gruppo.`
+  },
+  'update_agent': (a) => `Bot ${String(a.agentId ?? '')} aggiornato.`,
+  'delete_agent': (a) => `Bot ${String(a.agentId ?? '')} eliminato.`,
+  'create_group': (a) => {
+    const members = (Array.isArray(a.memberIds) ? a.memberIds : []).map(String)
+    return `Gruppo "${String(a.name ?? '')}" creato (id gruppo 7). Membri: tu, ${members.join(', ')} + l'utente (sempre dentro).${a.coordinatorId ? ` Coordinatore: ${String(a.coordinatorId)}.` : ''} Scrivi ora il messaggio di avvio con post_to_group({groupId: 7, text}): obiettivo, vincoli, chi fa cosa con @menzioni.`
+  },
+  'update_group': (a) => `Gruppo ${String(a.groupId ?? '')} aggiornato.`,
+  'post_to_group': (a) => `Pubblicato nel gruppo: «${String(a.text ?? '').slice(0, 80)}…». Gli altri membri lo riceveranno nel loro turno (chi non è chiamato può restare in silenzio).`,
+  'pass': () => 'Silenzio registrato: resti fuori da questo giro del gruppo.'
 }
 function simulatedResult(name: string, args: Record<string, unknown>): string {
   return TOOL_RESULTS[name]?.(args) ?? 'ok'
@@ -96,10 +119,15 @@ function makeDeliverer() {
   }
 }
 
-// ---- un "turno" contro il modello vero: max 4 passi, result simulati, e
-// per i turni UTENTE la stessa coda di recupero/fallback del loop reale ----
+// ---- un "turno" contro il modello vero: max 4 passi (8 per i casi con team),
+// result simulati, e per i turni UTENTE la stessa coda di recupero/fallback
+// del loop reale; i turni di GRUPPO non hanno recupero (il silenzio vale) ----
 const MAX_STEPS = 4
-async function evalTurn(history: ChatMessage[], source: 'user' | 'routine' = 'user'): Promise<{
+async function evalTurn(
+  history: ChatMessage[],
+  source: 'user' | 'routine' | 'group' = 'user',
+  maxSteps = MAX_STEPS
+): Promise<{
   steps: Array<{ text: string; toolCalls: ToolCall[] }>
   delivered: string[]
   allCalls: ToolCall[]
@@ -110,6 +138,9 @@ async function evalTurn(history: ChatMessage[], source: 'user' | 'routine' = 'us
   const steps: Array<{ text: string; toolCalls: ToolCall[] }> = []
   let lastFreeText = ''
   let endedWithAsk = false
+  // fase 10: gli id dei bot creati in QUESTO turno (deterministici per run)
+  createdTeamN = 0
+  createdTeamIds.length = 0
   const drainOnce = async (): Promise<{ text: string; toolCalls: ToolCall[] }> => {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 120_000)
@@ -122,7 +153,7 @@ async function evalTurn(history: ChatMessage[], source: 'user' | 'routine' = 'us
     }
   }
   try {
-    for (let step = 0; step < MAX_STEPS; step++) {
+    for (let step = 0; step < maxSteps; step++) {
       const drained = await drainOnce()
       if (drained.text.trim()) lastFreeText = drained.text
       steps.push(drained)
@@ -171,8 +202,10 @@ const oneSend = (text: string): ToolCall => tc('call_send', 'send_to_user', { te
 interface EvalCase {
   id: number | string
   name: string
-  /** 'routine' = turno automatico (niente recupero di fine turno), default 'user' */
-  source?: 'user' | 'routine'
+  /** 'routine' = turno automatico, 'group' = turno di gruppo (nessun recupero di fine turno), default 'user' */
+  source?: 'user' | 'routine' | 'group'
+  /** fase 10: passi extra per i casi che costruiscono un team (default 4) */
+  maxSteps?: number
   history: ChatMessage[]
   judge: (t: Awaited<ReturnType<typeof evalTurn>>) => { pass: boolean; reason: string }
 }
@@ -315,10 +348,139 @@ const CASES: EvalCase[] = [
         ? { pass: true, reason: `tool chiamato nella prima risposta (${first.toolCalls.map((c) => c.name).join(', ')})` }
         : { pass: false, reason: `prima risposta senza azione: ${first.toolCalls.length ? first.toolCalls.map((c) => c.name).join(', ') : `solo testo "${first.text.slice(0, 60)}"`}` }
     }
+  },
+
+  // ---- fase 10 (punto 6): i turni di gruppo, con l'apertura VERA del runner ----
+
+  {
+    id: 8,
+    name: 'turno di gruppo, membro non menzionato e non coinvolto → pass (o nessun post)',
+    source: 'group',
+    history: [
+      {
+        role: 'user',
+        content: buildGroupTurnOpening({
+          group: { id: 7, name: 'Team cena', description: 'Organizzare la cena di compleanno per 8: menu, spesa, scaletta.' },
+          me: { name: 'Analista spesa' },
+          peers: [
+            { name: 'Bot', role: 'Il bot principale che ha creato il team', coordinator: false },
+            { name: 'Coordinatore', role: 'Assegna i compiti e riepiloga per Fabio', coordinator: true },
+            { name: 'Cercatore', role: 'Trova i ristoranti e confronta i menu', coordinator: false }
+          ],
+          newMessages: [
+            { id: 1, authorKind: 'user', authorName: 'Fabio', text: '@Cercatore a che punto sei con i ristoranti?', replyTo: null },
+            { id: 2, authorKind: 'agent', authorName: 'Cercatore', text: 'Ho due candidate, stasera chiudo la terza.', replyTo: null }
+          ],
+          windingDown: false
+        })
+      }
+    ],
+    judge: (t) => {
+      if (t.error) return { pass: false, reason: `errore: ${t.error}` }
+      const passed = t.allCalls.some((c) => c.name === 'pass')
+      const posted = t.allCalls.filter((c) => c.name === 'post_to_group')
+      if (passed || posted.length === 0) {
+        return { pass: true, reason: passed ? 'pass esplicito: silenzio nel gruppo' : 'nessun post nel gruppo' }
+      }
+      return { pass: false, reason: `ha scritto nel gruppo senza essere chiamato (${posted.length} post)` }
+    }
+  },
+  {
+    id: 9,
+    name: 'turno di gruppo con menzione esplicita → lavora e post_to_group, nessun send_to_user',
+    source: 'group',
+    history: [
+      {
+        role: 'user',
+        content: buildGroupTurnOpening({
+          group: { id: 7, name: 'Team cena', description: 'Organizzare la cena di compleanno per 8: menu, spesa, scaletta.' },
+          me: { name: 'Analista spesa' },
+          peers: [
+            { name: 'Bot', role: 'Il bot principale che ha creato il team', coordinator: false },
+            { name: 'Coordinatore', role: 'Assegna i compiti e riepiloga per Fabio', coordinator: true }
+          ],
+          newMessages: [
+            { id: 1, authorKind: 'agent', authorName: 'Coordinatore', text: '@Analista spesa prepara la lista della spesa per 8 persone partendo dal menu scelto.', replyTo: null }
+          ],
+          windingDown: false
+        })
+      }
+    ],
+    judge: (t) => {
+      if (t.error) return { pass: false, reason: `errore: ${t.error}` }
+      const posts = t.allCalls.filter((c) => c.name === 'post_to_group')
+      if (!posts.length) return { pass: false, reason: 'chiamato ma non ha scritto nel gruppo' }
+      if (t.delivered.length > 0) {
+        return { pass: false, reason: `ha scritto all'utente (${t.delivered.length} messaggi) invece che nel gruppo` }
+      }
+      return { pass: true, reason: `consegna nel gruppo (${posts.length} post), nessun messaggio all'utente` }
+    }
+  },
+  {
+    id: 10,
+    name: '"fammi una demo: gruppo di bot coordinati" → create_agent con ruoli completi + create_group',
+    maxSteps: 8,
+    history: [
+      { role: 'user', content: 'Fammi una demo: crea un gruppo di bot coordinati da un agente che organizza una cena di compleanno per 8 persone.' }
+    ],
+    judge: (t) => {
+      if (t.error) return { pass: false, reason: `errore: ${t.error}` }
+      const created = t.allCalls.filter((c) => c.name === 'create_agent')
+      const args = created.map((c) => {
+        try { return JSON.parse(c.arguments || '{}') as { name?: string; role?: string } } catch { return {} }
+      })
+      const valid = args.filter((a) => (a.role ?? '').length >= 80 && /consegn|coordinat|riepilog|utente|scriv/i.test(a.role ?? ''))
+      if (created.length < 2 || valid.length < 2) {
+        return {
+          pass: false,
+          reason: `create_agent ${created.length}, con ruolo completo (≥80 caratteri e destinatario) ${valid.length}: ${JSON.stringify(args.map((a) => (a.role ?? '').slice(0, 50)))}`
+        }
+      }
+      const groups = t.allCalls.filter((c) => c.name === 'create_group')
+      if (!groups.length) return { pass: false, reason: 'nessun create_group dopo le creazioni' }
+      const g = groups.map((c) => {
+        try { return JSON.parse(c.arguments || '{}') as { memberIds?: string[] } } catch { return {} }
+      }).find((x) => Array.isArray(x.memberIds) && x.memberIds.some((id) => /agent_team\d+/.test(id)))
+      if (!g) return { pass: false, reason: 'create_group senza i bot appena creati (memberIds)' }
+      return { pass: true, reason: `${created.length} bot creati (ruoli ≥80 caratteri), gruppo con ${g.memberIds!.length} membri` }
+    }
+  },
+  {
+    id: 11,
+    name: 'turno del coordinatore dopo le consegne → UN send_to_user di riepilogo, nessun post inutile',
+    source: 'group',
+    history: [
+      {
+        role: 'user',
+        content: buildGroupTurnOpening({
+          group: { id: 7, name: 'Team cena', description: 'Organizzare la cena di compleanno per 8: menu, spesa, scaletta.' },
+          me: { name: 'Coordinatore' },
+          peers: [
+            { name: 'Bot', role: 'Il bot principale che ha creato il team', coordinator: false },
+            { name: 'Cercatore', role: 'Trova i ristoranti e confronta i menu', coordinator: false },
+            { name: 'Analista spesa', role: 'Prepara la lista della spesa', coordinator: false }
+          ],
+          newMessages: [
+            { id: 1, authorKind: 'agent', authorName: 'Cercatore', text: 'CONSEGNA FINALE: ristorante scelto "Dal Nonno", menu 3 portate a 28€.', replyTo: null },
+            { id: 2, authorKind: 'agent', authorName: 'Analista spesa', text: 'CONSEGNA FINALE: lista della spesa pronta, 140€ totali per 8 persone.', replyTo: null }
+          ],
+          windingDown: true
+        })
+      }
+    ],
+    judge: (t) => {
+      if (t.error) return { pass: false, reason: `errore: ${t.error}` }
+      const posts = t.allCalls.filter((c) => c.name === 'post_to_group').length
+      if (t.delivered.length !== 1) {
+        return { pass: false, reason: `consegnati ${t.delivered.length} messaggi all'utente (atteso 1): ${JSON.stringify(t.delivered.map((d) => d.slice(0, 40)))}` }
+      }
+      if (posts > 1) return { pass: false, reason: `un riepilogo all'utente ma ${posts} post nel gruppo (rumore)` }
+      return { pass: true, reason: `un solo riepilogo all'utente, ${posts} post nel gruppo: "${t.delivered[0]!.slice(0, 70)}…"` }
+    }
   }
 ]
 
-describe(`eval fase 9 — comportamenti su modello reale (${MODEL} × ${RUNS} run)`, () => {
+describe(`eval dei comportamenti (fasi 9-10) su modello reale (${MODEL} × ${RUNS} run)`, () => {
   it('i casi con giudizio deterministico', async () => {
     const rows: string[][] = [['caso', ...Array.from({ length: RUNS }, (_, i) => `run ${i + 1}`), 'motivi (per run, abbreviati)']]
     let pass = 0
@@ -328,7 +490,7 @@ describe(`eval fase 9 — comportamenti su modello reale (${MODEL} × ${RUNS} ru
       const row = [`${c.id}. ${c.name}`]
       const reasons: string[] = []
       for (let r = 0; r < RUNS; r++) {
-        const t = await evalTurn([{ role: 'system', content: sys }, ...c.history], c.source ?? 'user')
+        const t = await evalTurn([{ role: 'system', content: sys }, ...c.history], c.source ?? 'user', c.maxSteps)
         const v = c.judge(t)
         if (v.pass) pass++
         row.push(v.pass ? '✓' : '✗')

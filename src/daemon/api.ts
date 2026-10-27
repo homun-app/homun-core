@@ -431,6 +431,35 @@ export function buildApiMethods(
       return { ok: true }
     },
 
+    // ---- fase 10: gruppi di bot (sidebar "Gruppi", vista gruppo) ----
+    'groups:list': async () => {
+      const { listGroups, groupWithMembers } = await import('../main/store/groups')
+      return listGroups().map(groupWithMembers)
+    },
+    'groups:messages': async ([groupId]) => {
+      const { groupMessages } = await import('../main/store/groups')
+      return groupMessages(Number(groupId)).map((m) => ({
+        id: m.id, groupId: m.group_id, authorKind: m.author_kind, authorId: m.author_id,
+        authorName: m.author_name, text: m.text, replyTo: m.reply_to, createdAt: m.created_at
+      }))
+    },
+    'groups:send-user': async ([groupId, text]) => {
+      // l'utente scrive nel gruppo: messaggio depth 0 (apre la catena) e
+      // pianificazione dei turni per i membri
+      const groups = await import('../main/store/groups')
+      const g = groups.getGroup(Number(groupId))
+      if (!g) throw new Error('Gruppo non trovato')
+      const t = String(text ?? '').trim()
+      if (!t) throw new Error('Testo mancante')
+      const msg = groups.addGroupMessage({
+        groupId: g.id, authorKind: 'user', authorId: null, authorName: 'utente', text: t, depth: 0
+      })
+      groups.scheduleTurnsForMessage(msg, emit)
+      emit({ type: 'groups' })
+      worker.poke()
+      return { ok: true, id: msg.id }
+    },
+
     // ---- memoria (fase 4): sezione nella vista dell'agente ----
     'memory:list': ([agentId]) => listMemories(agentId as string),
     'memory:update': ([agentId, id, content]) => {

@@ -52,6 +52,10 @@ const api: SandbotApi = {
   // fase 8 (§3bis L7): task thread
   listTasks: (agentId) => ipcRenderer.invoke('tasks:list', agentId),
   cancelTask: (taskId) => ipcRenderer.invoke('tasks:cancel', taskId),
+  // fase 10: gruppi di bot
+  listGroups: () => ipcRenderer.invoke('groups:list'),
+  groupMessages: (groupId) => ipcRenderer.invoke('groups:messages', groupId),
+  groupSendUser: (groupId, text) => ipcRenderer.invoke('groups:send-user', groupId, text),
   // fase 4: memoria e skill dell'agente
   listMemories: (agentId) => ipcRenderer.invoke('memory:list', agentId),
   updateMemory: (agentId, id, content) => ipcRenderer.invoke('memory:update', agentId, id, content),

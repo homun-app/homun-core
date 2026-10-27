@@ -11,6 +11,10 @@ export interface Agent {
   status: AgentStatus
   unread: number
   createdAt: number
+  /** fase 10: id dell'agente CREATORE (null = creato dall'utente/onboarding) */
+  createdBy?: string | null
+  /** fase 10: sezione della sidebar in cui raggruppare il bot (testo libero) */
+  section?: string | null
 }
 
 export type EntryKind =
@@ -231,6 +235,8 @@ export type SandbotEvent =
   | { type: 'tasks' }
   // fase 8 (§3bis L7): stato live — quale tool sta girando nel turno dell'agente
   | { type: 'activity'; agentId: string; activity: { tool: string; target: string } | null }
+  // fase 10: i messaggi o i membri di un gruppo sono cambiati (sidebar + vista gruppo)
+  | { type: 'groups' }
 
 export interface SandbotApi {
   // agenti e transcript
@@ -293,6 +299,10 @@ export interface SandbotApi {
   cancelTask(taskId: number): Promise<void>
   // fase 8 (§3bis L5): decisione dell'utente sulla regola proposta dall'agente
   autoreviewRuleDecision(agentId: string, entryId: number, action: 'add' | 'dismiss'): Promise<void>
+  // fase 10: gruppi (sidebar "Gruppi", vista gruppo, scrittura come utente)
+  listGroups(): Promise<GroupInfo[]>
+  groupMessages(groupId: number): Promise<GroupMessageInfo[]>
+  groupSendUser(groupId: number, text: string): Promise<void>
   // memoria (fase 4): sezione nella vista dell'agente, modifica ed eliminazione
   listMemories(agentId: string): Promise<MemoryInfo[]>
   updateMemory(agentId: string, id: string, content: string): Promise<void>
@@ -448,6 +458,39 @@ export interface TaskInfo {
   createdAt: number
   updatedAt: number
   summary: string | null
+}
+
+// ---- gruppi (fase 10, T7) ----
+
+/** Chi ha scritto un messaggio di gruppo: l'utente, un bot o una riga di sistema. */
+export type GroupAuthorKind = 'user' | 'agent' | 'system'
+
+/**
+ * Un gruppo di bot con l'utente (fase 10): stanza di chat con fino a 6 bot;
+ * l'utente ne è sempre membro. Il coordinatore (opzionale) è uno dei bot.
+ */
+export interface GroupInfo {
+  id: number
+  name: string
+  /** scopo e regole del gruppo (la "description" della room di Grok) */
+  description: string
+  createdBy: string
+  coordinatorId: string | null
+  /** i membri BOT (l'utente è sempre membro e non compare qui) */
+  members: Array<{ agentId: string; name: string; coordinator: boolean }>
+  createdAt: number
+}
+
+/** Un messaggio di gruppo come lo vede la UI. */
+export interface GroupMessageInfo {
+  id: number
+  groupId: number
+  authorKind: GroupAuthorKind
+  authorId: string | null
+  authorName: string
+  text: string
+  replyTo: number | null
+  createdAt: number
 }
 
 // ---- auto-review delle approvazioni (fase 8, §3bis L5) ----

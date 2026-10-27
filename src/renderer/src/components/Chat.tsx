@@ -143,9 +143,12 @@ export function Chat() {
         <div className="mx-auto max-w-3xl space-y-3">
           {/*
             fase 8 (§3bis L7): la chat principale mostra SOLO le entry senza
-            meta.taskId — le entry dei task vivono nella vista del sotto-transcript
+            meta.taskId — le entry dei task vivono nella vista del sotto-transcript.
+            fase 10 (§3): anche le entry dei turni di GRUPPO (meta.groupId) stanno
+            fuori dalla chat diretta — si vedono nella vista gruppo; restano
+            visibili i messaggi all'utente e le card, che groupId non lo portano
           */}
-          {entries.filter((e) => !e.meta?.taskId).map((e) => (
+          {entries.filter((e) => !e.meta?.taskId && !e.meta?.groupId).map((e) => (
             <EntryRow key={e.id} entry={e} showReasoning={showReasoning} />
           ))}
         </div>
@@ -153,6 +156,9 @@ export function Chat() {
 
       {/* fase 8 (§3bis L7): vista del sotto-transcript del task aperto */}
       {openTaskId !== null && <TaskPanel onClose={() => setOpenTask(null)} />}
+
+      {/* fase 10: vista del gruppo aperto (messaggi, membri, scrittura come utente) */}
+      <GroupPanel />
 
       <footer className="border-t border-neutral-800 px-6 py-4">
         <div className="mx-auto flex max-w-3xl items-end gap-2">
@@ -398,6 +404,114 @@ function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
           Apri le impostazioni del provider
         </button>
       )}
+    </div>
+  )
+}
+
+/**
+ * Fase 10: la vista del gruppo — i messaggi con il nome dell'autore (i bot in
+ * violetto come i messaggi tra agenti, l'utente a destra), le righe di sistema
+ * discrete (chiusura della catena, tetti), l'elenco dei membri e il campo per
+ * scrivere come utente (le @menzioni funzionano: le legge il daemon). UI
+ * minima: niente ricerca estetica, verrà ridisegnata dopo.
+ */
+function GroupPanel() {
+  const groups = useStore((s) => s.groups)
+  const openGroupId = useStore((s) => s.openGroupId)
+  const groupMessages = useStore((s) => s.groupMessages)
+  const openGroup = useStore((s) => s.openGroup)
+  const sendGroupMessage = useStore((s) => s.sendGroupMessage)
+  const [text, setText] = useState('')
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const group = groups.find((g) => g.id === openGroupId)
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+  }, [groupMessages.length])
+
+  if (openGroupId === null) return null
+  if (!group) {
+    return (
+      <div className="absolute inset-0 z-20 flex items-center justify-center bg-neutral-950/95">
+        <button className="text-sm text-neutral-400 hover:text-neutral-200" onClick={() => openGroup(null)}>
+          Gruppo non più disponibile — chiudi
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col bg-neutral-950/95 backdrop-blur-sm">
+      <header className="flex items-center justify-between border-b border-neutral-800 px-6 py-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-violet-300/80">Gruppo</p>
+          <h2 className="truncate text-base font-semibold text-neutral-100">{group.name}</h2>
+          <p className="truncate text-xs text-neutral-500">
+            Tu + {group.members.map((m) => m.name + (m.coordinator ? ' (coord.)' : '')).join(', ')}
+          </p>
+        </div>
+        <button className="rounded-md px-2 py-1 text-neutral-500 hover:text-neutral-200" onClick={() => openGroup(null)}>
+          ✕
+        </button>
+      </header>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 py-4">
+        <div className="mx-auto max-w-3xl space-y-2">
+          {groupMessages.length === 0 && (
+            <p className="mt-16 text-center text-sm text-neutral-600">Nessun messaggio nel gruppo.</p>
+          )}
+          {groupMessages.map((m) =>
+            m.authorKind === 'system' ? (
+              <p key={m.id} className="text-center text-xs text-neutral-600">{m.text}</p>
+            ) : m.authorKind === 'user' ? (
+              <div key={m.id} className="flex justify-end">
+                <div className="max-w-[80%] rounded-2xl rounded-br-md bg-sky-700/40 px-4 py-2.5 text-sm text-neutral-100 whitespace-pre-wrap">
+                  {m.text}
+                </div>
+              </div>
+            ) : (
+              <div key={m.id} className="max-w-[85%] rounded-2xl rounded-bl-md border border-violet-800/50 bg-violet-950/20 px-4 py-2.5 text-sm text-neutral-100">
+                <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-violet-300/80">
+                  {m.authorName}
+                  {group.members.find((mem) => mem.agentId === m.authorId)?.coordinator ? ' · coordinatore' : ''}
+                </p>
+                <p className="whitespace-pre-wrap">{m.text}</p>
+              </div>
+            )
+          )}
+        </div>
+      </div>
+      <footer className="border-t border-neutral-800 px-6 py-4">
+        <div className="mx-auto flex max-w-3xl items-end gap-2">
+          <textarea
+            className="min-h-[44px] flex-1 resize-none rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2.5 text-sm outline-none focus:border-neutral-600"
+            placeholder={`Scrivi nel gruppo (usa @nome per chiamare un bot, @tutti per tutti)`}
+            rows={Math.min(4, text.split('\n').length)}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                if (text.trim()) {
+                  sendGroupMessage(text)
+                  setText('')
+                }
+              }
+            }}
+          />
+          <button
+            className="h-11 rounded-xl bg-violet-600 px-4 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-40"
+            disabled={!text.trim()}
+            onClick={() => {
+              if (text.trim()) {
+                sendGroupMessage(text)
+                setText('')
+              }
+            }}
+          >
+            Invia
+          </button>
+        </div>
+      </footer>
     </div>
   )
 }

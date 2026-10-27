@@ -1,6 +1,6 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo, TaskInfo } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo } from '../../shared/types'
 
 const api = (window as unknown as { sandbot: import('../../shared/types').SandbotApi }).sandbot
 
@@ -26,6 +26,12 @@ interface Store {
   openTaskId: number | null
   /** fase 8 (§3bis L7): stato live "sta facendo X…" per agente */
   activity: Record<string, { tool: string; target: string } | null>
+  /** fase 10: gruppi (sidebar) */
+  groups: GroupInfo[]
+  /** fase 10: gruppo aperto nella vista gruppo */
+  openGroupId: number | null
+  /** fase 10: messaggi del gruppo aperto */
+  groupMessages: GroupMessageInfo[]
   init(): Promise<void>
   select(agentId: string): Promise<void>
   send(text: string, images?: string[]): Promise<void>
@@ -51,6 +57,10 @@ interface Store {
   openTask(id: number | null): void
   /** fase 8 (§3bis L7): interrompe un task dal bottone sulla card */
   cancelTask(taskId: number): void
+  /** fase 10: apre la vista di un gruppo (o torna alla chat) */
+  openGroup(id: number | null): void
+  /** fase 10: l'utente scrive nel gruppo (@menzioni comprese) */
+  sendGroupMessage(text: string): void
   setSettingsOpen(v: boolean): void
   setSettingsTab(v: string | null): void
 }
@@ -70,6 +80,9 @@ export const useStore = create<Store>((set, get) => ({
   tasks: [],
   openTaskId: null,
   activity: {},
+  groups: [],
+  openGroupId: null,
+  groupMessages: [],
 
   async init() {
     const agents = await api.listAgents()
@@ -86,6 +99,8 @@ export const useStore = create<Store>((set, get) => ({
     api.connectorsList().then((connectors) => set({ connectors })).catch(() => undefined)
     // fase 8: i task (card in chat + stato live nella sidebar)
     api.listTasks().then((tasks) => set({ tasks })).catch(() => undefined)
+    // fase 10: i gruppi (sidebar)
+    api.listGroups().then((groups) => set({ groups })).catch(() => undefined)
     api.onEvent((e: SandbotEvent) => {
       const s = get()
       switch (e.type) {
@@ -164,6 +179,14 @@ export const useStore = create<Store>((set, get) => ({
         // fase 8 (§3bis L7): stato live — quale tool sta girando nel turno
         case 'activity': {
           set({ activity: { ...s.activity, [e.agentId]: e.activity } })
+          break
+        }
+        // fase 10: un gruppo o i suoi messaggi sono cambiati (sidebar + vista)
+        case 'groups': {
+          api.listGroups().then((groups) => set({ groups })).catch(() => undefined)
+          if (s.openGroupId !== null) {
+            api.groupMessages(s.openGroupId).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
+          }
           break
         }
       }
@@ -300,6 +323,23 @@ export const useStore = create<Store>((set, get) => ({
   cancelTask(taskId) {
     void api.cancelTask(taskId).catch((err: unknown) =>
       console.error('cancelTask:', err instanceof Error ? err.message : err)
+    )
+  },
+
+  // fase 10: vista gruppo — i messaggi del gruppo, l'utente scrive con le
+  // @menzioni (le legge il daemon quando pianifica i turni)
+  openGroup(id) {    set({ openGroupId: id, groupMessages: [] })
+    if (id !== null) {
+      void api.groupMessages(id).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
+    }
+  },
+
+  // fase 10: l'utente scrive nel gruppo aperto
+  sendGroupMessage(text) {
+    const id = get().openGroupId
+    if (id === null || !text.trim()) return
+    void api.groupSendUser(id, text.trim()).catch((err: unknown) =>
+      console.error('groupSendUser:', err instanceof Error ? err.message : err)
     )
   },
 
