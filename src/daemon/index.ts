@@ -162,7 +162,21 @@ async function main(): Promise<void> {
     createAgent: (name, description) => createAgent(name, description),
     updateAgent,
     listProviders,
-    listModels: async (p) => (await import('../main/agent/providers')).listProviderModels(p),
+    // fase 9 (punto 1): provider attivo + modello predefinito (capability "tools"
+    // verificata via /api/show), non più il primo modello dell'elenco
+    assignDefaultModel: async () => {
+      const { assignDefaultModel } = await import('../main/agent/model-defaults')
+      type ModelDefaultsMap = import('../main/agent/model-defaults').ModelDefaultsMap
+      const providersMod = await import('../main/agent/providers')
+      return assignDefaultModel({
+        listProviders,
+        getOverrides: () => getSetting<ModelDefaultsMap>('providers.modelDefaults', {}),
+        supportsTools: (p, model) => {
+          const full = providersMod.getProvider(p.id)
+          return full ? providersMod.modelSupportsTools(full, model) : Promise.resolve({ ok: false, checked: false, error: 'provider non trovato' })
+        }
+      })
+    },
     appendSystemSend: (agentId, message, meta) => {
       const content = message.type === 'text' ? message.text : message.type === 'widget' ? message.prompt : ''
       const entry = appendEntry({

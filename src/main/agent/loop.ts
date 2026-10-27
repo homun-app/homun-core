@@ -42,6 +42,9 @@ import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from 
 // fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
 // avanzamenti, result col testo consegnato)
 import { deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkTool, messageCapResult } from './turn-sends'
+// fase 9 (punto 1): modello di riserva quando il principale non risponde
+import { fallbackModelFor, type ModelDefaultsMap } from './model-defaults'
+import { shouldUseFallback } from './model-fallback'
 import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
@@ -477,6 +480,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       idleMs: getSetting<number>('llm.streamIdleMs', DEFAULT_STREAM_DEADLINES.idleMs)
     }
 
+    // fase 9 (punto 1): la RISERVA — se il modello principale non risponde
+    // (5xx, timeout, scadenza dello stream) il turno riprova UNA volta col
+    // modello di riserva dello stesso provider; mai sui 4xx
+    const fallbackModel = fallbackModelFor(provider, getSetting<ModelDefaultsMap>('providers.modelDefaults', {}))
+    let activeModel = agent.model
+    let fallbackUsed = false
+
     setStatus(agentId, 'thinking', emit)
 
     let awaitingUser = false
@@ -490,7 +500,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       const streamAbort = new AbortController()
       const onTurnAbort = (): void => streamAbort.abort()
       controller.signal.addEventListener('abort', onTurnAbort)
-      const stream = llmStream(provider, agent.model, messages, allTools, AbortSignal.any([controller.signal, streamAbort.signal]))
+      const stream = llmStream(provider, activeModel, messages, allTools, AbortSignal.any([controller.signal, streamAbort.signal]))
       // fase 3: il testo libero è ragionamento interno, non una risposta
       const entry = add({ agentId, kind: 'thinking', role: 'assistant', content: '' })
       emit({ type: 'entries', agentId, entries: [entry] })
@@ -521,6 +531,23 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       } catch (err) {
         streamAbort.abort()
         updateEntryContent(entry.id, acc)
+        // fase 9 (punto 1): il modello principale non risponde → UNA riprova
+        // col modello di riserva (il consumed step conta nel tetto MAX_STEPS)
+        if (
+          shouldUseFallback(err, {
+            fallbackModel, model: activeModel, fallbackUsed, aborted: controller.signal.aborted
+          })
+        ) {
+          fallbackUsed = true
+          activeModel = fallbackModel!
+          const why = err instanceof Error ? err.message : String(err)
+          add({
+            agentId, kind: 'notice', role: 'system',
+            content: `Il modello principale ${agent.model} non risponde (${why}): uso la riserva ${activeModel}.`
+          })
+          emitLastEntry(agentId, emit)
+          continue
+        }
         if (err instanceof StreamDeadlineError) {
           // fase 8 (§3bis L11): il modello non risponde — abort del solo stream
           add({ agentId, kind: 'notice', role: 'system', content: `Il modello non risponde (${err.message}): turno interrotto.` })
@@ -1101,7 +1128,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         messages.push({ role: 'user', content: RECOVERY_NUDGE })
         setStatus(agentId, 'thinking', emit)
         try {
-          const rstream = llmStream(provider, agent.model, messages, allTools, controller.signal)
+          const rstream = llmStream(provider, activeModel, messages, allTools, controller.signal)
           let acc = ''
           let recoveryCalls: ToolCall[] = []
           const rit = rstream[Symbol.asyncIterator]()

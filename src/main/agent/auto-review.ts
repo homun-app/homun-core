@@ -208,20 +208,34 @@ export async function runReviewer(
  * Adattatore di produzione: legge le impostazioni e chiama il modello piccolo
  * del revisore (temperatura 0, tool forzato). Provider/modello mancanti o
  * qualunque errore della chiamata diventano { ok: false } → ask.
+ * Fase 9 (punto 1): modello del revisore non scelto → il default del provider
+ * (per Ollama glm-5.3-flash:cloud); anche il provider, se non scelto, è il
+ * primo attivo che abbia un default di revisore.
  * Ritorna null se l'auto-review è spenta o l'azione è fuori ambito a prescindere.
  */
 export async function reviewWithConfiguredModel(action: AutoReviewAction): Promise<{ cfg: AutoReviewSettings; outcome: ReviewerOutcome } | null> {
-  const { getSetting } = await import('../store/db')
+  const { getSetting, listProviders } = await import('../store/db')
   const cfg = getSetting<AutoReviewSettings>('autoReview', (await import('../../shared/types')).DEFAULT_AUTO_REVIEW)
-  if (!cfg.enabled || !cfg.providerId || !cfg.model) return null
+  if (!cfg.enabled) return null
   const { getProvider } = await import('./providers')
-  const provider = getProvider(cfg.providerId)
-  if (!provider) return { cfg, outcome: { ok: false, error: 'provider del revisore non trovato' } }
+  const { autoReviewModelFor } = await import('./model-defaults')
+  type ModelDefaultsMap = import('./model-defaults').ModelDefaultsMap
+  const overrides = getSetting<ModelDefaultsMap>('providers.modelDefaults', {})
+  let provider: ReturnType<typeof getProvider> = undefined
+  if (cfg.providerId) {
+    provider = getProvider(cfg.providerId)
+    if (!provider) return { cfg, outcome: { ok: false, error: 'provider del revisore non trovato' } }
+  } else {
+    provider = listProviders().find((p) => p.enabled && autoReviewModelFor(p, overrides))
+    if (!provider) return null
+  }
+  const reviewerModel = cfg.model ?? autoReviewModelFor(provider, overrides)
+  if (!reviewerModel) return null
   const { llmStream } = await import('./llm')
   const controller = new AbortController()
   const model: ReviewerModel = {
     call: async (messages, tools) => {
-      const stream = llmStream(provider, cfg.model!, messages as never, tools as never, controller.signal, { temperature: 0 })
+      const stream = llmStream(provider, reviewerModel, messages as never, tools as never, controller.signal, { temperature: 0 })
       const drained = await stream.drain()
       return { toolCalls: drained.toolCalls.map((c) => ({ arguments: c.arguments })) }
     }

@@ -8,7 +8,7 @@
 // widget che porta alle impostazioni del provider e riprende (dopo il salvataggio
 // di un provider o al prossimo avvio) da lì. Tutto a dipendenze iniettabili:
 // nei test niente LLM, niente rete.
-import type { Agent, ModelInfo, ProviderConfig, SendMessagePayload, SandbotEvent, WidgetOption } from '../shared/types'
+import type { Agent, ProviderConfig, SendMessagePayload, SandbotEvent, WidgetOption } from '../shared/types'
 import type { BotTemplate } from '../shared/types'
 import { templateById } from '../main/templates'
 
@@ -61,7 +61,8 @@ export interface OnboardingDeps {
   createAgent(name: string, description: string): Agent
   updateAgent(id: string, patch: { providerId?: string | null; model?: string | null }): void
   listProviders(): ProviderConfig[]
-  listModels(p: ProviderConfig): Promise<ModelInfo[]>
+  /** Fase 9 (punto 1): provider attivo + defaultModel (con capability "tools"). */
+  assignDefaultModel(): Promise<{ providerId: string; model: string | null; warning?: string } | null>
   /** Entry visibile creata dal sistema (non dal modello), come il look-around. */
   appendSystemSend(agentId: string, message: SendMessagePayload, meta?: Record<string, unknown>): void
   /** Segna il widget risposto (respondedValue) e lo rimanda alla UI. */
@@ -133,33 +134,34 @@ export async function resumeOnboarding(deps: OnboardingDeps): Promise<boolean> {
 
 /**
  * Completa l'onboarding: i due bot da template (col kickstart in coda) e il
- * benvenuto FISSO del bot principale. Ai nuovi bot (e al principale) viene
- * assegnato il primo provider attivo e il suo primo modello, così il kickstart
- * può girare davvero.
+ * benvenuto FISSO del bot principale. Fase 9 (punto 1): ai bot va il
+ * MODELLO PREDEFINITO del provider (capability "tools" verificata), non più
+ * il primo modello dell'elenco; senza default configurato il bot resta senza
+ * modello e la prima chat dirà di configurarlo.
  */
 export async function completeOnboarding(deps: OnboardingDeps, role: string): Promise<void> {
-  const provider = deps.listProviders().find((p) => p.enabled) ?? null
-  let model: string | null = null
-  if (provider) {
-    try {
-      model = (await deps.listModels(provider))[0]?.id ?? null
-    } catch {
-      model = null // provider attivo ma non raggiungibile: il kickstart dirà cosa manca
-    }
-  }
+  const assignment = await deps.assignDefaultModel()
   const mainId = deps.getSetting<string | null>('mainAgentId', null)
-  if (mainId && provider) deps.updateAgent(mainId, { providerId: provider.id, model })
+  if (mainId && assignment) deps.updateAgent(mainId, { providerId: assignment.providerId, model: assignment.model })
 
   const templates = roleTemplates(role)
     .map((id) => templateById(id))
     .filter((t): t is BotTemplate => !!t)
   for (const t of templates) {
     const a = deps.createAgent(t.name, t.description)
-    if (provider) deps.updateAgent(a.id, { providerId: provider.id, model })
+    if (assignment) deps.updateAgent(a.id, { providerId: assignment.providerId, model: assignment.model })
     deps.enqueueKickstart(a.id, t)
   }
   if (mainId) {
     deps.appendSystemSend(mainId, { type: 'text', text: welcomeMessage(templates) })
+    // il default non è assegnabile (niente capability "tools"): lo dice qui,
+    // così l'utente sa perché i bot non rispondono finché non sistema il modello
+    if (assignment?.warning) {
+      deps.appendSystemSend(mainId, {
+        type: 'text',
+        text: `Attenzione: non ho potuto assegnare il modello ai bot (${assignment.warning}). Scegline uno valido dalle impostazioni dell'agente.`
+      })
+    }
   }
   deps.setSetting(PENDING_PROVIDER_SETTING, false)
   deps.setSetting(DONE_SETTING, true)

@@ -11,7 +11,7 @@ import {
   MAIN_BOT_NAME, ROLE_SETTING, PENDING_PROVIDER_SETTING, DONE_SETTING,
   type OnboardingDeps
 } from '../onboarding'
-import type { Agent, ModelInfo, ProviderConfig, SendMessagePayload, SandbotEvent } from '../../shared/types'
+import type { Agent, ProviderConfig, SendMessagePayload, SandbotEvent } from '../../shared/types'
 import type { BotTemplate } from '../../shared/types'
 
 interface Log {
@@ -27,7 +27,11 @@ interface Log {
   nextEntryId: number
 }
 
-function mkDeps(log: Log, models: ModelInfo[] = [{ id: 'm1' }]): OnboardingDeps {
+function mkDeps(
+  log: Log,
+  /** fase 9 (punto 1): l'assegnazione provider+defaultModel è iniettata */
+  assignment: { providerId: string; model: string | null; warning?: string } | null = { providerId: 'ollama', model: 'kimi-k3:cloud' }
+): OnboardingDeps {
   return {
     now: () => 1_000_000_000_000,
     getSetting: <T,>(key: string, fallback: T) => (key in log.settings ? (log.settings[key] as T) : fallback),
@@ -43,7 +47,7 @@ function mkDeps(log: Log, models: ModelInfo[] = [{ id: 'm1' }]): OnboardingDeps 
     },
     updateAgent: (id, patch) => { log.updates.push({ id, patch: patch as Record<string, unknown> }) },
     listProviders: () => log.providers,
-    listModels: async () => models,
+    assignDefaultModel: async () => assignment,
     appendSystemSend: (agentId, message, meta) => { log.sends.push({ agentId, message, meta }) },
     markWidgetResponded: (agentId, entryId, value) => { log.marked.push({ agentId, entryId, value }) },
     enqueueKickstart: (agentId, template) => { log.kickstarts.push({ agentId, template }) },
@@ -125,11 +129,12 @@ describe('answerOnboardingRole CON provider configurato', () => {
     })
     // il widget è stato marcato risposto
     expect(log.marked).toEqual([{ agentId: log.settings['mainAgentId'], entryId: roleWidgetEntryId, value: 'email' }])
-    // i due bot della mappa email, col provider e il modello assegnati
+    // i due bot della mappa email, col provider e il modello PREDEFINITO assegnato
     expect(log.agents.map((a) => a.name)).toEqual([MAIN_BOT_NAME, 'Gestore della posta in arrivo', 'Capo dello staff'])
     const assigned = log.updates.filter((u) => u.patch.providerId === 'ollama')
     expect(assigned).toHaveLength(3) // principale + due nuovi
-    expect(assigned.every((u) => u.patch.model === 'm1')).toBe(true)
+    // fase 9 (punto 1): il defaultModel, non più il primo modello dell'elenco
+    expect(assigned.every((u) => u.patch.model === 'kimi-k3:cloud')).toBe(true)
     // kickstart in coda per i DUE bot da template (non per il principale)
     expect(log.kickstarts.map((k) => k.template.id)).toEqual(['inbox-manager', 'chief-of-staff'])
     // benvenuto fisso: una riga per bot
@@ -140,6 +145,31 @@ describe('answerOnboardingRole CON provider configurato', () => {
     expect(text).toContain('Capo dello staff')
     expect(welcomeMessage([{ name: 'A', description: 'dA' } as BotTemplate, { name: 'B', description: 'dB' } as BotTemplate]).split('\n')).toHaveLength(3)
     expect(log.settings[DONE_SETTING]).toBe(true)
+  })
+
+  it('fase 9 (punto 1): defaultModel senza capability "tools" → nessun modello assegnato e avviso visibile', async () => {
+    deps = mkDeps(log, { providerId: 'ollama', model: null, warning: 'il modello "emb-only" non supporta i tool' })
+    await new Promise<void>((r) => {
+      answerOnboardingRole(deps, roleWidgetEntryId, 'email')
+      setTimeout(r, 0)
+    })
+    const assigned = log.updates.filter((u) => u.patch.providerId === 'ollama')
+    expect(assigned).toHaveLength(3)
+    expect(assigned.every((u) => u.patch.model === null)).toBe(true)
+    // l'avviso arriva nella chat del bot principale, leggibile
+    const warn = log.sends.find((s) => (s.message as { text?: string }).text?.includes('non supporta i tool'))
+    expect(warn?.agentId).toBe(log.settings['mainAgentId'])
+  })
+
+  it('fase 9 (punto 1): provider senza defaultModel → provider sì, modello null (niente primo dell\'elenco)', async () => {
+    deps = mkDeps(log, { providerId: 'ollama', model: null })
+    await new Promise<void>((r) => {
+      answerOnboardingRole(deps, roleWidgetEntryId, 'email')
+      setTimeout(r, 0)
+    })
+    const assigned = log.updates.filter((u) => u.patch.providerId === 'ollama')
+    expect(assigned.every((u) => u.patch.model === null)).toBe(true)
+    expect(log.sends.some((s) => (s.message as { text?: string }).text?.includes('Attenzione'))).toBe(false)
   })
 })
 

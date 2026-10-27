@@ -27,6 +27,8 @@ const h = vi.hoisted(() => {
   const llm = {
     queue: [] as unknown[],
     calls: [] as Array<Array<{ role: string; content: string; toolCallId?: string; images?: string[]; toolCalls?: unknown[] }>>,
+    // fase 9 (punto 1): il modello di OGNI chiamata (per i test della riserva)
+    models: [] as string[],
     gates: new Set<{ resolve: () => void }>(),
     // fase 8: risposta del revisore delle approvazioni (chiamata separata col
     // tool report_decision — non consuma la coda delle risposte del turno;
@@ -42,7 +44,14 @@ const h = vi.hoisted(() => {
 })
 
 interface FakeToolCall { id: string; name: string; arguments: string }
-interface FakeResp { text?: string; toolCalls?: FakeToolCall[]; /** fase 8: lo stream non risponde mai (test delle scadenze) */ hang?: true }
+interface FakeResp {
+  text?: string
+  toolCalls?: FakeToolCall[]
+  /** fase 8: lo stream non risponde mai (test delle scadenze) */
+  hang?: true
+  /** fase 9 (punto 1): lo stream FALLISCE con questo errore (test della riserva) */
+  error?: unknown
+}
 /**
  * Risposta in coda: oggetto, oppure funzione che vede i messaggi e i tool
  * della chiamata (fase 4: distingue la chiamata di compaction — un solo
@@ -77,6 +86,8 @@ vi.mock('../../store/db', () => ({
   // fase 7: roster degli agenti (bot principale, send_to_agent) e routine attive
   listAgents: () => [...h.db.agents.values()].sort((a, b) => a.createdAt - b.createdAt),
   listRoutines: (agentId?: string) => h.db.routines.filter((r) => !agentId || r.agent_id === agentId),
+  // fase 9 (punto 1): elenco provider (richiesto dal revisore di auto-review)
+  listProviders: () => [] as Array<import('../../../shared/types').ProviderConfig>,
   db: () => undefined as never,
   setSetting: (key: string, value: unknown) => { h.db.settings.set(key, value) },
   // fase 6: outbox (i messaggi non urgenti dei turni automatici restano trattenuti)
@@ -185,6 +196,8 @@ vi.mock('../llm', () => ({
     tools: unknown[] = []
   ) => {
     h.llm.calls.push(messages.map((m) => ({ role: m.role, content: m.content, toolCallId: m.toolCallId, images: m.images, toolCalls: m.toolCalls })))
+    // fase 9 (punto 1): quale modello è stato usato per questa chiamata
+    h.llm.models.push(String(_model))
     // fase 8: la chiamata del REVISORE (solo tool report_decision) risponde da
     // h.llm.reviewer senza toccare la coda del turno
     if ((tools as Array<{ name?: string }>).some((t) => t?.name === 'report_decision')) {
@@ -220,6 +233,8 @@ vi.mock('../llm', () => ({
           await new Promise(() => undefined)
           return
         }
+        // fase 9 (punto 1): lo stream fallisce (test della riserva)
+        if (r.error) throw r.error
         if (r.text) yield { textDelta: r.text }
         if (r.toolCalls) yield { toolCalls: r.toolCalls, finishReason: 'tool_calls' }
         else yield { finishReason: 'stop' }
@@ -313,6 +328,7 @@ beforeEach(() => {
   rmSync(join(TMP, 'agents'), { recursive: true, force: true })
   h.llm.queue.length = 0
   h.llm.calls.length = 0
+  h.llm.models.length = 0
   h.llm.reviewer = { text: 'no' }
   h.sandboxMock.exec = { command: '', env: {}, calls: 0 }
   h.sandboxMock.result = { stdout: '', stderr: '', exitCode: 0, signal: null, trimmed: false }
@@ -2026,5 +2042,78 @@ describe('fase 9 (punto 0): più messaggi per una sola azione', () => {
     expect(sends.map((s) => s.content)).toEqual(['Routine attivata.'])
     // il secondo è diventato ragionamento, non chat
     expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content === 'Fatto.')).toBe(true)
+  })
+})
+
+// ---- fase 9 (punto 1): il modello di riserva quando il principale non risponde ----
+
+describe('fase 9 (punto 1): riserva del modello', () => {
+  const mkSend = (id: string, args: string): FakeToolCall => ({ id, name: 'send_to_user', arguments: args })
+  const httpError = (status: number): Error => {
+    const e = new Error(`HTTP ${status}`)
+    ;(e as Error & { status?: number }).status = status
+    return e
+  }
+  const setRiserva = (model: string): void => {
+    h.db.settings.set('providers.modelDefaults', { prov: { fallbackModel: model } })
+  }
+
+  it('5xx → UNA riprova col modello di riserva, notice di sistema, consegna normale', async () => {
+    setRiserva('m-riserva')
+    h.llm.queue = [
+      { error: httpError(502) },
+      { toolCalls: [mkSend('f1', '{"text":"eccomi"}')] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    // il principale ha fallito, le chiamate successive girano sulla riserva
+    expect(h.llm.models).toEqual(['m1', 'm-riserva', 'm-riserva'])
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('uso la riserva m-riserva'))).toBe(true)
+    const send = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(send.content).toBe('eccomi')
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
+  })
+
+  it('la scadenza dello stream (fase 8) ammette la riserva come un timeout', async () => {
+    h.db.settings.set('llm.firstTokenMs', 30)
+    setRiserva('m-riserva')
+    h.llm.queue = [
+      { hang: true },
+      { toolCalls: [mkSend('f2', '{"text":"risposta dalla riserva"}')] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    expect(h.llm.models).toEqual(['m1', 'm-riserva', 'm-riserva'])
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('uso la riserva'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
+  })
+
+  it('la riserva si usa UNA volta sola: se fallisce anche lei il turno chiude STOPPED', async () => {
+    setRiserva('m-riserva')
+    h.llm.queue = [
+      { error: httpError(503) },
+      { error: httpError(503) },
+      { text: 'mai raggiunta' }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    expect(h.llm.models).toEqual(['m1', 'm-riserva'])
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.startsWith('Errore dal modello'))).toBe(true)
+  })
+
+  it('4xx: MAI riserva (richiesta sbagliata), turno STOPPED subito', async () => {
+    setRiserva('m-riserva')
+    h.llm.queue = [{ error: httpError(400) }, { text: 'mai' }]
+    await runTurn(AGENT, 'ciao', emit)
+    expect(h.llm.models).toEqual(['m1'])
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('riserva'))).toBe(false)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
+  })
+
+  it('senza riserva configurata il comportamento resta quello di prima', async () => {
+    h.llm.queue = [{ error: httpError(500) }, { text: 'mai' }]
+    await runTurn(AGENT, 'ciao', emit)
+    expect(h.llm.models).toEqual(['m1'])
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
   })
 })

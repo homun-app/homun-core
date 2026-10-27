@@ -1,5 +1,5 @@
 // Impostazioni: provider (modelli personalizzati), modello per agente, permessi, routine, connettori, generale.
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { api, useStore } from '../store'
 import { describeTrigger } from '../../../shared/cron-human'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
@@ -168,7 +168,7 @@ function AutoReviewTab() {
           disabled={!cfg.providerId}
           onChange={(e) => save({ ...cfg, model: e.target.value || null })}
         >
-          <option value="">modello…</option>
+          <option value="">modello… (vuoto = default del provider)</option>
           {models.map((m) => <option key={m.id} value={m.id}>{m.label ?? m.id}</option>)}
         </select>
       </div>
@@ -618,6 +618,61 @@ function GeneralTab() {
   )
 }
 
+// ---- fase 9 (punto 1): modelli del provider (predefinito, riserva, auto-review) ----
+
+interface ModelOverrides { defaultModel?: string; fallbackModel?: string; autoReviewModel?: string }
+
+/**
+ * I tre modelli configurabili per provider: il predefinito va ai bot nuovi
+ * (onboarding e template), la riserva rileva i turni quando il principale non
+ * risponde, il revisore giudica le approvazioni automatiche. Salvati nel
+ * setting 'providers.modelDefaults' (chiave = id del provider).
+ */
+function ModelDefaultsRow({ p }: { p: ProviderConfig }) {
+  const [models, setModels] = useState<ModelInfo[] | null>(null)
+  const [saved, setSaved] = useState<ModelOverrides>({})
+
+  useEffect(() => {
+    void api.settingsGet<Record<string, ModelOverrides> | undefined>('providers.modelDefaults', undefined)
+      .then((all) => setSaved(all?.[p.id] ?? {}))
+      .catch(() => setSaved({}))
+    void api.listModels(p.id).then(setModels).catch(() => setModels([]))
+  }, [p.id])
+
+  const save = async (patch: ModelOverrides): Promise<void> => {
+    const next = { ...saved, ...patch }
+    setSaved(next)
+    const all = await api.settingsGet<Record<string, ModelOverrides>>('providers.modelDefaults', {})
+    await api.settingsSet('providers.modelDefaults', { ...all, [p.id]: next })
+  }
+
+  const options = (value: string | undefined, label: string): ReactNode => (
+    <>
+      <option value="">{label}</option>
+      {/* il valore salvato potrebbe non essere nell'elenco (es. modelli cloud non ancora tirati): resta visibile */}
+      {value && !(models ?? []).some((m) => m.id === value) && <option value={value}>{value}</option>}
+      {(models ?? []).map((m) => <option key={m.id} value={m.id}>{m.label ?? m.id}</option>)}
+    </>
+  )
+  const sel = 'rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none'
+
+  if (models === null) return <div className="mt-2 text-xs text-neutral-600">modelli…</div>
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <span className="text-[11px] uppercase tracking-wide text-neutral-500">modelli</span>
+      <select className={sel} value={saved.defaultModel ?? ''} onChange={(e) => void save({ defaultModel: e.target.value || undefined })}>
+        {options(saved.defaultModel, 'predefinito…')}
+      </select>
+      <select className={sel} value={saved.fallbackModel ?? ''} onChange={(e) => void save({ fallbackModel: e.target.value || undefined })}>
+        {options(saved.fallbackModel, 'riserva…')}
+      </select>
+      <select className={sel} value={saved.autoReviewModel ?? ''} onChange={(e) => void save({ autoReviewModel: e.target.value || undefined })}>
+        {options(saved.autoReviewModel, 'auto-review…')}
+      </select>
+    </div>
+  )
+}
+
 function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
   const providers = useStore((s) => s.providers)
   const [edit, setEdit] = useState<ProviderConfig | null>(null)
@@ -677,6 +732,7 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
                 : `✕ ${testResult[p.id].error}`}
             </div>
           )}
+          <ModelDefaultsRow p={p} />
         </div>
       ))}
 

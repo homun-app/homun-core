@@ -76,6 +76,36 @@ export async function testProvider(p: ProviderConfig): Promise<{ ok: boolean; er
   }
 }
 
+/**
+ * Fase 9 (punto 1): il modello supporta i tool? Serve PRIMA di assegnarlo a un
+ * agente (un modello senza tool non può chiamare send_to_user: muto). Ollama
+ * espone le capability in /api/show; gli altri provider non le espongono in
+ * modo standard e non vengono controllati (checked: false).
+ */
+export async function modelSupportsTools(
+  p: ProviderConfig,
+  model: string
+): Promise<{ ok: boolean; checked: boolean; error?: string }> {
+  const base = p.baseUrl.replace(/\/$/, '')
+  if (p.kind !== 'ollama') return { ok: true, checked: false }
+  try {
+    const r = await fetch(base + '/api/show', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(8000)
+    })
+    if (!r.ok) return { ok: false, checked: true, error: `impossibile verificare "${model}" su ${p.name}: HTTP ${r.status}` }
+    const j = (await r.json()) as { capabilities?: string[] }
+    if (!(j.capabilities ?? []).includes('tools')) {
+      return { ok: false, checked: true, error: `il modello "${model}" non supporta i tool (capability "tools" assente): scegline uno con i tool, altrimenti il bot non può parlarti` }
+    }
+    return { ok: true, checked: true }
+  } catch (e) {
+    return { ok: false, checked: true, error: `impossibile verificare "${model}" su ${p.name}: ${e instanceof Error ? e.message : String(e)}` }
+  }
+}
+
 export function getProvider(id: string): ProviderConfig | undefined {
   return listProviders().find((p) => p.id === id)
 }

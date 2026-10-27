@@ -110,7 +110,21 @@ export function buildApiMethods(
       emit({ type: 'agents' })
       return a
     },
-    'agents:update': ([id, patch]) => {
+    'agents:update': async ([id, patch]) => {
+      const p = patch as { providerId?: string | null; model?: string | null }
+      // fase 9 (punto 1): prima di assegnare provider+modello verifica che il
+      // modello supporti i tool (Ollama: /api/show → capabilities "tools");
+      // senza → errore leggibile e nessuna assegnazione
+      if (p.model !== undefined || p.providerId !== undefined) {
+        const a = store.getAgent(id as string)
+        const providerId = p.providerId !== undefined ? p.providerId : a?.providerId ?? null
+        const model = p.model !== undefined ? p.model : a?.model ?? null
+        const provider = providerId ? providers.getProvider(providerId) : undefined
+        if (providerId && model && provider) {
+          const check = await providers.modelSupportsTools(provider, model)
+          if (!check.ok) throw new Error(check.error)
+        }
+      }
       store.updateAgent(id as string, patch as Parameters<typeof store.updateAgent>[1])
       emit({ type: 'agents' })
     },
@@ -132,10 +146,23 @@ export function buildApiMethods(
 
     // ---- fase 7: template dei bot + kickstart ----
     'templates:list': () => loadTemplates(),
-    'agents:create-from-template': ([templateId]) => {
+    'agents:create-from-template': async ([templateId]) => {
       const t = templateById(String(templateId))
       if (!t) throw new Error(`template sconosciuto: ${String(templateId)}`)
       const a = store.createAgent(t.name, t.description)
+      // fase 9 (punto 1): al bot da template vanno il provider attivo e il suo
+      // modello PREDEFINITO (con capability "tools" verificata)
+      const { assignDefaultModel } = await import('../main/agent/model-defaults')
+      type ModelDefaultsMap = import('../main/agent/model-defaults').ModelDefaultsMap
+      const assignment = await assignDefaultModel({
+        listProviders: () => store.listProviders(),
+        getOverrides: () => store.getSetting<ModelDefaultsMap>('providers.modelDefaults', {}),
+        supportsTools: (p, model) => {
+          const full = providers.getProvider(p.id)
+          return full ? providers.modelSupportsTools(full, model) : Promise.resolve({ ok: false, checked: false, error: 'provider non trovato' })
+        }
+      })
+      if (assignment) store.updateAgent(a.id, { providerId: assignment.providerId, model: assignment.model })
       // il kickstart parte come job della coda: un riavvio a metà lo riprende
       // come gli altri turni (payload.entryId, fase 2)
       const now = Date.now()
