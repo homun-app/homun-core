@@ -14,6 +14,7 @@ import {
   startGroupTurn, finishGroupTurn, pendingTurnNonces, groupTurnNonces,
   scheduleTurnsForMessage, botPostsLastHour, cancelGroupJobs
 } from '../groups'
+import { memberOfNonce } from '../../agent/group-turns'
 
 let dir: string
 
@@ -59,6 +60,24 @@ describe('gruppi e membri', () => {
     expect(groupMemberIds(g.id)).toHaveLength(2)
     removeGroupMember(g.id, a2.id)
     expect(groupMemberIds(g.id)).toEqual([a1.id])
+  })
+
+  it('rimuovere un membro chiude i suoi turni pianificati (niente fusione fantasma alla ri-aggiunta)', () => {
+    const a1 = createAgent('Uno', '')
+    const a2 = createAgent('Due', '')
+    const g = createGroup('Gp', 'd', a1.id, [a2.id])
+    const m = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'utente', text: 'via', depth: 0 })
+    scheduleTurnsForMessage(m, () => undefined, 5000)
+    // a2 ha un turno pianificato non partito
+    expect(pendingTurnNonces(g.id).length).toBeGreaterThan(0)
+    removeGroupMember(g.id, a2.id)
+    // i turni di a2 sono chiusi; quelli degli ALTRI membri restano validi
+    expect(pendingTurnNonces(g.id).map((n) => memberOfNonce(n))).not.toContain(a2.id)
+    // ri-aggiunto, un messaggio nuovo genera di nuovo il suo turno
+    addGroupMember(g.id, a2.id)
+    const m2 = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'utente', text: 'ancora', depth: 0 })
+    const r = scheduleTurnsForMessage(m2, () => undefined, 6000)
+    expect(r.jobs.some((j) => j.agentId === a2.id)).toBe(true)
   })
 })
 

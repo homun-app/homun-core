@@ -184,6 +184,12 @@ export function addGroupMember(groupId: number, agentId: string): void {
 export function removeGroupMember(groupId: number, agentId: string): void {
   db().prepare('DELETE FROM group_members WHERE group_id = ? AND agent_id = ?').run(groupId, agentId)
   db().prepare('DELETE FROM group_cursors WHERE group_id = ? AND agent_id = ?').run(groupId, agentId)
+  // i turni PIANIFICATI e non partiti si chiudono: altrimenti resterebbero
+  // "in coda" per sempre e la fusione silenzierebbe il membro ri-aggiunto
+  db().prepare(`
+    UPDATE group_turns SET outcome = 'CANCELLED', ended_at = ?
+    WHERE group_id = ? AND member_id = ? AND started_at IS NULL AND outcome IS NULL
+  `).run(Date.now(), groupId, agentId)
 }
 
 /** Fase 10 (residuo della cascata): l'agente eliminato esce da tutti i gruppi. */
