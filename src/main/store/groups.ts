@@ -211,7 +211,12 @@ export function addGroupMessage(m: NewGroupMessage): GroupMessage {
     .prepare(`INSERT INTO group_messages(group_id, author_kind, author_id, author_name, text, reply_to, root_id, depth, automatic, created_at)
               VALUES(?,?,?,?,?,?,?,?,?,?)`)
     .run(m.groupId, m.authorKind, m.authorId, m.authorName, m.text, m.replyTo ?? null, m.rootId ?? null, m.depth ?? 0, m.automatic ? 1 : 0, Date.now())
-  return getGroupMessage(Number(r.lastInsertRowid))!
+  const id = Number(r.lastInsertRowid)
+  // catena: un messaggio a depth 0 SENZA root apre una catena ed è root di sé
+  if ((m.depth ?? 0) === 0 && (m.rootId ?? null) === null) {
+    db().prepare('UPDATE group_messages SET root_id = ? WHERE id = ?').run(id, id)
+  }
+  return getGroupMessage(id)!
 }
 
 export function getGroupMessage(id: number): GroupMessage | null {
