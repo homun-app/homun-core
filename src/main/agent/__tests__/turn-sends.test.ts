@@ -1,9 +1,11 @@
 // Fase 9 (punto 0) — test puri delle regole dei send_to_user nel turno:
 // result con l'inizio del testo consegnato, dedup, tetto degli avanzamenti.
+// Fase 10 (residuo 0c): tetto dei send consegnati per turno.
 import { describe, expect, it } from 'vitest'
 import {
   deliveredResultText, alreadyDeliveredResult, isDuplicateSend,
-  isWorkTool, messageCapResult, previewOf, DELIVERED_PREVIEW_CHARS
+  isWorkTool, messageCapResult, previewOf, DELIVERED_PREVIEW_CHARS,
+  turnCapResult, MAX_DELIVERED_PER_TURN
 } from '../turn-sends'
 
 describe('previewOf / deliveredResultText (punto 0b)', () => {
@@ -91,5 +93,19 @@ describe('isWorkTool / messageCapResult (punto 0d)', () => {
     expect(r).toContain('Non consegnato')
     expect(r).toContain('Non ripetere')
     expect(r).toContain('un solo messaggio')
+  })
+})
+
+describe('turnCapResult / MAX_DELIVERED_PER_TURN (fase 10, residuo 0c)', () => {
+  it('il tetto del turno è 3 send consegnati', () => {
+    expect(MAX_DELIVERED_PER_TURN).toBe(3)
+  })
+
+  it('il result del tetto dice che il testo è ragionamento e come procedere', () => {
+    const r = turnCapResult()
+    expect(r).toContain('Non consegnato')
+    expect(r).toContain('ragionamento')
+    expect(r).toContain('3 messaggi')
+    expect(r).not.toContain('Non ripetere lo stesso contenuto')
   })
 })

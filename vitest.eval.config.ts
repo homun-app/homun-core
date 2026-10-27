@@ -6,6 +6,10 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     include: ['eval/**/*.eval.ts'],
+    // fase 10 (residuo 0a): silent:false — vitest 5 nasconde i console.log dei
+    // test che passano, e la tabella dell'eval è proprio l'output che serve
+    // quando la soglia è raggiunta
+    silent: false,
     // una chiamata può essere lenta (modello cloud): la singola esecuzione di
     // tutti i casi × run ha un tetto ampio, non il progetto
     testTimeout: 1_800_000,

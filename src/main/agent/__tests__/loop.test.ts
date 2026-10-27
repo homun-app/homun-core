@@ -19,6 +19,8 @@ const h = vi.hoisted(() => {
     // fase 8: righe dei task (create_task / update_task); correzione B1:
     // untrusted/automatic = origine del turno che li ha creati
     tasks: [] as Array<{ id: number; agent_id: string; title: string; status: string; created_at: number; updated_at: number; summary: string | null; untrusted?: number; automatic?: number }>,
+    // fase 10 (residuo 0e): provider attivi (notice di onboarding del loop)
+    providers: [] as Array<{ id: string; enabled: boolean }>,
     nextId: 1,
     nextRoutineId: 1,
     nextTaskId: 1,
@@ -86,8 +88,9 @@ vi.mock('../../store/db', () => ({
   // fase 7: roster degli agenti (bot principale, send_to_agent) e routine attive
   listAgents: () => [...h.db.agents.values()].sort((a, b) => a.createdAt - b.createdAt),
   listRoutines: (agentId?: string) => h.db.routines.filter((r) => !agentId || r.agent_id === agentId),
-  // fase 9 (punto 1): elenco provider (richiesto dal revisore di auto-review)
-  listProviders: () => [] as Array<import('../../../shared/types').ProviderConfig>,
+  // fase 9 (punto 1): elenco provider (richiesto dal revisore di auto-review);
+  // fase 10 (residuo 0e): controllabile dai test della notice di onboarding
+  listProviders: () => h.db.providers,
   db: () => undefined as never,
   setSetting: (key: string, value: unknown) => { h.db.settings.set(key, value) },
   // fase 6: outbox (i messaggi non urgenti dei turni automatici restano trattenuti)
@@ -321,6 +324,7 @@ beforeEach(() => {
   h.db.outbox.length = 0
   h.db.jobs.length = 0
   h.db.tasks.length = 0
+  h.db.providers.length = 0
   h.db.nextId = 1
   h.db.nextRoutineId = 1
   h.db.nextTaskId = 1
@@ -2132,5 +2136,73 @@ describe('fase 9: send senza testo', () => {
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
     const results = lastCall.filter((m) => m.role === 'tool').map((m) => String(m.content))
     expect(results.filter((c) => c.includes('campo text è vuoto'))).toHaveLength(3)
+  })
+})
+
+// ---- fase 10 (residui della fase 9) ----
+
+describe('fase 10 (residuo 0c): al massimo 3 send consegnati per turno', () => {
+  const mkSend = (id: string, text: string): FakeToolCall =>
+    ({ id, name: 'send_to_user', arguments: JSON.stringify({ text }) })
+  const lavoro = (id: string): FakeToolCall => ({ id, name: 'list-credentials', arguments: '{}' })
+
+  it('dal quarto send (con lavoro in mezzo, quindi legittimo per 0d) il testo è ragionamento', async () => {
+    h.llm.queue = [
+      { toolCalls: [mkSend('c1', 'primo messaggio')] },
+      { toolCalls: [lavoro('w1')] },
+      { toolCalls: [mkSend('c2', 'secondo messaggio')] },
+      { toolCalls: [lavoro('w2')] },
+      { toolCalls: [mkSend('c3', 'terzo messaggio')] },
+      { toolCalls: [lavoro('w3')] },
+      // il quarto, pur separato dal lavoro, supera il tetto del TURNO
+      { toolCalls: [mkSend('c4', 'quarto messaggio')] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'lavoro lungo', emit)
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends.map((s) => s.content)).toEqual(['primo messaggio', 'secondo messaggio', 'terzo messaggio'])
+    expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content === 'quarto messaggio')).toBe(true)
+    // il result spiega il tetto del turno (diverso dal cap di fila 0d)
+    const lastCall = h.llm.calls[h.llm.calls.length - 1]!
+    const results = lastCall.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes('3 messaggi'))).toBe(true)
+  })
+})
+
+describe('fase 10 (residuo 0e): notice di onboarding quando il provider esiste', () => {
+  it('senza provider resta la vecchia notice di configurazione', async () => {
+    h.db.agents.set(AGENT, { ...h.db.agents.get(AGENT)!, providerId: null, model: null })
+    h.db.providers = []
+    await runTurn(AGENT, 'ciao', emit)
+    const notice = h.db.entries.find((e) => e.kind === 'notice')
+    expect(notice?.content).toContain('Configura prima un provider')
+  })
+
+  it('provider attivo + widget del ruolo in attesa → chiede di scegliere il ruolo, non di configurare', async () => {
+    h.db.agents.set(AGENT, { ...h.db.agents.get(AGENT)!, providerId: null, model: null })
+    h.db.providers = [{ id: 'prov', enabled: true }]
+    h.db.entries.push({
+      id: h.db.nextId++, agentId: AGENT, kind: 'send-message', role: 'assistant',
+      content: 'Per cosa vuoi usarmi di più?', meta: { onboardingRole: true, message: { type: 'widget', prompt: '', options: [] } },
+      createdAt: 1
+    })
+    await runTurn(AGENT, 'ciao', emit)
+    const notice = h.db.entries.find((e) => e.kind === 'notice')
+    expect(notice?.content).toContain('scegli il ruolo nel messaggio')
+    expect(notice?.content).not.toContain('Configura prima un provider')
+  })
+
+  it('widget del ruolo GIÀ risposto: anche col provider attivo la notice resta quella di configurazione', async () => {
+    h.db.agents.set(AGENT, { ...h.db.agents.get(AGENT)!, providerId: null, model: null })
+    h.db.providers = [{ id: 'prov', enabled: true }]
+    h.db.entries.push({
+      id: h.db.nextId++, agentId: AGENT, kind: 'send-message', role: 'assistant',
+      content: 'Per cosa vuoi usarmi di più?',
+      meta: { onboardingRole: true, respondedValue: 'email', message: { type: 'widget', prompt: '', options: [] } },
+      createdAt: 1
+    })
+    await runTurn(AGENT, 'ciao', emit)
+    const notice = h.db.entries.find((e) => e.kind === 'notice')
+    expect(notice?.content).toContain('Configura prima un provider')
   })
 })

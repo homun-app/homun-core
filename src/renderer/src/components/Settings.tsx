@@ -5,6 +5,8 @@ import { describeTrigger } from '../../../shared/cron-human'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
 import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo, AutoReviewSettings } from '../../../shared/types'
 import { DEFAULT_AUTO_REVIEW } from '../../../shared/types'
+// fase 10 (residuo 0d): i default per kind (modulo puro, nessuna dipendenza node)
+import { modelDefaultsFor } from '../../../main/agent/model-defaults'
 
 const KINDS: ProviderKind[] = [
   'ollama', 'lmstudio', 'anthropic', 'mistral', 'openrouter', 'zai', 'xai', 'deepseek', 'groq', 'openai-compatible'
@@ -627,6 +629,8 @@ interface ModelOverrides { defaultModel?: string; fallbackModel?: string; autoRe
  * (onboarding e template), la riserva rileva i turni quando il principale non
  * risponde, il revisore giudica le approvazioni automatiche. Salvati nel
  * setting 'providers.modelDefaults' (chiave = id del provider).
+ * Fase 10 (residuo 0d): senza override il selettore mostra il default
+ * EFFETTIVO del provider (es. "predefinito: kimi-k3:cloud").
  */
 function ModelDefaultsRow({ p }: { p: ProviderConfig }) {
   const [models, setModels] = useState<ModelInfo[] | null>(null)
@@ -646,6 +650,11 @@ function ModelDefaultsRow({ p }: { p: ProviderConfig }) {
     await api.settingsSet('providers.modelDefaults', { ...all, [p.id]: next })
   }
 
+  const effective = modelDefaultsFor(p)
+  const effLabel = (role: keyof ModelOverrides, fallback: string): string => {
+    const eff = effective[role]
+    return eff ? `${fallback}: ${eff}` : `${fallback}…`
+  }
   const options = (value: string | undefined, label: string): ReactNode => (
     <>
       <option value="">{label}</option>
@@ -661,13 +670,13 @@ function ModelDefaultsRow({ p }: { p: ProviderConfig }) {
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <span className="text-[11px] uppercase tracking-wide text-neutral-500">modelli</span>
       <select className={sel} value={saved.defaultModel ?? ''} onChange={(e) => void save({ defaultModel: e.target.value || undefined })}>
-        {options(saved.defaultModel, 'predefinito…')}
+        {options(saved.defaultModel, saved.defaultModel ? 'predefinito…' : effLabel('defaultModel', 'predefinito'))}
       </select>
       <select className={sel} value={saved.fallbackModel ?? ''} onChange={(e) => void save({ fallbackModel: e.target.value || undefined })}>
-        {options(saved.fallbackModel, 'riserva…')}
+        {options(saved.fallbackModel, saved.fallbackModel ? 'riserva…' : effLabel('fallbackModel', 'riserva'))}
       </select>
       <select className={sel} value={saved.autoReviewModel ?? ''} onChange={(e) => void save({ autoReviewModel: e.target.value || undefined })}>
-        {options(saved.autoReviewModel, 'auto-review…')}
+        {options(saved.autoReviewModel, saved.autoReviewModel ? 'auto-review…' : effLabel('autoReviewModel', 'auto-review'))}
       </select>
     </div>
   )

@@ -18,7 +18,7 @@
 // draft_external. Ogni turno si chiude con un evento meta.turnEnd ∈
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID } from 'node:crypto'
-import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, type AppendEntry } from '../store/db'
+import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, listProviders, type AppendEntry } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
 import { systemPrompt, secondaryPrompts, mainAgentSection } from './prompts'
 import { toolDefs, executeTool } from './tools'
@@ -41,7 +41,7 @@ import { activityOf, isToolLoop } from './loop-guard'
 import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from './stream-deadline'
 // fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
 // avanzamenti, result col testo consegnato)
-import { deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkTool, messageCapResult, emptySendResult } from './turn-sends'
+import { deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkTool, messageCapResult, emptySendResult, turnCapResult, MAX_DELIVERED_PER_TURN } from './turn-sends'
 // fase 9 (punto 1): modello di riserva quando il principale non risponde
 import { fallbackModelFor, type ModelDefaultsMap } from './model-defaults'
 import { shouldUseFallback } from './model-fallback'
@@ -235,7 +235,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   const agent = getAgent(agentId)
   if (!agent) throw new Error('Agente non trovato')
   if (!agent.providerId || !agent.model) {
-    appendEntry({ agentId, kind: 'notice', role: 'system', content: "Configura prima un provider e un modello nelle impostazioni dell'agente." })
+    // fase 10 (residuo 0e): durante l'onboarding, se il provider ESISTE ma il
+    // widget del ruolo è ancora in attesa, il problema non è la configurazione:
+    // chiedere di configurare porta fuori strada
+    const onboardingWaiting =
+      listProviders().some((p) => p.enabled) &&
+      getEntries(agentId).some((e) => e.kind === 'send-message' && e.meta?.onboardingRole && e.meta?.respondedValue === undefined)
+    appendEntry({
+      agentId, kind: 'notice', role: 'system',
+      content: onboardingWaiting
+        ? "C'è già un provider attivo: per farmi partire scegli il ruolo nel messaggio qui sopra (con la risposta preparo i tuoi bot)."
+        : "Configura prima un provider e un modello nelle impostazioni dell'agente."
+    })
     emitLastEntry(agentId, emit)
     return
   }
@@ -324,6 +335,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // a volte chiama send_to_user senza text)
     if (!text.trim()) return emptySendResult()
     if (isDuplicateSend(deliveredTexts, text)) return alreadyDeliveredResult(text)
+    // fase 10 (residuo 0c): dal quarto send_to_user consegnato del turno il
+    // testo è ragionamento — tre messaggi bastano per un turno di lavoro
+    if (deliveredTexts.length >= MAX_DELIVERED_PER_TURN) {
+      add({ agentId, kind: 'thinking', role: 'assistant', content: text })
+      emitLastEntry(agentId, emit)
+      return turnCapResult()
+    }
     if (sendsSinceWork >= 1) {
       add({ agentId, kind: 'thinking', role: 'assistant', content: text })
       emitLastEntry(agentId, emit)

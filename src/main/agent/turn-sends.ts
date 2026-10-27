@@ -71,6 +71,18 @@ export function messageCapResult(): string {
 }
 
 /**
+ * Fase 10 (residuo 0c): al massimo 3 send_to_user CONSEGNATI per turno — il
+ * lavoro di uno stesso turno per l'utente sta in tre messaggi; dal quarto il
+ * testo è ragionamento (come per il cap di fila).
+ */
+export const MAX_DELIVERED_PER_TURN = 3
+
+/** Il result per la send oltre il tetto del turno (residuo 0c). */
+export function turnCapResult(): string {
+  return `Non consegnato: in questo turno sono già arrivati all'utente ${MAX_DELIVERED_PER_TURN} messaggi (il tetto del turno). Il testo è finito nel ragionamento, non in chat: se manca qualcosa di essenziale, chiudi il turno e lo riprenderai al prossimo messaggio dell'utente.`
+}
+
+/**
  * Il result per una send SENZA testo (visto nel valutare i comportamenti:
  * un modello a volte chiama send_to_user con text vuoto): niente consegna,
  * la chat non deve riempirsi di messaggi vuoti.

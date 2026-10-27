@@ -17,7 +17,7 @@ const min = flag('min', '19')
 const baseUrl = flag('base-url', 'http://127.0.0.1:11434')
 
 console.log(`eval fase 9 — modello=${model} runs=${runs} provider=${baseUrl}`)
-console.log(`soglia: almeno ${min} pass su ${Number(runs) * 7}\n`)
+console.log(`soglia: almeno ${min} pass (il totale casi × run lo stampa la suite)\n`)
 
 const r = spawnSync('npx', ['vitest', 'run', '--config', 'vitest.eval.config.ts'], {
   stdio: 'inherit',
