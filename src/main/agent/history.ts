@@ -39,6 +39,11 @@ function sendCallOf(e: TranscriptEntry): { name: string; arguments: string } {
 export function sendResultText(e: TranscriptEntry): string {
   const m = payloadOf(e)
   const p = m?.message
+  // fase 7 (correzione A2): la delega a un altro bot NON è "inviato all'utente":
+  // il turno successivo trova la coppia chiamata/risultato con l'esito della coda
+  if (m?.agentSend) {
+    return `messaggio in coda per ${m.toAgentName ?? 'un altro bot'} (passaggio ${m.hop ?? 1}): l'altro bot non vede questa conversazione`
+  }
   if (m && p?.type === 'widget') {
     if (m.respondedValue !== undefined) return `l'utente ha risposto: ${JSON.stringify(m.respondedValue)}`
     if (m.widgetDismissed) return "widget mostrato all'utente, poi scartato: l'utente ha proseguito senza rispondere"

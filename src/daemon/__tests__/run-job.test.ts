@@ -79,6 +79,34 @@ describe('makeJobRunner: user-message', () => {
     expect(log[0]!.opts.initiator).toBe('AGENT')
     expect(log[0]!.opts.agentMessage).toEqual({ fromAgentId: 'a1', fromAgentName: 'Bot', hop: 2 })
   })
+
+  // correzione A3: l'automaticità della catena viaggia nel payload e sopravvive alla ripresa
+  it('payload automatic (catena partita da un turno automatico) → opts.automatic, anche in ripresa', async () => {
+    const job = enqueueJob(db, {
+      agentId: 'a2', kind: 'user-message',
+      payload: {
+        text: '<messaggio_da_agente nome="Bot">ciao</messaggio_da_agente>', initiator: 'AGENT',
+        fromAgentId: 'a1', fromAgentName: 'Bot', toAgentId: 'a2', hop: 1, automatic: true, entryId: 9
+      },
+      runAt: 0, now: 0
+    })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.opts.automatic).toBe(true)
+    expect(log[0]!.opts.resume).toEqual({ entryId: 9 })
+    expect(log[0]!.opts.agentMessage).toEqual({ fromAgentId: 'a1', fromAgentName: 'Bot', hop: 1 })
+  })
+
+  it('senza payload automatic la catena resta immediata (nessuna opts.automatic)', async () => {
+    const job = enqueueJob(db, {
+      agentId: 'a2', kind: 'user-message',
+      payload: { text: 'ciao', initiator: 'AGENT', fromAgentId: 'a1', fromAgentName: 'Bot', toAgentId: 'a2', hop: 1 },
+      runAt: 0, now: 0
+    })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.opts.automatic).toBeUndefined()
+  })
 })
 
 describe('makeJobRunner: routine-run', () => {

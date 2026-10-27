@@ -266,6 +266,18 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       // fase 6: trattenuto nell'outbox (turno automatico non urgent, in
       // attesa della finestra di consegna) — invisibile finché non consegnato
       if (meta.held) return null
+      // fase 7 (correzione A2): delega a un altro bot — entry "A <nome>"
+      // specchiata al "Da <nome>" dei messaggi ricevuti
+      if (meta.agentSend && meta.toAgentName) {
+        return (
+          <div className="max-w-[80%] rounded-2xl rounded-bl-md border border-violet-800/50 bg-violet-950/20 px-4 py-2.5 text-sm text-neutral-100">
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-violet-300/80">
+              A {meta.toAgentName}
+            </p>
+            <p className="whitespace-pre-wrap">{entry.content}</p>
+          </div>
+        )
+      }
       // fase 7: widget di sistema che porta alle impostazioni del provider
       // (onboarding fermo): il bottone apre le Impostazioni, niente turno
       if (message?.type === 'widget' && (entry.meta as Record<string, unknown>)?.onboardingProvider) {

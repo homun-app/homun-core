@@ -26,16 +26,22 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
         text: string; images?: string[]; respondedTo?: number; initiator?: string
         // fase 7: messaggio di un altro bot (§3bis L8) — entra come evidenza
         fromAgentId?: string; fromAgentName?: string; hop?: number
+        // fase 7 (correzione A3): la catena eredita l'automaticità del mittente
+        automatic?: boolean
         // fase 7: meta extra del messaggio che apre il turno (es. templateName)
         extraMeta?: Record<string, unknown>
       }
+      // correzione A3: le opzioni derivate dal payload vengono DOPO `opts`, così
+      // sopravvivono anche alla ripresa (payload.entryId): una catena automatica
+      // resta tale anche dopo un crash a metà turno
       await runTurnFn(job.agent_id, p.text, emit, p.images, {
-        source: 'user', ...opts, onTurnEntry,
+        source: 'user', onTurnEntry, ...opts,
         ...(p.respondedTo !== undefined ? { respondedTo: p.respondedTo } : {}),
         ...(p.initiator ? { initiator: p.initiator } : {}),
         ...(p.fromAgentId && p.fromAgentName && typeof p.hop === 'number'
           ? { agentMessage: { fromAgentId: p.fromAgentId, fromAgentName: p.fromAgentName, hop: p.hop } }
           : {}),
+        ...(p.automatic ? { automatic: true } : {}),
         ...(p.extraMeta ? { extraMeta: p.extraMeta } : {})
       })
       return

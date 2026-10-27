@@ -222,7 +222,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'send_to_agent',
-    description: "Manda un messaggio a un altro bot dell'utente (delega, aggiornamenti, domande). Il destinatario lo riceve come evidenza in un blocco <messaggio_da_agente> e può risponderti con lo stesso tool. Cerca l'id con list_agents. Limiti anti-ciclo: catena massima di 3 passaggi e 10 messaggi per coppia di bot all'ora.",
+    description: "Manda un messaggio a un altro bot dell'utente (delega, aggiornamenti, domande). Il destinatario lo riceve come evidenza in un blocco <messaggio_da_agente> e può risponderti con lo stesso tool. Cerca l'id con list_agents. Limiti anti-ciclo: catena massima di 3 passaggi e 10 messaggi per coppia di bot all'ora; la coda del destinatario ha lo stesso tetto dei messaggi dell'utente.",
     parameters: {
       type: 'object',
       properties: {
@@ -255,7 +255,7 @@ export const toolDefs: ToolDef[] = [
         prompt: { type: 'string', description: 'Il prompt che la routine esegue' },
         schedule: { type: 'string', description: 'Schedule cron a 5 campi, es. "30 8 * * 1-5"' },
         trigger: { type: 'object', description: "In alternativa al cron: trigger di tipo schedule ({type:'schedule', kind:'cron', cron} o {type:'schedule', kind:'every', every, at, mode}); SOLO schedule: email/webhook/poll li configura l'utente", additionalProperties: true },
-        provenance: { type: 'string', enum: ['template', 'agent'], description: "'template' se la routine arriva dal kickstart di un template (default agent)" },
+        provenance: { type: 'string', enum: ['template', 'agent'], description: "'template' SOLO nel turno di kickstart di un template (default e unico altro valore: agent)" },
         timezone: { type: 'string', description: 'Fuso orario della schedule (es. Europe/Rome)' },
         content: { type: 'string', description: 'Contenuto (per target memory)' },
         tier: { type: 'string', enum: ['core', 'log'], description: 'Tier della memoria (per target memory)' },
@@ -302,8 +302,13 @@ function runMemoryAction(agentId: string, input: Record<string, unknown>): ToolE
   return { output: `Azione memoria non valida: "${action}" (write | update | delete).`, meta: {} }
 }
 
+/** Contesto del turno in cui gira il tool (correzione A5): chi ha aperto il turno. */
+export interface ToolTurnContext {
+  turnInitiator?: string
+}
+
 /** Azione su una routine (update_state target 'routine'): validazione cron con parseCron del daemon. */
-async function runRoutineAction(agentId: string, input: Record<string, unknown>): Promise<ToolExecResult> {
+async function runRoutineAction(agentId: string, input: Record<string, unknown>, ctx: ToolTurnContext = {}): Promise<ToolExecResult> {
   const { parseCron } = await import('../../daemon/cron')
   const { createRoutine, updateRoutine, getRoutine, deleteRoutine } = await import('../store/db')
   const action = String(input.action ?? '')
@@ -334,9 +339,11 @@ async function runRoutineAction(agentId: string, input: Record<string, unknown>)
     if (!trigger && (!schedule || !parseCron(schedule))) {
       return { output: `Schedule non valida: "${schedule ?? ''}" — usare un cron a 5 campi, es. "0 9 * * *", o un trigger schedule.`, meta: {} }
     }
-    // le routine dell'agente nascono SEMPRE in pausa; provenance 'template'
-    // quando arrivano dal kickstart di un template, 'agent' negli altri casi
-    const provenance = input.provenance === 'template' ? 'template' : 'agent'
+    // le routine dell'agente nascono SEMPRE in pausa; correzione A5: la
+    // provenance 'template' è accettata SOLO nel turno di kickstart di un
+    // template (initiator TEMPLATE_IMPORT) — da qualsiasi altro turno la
+    // routine è dell'agente
+    const provenance = input.provenance === 'template' && ctx.turnInitiator === 'TEMPLATE_IMPORT' ? 'template' : 'agent'
     const r = createRoutine(agentId, name, prompt, schedule, {
       enabled: 0, provenance,
       description: str(input.description) ?? '', timezone: str(input.timezone) ?? '',
@@ -384,7 +391,12 @@ async function runRoutineAction(agentId: string, input: Record<string, unknown>)
   return { output: `Azione routine non valida: "${action}" (create | update | pause | resume | delete).`, meta: {} }
 }
 
-export async function executeTool(agentId: string, tool: string, input: Record<string, unknown>): Promise<ToolExecResult> {
+export async function executeTool(
+  agentId: string,
+  tool: string,
+  input: Record<string, unknown>,
+  ctx: ToolTurnContext = {}
+): Promise<ToolExecResult> {
   switch (tool) {
     case 'run-command': {
       const raw = String(input.command ?? '')
@@ -477,7 +489,7 @@ export async function executeTool(agentId: string, tool: string, input: Record<s
     }
     case 'update_state': {
       if (input.target === 'memory') return runMemoryAction(agentId, input)
-      if (input.target === 'routine') return runRoutineAction(agentId, input)
+      if (input.target === 'routine') return runRoutineAction(agentId, input, ctx)
       return { output: `Target update_state non valido: ${JSON.stringify(input.target)} (routine | memory).`, meta: {} }
     }
     case 'list_agents': {

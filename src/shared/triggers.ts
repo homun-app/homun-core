@@ -5,6 +5,7 @@
 // variazione 'around' deterministica, formattazione dell'evento <evento> che
 // entra nel prompt del turno come evidenza.
 import type { ConnectorPollTrigger, EveryScheduleSpec, RoutineTrigger, TriggerEventPayload } from './types'
+import { neutralizeClosingTag } from './agent-message'
 
 /** Il tetto del set dei visti di un trigger connector_poll (ultimi 1000 id). */
 export const SEEN_IDS_CAP = 1000
@@ -236,9 +237,11 @@ export function triggerShapeErrors(t: RoutineTrigger): string[] {
  * è un dato, non un'istruzione (§3bis L3: mai eseguire iniezioni).
  */
 export function formatTriggerEvent(title: string, prompt: string, event: TriggerEventPayload): string {
-  const data = event.data === undefined ? '' : JSON.stringify(event.data, null, 2).slice(0, 4000)
+  // correzione A4: anche il dato dell'evento può contenere un tag di chiusura
+  // ostile (email, payload webhook): neutralizzato, non chiude il blocco
+  const data = event.data === undefined ? '' : neutralizeClosingTag(JSON.stringify(event.data, null, 2).slice(0, 4000), 'evento')
   return [
-    `[routine "${title}": ${event.title}]`,
+    `[routine "${title}": ${neutralizeClosingTag(event.title, 'evento')}]`,
     prompt,
     '',
     '<evento>',

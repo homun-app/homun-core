@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildMessages, visibleReplyEntries } from '../history'
+import { buildMessages, visibleReplyEntries, sendResultText } from '../history'
 import type { TranscriptEntry } from '../../../shared/types'
 
 let nextId = 1
@@ -252,5 +252,30 @@ describe('fase 3 (§3bis L2): send-message e thinking nella storia del modello',
     expect(visible.map((e) => e.content)).toEqual(['avanzamento', 'risultato finale'])
     // senza send-message (turno di routine silenzioso) → nessun messaggio visibile
     expect(visibleReplyEntries(entries.slice(0, 5), entries[0]!.id)).toHaveLength(0)
+  })
+})
+
+// correzione A2: la delega send_to_agent persistita lato mittente torna al
+// modello come coppia chiamata/risultato coerente (sa di aver delegato)
+describe('fase 7 (A2): entry di delega send_to_agent nella storia del modello', () => {
+  const ARGS = '{"agentId":"b","text":"controlla la posta"}'
+  const delegation = mk('send-message', 'assistant', 'controlla la posta', {
+    call: { id: 'd1', name: 'send_to_agent', arguments: ARGS },
+    message: { type: 'text', text: 'controlla la posta' },
+    toAgentId: 'b', toAgentName: 'Specialista', hop: 1, agentSend: true
+  })
+
+  it('buildMessages: tool call send_to_agent (quella originale) + result con l\'esito della coda', () => {
+    const msgs = buildMessages(sys, [mk('message', 'user', 'occupatene'), delegation])
+    // [system, user, assistant(toolCalls), tool-result]
+    expect(msgs[2]?.toolCalls?.[0]).toMatchObject({ id: `send_${delegation.id}`, name: 'send_to_agent', arguments: ARGS })
+    expect(msgs[3]).toMatchObject({ role: 'tool', toolCallId: `send_${delegation.id}` })
+    expect(msgs[3]?.content).toContain('in coda per Specialista')
+    expect(msgs[3]?.content).toContain('passaggio 1')
+  })
+
+  it('sendResultText: la delega NON è "inviato all\'utente"', () => {
+    expect(sendResultText(delegation)).toContain('in coda per Specialista')
+    expect(sendResultText(delegation)).not.toContain('inviato all\'utente')
   })
 })

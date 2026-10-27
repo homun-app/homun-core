@@ -10,12 +10,14 @@
 // pendenti con dismissOnMoveOn.
 import type { DatabaseSync } from 'node:sqlite'
 import { appendEntry, getEntries, updateAgent, updateEntryMeta } from '../main/store/db'
-import { activeJobForAgent, pendingUserMessages, enqueueJob, type Job } from '../main/store/jobs'
+import { activeJobForAgent, pendingUserMessages, enqueueJob, MAX_USER_MESSAGE_QUEUE, type Job } from '../main/store/jobs'
 import { emitLastEntry, supersedeIfPaused, dismissPendingWidgets } from '../main/agent/loop'
 import { findDismissibleWidgets, widgetPayload, responseDisplayText } from '../main/agent/widgets'
 import type { SandbotEvent } from '../shared/types'
 
-const MAX_QUEUE = 10
+// fase 7 (correzione A1): il tetto vive nello store jobs, così vale anche per
+// i send_to_agent del loop (prima era una costante locale di questo modulo)
+const MAX_QUEUE = MAX_USER_MESSAGE_QUEUE
 
 type Emitter = (e: SandbotEvent) => void
 

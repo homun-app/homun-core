@@ -109,6 +109,14 @@ export interface SendMessageMeta {
   fallback?: boolean
   /** fase 6: true finché il messaggio è trattenuto nell'outbox (consegna alla finestra) */
   held?: boolean
+  /**
+   * Fase 7 (correzione A2): delega send_to_agent — entry visibile nella chat
+   * del MITTENTE come "A <nome bot>", con destinatario e hop del messaggio.
+   */
+  toAgentId?: string
+  toAgentName?: string
+  hop?: number
+  agentSend?: boolean
 }
 
 export interface TranscriptEntry {

@@ -93,9 +93,34 @@ export function activeJobForAgent(db: DatabaseSync, agentId: string): Job | null
   return r ? rowToJob(r) : null
 }
 
+/** Tetto della coda dei messaggi utente per agente (fase 1/2; correzione A1: vale anche per send_to_agent). */
+export const MAX_USER_MESSAGE_QUEUE = 10
+
 /** Messaggi utente in attesa per un agente (il tetto coda della fase 1). */
 export function pendingUserMessages(db: DatabaseSync, agentId: string): number {
   const r = db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE agent_id = ? AND status = 'queued' AND kind = 'user-message'").get(agentId) as { n: number }
+  return r.n
+}
+
+/**
+ * Correzione A1: i messaggi tra la coppia di agenti già ACCODATI (job
+ * user-message con initiator AGENT, in coda o in lease, entro l'ultima ora) —
+ * la parte del limite orario che il transcript non vede finché il turno del
+ * destinatario non parte. I job con entryId sono già diventati entry del
+ * destinatario (ripresa dopo crash): contarli conteggierebbe due volte.
+ */
+export function pendingAgentPairJobs(db: DatabaseSync, a: string, b: string, now: number): number {
+  const r = db.prepare(`
+    SELECT COUNT(*) AS n FROM jobs
+    WHERE kind = 'user-message' AND status IN ('queued','leased')
+      AND created_at > ?
+      AND json_extract(payload_json, '$.initiator') = 'AGENT'
+      AND json_extract(payload_json, '$.entryId') IS NULL
+      AND (
+        (json_extract(payload_json, '$.fromAgentId') = ? AND json_extract(payload_json, '$.toAgentId') = ?)
+        OR (json_extract(payload_json, '$.fromAgentId') = ? AND json_extract(payload_json, '$.toAgentId') = ?)
+      )
+  `).get(now - 3_600_000, a, b, b, a) as { n: number }
   return r.n
 }
 

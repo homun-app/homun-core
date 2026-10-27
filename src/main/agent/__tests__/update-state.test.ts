@@ -98,7 +98,7 @@ describe('esecuzione (store reale)', () => {
     const { output, meta } = await executeTool(AGENT, 'update_state', {
       target: 'routine', action: 'create', name: 'Da template', prompt: 'p',
       trigger: { type: 'schedule', kind: 'cron', cron: '30 8 * * 1-5' }, provenance: 'template'
-    })
+    }, { turnInitiator: 'TEMPLATE_IMPORT' })
     expect(output).toContain('PAUSA')
     expect(output).toContain('provenance template')
     const id = (meta.automation as { id: number }).id
@@ -107,6 +107,17 @@ describe('esecuzione (store reale)', () => {
     expect(r.provenance).toBe('template')
     expect(r.schedule).toBe('30 8 * * 1-5')
     expect(r.trigger).toEqual({ type: 'schedule', kind: 'cron', cron: '30 8 * * 1-5' })
+  })
+
+  // correzione A5: la provenance 'template' non si accetta da un turno qualsiasi
+  it('create con provenance template FUORI dal kickstart: la routine nasce provenance agent', async () => {
+    const { output, meta } = await executeTool(AGENT, 'update_state', {
+      target: 'routine', action: 'create', name: 'Falsa template', prompt: 'p',
+      schedule: '0 9 * * *', provenance: 'template'
+    })
+    expect(output).toContain('provenance agent')
+    const r = getRoutine((meta.automation as { id: number }).id)!
+    expect(r.provenance).toBe('agent')
   })
 
   it('create con trigger every: colonna schedule vuota (nessun cron), trigger_json pieno', async () => {

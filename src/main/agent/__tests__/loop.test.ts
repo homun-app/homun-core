@@ -15,7 +15,7 @@ const h = vi.hoisted(() => {
     // fase 6: righe dell'outbox (le send-message trattenute dei turni automatici)
     outbox: [] as Array<{ entry_id: number; agent_id: string; created_at: number }>,
     // fase 7: job accodati dal loop (send_to_agent verso altri bot)
-    jobs: [] as Array<{ id: number; agentId: string; kind: string; payload: Record<string, unknown> }>,
+    jobs: [] as Array<{ id: number; agentId: string; kind: string; payload: Record<string, unknown>; createdAt: number; status: string }>,
     nextId: 1,
     nextRoutineId: 1,
     dataDir: '' // riempita nel beforeAll (mkdtemp): memoria/skill scrivono lì
@@ -111,11 +111,22 @@ vi.mock('../../store/db', () => ({
 }))
 
 vi.mock('../../store/jobs', () => ({
+  MAX_USER_MESSAGE_QUEUE: 10,
   enqueueJob: (_db: unknown, input: { agentId: string; kind: string; payload: Record<string, unknown>; runAt: number; now: number }) => {
-    const job = { id: h.db.jobs.length + 1, ...input, status: 'queued' }
+    const job = { id: h.db.jobs.length + 1, ...input, createdAt: input.now, status: 'queued' }
     h.db.jobs.push(job)
     return job
-  }
+  },
+  // correzione A1: stesso tetto della coda dei messaggi utente (mock del conteggio SQL)
+  pendingUserMessages: (_db: unknown, agentId: string) =>
+    h.db.jobs.filter((j) => j.agentId === agentId && j.kind === 'user-message' && j.status === 'queued').length,
+  // correzione A1: i job della coppia già accodati (mock di pendingAgentPairJobs)
+  pendingAgentPairJobs: (_db: unknown, a: string, b: string, now: number) =>
+    h.db.jobs.filter((j) =>
+      j.kind === 'user-message' && (j.status === 'queued' || j.status === 'leased') &&
+      j.createdAt > now - 3_600_000 && j.payload.initiator === 'AGENT' && j.payload.entryId === undefined &&
+      ((j.payload.fromAgentId === a && j.payload.toAgentId === b) || (j.payload.fromAgentId === b && j.payload.toAgentId === a))
+    ).length
 }))
 
 vi.mock('../providers', () => ({
@@ -1189,5 +1200,133 @@ describe('fase 7: send_to_agent', () => {
       }
     ]
     await runTurn(AGENT, 'normale', emit)
+  })
+
+  // ---- correzioni review fase 7 (A1/A2/A3/A5) ----
+
+  it('correzione A1: 11 send_to_agent nella stessa risposta → 10 accodati, l\'11° errore e nessun accodamento', async () => {
+    const calls = Array.from({ length: 11 }, (_, i) => ({
+      id: `m${i + 1}`, name: 'send_to_agent',
+      arguments: JSON.stringify({ agentId: OTHER, text: `msg ${i + 1}` })
+    }))
+    h.llm.queue = [{ toolCalls: calls }, { text: 'ok' }]
+    await runTurn(AGENT, 'delega a raffica', emit)
+    expect(h.db.jobs).toHaveLength(10)
+    // le 10 deleghe lasciano traccia lato mittente (A2): l'utente ha visto,
+    // quindi NESSUNA chiamata di recupero — la seconda chiamata è solo il
+    // proseguimento del turno, e lì stanno i tool result delle 11 call
+    expect(h.llm.calls).toHaveLength(2)
+    const toolResults = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(toolResults.filter((c) => c.includes('in coda per Specialista'))).toHaveLength(10)
+    expect(toolResults.some((c) => c.includes('ultima ora'))).toBe(true)
+  })
+
+  it('correzione A1: la coda del destinatario ha lo stesso tetto dei messaggi utente (10 in attesa → rifiuto, niente entry)', async () => {
+    // 10 messaggi utente normali già in coda per il destinatario
+    for (let i = 0; i < 10; i++) {
+      h.db.jobs.push({ id: i + 1, agentId: OTHER, kind: 'user-message', payload: { text: `coda ${i}` }, createdAt: Date.now(), status: 'queued' })
+    }
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'send_to_agent', arguments: JSON.stringify({ agentId: OTHER, text: 'un altro' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'delega', emit)
+    expect(h.db.jobs).toHaveLength(10) // nessun job nuovo
+    expect(h.db.entries.some((e) => e.meta?.agentSend)).toBe(false) // nemmeno la traccia A2
+    const toolResults = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(toolResults.some((c) => c.includes('Coda piena per Specialista'))).toBe(true)
+  })
+
+  it('correzione A2: la delega lascia una entry "A <nome>" dal mittente, e il turno dopo vede chiamata+esito', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 't1', name: 'send_to_agent', arguments: JSON.stringify({ agentId: OTHER, text: 'controlla la posta di stamattina' }) }] },
+      { text: 'delegato' }
+    ]
+    await runTurn(AGENT, 'occupatene tu', emit)
+    const sent = h.db.entries.find((e) => e.kind === 'send-message' && e.meta?.agentSend)!
+    expect(sent.content).toBe('controlla la posta di stamattina')
+    expect(sent.meta).toMatchObject({
+      toAgentId: OTHER, toAgentName: 'Specialista', hop: 1,
+      call: { id: 't1', name: 'send_to_agent' }
+    })
+
+    // il turno successivo del mittente: buildMessages riporta la coppia
+    // chiamata/risultato (sa di aver delegato, non riceve risposte "dal nulla")
+    h.llm.queue = [
+      { toolCalls: [{ id: 't2', name: 'send_to_user', arguments: JSON.stringify({ text: 'in attesa del gestore' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'e adesso?', emit)
+    // la prima chiamata del SECONDO turno: quella che contiene il nuovo messaggio utente
+    const second = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && m.content === 'e adesso?'))!
+    const call = second.flatMap((m) => (m.toolCalls as FakeToolCall[] | undefined) ?? []).find((tc) => tc?.name === 'send_to_agent')
+    expect(call).toBeTruthy()
+    const result = second.find((m) => m.role === 'tool' && m.toolCallId === call!.id)
+    expect(String(result?.content)).toContain('in coda per Specialista')
+    expect(String(result?.content)).toContain('non vede questa conversazione')
+  })
+
+  it('correzione A3: la catena partita da una routine è automatica — payload automatic, outbox e un solo urgent per il destinatario', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'r1', name: 'send_to_agent', arguments: JSON.stringify({ agentId: OTHER, text: 'controlla la posta' }) }] },
+      { text: 'delegato' }
+    ]
+    await runTurn(AGENT, '[routine] notturna', emit, undefined, { source: 'routine', title: 'Notturna' })
+    expect(h.db.jobs[0]!.payload.automatic).toBe(true)
+
+    // il turno del destinatario, aperto dal job automatico: send_to_user come
+    // nei turni di routine (outbox + al massimo un urgent)
+    h.llm.queue = [
+      { toolCalls: [
+        { id: 'b1', name: 'send_to_user', arguments: JSON.stringify({ text: 'riepilogo notturno' }) },
+        { id: 'b2', name: 'send_to_user', arguments: JSON.stringify({ text: 'primo urgent', urgent: true }) },
+        { id: 'b3', name: 'send_to_user', arguments: JSON.stringify({ text: 'secondo urgent', urgent: true }) }
+      ] },
+      { text: 'fatto' }
+    ]
+    await runTurn(OTHER, '<messaggio_da_agente nome="TestBot">controlla la posta</messaggio_da_agente>', emit, undefined, {
+      agentMessage: { fromAgentId: AGENT, fromAgentName: 'TestBot', hop: 1 }, automatic: true
+    })
+    const sends = h.db.entries.filter((e) => e.agentId === OTHER && e.kind === 'send-message')
+    expect(sends).toHaveLength(3)
+    expect(sends[0]!.meta?.held).toBe(true) // non urgent → outbox
+    expect(sends[1]!.meta?.held).toBeUndefined() // il primo urgent passa subito
+    expect(sends[2]!.meta?.held).toBe(true) // il secondo urgent viene trattenuto
+    expect(h.db.outbox.filter((o) => o.agent_id === OTHER)).toHaveLength(2)
+  })
+
+  it('correzione A3: la catena partita da un messaggio dell\'utente resta immediata', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'u1', name: 'send_to_agent', arguments: JSON.stringify({ agentId: OTHER, text: 'controlla' }) }] },
+      { text: 'delegato' }
+    ]
+    await runTurn(AGENT, 'occupatene tu', emit) // turno utente: catena NON automatica
+    expect(h.db.jobs[0]!.payload.automatic).toBeUndefined()
+
+    h.llm.queue = [
+      { toolCalls: [{ id: 'b1', name: 'send_to_user', arguments: JSON.stringify({ text: 'risposta immediata' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(OTHER, '<messaggio_da_agente nome="TestBot">controlla</messaggio_da_agente>', emit, undefined, {
+      agentMessage: { fromAgentId: AGENT, fromAgentName: 'TestBot', hop: 1 }
+    })
+    const send = h.db.entries.find((e) => e.agentId === OTHER && e.kind === 'send-message')!
+    expect(send.meta?.held).toBeUndefined()
+    expect(h.db.outbox).toHaveLength(0)
+  })
+
+  it('correzione A5: provenance template accettata SOLO nel turno di kickstart (TEMPLATE_IMPORT)', async () => {
+    const create = (id: string): FakeToolCall => ({
+      id, name: 'update_state',
+      arguments: JSON.stringify({ target: 'routine', action: 'create', name: 'Da template', prompt: 'p', schedule: '0 9 * * *', provenance: 'template' })
+    })
+    h.llm.queue = [{ toolCalls: [create('k1')] }, { text: '.' }]
+    await runTurn(AGENT, 'configurati', emit, undefined, { initiator: 'TEMPLATE_IMPORT' })
+    h.llm.queue = [{ toolCalls: [create('k2')] }, { text: '.' }]
+    await runTurn(AGENT, 'creami una routine', emit) // turno utente normale
+    expect(h.db.routines).toHaveLength(2)
+    expect(h.db.routines[0]).toMatchObject({ title: 'Da template', provenance: 'template', enabled: 0 })
+    // stessa chiamata fuori dal kickstart: la routine è dell'agente
+    expect(h.db.routines[1]).toMatchObject({ provenance: 'agent' })
   })
 })

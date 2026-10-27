@@ -149,6 +149,14 @@ export interface RunTurnOptions {
    * bot (initiator AGENT) — serve al limite anti-ciclo dei send_to_agent.
    */
   agentMessage?: { fromAgentId: string; fromAgentName: string; hop: number }
+  /**
+   * Fase 7 (correzione A3): il turno è una catena tra bot partita da un turno
+   * automatico (routine/trigger, o a sua volta una catena automatica): i suoi
+   * send_to_user seguono le regole dell'outbox come i turni di routine, e le
+   * catene che genera restano automatiche. Una catena partita da un messaggio
+   * dell'utente NON lo è e resta immediata.
+   */
+  automatic?: boolean
   /** Fase 7: meta extra del messaggio che apre il turno (es. templateName per TEMPLATE_IMPORT). */
   extraMeta?: Record<string, unknown>
 }
@@ -183,12 +191,37 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   const run: Running = { controller, approvals: new Map() }
   running.set(agentId, run)
 
+  // fase 7 (correzione A3): un turno è AUTOMATICO se è di routine/trigger o
+  // se è stato aperto da una catena tra bot a sua volta automatica: outbox e
+  // tetto urgent valgono per TUTTI i suoi send_to_user (recupero compreso)
+  const automatic = source === 'routine' || opts.automatic === true
+
   // id dell'entry che apre il turno: serve a decidere se l'utente ha VISTO qualcosa
   let turnEntryId = 0
   // ultimo testo libero non vuoto del modello nel turno (ripiego del fallback)
   let lastFreeText = ''
   // fase 7 (residuo 0b): nei turni automatici al massimo UN urgent per esecuzione
   let urgentUsed = false
+
+  /**
+   * Un send_to_user con le regole dei turni automatici (residuo 0b + §3bis L4):
+   * il primo urgent passa, i successivi diventano non urgenti, e i non urgenti
+   * restano in outbox fino alla finestra di consegna o all'apertura della chat.
+   * Correzione A3: lo usa anche la chiamata di recupero, così nemmeno quella
+   * svuota l'outbox di una catena automatica. Torna true se trattenuto.
+   */
+  const sendToUser = (call: { id: string; name: string; arguments: string }, input: Record<string, unknown>): boolean => {
+    let urgent = input.urgent === true
+    if (urgent && automatic) {
+      if (urgentUsed) urgent = false
+      else urgentUsed = true
+    }
+    const message: SendMessagePayload = { type: 'text', text: String(input.text ?? ''), ...(urgent ? { urgent: true } : {}) }
+    const hold = automatic && !urgent
+    const sent = appendSend(agentId, call, message, emit, hold ? { held: true } : {})
+    if (hold) holdOutboxEntry(sent.id, agentId, sent.createdAt)
+    return hold
+  }
 
   try {
     if (opts.resume) {
@@ -387,22 +420,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         }
 
         if (call.name === 'send_to_user') {
-          // fase 7 (residuo 0b): alcuni modelli mettono urgent a OGNI
-          // send_to_user dei turni automatici, svuotando l'outbox: nei turni
-          // di routine il primo urgent passa, i successivi diventano non
-          // urgenti (e finiscono trattenuti come gli altri)
-          let urgent = input.urgent === true
-          if (urgent && source === 'routine') {
-            if (urgentUsed) urgent = false
-            else urgentUsed = true
-          }
-          const message: SendMessagePayload = { type: 'text', text: String(input.text ?? ''), ...(urgent ? { urgent: true } : {}) }
-          // fase 6 (§3bis L4): i messaggi NON urgenti dei turni automatici
-          // (routine/trigger) restano in outbox fino alla finestra di consegna
-          // o all'apertura della chat; urgent e turni utente passano subito
-          const hold = source === 'routine' && !urgent
-          const sent = appendSend(agentId, call, message, emit, hold ? { held: true } : {})
-          if (hold) holdOutboxEntry(sent.id, agentId, sent.createdAt)
+          // fase 6/7: tetto urgent e outbox dei turni automatici vivono in
+          // sendToUser (le stesse regole anche per la chiamata di recupero)
+          const hold = sendToUser(call, input)
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: hold
@@ -499,17 +519,35 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             messages.push({ role: 'tool', toolCallId: call.id, content: 'Testo mancante: scrivi il messaggio per l\'altro bot nel campo text.' })
             continue
           }
-          // protezione anti-ciclo: hop del messaggio che ha aperto QUESTO
-          // turno + messaggi tra la coppia nell'ultima ora (entrambe le direzioni)
+          const { enqueueJob, pendingUserMessages, pendingAgentPairJobs, MAX_USER_MESSAGE_QUEUE } = await import('../store/jobs')
+          const now = Date.now()
+          // correzione A1: il limite per coppia si conta AL MOMENTO DELL'INVIO
+          // e la fonte comprende i messaggi già ACCODATI (job non ancora
+          // consegnati): con più tool call nella stessa risposta il tetto orario
+          // scatta comunque, non solo quando il turno del destinatario parte
           const incomingHop = opts.agentMessage?.hop ?? 0
-          const pairLastHour = countPairMessagesLastHour([...getEntries(agentId), ...getEntries(toId)], agentId, toId, Date.now())
+          const pairLastHour =
+            countPairMessagesLastHour([...getEntries(agentId), ...getEntries(toId)], agentId, toId, now) +
+            pendingAgentPairJobs(db(), agentId, toId, now)
           const guard = agentSendGuard({ incomingHop, pairLastHour })
           if (!guard.ok) {
             messages.push({ role: 'tool', toolCallId: call.id, content: guard.error })
             continue
           }
-          const { enqueueJob } = await import('../store/jobs')
-          const now = Date.now()
+          // correzione A1: stesso tetto di coda dei messaggi dell'utente (fase 2)
+          if (pendingUserMessages(db(), toId) >= MAX_USER_MESSAGE_QUEUE) {
+            messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: `Coda piena per ${dest.name} (${MAX_USER_MESSAGE_QUEUE} messaggi già in attesa): messaggio NON accodato. Riprova più tardi o riassumi tutto in un solo messaggio.`
+            })
+            continue
+          }
+          // correzione A2: traccia lato MITTENTE — l'utente vede cosa è stato
+          // delegato ("A <nome bot>") e buildMessages riporta l'entry al modello
+          // come coppia send_to_agent + esito della coda nel turno successivo
+          appendSend(agentId, call, { type: 'text', text }, emit, {
+            toAgentId: toId, toAgentName: dest.name, hop: guard.hop, agentSend: true
+          })
           enqueueJob(db(), {
             agentId: toId,
             kind: 'user-message',
@@ -519,7 +557,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               fromAgentId: agentId,
               fromAgentName: agent.name,
               toAgentId: toId,
-              hop: guard.hop
+              hop: guard.hop,
+              // correzione A3: la catena eredita l'automaticità del turno
+              // mittente (routine/trigger, o catena automatica a sua volta)
+              ...(automatic ? { automatic: true } : {})
             },
             runAt: now,
             now
@@ -621,7 +662,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
         // esecuzione
         try {
-          const { output, meta, images } = await executeTool(agentId, call.name, input)
+          // correzione A5: il contesto del turno (chi lo ha aperto) serve a
+          // update_state per decidere se accettare la provenance 'template'
+          const { output, meta, images } = await executeTool(agentId, call.name, input, { turnInitiator: opts.initiator })
           const res = appendEntry({
             agentId, kind: 'tool-result', role: 'system',
             content: output.slice(0, 50_000),
@@ -703,8 +746,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             for (const call of sends) {
               let input: Record<string, unknown>
               try { input = JSON.parse(call.arguments || '{}') } catch { input = {} }
-              const message: SendMessagePayload = { type: 'text', text: String(input.text ?? acc), ...(input.urgent ? { urgent: true } : {}) }
-              appendSend(agentId, call, message, emit)
+              // correzione A3: anche il recupero di una catena automatica passa
+              // dall'outbox (stesso tetto urgent dei turni di routine)
+              sendToUser(call, { ...input, text: String(input.text ?? acc) })
             }
           } else {
             const fallback = (acc.trim() ? acc : lastFreeText).trim()

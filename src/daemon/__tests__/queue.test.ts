@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setDataDir, dataDir, db, createAgent, createRoutine, listRoutines, getEntries, appendEntry, type Routine } from '../../main/store/db'
-import { claimDueJobs, activeJobForAgent } from '../../main/store/jobs'
+import { claimDueJobs, activeJobForAgent, enqueueJob, pendingAgentPairJobs } from '../../main/store/jobs'
 import { enqueueUserMessage, enqueueWidgetResponse } from '../enqueue'
 import { dueRoutines, tickScheduler } from '../scheduler'
 import { nextCronRun } from '../cron'
@@ -193,5 +193,36 @@ describe('coerenza scheduler/cron', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+// correzione A1: il limite orario per coppia conta anche i messaggi già in coda
+describe('pendingAgentPairJobs: i send_to_agent accodati e non ancora consegnati', () => {
+  const NOW = 2_000_000_000_000
+  const pairJob = (from: string, to: string, over: Record<string, unknown> = {}) => ({
+    initiator: 'AGENT', fromAgentId: from, fromAgentName: from, toAgentId: to, hop: 1, ...over
+  })
+
+  it('conta i job user-message della coppia (entrambe le direzioni) in coda o in lease, entro l\'ultima ora', () => {
+    enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b'), runAt: 0, now: NOW - 60_000 })
+    enqueueJob(db(), { agentId: 'a', kind: 'user-message', payload: pairJob('b', 'a'), runAt: 0, now: NOW - 120_000 })
+    // coppia diversa e messaggio utente normale: non contano
+    enqueueJob(db(), { agentId: 'c', kind: 'user-message', payload: pairJob('a', 'c'), runAt: 0, now: NOW - 60_000 })
+    enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: { text: 'ciao' }, runAt: 0, now: NOW - 60_000 })
+    expect(pendingAgentPairJobs(db(), 'a', 'b', NOW)).toBe(2)
+  })
+
+  it('i job consegnati, più vecchi di un\'ora o con entryId non contano (già entry del destinatario)', () => {
+    const done = enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b'), runAt: 0, now: NOW - 60_000 })
+    db().prepare("UPDATE jobs SET status = 'done' WHERE id = ?").run(done.id)
+    // esattamente un'ora fa: fuori dalla finestra
+    enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b'), runAt: 0, now: NOW - 3_600_000 })
+    // in lease MA con entryId: il turno è già partito, il transcript lo conta
+    const resumed = enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b', { entryId: 7 }), runAt: 0, now: NOW - 60_000 })
+    db().prepare("UPDATE jobs SET status = 'leased' WHERE id = ?").run(resumed.id)
+    // in lease SENZA entryId: in consegna, conta
+    const leased = enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b'), runAt: 0, now: NOW - 60_000 })
+    db().prepare("UPDATE jobs SET status = 'leased' WHERE id = ?").run(leased.id)
+    expect(pendingAgentPairJobs(db(), 'a', 'b', NOW)).toBe(1)
   })
 })
