@@ -132,12 +132,64 @@ export function boxNeedsRecreateForInit(inspectOutput: string): boolean {
 }
 
 /**
+ * H1: controllo della scrivibilità del box dopo lo start — argv PURO, `test
+ * -w` gira nel container CON l'utente del container: se fallisce, meglio un
+ * errore chiaro qui che permessi negati sparsi a ogni write-file.
+ */
+export function dockerBoxWritableArgv(container: string): string[] {
+  return ['exec', container, 'test', '-w', `${BOX_MOUNT}/workspace`]
+}
+
+export interface BoxEnsureFacts {
+  exists: boolean
+  /** l'inspect dell'init NON chiede la ricreazione (G2). */
+  initOk: boolean
+  /** esito di dockerBoxWritableArgv dopo lo start (H1); ignoto se initOk è falso. */
+  writable?: boolean
+}
+
+export type BoxEnsurePlan =
+  | { kind: 'use' }
+  | { kind: 'recreate'; reason: 'senza-init' | 'volume-di-root' }
+  | { kind: 'create' }
+
+/**
+ * H1 (puro): cosa fare del container del box. Non esiste → creazione (col
+ * one-shot di init prima del create). Esiste senza --init (G2) → UNA
+ * ricreazione. Esiste con init a posto → decide `test -w`: un volume
+ * diventato di root (container nato prima di :nocopy) si riconquista con la
+ * ricreazione, che ripassa dal one-shot di init (mkdir+chown) come oggi.
+ */
+export function boxEnsurePlan(facts: BoxEnsureFacts): BoxEnsurePlan {
+  if (!facts.exists) return { kind: 'create' }
+  if (!facts.initOk) return { kind: 'recreate', reason: 'senza-init' }
+  return facts.writable ? { kind: 'use' } : { kind: 'recreate', reason: 'volume-di-root' }
+}
+
+/**
+ * H1 (puro): esito del controllo `test -w` DOPO la (ri)creazione. Se il box
+ * resta non scrivibile l'errore è CHIARO e non si riprova: la ricreazione è
+ * UNA sola, i dati nel volume non sono stati toccati.
+ */
+export function boxCreateCheck(writable: boolean): { ok: true } | { ok: false; error: string } {
+  if (writable) return { ok: true }
+  return {
+    ok: false,
+    error: `il box non è scrivibile dall'utente del container (${CONTAINER_USER}): docker exec ${BOX_CONTAINER} test -w ${BOX_MOUNT}/workspace è fallito — il volume ${BOX_VOLUME} resta di root nonostante il one-shot di init; i dati dentro non sono stati toccati`
+  }
+}
+
+/**
  * Hardening del container condiviso a creazione (§5.2 + punto 1 + G2):
  * non-root, cap-drop, no-new-privs, limiti CONDIVISI e configurabili (memoria
  * 4g, cpu 2, pids 1024 di default). Volume unico montato su /box. `--init` è
  * tini di Docker (G2): PID 1 raccoglie i processi zombie — con `sleep
  * infinity` non lo farebbe, e gli zombie di un box a vita lunga consumerebbero
- * il tetto --pids-limit condiviso.
+ * il tetto --pids-limit condiviso. H1: il volume è montato `:nocopy` — alla
+ * prima mount di un volume VUOTO docker copia nel volume contenuto E
+ * proprietà della cartella di destinazione dell'immagine, e `-w /box` la fa
+ * nascere di root nel rootfs: il chown del one-shot verrebbe sovrascritto e,
+ * non-root con --cap-drop ALL, nessuno scriverebbe più nulla nel box.
  */
 export function dockerBoxCreateArgv(container: string, volume: string, network: 'bridge' | 'none', limits: BoxLimits): string[] {
   return [
@@ -151,7 +203,7 @@ export function dockerBoxCreateArgv(container: string, volume: string, network: 
     '--memory', limits.memory,
     '--cpus', String(limits.cpus),
     '--network', network,
-    '-v', `${volume}:${BOX_MOUNT}`,
+    '-v', `${volume}:${BOX_MOUNT}:nocopy`,
     '-w', BOX_MOUNT,
     '-i',
     'ubuntu:24.04',
@@ -163,10 +215,15 @@ export function dockerBoxCreateArgv(container: string, volume: string, network: 
  * Init del volume alla prima creazione: il volume appena montato è di root,
  * ma il container gira non-root con --cap-drop ALL (root senza CAP_CHOWN non
  * può chownare). Un one-shot con la stessa immagine, root e senza hardening,
- * sistema la proprietà una volta sola.
+ * sistema la proprietà una volta sola. H1: la stringa `sh -c` è COSTANTE e
+ * crea workspace e home PRIMA del chown — il volume non è più VUOTO e il
+ * copy-up di docker non ha più niente da sovrascrivere alla prima mount
+ * (il create monta comunque :nocopy: due difese indipendenti).
  */
+export const DOCKER_BOX_INIT_SH = `mkdir -p ${BOX_MOUNT}/workspace ${BOX_MOUNT}/home && chown -R ${CONTAINER_USER} ${BOX_MOUNT}`
+
 export function dockerBoxChownArgv(volume: string): string[] {
-  return ['run', '--rm', '-v', `${volume}:${BOX_MOUNT}`, 'ubuntu:24.04', 'chown', '-R', CONTAINER_USER, BOX_MOUNT]
+  return ['run', '--rm', '-v', `${volume}:${BOX_MOUNT}`, 'ubuntu:24.04', 'sh', '-c', DOCKER_BOX_INIT_SH]
 }
 
 /**
@@ -174,8 +231,12 @@ export function dockerBoxChownArgv(volume: string): string[] {
  * `sandbot-<agentId>-box` nella home del bot dentro il box condiviso, con un
  * container one-shot. La stringa `sh -c` è COSTANTE (l'agentId viaggia come
  * $1); gli originali restano dove sono (la cancellazione la decide l'utente).
+ * H1: il one-shot gira COME ROOT e non usa -w /box — senza il chown finale
+ * la home del bot appena creata (e la copia) resterebbero di root e il bot
+ * non potrebbe scriverci. Il marker toccato da root nella radice va bene,
+ * la home e il workspace no.
  */
-export const DOCKER_BOX_MIGRATE_SH = 'mkdir -p "/box/home/$1" && cp -a /from/. "/box/home/$1/"'
+export const DOCKER_BOX_MIGRATE_SH = `mkdir -p "${BOX_MOUNT}/home/$1" && cp -a /from/. "${BOX_MOUNT}/home/$1/" && chown -R ${CONTAINER_USER} "${BOX_MOUNT}/home/$1"`
 
 export function dockerBoxMigrateArgv(oldVolume: string, agentId: string): string[] {
   return [

@@ -34,7 +34,11 @@ import {
   dockerBoxMarkerWriteArgv,
   dockerBoxInitCheckArgv,
   dockerBoxRmArgv,
+  dockerBoxWritableArgv,
   boxNeedsRecreateForInit,
+  boxEnsurePlan,
+  boxCreateCheck,
+  type BoxEnsureFacts,
   dockerVolumeLsArgv,
   dockerClientEnv,
   BOX_CONTAINER,
@@ -202,15 +206,25 @@ export async function runDockerArgv(argv: string[], opts: ExecOptions = {}): Pro
   return { stdout: o.text, stderr: e.text, exitCode: r.exitCode, signal: r.signal, trimmed: o.trimmed || e.trimmed }
 }
 
+// H1: l'errore chiaro del controllo di scrivibilità si RICORDA — dopo l'unica
+// ricreazione fallita ogni operazione fallisce subito, senza ripetere la
+// catena ps/inspect/rm/create a ogni write-file (si azzera al riavvio).
+let boxNotWritableError: string | null = null
+
 /**
  * Il container UNICO del box condiviso (punto 1): come il vecchio
  * ensureContainer per agente, ma con volume `sandbot-box` montato su /box e
- * limiti condivisi configurabili.
+ * limiti condivisi configurabili. H1: dopo ogni start un controllo argv puro
+ * `test -w /box/workspace` — un volume di root (container nato senza :nocopy)
+ * si scopre qui, con UNA ricreazione che ripassa dal one-shot di init, e poi
+ * con l'errore chiaro: mai permessi negati sparsi a ogni write-file.
  */
 export async function ensureBoxContainer(): Promise<void> {
   if (sandboxMode() !== 'docker') return
+  if (boxNotWritableError) throw new Error(boxNotWritableError)
   const ps = await runProcess('docker', dockerPsArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
   const exists = ps.exitCode === 0 && ps.stdout.trim().split('\n').includes(BOX_CONTAINER)
+  const facts: BoxEnsureFacts = { exists, initOk: true }
   if (exists) {
     // G2: un container nato PRIMA di --init non raccoglie gli zombie (PID 1 è
     // `sleep infinity`) e con --pids-limit condiviso li accumula a ogni comando
@@ -218,22 +232,35 @@ export async function ensureBoxContainer(): Promise<void> {
     // dati dei bot non si tocca MAI. Inspect fallito/output inatteso: si tiene
     // il container che funziona (la ricreazione è ottimale, non vitale).
     const init = await runProcess('docker', dockerBoxInitCheckArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
-    if (!(init.exitCode === 0 && boxNeedsRecreateForInit(init.stdout))) {
+    facts.initOk = !(init.exitCode === 0 && boxNeedsRecreateForInit(init.stdout))
+    if (facts.initOk) {
       const start = await runProcess('docker', dockerStartArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
       if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
-      return
+      const w = await runProcess('docker', dockerBoxWritableArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
+      facts.writable = w.exitCode === 0
     }
-    const rm = await runProcess('docker', dockerBoxRmArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
-    if (rm.exitCode !== 0) throw new Error(`rimozione del container senza init fallita: ${rm.stderr}`)
   }
-  // creazione (prima volta o ricreazione G2): il volume è di root, il
-  // container gira non-root senza caps
+  const plan = boxEnsurePlan(facts)
+  if (plan.kind === 'use') return
+  if (plan.kind === 'recreate') {
+    const rm = await runProcess('docker', dockerBoxRmArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
+    if (rm.exitCode !== 0) throw new Error(`rimozione del container (${plan.reason}) fallita: ${rm.stderr}`)
+  }
+  // creazione (prima volta o ricreazione G2/H1): il one-shot rende il volume
+  // NON vuoto (workspace e home) e lo consegna all'utente del container; il
+  // mount :nocopy del create non dipende dal copy-up di docker
   const chown = await runProcess('docker', dockerBoxChownArgv(BOX_VOLUME), { timeoutMs: 60_000 })
   if (chown.exitCode !== 0) throw new Error(`init volume fallito: ${chown.stderr}`)
   const create = await runProcess('docker', dockerBoxCreateArgv(BOX_CONTAINER, BOX_VOLUME, sandboxNetwork(), boxLimits()), { timeoutMs: 60_000 })
   if (create.exitCode !== 0) throw new Error(`docker create fallito: ${create.stderr}`)
   const start = await runProcess('docker', dockerStartArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
   if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
+  const w = await runProcess('docker', dockerBoxWritableArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
+  const check = boxCreateCheck(w.exitCode === 0)
+  if (!check.ok) {
+    boxNotWritableError = check.error
+    throw new Error(check.error)
+  }
 }
 
 export async function execCommand(agentId: string, command: string, opts: ExecOptions = {}): Promise<ExecResult> {

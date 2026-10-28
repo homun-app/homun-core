@@ -22,8 +22,12 @@ import {
   dockerKillGroupArgv,
   dockerBoxInitCheckArgv,
   dockerBoxRmArgv,
+  dockerBoxWritableArgv,
   boxNeedsRecreateForInit,
+  boxEnsurePlan,
+  boxCreateCheck,
   DOCKER_WRITE_SH,
+  DOCKER_BOX_INIT_SH,
   DOCKER_BOX_MIGRATE_SH,
   DOCKER_BG_WRAPPER_SH,
   BOX_CONTAINER,
@@ -102,7 +106,11 @@ describe('lifecycle & hardening del box condiviso (§5.2 + fase 11 punto 1)', ()
     }
     const val = (flag: string) => argv[argv.indexOf(flag) + 1]
     expect(argv[argv.indexOf('--name') + 1]).toBe('sandbot-box')
-    expect(argv).toContain(`${BOX_VOLUME}:${BOX_MOUNT}`)
+    // H1: il volume montato :nocopy — alla prima mount di un volume VUOTO
+    // docker copia nel volume contenuto E proprietà della cartella di
+    // destinazione (root, per via di -w /box), sovrascrivendo il chown
+    expect(argv).toContain('sandbot-box:/box:nocopy')
+    expect(argv).not.toContain('sandbot-box:/box')
     expect(val('--user')).toBe('1000:1000')
     expect(val('--cap-drop')).toBe('ALL')
     expect(val('--security-opt')).toBe('no-new-privileges')
@@ -120,8 +128,12 @@ describe('lifecycle & hardening del box condiviso (§5.2 + fase 11 punto 1)', ()
     expect(v2('--network')).toBe('none')
   })
 
-  it('init volume: one-shot chown del box condiviso montato su /box', () => {
-    expect(dockerBoxChownArgv(BOX_VOLUME)).toEqual(['run', '--rm', '-v', 'sandbot-box:/box', 'ubuntu:24.04', 'chown', '-R', '1000:1000', '/box'])
+  it('init volume (H1): one-shot con sh -c COSTANTE — crea workspace e home PRIMA del chown', () => {
+    expect(dockerBoxChownArgv(BOX_VOLUME)).toEqual(['run', '--rm', '-v', 'sandbot-box:/box', 'ubuntu:24.04', 'sh', '-c', DOCKER_BOX_INIT_SH])
+    // H1: il volume non è più VUOTO quando il create lo monta — il copy-up
+    // non ha più niente da sovrascrivere (il mount è comunque :nocopy)
+    expect(DOCKER_BOX_INIT_SH).toBe('mkdir -p /box/workspace /box/home && chown -R 1000:1000 /box')
+    expect(DOCKER_BOX_INIT_SH.indexOf('mkdir -p')).toBeLessThan(DOCKER_BOX_INIT_SH.indexOf('chown -R'))
   })
 
   it('la home di un bot dentro il box condiviso', () => {
@@ -144,8 +156,10 @@ describe('migrazione docker una tantum (punto 1): argv puri, copia senza cancell
       '-v', 'sandbot-box:/box',
       'ubuntu:24.04', 'sh', '-c', DOCKER_BOX_MIGRATE_SH, 'sh', 'agent_x'
     ])
-    // lo script è fisso: copia dentro la home del bot, NON cancella l'origine
-    expect(DOCKER_BOX_MIGRATE_SH).toBe('mkdir -p "/box/home/$1" && cp -a /from/. "/box/home/$1/"')
+    // lo script è fisso: copia dentro la home del bot, NON cancella l'origine;
+    // H1: il one-shot è di root — il chown finale non lascia la home (e la
+    // copia) di root dove il bot deve scrivere
+    expect(DOCKER_BOX_MIGRATE_SH).toBe('mkdir -p "/box/home/$1" && cp -a /from/. "/box/home/$1/" && chown -R 1000:1000 "/box/home/$1"')
     expect(DOCKER_BOX_MIGRATE_SH).not.toContain('rm ')
   })
 
@@ -281,6 +295,43 @@ describe('G2: init del container e migrazione senza toccare il volume', () => {
     // inspect fallito o output inatteso: si tiene il container che funziona
     for (const weird of ['', '\n', 'Error: No such object', 'False']) {
       expect(boxNeedsRecreateForInit(weird), JSON.stringify(weird)).toBe(false)
+    }
+  })
+})
+
+// ---- H1: scrivibilità del box — il volume di root non passa più inosservato ----
+
+describe('H1: controllo test -w e decisione use/una ricreazione/errore chiaro', () => {
+  it('il controllo della scrivibilità: argv PURO, test -w dentro il container, niente shell', () => {
+    const argv = dockerBoxWritableArgv(BOX_CONTAINER)
+    expect(argv).toEqual(['exec', 'sandbot-box', 'test', '-w', '/box/workspace'])
+    expect(argv).not.toContain('sh')
+  })
+
+  it('decisione pura: container inesistente → creazione; senza init o non scrivibile → UNA ricreazione', () => {
+    expect(boxEnsurePlan({ exists: false, initOk: true })).toEqual({ kind: 'create' })
+    expect(boxEnsurePlan({ exists: false, initOk: false })).toEqual({ kind: 'create' })
+    // G2: nato senza --init si ricrea, qualunque la scrivibilità
+    expect(boxEnsurePlan({ exists: true, initOk: false })).toEqual({ kind: 'recreate', reason: 'senza-init' })
+    expect(boxEnsurePlan({ exists: true, initOk: false, writable: true })).toEqual({ kind: 'recreate', reason: 'senza-init' })
+    // H1: init a posto → decide il test -w (volume di root = container nato senza :nocopy)
+    expect(boxEnsurePlan({ exists: true, initOk: true, writable: true })).toEqual({ kind: 'use' })
+    expect(boxEnsurePlan({ exists: true, initOk: true, writable: false })).toEqual({ kind: 'recreate', reason: 'volume-di-root' })
+    // scrivibilità ignota (difensivo): si ricrea, il lato sicuro
+    expect(boxEnsurePlan({ exists: true, initOk: true })).toEqual({ kind: 'recreate', reason: 'volume-di-root' })
+  })
+
+  it('esito DOPO la (ri)creazione: ok, o l\'errore CHIARO — la ricreazione è una sola', () => {
+    expect(boxCreateCheck(true)).toEqual({ ok: true })
+    const r = boxCreateCheck(false)
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      // dice COSA è fallito (test -w), CHI non può scrivere e che i dati sono
+      // salvi — al posto dei permessi negati sparsi di ogni write-file
+      expect(r.error).toContain('il box non è scrivibile dall\'utente del container (1000:1000)')
+      expect(r.error).toContain('test -w /box/workspace')
+      expect(r.error).toContain('sandbot-box')
+      expect(r.error).toContain('non sono stati toccati')
     }
   })
 })
