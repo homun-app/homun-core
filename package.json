@@ -61,6 +61,10 @@
       {
         "from": "vendor",
         "to": "vendor"
+      },
+      {
+        "from": "resources/box",
+        "to": "box"
       }
     ],
     "mac": {

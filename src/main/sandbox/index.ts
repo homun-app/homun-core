@@ -40,6 +40,10 @@ import {
   boxEnsurePlan,
   boxCreateCheck,
   boxImageTag,
+  dockerImageInspectArgv,
+  dockerContainerImageArgv,
+  dockerBuildArgv,
+  BOX_IMAGE_BUILD_TIMEOUT_MS,
   type BoxEnsureFacts,
   dockerVolumeLsArgv,
   dockerClientEnv,
@@ -280,18 +284,82 @@ export async function runDockerArgv(argv: string[], opts: ExecOptions = {}): Pro
 let boxNotWritableError: string | null = null
 
 /**
+ * Punto 1: la build dell'immagine del box, SINGLE-FLIGHT — se più bot la
+ * chiedono insieme (o il tick e un exec), una sola build gira e tutti ne
+ * aspettano l'esito. Prima di partire manda un notice al bot principale:
+ * "preparo il computer dei bot, una volta sola, qualche minuto".
+ */
+let boxImageBuild: Promise<boolean> | null = null
+
+/** Il notice al bot principale prima della build (una volta per build). */
+function notifyBoxImageBuild(): void {
+  void (async () => {
+    try {
+      const { listAgents, getSetting, appendEntry } = await import('../store/db')
+      const { mainAgentOf } = await import('../../daemon/presence')
+      const main = mainAgentOf(listAgents(), getSetting<string | null>('mainAgentId', null))
+      if (!main) return
+      appendEntry({
+        agentId: main.id, kind: 'notice', role: 'system',
+        content: 'Preparo il computer dei bot (immagine del box con il browser): una volta sola, qualche minuto. I bot riprendono appena è pronta.'
+      })
+    } catch {
+      // notice best-effort: la build parte comunque
+    }
+  })()
+}
+
+/**
+ * Punto 1: se l'immagine del box manca, la COSTRUISCE (timeout 20 minuti,
+ * single-flight, notice al bot principale). false = build fallita (l'errore
+ * lo dice il chiamante, che sa se il container vecchio esiste ancora).
+ */
+function ensureBoxImage(): Promise<boolean> {
+  if (!boxImageBuild) {
+    boxImageBuild = (async () => {
+      const tag = boxImage()
+      const has = await dockerRunner(dockerImageInspectArgv(tag), { timeoutMs: 15_000 })
+      if (has.exitCode === 0) return true
+      notifyBoxImageBuild()
+      const dockerfile = boxDockerfilePath()
+      const build = await dockerRunner(dockerBuildArgv(tag, dockerfile, dirname(dockerfile)), { timeoutMs: BOX_IMAGE_BUILD_TIMEOUT_MS })
+      if (build.exitCode !== 0) {
+        console.error(`[sandbox] build dell'immagine del box (${tag}) fallita: ${(build.stderr || `exit ${build.exitCode}`).slice(0, 500)}`)
+        return false
+      }
+      return true
+    })().finally(() => {
+      // la corsa è chiusa: la PROSSIMA richiesta ricontrolla l'immagine
+      boxImageBuild = null
+    })
+  }
+  return boxImageBuild
+}
+
+/**
  * Il container UNICO del box condiviso (punto 1): come il vecchio
  * ensureContainer per agente, ma con volume `sandbot-box` montato su /box e
  * limiti condivisi configurabili. H1: dopo ogni start un controllo argv puro
  * `test -w /box/workspace` — un volume di root (container nato senza :nocopy)
  * si scopre qui, con UNA ricreazione che ripassa dal one-shot di init, e poi
  * con l'errore chiaro: mai permessi negati sparsi a ogni write-file.
+ * Punto 1: l'immagine è NOSTRA — manca → build single-flight; il container
+ * esiste con un'immagine DIVERSA → ricreazione (solo il container, volume mai
+ * toccato). Build fallita col container che esiste ancora → si PROSEGUE col
+ * vecchio (i tool senza browser continuano a funzionare); senza container →
+ * errore chiaro.
  */
 export async function ensureBoxContainer(): Promise<void> {
   if (sandboxMode() !== 'docker') return
   if (boxNotWritableError) throw new Error(boxNotWritableError)
+  // punto 1: l'immagine del box esiste (o viene costruita) PRIMA di tutto
+  const image = boxImage()
+  const imageOk = await ensureBoxImage()
   const ps = await dockerRunner(dockerPsArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
   const exists = ps.exitCode === 0 && ps.stdout.trim().split('\n').includes(BOX_CONTAINER)
+  if (!imageOk && !exists) {
+    throw new Error(`build dell'immagine del box (${image}) fallita: guarda i log del daemon (docker build); il Dockerfile è ${boxDockerfilePath()}`)
+  }
   const facts: BoxEnsureFacts = { exists, initOk: true }
   if (exists) {
     // G2: un container nato PRIMA di --init non raccoglie gli zombie (PID 1 è
@@ -302,6 +370,14 @@ export async function ensureBoxContainer(): Promise<void> {
     const init = await dockerRunner(dockerBoxInitCheckArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
     facts.initOk = !(init.exitCode === 0 && boxNeedsRecreateForInit(init.stdout))
     if (facts.initOk) {
+      // punto 1: container nato con un'IMMAGINE DIVERSA (Dockerfile cambiato)
+      // → stessa regola di G2/H1. L'inspect fallito NON ricrea (imageOk resta
+      // undefined): un falso positivo fermerebbe i bot senza bisogno; con la
+      // build fallita non si ricrea nemmeno (l'immagine nuova non c'è).
+      if (imageOk) {
+        const img = await dockerRunner(dockerContainerImageArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
+        facts.imageOk = img.exitCode === 0 ? img.stdout.trim() === image : undefined
+      }
       const start = await dockerRunner(dockerStartArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
       if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
       const w = await dockerRunner(dockerBoxWritableArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
@@ -321,7 +397,6 @@ export async function ensureBoxContainer(): Promise<void> {
   // NON vuoto (workspace e home) e lo consegna all'utente del container; il
   // mount :nocopy del create non dipende dal copy-up di docker
   // 0c: creazione e one-shot con l'immagine NOSTRA del box (tag dal Dockerfile)
-  const image = boxImage()
   const chown = await dockerRunner(dockerBoxChownArgv(BOX_VOLUME, image), { timeoutMs: 60_000 })
   if (chown.exitCode !== 0) throw new Error(`init volume fallito: ${chown.stderr}`)
   const create = await dockerRunner(dockerBoxCreateArgv(BOX_CONTAINER, BOX_VOLUME, sandboxNetwork(), boxLimits(), image), { timeoutMs: 60_000 })

@@ -16,21 +16,25 @@ vi.mock('../../store/db', () => ({
   dataDir: () => TMP
 }))
 
-const { execCommand, ensureBotHome, setDockerRunnerForTests, resetBotHomesForTests } = await import('../index')
+const { execCommand, ensureBotHome, setDockerRunnerForTests, resetBotHomesForTests, boxImage } = await import('../index')
 
 /**
  * Runner finto del client docker: container SANO di default (ps lo vede,
- * init true, scrivibile); registra ogni argv. `state.inspect` si può girare
- * a 'false' per simulare il container nato senza --init e forzare la
- * RICREAZIONE (G2); `state.mkdirExit` fa fallire il mkdir della home.
+ * init true, IMMAGINE CORRENTE, scrivibile); registra ogni argv. `state.inspect`
+ * si può girare a 'false' per simulare il container nato senza --init e forzare
+ * la RICREAZIONE (G2); `state.image` cambia l'immagine con cui il container è
+ * nato (punto 1); `state.mkdirExit` fa fallire il mkdir della home.
  */
-function fakeDocker(state: { inspect: string; mkdirExit?: number }) {
+function fakeDocker(state: { inspect: string; image?: string; mkdirExit?: number }) {
   const calls: string[][] = []
   const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, signal: null })
   const runner = async (argv: string[]): Promise<{ stdout: string; stderr: string; exitCode: number | null; signal: string | null }> => {
     calls.push(argv)
     if (argv[0] === 'ps') return ok('sandbot-box') // il container esiste
+    // punto 1: init e immagine del container si leggono con inspect -f diversi
+    if (argv[0] === 'inspect' && argv[2] === '{{.Config.Image}}') return ok(state.image ?? boxImage())
     if (argv[0] === 'inspect') return ok(state.inspect)
+    if (argv[0] === 'image') return ok() // l'immagine del box c'è già
     if (argv[0] === 'exec' && argv[2] === 'mkdir') {
       return state.mkdirExit ? { stdout: '', stderr: 'mkdir: Permission denied', exitCode: state.mkdirExit, signal: null } : ok()
     }
@@ -84,6 +88,18 @@ describe('H2: la home del bot prima dell\'exec in docker', () => {
     await execCommand('agent_x', 'true')
     expect(f.calls.some((a) => a[0] === 'rm')).toBe(true) // è davvero passato di lì
     expect(f.homes()).toEqual(['/box/home/agent_x', '/box/home/agent_x']) // e ha rifatto il mkdir
+  })
+
+  it("punto 1: container nato con un'immagine DIVERSA → ricreazione del SOLO container (il volume non si tocca) con l'immagine corrente", async () => {
+    const f = fakeDocker({ inspect: 'true', image: 'sandbot-box:vecchiotag' })
+    setDockerRunnerForTests(f.runner)
+    await execCommand('agent_x', 'true')
+    // ricreato davvero: rm del container e create con l'immagine CORRENTE
+    expect(f.calls.some((a) => a[0] === 'rm')).toBe(true)
+    expect(f.calls.some((a) => a[0] === 'create' && a.includes(boxImage()))).toBe(true)
+    // MAI rm del volume: i dati dei bot restano
+    expect(f.calls.some((a) => a[0] === 'volume' && a.includes('rm'))).toBe(false)
+    expect(f.homes()).toEqual(['/box/home/agent_x'])
   })
 
   it('mkdir fallito: errore CHIARO e niente memoria (il tentativo si ripete)', async () => {

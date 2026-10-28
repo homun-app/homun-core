@@ -173,11 +173,18 @@ export interface BoxEnsureFacts {
   initOk: boolean
   /** esito di dockerBoxWritableArgv dopo lo start (H1); ignoto se initOk è falso. */
   writable?: boolean
+  /**
+   * fase 11b (punto 1): il container esistente è nato con l'immagine CORRENTE
+   * (inspect -f {{.Config.Image}} = tag attuale). true = a posto; false =
+   * immagine diversa → ricreazione; undefined = inspect non riuscito → si
+   * tiene il container che funziona (come G2, la ricreazione è ottimale).
+   */
+  imageOk?: boolean
 }
 
 export type BoxEnsurePlan =
   | { kind: 'use' }
-  | { kind: 'recreate'; reason: 'senza-init' | 'volume-di-root' }
+  | { kind: 'recreate'; reason: 'senza-init' | 'volume-di-root' | 'immagine-vecchia' }
   | { kind: 'create' }
 
 /**
@@ -186,10 +193,13 @@ export type BoxEnsurePlan =
  * ricreazione. Esiste con init a posto → decide `test -w`: un volume
  * diventato di root (container nato prima di :nocopy) si riconquista con la
  * ricreazione, che ripassa dal one-shot di init (mkdir+chown) come oggi.
+ * Punto 1: container nato con un'immagine DIVERSA (Dockerfile cambiato) →
+ * stessa regola di G2/H1: si ricrea il SOLO container, il volume non si tocca.
  */
 export function boxEnsurePlan(facts: BoxEnsureFacts): BoxEnsurePlan {
   if (!facts.exists) return { kind: 'create' }
   if (!facts.initOk) return { kind: 'recreate', reason: 'senza-init' }
+  if (facts.imageOk === false) return { kind: 'recreate', reason: 'immagine-vecchia' }
   return facts.writable ? { kind: 'use' } : { kind: 'recreate', reason: 'volume-di-root' }
 }
 
@@ -346,5 +356,29 @@ export function dockerKillGroupArgv(container: string, pgid: number, signal: Doc
  */
 export function dockerStatSizeArgv(container: string, path: string): string[] {
   return ['exec', '-i', '-w', BOX_MOUNT, container, 'stat', '-c', '%s', '--', path]
+}
+
+// ---- fase 11b (punto 1): l'immagine NOSTRA del box, costruita da noi ----
+
+/** Timeout della build dell'immagine del box (base playwright + Chromium). */
+export const BOX_IMAGE_BUILD_TIMEOUT_MS = 20 * 60_000
+
+/** Esistenza dell'immagine del box per tag esatto. */
+export function dockerImageInspectArgv(tag: string): string[] {
+  return ['image', 'inspect', tag]
+}
+
+/** Con quale immagine è nato il container esistente (inspect -f, argv puro). */
+export function dockerContainerImageArgv(container: string): string[] {
+  return ['inspect', '-f', '{{.Config.Image}}', container]
+}
+
+/**
+ * La build dell'immagine del box (punto 1): argv PURO, niente --platform —
+ * la build è NATIVA per l'host (arm64 sul Mac arm64). Il contesto è la
+ * cartella del Dockerfile (nessuna COPY serve: tutto arriva dalla base).
+ */
+export function dockerBuildArgv(tag: string, dockerfilePath: string, contextDir: string): string[] {
+  return ['build', '-t', tag, '-f', dockerfilePath, contextDir]
 }
 

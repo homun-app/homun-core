@@ -28,6 +28,9 @@ import {
   boxEnsurePlan,
   boxCreateCheck,
   boxImageTag,
+  dockerImageInspectArgv,
+  dockerContainerImageArgv,
+  dockerBuildArgv,
   DOCKER_WRITE_SH,
   DOCKER_BOX_INIT_SH,
   DOCKER_BOX_MIGRATE_SH,
@@ -333,6 +336,24 @@ describe('H1: controllo test -w e decisione use/una ricreazione/errore chiaro', 
     expect(boxEnsurePlan({ exists: true, initOk: true, writable: false })).toEqual({ kind: 'recreate', reason: 'volume-di-root' })
     // scrivibilità ignota (difensivo): si ricrea, il lato sicuro
     expect(boxEnsurePlan({ exists: true, initOk: true })).toEqual({ kind: 'recreate', reason: 'volume-di-root' })
+  })
+
+  it('punto 1: decisione pura con imageOk — immagine DIVERSA ricrea, inspect fallito NON ricrea', () => {
+    // container nato con un'immagine diversa (Dockerfile cambiato) → ricreazione
+    expect(boxEnsurePlan({ exists: true, initOk: true, imageOk: false, writable: true })).toEqual({ kind: 'recreate', reason: 'immagine-vecchia' })
+    expect(boxEnsurePlan({ exists: true, initOk: true, imageOk: false, writable: false })).toEqual({ kind: 'recreate', reason: 'immagine-vecchia' })
+    // immagine corrente (o inspect non riuscito: undefined) → non è quella la ragione
+    expect(boxEnsurePlan({ exists: true, initOk: true, imageOk: true, writable: true })).toEqual({ kind: 'use' })
+    expect(boxEnsurePlan({ exists: true, initOk: true, imageOk: undefined, writable: false })).toEqual({ kind: 'recreate', reason: 'volume-di-root' })
+  })
+
+  it('punto 1: argv PURI di build, esistenza immagine e immagine del container', () => {
+    const build = dockerBuildArgv('sandbot-box:abc', '/repo/resources/box/Dockerfile', '/repo/resources/box')
+    expect(build).toEqual(['build', '-t', 'sandbot-box:abc', '-f', '/repo/resources/box/Dockerfile', '/repo/resources/box'])
+    // mai --platform: la build è NATIVA per l'host
+    expect(build).not.toContain('--platform')
+    expect(dockerImageInspectArgv('sandbot-box:abc')).toEqual(['image', 'inspect', 'sandbot-box:abc'])
+    expect(dockerContainerImageArgv('sandbot-box')).toEqual(['inspect', '-f', '{{.Config.Image}}', 'sandbot-box'])
   })
 
   it('esito DOPO la (ri)creazione: ok, o l\'errore CHIARO — la ricreazione è una sola', () => {
