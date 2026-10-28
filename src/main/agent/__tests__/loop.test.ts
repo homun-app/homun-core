@@ -3611,6 +3611,26 @@ describe('fase 11b: il browser del bot nel loop', () => {
     browserState.calls.length = 0
   })
 
+  it('i tool del browser compaiono nella lista offerta al modello SOLO se il browser è disponibile', async () => {
+    let seen: string[] = []
+    h.llm.queue = [
+      async (_msgs: unknown[], tools: Array<{ name: string }>) => { seen = tools.map((t) => t.name); return { text: 'ok' } }
+    ]
+    browserState.available = false
+    await runTurn(AGENT, 'ciao', emit)
+    expect(seen).not.toContain('browser_open')
+    browserState.available = true
+    h.llm.queue = [
+      async (_msgs: unknown[], tools: Array<{ name: string }>) => { seen = tools.map((t) => t.name); return { text: 'ok' } }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    // col browser attivo i tool ci sono, e i NON esposti non compaiono mai
+    expect(seen).toContain('browser_open')
+    expect(seen).toContain('browser_snapshot')
+    expect(seen).not.toContain('browser_evaluate')
+    expect(seen.some((n) => n.includes('fill_form') || n.includes('upload'))).toBe(false)
+  })
+
   it('browser NON disponibile (host): il result lo dice, nessun tool eseguito', async () => {
     h.llm.queue = [
       { toolCalls: [{ id: 'b1', name: 'browser_open', arguments: JSON.stringify({ url: 'https://x.example' }) }] },
