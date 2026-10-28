@@ -107,6 +107,30 @@ export const toolDefs: ToolDef[] = [
     }
   },
   {
+    name: 'copy_to_box',
+    description: "Copia un file dal Mac dell'utente dentro il computer dei bot (max 200 MB): chiede SEMPRE la conferma dell'utente con una card (path, dimensione, direzione). Le cartelle sensibili del Mac (~/.ssh, portachiavi, credenziali cloud) sono escluse fisso.",
+    parameters: {
+      type: 'object',
+      properties: {
+        mac_path: { type: 'string', description: 'Percorso del file sul Mac (assoluto o relativo alla sua home)' },
+        box_path: { type: 'string', description: 'Destinazione nel box (relativa alla tua home o /workspace/…)' }
+      },
+      required: ['mac_path', 'box_path']
+    }
+  },
+  {
+    name: 'copy_from_box',
+    description: "Porta un file dal computer dei bot al Mac dell'utente (max 200 MB): chiede SEMPRE la conferma dell'utente con una card. Di default scrive in ~/Downloads/SandBot/ e non sovrascrive MAI un file esistente (usa un nome alternativo).",
+    parameters: {
+      type: 'object',
+      properties: {
+        box_path: { type: 'string', description: 'Percorso del file nel box' },
+        mac_path: { type: 'string', description: 'Destinazione sul Mac (opzionale: default ~/Downloads/SandBot/)' }
+      },
+      required: ['box_path']
+    }
+  },
+  {
     name: 'read-file',
     description: "Legge il contenuto di un file nel computer dell'agente.",
     parameters: {

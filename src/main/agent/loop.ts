@@ -937,6 +937,78 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           continue
         }
 
+        // fase 11 (punto 4): lo scambio di file Mac <-> box chiede SEMPRE
+        // all'utente — card con path, dimensione e direzione; mai approvabile
+        // dall'auto-review (nemmeno con una regola: non passa dal gate).
+        // I rifiuti FISSI (cartelle sensibili del Mac, dati di SandBot, confini
+        // del box, tetto dei 200 MB) scattano PRIMA della card
+        if (call.name === 'copy_to_box' || call.name === 'copy_from_box') {
+          emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
+          const copyEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [copyEntry] })
+          const { getPrepareFileExchange, getRunFileExchange } = await import('./file-exchange')
+          const pre = await getPrepareFileExchange()(agentId, call.name, input)
+          if (!pre.ok) {
+            const r = add({ agentId, kind: 'tool-result', role: 'system', content: pre.error, meta: { callId: call.id, error: true } })
+            emit({ type: 'entries', agentId, entries: [r] })
+            messages.push({ role: 'tool', toolCallId: call.id, content: pre.error })
+            continue
+          }
+          const arrow = pre.plan.direction === 'to_box' ? `Mac ${pre.plan.macPath} → box ${pre.plan.boxPath}` : `box ${pre.plan.boxPath} → Mac ${pre.plan.macPath}`
+          const approval: Approval = {
+            id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
+          }
+          run.approvals.set(approval.id, () => undefined)
+          const approvalEntry = add({
+            agentId, kind: 'approval', role: 'system',
+            content: `${call.name}: ${arrow} (${pre.plan.size} byte)`,
+            meta: {
+              approvalId: approval.id, tool: call.name, input, status: 'pending',
+              fileExchange: { direction: pre.plan.direction, macPath: pre.plan.macPath, boxPath: pre.plan.boxPath, size: pre.plan.size },
+              keys: [arrow]
+            }
+          })
+          setStatus(agentId, 'paused-for-approval', emit)
+          emit({ type: 'entries', agentId, entries: [approvalEntry] })
+          emit({ type: 'approval', agentId, approval })
+          emitNeedsInput(agentId, approvalEntry, `${call.name}: ${arrow}`, emit)
+          taskNeedsInput()
+          const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
+            run.approvals.set(approval.id, (d) => resolve(d))
+            setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
+          })
+          run.approvals.delete(approval.id)
+          updateEntryMeta(approvalEntry.id, {
+            ...approvalEntry.meta,
+            status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
+          })
+          const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
+          if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+          taskWorking()
+          if (decision !== 'allow') {
+            const msg = decision === 'deny' ? 'Copia negata dall\'utente.' : 'Approvazione scaduta o interrotta: copia non eseguita.'
+            messages.push({ role: 'tool', toolCallId: call.id, content: msg })
+            const r = add({ agentId, kind: 'tool-result', role: 'system', content: msg, meta: { callId: call.id } })
+            emit({ type: 'entries', agentId, entries: [r] })
+            setStatus(agentId, 'thinking', emit)
+            continue
+          }
+          setStatus(agentId, 'thinking', emit)
+          let out: string
+          try {
+            out = (await getRunFileExchange()(agentId, pre.plan)).output
+          } catch (e) {
+            out = `Errore nella copia: ${e instanceof Error ? e.message : String(e)}`
+          }
+          const r = add({ agentId, kind: 'tool-result', role: 'system', content: out, meta: { callId: call.id } })
+          emit({ type: 'entries', agentId, entries: [r] })
+          messages.push({ role: 'tool', toolCallId: call.id, content: out })
+          continue
+        }
+
         // fase 5 (§3ter T2-T3, funnel): OFFERTA di connessione — l'agente NON
         // può connettere da solo, crea solo la card col bottone "Connetti";
         // quando l'utente connette, arriverà un messaggio di sistema

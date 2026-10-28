@@ -65,6 +65,13 @@ const FUTURE_CHANGING_TOOLS = new Set(['update_skill', 'update_memory', 'update_
 export const CONTAMINATED_ASK_TOOLS = new Set(['run-command', 'draft_external', 'send_to_agent', 'create_agent', 'create_group'])
 
 /**
+ * Fase 11 (punto 4): lo scambio di file Mac <-> box chiede SEMPRE l'utente —
+ * mai approvabile dall'auto-review, nemmeno con una regola (il loop li gestisce
+ * con la card dedicata prima del gate; qui è la rete di sicurezza).
+ */
+const ALWAYS_ASK_TOOLS = new Set(['copy_to_box', 'copy_from_box'])
+
+/**
  * La decisione finale (PURO): gate già eseguito dal chiamante (qui si arriva
  * solo per "ask"), esclusioni hard, esito del revisore e contatore del turno.
  * Un "allow" del revisore vale SOLO se cita PAROLA PER PAROLA una delle regole
@@ -92,6 +99,9 @@ export function autoReviewDecision(
   }
   if (FUTURE_CHANGING_TOOLS.has(action.tool)) {
     return { autoAllow: false, reason: `${action.tool} cambia il comportamento futuro del bot` }
+  }
+  if (ALWAYS_ASK_TOOLS.has(action.tool)) {
+    return { autoAllow: false, reason: 'lo scambio di file con il Mac chiede sempre l\'utente' }
   }
   if (usedInTurn >= AUTO_REVIEW_MAX_PER_TURN) {
     return { autoAllow: false, reason: `limite di ${AUTO_REVIEW_MAX_PER_TURN} approvazioni automatiche per turno raggiunto` }

@@ -14,7 +14,7 @@
 // Le scritture sono ATOMICHE (file temporaneo nella stessa cartella + rename).
 import { spawn } from 'node:child_process'
 import { mkdirSync, existsSync, writeFileSync, realpathSync as realpathSyncHost } from 'node:fs'
-import { readFile, writeFile, readdir, mkdir, rename, cp } from 'node:fs/promises'
+import { readFile, writeFile, readdir, mkdir, rename, cp, copyFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
@@ -264,6 +264,36 @@ export async function listDirectoryInBox(agentId: string, path: string): Promise
   }
   const entries = await readdir(abs, { withFileTypes: true })
   return entries.map((e) => `${e.isDirectory() ? 'd' : e.isSymbolicLink() ? 'l' : '-'} ${e.name}`).join('\n')
+}
+
+// ---- fase 11 (punto 4): copia di file tra Mac e box (byte-exact) ----
+
+/**
+ * Copia un file dal Mac DENTRO il box (host: fs copyFile; docker: `docker cp`,
+ * argv puro). I confini del path del box li ha già validati il chiamante.
+ */
+export async function copyMacIntoBox(agentId: string, macPath: string, boxAbsPath: string): Promise<void> {
+  if (sandboxMode() === 'docker') {
+    const r = await runProcess('docker', ['cp', macPath, `${BOX_CONTAINER}:${boxAbsPath}`], { timeoutMs: 120_000 })
+    if (r.exitCode !== 0) throw new Error(`docker cp fallito: ${r.stderr}`)
+    return
+  }
+  await mkdir(dirname(boxAbsPath), { recursive: true })
+  await copyFile(macPath, boxAbsPath)
+}
+
+/**
+ * Copia un file dal box al Mac (host: fs copyFile; docker: `docker cp`).
+ * La destinazione sul Mac la decide il chiamante (già validata dalla policy).
+ */
+export async function copyBoxOntoMac(agentId: string, boxAbsPath: string, macPath: string): Promise<void> {
+  if (sandboxMode() === 'docker') {
+    const r = await runProcess('docker', ['cp', `${BOX_CONTAINER}:${boxAbsPath}`, macPath], { timeoutMs: 120_000 })
+    if (r.exitCode !== 0) throw new Error(`docker cp fallito: ${r.stderr}`)
+    return
+  }
+  await mkdir(dirname(macPath), { recursive: true })
+  await copyFile(boxAbsPath, macPath)
 }
 
 // ---- migrazione una tantum dal layout vecchio (punto 1) ----

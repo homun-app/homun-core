@@ -3371,3 +3371,84 @@ describe('fase 11 (punto 3): run-command background nel loop', () => {
     expect(String(res.content)).toContain('Denied by user')
   })
 })
+
+// ---- fase 11 (punto 4): lo scambio di file Mac <-> box chiede SEMPRE ----
+
+const { setFileExchangeForTests } = await import('../file-exchange')
+
+describe('fase 11 (punto 4): copy_to_box / copy_from_box nel loop', () => {
+  const runs: unknown[] = []
+
+  beforeEach(() => {
+    runs.length = 0
+    setFileExchangeForTests({
+      prepare: async (_a, tool) => ({
+        ok: true,
+        plan: { direction: tool === 'copy_to_box' ? 'to_box' as const : 'from_box' as const, macPath: '/Users/test/Downloads/foto.jpg', boxPath: '/workspace/foto.jpg', size: 12345 }
+      }),
+      run: async (_a, plan) => { runs.push(plan); return { output: `Copiato (${plan.direction}).` } }
+    })
+  })
+  afterEach(() => setFileExchangeForTests(null))
+
+  it('card SEMPRE con path, dimensione e direzione; allow esegue la copia', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'cp1', name: 'copy_to_box', arguments: JSON.stringify({ mac_path: '/Users/test/Downloads/foto.jpg', box_path: '/workspace/foto.jpg' }) }] },
+      { text: '.' }
+    ]
+    const turn = runTurn(AGENT, 'portami la foto nel box', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending' && e.meta?.tool === 'copy_to_box')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval' && e.meta?.tool === 'copy_to_box')!
+    // la card mostra direzione, path e dimensione
+    expect(appr.content).toContain('Mac /Users/test/Downloads/foto.jpg → box /workspace/foto.jpg')
+    expect(appr.content).toContain('12345 byte')
+    expect(appr.meta?.fileExchange).toMatchObject({ direction: 'to_box', size: 12345 })
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', 'once')
+    await turn
+    expect(runs).toHaveLength(1)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('Copiato (to_box)')
+  })
+
+  it('deny: nessuna copia eseguita', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'cp2', name: 'copy_from_box', arguments: JSON.stringify({ box_path: 'report.md' }) }] },
+      { text: '.' }
+    ]
+    const turn = runTurn(AGENT, 'portami il report sul Mac', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(runs).toHaveLength(0)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('negata')
+  })
+
+  it('rifiuto FISSO (percorso sensibile del Mac) → result di errore, NESSUNA card', async () => {
+    setFileExchangeForTests({
+      prepare: async () => ({ ok: false, error: 'Percorso del Mac non permesso: "~/.ssh/id_rsa" (niente cartelle sensibili né i dati di SandBot).' })
+    })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'cp3', name: 'copy_to_box', arguments: JSON.stringify({ mac_path: '~/.ssh/id_rsa', box_path: 'x' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'portami la chiave', emit)
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('non permesso')
+  })
+
+  it('l\'auto-review PURA non approva MAI i tool di copia (nemmeno col revisore favorevole)', async () => {
+    const { autoReviewDecision } = await import('../auto-review')
+    const cfg = { enabled: true, allowRules: ['tutto'], blockRules: [], providerId: 'prov', model: 'm1' }
+    const reviewer = { ok: true as const, decision: 'allow' as const, ruleMatched: 'tutto' }
+    for (const tool of ['copy_to_box', 'copy_from_box']) {
+      const d = autoReviewDecision(cfg, { tool, neverAuto: false, untrustedTurn: false }, reviewer, 0)
+      expect(d.autoAllow, tool).toBe(false)
+    }
+  })
+})
