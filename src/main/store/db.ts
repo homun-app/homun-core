@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { JOBS_DDL } from './jobs'
 import { GROUPS_DDL } from './groups'
 import { SHELL_JOBS_DDL } from './shell-jobs'
+import { SUBAGENTS_DDL } from './subagents'
 import type { Agent, TranscriptEntry, PermissionsConfig, RoutineTrigger } from '../../shared/types'
 
 let _dir: string | null = null
@@ -101,6 +102,7 @@ function open(): DatabaseSync {
     ${JOBS_DDL}
     ${GROUPS_DDL}
     ${SHELL_JOBS_DDL}
+    ${SUBAGENTS_DDL}
   `)
   // fase 4: colonne nuove delle routine per i DB esistenti (CREATE TABLE IF
   // NOT EXISTS non le aggiunge); provenance distingue le routine dell'utente
@@ -132,11 +134,13 @@ function open(): DatabaseSync {
   }
   // fase 10: colonne degli agents — created_by (chi ha creato il bot) e
   // section (raggruppamento della sidebar, testo libero)
+  // fase 12: parent_id — un sottoagente è un BOT FIGLIO nascosto (punto 1)
   const agentCols = db.prepare("SELECT name FROM pragma_table_info('agents')").all() as Array<{ name: string }>
   const agentPresent = new Set(agentCols.map((c) => c.name))
   for (const [col, ddl] of [
     ['created_by', "ALTER TABLE agents ADD COLUMN created_by TEXT"],
-    ['section', "ALTER TABLE agents ADD COLUMN section TEXT DEFAULT ''"]
+    ['section', "ALTER TABLE agents ADD COLUMN section TEXT DEFAULT ''"],
+    ['parent_id', 'ALTER TABLE agents ADD COLUMN parent_id TEXT']
   ] as const) {
     if (!agentPresent.has(col)) db.exec(ddl)
   }
@@ -177,18 +181,28 @@ interface AgentRow {
   id: string; name: string; description: string; provider_id: string | null
   model: string | null; status: string; unread: number; created_at: number
   created_by?: string | null; section?: string | null
+  /** fase 12: il padre, se questa riga è un sottoagente (bot figlio nascosto) */
+  parent_id?: string | null
 }
 
 function rowToAgent(r: AgentRow): Agent {
   return {
     id: r.id, name: r.name, description: r.description, providerId: r.provider_id,
     model: r.model, status: r.status as Agent['status'], unread: r.unread, createdAt: r.created_at,
-    createdBy: r.created_by ?? null, section: r.section ?? null
+    createdBy: r.created_by ?? null, section: r.section ?? null,
+    parentId: r.parent_id ?? null
   }
 }
 
+/**
+ * Fase 12 (punto 1): il roster ESCLUDE i figli (WHERE parent_id IS NULL) —
+ * così restano protetti senza modifiche la sidebar, list_agents, i gruppi,
+ * mainAgentOf, la destinazione di send_to_agent, l'onboarding, il tray e gli
+ * orfani del browser (che il boot completa con allSubagentIds). getAgent(id)
+ * continua a trovarli.
+ */
 export function listAgents(): Agent[] {
-  const rows = db().prepare('SELECT * FROM agents ORDER BY created_at').all() as unknown as AgentRow[]
+  const rows = db().prepare('SELECT * FROM agents WHERE parent_id IS NULL ORDER BY created_at').all() as unknown as AgentRow[]
   return rows.map(rowToAgent)
 }
 
@@ -197,21 +211,28 @@ export function getAgent(id: string): Agent | null {
   return r ? rowToAgent(r) : null
 }
 
-/** Opzioni di creazione (fase 10): creatore e sezione della sidebar. */
+/**
+ * Opzioni di creazione (fase 10): creatore e sezione della sidebar.
+ * Fase 12: parentId fa della riga un BOT FIGLIO (sottoagente nascosto), con
+ * un id imposto dal chiamante (`sub_<8 hex>`).
+ */
 export interface CreateAgentOpts {
   createdBy?: string
   section?: string
+  parentId?: string
+  /** solo per i figli: l'id `sub_…` generato dal chiamante */
+  id?: string
 }
 
 export function createAgent(name: string, description = '', opts: CreateAgentOpts = {}): Agent {
-  const id = 'agent_' + crypto.randomUUID().slice(0, 8)
+  const id = opts.id ?? 'agent_' + crypto.randomUUID().slice(0, 8)
   const now = Date.now()
   db()
-    .prepare('INSERT INTO agents(id, name, description, status, created_at, created_by, section) VALUES(?,?,?,?,?,?,?)')
-    .run(id, name, description, 'idle', now, opts.createdBy ?? null, opts.section ?? '')
+    .prepare('INSERT INTO agents(id, name, description, status, created_at, created_by, section, parent_id) VALUES(?,?,?,?,?,?,?,?)')
+    .run(id, name, description, 'idle', now, opts.createdBy ?? null, opts.section ?? '', opts.parentId ?? null)
   return {
     id, name, description, providerId: null, model: null, status: 'idle', unread: 0, createdAt: now,
-    createdBy: opts.createdBy ?? null, section: opts.section ?? ''
+    createdBy: opts.createdBy ?? null, section: opts.section ?? '', parentId: opts.parentId ?? null
   }
 }
 
@@ -230,10 +251,32 @@ export function updateAgent(
     )
 }
 
+/**
+ * Fase 12 (punto 1): il loop registra qui il suo interrupt, così deleteAgent
+ * può FERMARE i figli di un padre eliminato senza importare il loop (ciclo).
+ * Nei test si registra una funzione finta.
+ */
+let agentStopper: ((agentId: string) => void) | null = null
+
+export function setAgentStopperForDaemon(fn: ((agentId: string) => void) | null): void {
+  agentStopper = fn
+}
+
 export function deleteAgent(id: string): void {
   // fase 5 (residuo 0d): si rimuove solo un agente ESISTENTE (il path della
   // directory si costruisce dal suo id, mai da input libero)
   if (!getAgent(id)) return
+  // fase 12 (punto 1): i FIGLI muoiono col padre — turno fermato, coda
+  // svuotata, righe agents/entry/subagents eliminate. I file del box NON si
+  // toccano mai: la home del figlio è quella del padre (il volume è suo)
+  const childRows = db().prepare('SELECT id FROM subagents WHERE parent_id = ?').all(id) as Array<{ id: string }>
+  for (const child of childRows) {
+    agentStopper?.(child.id)
+    db().prepare('DELETE FROM jobs WHERE agent_id = ?').run(child.id)
+    db().prepare('DELETE FROM agents WHERE id=?').run(child.id)
+    db().prepare('DELETE FROM entries WHERE agent_id=?').run(child.id)
+    db().prepare('DELETE FROM subagents WHERE id=?').run(child.id)
+  }
   // fase 7 (residuo 0c): pulizia di tutto ciò che resta dell'agente — le
   // routine (con i loro setting trigger.seen.<id>, altrimenti orfani nei
   // settings) e le righe outbox trattenute; le entry muoiono col DELETE sotto
@@ -253,6 +296,25 @@ export function deleteAgent(id: string): void {
   } catch {
     // directory assente o non eliminabile: le righe sono già via
   }
+}
+
+/**
+ * Fase 12 (punto 1): il padre di un id, se quella riga è un FIGLIO (null per
+ * i bot normali o per id sconosciuti).
+ */
+export function subagentParentOf(id: string): Agent | null {
+  const a = getAgent(id)
+  return a?.parentId ? getAgent(a.parentId) : null
+}
+
+/**
+ * Fase 12 (punto 1): il messaggio di rifiuto per un id di figlio passato a un
+ * tool/RPC che vuole un BOT (update_agent, delete_agent, send_to_agent, gruppi,
+ * routine). null se l'id non è un figlio.
+ */
+export function subagentRefusal(id: string): string | null {
+  const parent = subagentParentOf(id)
+  return parent ? `${id} non è un bot: è un sottoagente di ${parent.name}` : null
 }
 
 // ---- transcript (event-sourced) ----
@@ -347,6 +409,14 @@ export function getPermissions(): PermissionsConfig {
       { tool: 'propose_rule_change', pattern: '*', mode: 'always_allow' },
       { tool: 'create_task', pattern: '*', mode: 'always_allow' },
       { tool: 'update_task', pattern: '*', mode: 'always_allow' },
+      // fase 12: i sottoagenti sono interni all'utente (il figlio è un agente
+      // suo; spawn/check/message/stop e wake_parent sono intercettati dal loop
+      // e non hanno effetti fuori dal sistema)
+      { tool: 'spawn_subagent', pattern: '*', mode: 'always_allow' },
+      { tool: 'check_subagent', pattern: '*', mode: 'always_allow' },
+      { tool: 'message_subagent', pattern: '*', mode: 'always_allow' },
+      { tool: 'stop_subagent', pattern: '*', mode: 'always_allow' },
+      { tool: 'wake_parent', pattern: '*', mode: 'always_allow' },
       // fase 10: creare bot e gruppi nei turni dell'UTENTE parte senza card
       // (il loop forza la card nei turni automatici/di altri bot/di gruppo/
       // untrusted: permessi per origine, punto 1); aggiornare ed eliminare

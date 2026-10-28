@@ -18,7 +18,7 @@ import { readFile, writeFile, readdir, mkdir, rename, cp, copyFile } from 'node:
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
-import { getSetting, dataDir } from '../store/db'
+import { getSetting, dataDir, getAgent } from '../store/db'
 import { resolveBoxPath } from './box-paths'
 import {
   dockerExecArgv,
@@ -134,9 +134,34 @@ export function boxRoot(): string {
   return root
 }
 
-/** La home del bot dentro il box condiviso (cwd predefinita dei suoi comandi). */
+/**
+ * Fase 12 (punto 1): il PROPRIETARIO delle risorse del box. Per un sottoagente
+ * (riga agents con parent_id) è il PADRE, per gli altri l'id stesso: è la
+ * funzione unica che sta in ogni punto che costruisce una home o un path del
+ * box — così il figlio lavora nella home del padre (i file sono condivisi,
+ * come in Grok e in Claude Code).
+ */
+export function boxOwnerOf(agentId: string): string {
+  try {
+    return getAgent(agentId)?.parentId ?? agentId
+  } catch {
+    // store non disponibile (boot freddo): l'id stesso, il chiamante deciderà
+    return agentId
+  }
+}
+
+/** Fase 12: la riga è un sottoagente (bot figlio)? Serve a pid file e orfani del browser. */
+export function isSubagent(agentId: string): boolean {
+  try {
+    return getAgent(agentId)?.parentId != null
+  } catch {
+    return false
+  }
+}
+
+/** La home del bot dentro il box condiviso (cwd predefinita dei suoi comandi); per un figlio è quella del padre. */
 export function boxDir(agentId: string): string {
-  const dir = join(boxRoot(), 'home', agentId)
+  const dir = join(boxRoot(), 'home', boxOwnerOf(agentId))
   mkdirSync(dir, { recursive: true })
   return dir
 }
@@ -247,21 +272,24 @@ const ensuredBotHomes = new Set<string>()
  */
 export async function ensureBotHome(agentId: string): Promise<void> {
   if (sandboxMode() !== 'docker') return
-  if (ensuredBotHomes.has(agentId)) return
-  const r = await dockerRunner(dockerEnsureHomeArgv(BOX_CONTAINER, agentId), { timeoutMs: 30_000 })
+  // fase 12 (punto 1): la home di un FIGLIO è quella del padre
+  const owner = boxOwnerOf(agentId)
+  if (ensuredBotHomes.has(owner)) return
+  const r = await dockerRunner(dockerEnsureHomeArgv(BOX_CONTAINER, owner), { timeoutMs: 30_000 })
   if (r.exitCode !== 0) {
-    throw new Error(`creazione della home ${boxHomePath(agentId)} nel container fallita: ${r.stderr || `exit ${r.exitCode}`}`)
+    throw new Error(`creazione della home ${boxHomePath(owner)} nel container fallita: ${r.stderr || `exit ${r.exitCode}`}`)
   }
-  ensuredBotHomes.add(agentId)
+  ensuredBotHomes.add(owner)
 }
 
 /** Esecuzione nel container condiviso: argv, senza shell dell'host; ogni exec gira nella home del bot con la sua HOME. */
 async function execDocker(agentId: string, command: string, opts: ExecOptions): Promise<ExecResult> {
   // H2: -w punta alla home del bot — la home esiste PRIMA dell'exec (un'unica
-  // catena ensure: container, poi home, poi il comando)
+  // catena ensure: container, poi home, poi il comando).
+  // Fase 12 (punto 1): la home è quella del PROPRIETARIO (il padre di un figlio)
   await ensureBoxContainer()
   await ensureBotHome(agentId)
-  const home = boxHomePath(agentId)
+  const home = boxHomePath(boxOwnerOf(agentId))
   const env = { HOME: home, ...(opts.env ?? {}) }
   const r = await dockerRunner(dockerExecArgv(BOX_CONTAINER, command, { workdir: home, env }), {
     ...opts,
@@ -441,16 +469,33 @@ export async function execCommand(agentId: string, command: string, opts: ExecOp
 
 /** Il path di un tool risolto e validato per la modalità attiva (host: fs reale; docker: forma). */
 function checkedBoxPath(agentId: string, path: string): string {
+  // fase 12 (punto 1): i confini sono quelli della home del PROPRIETARIO —
+  // la home condivisa col padre (boxDir e boxHomeOf fanno già il redirect)
+  const owner = boxOwnerOf(agentId)
   if (sandboxMode() === 'docker') {
     // in docker il filesystem sta nel container: solo controllo di FORMA
     // (realpath non è disponibile senza un exec in più per operazione)
-    const r = resolveBoxPath(path, BOX_MOUNT, boxHomePath(agentId), (p) => p)
+    const r = resolveBoxPath(path, BOX_MOUNT, boxHomePath(owner), (p) => p)
     if (!r.ok) throw new Error(r.reason)
     return r.abs!
   }
   const r = resolveBoxPath(path, boxRoot(), boxDir(agentId), realpathSyncHost)
   if (!r.ok) throw new Error(r.reason)
   return r.abs!
+}
+
+/**
+ * Fase 12 (punto 3): un path del box è VALIDO per la home di questo agente
+ * (come lo controllerebbe write-file), senza toccare il filesystem? Serve alla
+ * validazione di report_path in wake_parent.
+ */
+export function validBoxPathOf(agentId: string, path: string): boolean {
+  try {
+    checkedBoxPath(agentId, path)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export async function readFileInBox(agentId: string, path: string): Promise<string> {

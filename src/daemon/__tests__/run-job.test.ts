@@ -185,3 +185,102 @@ describe('makeJobRunner: routine-run', () => {
     expect(log[0]!.opts.resume).toEqual({ entryId: 9 })
   })
 })
+
+// ---- fase 12 (punti 3-4): il job subagent-run apre il turno del FIGLIO ----
+
+describe('makeJobRunner: subagent-run', () => {
+  beforeEach(() => {
+    db.exec('CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT, description TEXT DEFAULT "", provider_id TEXT, model TEXT, status TEXT DEFAULT "offline", unread INTEGER DEFAULT 0, created_at INTEGER, parent_id TEXT)')
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS subagents (
+        id TEXT PRIMARY KEY, parent_id TEXT NOT NULL, parent_task_id INTEGER, batch_id TEXT NOT NULL,
+        title TEXT NOT NULL, brief TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
+        summary TEXT, report_path TEXT, contaminated INTEGER DEFAULT 0, untrusted INTEGER DEFAULT 0,
+        automatic INTEGER DEFAULT 0, woken INTEGER DEFAULT 0, created_at INTEGER NOT NULL,
+        started_at INTEGER, finished_at INTEGER, deadline_at INTEGER NOT NULL
+      );
+    `)
+    db.prepare('INSERT INTO agents(id, name) VALUES(?, ?)').run('agent_p', 'Padre')
+    db.prepare(`INSERT INTO subagents(id, parent_id, batch_id, title, brief, status, created_at, deadline_at)
+      VALUES('sub_k1', 'agent_p', 'b1', 'Ricerca', 'il brief', 'queued', 1, 999)`).run()
+  })
+
+  it('primo job: apre col BRIEF (blocco <brief>), segna running/started_at e passa subagent/untrusted/automatic', async () => {
+    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', first: true }, runAt: 0, now: 0 })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.agentId).toBe('sub_k1')
+    expect(log[0]!.text).toContain('<brief titolo="Ricerca">')
+    expect(log[0]!.text).toContain('il brief')
+    expect(log[0]!.text).toContain('wake_parent')
+    expect(log[0]!.opts.source).toBe('user')
+    expect(log[0]!.opts.subagent).toEqual({ id: 'sub_k1', parentId: 'agent_p' })
+    expect(log[0]!.opts.onTurnEntry).toBeTruthy()
+    // riga → running con started_at
+    const row = db.prepare('SELECT status, started_at FROM subagents WHERE id = ?').get('sub_k1') as { status: string; started_at: number }
+    expect(row.status).toBe('running')
+    expect(row.started_at).not.toBeNull()
+    // R1: l'entry del turno finisce nel payload
+    expect(getJobById(db, job.id)!.payload).toMatchObject({ subagentId: 'sub_k1', entryId: 42 })
+  })
+
+  it('eredità: untrusted/automatic della riga arrivano al turno del figlio', async () => {
+    db.prepare("UPDATE subagents SET status = 'queued', untrusted = 1, automatic = 1 WHERE id = 'sub_k1'").run()
+    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', first: true }, runAt: 0, now: 0 })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.opts.untrusted).toBe(true)
+    expect(log[0]!.opts.automatic).toBe(true)
+  })
+
+  it('messaggio del padre: blocco <messaggio_dal_padre> col nome del padre', async () => {
+    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', message: 'aggiungi i prezzi' }, runAt: 0, now: 0 })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.text).toContain('<messaggio_dal_padre nome="Padre">')
+    expect(log[0]!.text).toContain('aggiungi i prezzi')
+  })
+
+  it('figlio già TERMINALE (stop/scadenza prima del job): non parte', async () => {
+    db.prepare("UPDATE subagents SET status = 'stopped' WHERE id = 'sub_k1'").run()
+    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', first: true }, runAt: 0, now: 0 })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log).toHaveLength(0)
+  })
+
+  it('ripresa R1: payload.entryId → resume, senza riscrivere il brief', async () => {
+    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', first: true, entryId: 7 }, runAt: 0, now: 0 })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.opts.resume).toEqual({ entryId: 7 })
+    expect(log[0]!.text).toContain('<brief')
+  })
+
+  it('user-message con contaminated (risveglio SUBAGENTS_DONE): il turno del padre PARTE contaminato', async () => {
+    const job = enqueueJob(db, {
+      agentId: 'agent_p', kind: 'user-message',
+      payload: { text: '<risultati_sottoagenti>…', initiator: 'SUBAGENTS_DONE', contaminated: true },
+      runAt: 0, now: 0
+    })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.opts.contaminated).toBe(true)
+    expect(log[0]!.opts.initiator).toBe('SUBAGENTS_DONE')
+  })
+
+  it('task-run (risveglio nel task): brief = risultati, bandiere del payload rispettate', async () => {
+    db.prepare("INSERT INTO tasks(id, agent_id, title) VALUES(3, 'agent_p', 'Confronto')").run()
+    const job = enqueueJob(db, {
+      agentId: 'agent_p', kind: 'task-run',
+      payload: { taskId: 3, brief: '<risultati_sottoagenti>…', contaminated: true, automatic: true },
+      runAt: 0, now: 0
+    })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.opts.taskId).toBe(3)
+    expect(log[0]!.text).toContain('[task n. 3 "Confronto"')
+    expect(log[0]!.opts.contaminated).toBe(true)
+    expect(log[0]!.opts.automatic).toBe(true)
+  })
+})

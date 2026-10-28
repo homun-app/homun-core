@@ -100,13 +100,21 @@ vi.mock('../../store/db', () => ({
   // fase 7: roster degli agenti (bot principale, send_to_agent) e routine attive
   listAgents: () => [...h.db.agents.values()].sort((a, b) => a.createdAt - b.createdAt),
   // fase 10: creazione/eliminazione bot dal tool create_agent/delete_agent
-  createAgent: (name: string, description = '', opts: { createdBy?: string; section?: string } = {}) => {
+  createAgent: (name: string, description = '', opts: { createdBy?: string; section?: string; parentId?: string; id?: string } = {}) => {
     const a: Agent = {
-      id: 'agent_' + h.db.nextAgentId++, name, description, providerId: null, model: null,
-      status: 'idle', unread: 0, createdAt: Date.now(), createdBy: opts.createdBy ?? null, section: opts.section ?? ''
+      id: opts.id ?? 'agent_' + h.db.nextAgentId++, name, description, providerId: null, model: null,
+      status: 'idle', unread: 0, createdAt: Date.now(), createdBy: opts.createdBy ?? null, section: opts.section ?? '',
+      parentId: opts.parentId ?? null
     }
     h.db.agents.set(a.id, a)
     return { ...a }
+  },
+  // fase 12 (punto 1): il rifiuto per un id di FIGLIO (parent_id sulla riga)
+  subagentRefusal: (id: string) => {
+    const a = h.db.agents.get(id)
+    if (!a?.parentId) return null
+    const parent = h.db.agents.get(a.parentId)
+    return `${id} non è un bot: è un sottoagente di ${parent?.name ?? a.parentId}`
   },
   deleteAgent: (id: string) => {
     h.db.agents.delete(id)
@@ -438,6 +446,10 @@ vi.mock('../../sandbox', () => ({
   sandboxMode: () => 'host' as const,
   browserSandboxOk: () => false,
   boxDir: (id: string) => `/tmp/sandbot-${id}`,
+  // fase 12: il proprietario delle risorse del box (il padre di un figlio)
+  boxOwnerOf: (id: string) => h.db.agents.get(id)?.parentId ?? id,
+  isSubagent: (id: string) => h.db.agents.get(id)?.parentId != null,
+  validBoxPathOf: () => true,
   execCommand: async (_agentId: string, command: string, opts: { env?: Record<string, string> } = {}) => {
     h.sandboxMock.exec.command = command
     h.sandboxMock.exec.env = opts.env ?? {}
@@ -452,6 +464,79 @@ vi.mock('../../vault', () => ({
     throw new Error(`credenziale "${name}" non presente nel vault`)
   },
   listSecretNames: () => ['API_KEY']
+}))
+
+// fase 12: il registro dei sottoagenti, in memoria (mock dello store SQL);
+// e le operazioni del daemon (terminal/changed registrate per le asserzioni)
+const subagentsState = vi.hoisted(() => ({
+  rows: [] as Array<{
+    id: string; parent_id: string; parent_task_id: number | null; batch_id: string
+    title: string; brief: string; status: string; summary: string | null; report_path: string | null
+    contaminated: number; untrusted: number; automatic: number; woken: number
+    created_at: number; started_at: number | null; finished_at: number | null; deadline_at: number
+  }>,
+  nextId: 1,
+  terminal: [] as string[],
+  changed: [] as string[]
+}))
+vi.mock('../../store/subagents', () => {
+  const TERMINAL = ['done', 'failed', 'stopped', 'expired']
+  const find = (id: string) => subagentsState.rows.find((r) => r.id === id) ?? null
+  return {
+    DEFAULT_SUBAGENT_DEADLINE_MIN: 20,
+    newSubagentId: () => `sub_t${subagentsState.nextId++}`,
+    newSubagentBatchId: () => `batch${subagentsState.nextId++}`,
+    insertSubagent: (_db: unknown, input: Record<string, unknown>) => {
+      const row = {
+        id: input.id as string, parent_id: input.parentId as string,
+        parent_task_id: (input.parentTaskId as number | null) ?? null,
+        batch_id: input.batchId as string, title: input.title as string, brief: input.brief as string,
+        status: 'queued', summary: null, report_path: null,
+        contaminated: 0, untrusted: input.untrusted ? 1 : 0, automatic: input.automatic ? 1 : 0, woken: 0,
+        created_at: input.createdAt as number, started_at: null, finished_at: null,
+        deadline_at: input.deadlineAt as number
+      }
+      subagentsState.rows.push(row)
+      return { ...row }
+    },
+    getSubagent: (_db: unknown, id: string) => find(id) ? { ...find(id) } : null,
+    listSubagentsOf: (_db: unknown, parentId: string) => subagentsState.rows.filter((r) => r.parent_id === parentId).map((r) => ({ ...r })),
+    openSubagentsOf: (_db: unknown, parentId: string) =>
+      subagentsState.rows.filter((r) => r.parent_id === parentId && (r.status === 'queued' || r.status === 'running')).length,
+    updateSubagent: (_db: unknown, id: string, patch: Record<string, unknown>) => {
+      const r = find(id)
+      if (!r) return null
+      Object.assign(r, patch, {
+        // come lo store: woken si azzera pure (riapertura), contaminated no
+        woken: patch.woken !== undefined ? (patch.woken ? 1 : 0) : r.woken,
+        contaminated: patch.contaminated === true || r.contaminated === 1 ? 1 : 0
+      })
+      return { ...r }
+    },
+    closeSubagent: (_db: unknown, id: string, final: { status: string; summary?: string; report_path?: string; contaminated?: boolean; finishedAt: number }) => {
+      const r = find(id)
+      if (!r || TERMINAL.includes(r.status)) return r ? { ...r } : null
+      Object.assign(r, {
+        status: final.status, finished_at: final.finishedAt,
+        ...(final.summary !== undefined ? { summary: final.summary } : {}),
+        ...(final.report_path !== undefined ? { report_path: final.report_path } : {}),
+        ...(final.contaminated ? { contaminated: 1 } : {})
+      })
+      return { ...r }
+    },
+    subagentsOfBatch: (_db: unknown, batchId: string) => subagentsState.rows.filter((r) => r.batch_id === batchId).map((r) => ({ ...r })),
+    wakeBatch: (_db: unknown, batchId: string) => {
+      const rows = subagentsState.rows.filter((r) => r.batch_id === batchId)
+      if (!rows.length || rows.some((r) => !TERMINAL.includes(r.status))) return []
+      const toWake = rows.filter((r) => r.woken === 0)
+      for (const r of toWake) r.woken = 1
+      return toWake.map((r) => ({ ...r }))
+    }
+  }
+})
+vi.mock('../../../daemon/subagent-ops', () => ({
+  onSubagentTerminal: (_db: unknown, id: string) => { subagentsState.terminal.push(id) },
+  subagentsChanged: (parentId: string) => { subagentsState.changed.push(parentId) }
 }))
 
 // fase 11b (punto 2): il browser del bot — mock parziale (i tool defs sono
@@ -594,6 +679,11 @@ beforeEach(() => {
   h.db.nextId = 1
   h.db.nextRoutineId = 1
   h.db.nextTaskId = 1
+  // fase 12: registro dei sottoagenti e chiamate alle ops del daemon
+  subagentsState.rows.length = 0
+  subagentsState.nextId = 1
+  subagentsState.terminal.length = 0
+  subagentsState.changed.length = 0
   // fase 4: memoria e skill scritte dai test non devono inquinare il dopo
   rmSync(join(TMP, 'agents'), { recursive: true, force: true })
   h.llm.queue.length = 0
@@ -3836,5 +3926,460 @@ describe('fase 12 0a/0d: probe interno del tipo di campo e card di press_key', (
     resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
     await turn
     expect(browserState.calls).toHaveLength(0)
+  })
+})
+
+// ---- fase 12 (punti 2-3-5): sottoagenti nel loop ----
+
+describe('fase 12: spawn_subagent — validazioni, card, job e lotto', () => {
+  beforeEach(() => {
+    browserState.available = false
+    browserState.calls.length = 0
+    browserState.fieldProbe = null
+  })
+
+  const spawnCall = (id: string, title: string, brief: string) => ({
+    id, name: 'spawn_subagent', arguments: JSON.stringify({ title, brief })
+  })
+  const LONG_BRIEF = 'Ricerca approfondita su X: punti di forza, limiti, quando sceglierlo. Confini: non cercare Y. Formato: summary di 10 righe e report in subagents/report.md. Fonti: aprire i link citati. Contesto: lavoro per il confronto dell\'utente.' + 'x'.repeat(120)
+
+  it('spawn valida: figlio nascosto creato (parent_id, nome "padre · title", modello copiato), riga subagents, job subagent-run, card e result', async () => {
+    h.llm.queue = [
+      { toolCalls: [spawnCall('sp1', 'Ricerca su Astro', LONG_BRIEF)] },
+      { toolCalls: [{ id: 'sp2', name: 'send_to_user', arguments: JSON.stringify({ text: 'tre sottoagenti al lavoro' }) }] }
+    ]
+    await runTurn(AGENT, 'cerca', emit)
+    // riga agents del FIGLIO: nascosta (parent_id) e con modello del padre
+    const child = [...h.db.agents.values()].find((a) => a.parentId === AGENT)
+    expect(child).toBeTruthy()
+    expect(child!.name).toBe('TestBot · Ricerca su Astro')
+    expect(child!.providerId).toBe('prov')
+    expect(child!.model).toBe('m1')
+    expect(child!.id.startsWith('sub_')).toBe(true)
+    // riga subagents: queued, lotto del turno, scadenza
+    const row = subagentsState.rows.find((r) => r.id === child!.id)!
+    expect(row).toMatchObject({ status: 'queued', parent_id: AGENT, title: 'Ricerca su Astro', brief: LONG_BRIEF })
+    expect(row.batch_id).toBeTruthy()
+    expect(row.deadline_at).toBeGreaterThan(Date.now())
+    // job subagent-run sulla corsia del FIGLIO
+    const job = h.db.jobs.find((j) => j.kind === 'subagent-run')
+    expect(job).toBeTruthy()
+    expect(job!.agentId).toBe(child!.id)
+    expect(job!.payload).toMatchObject({ subagentId: child!.id, first: true })
+    // card nella chat del padre
+    const card = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string })?.type === 'subagent')
+    expect(card).toBeTruthy()
+    expect((card!.meta!.message as { subagentId: string; title: string })).toEqual({ type: 'subagent', subagentId: child!.id, title: 'Ricerca su Astro' })
+    // result col testo della specifica
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain(`Sottoagente "Ricerca su Astro" lanciato (id ${child!.id})`)
+    expect(String(res.content)).toContain('Non aspettarlo in loop')
+  })
+
+  it('le spawn dello STESSO turno condividono il lotto; la 5ª è rifiutata', async () => {
+    h.llm.queue = [
+      { toolCalls: [spawnCall('s1', 'A', LONG_BRIEF), spawnCall('s2', 'B', LONG_BRIEF), spawnCall('s3', 'C', LONG_BRIEF), spawnCall('s4', 'D', LONG_BRIEF)] },
+      { toolCalls: [spawnCall('s5', 'E', LONG_BRIEF)] },
+      { toolCalls: [{ id: 's6', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'quattro', emit)
+    const batches = new Set(subagentsState.rows.map((r) => r.batch_id))
+    expect(batches.size).toBe(1) // un lotto per turno
+    const results = h.llm.calls[1]!.concat(h.llm.calls[2]!).filter((m) => m.role === 'tool')
+    const fifth = results.find((m) => String(m.content).includes('al massimo 4 spawn_subagent per turno'))
+    expect(fifth).toBeTruthy()
+    expect(subagentsState.rows).toHaveLength(4)
+  })
+
+  it('brief corto → rifiuto con il motivo, NESSUNA creazione; title mancante idem', async () => {
+    h.llm.queue = [
+      { toolCalls: [spawnCall('c1', 'Corto', 'breve')] },
+      { toolCalls: [{ id: 'c2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'cerca', emit)
+    expect(subagentsState.rows).toHaveLength(0)
+    expect([...h.db.agents.values()].some((a) => a.parentId === AGENT)).toBe(false)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('il brief deve essere autosufficiente: obiettivo, confini, formato del risultato')
+  })
+
+  it('il 7° figlio APERTO è rifiutato (tetto 6)', async () => {
+    // 6 figli già aperti dal turno prima
+    for (let i = 0; i < 6; i++) {
+      const id = `sub_open${i}`
+      h.db.agents.set(id, { id, name: `TestBot · T${i}`, description: '', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: i, createdBy: null, section: '', parentId: AGENT })
+      subagentsState.rows.push({
+        id, parent_id: AGENT, parent_task_id: null, batch_id: 'old', title: `T${i}`, brief: 'b',
+        status: i < 3 ? 'running' : 'queued', summary: null, report_path: null,
+        contaminated: 0, untrusted: 0, automatic: 0, woken: 0,
+        created_at: i, started_at: null, finished_at: null, deadline_at: 9e15
+      })
+    }
+    h.llm.queue = [
+      { toolCalls: [spawnCall('o1', 'Settimo', LONG_BRIEF)] },
+      { toolCalls: [{ id: 'o2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'ancora uno', emit)
+    expect(subagentsState.rows).toHaveLength(6)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('6 sottoagenti aperti')
+  })
+
+  it('turno di GRUPPO: spawn rifiutata (lì si coordina col gruppo)', async () => {
+    h.llm.queue = [
+      { toolCalls: [spawnCall('g1', 'X', LONG_BRIEF)] },
+      { toolCalls: [{ id: 'g2', name: 'pass', arguments: '{}' }] }
+    ]
+    await runTurn(AGENT, 'turno di gruppo', emit, undefined, {
+      source: 'user',
+      groupTurn: { groupId: 1, readMaxDepth: 0, rootId: null }
+    })
+    expect(subagentsState.rows).toHaveLength(0)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('turni di gruppo non si lanciano sottoagenti')
+  })
+})
+
+describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
+  beforeEach(() => {
+    browserState.available = false
+    browserState.calls.length = 0
+    browserState.fieldProbe = null
+  })
+
+  const CHILD = 'sub_child1'
+  const childAgent = () => {
+    h.db.agents.set(CHILD, {
+      id: CHILD, name: 'TestBot · Ricerca', description: 'Ricerca', providerId: 'prov', model: 'm1',
+      status: 'idle', unread: 0, createdAt: 1, createdBy: null, section: '', parentId: AGENT
+    })
+    subagentsState.rows.push({
+      id: CHILD, parent_id: AGENT, parent_task_id: null, batch_id: 'b-child', title: 'Ricerca', brief: 'il brief del padre',
+      status: 'running', summary: null, report_path: null,
+      contaminated: 0, untrusted: 0, automatic: 0, woken: 0,
+      created_at: 1000, started_at: 1000, finished_at: null, deadline_at: 9e15
+    })
+  }
+
+  it('la lista dei tool del figlio è la WHITELIST + wake_parent; send_to_user e create_task non ci sono', async () => {
+    childAgent()
+    let seen: string[] = []
+    h.llm.queue = [
+      async (_msgs: unknown[], tools: Array<{ name: string }>) => { seen = tools.map((t) => t.name); return { text: 'ok' } }
+    ]
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    expect(seen).toContain('wake_parent')
+    expect(seen).toContain('run-command')
+    expect(seen).toContain('write-file')
+    expect(seen).toContain('web_fetch')
+    expect(seen).toContain('recall_memory')
+    expect(seen).not.toContain('send_to_user')
+    expect(seen).not.toContain('ask_user')
+    expect(seen).not.toContain('create_task')
+    expect(seen).not.toContain('spawn_subagent')
+    expect(seen).not.toContain('update_memory')
+  })
+
+  it('il PROMPT del figlio è subagentSystemPrompt (niente "# Chi sei" del padre, con "sottoagente di") e memoria/skill del PADRE', async () => {
+    childAgent()
+    const { writeMemory } = await import('../memory')
+    writeMemory(AGENT, { content: "l'utente vuole puntualità", tier: 'core' })
+    let system = ''
+    h.llm.queue = [
+      async (msgs: Array<{ role: string; content: string }>) => { system = msgs[0]!.content; return { text: 'ok' } }
+    ]
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    expect(system).toContain(`sottoagente di TestBot`)
+    expect(system).toContain('wake_parent')
+    expect(system).toContain('# Come lavori')
+    // la memoria del PADRE è nel contesto del figlio
+    expect(system).toContain("l'utente vuole puntualità")
+  })
+
+  it('un tool ESCLUSO chiamato lo stesso → "non disponibile ai sottoagenti: <motivo>"', async () => {
+    childAgent()
+    h.llm.queue = [
+      { toolCalls: [{ id: 'x1', name: 'send_to_user', arguments: JSON.stringify({ text: 'ciao utente' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toBe('non disponibile ai sottoagenti: il sottoagente non parla con l\'utente né con gli altri bot: consegna al padre con wake_parent')
+    // NESSUN messaggio in chat
+    expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(0)
+  })
+
+  it('wake_parent chiude il figlio (status, summary, report_path, contaminazione) e chiama il lotto; il turno finisce lì', async () => {
+    childAgent()
+    // il figlio legge una pagina (fetch finto, come gli altri test web)
+    setWebFetchForTests(async () => ({ ok: true, text: '# Pagina letta', contentType: 'text/html', finalUrl: 'https://x.example/a', downloadedBytes: 10 }))
+    h.llm.queue = [
+      { toolCalls: [{ id: 'w1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://x.example' }) }] },
+      { toolCalls: [{ id: 'w2', name: 'wake_parent', arguments: JSON.stringify({ status: 'done', summary: 'fatto: report pronto', report_path: 'subagents/sub_child1/report.md' }) }] },
+      { toolCalls: [{ id: 'w3', name: 'run-command', arguments: JSON.stringify({ command: 'eco' }) }] }
+    ]
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    const row = subagentsState.rows.find((r) => r.id === CHILD)!
+    expect(row.status).toBe('done')
+    expect(row.summary).toBe('fatto: report pronto')
+    expect(row.report_path).toBe('subagents/sub_child1/report.md')
+    // il figlio aveva letto una pagina → contaminazione registrata sulla riga
+    expect(row.contaminated).toBe(1)
+    // la chiusura chiama il controllo del lotto
+    expect(subagentsState.terminal).toContain(CHILD)
+    // il turno finisce con wake_parent: la run-command DOPO non è eseguita
+    // (nessuna terza chiamata al modello) e il result della consegna è nel
+    // transcript del figlio
+    expect(h.llm.calls).toHaveLength(2)
+    expect(h.db.entries.some((e) => e.kind === 'tool-result' && e.content.includes('Consegnato al padre. Hai finito: non fare altro.'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'tool-call' && e.content === 'run-command')).toBe(false)
+  })
+
+  afterEach(() => {
+    setWebFetchForTests(null)
+  })
+
+  it('chiusura robusta: turno senza wake_parent → UN sollecito con soli tool wake_parent; se consegna, bene', async () => {
+    childAgent()
+    h.llm.queue = [
+      { text: 'ho quasi finito la ricerca' },
+      { toolCalls: [{ id: 'n1', name: 'wake_parent', arguments: JSON.stringify({ status: 'done', summary: 'consegnato dopo il sollecito' }) }] }
+    ]
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    // il sollecito è quello VERO e i tool della chiamata sono SOLO wake_parent
+    const nudgeMsg = h.llm.calls[1]!.find((m) => m.role === 'user')
+    expect(nudgeMsg).toBeTruthy()
+    const row = subagentsState.rows.find((r) => r.id === CHILD)!
+    expect(row.status).toBe('done')
+    expect(row.summary).toBe('consegnato dopo il sollecito')
+  })
+
+  it('chiusura robusta: né consegna né testo → AUTO-FAILED con la nota', async () => {
+    childAgent()
+    h.llm.queue = [
+      { text: '' },
+      { text: '' }
+    ]
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    const row = subagentsState.rows.find((r) => r.id === CHILD)!
+    expect(row.status).toBe('failed')
+    expect(row.summary).toContain('chiusura automatica: il sottoagente non ha consegnato con wake_parent')
+    expect(subagentsState.terminal).toContain(CHILD)
+  })
+
+  it('chiusura robusta: testo libero senza consegna → AUTO-DONE col testo e la nota', async () => {
+    childAgent()
+    h.llm.queue = [
+      { text: 'Astro è il migliore per i siti di contenuti' },
+      { text: '' }
+    ]
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    const row = subagentsState.rows.find((r) => r.id === CHILD)!
+    expect(row.status).toBe('done')
+    expect(row.summary).toContain('Astro è il migliore')
+    expect(row.summary).toContain('(chiusura automatica')
+  })
+
+  it('errore del modello → il figlio chiude FAILED col motivo, senza sollecito', async () => {
+    childAgent()
+    h.llm.queue = [
+      { error: new Error('boom del provider') },
+      { text: 'ok' }
+    ]
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    const row = subagentsState.rows.find((r) => r.id === CHILD)!
+    expect(row.status).toBe('failed')
+    expect(row.summary).toContain('boom del provider')
+    expect(subagentsState.terminal).toContain(CHILD)
+    // niente sollecito: una sola chiamata al modello
+    expect(h.llm.calls).toHaveLength(1)
+  })
+
+  it('MAX_STEPS senza wake_parent → sollecito e poi chiusura automatica', async () => {
+    childAgent()
+    // 24+1 risposte di solo testo (nessuna consegna), poi il sollecito (vuoto)
+    h.llm.queue = Array.from({ length: 40 }, () => ({ text: 'lavoro…' }))
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    const row = subagentsState.rows.find((r) => r.id === CHILD)!
+    expect(row.status).toBe('done') // c'è testo libero
+    expect(row.summary).toContain('lavoro')
+    expect(row.summary).toContain('(chiusura automatica')
+  })
+})
+
+describe('fase 12: check/message/stop_subagent e i rifiuti sugli id dei figli', () => {
+  beforeEach(() => {
+    browserState.available = false
+    browserState.calls.length = 0
+  })
+
+  const CHILD = 'sub_mgr1'
+  const seedOpen = (status = 'running'): void => {
+    h.db.agents.set(CHILD, {
+      id: CHILD, name: 'TestBot · Ricerca', description: 'Ricerca', providerId: 'prov', model: 'm1',
+      status: 'idle', unread: 0, createdAt: 1, createdBy: null, section: '', parentId: AGENT
+    })
+    subagentsState.rows.push({
+      id: CHILD, parent_id: AGENT, parent_task_id: null, batch_id: 'b-mgr', title: 'Ricerca', brief: 'b',
+      status, summary: null, report_path: null,
+      contaminated: 0, untrusted: 0, automatic: 0, woken: 0,
+      created_at: Date.now() - 60_000, started_at: Date.now() - 30_000, finished_at: null, deadline_at: Date.now() + 60_000
+    })
+    h.db.entries.push({
+      id: h.db.nextId++, agentId: CHILD, kind: 'tool-call', role: 'assistant', content: 'web_fetch',
+      meta: { id: 'tc1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://x.example/a' }) }, createdAt: Date.now()
+    })
+  }
+
+  it('check_subagent: stato, tempi, passi, ultima attività; solo figli PROPRI', async () => {
+    seedOpen()
+    h.llm.queue = [
+      { toolCalls: [{ id: 'k1', name: 'check_subagent', arguments: JSON.stringify({ id: CHILD }) }] },
+      { toolCalls: [{ id: 'k1b', name: 'check_subagent', arguments: JSON.stringify({ id: 'sub_altro' }) }] },
+      { toolCalls: [{ id: 'k2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'come va', emit)
+    // l'ULTIMA chiamata contiene tutti i tool result accumulati
+    const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results[0]).toContain(`Sottoagente "Ricerca" (id ${CHILD}): stato running`)
+    expect(results[0]).toContain('Passi: 1')
+    expect(results[0]).toContain('Ultima attività: web_fetch')
+    // un id che non è un figlio tuo: rifiuto generico di non trovato
+    expect(results[1]).toContain('Sottoagente non trovato')
+  })
+
+  it('message_subagent: al figlio APERTO accoda un job col blocco <messaggio_dal_padre>; al figlio DONE lo RIAPRE (lotto nuovo, woken 0)', async () => {
+    seedOpen()
+    h.llm.queue = [
+      { toolCalls: [{ id: 'm1', name: 'message_subagent', arguments: JSON.stringify({ id: CHILD, text: 'aggiungi anche i prezzi' }) }] },
+      { toolCalls: [{ id: 'm2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'aggiungi', emit)
+    const job = h.db.jobs.find((j) => j.kind === 'subagent-run' && (j.payload as { message?: string }).message)
+    expect(job).toBeTruthy()
+    expect(job!.agentId).toBe(CHILD)
+    expect(String((job!.payload as { message: string }).message)).toContain('aggiungi anche i prezzi')
+    // riapertura: chiudo il figlio e rimando un messaggio
+    const row = subagentsState.rows.find((r) => r.id === CHILD)!
+    row.status = 'done'
+    row.summary = 'prima consegna'
+    row.batch_id = 'b-old'
+    row.woken = 1
+    h.db.jobs.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'm3', name: 'message_subagent', arguments: JSON.stringify({ id: CHILD, text: 'approfondisci i prezzi' }) }] },
+      { toolCalls: [{ id: 'm4', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'approfondisci', emit)
+    expect(row.status).toBe('queued')
+    expect(row.batch_id).not.toBe('b-old')
+    expect(row.woken).toBe(0)
+    expect(row.deadline_at).toBeGreaterThan(Date.now())
+    const res = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content)).find((c) => c.includes('RIAPERTO'))
+    expect(res).toBeTruthy()
+  })
+
+  it('message_subagent a un figlio STOPPED o EXPIRED → rifiuto', async () => {
+    seedOpen('stopped')
+    h.llm.queue = [
+      { toolCalls: [{ id: 'ms1', name: 'message_subagent', arguments: JSON.stringify({ id: CHILD, text: 'riprova' }) }] },
+      { toolCalls: [{ id: 'ms2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'riprova', emit)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('fermato: non si riapre con un messaggio')
+    expect(h.db.jobs.filter((j) => j.kind === 'subagent-run')).toHaveLength(0)
+  })
+
+  it('stop_subagent: interrupt del figlio, job in coda cancellati, status stopped e lotto terminal-check', async () => {
+    seedOpen()
+    h.db.jobs.push({ id: 99, agentId: CHILD, kind: 'subagent-run', payload: {}, createdAt: 1, status: 'queued' })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'st1', name: 'stop_subagent', arguments: JSON.stringify({ id: CHILD }) }] },
+      { toolCalls: [{ id: 'st2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'ferma', emit)
+    const row = subagentsState.rows.find((r) => r.id === CHILD)!
+    expect(row.status).toBe('stopped')
+    expect(row.finished_at).toBeTruthy()
+    expect(h.db.jobs.filter((j) => j.agentId === CHILD)).toHaveLength(0)
+    expect(subagentsState.terminal).toContain(CHILD)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('fermato')
+  })
+
+  it('rifiuti sugli id dei FIGLI: update_agent, delete_agent, send_to_agent dicono "non è un bot: è un sottoagente di…"', async () => {
+    seedOpen()
+    h.db.settings.set('permissions', { default: 'always_allow', rules: [] })
+    h.llm.queue = [
+      { toolCalls: [
+        { id: 'r1', name: 'update_agent', arguments: JSON.stringify({ agentId: CHILD, name: 'Rinominato' }) },
+        { id: 'r2', name: 'send_to_agent', arguments: JSON.stringify({ agentId: CHILD, text: 'ciao' }) }
+      ] },
+      { toolCalls: [{ id: 'r3', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'tocca il figlio', emit)
+    const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results[0]).toContain(`${CHILD} non è un bot: è un sottoagente di TestBot`)
+    expect(results[1]).toContain(`${CHILD} non è un bot: è un sottoagente di TestBot`)
+    expect(h.db.jobs.filter((j) => j.payload && (j.payload as { initiator?: string }).initiator === 'AGENT')).toHaveLength(0)
+  })
+
+  it('create_group con un id di FIGLIO tra i membri → rifiuto esplicito, gruppo NON creato', async () => {
+    seedOpen()
+    // il gate di create_group non deve fermare il test: il rifiuto del FIGLIO
+    // viene PRIMA (nella validazione del tool)
+    h.db.settings.set('permissions', { default: 'always_allow', rules: [] })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'gr1', name: 'create_group', arguments: JSON.stringify({ name: 'Team', description: 'x', memberIds: [CHILD] }) }] },
+      { toolCalls: [{ id: 'gr2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'crea il gruppo', emit)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain(`${CHILD} non è un bot: è un sottoagente di TestBot`)
+    expect(h.db.groupsState.groups).toHaveLength(0)
+  })
+
+  it('spawn da un FIGLIO → rifiuto (niente annidamento)', async () => {
+    h.db.agents.set('sub_no1', {
+      id: 'sub_no1', name: 'TestBot · Nido', description: '', providerId: 'prov', model: 'm1',
+      status: 'idle', unread: 0, createdAt: 1, createdBy: null, section: '', parentId: AGENT
+    })
+    subagentsState.rows.push({
+      id: 'sub_no1', parent_id: AGENT, parent_task_id: null, batch_id: 'b-nido', title: 'Nido', brief: 'b',
+      status: 'running', summary: null, report_path: null,
+      contaminated: 0, untrusted: 0, automatic: 0, woken: 0,
+      created_at: 1, started_at: 1, finished_at: null, deadline_at: 9e15
+    })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'nn1', name: 'spawn_subagent', arguments: JSON.stringify({ title: 'Nipote', brief: 'x'.repeat(250) }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn('sub_no1', 'brief', emit, undefined, { source: 'user', subagent: { id: 'sub_no1', parentId: AGENT } })
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('non disponibile ai sottoagenti: niente sottoagenti dentro sottoagenti')
+    expect(subagentsState.rows.filter((r) => r.parent_id === 'sub_no1')).toHaveLength(0)
+  })
+})
+
+describe('fase 12 (punto 5): il turno SUBAGENTS_DONE parte già CONTAMINATO', () => {
+  it('runTurn con opts.contaminated: una regola always_allow di run-command torna a chiedere (lift F8)', async () => {
+    browserState.available = false
+    h.db.settings.set('permissions', {
+      default: 'needs_approval',
+      rules: [{ tool: 'run-command', pattern: 'curl', mode: 'always_allow' }]
+    })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'cz1', name: 'run-command', arguments: JSON.stringify({ command: 'curl https://esempio' }) }] },
+      { toolCalls: [{ id: 'cz2', name: 'send_to_user', arguments: JSON.stringify({ text: 'resoconto unico' }) }] }
+    ]
+    const turn = runTurn(AGENT, 'risultati sottoagenti', emit, undefined, { source: 'user', contaminated: true })
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending' && e.meta?.tool === 'run-command')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval' && e.meta?.tool === 'run-command')!
+    expect(String(appr.content)).toContain('contenuti web non fidati')
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
+    await turn
   })
 })

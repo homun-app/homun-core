@@ -21,7 +21,7 @@ import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { db as dbFn } from '../store/db'
 import { createShellJob, getShellJob, updateShellJob, runningShellJobsOf, runningShellJobsAll, SHELLS_PER_AGENT_MAX, SHELLS_PER_BOX_MAX, SHELL_MAX_DURATION_MS, type ShellJob } from '../store/shell-jobs'
-import { sandboxMode, boxDir, readFileInBox, ensureBoxContainer, ensureBotHome, execCommand, capOutput } from '../sandbox'
+import { sandboxMode, boxDir, boxOwnerOf, readFileInBox, ensureBoxContainer, ensureBotHome, execCommand, capOutput } from '../sandbox'
 import { dockerExecBackgroundArgv, dockerKillGroupArgv, dockerClientEnv, DOCKER_BG_WRAPPER_SH, BOX_CONTAINER, boxHomePath } from '../sandbox/docker-argv'
 import { formatShellDone } from '../../shared/agent-message'
 import { redactSecrets } from './secrets'
@@ -253,7 +253,9 @@ function defaultShellLaunch(mode: 'host' | 'docker'): NonNullable<ShellHostDeps[
       } catch (e) {
         return { ok: false, exitCode: null, stderr: e instanceof Error ? e.message : String(e) }
       }
-      const home = boxHomePath(agentId)
+      // fase 12 (punto 1): la home (path del log, -w e HOME) è quella del
+      // PROPRIETARIO: i comandi di un figlio girano nella home del padre
+      const home = boxHomePath(boxOwnerOf(agentId))
       const env2 = { HOME: home, ...env }
       // H2: -d torna subito, ma l'exit code dice se il comando è PARTITO: si
       // attende — un errore di avvio non lascia più la riga "running" per 6

@@ -56,6 +56,12 @@ import {
   GROUP_RECOVERY_NUDGE, GROUP_CLOSING_RECOVERY_NUDGE,
   GROUP_CALLED_RECOVERY_NUDGE, GROUP_CALLED_CLOSING_RECOVERY_NUDGE
 } from '../src/main/agent/group-turns'
+// fase 12 (punto 8): il prompt del FIGLIO e la sua whitelist sono quelli VERI;
+// i formatter del brief e del risveglio pure (i result restano simulati)
+import { subagentSystemPrompt, systemPrompt as systemPromptOf } from '../src/main/agent/prompts'
+import { subagentToolAllowed } from '../src/main/agent/subagents'
+import { wakeParentToolDef } from '../src/main/agent/tools'
+import { formatSubagentBrief, formatSubagentsDone } from '../src/shared/agent-message'
 import {
   deliveredResultText, alreadyDeliveredResult, isDuplicateSend, messageCapResult, emptySendResult, turnCapResult, MAX_DELIVERED_PER_TURN
 } from '../src/main/agent/turn-sends'
@@ -203,8 +209,18 @@ const TOOL_RESULTS: Record<string, (args: Record<string, unknown>) => string> = 
   },
   'update_group': (a) => `Gruppo ${String(a.groupId ?? '')} aggiornato.`,
   'post_to_group': (a) => `Pubblicato nel gruppo: «${String(a.text ?? '').slice(0, 80)}…». Gli altri membri lo riceveranno nel loro turno (chi non è chiamato può restare in silenzio).`,
-  'pass': () => 'Silenzio registrato: resti fuori da questo giro del gruppo.'
+  'pass': () => 'Silenzio registrato: resti fuori da questo giro del gruppo.',
+  // fase 12 (punto 8): i result dei tool del padre sui figli (deterministici)
+  'spawn_subagent': (a) => {
+    const t = String(a.title ?? '')
+    return `Sottoagente "${t}" lanciato (id sub_${String(a.title ?? '').slice(0, 3).toLowerCase()}${(spawnedN++ + 10)}): lavora in parallelo; i risultati del lotto ti arrivano tutti insieme quando l'ultimo ha finito. Non aspettarlo in loop.`
+  },
+  'check_subagent': (a) => `Sottoagente (id ${String(a.id ?? '')}): stato running. Tempo: 1 min trascorsi, scadenza tra 19 min. Passi: 3. Ultima attività: web_fetch https://docs.example.`,
+  'message_subagent': (a) => `Sottoagente (id ${String(a.id ?? '')}) RIAPERTO su questo messaggio: lavora e il risultato ti arriva da solo quando chiude.`,
+  'stop_subagent': (a) => `Sottoagente (id ${String(a.id ?? '')}) fermato: turno interrotto e lavori in coda cancellati.`,
+  'wake_parent': () => 'Consegnato al padre. Hai finito: non fare altro.'
 }
+let spawnedN = 0
 function simulatedResult(name: string, args: Record<string, unknown>): string {
   return TOOL_RESULTS[name]?.(args) ?? 'ok'
 }
@@ -230,6 +246,10 @@ function makeDeliverer() {
       if (name === 'ask_user') {
         return { result: "widget mostrato all'utente: il turno termina e la risposta arriverà come nuovo messaggio utente. Non ripetere la domanda.", endTurn: true }
       }
+      // fase 12: come nel loop, wake_parent CHIUDE il turno del figlio
+      if (name === 'wake_parent') {
+        return { result: 'Consegnato al padre. Hai finito: non fare altro.', endTurn: true }
+      }
       sendsSinceWork = 0
       return { result: simulatedResult(name, args), endTurn: false }
     }
@@ -245,7 +265,9 @@ async function evalTurn(
   history: ChatMessage[],
   source: 'user' | 'routine' | 'group' = 'user',
   maxSteps = MAX_STEPS,
-  groupOpts?: { called: boolean; closing: boolean }
+  groupOpts?: { called: boolean; closing: boolean },
+  /** fase 12 (punto 8): la lista di tool del turno (default EVAL_TOOLS; il figlio ha la sua) */
+  turnToolsAll: ToolDef[] = EVAL_TOOLS
 ): Promise<{
   steps: Array<{ text: string; toolCalls: ToolCall[] }>
   delivered: string[]
@@ -266,7 +288,7 @@ async function evalTurn(
   // fase 10: gli id dei bot creati in QUESTO turno (deterministici per run)
   createdTeamN = 0
   createdTeamIds.length = 0
-  const drainOnce = async (tools: ToolDef[] = EVAL_TOOLS): Promise<{ text: string; toolCalls: ToolCall[] }> => {
+  const drainOnce = async (tools: ToolDef[] = turnToolsAll): Promise<{ text: string; toolCalls: ToolCall[] }> => {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 120_000)
     try {
@@ -345,6 +367,11 @@ async function evalTurn(
 
 // ---- i 7 casi (system REALE + history costruita a mano) ----
 const sys = systemPrompt(AGENT)
+// fase 12: il system dei turni di GRUPPO è senza la sezione Sottoagenti (come
+// il loop vero); quello del FIGLIO è il costruttore separato
+const sysGroup = systemPrompt(AGENT, { subagents: false })
+const sysChild = subagentSystemPrompt(AGENT, { title: 'Ricerca su Astro' })
+const CHILD_TOOLS: ToolDef[] = [...EVAL_TOOLS.filter((t) => subagentToolAllowed(t.name)), wakeParentToolDef as ToolDef]
 const tc = (id: string, name: string, args: Record<string, unknown>): ToolCall =>
   ({ id, name, arguments: JSON.stringify(args) })
 const past = (call: ToolCall, result: string): ChatMessage[] => [
@@ -358,6 +385,8 @@ interface EvalCase {
   name: string
   /** 'routine' = turno automatico, 'group' = turno di gruppo, default 'user' */
   source?: 'user' | 'routine' | 'group'
+  /** fase 12 (punto 8): il turno è del FIGLIO — system prompt e tool del figlio */
+  child?: boolean
   /**
    * fase 11b (0b): i fatti del turno di gruppo che il runner calcola di vero
    * (called = @menzionato nella finestra o turno di chiusura; closing = turno
@@ -913,6 +942,123 @@ const CASES: EvalCase[] = [
       }
       return { pass: true, reason: `niente carta e richiesta all'utente: "${d.slice(0, 70)}…"` }
     }
+  },
+  {
+    id: 21,
+    name: '"ricerca approfondita su Astro, SvelteKit e Remix" → 3 spawn_subagent nello STESSO turno, un brief per framework',
+    maxSteps: 3,
+    history: [
+      { role: 'user', content: 'Fammi una ricerca approfondita su Astro, SvelteKit e Remix: punti di forza, limiti, quando sceglierli.' }
+    ],
+    judge: (t) => {
+      if (t.error) return { pass: false, reason: `errore: ${t.error}` }
+      const spawns = t.allCalls.filter((c) => c.name === 'spawn_subagent')
+      if (spawns.length !== 3) return { pass: false, reason: `${spawns.length} spawn_subagent (attesi 3)` }
+      // tutte e tre nello STESSO passo (una sola risposta del modello)
+      const sameStep = t.steps.some((st) => st.toolCalls.filter((c) => c.name === 'spawn_subagent').length === 3)
+      if (!sameStep) return { pass: false, reason: 'le spawn non sono tutte nello stesso turno' }
+      const briefs = spawns.map((c) => {
+        try { return String((JSON.parse(c.arguments || '{}') as { brief?: string }).brief ?? '') } catch { return '' }
+      })
+      if (briefs.some((b) => b.trim().length < 200)) {
+        return { pass: false, reason: 'un brief è più corto di 200 caratteri (non autosufficiente)' }
+      }
+      // NESSUN brief copre tutti e tre i framework: uno a testa, con confini
+      const fw = (b: string) => [/astro/i.test(b), /sveltekit|svelte\s*kit/i.test(b), /remix/i.test(b)]
+      if (briefs.some((b) => fw(b).filter(Boolean).length === 3)) {
+        return { pass: false, reason: 'un brief copre tutti e tre i framework (i confini mancano)' }
+      }
+      // al massimo UNA riga all'utente
+      if (t.delivered.length > 1) return { pass: false, reason: `${t.delivered.length} messaggi all'utente (attesi 0 o 1)` }
+      // il padre NON fa il lavoro dei figli
+      const fatherWeb = t.allCalls.filter((c) => c.name === 'web_search' || c.name === 'web_fetch')
+      if (fatherWeb.length) return { pass: false, reason: `il padre ha cercato per conto dei figli (${fatherWeb.map((c) => c.name).join(', ')})` }
+      return { pass: true, reason: `3 brief paralleli nello stesso turno${t.delivered.length ? ' e una riga all\'utente' : ''}` }
+    }
+  },
+  {
+    id: 22,
+    name: 'turno SUBAGENTS_DONE con 3 risultati → ESATTAMENTE UN send_to_user che li integra, nessuna nuova spawn né check',
+    history: [
+      { role: 'user', content: 'Fammi una ricerca approfondita su Astro, SvelteKit e Remix: punti di forza, limiti, quando sceglierli.' },
+      ...past(tc('call_s1', 'spawn_subagent', { title: 'Ricerca su Astro', brief: 'Ricerca su Astro: punti di forza, limiti, quando sceglierlo. ' + 'x'.repeat(180) }), 'Sottoagente "Ricerca su Astro" lanciato (id sub_a11): lavora in parallelo; i risultati del lotto ti arrivano tutti insieme quando l\'ultimo ha finito. Non aspettarlo in loop.'),
+      ...past(tc('call_s2', 'spawn_subagent', { title: 'Ricerca su SvelteKit', brief: 'Ricerca su SvelteKit: punti di forza, limiti, quando sceglierlo. ' + 'x'.repeat(180) }), 'Sottoagente "Ricerca su SvelteKit" lanciato (id sub_a12): lavora in parallelo; i risultati del lotto ti arrivano tutti insieme quando l\'ultimo ha finito. Non aspettarlo in loop.'),
+      ...past(tc('call_s3', 'spawn_subagent', { title: 'Ricerca su Remix', brief: 'Ricerca su Remix: punti di forza, limiti, quando sceglierlo. ' + 'x'.repeat(180) }), 'Sottoagente "Ricerca su Remix" lanciato (id sub_a13): lavora in parallelo; i risultati del lotto ti arrivano tutti insieme quando l\'ultimo ha finito. Non aspettarlo in loop.'),
+      ...past(oneSend('Ho lanciato tre sottoagenti in parallelo: appena finiscono ti scrivo un resoconto unico.'), "consegnato all'utente: «Ho lanciato tre sottoagenti in parallelo: appena finiscono ti scrivo un resoconto unico.». Non ripeterlo."),
+      {
+        role: 'user',
+        content: formatSubagentsDone([
+          { id: 'sub_a11', title: 'Ricerca su Astro', status: 'done', summary: 'Astro: sitibuilt per contenuti, zero JS di default, isole interattive; limiti: poca interattività piena. Ottimo per blog e siti documentazione.', report_path: 'subagents/sub_a11/report.md' },
+          { id: 'sub_a12', title: 'Ricerca su SvelteKit', status: 'done', summary: 'SvelteKit: framework full-stack con compilatore Svelte, bundle minimi, form actions; limiti: ecosistema più piccolo.', report_path: 'subagents/sub_a12/report.md' },
+          { id: 'sub_a13', title: 'Ricerca su Remix', status: 'done', summary: 'Remix: focus su web standard, loader/action, nested route; limiti: community in transito verso React Router 7.', report_path: 'subagents/sub_a13/report.md' }
+        ])
+      }
+    ],
+    judge: (t) => {
+      if (t.error) return { pass: false, reason: `errore: ${t.error}` }
+      const sends = t.allCalls.filter((c) => c.name === 'send_to_user')
+      if (sends.length !== 1 || t.delivered.length !== 1) {
+        return { pass: false, reason: `${sends.length} send_to_user / ${t.delivered.length} consegnati (attesi esattamente 1)` }
+      }
+      const d = t.delivered[0]!
+      const has = [/astro/i.test(d), /sveltekit|svelte/i.test(d), /remix/i.test(d)]
+      if (has.filter(Boolean).length < 3) {
+        return { pass: false, reason: `il resoconto non integra tutti e tre i framework: ${JSON.stringify(d.slice(0, 120))}` }
+      }
+      if (t.allCalls.some((c) => c.name === 'spawn_subagent')) return { pass: false, reason: 'ha rilanciato sottoagenti invece di scrivere il resoconto' }
+      if (t.allCalls.some((c) => c.name === 'check_subagent')) return { pass: false, reason: 'ha controllato i sottoagenti (i risultati sono già nel messaggio)' }
+      return { pass: true, reason: `un solo resoconto che integra i tre framework: "${d.slice(0, 70)}…"` }
+    }
+  },
+  {
+    id: 23,
+    name: '"Che ore sono a Tokyo?" (domanda da 1-2 passi) → NESSUNA spawn_subagent',
+    history: [
+      { role: 'user', content: 'Che ore sono adesso a Tokyo?' }
+    ],
+    judge: (t) => {
+      if (t.error) return { pass: false, reason: `errore: ${t.error}` }
+      if (t.allCalls.some((c) => c.name === 'spawn_subagent')) {
+        return { pass: false, reason: 'ha lanciato un sottoagente per una domanda da 1-2 passi' }
+      }
+      if (!t.delivered.length) return { pass: false, reason: 'nessuna risposta consegnata' }
+      return { pass: true, reason: `nessuna spawn e risposta diretta: "${t.delivered[0]!.slice(0, 60)}…"` }
+    }
+  },
+  {
+    id: 24,
+    name: 'prompt del FIGLIO: brief di ricerca → web_fetch/write-file e chiusura wake_parent, NESSUN tool escluso',
+    child: true,
+    maxSteps: 6,
+    history: [
+      {
+        role: 'user',
+        content: formatSubagentBrief('Ricerca su Astro', [
+          'Ricerca approfondita sul framework web Astro.',
+          'Obiettivo: punti di forza, limiti principali e quando sceglierlo rispetto a SvelteKit e Remix.',
+          'Confini: NON cercare SvelteKit né Remix (li cerca un altro sottoagente).',
+          'Formato: summary di massimo 10 righe col giudizio; il dettaglio va nel report.',
+          'Dove salvare: subagents/sub_e24a/report.md (write-file).'
+        ].join('\n'))
+      }
+    ],
+    judge: (t) => {
+      if (t.error) return { pass: false, reason: `errore: ${t.error}` }
+      // il figlio LAVORA: almeno una lettura web o la scrittura del report
+      const work = t.allCalls.filter((c) => c.name === 'web_fetch' || c.name === 'write-file' || c.name === 'web_search')
+      if (!work.length) return { pass: false, reason: 'nessun lavoro (web_fetch/write-file/web_search attesi)' }
+      // chiude col wake_parent, summary NON vuoto
+      const wake = t.allCalls.find((c) => c.name === 'wake_parent')
+      if (!wake) return { pass: false, reason: 'non ha chiuso con wake_parent' }
+      let summary = ''
+      try { summary = String((JSON.parse(wake.arguments || '{}') as { summary?: string }).summary ?? '') } catch { /* vuoto */ }
+      if (!summary.trim()) return { pass: false, reason: 'wake_parent senza summary' }
+      // NESSUN tool escluso tentato (non sono nella lista: il modello non deve provarci)
+      const forbidden = ['send_to_user', 'ask_user', 'send_to_agent', 'post_to_group', 'create_task', 'spawn_subagent']
+      const bad = t.allCalls.filter((c) => forbidden.includes(c.name))
+      if (bad.length) return { pass: false, reason: `tool esclusi tentati dal figlio: ${bad.map((b) => b.name).join(', ')}` }
+      return { pass: true, reason: `lavoro (${work.map((w) => w.name).join(', ')}) e consegna col summary: "${summary.slice(0, 60)}…"` }
+    }
   }
 ]
 
@@ -929,11 +1075,15 @@ describe(`eval dei comportamenti (fasi 9-11) su modello reale (${MODEL} × ${RUN
       const row = [`${c.id}. ${c.name}`]
       const reasons: string[] = []
       for (let r = 0; r < RUNS; r++) {
+          // fase 12 (punto 8): system e tool PER CASO — il gruppo senza la sezione
+        // Sottoagenti (come il loop), il figlio col SUO prompt e la SUA lista
+        const caseSystem = c.child ? sysChild : c.source === 'group' ? sysGroup : sys
         const t = await evalTurn(
-          [{ role: 'system', content: sys }, ...c.history],
+          [{ role: 'system', content: caseSystem }, ...c.history],
           c.source ?? 'user',
           c.maxSteps,
-          c.group ? { called: c.group.called, closing: c.group.closing === true } : undefined
+          c.group ? { called: c.group.called, closing: c.group.closing === true } : undefined,
+          c.child ? CHILD_TOOLS : EVAL_TOOLS
         )
         const v = c.judge(t)
         if (v.pass) {

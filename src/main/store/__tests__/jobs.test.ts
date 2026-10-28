@@ -168,3 +168,44 @@ describe('cancellazione per agente eliminato', () => {
     expect(getJobById(db, j1.id)?.status).toBe('done')
   })
 })
+
+// ---- fase 12 (punto 4): il tetto globale dei subagent-run in lease ----
+
+describe('claimDueJobs col tetto maxSubagentLeases', () => {
+  const subRun = (agentId: string, runAt = NOW) =>
+    enqueueJob(db, { agentId, kind: 'subagent-run', payload: { subagentId: agentId }, runAt, now: NOW })
+
+  it('5 job dovuti col tetto 3 → ne partono 3; finito uno → parte il quarto', () => {
+    for (let i = 1; i <= 5; i++) subRun(`sub_${i}`)
+    const first = claimDueJobs(db, NOW, LEASE, 5, 3)
+    expect(first).toHaveLength(3)
+    // il quarto e il quinto restano in coda anche con tick successivi
+    expect(claimDueJobs(db, NOW + 1, LEASE, 5, 3)).toHaveLength(0)
+    // uno finisce: libera un posto
+    completeJob(db, first[0]!.id)
+    const second = claimDueJobs(db, NOW + 2, LEASE, 5, 3)
+    expect(second).toHaveLength(1)
+    expect(second[0]!.agent_id).toBe('sub_4')
+  })
+
+  it('i job NORMALI non sono toccati dal tetto', () => {
+    for (let i = 1; i <= 3; i++) subRun(`sub_${i}`)
+    userMsg('a1')
+    userMsg('a2')
+    const claimed = claimDueJobs(db, NOW, LEASE, 10, 3)
+    // i 3 subagent-run occupano il tetto, i 2 user-message partono LO STESSO
+    expect(claimed.filter((j) => j.kind === 'subagent-run')).toHaveLength(3)
+    expect(claimed.filter((j) => j.kind === 'user-message')).toHaveLength(2)
+    // con tetto 0 nessun subagent-run parte, i normali sì
+    const db2 = memdb()
+    enqueueJob(db2, { agentId: 'sub_x', kind: 'subagent-run', payload: {}, runAt: NOW, now: NOW })
+    enqueueJob(db2, { agentId: 'a1', kind: 'user-message', payload: { text: 'x' }, runAt: NOW, now: NOW })
+    const claimed2 = claimDueJobs(db2, NOW, LEASE, 10, 0)
+    expect(claimed2.map((j) => j.kind)).toEqual(['user-message'])
+  })
+
+  it('senza tetto esplicito (default Infinity) tutto parte come prima', () => {
+    for (let i = 1; i <= 4; i++) subRun(`sub_${i}`)
+    expect(claimDueJobs(db, NOW, LEASE, 5)).toHaveLength(4)
+  })
+})

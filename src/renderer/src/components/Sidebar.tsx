@@ -27,6 +27,8 @@ export function Sidebar() {
   const tasks = useStore((s) => s.tasks)
   // fase 10: i gruppi della sidebar e la vista gruppo aperta
   const groups = useStore((s) => s.groups)
+  // fase 12: i sottoagenti (stato live del padre: N al lavoro)
+  const subagents = useStore((s) => s.subagents)
   const openGroupId = useStore((s) => s.openGroupId)
   const openGroup = useStore((s) => s.openGroup)
   const select = useStore((s) => s.select)
@@ -37,6 +39,9 @@ export function Sidebar() {
   // fase 7: senza setting mainAgentId il principale è il primo agente (il più vecchio)
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
   const workingTasksOf = (agentId: string): number => tasks.filter((t) => t.agentId === agentId && t.status === 'working').length
+  const subagentsOf = (agentId: string): { running: number } => ({
+    running: subagents.filter((x) => x.parentId === agentId && x.status === 'running').length
+  })
 
   const agentButton = (a: (typeof agents)[number]) => (
     <button
@@ -62,6 +67,12 @@ export function Sidebar() {
           {workingTasksOf(a.id) > 0 ? ` · ${workingTasksOf(a.id)} task` : ''}
         </span>
         {/* fase 8 (§3bis L7): stato live — nome del tool e target, mai testo del modello */}
+        {/* fase 12: stato live del padre — figli al lavoro (has_running_subagents di Grok) */}
+        {subagentsOf(a.id).running > 0 && (
+          <span className="block truncate text-[10px] text-teal-400/80">
+            {subagentsOf(a.id).running} sottoagenti al lavoro
+          </span>
+        )}
         {activity[a.id] && (
           <span className="block truncate text-[10px] text-sky-400/80" title={`${activity[a.id]!.tool} ${activity[a.id]!.target}`}>
             sta facendo {activity[a.id]!.tool}

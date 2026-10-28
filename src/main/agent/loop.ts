@@ -18,7 +18,7 @@
 // draft_external. Ogni turno si chiude con un evento meta.turnEnd ∈
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID } from 'node:crypto'
-import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, listProviders, type AppendEntry } from '../store/db'
+import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, listProviders, createAgent, subagentRefusal, type AppendEntry } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
 import { systemPrompt, secondaryPrompts, mainAgentSection } from './prompts'
 import { toolDefs, executeTool } from './tools'
@@ -54,8 +54,20 @@ import {
   needsGroupRecovery, groupRecoveryTools, GROUP_RECOVERY_NUDGE, GROUP_CLOSING_RECOVERY_NUDGE,
   GROUP_CALLED_RECOVERY_NUDGE, GROUP_CALLED_CLOSING_RECOVERY_NUDGE
 } from './group-turns'
-import { MAX_CREATE_AGENTS_PER_TURN } from './tools'
+import { MAX_CREATE_AGENTS_PER_TURN, wakeParentToolDef } from './tools'
 import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
+// fase 12: sottoagenti — policy pura del figlio, store del registro, formatters
+import {
+  subagentToolDenyReason, subagentBriefError, subagentClosure, autoCloseSummary,
+  SUBAGENT_RECOVERY_NUDGE, MAX_SPAWNS_PER_TURN, MAX_OPEN_SUBAGENTS, WAKE_SUMMARY_MAX_CHARS
+} from './subagents'
+import {
+  insertSubagent, getSubagent, updateSubagent, closeSubagent, openSubagentsOf,
+  newSubagentId, newSubagentBatchId, DEFAULT_SUBAGENT_DEADLINE_MIN
+} from '../store/subagents'
+import { onSubagentTerminal, subagentsChanged } from '../../daemon/subagent-ops'
+import { subagentSystemPrompt } from './prompts'
+import { formatSubagentBrief } from '../../shared/agent-message'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
 export { buildMessages } from './history'
@@ -155,6 +167,7 @@ function appendSend(
     : message.type === 'widget' ? message.prompt
     : message.type === 'connector' ? (message.reason || message.name)
     : message.type === 'task' ? message.title
+    : message.type === 'subagent' ? message.title
     : message.type === 'rule' ? message.text
     : (message.subject || message.to || '')
   const entry = appendEntry({
@@ -230,6 +243,18 @@ export interface RunTurnOptions {
   /** Fase 8 (§3bis L7): il turno gira nel sotto-transcript di questo task. */
   taskId?: number
   /**
+   * Fase 12 (punti 3-4): il turno è del FIGLIO (un sottoagente). Contesto suo
+   * (brief + proprie entry), tool della whitelist, chiusura con wake_parent e
+   * la chiusura robusta se non consegna. spawn_subagent qui non esiste.
+   */
+  subagent?: { id: string; parentId: string }
+  /**
+   * Fase 12 (punto 5): il turno parte GIÀ contaminato (il risveglio di un
+   * lotto con almeno un figlio contaminato): lift F8 sui tool con effetti e
+   * revoca dei grant di turno, come dopo una lettura web.
+   */
+  contaminated?: boolean
+  /**
    * Fase 10 (§3): il turno è un TURNO DI GRUPPO per questo membro. Le entry
    * portano meta.groupId (visibili nella storia del membro, nascoste nella
    * chat diretta tranne i messaggi all'utente e le card), niente recupero di
@@ -272,6 +297,172 @@ async function turnGrantKey(tool: string, input: Record<string, unknown>): Promi
     return [...new Set(analysis.commands.map(commandKey))].sort().join(';')
   }
   return `${tool}|${permissions.targetKey(tool, input)}`
+}
+
+/** Il contesto del turno del padre che i tool dei sottoagenti devono sapere (fase 12). */
+interface SubagentToolDeps {
+  emit: Emitter
+  /** il turno è di gruppo: spawn rifiutato (lì si coordina col gruppo) */
+  inGroupTurn: boolean
+  /** il turno è di un FIGLIO: niente annidamento (rete di sicurezza) */
+  inSubagent: boolean
+  /** se il turno gira in un task, i risultati del figlio tornano al task */
+  parentTaskId?: number
+  untrustedTurn: boolean
+  automatic: boolean
+  /** le spawn già passate di qui in questo turno (compresa l'eventuale corrente) */
+  spawnsInTurn: number
+  /** il lotto del turno corrente (creato alla prima spawn) */
+  batchIdOf(): string
+}
+
+interface SubagentToolResult {
+  output: string
+  /** card da aggiungere nella chat del padre (spawn riuscita) */
+  card?: SendMessagePayload
+  /** lo stato dei figli è cambiato: evento alla UI */
+  changed?: boolean
+}
+
+/**
+ * Fase 12 (punto 2): i tool del PADRE — spawn_subagent, check_subagent,
+ * message_subagent, stop_subagent. Il figlio è una riga agents nascosta con
+ * parent_id + una riga subagents; il job subagent-run è sulla SUA corsia (il
+ * parallelismo arriva gratis: tre figli sono tre agenti).
+ */
+async function runSubagentTool(
+  agentId: string,
+  call: { name: string },
+  input: Record<string, unknown>,
+  deps: SubagentToolDeps
+): Promise<SubagentToolResult> {
+  const database = db()
+  if (deps.inSubagent) {
+    return { output: 'non disponibile ai sottoagenti: niente sottoagenti dentro sottoagenti' }
+  }
+  const deadlineMin = getSetting<number>('subagents.deadlineMin', DEFAULT_SUBAGENT_DEADLINE_MIN)
+
+  if (call.name === 'spawn_subagent') {
+    if (deps.inGroupTurn) {
+      return { output: 'Nei turni di gruppo non si lanciano sottoagenti: lì si coordina col gruppo (post_to_group).' }
+    }
+    const title = String(input.title ?? '').trim()
+    const brief = String(input.brief ?? '').trim()
+    if (!title || !brief) return { output: 'Sottoagente non lanciato: servono title e brief.' }
+    const briefError = subagentBriefError(brief)
+    if (briefError) return { output: `Sottoagente non lanciato: ${briefError}.` }
+    if (deps.spawnsInTurn > MAX_SPAWNS_PER_TURN) {
+      return { output: `Limite del turno raggiunto: al massimo ${MAX_SPAWNS_PER_TURN} spawn_subagent per turno.` }
+    }
+    if (openSubagentsOf(database, agentId) >= MAX_OPEN_SUBAGENTS) {
+      return { output: `Ci sono già ${MAX_OPEN_SUBAGENTS} sottoagenti aperti (in coda o al lavoro): fermane qualcuno con stop_subagent o aspetta i risultati del lotto.` }
+    }
+    const parent = getAgent(agentId)
+    const batchId = deps.batchIdOf()
+    const now = Date.now()
+    const childId = newSubagentId()
+    // il figlio: riga agents NASCOSTA (parent_id), nome "<padre> · <title>",
+    // modello e provider COPIATI dal padre
+    createAgent(`${parent?.name ?? agentId} · ${title}`, title, { parentId: agentId, id: childId })
+    updateAgent(childId, { providerId: parent?.providerId ?? null, model: parent?.model ?? null })
+    insertSubagent(database, {
+      id: childId, parentId: agentId, parentTaskId: deps.parentTaskId ?? null, batchId, title, brief,
+      deadlineAt: now + deadlineMin * 60_000, createdAt: now,
+      untrusted: deps.untrustedTurn, automatic: deps.automatic
+    })
+    const { enqueueJob } = await import('../store/jobs')
+    enqueueJob(database, {
+      agentId: childId, kind: 'subagent-run',
+      payload: { subagentId: childId, first: true },
+      runAt: now, now
+    })
+    return {
+      output: `Sottoagente "${title}" lanciato (id ${childId}): lavora in parallelo; i risultati del lotto ti arrivano tutti insieme quando l'ultimo ha finito. Non aspettarlo in loop.`,
+      card: { type: 'subagent', subagentId: childId, title },
+      changed: true
+    }
+  }
+
+  const id = String(input.id ?? '')
+  const row = getSubagent(database, id)
+  // solo figli PROPRI: il registro lo dice, non serve listAgents
+  if (!row || row.parent_id !== agentId) {
+    return { output: `Sottoagente non trovato ("${id}"): gli id sono i sub_… tornati da spawn_subagent, e solo i TUOI figli.` }
+  }
+
+  if (call.name === 'check_subagent') {
+    const entries = getEntries(row.id)
+    const steps = entries.filter((e) => e.kind === 'tool-call').length
+    const lastCall = [...entries].reverse().find((e) => e.kind === 'tool-call' && e.meta?.name)
+    let activity = 'nessuna attività ancora'
+    if (lastCall) {
+      try {
+        const args = JSON.parse(String(lastCall.meta?.arguments ?? '{}')) as Record<string, unknown>
+        activity = `${String(lastCall.meta?.name)} ${activityOf(String(lastCall.meta?.name), args).target}`.trim()
+      } catch {
+        activity = String(lastCall.meta?.name ?? '')
+      }
+    }
+    const now = Date.now()
+    const elapsed = Math.max(0, Math.round((now - row.created_at) / 60_000))
+    const left = Math.max(0, Math.round((row.deadline_at - now) / 60_000))
+    const childStatus = getAgent(row.id)?.status
+    const waiting = childStatus === 'paused-for-approval' ? ' — in attesa di conferma dell\'utente su una card del figlio' : ''
+    const lines = [
+      `Sottoagente "${row.title}" (id ${row.id}): stato ${row.status}${waiting}.`,
+      `Tempo: ${elapsed} min trascorsi, scadenza tra ${left} min. Passi: ${steps}. Ultima attività: ${activity}.`
+    ]
+    if (row.status === 'done' || row.status === 'failed' || row.status === 'stopped' || row.status === 'expired') {
+      lines.push(`Summary: ${row.summary ?? '(nessuno)'}`)
+      if (row.report_path) lines.push(`Report: ${row.report_path}`)
+    }
+    return { output: lines.join('\n') }
+  }
+
+  if (call.name === 'message_subagent') {
+    const text = String(input.text ?? '').trim()
+    if (!text) return { output: 'Testo mancante: scrivi il messaggio nel campo text.' }
+    if (row.status === 'stopped' || row.status === 'expired') {
+      return { output: `"${row.title}" è ${row.status === 'stopped' ? 'fermato' : 'scaduto'}: non si riapre con un messaggio (serve una nuova spawn_subagent).` }
+    }
+    const now = Date.now()
+    // done/failed → RIAPRE: lotto nuovo di un solo membro e nuova scadenza —
+    // il suo risultato arriverà da solo
+    const reopened = row.status === 'done' || row.status === 'failed'
+    if (reopened) {
+      updateSubagent(database, row.id, {
+        status: 'queued', batch_id: newSubagentBatchId(), woken: false,
+        deadline_at: now + deadlineMin * 60_000
+      })
+    }
+    const { enqueueJob } = await import('../store/jobs')
+    enqueueJob(database, {
+      agentId: row.id, kind: 'subagent-run',
+      payload: { subagentId: row.id, message: text },
+      runAt: now, now
+    })
+    return {
+      output: reopened
+        ? `Sottoagente "${row.title}" (id ${row.id}) RIAPERTO su questo messaggio: lavora e il risultato ti arriva da solo quando chiude.`
+        : `Messaggio in coda per "${row.title}" (id ${row.id}): lo riceverà nel suo turno.`,
+      changed: true
+    }
+  }
+
+  // stop_subagent: interrompe il turno, cancella i job in coda, chiude
+  if (call.name === 'stop_subagent') {
+    interrupt(row.id)
+    const { cancelAgentJobs } = await import('../store/jobs')
+    cancelAgentJobs(database, row.id)
+    const closed = closeSubagent(database, row.id, { status: 'stopped', finishedAt: Date.now() })
+    if (closed) onSubagentTerminal(database, row.id, deps.emit)
+    return {
+      output: `Sottoagente "${row.title}" fermato: turno interrotto e lavori in coda cancellati. Il risultato del lotto arriva comunque quando gli altri figli finiscono.`,
+      changed: true
+    }
+  }
+
+  return { output: `Tool sconosciuto: ${call.name}` }
 }
 
 export async function runTurn(agentId: string, userText: string, emit: Emitter, images?: string[], opts: RunTurnOptions = {}): Promise<void> {
@@ -332,8 +523,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // fase 11 (punto 2): dal PRIMO web_search o web_fetch con contenuto il turno
   // è CONTAMINATO: dato non fidato nel contesto — le azioni con effetti
   // (run-command, draft_external, send_to_agent, create_agent, create_group)
-  // tornano a chiedere all'utente, l'auto-review non le approva da sola
-  let contaminated = false
+  // tornano a chiedere all'utente, l'auto-review non le approva da sola.
+  // Fase 12 (punto 5): può PARTIRE contaminato (risveglio SUBAGENTS_DONE con
+  // un figlio contaminato nel lotto) — stessi lift, stessi divieti
+  let contaminated = opts.contaminated === true
 
   // id dell'entry che apre il turno: serve a decidere se l'utente ha VISTO qualcosa
   let turnEntryId = 0
@@ -353,6 +546,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   let groupPosted = false
   let passedSilence = false
   let groupRecoveryDone = false
+  // fase 12 (punti 2-3): il lotto del turno del padre (una sola spawn batch per
+  // turno) e la chiusura del figlio (ha consegnato? il sollecito è già stato?)
+  let turnBatchId: string | null = null
+  let wakeDone = false
+  let subagentNudged = false
 
   // fase 8 (§3bis L7): ogni entry scritta da un turno di TASK porta meta.taskId —
   // vive nel sotto-transcript del task, esclusa dalla chat principale.
@@ -372,6 +570,20 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             }
           }
     )
+  /**
+   * Fase 12 (punto 3): chiusura di FALLIMENTO del figlio per errore del modello
+   * (niente sollecito su un modello che non risponde). Se il turno è stato
+   * interrotto (stop/scadenza) la riga è già terminale e closeSubagent non
+   * tocca nulla; il controllo del lotto resta idempotente (wakeBatch atomico).
+   */
+  const failSubagent = (reason: string): void => {
+    if (!opts.subagent || controller.signal.aborted) return
+    const closed = closeSubagent(db(), opts.subagent.id, {
+      status: 'failed', summary: reason, finishedAt: Date.now()
+    })
+    if (closed) onSubagentTerminal(db(), opts.subagent.id, emit)
+  }
+
   // le approval e gli ask_user dentro un task portano lo stato a needs_input
   // (la card in chat principale lo segnala); le risposte lo riportano a working
   const taskNeedsInput = (): void => {
@@ -545,38 +757,50 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // Fase 7: se questo è il bot principale, la sezione di coordinamento con
     // l'elenco degli altri bot (nome, descrizione, routine attive)
     let mainSection = ''
-    try {
-      const agents = listAgents()
-      if (mainAgentOf(agents, getSetting<string | null>('mainAgentId', null))?.id === agentId) {
-        mainSection = mainAgentSection(
-          agents
-            .filter((a) => a.id !== agentId)
-            .map((a) => ({
-              name: a.name,
-              description: a.description,
-              routines: listRoutines(a.id).filter((r) => r.enabled).map((r) => r.title)
-            }))
-        )
-      }
-    } catch {
-      // elenco non disponibile: il prompt resta quello di base
-    }
     let connectorsSection = ''
-    try {
-      const { connectorInstructionsFromSettings } = await import('../connectors')
-      const { listServers } = await import('../mcp')
-      connectorsSection = connectorInstructionsFromSettings(
-        listServers(),
-        getSetting<Record<string, import('../connectors').ConnectorState>>('connectors.state', {})
-      )
-    } catch {
-      // connettori non disponibili: il system prompt resta quello di base
+    let systemText: string
+    if (opts.subagent) {
+      // fase 12 (punto 3): il FIGLIO ha un prompt SEPARATO (costruttore proprio,
+      // ~450 token): identità da sottoagente, come lavorare, chiusura col
+      // wake_parent. Memoria e skill sono quelle del PADRE (sola lettura:
+      // update_memory/update_skill non sono nella whitelist del figlio)
+      const subRow = getSubagent(db(), opts.subagent.id)
+      const parent = getAgent(opts.subagent.parentId)
+      systemText = subagentSystemPrompt(parent ?? agent, subRow ?? { title: '' }) +
+        buildMemorySection(opts.subagent.parentId) + buildSkillsSection(opts.subagent.parentId)
+    } else {
+      try {
+        const agents = listAgents()
+        if (mainAgentOf(agents, getSetting<string | null>('mainAgentId', null))?.id === agentId) {
+          mainSection = mainAgentSection(
+            agents
+              .filter((a) => a.id !== agentId)
+              .map((a) => ({
+                name: a.name,
+                description: a.description,
+                routines: listRoutines(a.id).filter((r) => r.enabled).map((r) => r.title)
+              }))
+          )
+        }
+      } catch {
+        // elenco non disponibile: il prompt resta quello di base
+      }
+      try {
+        const { connectorInstructionsFromSettings } = await import('../connectors')
+        const { listServers } = await import('../mcp')
+        connectorsSection = connectorInstructionsFromSettings(
+          listServers(),
+          getSetting<Record<string, import('../connectors').ConnectorState>>('connectors.state', {})
+        )
+      } catch {
+        // connettori non disponibili: il system prompt resta quello di base
+      }
+      // fase 12 (punto 6): la sezione Sottoagenti solo nei bot NORMALI, mai
+      // nei turni di gruppo (lì si coordina col gruppo)
+      systemText = systemPrompt(agent, { subagents: opts.groupTurn === undefined }) +
+        mainSection + buildMemorySection(agentId) + buildSkillsSection(agentId) + connectorsSection
     }
-    const messages: ChatMessage[] = buildMessages(
-      systemPrompt(agent) + mainSection + buildMemorySection(agentId) + buildSkillsSection(agentId) + connectorsSection,
-      scopedEntries(),
-      images
-    )
+    const messages: ChatMessage[] = buildMessages(systemText, scopedEntries(), images)
 
     // tool statici + tool MCP attivi (server esterni → mcp__<server>__<tool>)
     const { toolDefs } = await import('./tools')
@@ -594,6 +818,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       if (browserAvailable()) allTools = [...allTools, ...browserToolDefs]
     } catch {
       // browser non disponibile: prosegue senza
+    }
+    // fase 12 (punto 3): nel FIGLIO solo i tool della whitelist (run-command,
+    // file, web, browser, memoria/skill in LETTURA, connettori via gate) più
+    // wake_parent; i tool del padre non compaiono proprio
+    if (opts.subagent) {
+      allTools = [...allTools.filter((t) => subagentToolDenyReason(t.name) === null), wakeParentToolDef]
     }
     // correzione E2: i tool del passo corrente — la chiamata di recupero di un
     // turno di gruppo li restringe a quelli del sollecito
@@ -683,6 +913,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // fase 8 (§3bis L11): il modello non risponde — abort del solo stream
           add({ agentId, kind: 'notice', role: 'system', content: `Il modello non risponde (${err.message}): turno interrotto.` })
           emitLastEntry(agentId, emit)
+          // fase 12 (punto 3): il figlio che non risponde chiude failed col motivo
+          failSubagent(`il modello non ha risposto (${err.message})`)
           endTurn(agentId, 'STOPPED', emit, opts.taskId, 'model-error')
           setStatus(agentId, 'idle', emit)
           return
@@ -690,6 +922,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         const msg = err instanceof Error ? err.message : String(err)
         add({ agentId, kind: 'notice', role: 'system', content: `Errore dal modello: ${msg}` })
         emitLastEntry(agentId, emit)
+        // fase 12 (punto 3): errore del modello → il figlio chiude failed col motivo
+        if (!controller.signal.aborted) failSubagent(`errore del modello: ${msg}`)
         // correzione C5: il motivo distingue il limite d'uso del provider (429)
         // dagli altri errori; se il turno era già stato interrotto è un interrupt
         endTurn(agentId, 'STOPPED', emit, opts.taskId, controller.signal.aborted ? 'interrupt' : stopReasonOfError(err))
@@ -729,6 +963,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         }
         add({ agentId, kind: 'notice', role: 'system', content: 'Il modello non ha prodotto risposta (vuota).' })
         emitLastEntry(agentId, emit)
+        // fase 12 (punto 3): flash a volte risponde vuoto — la chiusura del
+        // figlio non dipende dal modello: sollecito e chiusura automatica
+        if (opts.subagent) break
         endTurn(agentId, 'STOPPED', emit, opts.taskId, 'model-error')
         setStatus(agentId, 'idle', emit)
         return
@@ -785,6 +1022,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (isToolLoop(executedCalls, { name: call.name, args: call.arguments })) {
           add({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: la stessa identica chiamata si ripete (loop).' })
           emitLastEntry(agentId, emit)
+          // fase 12 (punto 3): il figlio inceppato chiude failed col motivo
+          failSubagent(`il modello ripeteva la stessa identica chiamata (${call.name})`)
           endTurn(agentId, 'STOPPED', emit, opts.taskId, 'loop')
           setStatus(agentId, 'idle', emit)
           return
@@ -793,6 +1032,19 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // fase 9 (punto 0d): ogni tool che non è "parlare" è lavoro — azzera
         // il conteggio dei messaggi consecutivi senza lavoro in mezzo
         if (isWorkTool(call.name)) sendsSinceWork = 0
+
+        // fase 12 (punto 3): nel FIGLIO i tool esclusi non compaiono nella
+        // lista, ma se il modello li chiama lo stesso il rifiuto dice PERCHÉ
+        if (opts.subagent) {
+          const denyReason = subagentToolDenyReason(call.name)
+          if (denyReason) {
+            const refused = `non disponibile ai sottoagenti: ${denyReason}`
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            messages.push({ role: 'tool', toolCallId: call.id, content: refused })
+            continue
+          }
+        }
 
         // ---- fase 3 (§3bis L2/L5): comunicazione e invii esterni, gestiti dal loop ----
 
@@ -1225,6 +1477,82 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           continue
         }
 
+        // fase 12 (punto 3): la CONSEGNA del figlio — chiude il sottoagente
+        // (status, summary, report_path) e passa al controllo del lotto (punto
+        // 5). Il turno del figlio termina lì, come pass
+        if (call.name === 'wake_parent') {
+          const wakeEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: 'wake_parent',
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [wakeEntry] })
+          if (!opts.subagent) {
+            const msg = 'wake_parent vale solo dentro un sottoagente: qui sei il padre, il risultato ti arriva con il messaggio del lotto.'
+            messages.push({ role: 'tool', toolCallId: call.id, content: msg })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: msg, meta: { callId: call.id } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
+          const status = input.status === 'failed' ? 'failed' : 'done'
+          const summary = String(input.summary ?? '').slice(0, WAKE_SUMMARY_MAX_CHARS)
+          // il report va nella home CONDIVISA: il path si valida come write-file
+          // (confini della home; fuori → il report non si registra)
+          let reportPath: string | null = null
+          if (input.report_path !== undefined && String(input.report_path).trim()) {
+            const { validBoxPathOf } = await import('../sandbox')
+            reportPath = validBoxPathOf(agentId, String(input.report_path)) ? String(input.report_path) : null
+          }
+          const closed = closeSubagent(db(), opts.subagent.id, {
+            status,
+            ...(summary.trim() ? { summary } : {}),
+            ...(reportPath ? { report_path: reportPath } : {}),
+            contaminated,
+            finishedAt: Date.now()
+          })
+          if (closed) onSubagentTerminal(db(), opts.subagent.id, emit)
+          const okMsg = 'Consegnato al padre. Hai finito: non fare altro.'
+          const res = add({ agentId, kind: 'tool-result', role: 'system', content: okMsg, meta: { callId: call.id } })
+          emit({ type: 'entries', agentId, entries: [res] })
+          messages.push({ role: 'tool', toolCallId: call.id, content: okMsg })
+          wakeDone = true
+          finished = true
+          break
+        }
+
+        // fase 12 (punto 2): i tool del PADRE — lancio, controllo, messaggio e
+        // stop dei figli. Non nei turni di gruppo (lì si coordina col gruppo)
+        // e non nei figli (niente annidamento: la whitelist li ha già tolti,
+        // qui la doppia rete di sicurezza)
+        if (call.name === 'spawn_subagent' || call.name === 'check_subagent' || call.name === 'message_subagent' || call.name === 'stop_subagent') {
+          const subEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [subEntry] })
+          const result = await runSubagentTool(agentId, call, input, {
+            emit,
+            inGroupTurn: opts.groupTurn !== undefined,
+            inSubagent: opts.subagent !== undefined,
+            parentTaskId: opts.taskId,
+            untrustedTurn,
+            automatic,
+            // il tetto conta le spawn già passate di qui nel turno (compresa questa)
+            spawnsInTurn: executedCalls.filter((c) => c.name === 'spawn_subagent').length,
+            batchIdOf: () => {
+              if (!turnBatchId) turnBatchId = newSubagentBatchId()
+              return turnBatchId
+            }
+          })
+          // card nella chat del padre (entry send-message type subagent) quando
+          // la spawn riesce; nel turno di un task va nel sotto-transcript
+          if (result.card) appendSend(agentId, call, result.card, emit, {}, opts.taskId)
+          if (result.changed) subagentsChanged(agentId, emit)
+          const res = add({ agentId, kind: 'tool-result', role: 'system', content: result.output, meta: { callId: call.id } })
+          emit({ type: 'entries', agentId, entries: [res] })
+          messages.push({ role: 'tool', toolCallId: call.id, content: result.output })
+          continue
+        }
+
         // fase 8 (§3bis L7): apertura di un TASK THREAD — lavoro lungo in un
         // contesto separato: la chat principale resta pulita, il task gira
         // come job della stessa coda per agente (in serie con gli altri turni)
@@ -1281,6 +1609,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // blocco evidenza <messaggio_da_agente> e potrà rispondere al mittente
         if (call.name === 'send_to_agent') {
           const toId = String(input.agentId ?? '')
+          // fase 12 (punto 1): un id di FIGLIO non è un destinatario (non è un
+          // bot: è un sottoagente del padre che lo ha lanciato)
+          const childRefusal = subagentRefusal(toId)
+          if (childRefusal) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: childRefusal })
+            continue
+          }
           const dest = listAgents().find((a) => a.id === toId)
           if (!dest) {
             messages.push({ role: 'tool', toolCallId: call.id, content: `Destinatario non trovato ("${toId}"): cerca l'id esatto con list_agents.` })
@@ -1724,8 +2059,66 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       if (paused && messages[messages.length - 1]?.role === 'tool') {
         // dopo un rifiuto il modello può decidere come proseguire: continua il loop
       }
-      // correzione C1: pass ha chiuso il turno di gruppo (niente altre chiamate)
-      if (awaitingUser || passedSilence || controller.signal.aborted) break
+      // correzione C1: pass ha chiuso il turno di gruppo (niente altre chiamate).
+      // fase 12: anche wake_parent chiude il turno del FIGLIO lì
+      if (awaitingUser || passedSilence || wakeDone || controller.signal.aborted) break
+    }
+
+    // ---- fase 12 (punto 3): la chiusura robusta del FIGLIO ----
+    // Il turno del figlio è finito senza wake_parent (anche per MAX_STEPS o
+    // risposta vuota): UNA chiamata di recupero col sollecito (solo wake_parent),
+    // poi chiusura automatica — done col testo libero se c'è, failed se è vuoto.
+    // Turno abortito (stop/scadenza): la riga è già terminale, qui non si tocca
+    if (opts.subagent && !wakeDone && !controller.signal.aborted) {
+      const decision = subagentClosure({ wakeCalled: false, nudged: subagentNudged, freeText: lastFreeText, modelError: false })
+      if (decision.kind === 'nudge') {
+        subagentNudged = true
+        add({ agentId, kind: 'notice', role: 'system', content: 'Sollecito di consegna al padre (wake_parent).' })
+        emitLastEntry(agentId, emit)
+        messages.push({ role: 'user', content: SUBAGENT_RECOVERY_NUDGE })
+        setStatus(agentId, 'thinking', emit)
+        try {
+          const rstream = llmStream(provider, activeModel, messages, [wakeParentToolDef], controller.signal)
+          let racc = ''
+          let recoveryCalls: ToolCall[] = []
+          const rit = rstream[Symbol.asyncIterator]()
+          let rfirst = false
+          for (;;) {
+            const r = await nextWithDeadline(rit, rfirst, deadlines)
+            if (r.done) break
+            const ch = r.value
+            rfirst = true
+            if (ch.textDelta) racc += ch.textDelta
+            if (ch.toolCalls) recoveryCalls = ch.toolCalls
+          }
+          if (racc.trim()) lastFreeText = racc
+          const wake = recoveryCalls.find((c) => c.name === 'wake_parent')
+          if (wake) {
+            let winput: Record<string, unknown>
+            try { winput = JSON.parse(wake.arguments || '{}') } catch { winput = {} }
+            const closed = closeSubagent(db(), opts.subagent.id, {
+              status: winput.status === 'failed' ? 'failed' : 'done',
+              summary: String(winput.summary ?? '').slice(0, WAKE_SUMMARY_MAX_CHARS) || autoCloseSummary(lastFreeText),
+              finishedAt: Date.now()
+            })
+            if (closed) onSubagentTerminal(db(), opts.subagent.id, emit)
+            wakeDone = true
+          }
+        } catch {
+          // la chiamata di recupero stessa fallisce: chiusura automatica sotto
+        }
+      }
+      if (!wakeDone) {
+        const final2 = subagentClosure({ wakeCalled: false, nudged: subagentNudged, freeText: lastFreeText, modelError: false })
+        if (final2.kind === 'auto-done' || final2.kind === 'auto-failed') {
+          const closed = closeSubagent(db(), opts.subagent.id, {
+            status: final2.kind === 'auto-done' ? 'done' : 'failed',
+            summary: autoCloseSummary(lastFreeText),
+            finishedAt: Date.now()
+          })
+          if (closed) onSubagentTerminal(db(), opts.subagent.id, emit)
+        }
+      }
     }
 
     // ---- fase 3: chiusura del turno con esito ----
@@ -1734,8 +2127,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     } else if (controller.signal.aborted) {
       endTurn(agentId, run.superseded ? 'SUPERSEDED' : 'STOPPED', emit, opts.taskId, 'interrupt')
     } else if (!finished) {
-      add({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: limite di passi raggiunto.' })
-      emitLastEntry(agentId, emit)
+      // fase 12: nel figlio la notice non serve (la chiusura robusta ha già
+      // scritto cosa è successo: sollecito o chiusura automatica)
+      if (!opts.subagent) {
+        add({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: limite di passi raggiunto.' })
+        emitLastEntry(agentId, emit)
+      }
       endTurn(agentId, 'STOPPED', emit, opts.taskId, 'loop')
     } else {
       // turno FINISHED: se l'UTENTE non ha visto nulla (nessuna send-message nel
@@ -1744,7 +2141,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // Fase 8: nel contesto di un task valgono le SOLE entry del task.
       // Fase 10 (§3): nei turni di GRUPPO niente recupero — il silenzio è un
       // esito valido (PASS) e il testo libero non diventa mai un messaggio
-      if (source === 'user' && opts.groupTurn === undefined && visibleReplyEntries(scopedEntries(), turnEntryId).length === 0) {
+      if (source === 'user' && opts.groupTurn === undefined && opts.subagent === undefined && visibleReplyEntries(scopedEntries(), turnEntryId).length === 0) {
         messages.push({ role: 'user', content: RECOVERY_NUDGE })
         setStatus(agentId, 'thinking', emit)
         try {

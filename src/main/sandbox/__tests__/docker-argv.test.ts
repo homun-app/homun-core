@@ -46,7 +46,7 @@ import {
     boxHomePath,
     DEFAULT_BOX_LIMITS
 ,
-    PLAYWRIGHT_MCP_CONFIG, PLAYWRIGHT_MCP_CONFIG_JSON
+    PLAYWRIGHT_MCP_CONFIG, PLAYWRIGHT_MCP_CONFIG_JSON, browserPidFile
 } from '../docker-argv'
 
 /** 0c: nei test l'immagine del box è un tag qualunque derivato dal contenuto. */
@@ -468,5 +468,26 @@ describe('dimensione di un file nel box: argv PURI (F6)', () => {
     // niente shell nel mezzo: il path resta UN elemento argv
     expect(argv[argv.length - 1]).toBe(path)
     expect(argv).not.toContain('sh')
+  })
+})
+
+// ---- fase 12 (punto 1): il browser del FIGLIO (istanza propria, --isolated) ----
+
+describe('il launcher del browser di un SOTTOAGENTE', () => {
+  it('child: --isolated AL POSTO di --user-data-dir, output-dir separato, pid file col suo id, -w la home del PADRE', () => {
+    const flags = browserMcpFlags('sub_a1b2c3d4', 18765, { child: true, home: '/box/home/agent_padre' })
+    expect(flags).toContain('--isolated')
+    expect(flags).not.toContain('--user-data-dir')
+    expect(flags[flags.indexOf('--output-dir') + 1]).toBe('/box/home/agent_padre/.browser/output-sub_a1b2c3d4')
+    const argv = dockerBrowserMcpArgv('sub_a1b2c3d4', 18765, { child: true, home: '/box/home/agent_padre' })
+    expect(argv).toContain('/box/home/agent_padre/.sandbot/browser-sub_a1b2c3d4.pid')
+    expect(argv[argv.indexOf('-w') + 1]).toBe('/box/home/agent_padre')
+    // il flag --config resta obbligatorio anche per il figlio
+    expect(flags[flags.indexOf('--config') + 1]).toBe(PLAYWRIGHT_MCP_CONFIG)
+  })
+
+  it('browserPidFile: padre e figlio non si pestano il pid file', () => {
+    expect(browserPidFile('agent_x', false)).toBe('.sandbot/browser.pid')
+    expect(browserPidFile('sub_a1b2c3d4', true)).toBe('.sandbot/browser-sub_a1b2c3d4.pid')
   })
 })

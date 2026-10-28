@@ -1,6 +1,6 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo } from '../../shared/types'
 
 const api = (window as unknown as { sandbot: import('../../shared/types').SandbotApi }).sandbot
 
@@ -32,6 +32,12 @@ interface Store {
   openGroupId: number | null
   /** fase 10: messaggi del gruppo aperto */
   groupMessages: GroupMessageInfo[]
+  /** fase 12: sottoagenti dell'agente attivo (card in chat + stato live) */
+  subagents: SubagentInfo[]
+  /** fase 12: figlio aperto nella vista del suo transcript */
+  openSubagentId: string | null
+  /** fase 12: entry del figlio aperto (aggiornate dagli eventi entries) */
+  subEntries: TranscriptEntry[]
   init(): Promise<void>
   select(agentId: string): Promise<void>
   send(text: string, images?: string[]): Promise<void>
@@ -61,6 +67,10 @@ interface Store {
   openGroup(id: number | null): void
   /** fase 10: l'utente scrive nel gruppo (@menzioni comprese) */
   sendGroupMessage(text: string): void
+  /** fase 12: apre/chiude la vista del transcript di un sottoagente */
+  openSubagent(id: string | null): void
+  /** fase 12: bottone Ferma sulla card del sottoagente */
+  stopSubagent(id: string): void
   setSettingsOpen(v: boolean): void
   setSettingsTab(v: string | null): void
 }
@@ -83,6 +93,9 @@ export const useStore = create<Store>((set, get) => ({
   groups: [],
   openGroupId: null,
   groupMessages: [],
+  subagents: [],
+  openSubagentId: null,
+  subEntries: [],
 
   async init() {
     const agents = await api.listAgents()
@@ -101,6 +114,8 @@ export const useStore = create<Store>((set, get) => ({
     api.listTasks().then((tasks) => set({ tasks })).catch(() => undefined)
     // fase 10: i gruppi (sidebar)
     api.listGroups().then((groups) => set({ groups })).catch(() => undefined)
+    // fase 12: i sottoagenti dell'agente attivo (card e stato live)
+    if (activeId) api.listSubagents(activeId).then((subagents) => set({ subagents })).catch(() => undefined)
     api.onEvent((e: SandbotEvent) => {
       const s = get()
       switch (e.type) {
@@ -127,6 +142,17 @@ export const useStore = create<Store>((set, get) => ({
           break
         }
         case 'entries': {
+          // fase 12: le entry del FIGLIO aperto finiscono nel suo pannello
+          if (e.agentId === s.openSubagentId) {
+            const merged = [...s.subEntries]
+            for (const en of e.entries) {
+              const i = merged.findIndex((x) => x.id === en.id)
+              if (i >= 0) merged[i] = en
+              else merged.push(en)
+            }
+            set({ subEntries: merged.sort((a, b) => a.id - b.id) })
+            if (e.agentId !== s.activeId) break
+          }
           if (e.agentId !== s.activeId) {
             set({ agents: s.agents.map((a) => (a.id === e.agentId ? { ...a, unread: a.unread + 1 } : a)) })
             break
@@ -189,13 +215,22 @@ export const useStore = create<Store>((set, get) => ({
           }
           break
         }
+        // fase 12: lo stato di un sottoagente è cambiato (card + pannello)
+        case 'subagents': {
+          if (e.parentId === s.activeId) {
+            api.listSubagents(e.parentId).then((subagents) => set({ subagents })).catch(() => undefined)
+          }
+          break
+        }
       }
     })
   },
 
   async select(agentId) {
-    set({ activeId: agentId, entries: [] })
+    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [] })
     set({ entries: await api.getEntries(agentId) })
+    // fase 12: i sottoagenti dell'agente scelto
+    api.listSubagents(agentId).then((subagents) => set({ subagents })).catch(() => undefined)
     await api.updateAgent(agentId, {})
     // fase 6: l'utente sta guardando questa chat → notifiche soppresse per
     // questo agente e la sua outbox si consegna subito (finestra bypassata)
@@ -340,6 +375,21 @@ export const useStore = create<Store>((set, get) => ({
     if (id === null || !text.trim()) return
     void api.groupSendUser(id, text.trim()).catch((err: unknown) =>
       console.error('groupSendUser:', err instanceof Error ? err.message : err)
+    )
+  },
+
+  // fase 12: vista del transcript di un sottoagente (come la vista del task)
+  openSubagent(id) {
+    set({ openSubagentId: id, subEntries: [] })
+    if (id !== null) {
+      void api.getEntries(id).then((subEntries) => set({ subEntries })).catch(() => undefined)
+    }
+  },
+
+  // fase 12: il bottone Ferma della card (RPC subagents:stop)
+  stopSubagent(id) {
+    void api.stopSubagent(id).catch((err: unknown) =>
+      console.error('stopSubagent:', err instanceof Error ? err.message : err)
     )
   },
 

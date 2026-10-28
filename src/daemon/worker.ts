@@ -7,6 +7,8 @@ import type { DatabaseSync } from 'node:sqlite'
 import {
   recoverExpiredLeases, claimDueJobs, renewLease, completeJob, failJob, type Job
 } from '../main/store/jobs'
+import { getSetting } from '../main/store/db'
+import { DEFAULT_SUBAGENT_CONCURRENCY } from '../main/store/subagents'
 import type { SandbotEvent } from '../shared/types'
 
 const DEFAULT_LEASE_MS = 2 * 60_000
@@ -23,6 +25,11 @@ export interface WorkerDeps {
   /** Esegue un job (user-message/routine-run); emit è già cablato al heartbeat. */
   runJob(job: Job, emit: Emitter): Promise<void>
   onError?(job: Job, err: unknown, outcome: 'retry' | 'failed'): void
+  /**
+   * Fase 12 (punto 4): il tetto dei subagent-run in lease contemporaneamente
+   * (default: setting subagents.maxConcurrent, 3). Iniettabile nei test.
+   */
+  maxSubagentLeases?(): number
 }
 
 export class JobWorker {
@@ -63,7 +70,8 @@ export class JobWorker {
     try {
       const now = this.deps.now()
       recoverExpiredLeases(this.db, now)
-      for (const job of claimDueJobs(this.db, now, this.leaseMs)) {
+      const cap = this.deps.maxSubagentLeases?.() ?? getSetting<number>('subagents.maxConcurrent', DEFAULT_SUBAGENT_CONCURRENCY)
+      for (const job of claimDueJobs(this.db, now, this.leaseMs, 5, cap)) {
         // fire-and-forget: più agenti in parallelo, uno per agente
         const p = this.runOne(job).finally(() => this.inflight.delete(job.id))
         this.inflight.set(job.id, p)

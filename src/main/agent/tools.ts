@@ -4,6 +4,7 @@ import * as sandbox from '../sandbox'
 import { resolveSecretRefs } from './secrets'
 import { formatTaskDone } from '../../shared/agent-message'
 import { MAX_GROUP_MEMBERS } from './group-turns'
+import { WAKE_SUMMARY_MAX_CHARS } from './subagents'
 import {
   writeMemory, updateMemory, deleteMemory, listMemories, searchMemoriesByQuery,
   type MemoryTier, type MemoryScope
@@ -438,6 +439,48 @@ export const toolDefs: ToolDef[] = [
     }
   },
   {
+    name: 'spawn_subagent',
+    description: "Lancia un sottoagente che lavora in PARALLELO su un brief autosufficiente (contesto suo, non vede questa conversazione). Quando serve: parti di lavoro INDIPENDENTI (ricerche su più soggetti, confronti). title breve; brief con obiettivo, confini e formato del risultato (min 200 caratteri). Max 4 per turno, 6 aperti.",
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Titolo breve del lavoro (mostrato nella card)' },
+        brief: { type: 'string', description: 'Il compito completo: obiettivo, confini (cosa NON fare), formato del risultato, dove salvare il report. È tutto ciò che il sottoagente vedrà.' }
+      },
+      required: ['title', 'brief']
+    }
+  },
+  {
+    name: 'check_subagent',
+    description: 'Lo stato di un sottoagente tuo: stato, tempo trascorso e scadenza, ultima attività, numero di passi; summary e report quando ha finito.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Id del sottoagente (sub_…, dalla spawn)' } },
+      required: ['id']
+    }
+  },
+  {
+    name: 'message_subagent',
+    description: 'Manda un messaggio a un sottoagente tuo: se è in coda o al lavoro lo riceve nel suo turno; se aveva finito (done/failed) lo RIAPRE su questo messaggio. I fermati e i scaduti non riaprono.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Id del sottoagente (sub_…)' },
+        text: { type: 'string', description: 'Il messaggio per il sottoagente (aggiornamenti, correzioni, domande)' }
+      },
+      required: ['id', 'text']
+    }
+  },
+  {
+    name: 'stop_subagent',
+    description: 'Ferma subito un sottoagente tuo: interrompe il suo turno e cancella i suoi lavori in coda. Il risultato del lotto arriva comunque quando gli altri finiscono.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Id del sottoagente (sub_…)' } },
+      required: ['id']
+    }
+  },
+  {
     name: 'update_state',
     description: "Modifica il tuo stato. target 'memory' → come update_memory (action write/update/delete). target 'routine' → action: create (campi name, description, prompt, schedule cron a 5 campi OPPURE trigger di tipo schedule, timezone, provenance 'template' se crei le routine di un template; la routine nasce SEMPRE in pausa: chiedi all'utente se attivarla, l'attivazione richiede la sua approvazione), update (id + campi da cambiare), pause, resume, delete (id).",
     parameters: {
@@ -461,6 +504,25 @@ export const toolDefs: ToolDef[] = [
     }
   }
 ]
+
+/**
+ * Fase 12 (punto 3): wake_parent NON sta in toolDefs — esiste solo nel turno
+ * del FIGLIO (il loop lo aggiunge alla lista del figlio; nel padre non
+ * compare e, se chiamato, riceve il rifiuto).
+ */
+export const wakeParentToolDef: ToolDef = {
+  name: 'wake_parent',
+  description: `Chiude il tuo lavoro e consegna al PADRE: status 'done' o 'failed', summary CONDENSATO (max ${WAKE_SUMMARY_MAX_CHARS} caratteri) e il path del report scritto. Chiamalo SEMPRE alla fine, anche se il brief non è riuscito.`,
+  parameters: {
+    type: 'object',
+    properties: {
+      status: { type: 'string', enum: ['done', 'failed'], description: 'Esito finale' },
+      summary: { type: 'string', description: 'Il riassunto condensato per il padre, con i link verificati' },
+      report_path: { type: 'string', description: 'Path del report dettagliato nella home condivisa (convenzione: subagents/<tuo id>/report.md)' }
+    },
+    required: ['status', 'summary']
+  }
+}
 
 export interface ToolExecResult {
   output: string
@@ -722,13 +784,17 @@ export async function executeTool(
       }
     }
     case 'recall_memory': {
-      const found = searchMemoriesByQuery(listMemories(agentId), String(input.query ?? ''))
+      // fase 12 (punto 1): il figlio legge la memoria del PADRE (sola lettura:
+      // update_memory non è nella whitelist del figlio)
+      const owner = sandbox.boxOwnerOf(agentId)
+      const found = searchMemoriesByQuery(listMemories(owner), String(input.query ?? ''))
       if (!found.length) return { output: 'Nessuna memoria trovata per questa ricerca.', meta: {} }
       const lines = found.map((r) => `- [${r.id}] (${r.tier}/${r.scope}, aggiornata ${new Date(r.updatedAt).toISOString().slice(0, 10)}) ${r.content.replace(/\n+/g, ' ')}`)
       return { output: lines.join('\n'), meta: { memoryIds: found.map((r) => r.id) } }
     }
     case 'skill': {
-      const body = readSkillBody(agentId, String(input.name ?? ''))
+      // fase 12 (punto 1): le skill del figlio sono quelle del PADRE
+      const body = readSkillBody(sandbox.boxOwnerOf(agentId), String(input.name ?? ''))
       return { output: body, meta: { skill: String(input.name ?? '') } }
     }
     case 'update_skill': {
@@ -842,6 +908,9 @@ export async function executeTool(
       const dbMod = await import('../store/db')
       const target = dbMod.getAgent(String(input.agentId ?? ''))
       if (!target) return { output: `Bot non trovato ("${String(input.agentId ?? '')}"): cerca l'id esatto con list_agents.`, meta: {} }
+      // fase 12 (punto 1): un id di FIGLIO non si aggiorna da qui
+      const refusal = dbMod.subagentRefusal(target.id)
+      if (refusal) return { output: refusal, meta: {} }
       const main = (await import('../../daemon/presence')).mainAgentOf(dbMod.listAgents(), dbMod.getSetting<string | null>('mainAgentId', null))
       if (main?.id === target.id) {
         return { output: 'Il bot principale non si modifica dai tool: è il punto di contatto dell\'utente.', meta: {} }
@@ -867,6 +936,9 @@ export async function executeTool(
       if (main?.id === target.id) {
         return { output: 'Il bot principale non si elimina.', meta: {} }
       }
+      // fase 12 (punto 1): un id di FIGLIO non si elimina da qui (muore col padre)
+      const delRefusal = dbMod.subagentRefusal(target.id)
+      if (delRefusal) return { output: delRefusal, meta: {} }
       if (target.createdBy !== agentId) {
         return { output: `"${target.name}" non è un bot che hai creato tu: puoi eliminare solo i tuoi. Parlane con l'utente o col creatore.`, meta: {} }
       }
@@ -888,6 +960,11 @@ export async function executeTool(
       const dbMod = await import('../store/db')
       const groupsMod = await import('../store/groups')
       const agents = dbMod.listAgents()
+      // fase 12 (punto 1): un id di figlio non è un bot — messaggio esplicito
+      for (const id of memberIds) {
+        const refusal = dbMod.subagentRefusal(id)
+        if (refusal) return { output: `Gruppo non creato: ${refusal}.`, meta: {} }
+      }
       const missing = memberIds.filter((id) => !agents.some((a) => a.id === id))
       if (missing.length) {
         return { output: `Gruppo non creato: questi id non sono bot esistenti (${missing.join(', ')}): cerca gli id con list_agents.`, meta: {} }
@@ -929,6 +1006,11 @@ export async function executeTool(
       const remove = [...new Set(Array.isArray(input.removeMemberIds) ? input.removeMemberIds.map((m) => String(m)) : [])]
       const agents = dbMod.listAgents()
       if (add.length) {
+        // fase 12 (punto 1): un id di figlio non è un bot — messaggio esplicito
+        for (const id of add) {
+          const refusal = dbMod.subagentRefusal(id)
+          if (refusal) return { output: `Membro non aggiunto: ${refusal}.`, meta: { groupChanged: groupId } }
+        }
         const missing = add.filter((id) => !agents.some((a) => a.id === id))
         if (missing.length) {
           return { output: `Membri non aggiunti: id inesistenti (${missing.join(', ')}). Il resto dell'aggiornamento è già applicato.`, meta: { groupChanged: groupId } }

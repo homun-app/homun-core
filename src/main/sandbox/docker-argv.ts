@@ -387,6 +387,15 @@ export function dockerBuildArgv(tag: string, dockerfilePath: string, contextDir:
 /** Il pid file dell'istanza browser di un bot (relativo alla SUA home nel box). */
 export const BROWSER_PID_FILE = '.sandbot/browser.pid'
 
+/**
+ * Fase 12 (punto 1): il pid file del browser di un bot — per un FIGLIO il nome
+ * porta il suo id (sta comunque nella home del PADRE: due Chromium non si
+ * pestano il pid file) e il flag `--isolated` al posto del profilo persistente.
+ */
+export function browserPidFile(agentId: string, child: boolean): string {
+  return child ? `.sandbot/browser-${agentId}.pid` : BROWSER_PID_FILE
+}
+
 /** Chiusura per inattività: 10 minuti senza azioni (lato nostro + --idle-timeout). */
 export const BROWSER_IDLE_MS = 10 * 60_000
 
@@ -420,13 +429,15 @@ export const DOCKER_BROWSER_WRAPPER_SH = [
  * del Dockerfile — spegne il traffico di fondo di Chromium (component update,
  * sync, telemetry): connessioni non richieste, rumore nel proxy e privacy.
  */
-export function browserMcpFlags(agentId: string, proxyPort: number): string[] {
-  const home = boxHomePath(agentId)
+export function browserMcpFlags(agentId: string, proxyPort: number, opts: { child?: boolean; home?: string } = {}): string[] {
+  const home = opts.home ?? boxHomePath(agentId)
   return [
     '--headless', '--browser', 'chromium',
     '--no-sandbox',
-    '--user-data-dir', `${home}/.browser/profile`,
-    '--output-dir', `${home}/.browser/output`,
+    // fase 12 (punto 1): il figlio usa --isolated AL POSTO del profilo
+    // persistente (due Chromium sullo stesso profilo si bloccano a vicenda)
+    ...(opts.child ? ['--isolated'] : ['--user-data-dir', `${home}/.browser/profile`]),
+    '--output-dir', opts.child ? `${home}/.browser/output-${agentId}` : `${home}/.browser/output`,
     '--output-max-size', '52428800',
     '--no-webmcp',
     '--block-service-workers',
@@ -460,15 +471,16 @@ export const PLAYWRIGHT_MCP_CONFIG_JSON =
  * l'utente e la home del bot, il wrapper COSTANTE (pid file come $1) e i flag
  * del server MCP come argomenti posizionali dopo `sh <pidfile>`.
  */
-export function dockerBrowserMcpArgv(agentId: string, proxyPort: number): string[] {
+export function dockerBrowserMcpArgv(agentId: string, proxyPort: number, opts: { child?: boolean; home?: string } = {}): string[] {
+  const home = opts.home ?? boxHomePath(agentId)
   return [
     'exec', '-i',
     '-u', CONTAINER_USER,
-    '-w', boxHomePath(agentId),
+    '-w', home,
     BOX_CONTAINER,
     'sh', '-c', DOCKER_BROWSER_WRAPPER_SH, 'sh',
-    `${boxHomePath(agentId)}/${BROWSER_PID_FILE}`,
-    ...browserMcpFlags(agentId, proxyPort)
+    `${home}/${browserPidFile(agentId, opts.child === true)}`,
+    ...browserMcpFlags(agentId, proxyPort, opts)
   ]
 }
 

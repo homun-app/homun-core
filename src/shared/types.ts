@@ -15,6 +15,8 @@ export interface Agent {
   createdBy?: string | null
   /** fase 10: sezione della sidebar in cui raggruppare il bot (testo libero) */
   section?: string | null
+  /** fase 12: il padre, se questa riga è un SOTTOAGENTE (bot figlio nascosto) */
+  parentId?: string | null
 }
 
 export type EntryKind =
@@ -107,6 +109,12 @@ export type SendMessagePayload =
       kind: 'allow' | 'block'
       text: string
       why?: string
+    }
+  | {
+      /** fase 12 (punto 2): card del sottoagente lanciato — l'unica riga del figlio nella chat del padre */
+      type: 'subagent'
+      subagentId: string
+      title: string
     }
 
 /**
@@ -237,6 +245,8 @@ export type SandbotEvent =
   | { type: 'activity'; agentId: string; activity: { tool: string; target: string } | null }
   // fase 10: i messaggi o i membri di un gruppo sono cambiati (sidebar + vista gruppo)
   | { type: 'groups' }
+  // fase 12: lo stato di un sottoagente di questo padre è cambiato (card + pannello)
+  | { type: 'subagents'; parentId: string }
 
 export interface SandbotApi {
   // agenti e transcript
@@ -306,6 +316,9 @@ export interface SandbotApi {
   listGroups(): Promise<GroupInfo[]>
   groupMessages(groupId: number): Promise<GroupMessageInfo[]>
   groupSendUser(groupId: number, text: string): Promise<void>
+  // fase 12: sottoagenti del padre (card + pannello) e bottone Ferma
+  listSubagents(parentId: string): Promise<SubagentInfo[]>
+  stopSubagent(id: string): Promise<void>
   // memoria (fase 4): sezione nella vista dell'agente, modifica ed eliminazione
   listMemories(agentId: string): Promise<MemoryInfo[]>
   updateMemory(agentId: string, id: string, content: string): Promise<void>
@@ -461,6 +474,28 @@ export interface TaskInfo {
   createdAt: number
   updatedAt: number
   summary: string | null
+}
+
+// ---- sottoagenti (fase 12, §L7/T5) ----
+
+/** Un sottoagente del padre così come lo vede la UI (tabella subagents + stato live dell'agente figlio). */
+export interface SubagentInfo {
+  id: string
+  parentId: string
+  /** se lanciato da dentro un task, i risultati tornano al task */
+  parentTaskId: number | null
+  /** il lotto: i figli dello stesso turno del padre si svegliano insieme */
+  batchId: string
+  title: string
+  status: 'queued' | 'running' | 'done' | 'failed' | 'stopped' | 'expired'
+  summary: string | null
+  reportPath: string | null
+  createdAt: number
+  startedAt: number | null
+  finishedAt: number | null
+  deadlineAt: number
+  /** stato live dell'agente figlio (paused-for-approval = "in attesa di conferma") */
+  agentStatus: AgentStatus | null
 }
 
 // ---- gruppi (fase 10, T7) ----

@@ -4,7 +4,7 @@
 // test girano su un :memory: senza Electron.
 import type { DatabaseSync } from 'node:sqlite'
 
-export type JobKind = 'user-message' | 'routine-run' | 'task-run' | 'group-turn'
+export type JobKind = 'user-message' | 'routine-run' | 'task-run' | 'group-turn' | 'subagent-run'
 export type JobStatus = 'queued' | 'leased' | 'done' | 'failed'
 
 export interface Job {
@@ -150,23 +150,34 @@ export function requeueAllLeased(db: DatabaseSync): number {
  * clausola "agente senza lease attivo" è ripetuta DENTRO l'UPDATE: due job
  * dello stesso agente tra i candidati non vengono mai presi insieme (il
  * secondo vede il primo già leased dalla statement precedente).
+ *
+ * Fase 12 (punto 4): `maxSubagentLeases` è il TETO GLOBALE dei sottoagenti in
+ * esecuzione — un job subagent-run è reclamabile solo se i subagent-run in
+ * lease sono meno del tetto (default 3, setting subagents.maxConcurrent:
+ * Ollama cloud esegue 1 modello alla volta col piano Free, 3 col Pro). Anche
+ * questa condizione è ripetuta DENTRO l'UPDATE, come quella dell'agente: un
+ * figlio che finisce libera il posto per il prossimo. I job NORMALI non sono
+ * toccati dal tetto.
  */
-export function claimDueJobs(db: DatabaseSync, now: number, leaseMs: number, limit = 5): Job[] {
+export function claimDueJobs(db: DatabaseSync, now: number, leaseMs: number, limit = 5, maxSubagentLeases = Number.POSITIVE_INFINITY): Job[] {
+  const cap = Math.max(0, Math.floor(maxSubagentLeases))
   const candidates = db.prepare(`
     SELECT id FROM jobs
     WHERE status = 'queued' AND run_at <= ?
       AND agent_id NOT IN (SELECT agent_id FROM jobs WHERE status = 'leased')
+      AND (kind != 'subagent-run' OR (SELECT COUNT(*) FROM jobs WHERE kind = 'subagent-run' AND status = 'leased') < ?)
     ORDER BY run_at, id
     LIMIT ?
-  `).all(now, limit) as Array<{ id: number }>
+  `).all(now, cap, limit) as Array<{ id: number }>
   const claimed: Job[] = []
   for (const c of candidates) {
     const rows = db.prepare(`
       UPDATE jobs SET status = 'leased', lease_until = ?, attempts = attempts + 1
       WHERE id = ? AND status = 'queued'
         AND agent_id NOT IN (SELECT agent_id FROM jobs WHERE status = 'leased')
+        AND (kind != 'subagent-run' OR (SELECT COUNT(*) FROM jobs WHERE kind = 'subagent-run' AND status = 'leased') < ?)
       RETURNING *
-    `).all(now + leaseMs, c.id) as unknown as JobRow[]
+    `).all(now + leaseMs, c.id, cap) as unknown as JobRow[]
     if (rows[0]) claimed.push(rowToJob(rows[0]))
   }
   return claimed

@@ -10,6 +10,7 @@ import { DraftCard } from './DraftCard'
 import { ConnectorCard } from './ConnectorCard'
 import { RuleProposalCard } from './RuleProposalCard'
 import { TaskCard } from './TaskCard'
+import { SubagentCard } from './SubagentCard'
 import { MemoryPanel } from './MemoryPanel'
 import { SkillsPanel } from './SkillsPanel'
 
@@ -156,6 +157,9 @@ export function Chat() {
 
       {/* fase 8 (§3bis L7): vista del sotto-transcript del task aperto */}
       {openTaskId !== null && <TaskPanel onClose={() => setOpenTask(null)} />}
+
+      {/* fase 12 (punto 7): vista del transcript del sottoagente aperto */}
+      <SubagentPanel />
 
       {/* fase 10: vista del gruppo aperto (messaggi, membri, scrittura come utente) */}
       <GroupPanel />
@@ -323,6 +327,8 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       if (message?.type === 'rule') return <RuleProposalCard entry={entry} />
       // fase 8 (§3bis L7): card del task (unica riga del task in chat principale)
       if (message?.type === 'task') return <TaskCard entry={entry} />
+      // fase 12 (punto 7): card del sottoagente (unica riga del figlio in chat)
+      if (message?.type === 'subagent') return <SubagentCard entry={entry} />
       return (
         <div className="max-w-[92%] text-sm leading-relaxed text-neutral-100">
           <div className="prose-invert max-w-none prose-pre:bg-neutral-900 prose-pre:border prose-pre:border-neutral-800 prose-code:text-neutral-300">
@@ -575,6 +581,76 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
           ))}
         </div>
       </div>
+    </div>
+  )
+}
+
+
+/**
+ * Fase 12 (punto 7): la vista del transcript di un FIGLIO — le sue entry
+ * (caricate con l'id del figlio, aggiornate dagli eventi), le card di
+ * approvazione funzionano con l'id del figlio e in fondo summary e report.
+ * UI minima, come il resto: si ridisegnerà dopo.
+ */
+function SubagentPanel() {
+  const openSubagentId = useStore((s) => s.openSubagentId)
+  const openSubagent = useStore((s) => s.openSubagent)
+  const subagents = useStore((s) => s.subagents)
+  const subEntries = useStore((s) => s.subEntries)
+  const [showReasoning, setShowReasoning] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const sub = subagents.find((x) => x.id === openSubagentId)
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+  }, [subEntries.length])
+
+  if (openSubagentId === null) return null
+  const open = sub?.status === 'queued' || sub?.status === 'running'
+
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col bg-neutral-950/95 backdrop-blur-sm">
+      <header className="flex items-center justify-between border-b border-neutral-800 px-6 py-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-teal-300/80">Sottoagente</p>
+          <h2 className="truncate text-base font-semibold text-neutral-100">{sub?.title ?? openSubagentId}</h2>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            className={`rounded-lg px-2 py-1 text-xs ${showReasoning ? 'bg-neutral-700 text-neutral-200' : 'text-neutral-400 hover:bg-neutral-800'}`}
+            onClick={() => setShowReasoning(!showReasoning)}
+          >
+            🧠 Ragionamento
+          </button>
+          <button className="rounded-md px-2 py-1 text-neutral-500 hover:text-neutral-200" onClick={() => openSubagent(null)}>
+            ✕
+          </button>
+        </div>
+      </header>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 py-4">
+        <div className="mx-auto max-w-3xl space-y-3">
+          {subEntries.length === 0 && (
+            <p className="mt-16 text-center text-sm text-neutral-600">Il sottoagente non ha ancora attività.</p>
+          )}
+          {subEntries.map((e) => (
+            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} />
+          ))}
+          {sub && (sub.summary || sub.reportPath) && (
+            <div className="rounded-xl border border-teal-900/50 bg-teal-950/10 px-4 py-3 text-sm">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-teal-300/80">
+                {sub.status === 'done' ? 'Consegnato' : sub.status === 'failed' ? 'Fallito' : 'Esito'}
+              </p>
+              {sub.summary && <p className="mt-1 whitespace-pre-wrap text-neutral-200">{sub.summary}</p>}
+              {sub.reportPath && <p className="mt-1 font-mono text-xs text-neutral-500">report: {sub.reportPath}</p>}
+            </div>
+          )}
+        </div>
+      </div>
+      {open && (
+        <p className="border-t border-neutral-800 px-6 py-2 text-center text-[11px] text-neutral-600">
+          {sub?.agentStatus === 'paused-for-approval' ? 'In attesa di conferma: rispondi alle card qui sopra.' : 'Al lavoro: le card di approvazione del figlio compaiono qui.'}
+        </p>
+      )}
     </div>
   )
 }

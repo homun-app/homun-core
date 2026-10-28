@@ -330,10 +330,16 @@ export function buildApiMethods(
       })
     },
     'routines:create': ([agentId, title, prompt, schedule]) => {
+      // fase 12 (punto 1): niente routine su un SOTTOAGENTE (non è un bot)
+      const refusal = store.subagentRefusal(String(agentId ?? ''))
+      if (refusal) throw new Error(refusal)
       if (!parseCron(String(schedule))) throw new Error('Schedule non valida: usare un cron a 5 campi, es. "0 9 * * *"')
       return store.createRoutine(agentId as string, title as string, prompt as string, schedule as string)
     },
     'routines:create-trigger': async ([agentId, title, prompt, trigger, timezone]) => {
+      // fase 12 (punto 1): niente routine su un SOTTOAGENTE (non è un bot)
+      const refusal = store.subagentRefusal(String(agentId ?? ''))
+      if (refusal) throw new Error(refusal)
       let t = trigger as RoutineTrigger
       // il webhook nasce col token generato dal server (prima della validazione:
       // il client non lo manda, la UI lo copia dopo la creazione)
@@ -428,6 +434,32 @@ export function buildApiMethods(
       cancelTaskJobs(db(), taskId as number)
       store.updateTask(taskId as number, { status: 'cancelled' })
       emit({ type: 'tasks' })
+      return { ok: true }
+    },
+
+    // ---- fase 12: sottoagenti (card in chat, pannello del figlio, Ferma) ----
+    'subagents:list': async ([parentId]) => {
+      const { listSubagentsOf } = await import('../main/store/subagents')
+      return listSubagentsOf(db(), String(parentId ?? '')).map((r): import('../shared/types').SubagentInfo => ({
+        id: r.id, parentId: r.parent_id, parentTaskId: r.parent_task_id, batchId: r.batch_id, title: r.title, status: r.status,
+        summary: r.summary, reportPath: r.report_path,
+        createdAt: r.created_at, startedAt: r.started_at, finishedAt: r.finished_at, deadlineAt: r.deadline_at,
+        // stato live dell'agente figlio (paused-for-approval = card in attesa)
+        agentStatus: store.getAgent(r.id)?.status ?? null
+      }))
+    },
+    'subagents:stop': async ([id]) => {
+      // lo stesso di stop_subagent: interrompe il turno, cancella i job in
+      // coda, chiude stopped e controlla il lotto
+      const { getSubagent, closeSubagent } = await import('../main/store/subagents')
+      const { onSubagentTerminal } = await import('./subagent-ops')
+      const row = getSubagent(db(), String(id ?? ''))
+      if (!row) throw new Error('Sottoagente non trovato')
+      loop.interrupt(row.id)
+      cancelAgentJobs(db(), row.id)
+      const closed = closeSubagent(db(), row.id, { status: 'stopped', finishedAt: Date.now() })
+      if (closed) onSubagentTerminal(db(), row.id, emit)
+      emit({ type: 'subagents', parentId: row.parent_id })
       return { ok: true }
     },
 

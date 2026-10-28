@@ -16,11 +16,11 @@ const flag = (name, fallback) => {
 }
 const model = flag('model', 'kimi-k3:cloud')
 const runs = flag('runs', '3')
-// fase 11b (punto 5): 21 casi (1, 2, 2b, 3-20) × 3 run = 63; la soglia 57 è
-// l'equivalente proporzionale del 49/54 della fase 11 (che contava 18 casi).
-// Conta il TOTALE (sistema): il recupero dei turni di gruppo fa parte del
-// sistema (il "modello nudo" lo stampa la suite, solo informativo)
-const min = flag('min', '57')
+// fase 12 (punto 8): 25 casi (1, 2, 2b, 3-24) × 3 run = 75; la soglia 68 è
+// l'equivalente proporzionale del 57/63 della fase 11b (stesso rapporto ~0,905).
+// Conta il TOTALE (sistema): il recupero dei turni fa parte del sistema (il
+// "modello nudo" lo stampa la suite, solo informativo)
+const min = flag('min', '68')
 const baseUrl = flag('base-url', 'http://127.0.0.1:11434')
 // fase 11 (residuo 0a): filtro sui casi (es. --cases 9,11,13,14) — passa il
 // filtro a EVAL_ONLY della suite, che seleziona gli id corrispondenti

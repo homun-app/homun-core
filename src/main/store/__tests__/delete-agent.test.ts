@@ -60,3 +60,49 @@ describe('deleteAgent: pulizia outbox e trigger.seen (residuo 0c)', () => {
     expect(listAgents()).toHaveLength(1)
   })
 })
+
+// ---- fase 12 (punto 1): i FIGLI muoiono col padre ----
+
+describe('deleteAgent(padre): ferma ed elimina i sottoagenti', () => {
+  it('righe agents/entries/jobs/subagents dei figli eliminate, interrupt chiamato; mai file del box', async () => {
+    const { setAgentStopperForDaemon } = await import('../db') as typeof import('../db')
+    const { insertSubagent } = await import('../subagents') as typeof import('../subagents')
+    const { enqueueJob } = await import('../jobs') as typeof import('../jobs')
+    const parent = createAgent('Padre', '')
+    const other = createAgent('Altro', '')
+    // due figli col registro e la coda
+    const child = createAgent('Padre · Ricerca', 'Ricerca', { parentId: parent.id, id: 'sub_del1' })
+    createAgent('Padre · Altro', 'Altro', { parentId: parent.id, id: 'sub_del2' })
+    insertSubagent(db(), {
+      id: 'sub_del1', parentId: parent.id, parentTaskId: null, batchId: 'b1',
+      title: 'Ricerca', brief: 'b', deadlineAt: 999, createdAt: 1
+    })
+    insertSubagent(db(), {
+      id: 'sub_del2', parentId: parent.id, parentTaskId: null, batchId: 'b1',
+      title: 'Altro', brief: 'b', deadlineAt: 999, createdAt: 1
+    })
+    appendEntry({ agentId: child.id, kind: 'message', role: 'user', content: 'brief' })
+    enqueueJob(db(), { agentId: 'sub_del1', kind: 'subagent-run', payload: { subagentId: 'sub_del1', first: true }, runAt: 1, now: 1 })
+    const otherJob = enqueueJob(db(), { agentId: other.id, kind: 'user-message', payload: { text: 'ciao' }, runAt: 1, now: 1 })
+
+    const stopped: string[] = []
+    setAgentStopperForDaemon((id) => stopped.push(id))
+    deleteAgent(parent.id)
+    setAgentStopperForDaemon(null)
+
+    // l'interrupt ha fermato ENTRAMBI i figli (una volta ciascuno)
+    expect(stopped.sort()).toEqual(['sub_del1', 'sub_del2'])
+    // righe agents dei figli e del padre: via (restano l'ALTRO bot di questo
+    // test e quelli dei test precedenti, che condividono lo store)
+    const agentsLeft = (db().prepare('SELECT id FROM agents').all() as Array<{ id: string }>).map((r) => r.id)
+    expect(agentsLeft).toContain(other.id)
+    expect(agentsLeft).not.toContain(parent.id)
+    expect(agentsLeft).not.toContain('sub_del1')
+    expect(agentsLeft).not.toContain('sub_del2')
+    expect((db().prepare('SELECT COUNT(*) AS n FROM subagents').get() as { n: number }).n).toBe(0)
+    expect((db().prepare("SELECT COUNT(*) AS n FROM entries WHERE agent_id LIKE 'sub_%'").get() as { n: number }).n).toBe(0)
+    // i job dell'ALTRO bot restano
+    const jobsLeft = (db().prepare('SELECT id FROM jobs').all() as Array<{ id: number }>).map((r) => r.id)
+    expect(jobsLeft).toEqual([otherJob.id])
+  })
+})

@@ -59,6 +59,9 @@ const api: SandbotApi = {
   listGroups: () => ipcRenderer.invoke('groups:list'),
   groupMessages: (groupId) => ipcRenderer.invoke('groups:messages', groupId),
   groupSendUser: (groupId, text) => ipcRenderer.invoke('groups:send-user', groupId, text),
+  // fase 12: sottoagenti del padre e bottone Ferma sulla card
+  listSubagents: (parentId) => ipcRenderer.invoke('subagents:list', parentId),
+  stopSubagent: (id) => ipcRenderer.invoke('subagents:stop', id),
   // fase 4: memoria e skill dell'agente
   listMemories: (agentId) => ipcRenderer.invoke('memory:list', agentId),
   updateMemory: (agentId, id, content) => ipcRenderer.invoke('memory:update', agentId, id, content),

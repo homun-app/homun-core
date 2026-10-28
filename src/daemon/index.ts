@@ -16,7 +16,8 @@
 // passano dalle regole di soppressione (notifications.ts).
 import {
   setDataDir, dataDir, db, getAgent, getEntries, getSetting, setSetting,
-  listAgents, listRoutines, updateRoutine, appendEntry, updateEntryMeta, updateAgent, listProviders, createAgent
+  listAgents, listRoutines, updateRoutine, appendEntry, updateEntryMeta, updateAgent, listProviders, createAgent,
+  setAgentStopperForDaemon as store_setAgentStopper
 } from '../main/store/db'
 import { requeueAllLeased, enqueueJob } from '../main/store/jobs'
 import { acquireDaemonLock, releaseDaemonLock, writeDaemonInfo, removeDaemonInfo } from './daemon-files'
@@ -56,6 +57,12 @@ async function main(): Promise<void> {
   }
 
   const database = db()
+
+  // fase 12: il broadcast si riempie quando il server ws esiste; il boot lo
+  // usa per il risveglio dei lotti (gli eventi persi prima della connessione
+  // della UI si ricaricano comunque al primo 'agents'/'subagents')
+  let broadcast: (e: SandbotEvent) => void = () => undefined
+  const emitBoot = (e: SandbotEvent): void => broadcast(e)
 
   // fase 11 (punto 2): la web search API di Ollama legge la chiave dal vault
   // sigillato (chiave AES dal Keychain, come i connettori)
@@ -97,18 +104,34 @@ async function main(): Promise<void> {
 
   // fase 11b (punto 2): gli orfani del browser (server Playwright MCP rimasti
   // vivi nel container alla morte del daemon) si uccidono dal pid file —
-  // best effort: senza docker o senza container non c'è nessun orfano
+  // best effort: senza docker o senza container non c'è nessun orfano.
+  // Fase 12 (punto 1): anche i pid file dei FIGLI (browser-<childId>.pid)
   try {
     const { killBrowserOrphans } = await import('../main/agent/browser')
-    await killBrowserOrphans(listAgents().map((a) => a.id))
+    const { allSubagentIds } = await import('../main/store/subagents')
+    await killBrowserOrphans([...listAgents().map((a) => a.id), ...allSubagentIds(database)])
   } catch {
     // niente da uccidere
   }
 
+  // fase 12 (punto 1): il loop registra qui il suo interrupt, così deleteAgent
+  // può fermare i figli di un padre eliminato
+  {
+    const loop = await import('../main/agent/loop')
+    store_setAgentStopper(loop.interrupt)
+  }
+
+  // fase 12 (punto 5): i lotti TUTTI terminali mai svegliati (crash tra la
+  // fine dell'ultimo figlio e l'accodamento del risveglio) si svegliano ora
+  {
+    const { wakeDueBatchesAtBoot } = await import('./subagent-ops')
+    const woken = wakeDueBatchesAtBoot(database, emitBoot)
+    if (woken > 0) console.log(`[sandbotd] ${woken} lotti di sottoagenti completati svegliati all'avvio`)
+  }
+
   const token = generateToken()
   let bridge: ReturnType<typeof attachHostBridge> | null = null
-  // dichiarati prima della closure del server e riempiti appena pronti
-  let broadcast: (e: SandbotEvent) => void = () => undefined
+  // pokeWorker si riempie quando il worker esiste
   let pokeWorker: () => void = () => undefined
 
   // fase 6: presenza, look-around al rientro, pausa routine per assenza
@@ -267,6 +290,7 @@ async function main(): Promise<void> {
   // fa i poll dei connettori, mette in pausa le routine se l'utente è via da
   // giorni e consegna l'outbox nella finestra (fase 6)
   const schedulerTimer = setInterval(() => {
+    void (async () => {
     const now = Date.now()
     try {
       tickScheduler(database, emit, now)
@@ -276,6 +300,15 @@ async function main(): Promise<void> {
       // fase 11 (punto 3): il tick dei comandi in background (exit file comparsi
       // in docker, scadenza delle 6 ore) — le notifiche SHELL_DONE partono da qui
       void import('../main/agent/shells').then((m) => m.tickShellJobs()).catch((e) => console.error('[sandbotd] shell jobs:', e))
+      // fase 12 (punto 4): la scadenza dei figli (queued/running oltre
+      // deadline_at) — interrupt, expired, risveglio del lotto
+      try {
+        const loop = await import('../main/agent/loop')
+        const ops = await import('./subagent-ops')
+        ops.tickSubagentDeadlines(database, { interrupt: loop.interrupt, now: () => Date.now() }, emit)
+      } catch (e) {
+        console.error('[sandbotd] scadenze sottoagenti:', e)
+      }
       worker.poke()
     } catch (e) {
       console.error('[sandbotd] scheduler:', e)
@@ -283,6 +316,7 @@ async function main(): Promise<void> {
     void tickConnectorPolls({ db: database, emit, now: () => Date.now(), callMcpTool: pollMcpTool }, Date.now())
       .then(() => worker.poke())
       .catch((e) => console.error('[sandbotd] poll connettori:', e))
+    })()
   }, 30_000)
   schedulerTimer.unref()
   // tick immediato all'avvio: recupera anche le routine scadute mentre era giù

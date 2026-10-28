@@ -31,6 +31,9 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
         automatic?: boolean
         // fase 8 (correzione B1): l'origine del task arriva anche al TASK_DONE
         untrusted?: boolean
+        // fase 12 (punto 5): il turno parte GIÀ contaminato (un figlio del lotto
+        // ha letto contenuti non fidati) — lift F8 sui tool con effetti
+        contaminated?: boolean
         // fase 7: meta extra del messaggio che apre il turno (es. templateName)
         extraMeta?: Record<string, unknown>
       }
@@ -46,6 +49,7 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
           : {}),
         ...(p.automatic ? { automatic: true } : {}),
         ...(p.untrusted ? { untrusted: true } : {}),
+        ...(p.contaminated ? { contaminated: true } : {}),
         ...(p.extraMeta ? { extraMeta: p.extraMeta } : {})
       })
       return
@@ -57,16 +61,54 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     // automatic, salvata sulla riga) vale per TUTTI i turni del task — anche
     // le continuazioni dopo ask_user o approval ripartono da qui.
     if (job.kind === 'task-run') {
-      const p = job.payload as { taskId: number; brief: string; respondedTo?: number }
+      const p = job.payload as { taskId: number; brief: string; respondedTo?: number; untrusted?: boolean; automatic?: boolean; contaminated?: boolean }
       const row = db.prepare('SELECT title, untrusted, automatic FROM tasks WHERE id = ?').get(p.taskId) as
         | { title?: string; untrusted?: number; automatic?: number }
         | undefined
+      // fase 12 (punto 5): un task-run può essere anche il RISVEGLIO del padre
+      // (brief = <risultati_sottoagenti>) — le bandiere del payload valgono
+      // COME le righe del task (B1: l'origine non si perde)
       const opening = `[task n. ${p.taskId}${row?.title ? ` "${row.title}"` : ''} — per chiuderlo: update_task con id ${p.taskId}]\n${p.brief}`
       await runTurnFn(job.agent_id, opening, emit, undefined, {
         source: 'user', taskId: p.taskId, ...opts, onTurnEntry,
         ...(p.respondedTo !== undefined ? { respondedTo: p.respondedTo } : {}),
-        ...(row?.untrusted ? { untrusted: true } : {}),
-        ...(row?.automatic ? { automatic: true } : {})
+        ...(row?.untrusted || p.untrusted ? { untrusted: true } : {}),
+        ...(row?.automatic || p.automatic ? { automatic: true } : {}),
+        ...(p.contaminated ? { contaminated: true } : {})
+      })
+      return
+    }
+    // fase 12 (punti 3-4): il turno del FIGLIO — primo job = il brief (blocco
+    // evidenza <brief>), i successivi = i messaggi del padre. La riga dice
+    // untrusted/automatic (ereditati dal turno che ha lanciato, come B1).
+    // status running + started_at al PRIMO turno; R1 vale così com'è (il
+    // figlio è un agente con le sue entry). Un figlio già terminale (stop o
+    // scadenza arrivati prima del job) non parte.
+    if (job.kind === 'subagent-run') {
+      const p = job.payload as { subagentId: string; first?: boolean; message?: string; entryId?: number }
+      const { getSubagent, updateSubagent } = await import('../main/store/subagents')
+      const row = getSubagent(db, p.subagentId)
+      if (!row) return
+      if (row.status === 'done' || row.status === 'failed' || row.status === 'stopped' || row.status === 'expired') return
+      if (row.status === 'queued') {
+        updateSubagent(db, row.id, { status: 'running', started_at: Date.now() })
+        const { subagentsChanged } = await import('./subagent-ops')
+        subagentsChanged(row.parent_id, emit)
+      }
+      // il nome del padre si legge dalla STESSA connessione del job (come le
+      // righe del task): il runner non dipende dallo store globale
+      const parent = db.prepare('SELECT name FROM agents WHERE id = ?').get(row.parent_id) as { name?: string } | undefined
+      const agentMessage = await import('../shared/agent-message')
+      const opening = p.message !== undefined && parent
+        ? agentMessage.formatSubagentParentMessage(parent.name ?? row.parent_id, p.message)
+        : agentMessage.formatSubagentBrief(row.title, row.brief)
+      await runTurnFn(row.id, opening, emit, undefined, {
+        source: 'user',
+        subagent: { id: row.id, parentId: row.parent_id },
+        ...opts,
+        onTurnEntry,
+        ...(row.untrusted ? { untrusted: true } : {}),
+        ...(row.automatic ? { automatic: true } : {})
       })
       return
     }

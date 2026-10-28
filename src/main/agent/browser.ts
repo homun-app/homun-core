@@ -27,11 +27,12 @@ import {
   errorSection, fieldIsCredential, SNAPSHOT_BLOCKED_NOTE, type RefInfo, type FieldProbeInfo
 } from './browser-guard'
 import {
-  dockerBrowserMcpArgv, browserMcpFlags, BOX_CONTAINER, BROWSER_PID_FILE,
-  BROWSER_IDLE_MS, BROWSERS_PER_BOX_MAX, boxHomePath, dockerReadFileArgv, dockerKillGroupArgv
+  dockerBrowserMcpArgv, browserMcpFlags, BOX_CONTAINER,
+  BROWSER_IDLE_MS, BROWSERS_PER_BOX_MAX, boxHomePath, browserPidFile, dockerReadFileArgv, dockerKillGroupArgv
 } from '../sandbox/docker-argv'
 import {
-  sandboxMode, browserSandboxOk, ensureBoxContainer, ensureBotHome, runDockerRaw
+  sandboxMode, browserSandboxOk, ensureBoxContainer, ensureBotHome, runDockerRaw,
+  boxOwnerOf, isSubagent
 } from '../sandbox'
 import { ensureBrowserProxy } from './browser-proxy'
 import { parseShellPgid } from './shells'
@@ -230,9 +231,12 @@ async function killOrphanByPidFile(pidFileContent: string | null): Promise<void>
 
 export async function killBrowserOrphan(agentId: string): Promise<void> {
   if (sandboxMode() !== 'docker') return
-  const home = boxHomePath(agentId)
+  // fase 12 (punto 1): il pid file di un FIGLIO sta nella home del padre e
+  // porta il suo id nel nome
+  const home = boxHomePath(boxOwnerOf(agentId))
+  const pidFile = browserPidFile(agentId, isSubagent(agentId))
   // best effort: senza container o senza pid file non c'è nessun orfano
-  const r = await runDockerRaw(dockerReadFileArgv(BOX_CONTAINER, `${home}/${BROWSER_PID_FILE}`), { timeoutMs: 15_000 }).catch(() => null)
+  const r = await runDockerRaw(dockerReadFileArgv(BOX_CONTAINER, `${home}/${pidFile}`), { timeoutMs: 15_000 }).catch(() => null)
   if (!r || r.exitCode !== 0) return
   await killOrphanByPidFile(r.stdout)
 }
@@ -276,9 +280,13 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
     }
   } else {
     await ensureBoxContainer()
-    await ensureBotHome(agentId) // -w punta alla home del bot
+    await ensureBotHome(agentId) // -w punta alla home (del proprietario)
     await killBrowserOrphan(agentId)
-    args = dockerBrowserMcpArgv(agentId, proxyPort)
+    // fase 12 (punto 1): il browser di un FIGLIO ha istanza e pid file SUOI,
+    // --isolated al posto del profilo persistente e l'output separato — ma
+    // gira nella HOME DEL PADRE (condivisa)
+    const child = isSubagent(agentId)
+    args = dockerBrowserMcpArgv(agentId, proxyPort, { child, home: boxHomePath(boxOwnerOf(agentId)) })
   }
   const client = new Client({ name: 'sandbot', version: '0.1.0' })
   await client.connect(new StdioClientTransport(env ? { command, args, env } : { command, args }))
@@ -480,7 +488,9 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
       // fase 12 (0c): al modello solo il path del file e l'eventuale errore —
       // niente `### Ran Playwright code` né link alle uscite del server
       const err = errorSection(mcpText(res))
-      const path = `${boxHomePath(agentId)}/${filename}`
+      // fase 12 (punto 1): il file finisce nella home del PROPRIETARIO (il
+      // server MCP gira lì): per un figlio è la home del padre
+      const path = `${boxHomePath(boxOwnerOf(agentId))}/${filename}`
       return { output: `Screenshot salvato nel box: ${path}${err ? `\n${err}` : ''}`, meta: { screenshot: path } }
     }
     case 'browser_close':

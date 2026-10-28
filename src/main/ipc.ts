@@ -24,6 +24,7 @@ export const DAEMON_RPC_CHANNELS = [
   'presence:signal', 'presence:viewing', 'outbox:opened',
   // fase 8 (§3bis L7): task thread
   'tasks:list', 'tasks:cancel',
+  'subagents:list', 'subagents:stop',
   // fase 10: gruppi di bot (sidebar, vista gruppo, scrittura come utente)
   'groups:list', 'groups:messages', 'groups:send-user',
   'memory:list', 'memory:update', 'memory:delete',

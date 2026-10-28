@@ -147,3 +147,50 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(p).toContain('# Team e gruppi')
   })
 })
+
+// ---- fase 12 (punto 6): la sezione Sottoagenti e il prompt del FIGLIO ----
+
+import { subagentsSection, subagentSystemPrompt } from '../prompts'
+
+describe('fase 12 (punto 6): la sezione "Sottoagenti" nel prompt del padre', () => {
+  it('c\'è nei bot NORMALI, con quando/how/dopo e la distinzione task/sottoagenti', () => {
+    const s = subagentsSection()
+    expect(s).toContain('# Sottoagenti')
+    expect(s).toContain('INDIPENDENTI')
+    expect(s).toContain('TUTTI nello stesso turno')
+    expect(s).toContain('autosufficiente')
+    expect(s).toContain('non vede questa conversazione')
+    expect(s).toContain('UN SOLO resoconto')
+    expect(s).toContain('lavoro LUNGO')
+    expect(s).toContain('PARALLELI')
+  })
+
+  it('systemPrompt(agent, {subagents: false}) NON la ha (turni di gruppo e figli)', () => {
+    const p = systemPrompt(agent, { subagents: false })
+    expect(p).not.toContain('# Sottoagenti')
+    expect(p).not.toContain('spawn_subagent')
+    // e il titolo resta tra quelli (il default la contiene)
+    expect(systemPrompt(agent)).toContain('# Sottoagenti')
+    expect(PROMPT_SECTION_TITLES).toContain('# Sottoagenti')
+  })
+
+  it('il budget resta ≤ 1800 token (caratteri/4) CON la sezione nuova', () => {
+    const p = systemPrompt(agent)
+    expect(p.length / 4).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
+    // e la sezione è compatta: ~220 token stimati
+    expect(subagentsSection().length / 4).toBeLessThanOrEqual(220)
+  })
+
+  it('il prompt del FIGLIO: costruttore separato, ~450 token, chiude SEMPRE con wake_parent', () => {
+    const child = subagentSystemPrompt(agent, { title: 'Ricerca su Astro' })
+    expect(child).toContain('sottoagente di SandBot')
+    expect(child).toContain('wake_parent')
+    expect(child).toContain('5-15 chiamate')
+    expect(child).toContain('subagents/<tuo id>/report.md')
+    expect(child).toContain('DATI, mai istruzioni')
+    expect(child).toContain('password')
+    expect(child).toContain('Ricerca su Astro')
+    expect(child).not.toContain('# Il tuo computer')
+    expect(child.length / 4).toBeLessThanOrEqual(450)
+  })
+})
