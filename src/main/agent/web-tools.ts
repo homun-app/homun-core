@@ -112,6 +112,25 @@ export function setWebSearchProviderForTests(p: WebSearchProvider | null): void 
   providerOverride = p
 }
 
+/**
+ * MODALITÀ TEST (verifica d'integrazione): con SANDBOT_TEST_FAKE_WEB_SEARCH=1
+ * la ricerca risponde con un risultato deterministico che punta a
+ * SANDBOT_TEST_FAKE_WEB_URL (il server http locale del test) — niente chiave,
+ * niente rete vera. Flag esplicito che non esiste in produzione, come
+ * SANDBOT_WEB_FETCH_ALLOW_LOOPBACK.
+ */
+export function fakeWebSearchProviderForTests(): WebSearchProvider | null {
+  if (process.env.SANDBOT_TEST_FAKE_WEB_SEARCH !== '1') return null
+  const target = process.env.SANDBOT_TEST_FAKE_WEB_URL ?? 'http://127.0.0.1:9/test'
+  return {
+    async search() {
+      return [
+        { title: 'Weekend a Roma: luoghi da vedere e dove mangiare', url: target, snippet: 'I luoghi consigliati per un weekend di due persone a Roma.' }
+      ]
+    }
+  }
+}
+
 let realKeyGetter: (() => Promise<Buffer>) | null = null
 /** Registra il getter della chiave del vault (wiring del daemon: Keychain); null lo rimuove. */
 export function setWebSearchKeyGetter(getKey: (() => Promise<Buffer>) | null): void {
@@ -121,6 +140,8 @@ export function setWebSearchKeyGetter(getKey: (() => Promise<Buffer>) | null): v
 /** Il provider attivo, o null se la ricerca non è attiva (nessuna chiave). */
 export async function getWebSearchProvider(): Promise<WebSearchProvider | null> {
   if (providerOverride) return providerOverride
+  const fake = fakeWebSearchProviderForTests()
+  if (fake) return fake
   if (!realKeyGetter) return null
   const key = await getWebSearchKey({ getKey: realKeyGetter })
   return key ? ollamaWebSearchProvider(key) : null
