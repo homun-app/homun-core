@@ -18,12 +18,18 @@ const model = flag('model', 'kimi-k3:cloud')
 const runs = flag('runs', '3')
 const min = flag('min', '41')
 const baseUrl = flag('base-url', 'http://127.0.0.1:11434')
+// fase 11 (residuo 0a): filtro sui casi (es. --cases 9,11,13,14) — passa il
+// filtro a EVAL_ONLY della suite, che seleziona gli id corrispondenti
+const cases = flag('cases', '')
 
-console.log(`eval fase 9 — modello=${model} runs=${runs} provider=${baseUrl}`)
+console.log(`eval fase 9 — modello=${model} runs=${runs} provider=${baseUrl}${cases ? ` casi=${cases}` : ''}`)
 console.log(`soglia: almeno ${min} pass (il totale casi × run lo stampa la suite)\n`)
 
 const r = spawnSync('npx', ['vitest', 'run', '--config', 'vitest.eval.config.ts'], {
   stdio: 'inherit',
-  env: { ...process.env, EVAL_MODEL: model, EVAL_RUNS: runs, EVAL_MIN: min, EVAL_BASE_URL: baseUrl }
+  env: {
+    ...process.env, EVAL_MODEL: model, EVAL_RUNS: runs, EVAL_MIN: min, EVAL_BASE_URL: baseUrl,
+    ...(cases ? { EVAL_ONLY: cases } : {})
+  }
 })
 process.exit(r.status ?? 1)

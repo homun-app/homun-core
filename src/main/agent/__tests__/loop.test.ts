@@ -3079,6 +3079,73 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
   })
 
+  // ---- fase 11 (residuo 0b): risposta vuota del membro CHIAMATO ----
+
+  it('0b: risposta VUOTA del membro CHIAMATO → UNA chiamata di recupero col sollecito dedicato, poi il post passa dal percorso del turno', async () => {
+    setupGroup()
+    h.llm.queue = [
+      {}, // risposta vuota: né testo né tool
+      (msgs: Array<{ role: string; content: string }>, tools: unknown[]) => {
+        // il sollecito del chiamato e SOLO i tool del sollecito
+        expect(msgs.some((m) => m.role === 'user' && m.content.includes('Sei stato chiamato e non hai risposto'))).toBe(true)
+        expect((tools as Array<{ name: string }>).map((t) => t.name).sort()).toEqual(['pass', 'post_to_group'])
+        return { toolCalls: [{ id: 'cv1', name: 'post_to_group', arguments: JSON.stringify({ text: 'eccomi: la scaletta è pronta' }) }] }
+      },
+      { toolCalls: [{ id: 'cv2', name: 'pass', arguments: '{}' }] }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 1, rootId: 50, called: true }, untrusted: true
+    })
+    // vuota + recupero + chiusura col pass
+    expect(h.llm.calls).toHaveLength(3)
+    const post = h.db.groupsState.messages.find((m) => m.author_kind === 'agent')!
+    expect(post.text).toContain('eccomi')
+    expect(post.depth).toBe(2) // depth letta + 1, come i post del turno normale
+    expect(post.root_id).toBe(50)
+  })
+
+  it('0b: risposta vuota NON chiamato → nessun recupero: STOPPED model-error come prima', async () => {
+    setupGroup()
+    h.llm.queue = [{}]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 1, rootId: 50 }, untrusted: true
+    })
+    expect(h.llm.calls).toHaveLength(1)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && (e.content as string).includes('non ha prodotto risposta'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED' && e.meta?.stopReason === 'model-error')).toBe(true)
+  })
+
+  it('0b: CHIUSURA con risposta vuota → il recupero chiede send_to_user (post lì è rifiutato)', async () => {
+    setupGroup()
+    let recoveryTools: string[] = []
+    h.llm.queue = [
+      {},
+      (_msgs: Array<{ role: string; content: string }>, tools: unknown[]) => {
+        recoveryTools = (tools as Array<{ name: string }>).map((t) => t.name)
+        return { toolCalls: [{ id: 'cv3', name: 'send_to_user', arguments: JSON.stringify({ text: 'RIEPILOGO: tutto pronto.' }) }] }
+      },
+      { text: 'consegnato' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno" chiusura="true">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 5, rootId: 50, closing: true, called: true }, untrusted: true
+    })
+    expect(h.llm.calls).toHaveLength(3)
+    expect([...recoveryTools].sort()).toEqual(['pass', 'send_to_user'])
+    expect(h.db.entries.findLast((e) => e.kind === 'send-message')!.content).toContain('RIEPILOGO')
+  })
+
+  it('0b: il recupero del chiamato è UNO — seconda risposta vuota chiude STOPPED senza altri solleciti', async () => {
+    setupGroup()
+    h.llm.queue = [{}, {}]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 1, rootId: 50, called: true }, untrusted: true
+    })
+    expect(h.llm.calls).toHaveLength(2)
+    const solleciti = h.llm.calls.filter((c) => c.some((m) => m.role === 'user' && String(m.content).includes('Sei stato chiamato')))
+    expect(solleciti).toHaveLength(1)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED' && e.meta?.stopReason === 'model-error')).toBe(true)
+  })
+
   it('E2: turno di CHIUSURA con testo libero senza send_to_user → il recupero chiede send_to_user (o pass) e la consegna passa', async () => {
     setupGroup()
     let recoveryTools: string[] = []

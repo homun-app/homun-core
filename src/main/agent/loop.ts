@@ -51,7 +51,8 @@ import { shouldUseFallback } from './model-fallback'
 import { getGroup, getGroupMessage, isGroupMember, addGroupMessage, scheduleTurnsForMessage } from '../store/groups'
 import {
   nextPostDepth, hasSentToUserInChain, alreadySentToUserResult,
-  needsGroupRecovery, groupRecoveryTools, GROUP_RECOVERY_NUDGE, GROUP_CLOSING_RECOVERY_NUDGE
+  needsGroupRecovery, groupRecoveryTools, GROUP_RECOVERY_NUDGE, GROUP_CLOSING_RECOVERY_NUDGE,
+  GROUP_CALLED_RECOVERY_NUDGE, GROUP_CALLED_CLOSING_RECOVERY_NUDGE
 } from './group-turns'
 import { MAX_CREATE_AGENTS_PER_TURN } from './tools'
 import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
@@ -240,6 +241,12 @@ export interface RunTurnOptions {
      * l'apertura porta il flag chiusura="true".
      */
     closing?: boolean
+    /**
+     * Fase 11 (residuo 0b): il membro era @menzionato nella finestra letta
+     * (@tutti compreso) oppure è il turno di chiusura. Con risposta vuota e
+     * called vero il loop fa UNA chiamata di recupero col sollecito dedicato.
+     */
+    called?: boolean
   }
 }
 
@@ -676,6 +683,30 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       if (text.trim()) lastFreeText = text
 
       if (!text && !final.toolCalls?.length) {
+        // fase 11 (residuo 0b): risposta VUOTA in un turno di gruppo del membro
+        // CHIAMATO (menzionato nella finestra o turno di chiusura) → UNA chiamata
+        // di recupero col sollecito dedicato, lo stesso passo in più di E2 per il
+        // testo libero non pubblicato; il chiamato che non risponde non lascia la
+        // richiesta senza risposta
+        if (
+          opts.groupTurn !== undefined && !groupRecoveryDone &&
+          needsGroupRecovery({
+            finished: true,
+            passed: passedSilence,
+            posted: groupPosted,
+            userContact: scopedEntries().some((e) => e.id > turnEntryId && (e.kind === 'send-message' || e.kind === 'approval')),
+            freeText: '',
+            called: opts.groupTurn.called
+          })
+        ) {
+          groupRecoveryDone = true
+          turnTools = groupRecoveryTools(allTools, opts.groupTurn.closing === true)
+          messages.push({
+            role: 'user',
+            content: opts.groupTurn.closing ? GROUP_CALLED_CLOSING_RECOVERY_NUDGE : GROUP_CALLED_RECOVERY_NUDGE
+          })
+          continue
+        }
         add({ agentId, kind: 'notice', role: 'system', content: 'Il modello non ha prodotto risposta (vuota).' })
         emitLastEntry(agentId, emit)
         endTurn(agentId, 'STOPPED', emit, opts.taskId, 'model-error')
@@ -700,7 +731,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             passed: passedSilence,
             posted: groupPosted,
             userContact: scopedEntries().some((e) => e.id > turnEntryId && (e.kind === 'send-message' || e.kind === 'approval')),
-            freeText: text
+            freeText: text,
+            called: opts.groupTurn.called
           })
         ) {
           groupRecoveryDone = true

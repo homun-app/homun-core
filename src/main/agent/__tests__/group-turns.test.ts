@@ -17,7 +17,8 @@ import {
   GROUP_MEMBER_CHAIN_POSTS_MAX, GROUP_CLOSING_LINE,
   shouldScheduleClosingTurn, closingTurnNonce, isClosingNonce, memberWaitingForUser,
   hasSentToUserInChain, alreadySentToUserResult, readChainDepth,
-  needsGroupRecovery, groupRecoveryTools, GROUP_RECOVERY_NUDGE, GROUP_CLOSING_RECOVERY_NUDGE
+  needsGroupRecovery, groupRecoveryTools, GROUP_RECOVERY_NUDGE, GROUP_CLOSING_RECOVERY_NUDGE,
+  GROUP_CALLED_RECOVERY_NUDGE, GROUP_CALLED_CLOSING_RECOVERY_NUDGE
 } from '../group-turns'
 
 const MEMBERS = [
@@ -479,6 +480,8 @@ describe('buildGroupTurnOpening (puro)', () => {
     expect(o).toContain('[bot] Coordinatore: @Cercatore Cena tre opzioni')
     expect(o).toContain('(in risposta a Fabio: «Serve il menu entro stasera»)')
     expect(o).toContain('Sei Cercatore Cena')
+    // fase 11 (residuo 0c): il nome proprio non si menziona da solo
+    expect(o).toContain('Tu sei @Cercatore Cena: non menzionarti nei tuoi messaggi.')
   })
 
   it('la REGOLA dei turni di gruppo accompagna il blocco', () => {
@@ -575,5 +578,27 @@ describe('correzione E2: needsGroupRecovery e i tool del recupero (puri)', () =>
     expect(GROUP_RECOVERY_NUDGE).toContain('Il tuo testo NON è stato pubblicato')
     expect(GROUP_RECOVERY_NUDGE).toContain('pubblicala ORA con post_to_group')
     expect(GROUP_CLOSING_RECOVERY_NUDGE).toContain('mandala ORA con send_to_user')
+  })
+
+  // fase 11 (residuo 0b): risposta vuota del membro CHIAMATO
+  it('risposta VUOTA con called vero → serve il recupero (il chiamato non lascia la richiesta senza risposta)', () => {
+    const vuota = { ...testo, freeText: '' }
+    expect(needsGroupRecovery(vuota)).toBe(false) // non chiamato: come prima, silenzio/STOPPED
+    expect(needsGroupRecovery({ ...vuota, called: true })).toBe(true)
+  })
+
+  it('called vero NON basta se il turno ha post, pass, contatto utente o non è FINISHED (le altre regole di E2 restano)', () => {
+    const base = { ...testo, freeText: '', called: true }
+    expect(needsGroupRecovery({ ...base, passed: true })).toBe(false)
+    expect(needsGroupRecovery({ ...base, posted: true })).toBe(false)
+    expect(needsGroupRecovery({ ...base, userContact: true })).toBe(false)
+    expect(needsGroupRecovery({ ...base, finished: false })).toBe(false)
+  })
+
+  it('i solleciti del chiamato (0b): post_to_group nel gruppo, send_to_user nella chiusura', () => {
+    expect(GROUP_CALLED_RECOVERY_NUDGE).toContain('Sei stato chiamato e non hai risposto')
+    expect(GROUP_CALLED_RECOVERY_NUDGE).toContain('post_to_group')
+    expect(GROUP_CALLED_CLOSING_RECOVERY_NUDGE).toContain('Sei stato chiamato e non hai risposto')
+    expect(GROUP_CALLED_CLOSING_RECOVERY_NUDGE).toContain('send_to_user')
   })
 })

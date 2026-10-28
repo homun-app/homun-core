@@ -27,7 +27,7 @@ import {
 import {
   buildGroupTurnOpening, GROUP_WINDING_DOWN_DEPTH, GROUP_RATE_LIMIT_TEXT,
   shouldScheduleClosingTurn, memberWaitingForUser, closingTurnNonce, readChainDepth,
-  needsGroupRecovery
+  needsGroupRecovery, parseMentions
 } from '../main/agent/group-turns'
 import { setJobEntryId, getJobById, type Job } from '../main/store/jobs'
 import type { runTurn, RunTurnOptions } from '../main/agent/loop'
@@ -117,6 +117,14 @@ export async function runGroupTurnJob(
   // sta chiudendo), non l'ultima arrivata nella finestra
   const chainRootId = p.closing && typeof p.rootId === 'number' ? p.rootId : win.rootId
   const agents = memberIds.map((id) => getAgent(id)).filter((a): a is NonNullable<typeof a> => !!a)
+  // fase 11 (residuo 0b): il membro era @menzionato nella finestra letta
+  // (@tutti compreso) oppure è il turno di chiusura — con risposta vuota il
+  // loop farà UNA chiamata di recupero col sollecito dedicato
+  const called = p.closing === true || win.messages.some((m) => {
+    if (m.author_kind === 'system') return false
+    const mentions = parseMentions(m.text, agents.map((a) => ({ id: a.id, name: a.name })))
+    return mentions.all || mentions.ids.includes(p.memberId)
+  })
   const opening = buildGroupTurnOpening({
     group: { id: group.id, name: group.name, description: group.description },
     me: { name: me.name },
@@ -155,7 +163,8 @@ export async function runGroupTurnJob(
       groupId: group.id,
       readMaxDepth: win.maxDepth,
       rootId: chainRootId,
-      ...(p.closing ? { closing: true } : {})
+      ...(p.closing ? { closing: true } : {}),
+      ...(called ? { called: true } : {})
     },
     ...(typeof job.payload.entryId === 'number' ? { resume: { entryId: job.payload.entryId } } : {}),
     onTurnEntry: (entryId: number): void => {
@@ -217,7 +226,9 @@ export async function runGroupTurnJob(
     posted,
     userContact: turnEntry.some((e) => e.kind === 'send-message' || e.kind === 'approval'),
     // l'ultimo testo libero del modello = ultima thinking non vuota del turno
-    freeText: [...turnEntry].reverse().find((e) => e.kind === 'thinking' && e.content.trim())?.content ?? ''
+    freeText: [...turnEntry].reverse().find((e) => e.kind === 'thinking' && e.content.trim())?.content ?? '',
+    // residuo 0b: stessa fonte del loop (menzione nella finestra o chiusura)
+    called
   })
   finish(outcome, unpublishedText ? 'testo non pubblicato' : undefined)
 

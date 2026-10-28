@@ -8,9 +8,8 @@
 import { spawn } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { readFile, writeFile, readdir, mkdir } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
-import { getSetting } from '../store/db'
+import { getSetting, dataDir } from '../store/db'
 import {
   dockerExecArgv,
   dockerReadFileArgv,
@@ -50,8 +49,23 @@ function sandboxNetwork(): SandboxNetwork {
   return getSetting<SandboxNetwork>('sandbox.network', 'bridge')
 }
 
+/**
+ * Fase 11 (residuo 0d + §3bis L1): la radice del BOX CONDIVISO vive nella
+ * directory DATI (<dir dati>/box), non più nella home dell'utente: il box è
+ * un computer dei bot, non un file dell'utente, e la directory dati è già
+ * quella dell'app (iniettabile nei test: radice mai nella home reale).
+ * Struttura (punto 1): <radice>/workspace (comune a tutti i bot) e
+ * <radice>/home/<agentId> (la home di ciascun bot).
+ */
+export function boxRoot(): string {
+  const root = join(dataDir(), 'box')
+  mkdirSync(join(root, 'workspace'), { recursive: true })
+  return root
+}
+
+/** La home del bot dentro il box condiviso (cwd predefinita dei suoi comandi). */
 export function boxDir(agentId: string): string {
-  const dir = join(homedir(), 'SandBot', agentId, 'box')
+  const dir = join(boxRoot(), 'home', agentId)
   mkdirSync(dir, { recursive: true })
   return dir
 }

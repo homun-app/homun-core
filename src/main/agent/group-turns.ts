@@ -416,6 +416,9 @@ export function buildGroupTurnOpening(ev: GroupTurnEvidence): string {
     `Gruppo: ${ev.group.name}`,
     ev.group.description ? `Scopo e regole del gruppo: ${ev.group.description}` : '',
     `Sei ${ev.me.name}: questo è il tuo turno in questo gruppo. I PARTECIPANTI (tu compreso; l'utente legge tutto):`,
+    // fase 11 (residuo 0c): il nome proprio non si menziona da solo — senza
+    // questa riga il coordinatore apriva i post con "@Coordinatore …"
+    `Tu sei @${ev.me.name}: non menzionarti nei tuoi messaggi.`,
     peers.length ? peers.join('\n') : '- (solo tu e l\'utente)',
     // correzione C6a: le entry dei turni precedenti SONO nella storia del membro
     'MESSAGGI NUOVI da leggere (questi sono i messaggi dopo il tuo ultimo turno; quelli precedenti li hai già letti):',
@@ -510,6 +513,18 @@ export const GROUP_RECOVERY_NUDGE =
 export const GROUP_CLOSING_RECOVERY_NUDGE =
   "Il tuo testo NON è stato pubblicato: l'utente non l'ha letto. Se è un riepilogo o una comunicazione per lui, mandala ORA con send_to_user; se non hai nulla da dirgli, chiama pass."
 
+/**
+ * Fase 11 (residuo 0b): il sollecito quando il membro CHIAMATO non ha risposto
+ * affatto (risposta vuota: né testo né tool). Nella chiusura la consegna
+ * equivalente è per l'utente, non per il gruppo (post_to_group lì è rifiutato).
+ */
+export const GROUP_CALLED_RECOVERY_NUDGE =
+  'Sei stato chiamato e non hai risposto: pubblica ora con post_to_group, oppure chiama pass.'
+
+/** La variante del sollecito 0b per il turno di CHIUSURA (si scrive all'utente). */
+export const GROUP_CALLED_CLOSING_RECOVERY_NUDGE =
+  'Sei stato chiamato e non hai risposto: manda ora il riepilogo all\'utente con send_to_user, oppure chiama pass.'
+
 export interface GroupRecoveryInput {
   /** il turno è finito FINISHED (sugli esiti interrotti niente recupero) */
   finished: boolean
@@ -521,6 +536,13 @@ export interface GroupRecoveryInput {
   userContact: boolean
   /** l'ultimo testo libero del modello (dopo trim decide se vale il recupero) */
   freeText: string
+  /**
+   * Fase 11 (residuo 0b): il membro era @menzionato nella finestra letta (o
+   * @tutti), oppure è il turno di chiusura. Con risposta VUOTA e called vero
+   * vale lo stesso UNA chiamata di recupero col sollecito dedicato: il chiamato
+   * che non risponde non lascia la richiesta senza risposta.
+   */
+  called?: boolean
 }
 
 /**
@@ -530,9 +552,14 @@ export interface GroupRecoveryInput {
  * chiamata di recupero col sollecito dedicato. Se anche quella risponde solo
  * testo il turno resta PASS: il testo NON diventa mai un post (i turni di
  * gruppo sono untrusted, il ragionamento non trapela nel gruppo).
+ * Residuo 0b: vale il recupero anche con risposta VUOTA quando il membro era
+ * CHIAMATO (menzionato nella finestra o turno di chiusura); le altre regole
+ * restano uguali.
  */
 export function needsGroupRecovery(input: GroupRecoveryInput): boolean {
-  return input.finished && !input.passed && !input.posted && !input.userContact && input.freeText.trim() !== ''
+  if (!input.finished || input.passed || input.posted || input.userContact) return false
+  if (input.freeText.trim() !== '') return true
+  return input.called === true
 }
 
 /**

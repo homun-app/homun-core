@@ -445,8 +445,9 @@ describe('correzione D1: la profondità conta SOLO la catena del turno', () => {
     const u7 = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: "@Coordinatore aggiungi un'opzione vegetariana", depth: 0 })
     const seen: Seen[] = []
     await runGroupTurnJob(db(), scriptedDeps(seen, { post: 'chiamo lo chef' }), jobFor(coord.id, g, u7.id), emit)
-    // catena del turno = quella dell'ULTIMO messaggio (la nuova), depth 0
-    expect(seen[0]!.opts.groupTurn).toEqual({ groupId: g.id, readMaxDepth: 0, rootId: u7.id })
+    // catena del turno = quella dell'ULTIMO messaggio (la nuova), depth 0;
+    // residuo 0b: la @menzione nella finestra porta called=true
+    expect(seen[0]!.opts.groupTurn).toEqual({ groupId: g.id, readMaxDepth: 0, rootId: u7.id, called: true })
     // nessun windingDown: è la prima risposta a una richiesta nuova
     expect(seen[0]!.text).not.toContain('Il giro sta CHIUDENDO')
     // il post esce a depth 1 nella catena nuova (prima: 5, con windingDown)
@@ -467,7 +468,7 @@ describe('correzione D1: la profondità conta SOLO la catena del turno', () => {
     const u2 = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: "@Cercatore Cena un'alternativa?", depth: 0 })
     const seen: Seen[] = []
     await runGroupTurnJob(db(), scriptedDeps(seen, { post: '@Chef Menu aggiorniamo il menu' }), jobFor(bot.id, g, u2.id), emit)
-    expect(seen[0]!.opts.groupTurn).toEqual({ groupId: g.id, readMaxDepth: 0, rootId: u2.id })
+    expect(seen[0]!.opts.groupTurn).toEqual({ groupId: g.id, readMaxDepth: 0, rootId: u2.id, called: true })
     // il post esce a depth 1 (prima: 7 → planGroupTurns chiudeva SUBITO la catena)
     const post = groupMessages(g.id).findLast((m) => m.author_kind === 'agent' && m.author_id === bot.id)!
     expect(post.depth).toBe(1)

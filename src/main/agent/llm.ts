@@ -3,7 +3,39 @@
 // Aggiungere un provider = base URL + API key nella config, zero codice.
 import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
+import { appendFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { dataDir } from '../store/db'
 import type { ProviderConfig } from '../../shared/types'
+
+// ---- fase 11 (residuo 0a): traccia diagnostica delle chiamate ----
+
+/** I numeri di una chiamata completata (MAI il contenuto dei messaggi, mai segreti). */
+export interface LlmTraceRecord {
+  at: string
+  model: string
+  finishReason: string
+  contentLength: number
+  reasoningLength: number
+  toolCalls: number
+  usage: { input: number; output: number } | null
+}
+
+/**
+ * Con SANDBOT_LLM_TRACE=1 appende una riga JSON in <directory dati>/llm-trace.jsonl
+ * per OGNI chiamata completata: modello, finish_reason, lunghezza del content,
+ * lunghezza del ragionamento, numero di tool call e usage. Serve a diagnosticare
+ * le risposte vuote dei modelli cloud col contesto lungo (indagine 0a): mai il
+ * contenuto dei messaggi, mai chiavi o token.
+ */
+export function traceLlmCall(rec: LlmTraceRecord): void {
+  if (process.env.SANDBOT_LLM_TRACE !== '1') return
+  try {
+    appendFileSync(join(dataDir(), 'llm-trace.jsonl'), JSON.stringify(rec) + '\n')
+  } catch {
+    // directory dati non disponibile (es. harness senza store): traccia persa, la chiamata resta
+  }
+}
 
 // ---- formato interno unificato ----
 export interface ToolDef {
@@ -130,19 +162,24 @@ function openAiStream(p: ProviderConfig, messages: ChatMessage[], tools: ToolDef
 
   async function* iterate(): AsyncIterable<LlmChunk> {
     const stream = await client.chat.completions.create(
-      { model, messages: typedMessages, tools: oaiTools.length ? oaiTools : undefined, stream: true, ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}) },
+      { model, messages: typedMessages, tools: oaiTools.length ? oaiTools : undefined, stream: true, stream_options: { include_usage: true }, ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}) },
       { signal }
     )
     const acc = new Map<number, { id: string; name: string; args: string }>()
     let finish = 'stop'
+    // residuo 0a: numeri per la traccia diagnostica (mai il contenuto)
+    let contentLen = 0
+    let reasoningLen = 0
+    let usage: { input: number; output: number } | null = null
     for await (const part of stream) {
+      if (part.usage) usage = { input: part.usage.prompt_tokens ?? 0, output: part.usage.completion_tokens ?? 0 }
       const c = part.choices?.[0]
       if (!c) continue
-      if (c.delta?.content) yield { textDelta: c.delta.content }
+      if (c.delta?.content) { contentLen += c.delta.content.length; yield { textDelta: c.delta.content } }
       // modelli reasoning (Ollama/DeepSeek/QwQ): thinking in delta.reasoning o reasoning_content
       const reasoning = (c.delta as unknown as { reasoning?: string; reasoning_content?: string }).reasoning
         ?? (c.delta as unknown as { reasoning_content?: string }).reasoning_content
-      if (reasoning) yield { reasoningDelta: reasoning }
+      if (reasoning) { reasoningLen += reasoning.length; yield { reasoningDelta: reasoning } }
       // §5.4: itera TUTTI i delta del chunk, accumulando per index
       if (c.delta?.tool_calls?.length) {
         mergeToolCallDeltas(acc, c.delta.tool_calls as ToolCallDelta[])
@@ -151,6 +188,7 @@ function openAiStream(p: ProviderConfig, messages: ChatMessage[], tools: ToolDef
     }
     const ordered = mergeToolCallDeltas(acc, [])
     const toolCalls = ordered.map((v) => ({ id: v.id, name: v.name, arguments: v.args }))
+    traceLlmCall({ at: new Date().toISOString(), model, finishReason: finish, contentLength: contentLen, reasoningLength: reasoningLen, toolCalls: toolCalls.length, usage })
     yield { toolCalls: toolCalls.length ? toolCalls : undefined, finishReason: finish }
   }
 
@@ -244,8 +282,19 @@ function anthropicStream(p: ProviderConfig, messages: ChatMessage[], tools: Tool
     )
     let finish = 'stop'
     const toolCalls: ToolCall[] = []
+    // residuo 0a: numeri per la traccia diagnostica (mai il contenuto)
+    let contentLen = 0
+    let reasoningLen = 0
+    let usage: { input: number; output: number } | null = null
     for await (const event of stream) {
+      if (event.type === 'message_start') {
+        usage = { input: event.message.usage?.input_tokens ?? 0, output: event.message.usage?.output_tokens ?? 0 }
+      }
+      if (event.type === 'message_delta') {
+        if (event.usage?.output_tokens !== undefined) usage = { input: usage?.input ?? 0, output: event.usage.output_tokens }
+      }
       if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        contentLen += event.delta.text.length
         yield { textDelta: event.delta.text }
       } else if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
         toolCalls.push({ id: event.content_block.id, name: event.content_block.name, arguments: '' })
@@ -256,6 +305,7 @@ function anthropicStream(p: ProviderConfig, messages: ChatMessage[], tools: Tool
         finish = event.delta.stop_reason ?? 'stop'
       }
     }
+    traceLlmCall({ at: new Date().toISOString(), model, finishReason: finish === 'tool_use' ? 'tool_calls' : finish, contentLength: contentLen, reasoningLength: reasoningLen, toolCalls: toolCalls.length, usage })
     yield { toolCalls: toolCalls.length ? toolCalls : undefined, finishReason: finish === 'tool_use' ? 'tool_calls' : finish }
   }
 

@@ -624,6 +624,13 @@ describe(`eval dei comportamenti (fasi 9-10) su modello reale (${MODEL} × ${RUN
   }, 1_800_000)
 
   afterAll(() => {
+    // residuo 0a: con la traccia LLM attiva la directory NON si cancella e il
+    // path viene stampato, così la traccia diagnostica (llm-trace.jsonl) si può
+    // leggere dopo la corsa (le righe contengono solo numeri, mai contenuti)
+    if (process.env.SANDBOT_LLM_TRACE === '1') {
+      console.log(`\n[eval] SANDBOT_LLM_TRACE attiva: directory dati ${EVAL_DIR} lasciata sul disco (llm-trace.jsonl)`)
+      return
+    }
     rmSync(EVAL_DIR, { recursive: true, force: true })
   })
 })
