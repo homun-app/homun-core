@@ -3334,6 +3334,80 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
     expect([...h.db.agents.values()].some((a) => a.name === 'Malizioso')).toBe(false)
   })
 
+  it('CONTROLLO: la stessa regola allow, SENZA lettura web, esegue in silenzio (il delta è la contaminazione)', async () => {
+    h.db.settings.set('permissions', { default: 'needs_approval', rules: [{ tool: 'run-command', pattern: 'ls', mode: 'always_allow' }] })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'r0', name: 'run-command', arguments: JSON.stringify({ command: 'ls -la' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'elenca', emit)
+    expect(h.sandboxMock.exec.calls).toBe(1)
+    expect(h.db.entries.find((e) => e.kind === 'approval')).toBeUndefined()
+  })
+
+  it('CONTAMINAZIONE (F8): una regola allow dell\'utente NON esegue run-command senza card', async () => {
+    h.db.settings.set('permissions', { default: 'needs_approval', rules: [{ tool: 'run-command', pattern: 'ls', mode: 'always_allow' }] })
+    setWebSearchProviderForTests({ search: async () => [{ title: 't', url: 'https://x.example', snippet: 's' }] })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'w1', name: 'web_search', arguments: JSON.stringify({ query: 'x' }) }] },
+      { toolCalls: [{ id: 'r1', name: 'run-command', arguments: JSON.stringify({ command: 'ls -la' }) }] },
+      { text: '.' }
+    ]
+    const turn = runTurn(AGENT, 'cerca ed elenca', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending' && e.meta?.tool === 'run-command')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval' && e.meta?.tool === 'run-command')!
+    expect(appr.content).toContain('contenuti web') // la card dice il motivo
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.sandboxMock.exec.calls).toBe(0) // negato: mai eseguito
+  })
+
+  it('CONTAMINAZIONE (F8): il grant di turno dato PRIMA della lettura web non copre i comandi DOPO', async () => {
+    setWebSearchProviderForTests({ search: async () => [{ title: 't', url: 'https://x.example', snippet: 's' }] })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'a1', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] },
+      { toolCalls: [{ id: 'w1', name: 'web_search', arguments: JSON.stringify({ query: 'x' }) }] },
+      { toolCalls: [{ id: 'a2', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] },
+      { text: '.' }
+    ]
+    const turn = runTurn(AGENT, 'vai', emit)
+    // prima card (prima della lettura web): consenti PER QUESTO TURNO
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    resolveApproval(AGENT, String(h.db.entries.findLast((e) => e.kind === 'approval')!.meta?.approvalId), 'allow', 'turn')
+    // dopo il contenuto web lo STESSO comando chiede di nuovo: il grant pre-web è revocato
+    await vi.waitFor(() => {
+      const list = h.db.entries.filter((e) => e.kind === 'approval')
+      expect(list.length).toBeGreaterThanOrEqual(2)
+      expect(list.at(-1)?.meta?.status).toBe('pending')
+    })
+    resolveApproval(AGENT, String(h.db.entries.findLast((e) => e.kind === 'approval')!.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.sandboxMock.exec.calls).toBe(1) // solo il primo ls
+  })
+
+  it('CONTAMINAZIONE (F8): il grant dato sulla card DEL turno contaminato vale per il resto del turno', async () => {
+    setWebSearchProviderForTests({ search: async () => [{ title: 't', url: 'https://x.example', snippet: 's' }] })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'w1', name: 'web_search', arguments: JSON.stringify({ query: 'x' }) }] },
+      { toolCalls: [{ id: 'a1', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] },
+      { toolCalls: [{ id: 'a2', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] },
+      { text: '.' }
+    ]
+    const turn = runTurn(AGENT, 'cerca ed elenca', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    resolveApproval(AGENT, String(h.db.entries.findLast((e) => e.kind === 'approval')!.meta?.approvalId), 'allow', 'turn')
+    await turn
+    // UNA sola card: il secondo ls è passato col grant del turno contaminato
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(1)
+    expect(h.sandboxMock.exec.calls).toBe(2)
+  })
+
   it('la auto-review pura esclude le azioni contaminate anche col revisore favorevole', async () => {
     const { autoReviewDecision, CONTAMINATED_ASK_TOOLS } = await import('../auto-review')
     const cfg = { enabled: true, allowRules: ['qualsiasi cosa'], blockRules: [], providerId: 'prov', model: 'm1' }

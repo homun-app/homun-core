@@ -23,6 +23,7 @@
 // (argomenti in un blocco delimitato marcato come DATO), mai il transcript né
 // i risultati dei tool — nessun testo esterno che possa convincerlo.
 import type { AutoReviewSettings } from '../../shared/types'
+import type { Verdict } from './permissions'
 
 /** Tetto di approvazioni automatiche per turno: poi si torna a chiedere. */
 export const AUTO_REVIEW_MAX_PER_TURN = 20
@@ -63,6 +64,21 @@ const FUTURE_CHANGING_TOOLS = new Set(['update_skill', 'update_memory', 'update_
  * un'iniezione nella pagina. L'auto-review non può approvarle da sola.
  */
 export const CONTAMINATED_ASK_TOOLS = new Set(['run-command', 'draft_external', 'send_to_agent', 'create_agent', 'create_group'])
+
+/**
+ * F8 (PURO): nel turno CONTAMINATO da contenuti web un verdetto allow (dalla
+ * regola dell'utente o dal bypass del proprio target) di un tool con effetti
+ * torna a chiedere ALL'UTENTE. Il gate dei permessi resta quello di sempre:
+ * deny (regola "fermati") e ask passano invariati — si alza SOLO allow → ask,
+ * a differenza di forcedOriginAsk che salta il check del tutto. Il grant di
+ * turno dato su una card del turno contaminato vale per il resto del turno:
+ * il loop lo controlla dopo, come oggi.
+ */
+export function liftContaminatedAllow(verdict: Verdict, tool: string, contaminated: boolean): Verdict {
+  if (!contaminated || verdict.kind !== 'allow') return verdict
+  if (!CONTAMINATED_ASK_TOOLS.has(tool)) return verdict
+  return { kind: 'ask', reason: `${tool}: il turno ha letto contenuti web non fidati — l'azione con effetti torna all'utente` }
+}
 
 /**
  * Fase 11 (punto 4): lo scambio di file Mac <-> box chiede SEMPRE l'utente —

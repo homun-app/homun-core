@@ -2,17 +2,21 @@
 // l'interfaccia sostituibile WebSearchProvider (implementazione reale: la web
 // search API di Ollama, chiave SOLO nel vault sigillato); la LETTURA
 // (web_fetch) gira in LOCALE nel daemon: nessuna chiave, nessun credito, con
-// difese SSRF (web-guard, puro). L'output di entrambi è DATO NON FIDATO: il
+// difese SSRF (web-guard, puro) e validazione degli IP AL MOMENTO DELLA
+// CONNESSIONE (la lookup di node:http, F4: niente seconda risoluzione non
+// controllata). L'output di entrambi è DATO NON FIDATO: il
 // loop lo incarta nel blocco evidenza e contamina il turno (niente
 // auto-review sulle azioni con effetti).
 //
 // Dipendenze iniettabili (fetch, DNS, orologio): i test non toccano la rete
 // reale; il loopback è ammesso SOLO col flag di test
 // SANDBOT_WEB_FETCH_ALLOW_LOOPBACK=1 (che non esiste in produzione).
+import * as http from 'node:http'
+import * as https from 'node:https'
 import { createConnectorsSecretStore } from '../connectors/sealed-store'
 import { getSetting, setSetting } from '../store/db'
 import {
-  checkUrl, resolveRedirect, resolvedIpsAllowed, sliceWithOffset,
+  checkUrl, resolveRedirect, resolvedIpsAllowed, sliceWithOffset, isForbiddenIp, literalHostIp,
   loopbackAllowedForTests
 } from './web-guard'
 import {
@@ -160,14 +164,15 @@ export function getWebFetchFn(): (rawUrl: string) => Promise<WebFetchOutcome> {
 // ---- web_fetch: lettura LOCALE con difese SSRF, limiti e conversione ----
 
 export interface WebFetchDeps {
-  fetchImpl?: typeof fetch
   /** risoluzione DNS iniettabile: torna TUTTI gli indirizzi dell'host */
   lookup?: (host: string) => Promise<string[]>
   now?: () => number
+  /** trasporto http iniettabile (test): di default node:http/https con la lookup VALIDANTE */
+  transport?: HttpTransport
 }
 
 export type WebFetchOutcome =
-  | { ok: true; text: string; contentType: string; finalUrl: string; downloadedBytes: number }
+  | { ok: true; text: string; contentType: string; finalUrl: string; downloadedBytes: number; truncated?: boolean }
   | { ok: false; reason: string; blocked?: boolean; unsupported?: boolean }
 
 /** Cache per URL di 15 minuti (punto 2): dentro al modulo, iniettabile l'orologio. */
@@ -198,105 +203,290 @@ async function resolveHost(host: string, deps: WebFetchDeps): Promise<string[]> 
 }
 
 /**
+ * L'errore che la lookup VALIDANTE restituisce quando l'host risolve SOLO su
+ * indirizzi interni: webFetch lo riconosce e risponde col motivo giusto.
+ */
+export class ForbiddenAddressError extends Error {
+  constructor(hostname: string, ips: string[]) {
+    super(`indirizzo interno: ${hostname} risolve su ${ips.join(', ') || 'nessun indirizzo'}`)
+    this.name = 'ForbiddenAddressError'
+  }
+}
+
+/** La firma della lookup di node (net.connect la chiama alla CONNESSIONE). */
+export type NodeLookup = (
+  hostname: string,
+  options: { all?: boolean; family?: number },
+  callback: (err: Error | null, address?: unknown, family?: number) => void
+) => void
+
+/**
+ * La lookup che node chiama AL MOMENTO DELLA CONNESSIONE (anti-TOCTOU, F4):
+ * risolve l'host ORA, scarta gli indirizzi non ammessi e passa al socket
+ * SOLO quelli validati. Non esiste una seconda risoluzione non controllata:
+ * il vecchio percorso (checkDns e poi fetch che risolveva di nuovo per conto
+ * suo) permetteva il DNS rebinding — primo colpo IP pubblico, secondo colpo
+ * 127.0.0.1 o 169.254.169.254.
+ */
+export function validatingLookup(resolve: (host: string) => Promise<string[]>, allowAll: boolean): NodeLookup {
+  return (hostname, options, callback) => {
+    void resolve(hostname).then(
+      (ips) => {
+        const allowed = allowAll ? ips : ips.filter((ip) => !isForbiddenIp(ip))
+        if (!allowed.length) {
+          callback(new ForbiddenAddressError(hostname, ips))
+          return
+        }
+        if (options?.all) {
+          callback(null, allowed.map((address) => ({ address, family: literalHostIp(address) !== null && address.includes(':') ? 6 : 4 })))
+        } else {
+          const first = allowed[0]!
+          callback(null, first, first.includes(':') ? 6 : 4)
+        }
+      },
+      (e) => callback(e instanceof Error ? e : new Error(String(e)))
+    )
+  }
+}
+
+/** Un hop http: status, header (chiavi minuscole) e corpo GIA' limitato a maxBytes. */
+export interface HttpHop {
+  status: number
+  headers: Record<string, string>
+  body: Buffer
+  /** il corpo superava maxBytes: si sono tenuti i primi maxBytes e si è interrotto il download */
+  truncated: boolean
+}
+
+export interface HttpTransportOptions {
+  /** la lookup VALIDANTE (node la usa alla connessione) */
+  lookup: NodeLookup
+  /** scadenza TOTALE in ms epoch: copre redirect e lettura del corpo */
+  deadlineAt: number
+  maxBytes: number
+}
+
+export type HttpTransport = (url: URL, opts: HttpTransportOptions) => Promise<HttpHop>
+
+function flattenHeaders(res: { headers: Record<string, string | string[] | undefined> }): Record<string, string> {
+  const flat: Record<string, string> = {}
+  for (const [k, v] of Object.entries(res.headers)) {
+    if (v === undefined) continue
+    flat[k] = Array.isArray(v) ? v.join(', ') : v
+  }
+  return flat
+}
+
+/**
+ * Il trasporto reale (node:http/https, F4): la validazione degli IP avviene
+ * AL MOMENTO DELLA CONNESSIONE tramite l'opzione `lookup` — node non risolve
+ * per conto suo, il socket riceve SOLO indirizzi già validati. Il corpo si
+ * legge in STREAMING con un contatore di byte: oltre il tetto si interrompe
+ * il download (memoria limitata) e si tengono i primi maxBytes. Una SCADENZA
+ * TOTALE copre connessione, header e corpo.
+ */
+const realTransport: HttpTransport = (url, opts) =>
+  new Promise<HttpHop>((resolve, reject) => {
+    let req: http.ClientRequest | undefined
+    let settled = false
+    const chunks: Buffer[] = []
+    let received = 0
+    let truncated = false
+    const settle = (err: Error | null, hop?: HttpHop) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (err) {
+        req?.destroy()
+        reject(err)
+      } else {
+        resolve(hop!)
+      }
+    }
+    const timer = setTimeout(
+      () => settle(new Error(`tempo scaduto (${Math.round(WEB_FETCH_TIMEOUT_MS / 1000)} s totali per richiesta, redirect e lettura del corpo)`)),
+      Math.max(0, opts.deadlineAt - Date.now())
+    )
+    timer.unref?.()
+    const mod = url.protocol === 'https:' ? https : http
+    req = mod.request(url.toString(), {
+      headers: { 'user-agent': SANDBOT_USER_AGENT, accept: 'text/html,application/json,text/plain,*/*' },
+      lookup: opts.lookup as never
+    })
+    req.on('error', (e) => settle(e))
+    req.on('response', (res) => {
+      const flat = flattenHeaders(res)
+      res.on('data', (d: Buffer) => {
+        if (truncated) return
+        if (received + d.length > opts.maxBytes) {
+          const room = opts.maxBytes - received
+          if (room > 0) chunks.push(d.subarray(0, room))
+          truncated = true
+          // download interrotto qui: la memoria resta limitata al tetto
+          res.destroy()
+          settle(null, { status: res.statusCode ?? 0, headers: flat, body: Buffer.concat(chunks), truncated })
+          return
+        }
+        received += d.length
+        chunks.push(d)
+      })
+      res.on('end', () => settle(null, { status: res.statusCode ?? 0, headers: flat, body: Buffer.concat(chunks), truncated }))
+      res.on('error', (e) => settle(e))
+    })
+    req.end()
+  })
+
+// ---- captcha/sfida (F5): un falso positivo NON è un blocco ----
+
+/** Firme note di una sfida nello stato 403/429/503 (Cloudflare & simili). */
+export const CHALLENGE_SIGNATURES = ['cf-chl', 'just a moment', 'attention required', 'verify you are human'] as const
+
+/** Marcatori di moduli captcha dentro l'HTML. */
+const CHALLENGE_MARKERS = /recaptcha|hcaptcha|turnstile|cf-challenge/i
+
+/** Soglia di "pochissimo testo" perché una pagina con captcha sia SOLO la sfida. */
+export const CHALLENGE_MIN_TEXT = 200
+
+/**
+ * F5 (PURO): una risposta 403/429/503 è una sfida SOLO con una firma nota;
+ * una pagina 200 è bloccata SOLO se, dopo l'estrazione, ha pochissimo testo
+ * e contiene solo il modulo della sfida. Uno script reCAPTCHA dentro una
+ * pagina CON contenuto (il form di prenotazione del ristorante) non blocca.
+ */
+export function challengeBlocked(status: number, rawHtml: string, extractedText: string): boolean {
+  const low = rawHtml.toLowerCase()
+  if ((status === 403 || status === 429 || status === 503) && CHALLENGE_SIGNATURES.some((s) => low.includes(s))) return true
+  if (CHALLENGE_MARKERS.test(rawHtml) && extractedText.replace(/\s+/g, ' ').trim().length < CHALLENGE_MIN_TEXT) return true
+  return false
+}
+
+/**
  * Scarica e converte una pagina (locale, nessuna chiave): solo http/https,
- * DNS risolto e IP privati rifiutati A OGNI redirect (max 5), niente
- * credenziali nell'URL, timeout 20 s, download 3 MB. HTML → testo leggibile
- * in markdown; testo e JSON così come sono; altri tipi non supportati.
- * 403/429/captcha → esito "bloccato" esplicito (il bot NON lo aggira e lo
- * segnala all'utente, come ReportSiteBlocked in Grok).
+ * niente credenziali nell'URL, IP validati ALLA CONNESSIONE (lookup) a OGNI
+ * redirect (max 5), scadenza totale 20 s, corpo letto in streaming con tetto
+ * di 3 MB (oltre: si tengono i primi 3 MB con nota "pagina troncata").
+ * HTML → testo leggibile in markdown; testo e JSON così come sono; altri
+ * tipi non supportati. Sfide VERE (403/429/503 con firma nota, o pagina che
+ * contiene solo il captcha) → esito "bloccato" esplicito (il bot NON lo
+ * aggira e lo segnala all'utente, come ReportSiteBlocked in Grok).
  */
 export async function webFetch(rawUrl: string, deps: WebFetchDeps = {}): Promise<WebFetchOutcome> {
   const now = deps.now ?? Date.now
   const check = checkUrl(rawUrl)
   if (!check.ok) return { ok: false, reason: check.reason }
   let current = check.url
-  const doFetch = deps.fetchImpl ?? fetch
+  const transport = deps.transport ?? realTransport
+  const allowAll = loopbackAllowedForTests()
 
-  // DNS: gli IP risolti devono essere pubblici (flag di test a parte)
-  const checkDns = async (u: URL): Promise<string | null> => {
+  // pre-check dell'host (messaggi chiari): gli IP LETTERALI si validano senza
+  // DNS; l'ENFORCEMENT vero resta nella lookup alla connessione (anti-TOCTOU)
+  const checkHost = async (hostname: string): Promise<string | null> => {
+    const literal = literalHostIp(hostname)
+    if (literal !== null) {
+      return !allowAll && isForbiddenIp(literal)
+        ? `indirizzo interno (${hostname}): la lettura web non tocca la rete interna`
+        : null
+    }
     try {
-      const ips = await resolveHost(u.hostname, deps)
-      if (!ips.length) return `host non risolto: ${u.hostname}`
-      if (!resolvedIpsAllowed(ips)) {
-        return `host non ammesso (${u.hostname} risolve su un indirizzo privato/interno): la lettura web non tocca la rete interna`
+      const ips = await resolveHost(hostname, deps)
+      if (!ips.length) return `host non risolto: ${hostname}`
+      if (!allowAll && !resolvedIpsAllowed(ips)) {
+        return `host non ammesso (${hostname} risolve su un indirizzo privato/interno): la lettura web non tocca la rete interna`
       }
       return null
     } catch {
-      return `host non risolto: ${u.hostname}`
+      return `host non risolto: ${hostname}`
     }
   }
 
-  const dnsErr = await checkDns(current)
+  const dnsErr = await checkHost(current.hostname)
   if (dnsErr) return { ok: false, reason: dnsErr }
 
-  let response: Response
-  for (let hop = 0; ; hop++) {
-    let r: Response
+  // scadenza TOTALE: redirect e lettura del corpo compresi (F4)
+  const deadlineAt = now() + WEB_FETCH_TIMEOUT_MS
+  let hop: HttpHop
+  for (let redirect = 0; ; redirect++) {
+    let r: HttpHop
     try {
-      r = await doFetch(current.toString(), {
-        redirect: 'manual',
-        headers: { 'user-agent': SANDBOT_USER_AGENT, accept: 'text/html,application/json,text/plain,*/*' },
-        signal: AbortSignal.timeout(WEB_FETCH_TIMEOUT_MS)
+      r = await transport(current, {
+        lookup: validatingLookup((host) => resolveHost(host, deps), allowAll),
+        deadlineAt,
+        maxBytes: WEB_FETCH_MAX_BYTES
       })
     } catch (e) {
+      if (e instanceof ForbiddenAddressError) {
+        // la lookup ha rifiutato l'indirizzo ALLA CONNESSIONE (DNS rebinding)
+        return { ok: false, reason: `host non ammesso (${current.hostname}): ${e.message}` }
+      }
       return { ok: false, reason: `richiesta non riuscita: ${e instanceof Error ? e.message : String(e)}` }
     }
-    if (r.status >= 300 && r.status < 400 && r.headers.get('location')) {
-      if (hop >= WEB_FETCH_MAX_REDIRECTS) return { ok: false, reason: `troppi redirect (più di ${WEB_FETCH_MAX_REDIRECTS})` }
-      // il redirect si ricontrolla DA CAPO: URL valido E DNS ammesso
+    if (r.status >= 300 && r.status < 400 && r.headers['location']) {
+      if (redirect >= WEB_FETCH_MAX_REDIRECTS) return { ok: false, reason: `troppi redirect (più di ${WEB_FETCH_MAX_REDIRECTS})` }
+      // il redirect si ricontrolla DA CAPO: URL valido E host ammesso
       let next: URL
       try {
-        next = resolveRedirect(current, r.headers.get('location')!)
+        next = resolveRedirect(current, r.headers['location'])
       } catch {
         return { ok: false, reason: 'redirect con location non valida' }
       }
       const nc = checkUrl(next.toString())
       if (!nc.ok) return { ok: false, reason: `redirect non ammesso: ${nc.reason}` }
-      const nd = await checkDns(next)
+      const nd = await checkHost(next.hostname)
       if (nd) return { ok: false, reason: `redirect non ammesso: ${nd}` }
       current = next
       continue
     }
-    response = r
+    hop = r
     break
   }
 
-  if (response.status === 403 || response.status === 429) {
-    return {
-      ok: false,
-      blocked: true,
-      reason: `il sito ha bloccato la richiesta (HTTP ${response.status}): NON aggirare il blocco, segnala all'utente che la pagina non è leggibile`
+  const bodyText = (): string => {
+    // decodifica WHATWG (fatal: false): iso-8859-1 e windows-1252 arrivano
+    // bene; un'etichetta sconosciuta ricade su utf-8
+    const label = /charset=([\w-]+)/i.exec(hop.headers['content-type'] ?? '')?.[1]
+    try {
+      return new TextDecoder(label ?? 'utf-8').decode(hop.body)
+    } catch {
+      return new TextDecoder('utf-8').decode(hop.body)
     }
-  }
-  if (response.status >= 400) {
-    return { ok: false, reason: `la pagina risponde HTTP ${response.status}` }
   }
 
-  const declared = Number(response.headers.get('content-length') ?? '0')
-  if (declared > WEB_FETCH_MAX_BYTES) {
-    return { ok: false, reason: `pagina troppo grande (${declared} byte dichiarati, limite ${WEB_FETCH_MAX_BYTES})` }
-  }
-  const buf = Buffer.from(await response.arrayBuffer())
-  const bytes = Math.min(buf.length, WEB_FETCH_MAX_BYTES)
-  const contentType = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
-  const charset = /charset=([\w-]+)/i.exec(response.headers.get('content-type') ?? '')?.[1]
-  const decode = (b: Buffer): string => {
-    try {
-      return b.toString((charset && charset !== 'iso-8859-1' ? charset : 'utf8') as BufferEncoding)
-    } catch {
-      return b.toString('utf8')
+  // F5: lo stato di sfida si dichiara SOLO con le firme note
+  if (hop.status === 403 || hop.status === 429 || hop.status === 503) {
+    const sig = CHALLENGE_SIGNATURES.find((s) => hop.body.toString('latin1').toLowerCase().includes(s))
+    if (sig) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: `il sito ha bloccato la richiesta (HTTP ${hop.status}, sfida "${sig}"): NON aggirare il blocco, segnala all'utente che la pagina non è leggibile`
+      }
     }
+    return { ok: false, reason: `la pagina risponde HTTP ${hop.status}` }
   }
-  const text = decode(buf.subarray(0, bytes))
+  if (hop.status >= 400) {
+    return { ok: false, reason: `la pagina risponde HTTP ${hop.status}` }
+  }
+
+  const contentType = (hop.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase()
+  const truncatedNote = hop.truncated ? '\n\n[pagina troncata: oltre i 3 MB ho tenuto i primi 3 MB]' : ''
 
   if (contentType.includes('html')) {
-    if (/recaptcha|hcaptcha|turnstile|cf-challenge/i.test(text)) {
+    const text = htmlToMarkdown(bodyText())
+    if (challengeBlocked(hop.status, bodyText(), text)) {
       return { ok: false, blocked: true, reason: 'la pagina richiede un captcha: NON aggirare il blocco, segnala all\'utente che la pagina non è leggibile' }
     }
-    return { ok: true, text: htmlToMarkdown(text), contentType: 'text/html', finalUrl: current.toString(), downloadedBytes: bytes }
+    return {
+      ok: true, text: text + truncatedNote, contentType: 'text/html',
+      finalUrl: current.toString(), downloadedBytes: hop.body.length,
+      ...(hop.truncated ? { truncated: true } : {})
+    }
   }
   if (contentType.startsWith('text/') || contentType.includes('json')) {
-    return { ok: true, text, contentType, finalUrl: current.toString(), downloadedBytes: bytes }
+    return {
+      ok: true, text: bodyText() + truncatedNote, contentType,
+      finalUrl: current.toString(), downloadedBytes: hop.body.length,
+      ...(hop.truncated ? { truncated: true } : {})
+    }
   }
   return {
     ok: false,

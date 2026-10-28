@@ -2,7 +2,7 @@
 // sensibili e del nome alternativo, piano della card, copie reali su
 // directory temporanee (nessuna home reale) e card SEMPRE nel loop.
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, symlinkSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -66,6 +66,26 @@ describe('nonConflictingName (puro): mai sovrascrivere sul Mac in silenzio', () 
   })
 })
 
+describe('F7: espansione di ~ e REALPATH del path del Mac (puro)', () => {
+  const home = '/Users/test'
+
+  it('expandTilde: ~ e ~/ diventano la home, il resto resta', () => {
+    expect(pure.expandTilde('~', home)).toBe(home)
+    expect(pure.expandTilde('~/Downloads/x.pdf', home)).toBe(join(home, 'Downloads/x.pdf'))
+    expect(pure.expandTilde('/tmp/x', home)).toBe('/tmp/x')
+    expect(pure.expandTilde('~altro/x', home)).toBe('~altro/x') // la home di ALTRI utenti non si espande
+  })
+
+  it('resolveMacPath: segue i symlink del tratto esistente e lascia la coda nuova', () => {
+    // realpath FINTO: /h/link è un symlink a /h/.ssh; tutto il resto inesistente
+    const fakeReal = (p: string) => (p === '/h/link' ? '/h/.ssh' : p === '/h' ? '/h' : (() => { throw new Error('ENOENT') })())
+    // il file ancora inesistente: il tratto esistente (il symlink) si risolve, la coda resta
+    expect(pure.resolveMacPath('/h/link/id_rsa', '/h', fakeReal)).toBe('/h/.ssh/id_rsa')
+    // coda nuova di due livelli
+    expect(pure.resolveMacPath('/h/nuova/cartina/file.txt', '/h', fakeReal)).toBe('/h/nuova/cartina/file.txt')
+  })
+})
+
 describe('prepareFileExchange: piano e rifiuti PRIMA della card', () => {
   it('copy_to_box: file esistente e non sensibile → piano con dimensione', async () => {
     const r = await pure.prepareFileExchange('agent_c', 'copy_to_box', { mac_path: join(MAC, 'foto.jpg'), box_path: '/workspace/foto.jpg' }, { home: MAC })
@@ -106,13 +126,82 @@ describe('prepareFileExchange: piano e rifiuti PRIMA della card', () => {
     writeFileSync(boxFile, '# report')
     const r = await pure.prepareFileExchange('agent_c', 'copy_from_box', { box_path: 'report.md' }, { home: MAC })
     expect(r.ok).toBe(true)
-    if (r.ok) expect(r.plan.macPath).toBe(join(MAC, 'Downloads', 'SandBot', 'report.md'))
+    // F7: il piano porta la forma CANONICA del tratto esistente (la temporanea
+    // sta dietro il symlink /var → /private/var) con la coda nuova com'è
+    if (r.ok) expect(r.plan.macPath).toBe(join(realpathSync(join(MAC, 'Downloads')), 'SandBot', 'report.md'))
   })
 
   it('copy_from_box verso cartella sensibile del Mac rifiutato', async () => {
     const r = await pure.prepareFileExchange('agent_c', 'copy_from_box', { box_path: 'report.md', mac_path: '.ssh/x' }, { home: MAC })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toContain('non permesso')
+  })
+})
+
+describe('F7: symlink, maiuscole e ~ nei path del Mac (realpath PRIMA del controllo)', () => {
+  it('un symlink di Downloads verso ~/.ssh NON passa: la card mostrebbe il path innocuo, il controllo vede quello REALE', async () => {
+    mkdirSync(join(MAC, '.ssh'), { recursive: true })
+    writeFileSync(join(MAC, '.ssh', 'id_ed25519'), 'CHIAVE')
+    try {
+      symlinkSync(join(MAC, '.ssh'), join(MAC, 'Downloads', 'chiave'))
+      const r = await pure.prepareFileExchange('agent_c', 'copy_to_box', { mac_path: join(MAC, 'Downloads', 'chiave', 'id_ed25519'), box_path: 'k' }, { home: MAC })
+      expect(r.ok).toBe(false)
+      if (!r.ok) {
+        expect(r.error).toContain('sensibili')
+        // il messaggio mostra il path REALE risolto, non quello del symlink
+        expect(r.error).toContain(realpathSync(join(MAC, '.ssh', 'id_ed25519')))
+      }
+    } finally {
+      rmSync(join(MAC, 'Downloads', 'chiave'))
+      rmSync(join(MAC, '.ssh'), { recursive: true, force: true })
+    }
+  })
+
+  it('.SSH a maiuscole NON aggira il controllo (confronto case-insensitive + maiusole canoniche)', async () => {
+    mkdirSync(join(MAC, '.ssh'), { recursive: true })
+    writeFileSync(join(MAC, '.ssh', 'id_ed25519'), 'CHIAVE')
+    try {
+      // su APFS (case-insensitive di default) .SSH È .ssh: realpathSync.native
+      // torna le maiuscole canoniche e il confronto ignora il caso comunque
+      const r = await pure.prepareFileExchange('agent_c', 'copy_to_box', { mac_path: join(MAC, '.SSH', 'id_ed25519'), box_path: 'k' }, { home: MAC })
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toContain('sensibili')
+      // il confronto case-insensitive vale anche per la policy pura (stessa
+      // base canonica per il path e per la home del contesto)
+      const realMac = realpathSync(MAC)
+      expect(pure.macPathAllowed(join(realMac, '.SSH', 'x'), { home: realMac, dataDir: realpathSync(DATA) })).toBe(false)
+      expect(pure.macPathAllowed(join(realMac, 'LIBRARY/KEYCHAINS/x'), { home: realMac, dataDir: realpathSync(DATA) })).toBe(false)
+    } finally {
+      rmSync(join(MAC, '.ssh'), { recursive: true, force: true })
+    }
+  })
+
+  it('~/Downloads/x scritto dal modello si risolve nella home VERA (non <home>/~/Downloads/x)', async () => {
+    writeFileSync(join(MAC, 'Downloads', 'nota.txt'), 'ciao')
+    const r = await pure.prepareFileExchange('agent_c', 'copy_to_box', { mac_path: '~/Downloads/nota.txt', box_path: 'nota.txt' }, { home: MAC })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      // il piano (e la card) mostra il path reale risolto, col symlink della
+      // temporanea ridotto alla forma canonica
+      expect(r.plan.macPath).toBe(realpathSync(join(MAC, 'Downloads', 'nota.txt')))
+      expect(r.plan.macPath).not.toContain('~')
+    }
+  })
+
+  it('copy_from_box: la cartella di destinazione passa dal realpath (symlink → .ssh rifiutato)', async () => {
+    const boxFile = join(DATA, 'box', 'home', 'agent_c', 'report.md')
+    mkdirSync(join(DATA, 'box', 'home', 'agent_c'), { recursive: true })
+    writeFileSync(boxFile, '# report')
+    mkdirSync(join(MAC, '.ssh'), { recursive: true })
+    try {
+      symlinkSync(join(MAC, '.ssh'), join(MAC, 'portachiavi'))
+      const r = await pure.prepareFileExchange('agent_c', 'copy_from_box', { box_path: 'report.md', mac_path: 'portachiavi/report.md' }, { home: MAC })
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toContain('non permesso')
+    } finally {
+      rmSync(join(MAC, 'portachiavi'))
+      rmSync(join(MAC, '.ssh'), { recursive: true, force: true })
+    }
   })
 })
 
@@ -130,7 +219,8 @@ describe('runFileExchange: copia reale su directory temporanee', () => {
     const pre2 = await pure.prepareFileExchange('agent_c', 'copy_from_box', { box_path: 'report.md' }, { home: MAC })
     if (!pre2.ok) throw new Error('precheck fallito')
     const r2 = await pure.runFileExchange('agent_c', pre2.plan, { home: MAC })
-    expect(r2.finalMacPath).toBe(join(MAC, 'Downloads', 'SandBot', 'report (1).md'))
+    // il nome alternativo parte dal path CANONICO del piano (F7)
+    expect(r2.finalMacPath).toBe(join(realpathSync(join(MAC, 'Downloads')), 'SandBot', 'report (1).md'))
     expect(readFileSync(join(MAC, 'Downloads', 'SandBot', 'report.md'), 'utf8')).toBe('VECCHIO') // intatto
     expect(readFileSync(r2.finalMacPath!, 'utf8')).toBe('# report')
     expect(r2.output).toContain('esisteva già')

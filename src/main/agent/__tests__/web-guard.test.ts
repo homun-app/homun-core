@@ -1,7 +1,7 @@
 // Difese SSRF e troncamento di web_fetch (fase 11, punto 2) — PURE: niente
 // rete, niente DNS, niente Electron.
 import { describe, expect, it } from 'vitest'
-import { checkUrl, isForbiddenIp, resolvedIpsAllowed, resolveRedirect, sliceWithOffset } from '../web-guard'
+import { checkUrl, isForbiddenIp, literalHostIp, resolvedIpsAllowed, resolveRedirect, sliceWithOffset } from '../web-guard'
 import { WEB_FETCH_MAX_CHARS } from '../../../shared/web-limits'
 
 describe('checkUrl (puro)', () => {
@@ -56,6 +56,33 @@ describe('isForbiddenIp (puro)', () => {
       expect(isForbiddenIp(ip), ip).toBe(true)
     }
     expect(isForbiddenIp('2606:4700::1111')).toBe(false)
+  })
+
+  it('F4: i buchi della classificazione vecchia — IPv6 "camuffati" e benchmark rifiutati', () => {
+    for (const ip of [
+      '::ffff:7f00:1', // IPv4-mapped in forma hex: la forma di new URL('http://[::ffff:127.0.0.1]/')
+      '::127.0.0.1', // IPv4-compatible
+      '64:ff9b::7f00:1', // NAT64 64:ff9b::/96 con 127.0.0.1 incorporato
+      '2002:7f00:1::', // 6to4 2002::/16 con 127.0.0.1 incorporato
+      '::ffff:a9fe:a9fe', // metadati cloud 169.254.169.254 in forma mapped
+      '198.18.0.1', // benchmark 198.18.0.0/15
+      '2001:0:1234::1' // Teredo 2001::/32
+    ]) {
+      expect(isForbiddenIp(ip), ip).toBe(true)
+    }
+    // e restano ammessi un IPv4 e un IPv6 pubblici (anche mapped di un pubblico)
+    expect(isForbiddenIp('93.184.216.34')).toBe(false)
+    expect(isForbiddenIp('2606:2800:220:1:248:1893:25c8:1946')).toBe(false)
+    expect(isForbiddenIp('::ffff:93.184.216.34')).toBe(false)
+    // un non-indirizzo è rifiutato (fail closed)
+    expect(isForbiddenIp('example.com')).toBe(true)
+  })
+
+  it('literalHostIp: gli host IPv6 letterali escono dalle parentesi, i nomi restano nomi', () => {
+    expect(literalHostIp('[::1]')).toBe('::1')
+    expect(literalHostIp('[::ffff:127.0.0.1]')).toBe('::ffff:127.0.0.1')
+    expect(literalHostIp('93.184.216.34')).toBe('93.184.216.34')
+    expect(literalHostIp('example.com')).toBeNull()
   })
 })
 

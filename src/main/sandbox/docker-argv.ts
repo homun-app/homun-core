@@ -35,14 +35,42 @@ export const DEFAULT_BOX_LIMITS: BoxLimits = { memory: '4g', cpus: 2, pids: 1024
 
 export interface DockerExecOptions {
   workdir?: string
-  /** Variabili da iniettare nel container: chiave qui, VALORE nell'env del processo docker spawnato (`-e KEY` senza `=valore` eredita dall'ambiente). */
+  /**
+   * Variabili per il container: le chiavi NON segrete (es. HOME del bot)
+   * viaggiano col VALORE nell'argv (`-e KEY=VALORE` — il valore non è un
+   * segreto); le chiavi SANDBOT_SECRET_* passano come `-e KEY` SENZA valore,
+   * letto dall'ambiente del processo docker (F2: il client docker del Mac
+   * continua a usare la SUA HOME per trovare ~/.docker).
+   */
   env?: Record<string, string>
 }
 
-/** `docker exec -i -w <home del bot> [-e KEY …] <container> sh -c <command>` — il comando del modello resta un unico elemento argv. */
+/** Una chiave env è un SEGRETO (valore solo nell'env del processo, mai in argv)? */
+export function isSecretEnvKey(key: string): boolean {
+  return key.startsWith('SANDBOT_SECRET_')
+}
+
+/**
+ * L'env del processo docker sull'HOST (F2): quello del daemon + i SOLI
+ * segreti. HOME del bot e le altre variabili non segrete non ci entrano più:
+ * il client docker legge ~/.docker (contesti, socket di Docker Desktop,
+ * Colima, OrbStack) dalla HOME del daemon, non dalla home del bot nel box.
+ */
+export function dockerClientEnv(env: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => isSecretEnvKey(key)))
+}
+
+/** Aggiunge all'argv i `-e`: i segreti col solo NOME, le altre KEY=VALORE. */
+function pushEnvArgv(argv: string[], env: Record<string, string>): void {
+  for (const [key, value] of Object.entries(env)) {
+    argv.push('-e', isSecretEnvKey(key) ? key : `${key}=${value}`)
+  }
+}
+
+/** `docker exec -i -w <home del bot> [-e …] <container> sh -c <command>` — il comando del modello resta un unico elemento argv. */
 export function dockerExecArgv(container: string, command: string, opts: DockerExecOptions = {}): string[] {
   const argv = ['exec', '-i', '-w', opts.workdir ?? BOX_WORKDIR]
-  for (const key of Object.keys(opts.env ?? {})) argv.push('-e', key)
+  pushEnvArgv(argv, opts.env ?? {})
   argv.push(container, 'sh', '-c', command)
   return argv
 }
@@ -149,11 +177,29 @@ export function dockerBoxMarkerWriteArgv(): string[] {
 
 /**
  * Il wrapper COSTANTE del comando in background (puro): il comando, il log,
- * l'exit code e il pid entrano come argomenti posizionali ($1..$4) — il
- * wrapper scrive il pid, riversa lo stdout/stderr sul log e poi l'exit code
- * negli stessi path usati dalla modalità host, dentro il box.
+ * l'exit code e il pid entrano come argomenti posizionali ($1..$4). Il
+ * comando gira con `sh -c "$1"` (un comando con spazi e && è un COMANDO, non
+ * un nome di programma) dentro un GRUPPO DI PROCESSI suo: con setsid (c'è in
+ * ubuntu:24.04) il pid scritto è quello del GRUPPO, così il kill termina
+ * anche i figli (es. npm run build → node); senza setsid (macOS host) il
+ * gruppo è quello del wrapper, che la modalità host avvia già detached. Il
+ * wrapper crea la cartella dei file e scrive pid ed exit file LUI: la fine
+ * del comando non dipende dal daemon (sopravvive al riavvio, F3).
  */
-export const DOCKER_BG_WRAPPER_SH = 'echo $$ > "$4"; "$1" > "$2" 2>&1; echo $? > "$3"'
+export const DOCKER_BG_WRAPPER_SH = [
+  'mkdir -p "$(dirname "$2")"',
+  'if command -v setsid >/dev/null 2>&1; then',
+  '  setsid sh -c "$1" >"$2" 2>&1 &',
+  '  cmd=$!',
+  '  echo "$cmd" >"$4"',
+  'else',
+  '  sh -c "$1" >"$2" 2>&1 &',
+  '  cmd=$!',
+  '  echo "$$" >"$4"',
+  'fi',
+  'wait "$cmd"',
+  'echo "$?" >"$3"'
+].join('\n')
 
 export function dockerExecBackgroundArgv(
   container: string,
@@ -162,15 +208,27 @@ export function dockerExecBackgroundArgv(
   paths: { log: string; exit: string; pid: string }
 ): string[] {
   const argv = ['exec', '-d', '-w', opts.workdir ?? BOX_MOUNT]
-  for (const key of Object.keys(opts.env ?? {})) argv.push('-e', key)
+  pushEnvArgv(argv, opts.env ?? {})
   argv.push(container, 'sh', '-c', DOCKER_BG_WRAPPER_SH, 'sh', command, paths.log, paths.exit, paths.pid)
   return argv
 }
 
-/** Kill di un processo nel container leggendo il pid dal file dentro il box. */
-export const DOCKER_KILL_SH = 'kill "$(cat "$1")" 2>/dev/null'
+/**
+ * Kill del GRUPPO di processi del comando nel container (F1): il pid nel file
+ * è il pgid (setsid), il TERM negativo termina anche i figli.
+ */
+export const DOCKER_KILL_SH = 'kill -TERM -- -"$(cat "$1")" 2>/dev/null'
 
 export function dockerKillArgv(container: string, pidFile: string): string[] {
   return ['exec', container, 'sh', '-c', DOCKER_KILL_SH, 'sh', pidFile]
+}
+
+/**
+ * Dimensione di un file nel box (F6): argv PURO — il path del modello è un
+ * argomento di stat, MAI una shell (`wc -c < "${path}"` eseguiva comandi
+ * nascosti nel path prima della card).
+ */
+export function dockerStatSizeArgv(container: string, path: string): string[] {
+  return ['exec', '-i', '-w', BOX_MOUNT, container, 'stat', '-c', '%s', '--', path]
 }
 

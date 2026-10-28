@@ -7,11 +7,19 @@
 // 200 MB; sul Mac non si sovrascrive mai in silenzio (nome alternativo
 // "file (1).ext"); nel box valgono i soliti confini dei path.
 //
-// Policy PURA (macPathAllowed, nonConflictingName) ed esecuzione iniettabile:
-// i test non toccano la home reale.
+// F7: i path del Mac si espandono (`~`, `~/`) e si risolvono col REALPATH
+// (fs.realpathSync.native, che su macOS restituisce anche le maiuscole
+// canoniche) PRIMA del controllo e prima della card — un symlink verso .ssh
+// non passa e la card mostra il path reale. Il confronto dei prefissi
+// sensibili è case-insensitive (APFS di default non distingue le maiuscole).
+// F6: in docker la dimensione si legge con argv PURI (stat -c %s -- <path>),
+// mai con una shell che interpoli il path del modello.
+//
+// Policy PURA (macPathAllowed, nonConflictingName, resolveMacPath) ed
+// esecuzione iniettabile: i test non toccano la home reale.
 import { homedir } from 'node:os'
 import { join, resolve, extname, dirname, basename } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { sandboxMode, boxRoot, boxDir } from '../sandbox'
 import { resolveBoxPath } from '../sandbox/box-paths'
@@ -26,21 +34,53 @@ export const MAC_DEFAULT_DIR = join('Downloads', 'SandBot')
 /** Percorsi del Mac sempre RIFIUTATi (fisso, punto 4). */
 export const SENSITIVE_MAC_DIRS = ['.ssh', 'Library/Keychains', '.aws', '.config/gcloud', '.gnupg']
 
+/** Espansione di `~` e `~/` con la home (PURO, F7): `~` scritto dal modello non deve diventare `<home>/~/…`. */
+export function expandTilde(p: string, home: string): string {
+  if (p === '~') return home
+  if (p.startsWith('~/')) return join(home, p.slice(2))
+  return p
+}
+
 /**
- * La policy dei path sul Mac (PURA): si rifiutano i percorsi sensibili
- * (SSH, keychain, cloud CLI, gnupg) e la directory dati di SandBot (dove
- * vivono il DB e i token cifrati dei connettori). `path` è assoloto o
- * relativo alla home.
+ * Il path del Mac RISOLTO (PURO con realpath iniettabile, F7): `~` espanso e
+ * REALPATH del tratto esistente del filesystem — fs.realpathSync.native segue
+ * i symlink e, su macOS, restituisce le maiuscole CANONICHE (`.SSH` diventa
+ * `.ssh`). La coda ancora inesistente (il file nuovo di una copia) resta
+ * com'è: verrà creato con quel nome.
+ */
+export function resolveMacPath(rawPath: string, home: string, realpath: (p: string) => string): string {
+  const abs = resolve(home, expandTilde(String(rawPath), home))
+  let cur = abs
+  const tail: string[] = []
+  for (;;) {
+    try {
+      return join(realpath(cur), ...tail)
+    } catch {
+      // questo tratto non esiste ancora: scendi di un livello
+    }
+    const parent = dirname(cur)
+    if (parent === cur) return abs // nemmeno la radice risolve: il path resta com'era
+    tail.unshift(basename(cur))
+    cur = parent
+  }
+}
+
+/**
+ * La policy dei path sul Mac (PURA): si rifiutano i percorsi sensibili (SSH,
+ * keychain, cloud CLI, gnupg) e la directory dati di SandBot (dove vivono il
+ * DB e i token cifrati dei connettori). `path` è il path REALE già risolto da
+ * resolveMacPath; il confronto è case-insensitive (APFS di default).
  */
 export function macPathAllowed(
   path: string,
   ctx: { home: string; dataDir: string }
 ): boolean {
-  const abs = resolve(ctx.home, path)
-  if (abs === ctx.dataDir || abs.startsWith(ctx.dataDir + '/')) return false
+  const p = path.toLowerCase()
+  const data = ctx.dataDir.toLowerCase()
+  if (p === data || p.startsWith(data + '/')) return false
   for (const rel of SENSITIVE_MAC_DIRS) {
-    const sens = join(ctx.home, rel)
-    if (abs === sens || abs.startsWith(sens + '/')) return false
+    const sens = join(ctx.home, rel).toLowerCase()
+    if (p === sens || p.startsWith(sens + '/')) return false
   }
   return true
 }
@@ -77,6 +117,8 @@ export type FileExchangePrecheck =
 export interface FileExchangeDeps {
   home?: string
   statSize?(p: string): Promise<number | null>
+  /** dimensione nel box in modalità docker (F6): default stat -c %s con argv PURI; iniettabile per i test */
+  dockerStatSize?(agentId: string, boxAbsPath: string): Promise<number | null>
 }
 
 /** Valida la richiesta e calcola il piano (path, dimensione) per la card. */
@@ -87,6 +129,11 @@ export async function prepareFileExchange(
   deps: FileExchangeDeps = {}
 ): Promise<FileExchangePrecheck> {
   const home = deps.home ?? homedir()
+  // F7: il realpath (symlink e maiuscole canoniche) PRIMA del controllo e
+  // della card; anche home e directory dati si risolvono allo stesso modo,
+  // così il confronto è tra path reali
+  const realHome = resolveMacPath(home, home, realpathSync.native)
+  const realDataDir = resolveMacPath(dataDir(), home, realpathSync.native)
   const size = deps.statSize ?? (async (p) => {
     try {
       return (await stat(p)).size
@@ -95,13 +142,13 @@ export async function prepareFileExchange(
     }
   })
   if (tool === 'copy_to_box') {
-    const macPath = resolve(home, String(input.mac_path ?? ''))
     const boxRaw = String(input.box_path ?? '')
     if (!String(input.mac_path ?? '').trim() || !boxRaw.trim()) {
       return { ok: false, error: 'Servono mac_path (il file sul Mac) e box_path (la destinazione nel box).' }
     }
-    if (!macPathAllowed(macPath, { home, dataDir: dataDir() })) {
-      return { ok: false, error: `Percorso del Mac non permesso: "${input.mac_path}" (niente cartelle sensibili né i dati di SandBot).` }
+    const macPath = resolveMacPath(String(input.mac_path), home, realpathSync.native)
+    if (!macPathAllowed(macPath, { home: realHome, dataDir: realDataDir })) {
+      return { ok: false, error: `Percorso del Mac non permesso: "${macPath}" (niente cartelle sensibili né i dati di SandBot).` }
     }
     const s = await size(macPath)
     if (s === null) return { ok: false, error: `File non trovato sul Mac: "${input.mac_path}".` }
@@ -110,7 +157,7 @@ export async function prepareFileExchange(
     }
     const root = sandboxMode() === 'docker' ? '/box' : boxRoot()
     const home1 = sandboxMode() === 'docker' ? `/box/home/${agentId}` : boxDir(agentId)
-    const resolved = resolveBoxPath(boxRaw, root, home1, sandboxMode() === 'docker' ? (p) => p : (await import('node:fs')).realpathSync)
+    const resolved = resolveBoxPath(boxRaw, root, home1, sandboxMode() === 'docker' ? (p) => p : realpathSync)
     if (!resolved.ok) return { ok: false, error: resolved.reason! }
     return { ok: true, plan: { direction: 'to_box', macPath, boxPath: resolved.abs!, size: s } }
   }
@@ -119,17 +166,25 @@ export async function prepareFileExchange(
   if (!boxRaw.trim()) return { ok: false, error: 'Serve box_path (il file nel box da portare sul Mac).' }
   const root = sandboxMode() === 'docker' ? '/box' : boxRoot()
   const home1 = sandboxMode() === 'docker' ? `/box/home/${agentId}` : boxDir(agentId)
-  const resolved = resolveBoxPath(boxRaw, root, home1, sandboxMode() === 'docker' ? (p) => p : (await import('node:fs')).realpathSync)
+  const resolved = resolveBoxPath(boxRaw, root, home1, sandboxMode() === 'docker' ? (p) => p : realpathSync)
   if (!resolved.ok) return { ok: false, error: resolved.reason! }
   let boxSize = 0
   try {
-    // la dimensione la si legge dal box (host: stat; docker: wc -c via exec)
+    // la dimensione la si legge dal box (host: stat; docker: stat -c %s via
+    // ARGV PURI, F6 — il path del modello mai dentro una shell)
     if (sandboxMode() === 'host') {
       boxSize = (await stat(resolved.abs!)).size
     } else {
-      const { execCommand } = await import('../sandbox')
-      const r = await execCommand(agentId, `wc -c < "${resolved.abs!.replace(/"/g, '\\"')}"`, { timeoutMs: 15_000 })
-      boxSize = Number(r.stdout.trim()) || 0
+      const dockerStat = deps.dockerStatSize ?? (async (agent, p) => {
+        const { runDockerArgv } = await import('../sandbox')
+        const { dockerStatSizeArgv, BOX_CONTAINER } = await import('../sandbox/docker-argv')
+        const r = await runDockerArgv(dockerStatSizeArgv(BOX_CONTAINER, p), { timeoutMs: 15_000 })
+        const n = Number(r.stdout.trim())
+        return r.exitCode === 0 && Number.isFinite(n) ? n : null
+      })
+      const s = await dockerStat(agentId, resolved.abs!)
+      if (s === null) throw new Error('stat fallito')
+      boxSize = s
     }
   } catch {
     return { ok: false, error: `File non trovato nel box: "${boxRaw}".` }
@@ -138,10 +193,10 @@ export async function prepareFileExchange(
     return { ok: false, error: `File troppo grande (${boxSize} byte, limite ${FILE_EXCHANGE_MAX_BYTES}): rifiutato.` }
   }
   const macTarget = input.mac_path !== undefined && String(input.mac_path).trim()
-    ? resolve(home, String(input.mac_path))
-    : join(home, MAC_DEFAULT_DIR, basename(resolved.abs!))
-  if (!macPathAllowed(macTarget, { home, dataDir: dataDir() })) {
-    return { ok: false, error: `Percorso del Mac non permesso: "${input.mac_path ?? macTarget}" (niente cartelle sensibili né i dati di SandBot).` }
+    ? resolveMacPath(String(input.mac_path), home, realpathSync.native)
+    : resolveMacPath(join(home, MAC_DEFAULT_DIR, basename(resolved.abs!)), home, realpathSync.native)
+  if (!macPathAllowed(macTarget, { home: realHome, dataDir: realDataDir })) {
+    return { ok: false, error: `Percorso del Mac non permesso: "${macTarget}" (niente cartelle sensibili né i dati di SandBot).` }
   }
   return { ok: true, plan: { direction: 'from_box', macPath: macTarget, boxPath: resolved.abs!, size: boxSize } }
 }

@@ -367,7 +367,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'web_fetch',
-    description: "Scarica e LEGGE una pagina web (solo http/https, niente credenziali nell'URL) convertendola in testo: al massimo 20.000 caratteri per chiamata, poi prosegui con offset. Se il sito blocca (403, 429 o captcha) NON lo aggirare: segnala all'utente. Un link lo citi solo se l'hai aperto con web_fetch in questo lavoro e la pagina conferma ciò che dici; altrimenti scrivi che non è verificato.",
+    description: "Scarica e LEGGE una pagina web (solo http/https, niente credenziali nell'URL) convertendola in testo: al massimo 20.000 caratteri per chiamata, poi prosegui con offset. Se il sito risponde con una sfida (403/429/503 con captcha, o pagina di sola verifica) NON lo aggirare: segnala all'utente. Un link lo citi solo se l'hai aperto con web_fetch in questo lavoro e la pagina conferma ciò che dici; altrimenti scrivi che non è verificato.",
     parameters: {
       type: 'object',
       properties: {

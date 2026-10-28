@@ -36,7 +36,7 @@ import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HO
 import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto } from './permission-rules'
-import { autoReviewDecision, reviewWithConfiguredModel, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
+import { autoReviewDecision, reviewWithConfiguredModel, liftContaminatedAllow, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
 import { activityOf, isToolLoop, stopReasonOfError } from './loop-guard'
 import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from './stream-deadline'
 // fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
@@ -76,6 +76,13 @@ interface Running {
   superseded?: boolean
   /** fase 8 (punto 2): chiavi concesse "per questo turno" (in memoria, mai nel DB). */
   turnAllows: Set<string>
+  /**
+   * F8: epoca dei grant di turno. La lettura web che contamina il turno
+   * revoca i grant concessi PRIMA (clear + incremento): anche un grant ancora
+   * in fase di registrazione (analisi shell async) vede l'epoca cambiata e
+   * non si registra. I grant concessi DOPO la contaminazione non sono toccati.
+   */
+  turnGrantEpoch: number
   /** fase 8 (punto 2): grant di turno in arrivo (l'analisi shell è async: il prossimo ask la aspetta). */
   pendingTurnGrant?: Promise<void>
   /** fase 8 (§3bis L7): il turno gira nel sotto-transcript di questo task. */
@@ -305,7 +312,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   if (!provider) throw new Error('Provider non trovato')
 
   const controller = new AbortController()
-  const run: Running = { controller, approvals: new Map(), turnAllows: new Set() }
+  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0 }
   if (opts.taskId !== undefined) run.taskId = opts.taskId
   running.set(agentId, run)
 
@@ -923,7 +930,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             output = `Errore: ${e instanceof Error ? e.message : String(e)}`
             meta = { error: true }
           }
-          if (meta.webContent) contaminated = true
+          if (meta.webContent) {
+            // F8: i grant "per questo turno" dati PRIMA della lettura web non
+            // coprono le azioni successive (contenuto non fidato + effetti):
+            // chi concede la card DI QUESTO turno mantiene il grant per il
+            // resto del turno, come oggi. L'epoca revoca anche i grant ancora
+            // in fase di registrazione (l'analisi shell è async).
+            if (!contaminated) {
+              run.turnAllows.clear()
+              run.turnGrantEpoch++
+            }
+            contaminated = true
+          }
           const evidence = call.name === 'web_search'
             ? formatWebSearchEvidence(String(input.query ?? ''), output)
             : formatWebFetchEvidence(String(input.url ?? ''), output)
@@ -1353,6 +1371,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         } else {
           verdict = await permissions.check(call.name, input, agentId)
         }
+        // F8: nel turno contaminato un allow (regola dell'utente o bypass del
+        // proprio target) dei tool con effetti torna a chiedere — contenuto
+        // non fidato + strumento con effetti non passano insieme. Le regole
+        // blocked continuano a negare: il check è già stato eseguito sopra.
+        verdict = liftContaminatedAllow(verdict, call.name, contaminated)
 
         if (verdict.kind === 'deny') {
           const denied = add({
@@ -1711,10 +1734,13 @@ export function resolveApproval(
   }
   if (decision === 'allow' && mode === 'turn' && entry) {
     // la chiave è registrata appena l'analisi shell è pronta; il prossimo
-    // ramo ask attende la promise prima di controllare (niente race)
+    // ramo ask attende la promise prima di controllare (niente race).
+    // F8: se nel frattempo la contaminazione revoca i grant (epoca cambiata),
+    // la registrazione non avviene
+    const epoch = run.turnGrantEpoch
     run.pendingTurnGrant = turnGrantKey(String(entry.meta?.tool), entry.meta?.input as Record<string, unknown>)
       .then((key) => {
-        if (key) run.turnAllows.add(key)
+        if (key && run.turnGrantEpoch === epoch) run.turnAllows.add(key)
       })
       .catch(() => undefined)
   }

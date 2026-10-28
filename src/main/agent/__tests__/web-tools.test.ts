@@ -24,6 +24,7 @@ const {
   clampMaxResults, cacheFresh, WEB_SEARCH_INACTIVE, getWebFetchFn, setWebFetchForTests
 } = await import('../web-tools')
 import { getSetting, setSetting } from '../../store/db'
+import { WEB_FETCH_MAX_BYTES, WEB_FETCH_TIMEOUT_MS } from '../../../shared/web-limits'
 
 // il vault sigillato con chiave iniettata (niente Keychain reale)
 const KEY = Buffer.alloc(32, 7)
@@ -154,104 +155,164 @@ describe('htmlToMarkdown (puro)', () => {
   })
 })
 
-// ---- web_fetch con DNS/fetch iniettabili (SSRF: nessuna rete) ----
+// ---- webFetch con lookup/trasporto iniettabili (SSRF: nessuna rete) ----
 
-const fetchReturning = (status: number, body = '', headers: Record<string, string> = {}): typeof fetch =>
-  (vi.fn(async () => new Response(body, { status, headers }))) as unknown as typeof fetch
+/**
+ * Un trasporto FINTO che si comporta come node alla connessione: PRIMA chiama
+ * la lookup VALIDANTE (è lei a decidere se e verso cosa aprire il socket),
+ * POI conta la connessione e risponde. Così i test provano che la difesa sta
+ * davvero al momento della connessione, non in un pre-check aggirabile.
+ */
+function fakeTransport(respond: (url: URL) => { status: number; body?: string; headers?: Record<string, string> }) {
+  const connections: string[] = []
+  const seenOpts: Array<{ url: string; deadlineAt: number; maxBytes: number }> = []
+  const transport: import('../web-tools').HttpTransport = async (url, opts) => {
+    await new Promise<void>((resolve, reject) => {
+      opts.lookup(url.hostname, { all: true }, (err) => { if (err) reject(err); else resolve() })
+    })
+    connections.push(url.hostname)
+    seenOpts.push({ url: url.toString(), deadlineAt: opts.deadlineAt, maxBytes: opts.maxBytes })
+    const r = respond(url)
+    return { status: r.status, headers: r.headers ?? {}, body: Buffer.from(r.body ?? ''), truncated: false }
+  }
+  return { transport, connections, seenOpts }
+}
 
-describe('webFetch: difese SSRF (DNS iniettabile)', () => {
-  it('DNS che risolve a privato → rifiuto', async () => {
+const hop200 = { status: 200, body: 'contenuto', headers: { 'content-type': 'text/plain' } }
+
+describe('webFetch: difese SSRF (validazione ALLA CONNESSIONE, F4)', () => {
+  it('DNS che risolve a privato → rifiuto PRIMA della connessione', async () => {
+    const f = fakeTransport(() => hop200)
     const r = await webFetch('https://internal.example/', {
-      fetchImpl: publicFetchImpl as unknown as typeof fetch,
+      transport: f.transport,
       lookup: async () => ['10.0.0.5']
     })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toContain('privato/interno')
-    expect(publicFetchImpl).not.toHaveBeenCalled()
+    expect(f.connections).toHaveLength(0)
   })
 
-  it('DNS che risolve a metadati cloud → rifiuto', async () => {
-    const r = await webFetch('http://169.254.169.254/latest/meta-data/', {
-      fetchImpl: publicFetchImpl as unknown as typeof fetch,
-      lookup: async () => ['169.254.169.254']
-    })
+  it('anti-TOCTOU: lookup pubblico al primo colpo e loopback al secondo → NESSUNA connessione', async () => {
+    // il vecchio percorso risolveva DUE volte (checkDns e poi fetch): un
+    // dominio con TTL 0 passava il pre-check e connetteva al loopback. Ora il
+    // pre-check passa (primo colpo pubblico) ma la lookup DELLA CONNESSIONE
+    // rifiuta il secondo colpo: il socket non si apre
+    let calls = 0
+    const lookup = async (): Promise<string[]> => (calls++ === 0 ? ['93.184.216.34'] : ['127.0.0.1'])
+    const f = fakeTransport(() => hop200)
+    const r = await webFetch('http://rebinding.example/', { transport: f.transport, lookup })
     expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toContain('host non ammesso')
+    expect(calls).toBe(2)
+    expect(f.connections).toHaveLength(0)
+  })
+
+  it('IP letterali IPv6 rifiutati col motivo "indirizzo interno" (non "non risolto")', async () => {
+    const f = fakeTransport(() => hop200)
+    for (const u of ['http://[::1]/', 'http://[::ffff:127.0.0.1]/', 'http://169.254.169.254/latest/meta-data/']) {
+      const r = await webFetch(u, { transport: f.transport })
+      expect(r.ok, u).toBe(false)
+      if (!r.ok) {
+        expect(r.reason, u).toContain('indirizzo interno')
+        expect(r.reason, u).not.toContain('non risolto')
+      }
+    }
+    expect(f.connections).toHaveLength(0)
   })
 
   it('redirect verso host privato → rifiuto A OGNI hop (il redirect si ricontrolla)', async () => {
-    let hop = 0
-    const impl = (async (_url: string, init?: RequestInit) => {
-      const u = new URL(_url)
-      if (hop++ === 0 && u.hostname === 'public.example') {
-        return new Response('', { status: 302, headers: { location: 'http://private.local/segreto' } }
-        )
+    const f = fakeTransport((url) => {
+      if (url.hostname === 'public.example') {
+        return { status: 302, headers: { location: 'http://private.local/segreto' } }
       }
-      return new Response('contenuto', { status: 200 })
-    }) as unknown as typeof fetch
+      return hop200
+    })
     const r = await webFetch('http://public.example/', {
-      fetchImpl: impl,
+      transport: f.transport,
       lookup: async (host) => (host === 'private.local' ? ['192.168.1.9'] : ['93.184.216.34'])
     })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toContain('redirect non ammesso')
+    // solo il primo hop (pubblico) si è connesso: il secondo mai
+    expect(f.connections).toEqual(['public.example'])
   })
 
   it('troppi redirect → rifiuto (massimo 5)', async () => {
-    const impl = (async (_u: string) => new Response('', { status: 302, headers: { location: '/next' } })) as unknown as typeof fetch
-    const r = await webFetch('http://public.example/a', { fetchImpl: impl, lookup: async () => ['93.184.216.34'] })
+    const f = fakeTransport(() => ({ status: 302, headers: { location: '/next' } }))
+    const r = await webFetch('http://public.example/a', { transport: f.transport, lookup: async () => ['93.184.216.34'] })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toContain('redirect')
   })
 
-  it('403 e 429 → esito BLOCCATO esplicito (niente aggiramenti)', async () => {
-    for (const status of [403, 429]) {
-      const r = await webFetch('http://public.example/x', {
-        fetchImpl: fetchReturning(status, '', { 'content-type': 'text/html' }),
-        lookup: async () => ['93.184.216.34']
-      })
+  it('scadenza TOTALE di 20 s e tetto dei 3 MB passati al trasporto', async () => {
+    const t0 = 1_000_000
+    const f = fakeTransport(() => hop200)
+    const r = await webFetch('http://public.example/', { transport: f.transport, lookup: async () => ['93.184.216.34'], now: () => t0 })
+    expect(r.ok).toBe(true)
+    expect(f.seenOpts[0]!.deadlineAt).toBe(t0 + WEB_FETCH_TIMEOUT_MS)
+    expect(f.seenOpts[0]!.maxBytes).toBe(WEB_FETCH_MAX_BYTES)
+  })
+
+  it('testo e JSON passano così come sono', async () => {
+    const f = fakeTransport(() => ({ status: 200, body: '{"a":1}', headers: { 'content-type': 'application/json' } }))
+    const r = await webFetch('http://public.example/data.json', { transport: f.transport, lookup: async () => ['93.184.216.34'] })
+    expect(r.ok && r.text).toBe('{"a":1}')
+  })
+})
+
+describe('webFetch: sfide e captcha (F5, niente falsi positivi)', () => {
+  it('403/429/503 con firma nota di sfida → blocco esplicito (NON aggirare)', async () => {
+    for (const status of [403, 429, 503]) {
+      const f = fakeTransport(() => ({ status, body: '<html><title>Just a moment...</title></html>', headers: { 'content-type': 'text/html' } }))
+      const r = await webFetch('http://public.example/x', { transport: f.transport, lookup: async () => ['93.184.216.34'] })
       expect(r.ok, String(status)).toBe(false)
       if (!r.ok) {
-        expect(r.blocked).toBe(true)
+        expect(r.blocked, String(status)).toBe(true)
         expect(r.reason).toContain('NON aggirare')
       }
     }
   })
 
-  it('captcha nella pagina → blocco esplicito', async () => {
-    const r = await webFetch('http://public.example/login', {
-      fetchImpl: fetchReturning(200, '<html><body><script src="https://www.google.com/recaptcha/api.js"></script></body></html>', { 'content-type': 'text/html' }),
-      lookup: async () => ['93.184.216.34']
-    })
+  it('403 SENZA firma di sfida → errore HTTP, non "bloccato dal captcha"', async () => {
+    const f = fakeTransport(() => ({ status: 403, body: '<html><body>Forbidden</body></html>', headers: { 'content-type': 'text/html' } }))
+    const r = await webFetch('http://public.example/x', { transport: f.transport, lookup: async () => ['93.184.216.34'] })
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.blocked).toBe(true)
+    if (!r.ok) {
+      expect(r.blocked).toBeUndefined()
+      expect(r.reason).toContain('HTTP 403')
+    }
+  })
+
+  it('pagina con SOLO il captcha → blocco; reCAPTCHA in una pagina CON contenuto → si legge', async () => {
+    // solo sfida: pochissimo testo dopo l'estrazione
+    const solo = fakeTransport(() => ({
+      status: 200,
+      body: '<html><body><script src="https://www.google.com/recaptcha/api.js"></script></body></html>',
+      headers: { 'content-type': 'text/html' }
+    }))
+    const r1 = await webFetch('http://public.example/login', { transport: solo.transport, lookup: async () => ['93.184.216.34'] })
+    expect(r1.ok).toBe(false)
+    if (!r1.ok) expect(r1.blocked).toBe(true)
+    // il ristorante col form di prenotazione: il modulo reCAPTCHA c'è, ma la
+    // pagina ha contenuto — leggerla NON è un blocco
+    const conContenuto = fakeTransport(() => ({
+      status: 200,
+      body: '<html><body><article><h1>Trattoria da Leo</h1><p>Menu vegetariano, prenotazioni al telefono. '.repeat(10) +
+        '</p><form action="/prenota"><script src="https://www.google.com/recaptcha/api.js"></script></form></article></body></html>',
+      headers: { 'content-type': 'text/html' }
+    }))
+    const r2 = await webFetch('http://public.example/menu', { transport: conContenuto.transport, lookup: async () => ['93.184.216.34'] })
+    expect(r2.ok).toBe(true)
+    if (r2.ok) expect(r2.text).toContain('Trattoria da Leo')
   })
 
   it('altri tipi (pdf, binari) → tipo non supportato', async () => {
     for (const ct of ['application/pdf', 'application/octet-stream', 'image/png']) {
-      const r = await webFetch('http://public.example/f', {
-        fetchImpl: fetchReturning(200, '%PDF-1.4', { 'content-type': ct }),
-        lookup: async () => ['93.184.216.34']
-      })
+      const f = fakeTransport(() => ({ status: 200, body: '%PDF-1.4', headers: { 'content-type': ct } }))
+      const r = await webFetch('http://public.example/f', { transport: f.transport, lookup: async () => ['93.184.216.34'] })
       expect(r.ok, ct).toBe(false)
       if (!r.ok) expect(r.unsupported).toBe(true)
     }
-  })
-
-  it('content-length dichiarato oltre 3 MB → rifiuto', async () => {
-    const r = await webFetch('http://public.example/big', {
-      fetchImpl: fetchReturning(200, 'x', { 'content-type': 'text/plain', 'content-length': String(4 * 1024 * 1024) }),
-      lookup: async () => ['93.184.216.34']
-    })
-    expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.reason).toContain('troppo grande')
-  })
-
-  it('testo e JSON passano così come sono', async () => {
-    const r = await webFetch('http://public.example/data.json', {
-      fetchImpl: fetchReturning(200, '{"a":1}', { 'content-type': 'application/json' }),
-      lookup: async () => ['93.184.216.34']
-    })
-    expect(r.ok && r.text).toBe('{"a":1}')
   })
 })
 
@@ -261,11 +322,13 @@ describe('web_fetch contro un server http locale (flag di test)', () => {
   let server: Server
   let url: string
   let hits = 0
+  let lastUserAgent = ''
 
   beforeAll(async () => {
     process.env.SANDBOT_WEB_FETCH_ALLOW_LOOPBACK = '1'
     server = createServer((req, res) => {
       hits++
+      lastUserAgent = String(req.headers['user-agent'] ?? '')
       if (req.url === '/redirect') {
         res.writeHead(302, { location: '/arrivo' })
         res.end()
@@ -273,7 +336,35 @@ describe('web_fetch contro un server http locale (flag di test)', () => {
       }
       if (req.url === '/bloccato') {
         res.writeHead(403, { 'content-type': 'text/html' })
-        res.end('<html><body>no</body></html>')
+        res.end('<html><head><title>Just a moment...</title></head><body>Verify you are human</body></html>')
+        return
+      }
+      if (req.url === '/charset-latin1') {
+        res.writeHead(200, { 'content-type': 'text/plain; charset=iso-8859-1' })
+        res.end(Buffer.from('caffè più dài àéì latin1', 'latin1'))
+        return
+      }
+      if (req.url === '/charset-1252') {
+        res.writeHead(200, { 'content-type': 'text/plain; charset=windows-1252' })
+        // 0x92 = apostrofo tipografico in windows-1252
+        res.end(Buffer.concat([Buffer.from('l ', 'latin1'), Buffer.from([0x92]), Buffer.from('apostrofo', 'latin1')]))
+        return
+      }
+      if (req.url === '/grande') {
+        // corpo CHUNKED da 10 MB senza content-length: il lettore in streaming
+        // deve tenersi 3 MB e interrompere il download
+        res.writeHead(200, { 'content-type': 'text/plain' })
+        const piece = 'x'.repeat(1024)
+        let sent = 0
+        const pump = () => {
+          while (sent < 10 * 1024 * 1024) {
+            const ok = res.write(piece)
+            sent += piece.length
+            if (!ok) { res.once('drain', pump); return }
+          }
+          res.end()
+        }
+        pump()
         return
       }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -293,7 +384,7 @@ describe('web_fetch contro un server http locale (flag di test)', () => {
     delete process.env.SANDBOT_WEB_FETCH_ALLOW_LOOPBACK
     const r = await webFetch(`${url}/`, {})
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.reason).toContain('privato/interno')
+    if (!r.ok) expect(r.reason).toContain('indirizzo interno')
     process.env.SANDBOT_WEB_FETCH_ALLOW_LOOPBACK = saved
   })
 
@@ -305,6 +396,28 @@ describe('web_fetch contro un server http locale (flag di test)', () => {
       expect(r.text).toContain('# Page title')
       expect(r.text).toContain('[link](/x)')
     }
+  })
+
+  it('corpo chunked da 10 MB: si tengono 3 MB e si interrompe (memoria limitata)', async () => {
+    const r = await webFetch(`${url}/grande`, {})
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.truncated).toBe(true)
+      expect(r.downloadedBytes).toBe(WEB_FETCH_MAX_BYTES)
+      // i 3 MB di corpo + la sola nota "pagina troncata": nient'altro in memoria
+      expect(r.text.length).toBeLessThanOrEqual(WEB_FETCH_MAX_BYTES + 100)
+      expect(r.text.endsWith('x\n\n[pagina troncata: oltre i 3 MB ho tenuto i primi 3 MB]')).toBe(true)
+    }
+  })
+
+  it('latin1 e windows-1252 decodificati bene (TextDecoder, F4)', async () => {
+    const a = await webFetch(`${url}/charset-latin1`, {})
+    expect(a.ok).toBe(true)
+    if (a.ok) expect(a.text).toContain('caffè più dài àéì latin1')
+    const b = await webFetch(`${url}/charset-1252`, {})
+    expect(b.ok).toBe(true)
+    // 0x92 in windows-1252 è l'apostrofo tipografico U+2019 (prima: eccezione e ricada su utf8)
+    if (b.ok) expect(b.text).toContain('l ’apostrofo')
   })
 
   it('cache per URL: seconda lettura senza nuove richieste al server', async () => {
@@ -327,20 +440,18 @@ describe('web_fetch contro un server http locale (flag di test)', () => {
     expect(cacheFresh(Date.now() - 16 * 60_000, Date.now())).toBe(false)
   })
 
-  it('403 dal server locale → esito bloccato', async () => {
+  it('403 con la firma di una sfida dal server locale → esito bloccato', async () => {
     const r = await webFetch(`${url}/bloccato`, {})
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.blocked).toBe(true)
+    if (!r.ok) {
+      expect(r.blocked).toBe(true)
+      expect(r.reason).toContain('sfida')
+    }
   })
 
   it('user-agent onesto SandBot/<versione>', async () => {
-    let ua = ''
-    const impl = (async (_u: string, init?: RequestInit) => {
-      ua = (init?.headers as Record<string, string>)['user-agent']
-      return new Response('x', { status: 200, headers: { 'content-type': 'text/plain' } })
-    }) as unknown as typeof fetch
-    const r = await webFetch('http://public.example/ua', { fetchImpl: impl, lookup: async () => ['93.184.216.34'] })
+    const r = await webFetch(`${url}/arrivo`, {})
     expect(r.ok).toBe(true)
-    expect(ua).toMatch(/^SandBot\/[\d.]+$/)
+    expect(lastUserAgent).toMatch(/^SandBot\/[\d.]+$/)
   })
 })

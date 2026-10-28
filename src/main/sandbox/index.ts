@@ -33,6 +33,7 @@ import {
   dockerBoxMarkerCheckArgv,
   dockerBoxMarkerWriteArgv,
   dockerVolumeLsArgv,
+  dockerClientEnv,
   BOX_CONTAINER,
   BOX_VOLUME,
   BOX_MOUNT,
@@ -176,9 +177,23 @@ async function execDocker(agentId: string, command: string, opts: ExecOptions): 
   const env = { HOME: home, ...(opts.env ?? {}) }
   const r = await docker(dockerExecArgv(BOX_CONTAINER, command, { workdir: home, env }), {
     ...opts,
-    // i valori delle env viaggiano nell'ambiente del processo docker (non in argv)
-    env
+    // F2: nell'env del processo docker sull'HOST restano il daemon + i SOLI
+    // segreti: il client docker usa HOME sua per trovare ~/.docker (contesti,
+    // socket di Docker Desktop/Colima); HOME del bot e le altre variabili non
+    // segrete viaggiano col VALORE nell'argv (-e KEY=VALORE)
+    env: dockerClientEnv(env)
   })
+  const o = capOutput(r.stdout)
+  const e = capOutput(r.stderr)
+  return { stdout: o.text, stderr: e.text, exitCode: r.exitCode, signal: r.signal, trimmed: o.trimmed || e.trimmed }
+}
+
+/**
+ * Esegue ARGV PURI nel container condiviso (F6): per i path che arrivano dal
+ * modello (es. `stat -c %s -- <path>`) — nessuna shell, niente interpolazione.
+ */
+export async function runDockerArgv(argv: string[], opts: ExecOptions = {}): Promise<ExecResult> {
+  const r = await docker(argv, opts)
   const o = capOutput(r.stdout)
   const e = capOutput(r.stderr)
   return { stdout: o.text, stderr: e.text, exitCode: r.exitCode, signal: r.signal, trimmed: o.trimmed || e.trimmed }
@@ -304,6 +319,8 @@ const HOST_MIGRATION_MARKER = '.migrated-v1'
 export interface BoxMigration {
   migrated: Array<{ agentId: string; from: string; to: string }>
   alreadyDone: boolean
+  /** F9: copie FALLITE — niente marker, si riprovano al prossimo avvio */
+  failed: Array<{ agentId: string; from: string }>
 }
 
 /**
@@ -312,7 +329,8 @@ export interface BoxMigration {
  * home `<dir dati>/box/home/<agentId>`; docker copia i vecchi volumi
  * `sandbot-<agentId>-box` in `/box/home/<agentId>` con container one-shot.
  * Gli originali restano dove sono: la cancellazione la decide l'utente.
- * Idempotente: un marker nel box (dopo la corsa buona non si rifà nulla).
+ * Idempotente: un marker nel box, scritto SOLO se TUTTE le copie sono riuscite
+ * (F9) — una copia fallita finisce in `failed` e si riprova al prossimo avvio.
  * Le dipendenze sono iniettabili per i test (nessuna home reale).
  */
 export async function migrateLegacyBoxes(
@@ -325,30 +343,40 @@ export async function migrateLegacyBoxes(
       runProcess('docker', argv, { timeoutMs: 120_000 })
     const run = deps.runDocker ?? defaultRun
     const check = await run(dockerBoxMarkerCheckArgv())
-    if (check.exitCode === 0) return { migrated: [], alreadyDone: true }
+    if (check.exitCode === 0) return { migrated: [], alreadyDone: true, failed: [] }
     const migrated: Array<{ agentId: string; from: string; to: string }> = []
+    const failed: Array<{ agentId: string; from: string }> = []
     for (const a of agents) {
       const oldVolume = `sandbot-${a.id}-box`
       const ls = await run(dockerVolumeLsArgv(oldVolume))
       if (ls.exitCode === 0 && ls.stdout.trim().split('\n').includes(oldVolume)) {
         const copy = await run(dockerBoxMigrateArgv(oldVolume, a.id))
         if (copy.exitCode === 0) migrated.push({ agentId: a.id, from: `volume docker ${oldVolume}`, to: `/box/home/${a.id}` })
+        else failed.push({ agentId: a.id, from: `volume docker ${oldVolume}` })
       }
     }
-    await run(dockerBoxMarkerWriteArgv())
-    return { migrated, alreadyDone: false }
+    // F9: il marker SOLO se tutto è andato bene — con copie fallite la
+    // migrazione di quel bot va ritentata al prossimo avvio
+    if (!failed.length) await run(dockerBoxMarkerWriteArgv())
+    return { migrated, alreadyDone: false, failed }
   }
   const legacyRoot = deps.legacyRoot ?? join(homedir(), 'SandBot')
   const marker = join(root, HOST_MIGRATION_MARKER)
-  if (existsSync(marker)) return { migrated: [], alreadyDone: true }
+  if (existsSync(marker)) return { migrated: [], alreadyDone: true, failed: [] }
   const migrated: Array<{ agentId: string; from: string; to: string }> = []
+  const failed: Array<{ agentId: string; from: string }> = []
   for (const a of agents) {
     const from = join(legacyRoot, a.id, 'box')
     if (!existsSync(from)) continue
     const to = boxDir(a.id)
-    await cp(from, to, { recursive: true, force: true }) // COPIA: gli originali restano
-    migrated.push({ agentId: a.id, from, to })
+    try {
+      await cp(from, to, { recursive: true, force: true }) // COPIA: gli originali restano
+      migrated.push({ agentId: a.id, from, to })
+    } catch {
+      failed.push({ agentId: a.id, from })
+    }
   }
-  writeFileSync(marker, new Date().toISOString())
-  return { migrated, alreadyDone: false }
+  // F9 come in docker: niente marker se una copia è fallita
+  if (!failed.length) writeFileSync(marker, new Date().toISOString())
+  return { migrated, alreadyDone: false, failed }
 }

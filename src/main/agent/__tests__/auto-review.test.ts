@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   autoReviewDecision, runReviewer, reviewerPrompt, describeActionForReviewer,
+  liftContaminatedAllow, CONTAMINATED_ASK_TOOLS,
   AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction, type ReviewerModel
 } from '../auto-review'
 import { DEFAULT_AUTO_REVIEW, type AutoReviewSettings } from '../../../shared/types'
@@ -18,6 +19,29 @@ const cfg: AutoReviewSettings = {
 
 const cmd: AutoReviewAction = { tool: 'run-command', args: { command: 'ls' }, neverAuto: false, untrustedTurn: false }
 const allowOutcome = { ok: true as const, decision: 'allow' as const, ruleMatched: RULE }
+
+describe('liftContaminatedAllow (F8, pura): allow → ask nel turno contaminato', () => {
+  it('un verdetto allow dei tool con effetti torna a chiedere, col motivo del turno contaminato', () => {
+    for (const tool of [...CONTAMINATED_ASK_TOOLS]) {
+      const v = liftContaminatedAllow({ kind: 'allow', via: 'rule' }, tool, true)
+      expect(v.kind, tool).toBe('ask')
+      if (v.kind === 'ask') expect(v.reason, tool).toContain('il turno ha letto contenuti web')
+    }
+  })
+
+  it('deny e ask passano INVARIATI (le regole blocked continuano a negare)', () => {
+    const deny = { kind: 'deny' as const, reason: 'fermati sempre' }
+    expect(liftContaminatedAllow(deny, 'run-command', true)).toBe(deny)
+    const ask = { kind: 'ask' as const, reason: 'chiedi' }
+    expect(liftContaminatedAllow(ask, 'run-command', true)).toBe(ask)
+  })
+
+  it('fuori dal turno contaminato, e per gli altri tool, il verdetto non cambia', () => {
+    const allow = { kind: 'allow' as const, via: 'rule' as const }
+    expect(liftContaminatedAllow(allow, 'run-command', false)).toBe(allow)
+    expect(liftContaminatedAllow(allow, 'write-file', true)).toBe(allow)
+  })
+})
 
 describe('autoReviewDecision: la decisione finale (pura)', () => {
   it('auto-review spenta → mai auto-allow (default disabled)', () => {

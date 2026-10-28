@@ -75,6 +75,7 @@ describe('migrazione docker: argv one-shot passati al runner iniettato', () => {
       }
       const r1 = await migrateLegacyBoxes([{ id: 'agent_a' }, { id: 'agent_senza' }], { runDocker: run1 })
       expect(r1.migrated).toEqual([{ agentId: 'agent_a', from: 'volume docker sandbot-agent_a-box', to: '/box/home/agent_a' }])
+      expect(r1.failed).toEqual([])
       // la sequenza: check marker → ls volume (uno per agente) → cp → touch marker
       expect(seen[0]!.includes('test')).toBe(true)
       expect(seen.at(-1)!.includes('touch')).toBe(true)
@@ -89,6 +90,38 @@ describe('migrazione docker: argv one-shot passati al runner iniettato', () => {
       })
       expect(r2.alreadyDone).toBe(true)
       expect(calls).toBe(1) // solo il check del marker
+    } finally {
+      sandboxMode = 'host'
+    }
+  })
+
+  it('F9: una copia FALLITA → niente marker, il fallito in `failed`, e si RIPROVA al prossimo avvio', async () => {
+    sandboxMode = 'docker'
+    try {
+      let markerTouched = false
+      const run = async (argv: string[]) => {
+        if (argv.includes('test')) return { exitCode: 1, stdout: '' } // marker assente
+        if (argv.includes('volume')) return { exitCode: 0, stdout: 'sandbot-agent_a-box\nsandbot-agent_b-box' }
+        if (argv.includes('touch')) { markerTouched = true; return { exitCode: 0, stdout: '' } }
+        // la copia di agent_a riesce, quella di agent_b FALLISCE
+        return argv.includes('agent_a') ? { exitCode: 0, stdout: '' } : { exitCode: 1, stdout: 'boom' }
+      }
+      const r1 = await migrateLegacyBoxes([{ id: 'agent_a' }, { id: 'agent_b' }], { runDocker: run })
+      expect(r1.alreadyDone).toBe(false)
+      expect(r1.migrated.map((m) => m.agentId)).toEqual(['agent_a'])
+      expect(r1.failed).toEqual([{ agentId: 'agent_b', from: 'volume docker sandbot-agent_b-box' }])
+      // il marker NON si scrive: la migrazione va ritentata al prossimo avvio
+      expect(markerTouched).toBe(false)
+      // seconda corsa: il marker è ancora assente → si riprova TUTTO (idempotente per copia)
+      const r2 = await migrateLegacyBoxes([{ id: 'agent_a' }, { id: 'agent_b' }], {
+        runDocker: async (argv) => {
+          if (argv.includes('test')) return { exitCode: 1, stdout: '' }
+          if (argv.includes('volume')) return { exitCode: 0, stdout: 'sandbot-agent_b-box' }
+          return { exitCode: 0, stdout: '' } // stavolta la copia riesce
+        }
+      })
+      expect(r2.failed).toEqual([])
+      expect(r2.migrated.map((m) => m.agentId)).toEqual(['agent_b'])
     } finally {
       sandboxMode = 'host'
     }

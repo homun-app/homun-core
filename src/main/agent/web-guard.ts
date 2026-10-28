@@ -1,8 +1,9 @@
 // Difese SSRF e limiti di web_fetch (fase 11, punto 2) — funzioni PURE:
 // validazione dell'URL (solo http/https, niente credenziali), classificazione
-// degli IP (privati, loopback, link-local, ULA, 0.0.0.0, metadati cloud) e
-// troncamento con offset. Il DNS e il fetch sono iniettabili: nei test
-// niente rete reale.
+// degli IP NORMALIZZATI con ipaddr.js (mapped/compatible → IPv4, NAT64 e 6to4
+// con l'IPv4 incorporato, Teredo, benchmark 198.18.0.0/15) e troncamento con
+// offset. Il DNS e il fetch sono iniettabili: nei test niente rete reale.
+import ipaddr from 'ipaddr.js'
 import { WEB_FETCH_MAX_CHARS } from '../../shared/web-limits'
 
 export type UrlCheck =
@@ -32,30 +33,61 @@ export function checkUrl(raw: string): UrlCheck {
 }
 
 /**
- * IP riservato/privato (puro): loopback, privati RFC1918, CGNAT, link-local
- * (comprende i metadati cloud 169.254.169.254), 0.0.0.0, multicast/riservati,
- * ULA fc00::/7, link-local IPv6, IPv4-mapped IPv6.
+ * L'host è un INDIRIZZO letterale? URL lascia le parentesi negli hostname
+ * IPv6 (`new URL('http://[::1]/').hostname` è `[::1]`): qui si tolgono e si
+ * riconosce l'IP puro (IPv4 o IPv6). Null se l'host è un nome da risolvere.
  */
-export function isForbiddenIp(ip: string): boolean {
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip)
-  if (v4) {
-    const a = Number(v4[1])
-    const b = Number(v4[2])
-    if (a === 0 || a === 10 || a === 127) return true // 0.0.0.0, privati, loopback
-    if (a === 169 && b === 254) return true // link-local + endpoint metadati cloud
-    if (a === 172 && b >= 16 && b <= 31) return true
-    if (a === 192 && b === 168) return true
-    if (a === 100 && b >= 64 && b <= 127) return true // CGNAT
-    if (a >= 224) return true // multicast e riservati
-    return false
+export function literalHostIp(hostname: string): string | null {
+  const h = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname
+  return ipaddr.isValid(h) ? h : null
+}
+
+/** IPv4 rifiutati: reti interne, loopback, link-local (metadati cloud), CGNAT, benchmark 198.18.0.0/15, multicast/riservati. */
+const V4_FORBIDDEN_CIDRS = [
+  '0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16',
+  '172.16.0.0/12', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/3'
+].map((c) => ipaddr.parseCIDR(c))
+
+/** L'IPv4 costruito da due gruppi da 16 bit (gli ultimi 32 bit di un IPv6). */
+function v4FromParts(hi: number, lo: number): ipaddr.IPv4 {
+  return new ipaddr.IPv4([(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff])
+}
+
+function forbiddenV4(addr: ipaddr.IPv4): boolean {
+  return V4_FORBIDDEN_CIDRS.some((cidr) => addr.match(cidr))
+}
+
+/**
+ * IP riservato/interno (PURO, F4): IPv4 e IPv6 NORMALIZZATI prima del
+ * confronto, come request-filtering-agent / ssrf-req-filter:
+ * - mapped (::ffff:0:0/96) e compatible (::/96) estratti come IPv4
+ *   (`::1` e `::` cadono lì: 0.0.0.1 e 0.0.0.0 sono in 0.0.0.0/8);
+ * - NAT64 64:ff9b::/96 e 6to4 2002::/16 con l'IPv4 incorporato controllato;
+ * - Teredo 2001:0::/32 rifiutato in blocco; 198.18.0.0/15 (benchmark),
+ *   ULA fc00::/7, link-local fe80::/10 e multicast ff00::/8 rifiutati.
+ * Un indirizzo non parsabile è rifiutato (fail closed).
+ */
+export function isForbiddenIp(rawIp: string): boolean {
+  const literal = literalHostIp(rawIp)
+  if (literal === null) return true
+  const parsed = ipaddr.parse(literal)
+  if (parsed.kind() === 'ipv4') return forbiddenV4(parsed as ipaddr.IPv4)
+  const p = (parsed as ipaddr.IPv6).parts
+  // mapped e compatible: l'IPv4 sta negli ultimi 32 bit
+  if (p.slice(0, 5).every((x) => x === 0) && (p[5] === 0 || p[5] === 0xffff)) {
+    return forbiddenV4(v4FromParts(p[6]!, p[7]!))
   }
-  const v6 = ip.toLowerCase().replace(/^\[/, '').replace(/\]$/, '')
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v6)
-  if (mapped) return isForbiddenIp(mapped[1]!)
-  if (v6 === '::' || v6 === '::1') return true // unspecified e loopback
-  if (/^f[cd][0-9a-f]{2}:/.test(v6) || v6.startsWith('fd') || v6.startsWith('fc')) return true // ULA fc00::/7
-  if (/^fe[89ab][0-9a-f]:/.test(v6)) return true // link-local fe80::/10
-  if (v6.startsWith('ff')) return true // multicast
+  // NAT64 64:ff9b::/96: l'IPv4 incorporato negli ultimi 32 bit
+  if (p[0] === 0x64 && p[1] === 0xff9b && p.slice(2, 6).every((x) => x === 0)) {
+    return forbiddenV4(v4FromParts(p[6]!, p[7]!))
+  }
+  // 6to4 2002::/16: l'IPv4 incorporato nei bit 16..48
+  if (p[0] === 0x2002) return forbiddenV4(v4FromParts(p[1]!, p[2]!))
+  // Teredo 2001:0::/32 rifiutato in blocco
+  if (p[0] === 0x2001 && p[1] === 0) return true
+  if ((p[0]! & 0xfe00) === 0xfc00) return true // ULA fc00::/7
+  if ((p[0]! & 0xffc0) === 0xfe80) return true // link-local fe80::/10
+  if ((p[0]! & 0xff00) === 0xff00) return true // multicast ff00::/8
   return false
 }
 

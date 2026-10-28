@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   try {
     const { migrateLegacyBoxes } = await import('../main/sandbox')
     const migration = await migrateLegacyBoxes(listAgents())
-    if (migration.migrated.length) {
+    if (migration.migrated.length || migration.failed.length) {
       const main = mainAgentOf(listAgents(), getSetting<string | null>('mainAgentId', null))
       if (main) {
         appendEntry({
@@ -81,11 +81,15 @@ async function main(): Promise<void> {
             `Il computer dei bot ora è UNO solo, condiviso (radice: ${join(dataDir(), 'box')}).`,
             'Ho COPIATO i vecchi box dei bot nella nuova struttura, senza cancellare nulla:',
             ...migration.migrated.map((m) => `- ${m.from} → ${m.to}`),
+            // F9: le copie fallite si ritentano al prossimo avvio (niente marker)
+            ...(migration.failed.length
+              ? [`Non copiato (riproverò al prossimo avvio): ${migration.failed.map((f) => f.from).join(', ')}.`]
+              : []),
             'I dati originali restano dove sono: puoi cancellarli tu quando vuoi.'
           ].join('\n')
         })
       }
-      console.log(`[sandbotd] migrazione box condiviso: copiati ${migration.migrated.length} vecchi box (gli originali restano)`)
+      console.log(`[sandbotd] migrazione box condiviso: copiati ${migration.migrated.length} vecchi box (gli originali restano)${migration.failed.length ? `, ${migration.failed.length} non copiati (riprova al prossimo avvio)` : ''}`)
     }
   } catch (e) {
     console.error('[sandbotd] migrazione box fallita (si riprova al prossimo avvio):', e)
