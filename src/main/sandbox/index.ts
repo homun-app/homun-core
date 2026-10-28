@@ -13,7 +13,7 @@
 // comune, fuori dalla radice rifiutati (realpath: ../ e symlink esterni).
 // Le scritture sono ATOMICHE (file temporaneo nella stessa cartella + rename).
 import { spawn } from 'node:child_process'
-import { mkdirSync, existsSync, writeFileSync, realpathSync as realpathSyncHost } from 'node:fs'
+import { mkdirSync, existsSync, writeFileSync, readFileSync, realpathSync as realpathSyncHost } from 'node:fs'
 import { readFile, writeFile, readdir, mkdir, rename, cp, copyFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
@@ -39,6 +39,7 @@ import {
   boxNeedsRecreateForInit,
   boxEnsurePlan,
   boxCreateCheck,
+  boxImageTag,
   type BoxEnsureFacts,
   dockerVolumeLsArgv,
   dockerClientEnv,
@@ -88,6 +89,25 @@ export function boxLimits(): BoxLimits {
 }
 
 /**
+ * Fase 11b (0c): il Dockerfile dell'immagine NOSTRA del box. Override di test
+ * con SANDBOT_BOX_DOCKERFILE; nel pacchetto vive nelle extraResources
+ * (process.resourcesPath/box); in dev nel repo (la cwd del daemon è la radice).
+ */
+export function boxDockerfilePath(): string {
+  if (process.env.SANDBOT_BOX_DOCKERFILE) return process.env.SANDBOT_BOX_DOCKERFILE
+  if (process.resourcesPath) {
+    const packaged = join(process.resourcesPath, 'box', 'Dockerfile')
+    if (existsSync(packaged)) return packaged
+  }
+  return join(process.cwd(), 'resources', 'box', 'Dockerfile')
+}
+
+/** Il tag dell'immagine del box, derivato dal CONTENUTO del Dockerfile. */
+export function boxImage(): string {
+  return boxImageTag(readFileSync(boxDockerfilePath(), 'utf8'))
+}
+
+/**
  * Fase 11 (residuo 0d + §3bis L1): la radice del BOX CONDIVISO vive nella
  * directory DATI (<dir dati>/box), non più nella home dell'utente: il box è
  * un computer dei bot, non un file dell'utente, e la directory dati è già
@@ -108,7 +128,8 @@ export function boxDir(agentId: string): string {
   return dir
 }
 
-function capOutput(text: string): { text: string; trimmed: boolean } {
+/** Il tetto di righe dell'output dei comandi (come l'originale). */
+export function capOutput(text: string): { text: string; trimmed: boolean } {
   const lines = text.split('\n')
   if (lines.length <= MAX_OUTPUT_LINES) return { text, trimmed: false }
   return { text: lines.slice(0, MAX_OUTPUT_LINES).join('\n'), trimmed: true }
@@ -299,9 +320,11 @@ export async function ensureBoxContainer(): Promise<void> {
   // creazione (prima volta o ricreazione G2/H1): il one-shot rende il volume
   // NON vuoto (workspace e home) e lo consegna all'utente del container; il
   // mount :nocopy del create non dipende dal copy-up di docker
-  const chown = await dockerRunner(dockerBoxChownArgv(BOX_VOLUME), { timeoutMs: 60_000 })
+  // 0c: creazione e one-shot con l'immagine NOSTRA del box (tag dal Dockerfile)
+  const image = boxImage()
+  const chown = await dockerRunner(dockerBoxChownArgv(BOX_VOLUME, image), { timeoutMs: 60_000 })
   if (chown.exitCode !== 0) throw new Error(`init volume fallito: ${chown.stderr}`)
-  const create = await dockerRunner(dockerBoxCreateArgv(BOX_CONTAINER, BOX_VOLUME, sandboxNetwork(), boxLimits()), { timeoutMs: 60_000 })
+  const create = await dockerRunner(dockerBoxCreateArgv(BOX_CONTAINER, BOX_VOLUME, sandboxNetwork(), boxLimits(), image), { timeoutMs: 60_000 })
   if (create.exitCode !== 0) throw new Error(`docker create fallito: ${create.stderr}`)
   const start = await dockerRunner(dockerStartArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
   if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
@@ -433,7 +456,8 @@ export async function migrateLegacyBoxes(
     const defaultRun = (argv: string[]): Promise<{ exitCode: number | null; stdout: string }> =>
       runProcess('docker', argv, { timeoutMs: 120_000 })
     const run = deps.runDocker ?? defaultRun
-    const check = await run(dockerBoxMarkerCheckArgv())
+    const image = boxImage()
+    const check = await run(dockerBoxMarkerCheckArgv(image))
     if (check.exitCode === 0) return { migrated: [], alreadyDone: true, failed: [] }
     const migrated: Array<{ agentId: string; from: string; to: string }> = []
     const failed: Array<{ agentId: string; from: string }> = []
@@ -441,14 +465,14 @@ export async function migrateLegacyBoxes(
       const oldVolume = `sandbot-${a.id}-box`
       const ls = await run(dockerVolumeLsArgv(oldVolume))
       if (ls.exitCode === 0 && ls.stdout.trim().split('\n').includes(oldVolume)) {
-        const copy = await run(dockerBoxMigrateArgv(oldVolume, a.id))
+        const copy = await run(dockerBoxMigrateArgv(oldVolume, a.id, image))
         if (copy.exitCode === 0) migrated.push({ agentId: a.id, from: `volume docker ${oldVolume}`, to: `/box/home/${a.id}` })
         else failed.push({ agentId: a.id, from: `volume docker ${oldVolume}` })
       }
     }
     // F9: il marker SOLO se tutto è andato bene — con copie fallite la
     // migrazione di quel bot va ritentata al prossimo avvio
-    if (!failed.length) await run(dockerBoxMarkerWriteArgv())
+    if (!failed.length) await run(dockerBoxMarkerWriteArgv(image))
     return { migrated, alreadyDone: false, failed }
   }
   const legacyRoot = deps.legacyRoot ?? join(homedir(), 'SandBot')

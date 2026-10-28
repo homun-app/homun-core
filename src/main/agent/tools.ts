@@ -1,7 +1,7 @@
 // Tool base — stessi nomi e semantica dei tool verificati nel local-exec-daemon originale.
 import type { ToolDef } from './llm'
 import * as sandbox from '../sandbox'
-import { resolveSecretRefs, redactSecrets } from './secrets'
+import { resolveSecretRefs } from './secrets'
 import { formatTaskDone } from '../../shared/agent-message'
 import { MAX_GROUP_MEMBERS } from './group-turns'
 import {
@@ -620,18 +620,15 @@ export async function executeTool(
           meta: { shellId: started.shellId, background: true }
         }
       }
+      // fase 11b (0a): anche il foreground parte col wrapper costante delle
+      // shell in background (riga shell_jobs compresa) e il daemon attende al
+      // più la soglia di promozione: finisce → result come prima; non finisce
+      // → resta in background (SHELL_DONE / await_shell); tetti pieni → come
+      // prima, col timeout e la nota del perché
       const timeoutMs = Math.min(600, Number(input.timeout ?? 120)) * 1000
-      const r = await sandbox.execCommand(agentId, res.command, { timeoutMs, env: res.env })
-      const redact = (t: string) => redactSecrets(t, res.used)
-      const parts: string[] = []
-      if (r.stdout) parts.push(redact(r.stdout))
-      if (r.stderr) parts.push('[stderr]\n' + redact(r.stderr))
-      parts.push(`[exit ${r.exitCode ?? 'killed'}${r.trimmed ? ' — output trimmed' : ''}]`)
-      // output già redatto: lo stesso testo va al modello e al transcript
-      return {
-        output: parts.join('\n'),
-        meta: { exitCode: r.exitCode, trimmed: r.trimmed, secretRefs: res.used.map((s) => s.name) }
-      }
+      const { runForegroundShell } = await import('./shells')
+      const r = await runForegroundShell(agentId, res.command, res.env, res.used.map((s) => s.name), { timeoutMs })
+      return { output: r.output, meta: r.meta }
     }
     case 'await_shell': {
       // fase 11 (punto 3): attesa/kill di un comando in background — i comandi

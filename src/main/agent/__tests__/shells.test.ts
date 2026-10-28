@@ -16,7 +16,8 @@ const { setDataDir, db } = await import('../../store/db')
 setDataDir(TMP)
 
 const {
-  startBackgroundShell, awaitShell, tickShellJobs, backgroundShellPaths, lastLines, parseShellPgid
+  startBackgroundShell, awaitShell, tickShellJobs, backgroundShellPaths, lastLines, parseShellPgid,
+  runForegroundShell, foregroundOutcome, exitPollDelayMs
 } = await import('../shells')
 import { getShellJob, runningShellJobsOf, runningShellJobsAll, createShellJob, updateShellJob, SHELLS_PER_AGENT_MAX, SHELLS_PER_BOX_MAX } from '../../store/shell-jobs'
 
@@ -326,5 +327,118 @@ describe('store puro shell_jobs', () => {
     const job = getShellJob(db(), 'sh-c1')!
     expect(job.secret_names).toEqual(['API_KEY'])
     expect(job.command).not.toMatch(/SK-|Bearer [A-Za-z0-9]/)
+  })
+})
+
+describe('fase 11b (0a): auto-background del foreground', () => {
+  it('foregroundOutcome (PURO): tetti pieni → fallback col motivo; finito in tempo → done; non finito → promote', () => {
+    const fallback = foregroundOutcome({ capsFull: true, exited: true })
+    expect(fallback.kind).toBe('fallback')
+    if (fallback.kind === 'fallback') expect(fallback.why).toContain('al massimo')
+    expect(foregroundOutcome({ capsFull: false, exited: true }).kind).toBe('done')
+    expect(foregroundOutcome({ capsFull: false, exited: false }).kind).toBe('promote')
+  })
+
+  it('exitPollDelayMs (PURO): backoff 250 → 500 → 1000 → 1000', () => {
+    expect([1, 2, 3, 4, 5].map(exitPollDelayMs)).toEqual([250, 500, 1000, 1000, 1000])
+  })
+
+  it('comando VELOCE: result come oggi (output + exit), stdout e stderr INSIEME nell\'ordine, riga chiusa e GIÀ letta (nessuna notifica)', async () => {
+    const t = testDeps()
+    const r = await runForegroundShell(AGENT, 'echo prima; echo seconda >&2; exit 0', {}, [], { timeoutMs: 30_000 }, t.deps)
+    expect(r.output).toContain('prima')
+    expect(r.output).toContain('seconda')
+    // stdout e stderr arrivano insieme, nell'ordine del log del wrapper
+    expect(r.output.indexOf('prima')).toBeLessThan(r.output.indexOf('seconda'))
+    expect(r.output).toContain('[exit 0]')
+    expect(r.meta.exitCode).toBe(0)
+    // la riga esiste, è chiusa e marcata letta: NESSUN SHELL_DONE
+    const jobs = (await import('../../store/shell-jobs')).runningShellJobsOf(db(), AGENT)
+    expect(jobs).toHaveLength(0)
+    const row = (db() as unknown as DatabaseSync).prepare("SELECT * FROM shell_jobs WHERE agent_id = ?").all(AGENT) as Array<{ status: string; exit_code: number; awaited: number; notified: number }>
+    expect(row.length).toBeGreaterThanOrEqual(1)
+    for (const j of row) {
+      expect(j.status).toBe('done')
+      expect(j.exit_code).toBe(0)
+      expect(j.awaited).toBe(1)
+      expect(j.notified).toBe(1)
+    }
+    expect(t.enqueued).toHaveLength(0)
+  })
+
+  it('exit code diverso da zero riportato come oggi', async () => {
+    const t = testDeps()
+    const r = await runForegroundShell(AGENT, 'echo boom >&2; exit 3', {}, [], { timeoutMs: 30_000 }, t.deps)
+    expect(r.output).toContain('boom')
+    expect(r.output).toContain('[exit 3]')
+  })
+
+  it('output REDATTO coi segreti del comando (il valore non entra mai nel result)', async () => {
+    const t = testDeps()
+    const r = await runForegroundShell(AGENT, 'echo "token=$SANDBOT_SECRET_TOKEN"', { SANDBOT_SECRET_TOKEN: 'SK-TOKEN-SEGRETO' }, ['TOKEN'], { timeoutMs: 30_000 }, {
+      ...t.deps,
+      reveal: async () => 'SK-TOKEN-SEGRETO'
+    })
+    expect(r.output).toContain('[redacted:TOKEN]')
+    expect(r.output).not.toContain('SK-TOKEN-SEGRETO')
+  })
+
+  it('comando LUNGO oltre la soglia (iniettata breve): PROMOSO, resta in corsa e poi viene NOTIFICATO dal tick', async () => {
+    process.env.SANDBOT_TEST_PROMOTE_AFTER_SEC = '1'
+    try {
+      const t = testDeps()
+      const r = await runForegroundShell(AGENT, 'sleep 2 && echo pronto', {}, [], { timeoutMs: 30_000 }, t.deps)
+      // result della promozione: shellId, esito alla fine o await_shell
+      expect(r.output).toContain('ancora in corso dopo 1 s')
+      expect(r.output).toContain('l\'ho passato in background')
+      expect(r.output).toContain('await_shell')
+      const shellId = String(r.meta.shellId)
+      expect(shellId).toMatch(/^sh-/)
+      // la riga resta running: il comando è ancora vivo
+      expect(getShellJob(db(), shellId)!.status).toBe('running')
+      // il comando finisce da solo: il TICK finalizza e NOTIFICA (SHELL_DONE)
+      const p = backgroundShellPaths(shellId)
+      for (let i = 0; i < 60; i++) {
+        let closed = false
+        try { closed = readFileSync(join(TMP, 'box', 'home', AGENT, p.exit), 'utf8').trim() === '0' } catch { closed = false }
+        if (closed) break
+        await new Promise((res) => setTimeout(res, 100))
+      }
+      await tickShellJobs(t.deps)
+      expect(getShellJob(db(), shellId)!.status).toBe('done')
+      const note = t.enqueued.find((e) => e.agentId === AGENT)
+      if (!note) throw new Error('notifica SHELL_DONE mancante dopo la promozione')
+      expect(note.text).toContain(`<comando_finito id="${shellId}"`)
+      expect(note.text).toContain('pronto')
+    } finally {
+      delete process.env.SANDBOT_TEST_PROMOTE_AFTER_SEC
+    }
+  })
+
+  it('la soglia non supera MAI il timeout chiesto dal modello: timeout più breve della soglia → promozione AL timeout', async () => {
+    const t = testDeps()
+    // timeout richiesto 1.5 s < soglia di default (60 s): la promozione scatta a 1.5 s
+    const r = await runForegroundShell(AGENT, 'sleep 30', {}, [], { timeoutMs: 1_500 }, t.deps)
+    expect(r.output).toContain('ancora in corso dopo 2 s') // Math.round(1.5) = 2
+    const shellId = String(r.meta.shellId)
+    expect(getShellJob(db(), shellId)!.status).toBe('running')
+    // pulizia: kill del comando rimasto in background
+    await awaitShell(AGENT, shellId, { timeoutSec: 5, kill: true }, t.deps)
+    expect(getShellJob(db(), shellId)!.status).toBe('killed')
+  })
+  it('tetti pieni: foreground come una volta (timeout = kill) con la NOTA del perché', async () => {
+    const t = testDeps()
+    for (let i = 0; i < SHELLS_PER_AGENT_MAX; i++) {
+      createShellJob(db(), { id: `sh-fg-${i}`, agent_id: AGENT, command: 'sleep 60', secret_names: [], mode: 'host', pid: 99999, log_path: `.sandbot/shells/sh-fg-${i}.log`, started_at: Date.now() })
+    }
+    const r = await runForegroundShell(AGENT, 'echo libero', {}, [], { timeoutMs: 10_000 }, t.deps)
+    // com'era: eseguito direttamente, output + exit, e la nota del perché
+    expect(r.output).toContain('libero')
+    expect(r.output).toContain('[exit 0]')
+    expect(r.output).toContain('[nota: i comandi in background simultanei sono al massimo')
+    expect(r.meta.capsFull).toBe(true)
+    // nessuna riga nuova: il comando è passato dall'exec diretto, non dal wrapper
+    const rows = (db() as unknown as DatabaseSync).prepare("SELECT * FROM shell_jobs WHERE agent_id = ? AND log_path LIKE '%sh-fg-%'").all(AGENT) as unknown[]
+    expect(rows.length).toBe(SHELLS_PER_AGENT_MAX)
   })
 })

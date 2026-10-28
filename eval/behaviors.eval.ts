@@ -36,6 +36,14 @@ import { RECOVERY_NUDGE } from '../src/main/agent/loop'
 // evidenza + regola dei turni), così i casi 8/9/11 misurano il comportamento
 // sul testo che il membro riceve davvero
 import { buildGroupTurnOpening } from '../src/main/agent/group-turns'
+// fase 11b (0b): il recupero dei turni di gruppo è quello VERO del loop — le
+// STESSE funzioni (needsGroupRecovery, i tool del sollecito, i solleciti), UNA
+// sola chiamata: l'eval misura il sistema, non solo il primo impulso
+import {
+  needsGroupRecovery, groupRecoveryTools,
+  GROUP_RECOVERY_NUDGE, GROUP_CLOSING_RECOVERY_NUDGE,
+  GROUP_CALLED_RECOVERY_NUDGE, GROUP_CALLED_CLOSING_RECOVERY_NUDGE
+} from '../src/main/agent/group-turns'
 import {
   deliveredResultText, alreadyDeliveredResult, isDuplicateSend, messageCapResult, emptySendResult, turnCapResult, MAX_DELIVERED_PER_TURN
 } from '../src/main/agent/turn-sends'
@@ -72,6 +80,9 @@ const WEB_RESULTS = [
   { title: 'Orto e Cucina', url: 'https://ristoranti.example/orto-cucina', snippet: 'Cucina vegetariana stagionale a km 0.' },
   { title: 'Sfoglia Rinascita', url: 'https://ristoranti.example/sfoglia-rinascita', snippet: 'Pasta fresca con opzioni vegetariane verificate.' }
 ]
+/** fase 11b (0a): i comandi "lunghi" (build, test, install) il sistema li promuove in background da solo. */
+const LONG_CMD_RE = /\b(build|test|install|compile|make)\b/i
+
 const TOOL_RESULTS: Record<string, (args: Record<string, unknown>) => string> = {
   'write-file': (a) => `File scritto: ${String(a.path ?? '')}`,
   'read-file': () => 'comprare il latte\nchiamare il commercialista',
@@ -79,6 +90,12 @@ const TOOL_RESULTS: Record<string, (args: Record<string, unknown>) => string> = 
   'run-command': (a) => {
     // fase 11 (punto 5): come il tool vero, il background torna subito lo shellId
     if (a.background === true) return 'Comando avviato in background (shellId sh-eval0001): il turno prosegue. Quando finisce ricevi un messaggio di sistema con esito e ultime righe, oppure leggilo subito con await_shell({shellId: "sh-eval0001"}). Log: .sandbot/shells/sh-eval0001.log. Tetto: 6 ore.'
+    // fase 11b (0a): il foreground di un comando LUNGO (build, test, install)
+    // viene PROMOSSO dal codice dopo la soglia — il result simulato è quello
+    // della promozione, come nel sistema vero
+    if (LONG_CMD_RE.test(String(a.command ?? ''))) {
+      return 'Il comando è ancora in corso dopo 60 s: l\'ho passato in background (shellId sh-eval0001). Ti arriva l\'esito alla fine (messaggio di sistema con le ultime righe), oppure leggilo subito con await_shell({shellId: "sh-eval0001"}). Log: .sandbot/shells/sh-eval0001.log. Tetto: 6 ore.'
+    }
     return `[exit 0] ${String(a.command ?? '').slice(0, 60)}`
   },
   'web_search': () => webSearchToolOutput(WEB_RESULTS),
@@ -149,17 +166,21 @@ function makeDeliverer() {
 
 // ---- un "turno" contro il modello vero: max 4 passi (8 per i casi con team),
 // result simulati, e per i turni UTENTE la stessa coda di recupero/fallback
-// del loop reale; i turni di GRUPPO non hanno recupero (il silenzio vale) ----
+// del loop reale; i turni di GRUPPO hanno il recupero VERO del loop (0b):
+// needsGroupRecovery + i tool del sollecito + UNA sola chiamata ----
 const MAX_STEPS = 4
 async function evalTurn(
   history: ChatMessage[],
   source: 'user' | 'routine' | 'group' = 'user',
-  maxSteps = MAX_STEPS
+  maxSteps = MAX_STEPS,
+  groupOpts?: { called: boolean; closing: boolean }
 ): Promise<{
   steps: Array<{ text: string; toolCalls: ToolCall[] }>
   delivered: string[]
   allCalls: ToolCall[]
   error?: string
+  /** fase 11b (0b): il caso è passato (se passa) dalla chiamata di recupero */
+  recoveryUsed?: boolean
 }> {
   const messages: ChatMessage[] = [history[0]!, ...history.slice(1)]
   const deliverer = makeDeliverer()
@@ -168,14 +189,16 @@ async function evalTurn(
   let endedWithAsk = false
   // correzione C1: nei turni di gruppo pass è TERMINALE — il turno finisce lì
   let endedWithPass = false
+  // fase 11b (0b): UNA chiamata di recupero come nel loop
+  let recoveryUsed = false
   // fase 10: gli id dei bot creati in QUESTO turno (deterministici per run)
   createdTeamN = 0
   createdTeamIds.length = 0
-  const drainOnce = async (): Promise<{ text: string; toolCalls: ToolCall[] }> => {
+  const drainOnce = async (tools: ToolDef[] = toolDefs as ToolDef[]): Promise<{ text: string; toolCalls: ToolCall[] }> => {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 120_000)
     try {
-      const stream = llmStream(PROVIDER, MODEL, messages, toolDefs as ToolDef[], ctrl.signal)
+      const stream = llmStream(PROVIDER, MODEL, messages, tools, ctrl.signal)
       const d = await stream.drain()
       return { text: d.text, toolCalls: d.toolCalls ?? [] }
     } finally {
@@ -201,6 +224,32 @@ async function evalTurn(
       }
       if (endedWithAsk || endedWithPass) break
     }
+    // fase 11b (0b): il recupero dei turni di gruppo è quello VERO del loop —
+    // le STESSE funzioni (needsGroupRecovery sui fatti del turno, i tool del
+    // sollecito, il sollecito giusto tra i quattro) e UNA sola chiamata
+    if (source === 'group' && groupOpts && !endedWithAsk && !endedWithPass) {
+      const posted = steps.some((s) => s.toolCalls.some((c) => c.name === 'post_to_group'))
+      const userContact = deliverer.delivered.length > 0
+      if (needsGroupRecovery({ finished: true, passed: false, posted, userContact, freeText: lastFreeText, called: groupOpts.called })) {
+        const closing = groupOpts.closing
+        const nudge = lastFreeText.trim() === ''
+          ? (closing ? GROUP_CALLED_CLOSING_RECOVERY_NUDGE : GROUP_CALLED_RECOVERY_NUDGE)
+          : (closing ? GROUP_CLOSING_RECOVERY_NUDGE : GROUP_RECOVERY_NUDGE)
+        messages.push({ role: 'user', content: nudge })
+        recoveryUsed = true
+        const recovery = await drainOnce(groupRecoveryTools(toolDefs as ToolDef[], closing))
+        if (recovery.text.trim()) lastFreeText = recovery.text
+        steps.push(recovery)
+        messages.push({ role: 'assistant', content: recovery.text, toolCalls: recovery.toolCalls })
+        for (const c of recovery.toolCalls) {
+          let args: Record<string, unknown> = {}
+          try { args = JSON.parse(c.arguments || '{}') as Record<string, unknown> } catch { /* args vuoti */ }
+          const r = deliverer.run(c.name, args)
+          messages.push({ role: 'tool', toolCallId: c.id, content: r.result })
+          if (c.name === 'pass') { endedWithPass = true; break }
+        }
+      }
+    }
     // fase 3 del loop reale: turno UTENTE senza nessuna send visibile → UNA
     // chiamata di recupero col sollecito; se non basta, il testo libero
     // dell'ultima risposta diventa il messaggio di fallback
@@ -219,7 +268,7 @@ async function evalTurn(
   } catch (e) {
     return { steps, delivered: deliverer.delivered, allCalls: steps.flatMap((s) => s.toolCalls), error: e instanceof Error ? e.message : String(e) }
   }
-  return { steps, delivered: deliverer.delivered, allCalls: steps.flatMap((s) => s.toolCalls) }
+  return { steps, delivered: deliverer.delivered, allCalls: steps.flatMap((s) => s.toolCalls), ...(recoveryUsed ? { recoveryUsed: true } : {}) }
 }
 
 // ---- i 7 casi (system REALE + history costruita a mano) ----
@@ -235,8 +284,14 @@ const oneSend = (text: string): ToolCall => tc('call_send', 'send_to_user', { te
 interface EvalCase {
   id: number | string
   name: string
-  /** 'routine' = turno automatico, 'group' = turno di gruppo (nessun recupero di fine turno), default 'user' */
+  /** 'routine' = turno automatico, 'group' = turno di gruppo, default 'user' */
   source?: 'user' | 'routine' | 'group'
+  /**
+   * fase 11b (0b): i fatti del turno di gruppo che il runner calcola di vero
+   * (called = @menzionato nella finestra o turno di chiusura; closing = turno
+   * di chiusura) — con questi l'eval applica il recupero VERO del loop
+   */
+  group?: { called: boolean; closing?: boolean }
   /** fase 10: passi extra per i casi che costruiscono un team (default 4) */
   maxSteps?: number
   history: ChatMessage[]
@@ -389,6 +444,7 @@ const CASES: EvalCase[] = [
     id: 8,
     name: 'turno di gruppo, membro non menzionato e non coinvolto → pass (o nessun post)',
     source: 'group',
+    group: { called: false },
     history: [
       {
         role: 'user',
@@ -422,6 +478,7 @@ const CASES: EvalCase[] = [
     id: 9,
     name: 'turno di gruppo con menzione esplicita → lavora e post_to_group, nessun send_to_user',
     source: 'group',
+    group: { called: true },
     history: [
       {
         role: 'user',
@@ -482,6 +539,7 @@ const CASES: EvalCase[] = [
     id: 11,
     name: 'turno del coordinatore dopo le consegne → UN send_to_user di riepilogo, nessun post inutile',
     source: 'group',
+    group: { called: false },
     history: [
       {
         role: 'user',
@@ -518,6 +576,7 @@ const CASES: EvalCase[] = [
     id: 12,
     name: 'turno di CHIUSURA del coordinatore → esattamente UN send_to_user, nessun post_to_group',
     source: 'group',
+    group: { called: true, closing: true },
     history: [
       {
         role: 'user',
@@ -554,6 +613,7 @@ const CASES: EvalCase[] = [
     id: 13,
     name: 'specialista con la consegna già fatta, richiamato senza novità → pass e il turno finisce lì',
     source: 'group',
+    group: { called: false },
     history: [
       {
         role: 'user',
@@ -589,6 +649,7 @@ const CASES: EvalCase[] = [
     id: 14,
     name: 'specialista @menzionato dal coordinatore con una consegna da fare → pubblica con post_to_group',
     source: 'group',
+    group: { called: true },
     history: [
       {
         role: 'user',
@@ -677,7 +738,7 @@ const CASES: EvalCase[] = [
   },
   {
     id: 17,
-    name: '"lancia la build, ci mette 10 minuti" → run-command background:true, avvisa e NON attende in loop',
+    name: '"lancia la build, ci mette 10 minuti" → build in background (background:true o promozione), avvisa e NON attende in loop',
     history: [
       { role: 'user', content: 'Lancia la build del progetto, ci mette una decina di minuti.' }
     ],
@@ -685,47 +746,70 @@ const CASES: EvalCase[] = [
       if (t.error) return { pass: false, reason: `errore: ${t.error}` }
       const runs = t.allCalls.filter((c) => c.name === 'run-command')
       if (!runs.length) return { pass: false, reason: 'nessun run-command' }
+      // fase 11b (0a): la build è in background se il modello lo chiede
+      // (background:true) OPPURE se la promozione del codice l'ha passata lì
+      // (il result del foreground lungo è quello della promozione)
       const bg = runs.filter((c) => {
         try { return (JSON.parse(c.arguments || '{}') as { background?: boolean }).background === true } catch { return false }
       })
-      if (!bg.length) return { pass: false, reason: `build lanciata in foreground (${runs.length} run-command, nessuno con background:true)` }
+      const promoted = runs.filter((c) => {
+        if (bg.includes(c)) return false
+        try { return LONG_CMD_RE.test(String((JSON.parse(c.arguments || '{}') as { command?: string }).command ?? '')) } catch { return false }
+      })
+      if (!bg.length && !promoted.length) {
+        return { pass: false, reason: `build né in background né promossa dal sistema (${runs.length} run-command in foreground senza esito di promozione)` }
+      }
       const awaits = t.allCalls.filter((c) => c.name === 'await_shell')
       if (awaits.length > 1) return { pass: false, reason: `attese in loop (${awaits.length} await_shell)` }
       if (!t.delivered.length) return { pass: false, reason: 'nessun messaggio all\'utente' }
       const d = t.delivered[t.delivered.length - 1]!
-      if (!/avvis|notifi|quando fin|appena fin|a fine|ti dico|ti farò|farò sap/i.test(d)) {
-        return { pass: false, reason: `il messaggio non dice che avviserà alla fine: ${JSON.stringify(d.slice(0, 100))}` }
+      if (!/avvis|notifi|quando fin|appena fin|a fine|ti dico|ti farò|farò sap|in corso|gira|sta gir/i.test(d)) {
+        return { pass: false, reason: `il messaggio non dice che darà l'esito alla fine: ${JSON.stringify(d.slice(0, 100))}` }
       }
-      return { pass: true, reason: `build in background e avviso: "${d.slice(0, 70)}…"` }
+      return { pass: true, reason: `build in background (${bg.length ? 'background:true' : 'promossa dal sistema'}) e avviso: "${d.slice(0, 70)}…"` }
     }
   }
 ]
 
-describe(`eval dei comportamenti (fasi 9-10) su modello reale (${MODEL} × ${RUNS} run)`, () => {
+describe(`eval dei comportamenti (fasi 9-11) su modello reale (${MODEL} × ${RUNS} run)`, () => {
   it('i casi con giudizio deterministico', async () => {
     const rows: string[][] = [['caso', ...Array.from({ length: RUNS }, (_, i) => `run ${i + 1}`), 'motivi (per run, abbreviati)']]
     let pass = 0
+    // fase 11b (0b): i pass venuti dalla chiamata di recupero contano nel
+    // totale SISTEMA (quello della soglia) ma non in quello del modello nudo
+    let passNaked = 0
     const cases = ONLY.length ? CASES.filter((c) => ONLY.includes(String(c.id))) : CASES
     const total = cases.length * RUNS
     for (const c of cases) {
       const row = [`${c.id}. ${c.name}`]
       const reasons: string[] = []
       for (let r = 0; r < RUNS; r++) {
-        const t = await evalTurn([{ role: 'system', content: sys }, ...c.history], c.source ?? 'user', c.maxSteps)
+        const t = await evalTurn(
+          [{ role: 'system', content: sys }, ...c.history],
+          c.source ?? 'user',
+          c.maxSteps,
+          c.group ? { called: c.group.called, closing: c.group.closing === true } : undefined
+        )
         const v = c.judge(t)
-        if (v.pass) pass++
-        row.push(v.pass ? '✓' : '✗')
+        if (v.pass) {
+          pass++
+          if (!t.recoveryUsed) passNaked++
+          row.push(t.recoveryUsed ? '✓r' : '✓')
+        } else {
+          row.push('✗')
+        }
         reasons.push(v.reason.replace(/\s+/g, ' ').slice(0, 80))
       }
       row.push(reasons.join(' ¦ '))
       rows.push(row)
     }
-    // tabella caso × run
+    // tabella caso × run (✓r = passato grazie alla chiamata di recupero)
     const widths = rows[0]!.map((_, i) => Math.max(...rows.map((r) => r[i]!.length)))
     for (const r of rows) {
       console.log('| ' + r.map((cell, i) => cell.padEnd(widths[i]!)).join(' | ') + ' |')
     }
-    console.log(`\nTOTALE: ${pass}/${total} (soglia ${MIN_PASS})`)
+    console.log(`\nTOTALE (sistema): ${pass}/${total} (soglia ${MIN_PASS}) — col recupero del loop`)
+    console.log(`TOTALE (modello nudo): ${passNaked}/${total} — senza recupero, solo informativo`)
     expect(pass, `eval sotto soglia: ${pass}/${total}`).toBeGreaterThanOrEqual(Math.min(MIN_PASS, total))
   }, 1_800_000)
 

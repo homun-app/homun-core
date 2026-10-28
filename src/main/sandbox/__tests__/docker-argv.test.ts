@@ -27,6 +27,7 @@ import {
   boxNeedsRecreateForInit,
   boxEnsurePlan,
   boxCreateCheck,
+  boxImageTag,
   DOCKER_WRITE_SH,
   DOCKER_BOX_INIT_SH,
   DOCKER_BOX_MIGRATE_SH,
@@ -37,6 +38,9 @@ import {
   boxHomePath,
   DEFAULT_BOX_LIMITS
 } from '../docker-argv'
+
+/** 0c: nei test l'immagine del box è un tag qualunque derivato dal contenuto. */
+const IMG = boxImageTag('FROM mcr.microsoft.com/playwright:v1.64.1-noble')
 
 describe('dockerExecArgv', () => {
   it('argv senza shell: exec -i -w <workdir> <container> sh -c <command>', () => {
@@ -101,7 +105,7 @@ describe('lifecycle & hardening del box condiviso (§5.2 + fase 11 punto 1)', ()
   })
 
   it('create: container UNICO sandbot-box, volume sandbot-box su /box, hardening e limiti condivisi configurabili', () => {
-    const argv = dockerBoxCreateArgv(BOX_CONTAINER, BOX_VOLUME, 'bridge', DEFAULT_BOX_LIMITS)
+    const argv = dockerBoxCreateArgv(BOX_CONTAINER, BOX_VOLUME, 'bridge', DEFAULT_BOX_LIMITS, IMG)
     for (const flag of ['--user', '--cap-drop', '--security-opt', '--init', '--pids-limit', '--memory', '--cpus', '--network']) {
       expect(argv).toContain(flag)
     }
@@ -120,8 +124,10 @@ describe('lifecycle & hardening del box condiviso (§5.2 + fase 11 punto 1)', ()
     expect(val('--memory')).toBe('4g')
     expect(val('--cpus')).toBe('2')
     expect(val('--network')).toBe('bridge')
+    // 0c: l'immagine è la NOSTRA del box (tag dal Dockerfile), mai ubuntu
+    expect(argv[argv.indexOf('-i') + 1]).toBe(IMG)
     // limiti passati dal chiamante (settings sandbox.*)
-    const custom = dockerBoxCreateArgv('c', 'v', 'none', { memory: '2g', cpus: 1, pids: 512 })
+    const custom = dockerBoxCreateArgv('c', 'v', 'none', { memory: '2g', cpus: 1, pids: 512 }, IMG)
     const v2 = (f: string) => custom[custom.indexOf(f) + 1]
     expect(v2('--memory')).toBe('2g')
     expect(v2('--cpus')).toBe('1')
@@ -130,7 +136,7 @@ describe('lifecycle & hardening del box condiviso (§5.2 + fase 11 punto 1)', ()
   })
 
   it('init volume (H1): one-shot con sh -c COSTANTE — crea workspace e home PRIMA del chown', () => {
-    expect(dockerBoxChownArgv(BOX_VOLUME)).toEqual(['run', '--rm', '-v', 'sandbot-box:/box', 'ubuntu:24.04', 'sh', '-c', DOCKER_BOX_INIT_SH])
+    expect(dockerBoxChownArgv(BOX_VOLUME, IMG)).toEqual(['run', '--rm', '-v', 'sandbot-box:/box', IMG, 'sh', '-c', DOCKER_BOX_INIT_SH])
     // H1: il volume non è più VUOTO quando il create lo monta — il copy-up
     // non ha più niente da sovrascrivere (il mount è comunque :nocopy)
     expect(DOCKER_BOX_INIT_SH).toBe('mkdir -p /box/workspace /box/home && chown -R 1000:1000 /box')
@@ -150,12 +156,12 @@ describe('migrazione docker una tantum (punto 1): argv puri, copia senza cancell
   })
 
   it('copia one-shot: sh -c COSTANTE, agentId come $1, vecchio volume in sola lettura', () => {
-    const argv = dockerBoxMigrateArgv('sandbot-agent_x-box', 'agent_x')
+    const argv = dockerBoxMigrateArgv('sandbot-agent_x-box', 'agent_x', IMG)
     expect(argv).toEqual([
       'run', '--rm',
       '-v', 'sandbot-agent_x-box:/from:ro',
       '-v', 'sandbot-box:/box',
-      'ubuntu:24.04', 'sh', '-c', DOCKER_BOX_MIGRATE_SH, 'sh', 'agent_x'
+      IMG, 'sh', '-c', DOCKER_BOX_MIGRATE_SH, 'sh', 'agent_x'
     ])
     // lo script è fisso: copia dentro la home del bot, NON cancella l'origine;
     // H1: il one-shot è di root — il chown finale non lascia la home (e la
@@ -165,8 +171,15 @@ describe('migrazione docker una tantum (punto 1): argv puri, copia senza cancell
   })
 
   it('marker dell\'idempotenza: test e touch dentro il volume del box', () => {
-    expect(dockerBoxMarkerCheckArgv()).toEqual(['run', '--rm', '-v', 'sandbot-box:/box', 'ubuntu:24.04', 'test', '-f', '/box/.migrated-v1'])
-    expect(dockerBoxMarkerWriteArgv()).toEqual(['run', '--rm', '-v', 'sandbot-box:/box', 'ubuntu:24.04', 'touch', '/box/.migrated-v1'])
+    expect(dockerBoxMarkerCheckArgv(IMG)).toEqual(['run', '--rm', '-v', 'sandbot-box:/box', IMG, 'test', '-f', '/box/.migrated-v1'])
+    expect(dockerBoxMarkerWriteArgv(IMG)).toEqual(['run', '--rm', '-v', 'sandbot-box:/box', IMG, 'touch', '/box/.migrated-v1'])
+  })
+
+  it('0c: il tag dell\'immagine deriva dal CONTENUTO del Dockerfile (primi 12 hex dello sha256)', () => {
+    // stesso contenuto → stesso tag; contenuto diverso → tag diverso
+    expect(boxImageTag('FROM x')).toBe(boxImageTag('FROM x'))
+    expect(boxImageTag('FROM x')).toMatch(/^sandbot-box:[0-9a-f]{12}$/)
+    expect(boxImageTag('FROM y')).not.toBe(boxImageTag('FROM x'))
   })
 })
 

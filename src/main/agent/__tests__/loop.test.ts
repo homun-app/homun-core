@@ -453,6 +453,35 @@ vi.mock('../../vault', () => ({
   listSecretNames: () => ['API_KEY']
 }))
 
+// fase 11b (0a): il foreground di run-command passa da runForegroundShell
+// (wrapper + promozione); nei test del loop il comando "finisce in tempo" e il
+// result è quello dell'execCommand mockato, REDATTO come il percorso vero.
+// La promozione, i tetti e il wrapper vero sono provati nei test di shells.
+vi.mock('../shells', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../shells')>()
+  return {
+    ...real,
+    runForegroundShell: async (
+      agentId: string,
+      command: string,
+      env: Record<string, string>,
+      secretNames: string[]
+    ) => {
+      const { execCommand } = await import('../../sandbox')
+      const { redactSecrets } = await import('../secrets')
+      const { revealSecret } = await import('../../vault')
+      const r = await execCommand(agentId, command, { env })
+      const used = await Promise.all(secretNames.map(async (name) => ({ name, envName: `SANDBOT_SECRET_${name}`, value: await revealSecret(name) })))
+      const redact = (t: string) => redactSecrets(t, used)
+      const parts: string[] = []
+      if (r.stdout) parts.push(redact(r.stdout))
+      if (r.stderr) parts.push('[stderr]\n' + redact(r.stderr))
+      parts.push(`[exit ${r.exitCode ?? 'killed'}${r.trimmed ? ' — output trimmed' : ''}]`)
+      return { output: parts.join('\n'), meta: { exitCode: r.exitCode, trimmed: r.trimmed } }
+    }
+  }
+})
+
 // fase 3: il client MCP è finto — conta le chiamate per provare che gli invii
 // esterni NON partono finché l'utente non clicca Invia
 vi.mock('../../mcp', () => ({

@@ -3,6 +3,8 @@
 // ogni chiamata è spawn('docker', argv) con argv array. Path, comandi e opzioni
 // restano singoli elementi argv: niente interpolazione, niente quoting da
 // aggirare, niente escape possibile.
+import { createHash } from 'node:crypto'
+
 export const BOX_WORKDIR = '/home/box'
 
 /** Utente non-root del container (ubuntu:24.04 → uid/gid 1000). */
@@ -15,6 +17,20 @@ export const BOX_CONTAINER = 'sandbot-box'
 
 /** Il volume persistente del box condiviso, montato su /box. */
 export const BOX_VOLUME = 'sandbot-box'
+
+/**
+ * Fase 11b (0c + punto 1): l'immagine del box è NOSTRA, costruita dal
+ * Dockerfile nel repo (base playwright ufficiale, Playwright MCP esatto): sul
+ * Mac arm64 l'`ubuntu:24.04` di Docker è amd64 e il box girerebbe emulato.
+ * Il tag deriva dal CONTENUTO del Dockerfile (primi 12 hex dello sha256): cambia
+ * il Dockerfile, cambia il tag, il container si ricrea — mai tag "latest".
+ */
+export const BOX_IMAGE_REPO = 'sandbot-box'
+
+/** Il tag dell'immagine del box dal contenuto del Dockerfile (PURO). */
+export function boxImageTag(dockerfileContent: string): string {
+  return `${BOX_IMAGE_REPO}:${createHash('sha256').update(dockerfileContent).digest('hex').slice(0, 12)}`
+}
 
 /** Punto di montaggio del volume dentro il container. */
 export const BOX_MOUNT = '/box'
@@ -202,7 +218,7 @@ export function boxCreateCheck(writable: boolean): { ok: true } | { ok: false; e
  * nascere di root nel rootfs: il chown del one-shot verrebbe sovrascritto e,
  * non-root con --cap-drop ALL, nessuno scriverebbe più nulla nel box.
  */
-export function dockerBoxCreateArgv(container: string, volume: string, network: 'bridge' | 'none', limits: BoxLimits): string[] {
+export function dockerBoxCreateArgv(container: string, volume: string, network: 'bridge' | 'none', limits: BoxLimits, image: string): string[] {
   return [
     'create',
     '--name', container,
@@ -217,7 +233,7 @@ export function dockerBoxCreateArgv(container: string, volume: string, network: 
     '-v', `${volume}:${BOX_MOUNT}:nocopy`,
     '-w', BOX_MOUNT,
     '-i',
-    'ubuntu:24.04',
+    image,
     'sleep', 'infinity'
   ]
 }
@@ -233,8 +249,8 @@ export function dockerBoxCreateArgv(container: string, volume: string, network: 
  */
 export const DOCKER_BOX_INIT_SH = `mkdir -p ${BOX_MOUNT}/workspace ${BOX_MOUNT}/home && chown -R ${CONTAINER_USER} ${BOX_MOUNT}`
 
-export function dockerBoxChownArgv(volume: string): string[] {
-  return ['run', '--rm', '-v', `${volume}:${BOX_MOUNT}`, 'ubuntu:24.04', 'sh', '-c', DOCKER_BOX_INIT_SH]
+export function dockerBoxChownArgv(volume: string, image: string): string[] {
+  return ['run', '--rm', '-v', `${volume}:${BOX_MOUNT}`, image, 'sh', '-c', DOCKER_BOX_INIT_SH]
 }
 
 /**
@@ -249,24 +265,24 @@ export function dockerBoxChownArgv(volume: string): string[] {
  */
 export const DOCKER_BOX_MIGRATE_SH = `mkdir -p "${BOX_MOUNT}/home/$1" && cp -a /from/. "${BOX_MOUNT}/home/$1/" && chown -R ${CONTAINER_USER} "${BOX_MOUNT}/home/$1"`
 
-export function dockerBoxMigrateArgv(oldVolume: string, agentId: string): string[] {
+export function dockerBoxMigrateArgv(oldVolume: string, agentId: string, image: string): string[] {
   return [
     'run', '--rm',
     '-v', `${oldVolume}:/from:ro`,
     '-v', `${BOX_VOLUME}:${BOX_MOUNT}`,
-    'ubuntu:24.04', 'sh', '-c', DOCKER_BOX_MIGRATE_SH, 'sh', agentId
+    image, 'sh', '-c', DOCKER_BOX_MIGRATE_SH, 'sh', agentId
   ]
 }
 
 /** Marker della migrazione dentro il box (idempotenza): esistenza e scrittura. */
 export const BOX_MIGRATION_MARKER = `${BOX_MOUNT}/.migrated-v1`
 
-export function dockerBoxMarkerCheckArgv(): string[] {
-  return ['run', '--rm', '-v', `${BOX_VOLUME}:${BOX_MOUNT}`, 'ubuntu:24.04', 'test', '-f', BOX_MIGRATION_MARKER]
+export function dockerBoxMarkerCheckArgv(image: string): string[] {
+  return ['run', '--rm', '-v', `${BOX_VOLUME}:${BOX_MOUNT}`, image, 'test', '-f', BOX_MIGRATION_MARKER]
 }
 
-export function dockerBoxMarkerWriteArgv(): string[] {
-  return ['run', '--rm', '-v', `${BOX_VOLUME}:${BOX_MOUNT}`, 'ubuntu:24.04', 'touch', BOX_MIGRATION_MARKER]
+export function dockerBoxMarkerWriteArgv(image: string): string[] {
+  return ['run', '--rm', '-v', `${BOX_VOLUME}:${BOX_MOUNT}`, image, 'touch', BOX_MIGRATION_MARKER]
 }
 
 // ---- fase 11 (punto 3): comandi in background con docker exec -d ----

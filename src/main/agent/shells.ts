@@ -21,7 +21,7 @@ import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { db as dbFn } from '../store/db'
 import { createShellJob, getShellJob, updateShellJob, runningShellJobsOf, runningShellJobsAll, SHELLS_PER_AGENT_MAX, SHELLS_PER_BOX_MAX, SHELL_MAX_DURATION_MS, type ShellJob } from '../store/shell-jobs'
-import { sandboxMode, boxDir, readFileInBox, ensureBoxContainer, ensureBotHome } from '../sandbox'
+import { sandboxMode, boxDir, readFileInBox, ensureBoxContainer, ensureBotHome, execCommand, capOutput } from '../sandbox'
 import { dockerExecBackgroundArgv, dockerKillGroupArgv, dockerClientEnv, DOCKER_BG_WRAPPER_SH, BOX_CONTAINER, boxHomePath } from '../sandbox/docker-argv'
 import { formatShellDone } from '../../shared/agent-message'
 import { redactSecrets } from './secrets'
@@ -224,39 +224,7 @@ export async function startBackgroundShell(
   const id = `sh-${randomUUID().slice(0, 12)}`
   const paths = backgroundShellPaths(id)
   const mode = sandboxMode() === 'docker' ? 'docker' : 'host'
-  const launch = deps.launch ?? (async (agentId2, command, env2, p): Promise<ShellLaunch> => {
-    if (mode === 'docker') {
-      await ensureBoxContainer()
-      try {
-        await ensureBotHome(agentId2) // H2: -w punta alla home del bot
-      } catch (e) {
-        return { ok: false, exitCode: null, stderr: e instanceof Error ? e.message : String(e) }
-      }
-      const home = boxHomePath(agentId2)
-      const env = { HOME: home, ...env2 }
-      // H2: -d torna subito, ma l'exit code dice se il comando è PARTITO: si
-      // attende — un errore di avvio non lascia più la riga "running" per 6
-      // ore su un comando mai partito. Il wrapper costante scrive
-      // pid/log/exit nel box. F2: nel client docker sull'HOST restano il
-      // daemon + i SOLI segreti; HOME del bot viaggia col valore nell'argv
-      // (-e HOME=/box/home/<id>)
-      const r = await dockerArgvRun(dockerExecBackgroundArgv(BOX_CONTAINER, command, { workdir: home, env }, p), dockerClientEnv(env))
-      if (r.exitCode !== 0) return { ok: false, exitCode: r.exitCode, stderr: r.stderr }
-      return { ok: true, pid: null }
-    }
-    // F3: lo STESSO wrapper costante del docker, eseguito con /bin/sh: è lui
-    // a scrivere pid ed exit file, quindi la chiusura non dipende dal daemon
-    // (un riavvio non lascia la riga appesa). detached: il wrapper è un
-    // gruppo di processi SUO → il kill del gruppo prende anche i figli.
-    const child = spawn('/bin/sh', ['-c', DOCKER_BG_WRAPPER_SH, 'sh', command, p.log, p.exit, p.pid], {
-      cwd: boxDir(agentId2),
-      env: { ...process.env, ...env2 },
-      detached: true,
-      stdio: 'ignore'
-    })
-    child.unref()
-    return { ok: true, pid: child.pid ?? null }
-  })
+  const launch = deps.launch ?? defaultShellLaunch(mode)
   const started = await launch(agentId, rawCommand, env, paths)
   if (!started.ok) {
     // H2: il comando NON è mai partito → NESSUNA riga shell_jobs (niente da
@@ -271,9 +239,204 @@ export async function startBackgroundShell(
 }
 
 /**
+ * L'avvio di default di un comando nel wrapper COSTANTE (host e docker), usato
+ * sia dal background sia dal foreground con auto-promozione (0a): host è un
+ * figlio detached con /bin/sh, docker è `exec -d` di cui si attende l'exit
+ * code (H2: gli errori di avvio, es. il chdir di una home assente, arrivano lì).
+ */
+function defaultShellLaunch(mode: 'host' | 'docker'): NonNullable<ShellHostDeps['launch']> {
+  return async (agentId, command, env, p): Promise<ShellLaunch> => {
+    if (mode === 'docker') {
+      await ensureBoxContainer()
+      try {
+        await ensureBotHome(agentId) // H2: -w punta alla home del bot
+      } catch (e) {
+        return { ok: false, exitCode: null, stderr: e instanceof Error ? e.message : String(e) }
+      }
+      const home = boxHomePath(agentId)
+      const env2 = { HOME: home, ...env }
+      // H2: -d torna subito, ma l'exit code dice se il comando è PARTITO: si
+      // attende — un errore di avvio non lascia più la riga "running" per 6
+      // ore su un comando mai partito. Il wrapper costante scrive
+      // pid/log/exit nel box. F2: nel client docker sull'HOST restano il
+      // daemon + i SOLI segreti; HOME del bot viaggia col valore nell'argv
+      // (-e HOME=/box/home/<id>)
+      const r = await dockerArgvRun(dockerExecBackgroundArgv(BOX_CONTAINER, command, { workdir: home, env: env2 }, p), dockerClientEnv(env2))
+      if (r.exitCode !== 0) return { ok: false, exitCode: r.exitCode, stderr: r.stderr }
+      return { ok: true, pid: null }
+    }
+    // F3: lo STESSO wrapper costante del docker, eseguito con /bin/sh: è lui
+    // a scrivere pid ed exit file, quindi la chiusura non dipende dal daemon
+    // (un riavvio non lascia la riga appesa). detached: il wrapper è un
+    // gruppo di processi SUO → il kill del gruppo prende anche i figli.
+    const child = spawn('/bin/sh', ['-c', DOCKER_BG_WRAPPER_SH, 'sh', command, p.log, p.exit, p.pid], {
+      cwd: boxDir(agentId),
+      env: { ...process.env, ...env },
+      detached: true,
+      stdio: 'ignore'
+    })
+    child.unref()
+    return { ok: true, pid: child.pid ?? null }
+  }
+}
+
+// ---- fase 11b (0a): auto-background del foreground, deciso dal CODICE ----
+
+/** Dopo quanti secondi un run-command in foreground viene promosso in background (default 60 s). */
+export const PROMOTE_AFTER_SEC = 60
+
+/** La soglia effettiva in secondi: iniettabile nei test (SANDBOT_TEST_PROMOTE_AFTER_SEC). */
+export function promoteAfterSec(): number {
+  const v = Number(process.env.SANDBOT_TEST_PROMOTE_AFTER_SEC)
+  return Number.isFinite(v) && v > 0 ? v : PROMOTE_AFTER_SEC
+}
+
+export interface ForegroundFacts {
+  /** i tetti delle shell (4 per bot, 8 per box) sono pieni */
+  capsFull: boolean
+  /** l'exit file del wrapper è comparso entro la soglia */
+  exited: boolean
+}
+
+export type ForegroundPlan =
+  | { kind: 'fallback'; why: string } // come prima: foreground col timeout = kill
+  | { kind: 'done' }                  // finito in tempo: result come oggi
+  | { kind: 'promote' }               // ancora in corsa: RESTA in background (SHELL_DONE)
+
+/**
+ * 0a (PURO): che ne è di un run-command in foreground. Tetti pieni → il
+ * comportamento di prima (timeout = kill), col motivo nel result. Finisce
+ * entro la soglia → result come oggi. Non finisce → promozione in background:
+ * da lì vale tutto il percorso SHELL_DONE già esistente.
+ */
+export function foregroundOutcome(facts: ForegroundFacts): ForegroundPlan {
+  if (facts.capsFull) {
+    return {
+      kind: 'fallback',
+      why: `i comandi in background simultanei sono al massimo (${SHELLS_PER_AGENT_MAX} per bot, ${SHELLS_PER_BOX_MAX} per box): questo è girato in foreground col timeout, oltre il quale viene terminato`
+    }
+  }
+  return facts.exited ? { kind: 'done' } : { kind: 'promote' }
+}
+
+/**
+ * Il backoff della lettura dell'exit file (0a, PURO): 250 ms → 500 → 1 s → 1 s…
+ * In docker ogni lettura è un `docker exec`: un exec ogni 250 ms per minuti
+ * non ce lo possiamo permettere.
+ */
+export function exitPollDelayMs(reads: number): number {
+  return Math.min(250 * 2 ** Math.max(0, reads - 1), 1_000)
+}
+
+export interface ForegroundResult {
+  output: string
+  meta: Record<string, unknown>
+}
+
+/**
+ * 0a: un run-command SENZA background:true parte col lo STESSO wrapper
+ * costante del background (riga shell_jobs compresa) e il daemon attende al
+ * più `promoteAfterSec` (o il timeout chiesto dal modello, se minore).
+ * Finisce in tempo → result come oggi (exit code e output redatto e limitato
+ * come capOutput; unica differenza: stdout e stderr arrivano insieme, nell'ordine)
+ * e la riga si chiude GIÀ letta (nessun SHELL_DONE). Non finisce → il comando
+ * RESTA in esecuzione e il result annuncia la promozione (shellId): da lì
+ * valgono await_shell e la notifica di fine. Tetti pieni → foreground di una
+ * volta (timeout = kill) col motivo nel result. Il gate permessi sta a monte,
+ * nel loop, PRIMA della partenza: qui non si decide nulla di chi può partire.
+ */
+export async function runForegroundShell(
+  agentId: string,
+  rawCommand: string,
+  env: Record<string, string>,
+  secretNames: string[],
+  opts: { timeoutMs?: number } = {},
+  depsIn: Partial<ShellHostDeps> = {}
+): Promise<ForegroundResult> {
+  const deps = { ...defaultDeps(), ...depsIn }
+  const database = deps.db()
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
+  const timeoutMs = opts.timeoutMs ?? 120_000
+  const capsFull =
+    runningShellJobsOf(database, agentId).length >= SHELLS_PER_AGENT_MAX ||
+    runningShellJobsAll(database).length >= SHELLS_PER_BOX_MAX
+  const capsPlan = foregroundOutcome({ capsFull, exited: false })
+  if (capsPlan.kind === 'fallback') {
+    // com'era: exec diretto col timeout = kill, con la nota del perché
+    const r = await execCommand(agentId, rawCommand, { timeoutMs, env })
+    const redact = async (t: string): Promise<string> => {
+      if (!secretNames.length) return t
+      try {
+        const used = await Promise.all(secretNames.map(async (name) => ({ name, envName: `SANDBOT_SECRET_${name}`, value: await deps.reveal!(name) })))
+        return redactSecrets(t, used)
+      } catch {
+        return '(output omesso: impossibile redarre i segreti del comando)'
+      }
+    }
+    const parts: string[] = []
+    if (r.stdout) parts.push(await redact(r.stdout))
+    if (r.stderr) parts.push('[stderr]\n' + (await redact(r.stderr)))
+    parts.push(`[exit ${r.exitCode ?? 'killed'}${r.trimmed ? ' — output trimmed' : ''}]`)
+    parts.push(`[nota: ${capsPlan.why}]`)
+    return { output: parts.join('\n'), meta: { exitCode: r.exitCode, trimmed: r.trimmed, capsFull: true } }
+  }
+  const id = `sh-${randomUUID().slice(0, 12)}`
+  const paths = backgroundShellPaths(id)
+  const mode = sandboxMode() === 'docker' ? 'docker' : 'host'
+  const launch = deps.launch ?? defaultShellLaunch(mode)
+  const started = await launch(agentId, rawCommand, env, paths)
+  if (!started.ok) {
+    // H2 come il background: il comando non è mai partito
+    return { output: await launchErrorText(deps, secretNames, started), meta: { launchFailed: true } }
+  }
+  createShellJob(database, {
+    id, agent_id: agentId, command: rawCommand, secret_names: secretNames,
+    mode, pid: started.pid, log_path: paths.log, started_at: deps.now()
+  })
+  // la soglia di promozione: promoteAfterSec, MAI oltre il timeout chiesto
+  const promoteAfterMs = Math.min(promoteAfterSec() * 1000, timeoutMs)
+  const deadline = deps.now() + promoteAfterMs
+  let exitRaw: string | null = null
+  for (let reads = 1; deps.now() < deadline; reads++) {
+    await sleep(exitPollDelayMs(reads))
+    const raw = await deps.readBoxFile?.(agentId, paths.exit) ?? null
+    if (raw !== null && raw.trim() !== '') {
+      exitRaw = raw
+      break
+    }
+  }
+  const plan = foregroundOutcome({ capsFull, exited: exitRaw !== null && exitRaw.trim() !== '' })
+  if (plan.kind === 'promote') {
+    return {
+      output: `Il comando è ancora in corso dopo ${Math.round(promoteAfterMs / 1000)} s: l'ho passato in background (shellId ${id}). Ti arriva l'esito alla fine (messaggio di sistema con le ultime righe), oppure leggilo subito con await_shell({shellId: "${id}"}). Log: ${paths.log}. Tetto: 6 ore.`,
+      meta: { shellId: id, background: true, promoted: true }
+    }
+  }
+  // finito in tempo: result come oggi, riga chiusa e marcata LETTA (nessuna
+  // notifica SHELL_DONE per un comando che il bot ha già davanti)
+  const exitCode = exitRaw !== null && Number.isFinite(Number(exitRaw.trim())) ? Number(exitRaw.trim()) : null
+  const rawLog = await deps.readBoxFile?.(agentId, paths.log) ?? ''
+  const redactedLog = await (async () => {
+    if (!secretNames.length) return rawLog
+    try {
+      const used = await Promise.all(secretNames.map(async (name) => ({ name, envName: `SANDBOT_SECRET_${name}`, value: await deps.reveal!(name) })))
+      return redactSecrets(rawLog, used)
+    } catch {
+      return '(output omesso: impossibile redarre i segreti del comando)'
+    }
+  })()
+  const capped = capOutput(redactedLog)
+  updateShellJob(database, id, { status: 'done', exit_code: exitCode, finished_at: deps.now(), awaited: true, notified: true })
+  return {
+    output: `${capped.text}\n[exit ${exitCode ?? '?'}${capped.trimmed ? ' — output trimmed' : ''}]`,
+    meta: { exitCode, trimmed: capped.trimmed }
+  }
+}
+
+/**
  * H2: il messaggio dell'avvio fallito, con lo stderr REDATTO coi segreti del
  * comando (come l'output di oggi). Se la redazione non è possibile, l'esito
- * non si mostra.
+ * non si mostra. Usato dal background e dal foreground col wrapper (0a).
  */
 async function launchErrorText(
   deps: ShellHostDeps,
@@ -281,7 +444,7 @@ async function launchErrorText(
   failed: { exitCode: number | null; stderr: string }
 ): Promise<string> {
   const why = failed.stderr.trim().slice(0, 2_000)
-  const head = `Il comando in background non è mai partito (exit ${failed.exitCode ?? 'docker assente'}).`
+  const head = `Il comando non è mai partito (exit ${failed.exitCode ?? 'docker assente'}).`
   if (!secretNames.length) return why ? `${head} ${why}` : head
   try {
     const used = await Promise.all(secretNames.map(async (name) => ({ name, envName: `SANDBOT_SECRET_${name}`, value: await deps.reveal!(name) })))
