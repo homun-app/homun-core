@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Runner della suite eval (fasi 9-10): chiama un modello VERO via Ollama e
+// Runner della suite eval (fasi 9-11): chiama un modello VERO via Ollama e
 // GIUDICA con regole deterministiche (nessun modello giudice). NON fa parte di
 // `npx vitest run`: i file vivono in eval/ e la config è vitest.eval.config.ts.
 // Uso: npm run eval -- --model kimi-k3:cloud --runs 3
-// Opzioni: --model, --runs, --min (soglia pass), --base-url.
+// Opzioni: --model, --runs, --min (soglia pass), --base-url, --cases (filtro).
 // La soglia di default (41 su 15 casi × 3 run = 45) è l'equivalente
 // proporzionale del 30/33 della specifica fase 10 (che contava 11 casi; con
 // le correzioni i casi sono 15: 2b e 8-14).
@@ -16,7 +16,9 @@ const flag = (name, fallback) => {
 }
 const model = flag('model', 'kimi-k3:cloud')
 const runs = flag('runs', '3')
-const min = flag('min', '41')
+// fase 11 (punto 5): 18 casi (1, 2b, 3-17) × 3 run = 54; la soglia 49 è
+// l'equivalente proporzionale del 41/45 delle fasi 10 (che contava 15 casi)
+const min = flag('min', '49')
 const baseUrl = flag('base-url', 'http://127.0.0.1:11434')
 // fase 11 (residuo 0a): filtro sui casi (es. --cases 9,11,13,14) — passa il
 // filtro a EVAL_ONLY della suite, che seleziona gli id corrispondenti
