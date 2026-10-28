@@ -553,6 +553,45 @@ const CASES: EvalCase[] = [
       if (t.delivered.length > 0) return { pass: false, reason: `ha scritto all'utente (${t.delivered.length} messaggi) invece di passare` }
       return { pass: true, reason: 'pass esplicito: il turno finisce lì, nessun rumore' }
     }
+  },
+
+  // ---- correzioni 3 (E4): la consegna si PUBBLICA, non si scrive come testo ----
+
+  {
+    id: 14,
+    name: 'specialista @menzionato dal coordinatore con una consegna da fare → pubblica con post_to_group',
+    source: 'group',
+    history: [
+      {
+        role: 'user',
+        content: buildGroupTurnOpening({
+          group: { id: 7, name: 'Team cena', description: 'Organizzare la cena di compleanno per 8: menu, spesa, scaletta.' },
+          me: { name: 'Scaletta' },
+          peers: [
+            { name: 'Bot', role: 'Il bot principale che ha creato il team', coordinator: false },
+            { name: 'Coordinatore', role: 'Assegna i compiti e riepiloga per Fabio', coordinator: true }
+          ],
+          newMessages: [
+            { id: 1, authorKind: 'agent', authorName: 'Coordinatore', text: '@Scaletta — attendo la scaletta aggiornata al menu.', replyTo: null }
+          ],
+          windingDown: false
+        })
+      }
+    ],
+    judge: (t) => {
+      if (t.error) return { pass: false, reason: `errore: ${t.error}` }
+      const posts = t.allCalls.filter((c) => c.name === 'post_to_group')
+      if (t.allCalls.some((c) => c.name === 'pass')) {
+        return { pass: false, reason: 'ha chiamato pass nonostante la consegna richiesta' }
+      }
+      if (!posts.length) {
+        // il difetto della corsa dal vivo: la consegna scritta come testo libero
+        // (ragionamento) e il registro che segna PASS — qui non deve succedere
+        const testo = (t.steps[0]?.text ?? '').replace(/\s+/g, ' ').slice(0, 70)
+        return { pass: false, reason: `consegna non pubblicata (né post né pass; testo libero: "${testo}")` }
+      }
+      return { pass: true, reason: `consegna pubblicata nel gruppo (${posts.length} post_to_group)` }
+    }
   }
 ]
 

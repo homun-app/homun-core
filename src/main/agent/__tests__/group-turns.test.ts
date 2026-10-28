@@ -6,6 +6,9 @@
 // chiusura="true"), C3 (una send per catena), C6a (testo dell'apertura).
 // Correzioni 2: D1 (profondità per catena in readChainDepth), D2 (tetto per
 // catena dichiarato quando chiama il coordinatore), D3 (attesa da inizio catena).
+// Correzioni 3: E1 (la regola dice COME si scrive nel gruppo), E2 (il recupero
+// dei turni con la consegna nel testo libero), E3 (la catena non la decide un
+// post del membro).
 import { describe, expect, it } from 'vitest'
 import {
   parseMentions, planGroupTurns, groupTurnNonce, memberOfNonce, buildGroupTurnOpening,
@@ -13,7 +16,8 @@ import {
   GROUP_CHAIN_CLOSED_TEXT, GROUP_HOURLY_CAP_TEXT, GROUP_TURN_RULE,
   GROUP_MEMBER_CHAIN_POSTS_MAX, GROUP_CLOSING_LINE,
   shouldScheduleClosingTurn, closingTurnNonce, isClosingNonce, memberWaitingForUser,
-  hasSentToUserInChain, alreadySentToUserResult, readChainDepth
+  hasSentToUserInChain, alreadySentToUserResult, readChainDepth,
+  needsGroupRecovery, groupRecoveryTools, GROUP_RECOVERY_NUDGE, GROUP_CLOSING_RECOVERY_NUDGE
 } from '../group-turns'
 
 const MEMBERS = [
@@ -309,6 +313,38 @@ describe('correzione D1: readChainDepth (puro) — la profondità resta nella ca
   })
 })
 
+describe('correzione E3: la catena del turno non la decide un post del membro', () => {
+  it('il SUO post su una catena vecchia NON riporta la catena del turno sulla vecchia (caso del revisore)', () => {
+    // finestra [7, 8]: la richiesta nuova dell'utente (catena r7) e POI il post
+    // del MEMBRO sulla catena vecchia r1 a depth 4 — prima restituiva
+    // { rootId: 1, maxDepth: 0 }: la risposta alla richiesta nuova usciva a
+    // depth 1 nella catena VECCHIA (niente chiusura, né specialisti, e i tetti
+    // della vecchia catena a bloccare tutto)
+    const msgs = [
+      { id: 7, author_kind: 'user', author_id: null, depth: 0, root_id: 7 },
+      { id: 8, author_kind: 'agent', author_id: 'agent_coord', depth: 4, root_id: 1 }
+    ]
+    expect(readChainDepth({ messages: msgs, memberId: 'agent_coord', sourceDepth: 0 })).toEqual({ rootId: 7, maxDepth: 0 })
+  })
+
+  it('una riga di sistema in coda non cambia la catena scelta tra i messaggi degli altri', () => {
+    const msgs = [
+      { id: 7, author_kind: 'user', author_id: null, depth: 0, root_id: 7 },
+      { id: 8, author_kind: 'agent', author_id: 'agent_coord', depth: 4, root_id: 1 },
+      { id: 9, author_kind: 'system', author_id: null, depth: 0, root_id: 9 }
+    ]
+    expect(readChainDepth({ messages: msgs, memberId: 'agent_coord', sourceDepth: 0 })).toEqual({ rootId: 7, maxDepth: 0 })
+  })
+
+  it('nella finestra restano SOLO i suoi post → la catena dell\'ultimo non di sistema (fallback), depth dal sorgente', () => {
+    const msgs = [
+      { id: 3, author_kind: 'agent', author_id: 'agent_coord', depth: 2, root_id: 1 },
+      { id: 4, author_kind: 'agent', author_id: 'agent_coord', depth: 4, root_id: 1 }
+    ]
+    expect(readChainDepth({ messages: msgs, memberId: 'agent_coord', sourceDepth: 1 })).toEqual({ rootId: 1, maxDepth: 1 })
+  })
+})
+
 describe('correzione C2: shouldScheduleClosingTurn (puro)', () => {
   const ok = {
     coordinatorId: 'agent_coord',
@@ -483,5 +519,61 @@ describe('buildGroupTurnOpening (puro)', () => {
     expect(o).not.toContain('Il giro sta CHIUDENDO')
     // senza closing il flag non c'è
     expect(buildGroupTurnOpening(ev)).not.toContain('chiusura="true"')
+  })
+})
+
+describe('correzione E1: la regola del turno di gruppo dice COME si scrive', () => {
+  const ev = {
+    group: { id: 3, name: 'Cena compleanno', description: 'Organizzare la cena di compleanno per 8.' },
+    me: { name: 'Scaletta' },
+    peers: [{ name: 'Coordinatore', role: 'Assegna i compiti e riepiloga per Fabio', coordinator: true }],
+    newMessages: [
+      { id: 1, authorKind: 'agent' as const, authorName: 'Coordinatore', text: '@Scaletta — attendo la scaletta aggiornata al menu', replyTo: null }
+    ],
+    windingDown: false
+  }
+
+  it('la riga in testa: nel gruppo si scrive SOLO con post_to_group, per tacere si chiama pass', () => {
+    expect(GROUP_TURN_RULE).toContain(
+      'Nel gruppo si scrive SOLO con post_to_group: il testo che scrivi fuori dai tool è il tuo ragionamento e non lo legge nessuno. Per restare in silenzio chiama pass.'
+    )
+  })
+
+  it('niente più "(o semplicemente non scrivere)": il silenzio si dichiara con pass', () => {
+    expect(GROUP_TURN_RULE).not.toContain('o semplicemente non scrivere')
+    expect(GROUP_TURN_RULE).toContain('altrimenti chiama pass')
+  })
+
+  it('nel turno di CHIUSURA la riga equivalente: all\'utente si scrive SOLO con send_to_user', () => {
+    expect(GROUP_CLOSING_LINE).toContain("All'utente si scrive SOLO con send_to_user")
+    expect(buildGroupTurnOpening({ ...ev, windingDown: true, closing: true })).toContain("All'utente si scrive SOLO con send_to_user")
+  })
+})
+
+describe('correzione E2: needsGroupRecovery e i tool del recupero (puri)', () => {
+  const testo = { finished: true, passed: false, posted: false, userContact: false, freeText: '@Coordinatore cena ecco la scaletta v2 completa' }
+
+  it('turno FINISHED con testo libero e nessun tool → serve il recupero', () => {
+    expect(needsGroupRecovery(testo)).toBe(true)
+  })
+
+  it('pass esplicito, post, contatto con l\'utente, testo vuoto o turno non FINISHED → niente recupero', () => {
+    expect(needsGroupRecovery({ ...testo, passed: true })).toBe(false)
+    expect(needsGroupRecovery({ ...testo, posted: true })).toBe(false)
+    expect(needsGroupRecovery({ ...testo, userContact: true })).toBe(false)
+    expect(needsGroupRecovery({ ...testo, freeText: '   ' })).toBe(false)
+    expect(needsGroupRecovery({ ...testo, finished: false })).toBe(false)
+  })
+
+  it('il recupero offre SOLO i tool del sollecito (post_to_group+pass; chiusura send_to_user+pass)', () => {
+    const tools = [{ name: 'send_to_user' }, { name: 'post_to_group' }, { name: 'pass' }, { name: 'run-command' }]
+    expect(groupRecoveryTools(tools, false).map((t) => t.name)).toEqual(['post_to_group', 'pass'])
+    expect(groupRecoveryTools(tools, true).map((t) => t.name)).toEqual(['send_to_user', 'pass'])
+  })
+
+  it('i solleciti dedicati (testo della specifica per il gruppo, variante per la chiusura)', () => {
+    expect(GROUP_RECOVERY_NUDGE).toContain('Il tuo testo NON è stato pubblicato')
+    expect(GROUP_RECOVERY_NUDGE).toContain('pubblicala ORA con post_to_group')
+    expect(GROUP_CLOSING_RECOVERY_NUDGE).toContain('mandala ORA con send_to_user')
   })
 })

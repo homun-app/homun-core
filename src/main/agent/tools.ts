@@ -317,7 +317,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'post_to_group',
-    description: "Scrive un messaggio in un gruppo di cui sei membro. Dentro un turno di gruppo il gruppo è quello del turno (niente groupId); fuori (es. lanci il messaggio di avvio) serve l'id. Al massimo UN messaggio per turno: chi legge decide se rispondere. Con @nome chiami i membri specifici (@tutti = tutti).",
+    description: "Scrive un messaggio in un gruppo di cui sei membro: è l'UNICO modo di scrivere nel gruppo (il testo fuori dai tool è ragionamento e non lo legge nessuno). Dentro un turno di gruppo il gruppo è quello del turno (niente groupId); fuori (es. lanci il messaggio di avvio) serve l'id. Al massimo UN messaggio per turno: chi legge decide se rispondere. Con @nome chiami i membri specifici (@tutti = tutti).",
     parameters: {
       type: 'object',
       properties: {
@@ -330,7 +330,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'pass',
-    description: "Nei turni di gruppo: resta in silenzio per questo turno. Chiamalo quando il messaggio non ti riguarda o non hai niente di utile da aggiungere (è una scelta esplicita, non un errore). Anche chiudere il turno senza scrivere vale come silenzio.",
+    description: "Nei turni di gruppo: chiama pass per restare in silenzio per questo turno (è una scelta esplicita, non un errore). Chiamalo quando il messaggio non ti riguarda o non hai niente di utile da aggiungere: scrivere la risposta come testo libero NON la pubblica — nel gruppo si scrive solo con post_to_group.",
     parameters: {
       type: 'object',
       properties: {},

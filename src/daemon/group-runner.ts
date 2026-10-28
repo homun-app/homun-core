@@ -10,7 +10,10 @@
 // resta fermo, la coda del gruppo si svuota e nel gruppo compare una riga di
 // sistema. Correzioni 2: D1 — la profondità della finestra conta SOLO la
 // catena del turno, senza i post del membro (readChainDepth, pura); D3 —
-// l'attesa del coordinatore conta da quando è nata la catena.
+// l'attesa del coordinatore conta da quando è nata la catena. Correzioni 3:
+// E2 — un PASS senza pass esplicito e con testo libero non pubblicato porta
+// il motivo 'testo non pubblicato' nel registro (decide la pura
+// needsGroupRecovery, la stessa del recupero nel loop).
 // Le dipendenze sono iniettabili: nei test LLM finto e orologio finto.
 import type { DatabaseSync } from 'node:sqlite'
 import { getAgent, getEntries } from '../main/store/db'
@@ -23,7 +26,8 @@ import {
 } from '../main/store/groups'
 import {
   buildGroupTurnOpening, GROUP_WINDING_DOWN_DEPTH, GROUP_RATE_LIMIT_TEXT,
-  shouldScheduleClosingTurn, memberWaitingForUser, closingTurnNonce, readChainDepth
+  shouldScheduleClosingTurn, memberWaitingForUser, closingTurnNonce, readChainDepth,
+  needsGroupRecovery
 } from '../main/agent/group-turns'
 import { setJobEntryId, getJobById, type Job } from '../main/store/jobs'
 import type { runTurn, RunTurnOptions } from '../main/agent/loop'
@@ -89,7 +93,7 @@ export async function runGroupTurnJob(
     /** correzione C2: è il turno di CHIUSURA del coordinatore di questa catena */
     closing?: boolean; rootId?: number
   }
-  const finish = (outcome: GroupTurnOutcome): void => finishGroupTurn(p.nonce, outcome, deps.now())
+  const finish = (outcome: GroupTurnOutcome, reason?: string): void => finishGroupTurn(p.nonce, outcome, deps.now(), reason)
   const group = getGroup(p.groupId)
   if (!group) return finish('SKIPPED')
   const memberIds = groupMemberIds(group.id)
@@ -204,7 +208,18 @@ export async function runGroupTurnJob(
   else if (posted || sentToUser) outcome = 'SENT'
   else if (stopReason === 'rate-limit' || stopReason === 'model-error') outcome = 'ERROR'
   else if (turnEnd?.meta?.turnEnd === 'STOPPED') outcome = 'CANCELLED'
-  finish(outcome)
+  // correzione E2 (terzo giro): un PASS senza pass esplicito e con testo
+  // libero non pubblicato porta il MOTIVO nel registro (si distingue dal
+  // silenzio scelto) — la stessa pura che nel loop decide il recupero
+  const unpublishedText = outcome === 'PASS' && needsGroupRecovery({
+    finished: turnEnd?.meta?.turnEnd === 'FINISHED',
+    passed: turnEntry.some((e) => e.kind === 'tool-call' && e.content === 'pass'),
+    posted,
+    userContact: turnEntry.some((e) => e.kind === 'send-message' || e.kind === 'approval'),
+    // l'ultimo testo libero del modello = ultima thinking non vuota del turno
+    freeText: [...turnEntry].reverse().find((e) => e.kind === 'thinking' && e.content.trim())?.content ?? ''
+  })
+  finish(outcome, unpublishedText ? 'testo non pubblicato' : undefined)
 
   // correzione C5: limite d'uso del provider — il cursore NON avanza (i
   // messaggi restano da leggere), i job group-turn del gruppo ancora in coda

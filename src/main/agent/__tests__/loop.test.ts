@@ -28,7 +28,7 @@ const h = vi.hoisted(() => {
       members: new Map<number, string[]>(),
       messages: [] as Array<{ id: number; group_id: number; author_kind: string; author_id: string | null; author_name: string; text: string; reply_to: number | null; root_id: number | null; depth: number; automatic: number; created_at: number }>,
       cursors: new Map<string, number>(),
-      turns: [] as Array<{ nonce: string; group_id: number; member_id: string; source_message_id: number; outcome: string | null; started_at: number | null; ended_at: number | null }>,
+      turns: [] as Array<{ nonce: string; group_id: number; member_id: string; source_message_id: number; outcome: string | null; started_at: number | null; ended_at: number | null; reason?: string | null }>,
       nextGroupId: 1,
       nextMsgId: 1
     },
@@ -308,14 +308,14 @@ vi.mock('../../store/groups', async () => {
       const t = st().turns.find((x) => x.nonce === nonce)
       if (t && t.started_at === null) t.started_at = at
     },
-    finishGroupTurn: (nonce: string, outcome: string, at: number) => {
+    finishGroupTurn: (nonce: string, outcome: string, at: number, reason?: string) => {
       const t = st().turns.find((x) => x.nonce === nonce)
-      if (t) { t.outcome = outcome; t.ended_at = at }
+      if (t) { t.outcome = outcome; t.ended_at = at; t.reason = reason ?? null }
     },
     pendingTurnNonces: (groupId: number) => st().turns.filter((t) => t.group_id === groupId && t.started_at === null && t.outcome === null).map((t) => t.nonce),
     groupTurnNonces: (groupId: number) => st().turns.filter((t) => t.group_id === groupId).map((t) => t.nonce),
     // la colla: usa il planner PURO reale e accoda i job nel mock di jobs
-    scheduleTurnsForMessage: (message: { id: number; group_id: number; author_kind: string; author_id: string | null; text: string; depth: number; automatic: number }, emit: (e: unknown) => void) => {
+    scheduleTurnsForMessage: (message: { id: number; group_id: number; author_kind: string; author_id: string | null; text: string; depth: number; root_id?: number | null; automatic: number }, emit: (e: unknown) => void) => {
       const s = st()
       const group = s.groups.find((g) => g.id === message.group_id)
       if (!group || message.author_kind === 'system') return { plan: { turns: [], skipped: [], systemNotice: null, capNotice: false }, jobs: [] }
@@ -323,16 +323,26 @@ vi.mock('../../store/groups', async () => {
         .map((id) => [...h.db.agents.values()].find((a) => a.id === id))
         .filter((a): a is Agent => !!a)
         .map((a) => ({ id: a.id, name: a.name }))
-      // il planner è il modulo PURO reale (caricato dalla factory async)
+      // il planner è il modulo PURO reale (caricato dalla factory async);
+      // correzione E2: come lo store reale, il tetto per specialista conta i
+      // post della catena di questo messaggio (memberChainPosts)
       const { planGroupTurns, GROUP_HOURLY_CAP_TEXT } = pure
       const now = Date.now()
+      const chainRoot = message.root_id ?? message.id
+      const chainPosts: Record<string, number> = {}
+      for (const m of s.messages) {
+        if (m.group_id === group.id && m.root_id === chainRoot && m.author_kind === 'agent' && m.author_id) {
+          chainPosts[m.author_id] = (chainPosts[m.author_id] ?? 0) + 1
+        }
+      }
       const plan = planGroupTurns({
         group: { id: group.id, coordinatorId: group.coordinator_id },
         message: { id: message.id, authorKind: message.author_kind === 'user' ? 'user' : 'agent', authorId: message.author_id, text: message.text, depth: message.depth },
         members,
         pendingNonces: s.turns.filter((t) => t.group_id === group.id && t.started_at === null && t.outcome === null).map((t) => t.nonce),
         existingNonces: s.turns.filter((t) => t.group_id === group.id).map((t) => t.nonce),
-        postsLastHour: s.messages.filter((m) => m.group_id === group.id && m.author_kind === 'agent' && m.created_at > now - 3_600_000).length
+        postsLastHour: s.messages.filter((m) => m.group_id === group.id && m.author_kind === 'agent' && m.created_at > now - 3_600_000).length,
+        memberChainPosts: chainPosts
       })
       if (plan.capNotice) {
         const recent = s.messages.filter((m) => m.group_id === group.id && m.author_kind === 'system' && m.text === GROUP_HOURLY_CAP_TEXT && m.created_at > now - 3_600_000)
@@ -458,10 +468,14 @@ vi.mock('../../mcp', () => ({
 }))
 
 const { runTurn, isRunning, resolveApproval, supersedeIfPaused, interrupt, RECOVERY_NUDGE } = await import('../loop')
+// correzione E2: il tetto per catena dello scheduler (test del recupero)
+const { GROUP_MEMBER_CHAIN_POSTS_MAX } = await import('../group-turns')
 // il modulo mcp mockato (per patcharne callTool nel test della card Riconnetti)
 const mcpMock = await import('../../mcp')
 // fase 10: il modulo db mockato (createAgent con createdBy/section nei test)
 const dbm = await import('../../store/db')
+// correzione E1: le descrizioni dei tool di gruppo (il modulo gira già coi mock)
+const { toolDefs } = await import('../tools')
 
 const emit = () => undefined
 const AGENT = 'agent_t'
@@ -2820,19 +2834,26 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     expect(results2.some((c) => c.includes('solo dentro i turni di gruppo'))).toBe(true)
   })
 
-  it('NESSUN recupero di fine turno nei turni di gruppo: il silenzio è un esito, il testo libero non diventa messaggio', async () => {
+  it('il testo libero del turno di gruppo non diventa MAI un messaggio (E2: UN sollecito, poi il turno chiude)', async () => {
     setupGroup()
-    h.llm.queue = [{ text: 'ho letto tutto, non ho niente da aggiungere' }]
+    h.llm.queue = [
+      { text: 'ho letto tutto, non ho niente da aggiungere' },
+      { text: 'confermo: non ho nulla da aggiungere' }
+    ]
     await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
       groupTurn: { groupId: 1, readMaxDepth: 1, rootId: 1 }, untrusted: true
     })
-    // UNA sola chiamata al modello: niente recupero di fine turno
-    expect(h.llm.calls).toHaveLength(1)
-    // il testo libero è thinking (che porta meta.groupId), mai send-message
+    // E2 (terzo giro): la consegna scritta come testo libero merita UN sollecito
+    // (prima il recupero non c'era e il testo si perdeva in silenzio)…
+    expect(h.llm.calls).toHaveLength(2)
+    expect(h.llm.calls[1]!.some((m) => m.role === 'user' && m.content.includes('NON è stato pubblicato'))).toBe(true)
+    // …ma NESSUN fallback: il testo libero è thinking (con meta.groupId), mai
+    // un messaggio all'utente né un post nel gruppo
     const thinking = h.db.entries.find((e) => e.kind === 'thinking' && e.content.includes('niente da aggiungere'))
     expect(thinking).toBeTruthy()
     expect(thinking!.meta?.groupId).toBe(1)
     expect(h.db.entries.some((e) => e.kind === 'send-message')).toBe(false)
+    expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
     expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
   })
 
@@ -2965,5 +2986,161 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     const finale = h.db.entries.findLast((e) => e.kind === 'send-message')!
     expect(finale.content).toContain('RIEPILOGO FINALE')
     expect(finale.meta?.groupChain).toEqual({ groupId: 1, rootId: 50 })
+  })
+
+  // ---- correzioni 3 (E2): il recupero dei turni di gruppo ----
+
+  it('E1: le descrizioni dei tool post_to_group e pass non dicono più che si può tacere senza chiamare pass', () => {
+    const post = toolDefs.find((t) => t.name === 'post_to_group')!
+    const pass = toolDefs.find((t) => t.name === 'pass')!
+    // post_to_group: è l'UNICO modo di scrivere nel gruppo
+    expect(post.description).toContain("l'UNICO modo di scrivere nel gruppo")
+    // pass: il testo libero NON pubblica nulla (via "anche chiudere senza scrivere vale silenzio")
+    expect(pass.description).not.toContain('senza scrivere vale come silenzio')
+    expect(pass.description).toContain('solo con post_to_group')
+  })
+
+  it('E2: consegna scritta come TESTO LIBERO → UNA chiamata di recupero coi tool del sollecito, il post esce con depth e catena giuste', async () => {
+    setupGroup()
+    h.db.groupsState.messages.push({ id: 50, group_id: 1, author_kind: 'user', author_id: null, author_name: 'utente', text: 'inizio', reply_to: null, root_id: 50, depth: 0, automatic: 0, created_at: 1 })
+    let recoveryTools: string[] = []
+    h.llm.queue = [
+      { text: '@Coordinatore cena ecco la scaletta v2 aggiornata al menu' },
+      (msgs: Array<{ role: string; content: string }>, tools: unknown[]) => {
+        recoveryTools = (tools as Array<{ name: string }>).map((t) => t.name)
+        // il sollecito dedicato è nella chiamata di recupero
+        expect(msgs.some((m) => m.role === 'user' && m.content.includes('NON è stato pubblicato'))).toBe(true)
+        return { toolCalls: [{ id: 'rg1', name: 'post_to_group', arguments: JSON.stringify({ text: 'SCALETTA v2: 19:30 aperitivo, 20:00 cena, 22:30 torta' }) }] }
+      },
+      // il post non è terminale: il turno chiude col pass (come nel turno normale)
+      { toolCalls: [{ id: 'rg2', name: 'pass', arguments: '{}' }] }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 2, rootId: 50 }, untrusted: true
+    })
+    // turno + recupero + chiusura col pass (il post non è terminale)
+    expect(h.llm.calls).toHaveLength(3)
+    // il sollecito è UNO: appare una sola volta come messaggio utente
+    const userMsgs = h.llm.calls[2]!.filter((m) => m.role === 'user')
+    expect(userMsgs.filter((m) => m.content.includes('NON è stato pubblicato'))).toHaveLength(1)
+    // la chiamata di recupero offre SOLO i tool del sollecito
+    expect([...recoveryTools].sort()).toEqual(['pass', 'post_to_group'])
+    // il post pubblicato dal recupero passa dallo STESSO percorso: depth letta+1, catena letta
+    const post = h.db.groupsState.messages.find((m) => m.author_kind === 'agent')!
+    expect(post.text).toContain('SCALETTA v2')
+    expect(post.depth).toBe(3)
+    expect(post.root_id).toBe(50)
+    // la consegna NON è finita in chat diretta né persa in un secondo recupero
+    expect(h.db.entries.some((e) => e.kind === 'send-message')).toBe(false)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
+  })
+
+  it('E2: il recupero che risponde con pass → il turno è il silenzio dichiarato (PASS)', async () => {
+    setupGroup()
+    h.llm.queue = [
+      { text: 'la scaletta è già arrivata, è la v2 qui sopra' },
+      { toolCalls: [{ id: 'rp1', name: 'pass', arguments: '{}' }] }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 0, rootId: 1 }, untrusted: true
+    })
+    expect(h.llm.calls).toHaveLength(2)
+    expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
+    const results = h.db.entries.filter((e) => e.kind === 'tool-result').map((e) => e.content)
+    expect(results.some((c) => c.includes('Silenzio registrato'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
+  })
+
+  it('E2: il recupero che risponde di nuovo con SOLO TESTO → il turno resta PASS: nessun post, il ragionamento non trapela', async () => {
+    setupGroup()
+    h.llm.queue = [
+      { text: 'ecco la scaletta v2 completa, con gli orari' },
+      { text: 'detto sopra: la scaletta v2 è pronta' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 0, rootId: 1 }, untrusted: true
+    })
+    // il recupero è UNO: due chiamate in tutto, un solo sollecito
+    expect(h.llm.calls).toHaveLength(2)
+    expect(h.llm.calls.filter((c) => c.some((m) => m.role === 'user' && String(m.content).includes('NON è stato pubblicato')))).toHaveLength(1)
+    // il testo NON diventa mai un post automaticamente
+    expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
+    expect(h.db.entries.some((e) => e.kind === 'send-message')).toBe(false)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
+  })
+
+  it('E2: pass esplicito → NESSUN recupero (il silenzio è scelto)', async () => {
+    setupGroup()
+    h.llm.queue = [{ toolCalls: [{ id: 'np1', name: 'pass', arguments: '{}' }] }]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 0, rootId: 1 }, untrusted: true
+    })
+    expect(h.llm.calls).toHaveLength(1)
+    expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
+  })
+
+  it('E2: turno di CHIUSURA con testo libero senza send_to_user → il recupero chiede send_to_user (o pass) e la consegna passa', async () => {
+    setupGroup()
+    let recoveryTools: string[] = []
+    h.llm.queue = [
+      { text: 'Riepilogo finale: menu, spesa e scaletta pronti.' },
+      (msgs: Array<{ role: string; content: string }>, tools: unknown[]) => {
+        recoveryTools = (tools as Array<{ name: string }>).map((t) => t.name)
+        expect(msgs.some((m) => m.role === 'user' && m.content.includes("l'utente non l'ha letto"))).toBe(true)
+        return { toolCalls: [{ id: 'rs1', name: 'send_to_user', arguments: JSON.stringify({ text: 'RIEPILOGO: menu, spesa e scaletta pronti.' }) }] }
+      },
+      { text: 'consegnato, chiudo' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno" chiusura="true">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 5, rootId: 50, closing: true }, untrusted: true
+    })
+    expect(h.llm.calls).toHaveLength(3)
+    // nel turno di chiusura il recupero offre SOLO send_to_user e pass
+    expect([...recoveryTools].sort()).toEqual(['pass', 'send_to_user'])
+    const send = h.db.entries.findLast((e) => e.kind === 'send-message')!
+    expect(send.content).toContain('RIEPILOGO')
+    // e nel turno di chiusura il post nel gruppo resta rifiutato (stesso percorso)
+    expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
+  })
+
+  it('E2: il post del recupero passa dallo STESSO percorso — il tetto per catena (C4) vale anche per la sua pianificazione', async () => {
+    setupGroup()
+    // un terzo membro (specialista) da menzionare nel post del recupero
+    h.db.agents.set('agent_altro', { id: 'agent_altro', name: 'Altro', description: '', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: 3 })
+    h.db.groupsState.members.set(1, [AGENT, 'agent_coord', 'agent_altro'])
+    h.db.groupsState.messages.push({ id: 50, group_id: 1, author_kind: 'user', author_id: null, author_name: 'utente', text: 'inizio', reply_to: null, root_id: 50, depth: 0, automatic: 0, created_at: 1 })
+    const runRecoveryPost = async (): Promise<void> => {
+      h.db.jobs.length = 0
+      h.db.groupsState.turns.length = 0
+      // i post del membro della run precedente si tolgono (i 3 di Altro restano:
+      // sono il tetto per catena); così ogni run pubblica UN solo post
+      h.db.groupsState.messages = h.db.groupsState.messages.filter((m) => !(m.author_kind === 'agent' && m.author_id === AGENT))
+      h.llm.queue = [
+        { text: 'ecco la scaletta v2' },
+        { toolCalls: [{ id: 'rc1', name: 'post_to_group', arguments: JSON.stringify({ text: 'SCALETTA v2 pronta: @Altro verifica gli orari' }) }] },
+        { toolCalls: [{ id: 'rc2', name: 'pass', arguments: '{}' }] }
+      ]
+      await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+        groupTurn: { groupId: 1, readMaxDepth: 2, rootId: 50 }, untrusted: true
+      })
+      expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent' && m.text.includes('SCALETTA v2'))).toHaveLength(1)
+    }
+    // senza tetto: il post del recupero menziona @Altro → il turno tocca a lui
+    await runRecoveryPost()
+    const groupJobs = () => h.db.jobs.filter((j) => j.kind === 'group-turn')
+    expect(groupJobs().some((j) => j.agentId === 'agent_altro')).toBe(true)
+    expect(groupJobs().some((j) => j.agentId === 'agent_coord')).toBe(true)
+    // ora Altro ha raggiunto il tetto per catena (3 post nella catena 50)
+    for (let i = 1; i <= GROUP_MEMBER_CHAIN_POSTS_MAX; i++) {
+      h.db.groupsState.messages.push({
+        id: 100 + i, group_id: 1, author_kind: 'agent', author_id: 'agent_altro', author_name: 'Altro',
+        text: `passaggio ${i}`, reply_to: null, root_id: 50, depth: i, automatic: 0, created_at: i
+      })
+    }
+    await runRecoveryPost()
+    // il post del recupero NON riceve trattamento di favore: la pianificazione
+    // è la STESSA del turno normale, lo specialista a tetto raggiunto è escluso
+    expect(groupJobs().some((j) => j.agentId === 'agent_altro')).toBe(false)
+    expect(groupJobs().some((j) => j.agentId === 'agent_coord')).toBe(true)
   })
 })

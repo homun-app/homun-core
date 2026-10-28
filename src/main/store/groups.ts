@@ -105,7 +105,7 @@ export interface GroupTurn {
   outcome: GroupTurnOutcome | null
   started_at: number | null
   ended_at: number | null
-  /** correzione C5: il motivo di uno SKIPPED (giro sospeso per rate limit) */
+  /** correzione C5: il motivo di uno SKIPPED (giro sospeso per rate limit); correzione E2: 'testo non pubblicato' su un PASS senza pass esplicito */
   reason?: string | null
 }
 
@@ -287,14 +287,16 @@ export function startGroupTurn(nonce: string, at: number): void {
 /**
  * Chiude il turno con l'esito. UPSERT: la riga di pianificazione di solito
  * esiste già, ma un esito senza di essa (job orfano, gruppo cancellato dopo
- * l'accodamento) va comunque registrato.
+ * l'accodamento) va comunque registrato. Correzione E2 (terzo giro): un PASS
+ * senza pass esplicito porta il motivo 'testo non pubblicato' — si distingue
+ * dal silenzio scelto nel registro dei turni.
  */
-export function finishGroupTurn(nonce: string, outcome: GroupTurnOutcome, at: number): void {
+export function finishGroupTurn(nonce: string, outcome: GroupTurnOutcome, at: number, reason?: string): void {
   db().prepare(`
-    INSERT INTO group_turns(nonce, group_id, member_id, source_message_id, outcome, ended_at)
-    VALUES(?, 0, '', 0, ?, ?)
-    ON CONFLICT(nonce) DO UPDATE SET outcome = excluded.outcome, ended_at = excluded.ended_at
-  `).run(nonce, outcome, at)
+    INSERT INTO group_turns(nonce, group_id, member_id, source_message_id, outcome, ended_at, reason)
+    VALUES(?, 0, '', 0, ?, ?, ?)
+    ON CONFLICT(nonce) DO UPDATE SET outcome = excluded.outcome, ended_at = excluded.ended_at, reason = excluded.reason
+  `).run(nonce, outcome, at, reason ?? null)
 }
 
 /** I turni PIANIFICATI (non ancora partiti) di un gruppo: la fusione del planner. */

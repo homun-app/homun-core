@@ -4,9 +4,9 @@
 // `npx vitest run`: i file vivono in eval/ e la config è vitest.eval.config.ts.
 // Uso: npm run eval -- --model kimi-k3:cloud --runs 3
 // Opzioni: --model, --runs, --min (soglia pass), --base-url.
-// La soglia di default (38 su 14 casi × 3 run = 42) è l'equivalente
+// La soglia di default (41 su 15 casi × 3 run = 45) è l'equivalente
 // proporzionale del 30/33 della specifica fase 10 (che contava 11 casi; con
-// le correzioni fase 10 i casi sono 14: 2b e 8-13).
+// le correzioni i casi sono 15: 2b e 8-14).
 import { spawnSync } from 'node:child_process'
 
 const args = process.argv.slice(2)
@@ -16,7 +16,7 @@ const flag = (name, fallback) => {
 }
 const model = flag('model', 'kimi-k3:cloud')
 const runs = flag('runs', '3')
-const min = flag('min', '38')
+const min = flag('min', '41')
 const baseUrl = flag('base-url', 'http://127.0.0.1:11434')
 
 console.log(`eval fase 9 — modello=${model} runs=${runs} provider=${baseUrl}`)

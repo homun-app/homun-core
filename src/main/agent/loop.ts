@@ -45,9 +45,14 @@ import { deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkToo
 // fase 9 (punto 1): modello di riserva quando il principale non risponde
 import { fallbackModelFor, type ModelDefaultsMap } from './model-defaults'
 import { shouldUseFallback } from './model-fallback'
-// fase 10: gruppi (store) e regole del turno di gruppo (puro); correzioni C1-C3
+// fase 10: gruppi (store) e regole del turno di gruppo (puro); correzioni C1-C3;
+// correzione E2 (terzo giro): il recupero dei turni di gruppo finiti con la
+// consegna scritta come testo libero
 import { getGroup, getGroupMessage, isGroupMember, addGroupMessage, scheduleTurnsForMessage } from '../store/groups'
-import { nextPostDepth, hasSentToUserInChain, alreadySentToUserResult } from './group-turns'
+import {
+  nextPostDepth, hasSentToUserInChain, alreadySentToUserResult,
+  needsGroupRecovery, groupRecoveryTools, GROUP_RECOVERY_NUDGE, GROUP_CLOSING_RECOVERY_NUDGE
+} from './group-turns'
 import { MAX_CREATE_AGENTS_PER_TURN } from './tools'
 import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 
@@ -324,9 +329,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   let sendsSinceWork = 0
   // fase 10 (§3): un solo post_to_group per membro per turno (il secondo ha un
   // result esplicito che lo spiega); correzione C1: il silenzio esplicito
-  // (pass) CHIUDE il turno di gruppo
+  // (pass) CHIUDE il turno di gruppo; correzione E2 (terzo giro): al massimo
+  // UNA chiamata di recupero per turno quando la consegna è finita nel testo
   let groupPosted = false
   let passedSilence = false
+  let groupRecoveryDone = false
 
   // fase 8 (§3bis L7): ogni entry scritta da un turno di TASK porta meta.taskId —
   // vive nel sotto-transcript del task, esclusa dalla chat principale.
@@ -561,6 +568,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     } catch {
       // MCP non disponibile: prosegue coi tool base
     }
+    // correzione E2: i tool del passo corrente — la chiamata di recupero di un
+    // turno di gruppo li restringe a quelli del sollecito
+    let turnTools = allTools
 
     // fase 3 (§3bis L5): quali tool MCP sono invii verso l'esterno
     const externalCfg = getSetting<ExternalSendConfig>('externalSendTools', DEFAULT_EXTERNAL_SEND_TOOLS)
@@ -594,7 +604,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       const streamAbort = new AbortController()
       const onTurnAbort = (): void => streamAbort.abort()
       controller.signal.addEventListener('abort', onTurnAbort)
-      const stream = llmStream(provider, activeModel, messages, allTools, AbortSignal.any([controller.signal, streamAbort.signal]))
+      const stream = llmStream(provider, activeModel, messages, turnTools, AbortSignal.any([controller.signal, streamAbort.signal]))
       // fase 3: il testo libero è ragionamento interno, non una risposta
       const entry = add({ agentId, kind: 'thinking', role: 'assistant', content: '' })
       emit({ type: 'entries', agentId, entries: [entry] })
@@ -674,6 +684,30 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       }
 
       if (!final.toolCalls?.length) {
+        // correzione E2 (terzo giro): un turno di gruppo FINISHED senza post,
+        // senza pass e senza contatto con l'utente, ma CON testo libero, è una
+        // consegna scritta come ragionamento che nessuno ha letto — UNA
+        // chiamata di recupero col sollecito, SOLO coi tool del sollecito
+        // (post_to_group e pass; nella chiusura send_to_user e pass). Le
+        // chiamate che produce passano dallo STESSO percorso del turno (depth,
+        // rootId, tetti, rifiuto del post nella chiusura); se anche il recupero
+        // risponde solo testo il turno resta PASS: il testo NON diventa mai un
+        // post (il registro segna il motivo).
+        if (
+          opts.groupTurn !== undefined && !groupRecoveryDone &&
+          needsGroupRecovery({
+            finished: true,
+            passed: passedSilence,
+            posted: groupPosted,
+            userContact: scopedEntries().some((e) => e.id > turnEntryId && (e.kind === 'send-message' || e.kind === 'approval')),
+            freeText: text
+          })
+        ) {
+          groupRecoveryDone = true
+          turnTools = groupRecoveryTools(allTools, opts.groupTurn.closing === true)
+          messages.push({ role: 'user', content: opts.groupTurn.closing ? GROUP_CLOSING_RECOVERY_NUDGE : GROUP_RECOVERY_NUDGE })
+          continue
+        }
         // turno concluso senza tool: fine
         finished = true
         break

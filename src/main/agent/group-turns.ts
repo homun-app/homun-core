@@ -34,10 +34,14 @@ export const GROUP_RATE_LIMIT_TEXT =
 
 /**
  * Correzione C2: la riga chiara nell'apertura del turno di chiusura del
- * coordinatore — l'ultimo passo del giro che prima mancava.
+ * coordinatore — l'ultimo passo del giro che prima mancava. Correzione E1
+ * (terzo giro): la riga equivalente della regola di scrittura — all'utente si
+ * scrive SOLO con send_to_user, il testo libero non lo legge nessuno.
  */
-export const GROUP_CLOSING_LINE =
+export const GROUP_CLOSING_LINE = [
+  'All\'utente si scrive SOLO con send_to_user: il testo che scrivi fuori dai tool è il tuo ragionamento e non lo legge nessuno.',
   'Il giro è finito. Se le consegne ci sono, manda ORA all\'utente UN riepilogo completo (send_to_user); se manca qualcosa, digli cosa manca e cosa serve da lui. Non scrivere nel gruppo.'
+].join('\n')
 
 /**
  * Correzione C4: tetto per catena — uno specialista che ha già pubblicato
@@ -53,10 +57,14 @@ export const GROUP_HOURLY_CAP_TEXT =
 /**
  * La regola dei turni di gruppo (fase 10, punto 4): accompagna OGNI apertura
  * di turno — quando parlare, quando tacere, cosa non portare mai nel gruppo.
+ * Correzione E1 (terzo giro): la prima riga dice COME si scrive — nel gruppo
+ * si pubblica solo con post_to_group e il testo fuori dai tool non lo legge
+ * nessuno (le consegne scritte "a mano" si perdevano nel ragionamento).
  */
 export const GROUP_TURN_RULE = [
   'Regole del turno di gruppo:',
-  '- Scrivi nel gruppo SOLO se hai qualcosa di utile da aggiungere o se sei chiamato (@menzione); altrimenti resta in silenzio: chiama pass (o semplicemente non scrivere).',
+  '- Nel gruppo si scrive SOLO con post_to_group: il testo che scrivi fuori dai tool è il tuo ragionamento e non lo legge nessuno. Per restare in silenzio chiama pass.',
+  '- Scrivi nel gruppo SOLO se hai qualcosa di utile da aggiungere o se sei chiamato (@menzione); altrimenti chiama pass.',
   '- Quando il giro sta chiudendo (te lo dirà il messaggio di apertura) intervieni solo se è davvero essenziale.',
   '- All\'utente scrivi solo per una decisione che spetta a lui o, se sei il coordinatore, per il riepilogo alla chiusura.',
   '- Niente conferme vuote ("ricevuto", "un attimo"): il silenzio è una risposta valida.',
@@ -438,7 +446,11 @@ export interface ReadChainInput {
 }
 
 export interface ReadChainResult {
-  /** la catena del turno: root dell'ULTIMO messaggio letto (non di sistema) */
+  /**
+   * la catena del turno: root dell'ULTIMO messaggio letto che non è di
+   * sistema e non è un post del membro stesso (E3); se non ce n'è nessuno,
+   * quella dell'ultimo messaggio non di sistema
+   */
   rootId: number | null
   /** la profondità letta della catena del turno (−1 se non c'è nulla) */
   maxDepth: number
@@ -446,22 +458,34 @@ export interface ReadChainResult {
 
 /**
  * readChainDepth (pura, D1): catena e profondità della finestra di lettura di
- * un membro. La catena resta quella dell'ULTIMO messaggio letto (non di
- * sistema), come prima; la profondità conta SOLO i messaggi di quella catena,
- * SENZA i post del membro stesso: le catene vecchie rimaste nella finestra si
- * leggono (restano nell'apertura) ma non trascinano windingDown e depth della
- * catena nuova — un post a depth 6 di una catena finita non deve far uscire
- * la prima risposta a una richiesta nuova a depth 7, dove il planner
- * chiuderebbe subito la catena e la richiesta resterebbe senza specialisti.
+ * un membro. La profondità conta SOLO i messaggi di quella catena, SENZA i
+ * post del membro stesso: le catene vecchie rimaste nella finestra si leggono
+ * (restano nell'apertura) ma non trascinano windingDown e depth della catena
+ * nuova — un post a depth 6 di una catena finita non deve far uscire la prima
+ * risposta a una richiesta nuova a depth 7, dove il planner chiuderebbe
+ * subito la catena e la richiesta resterebbe senza specialisti.
+ * Correzione E3 (terzo giro): nemmeno la CATENA la decide un post del membro
+ * stesso — l'ultimo messaggio letto del membro su una catena vecchia non deve
+ * risucchiare la risposta a una richiesta nuova nella catena vecchia (lì la
+ * catena nuova non riceveva post: niente chiusura, né riepilogo, né
+ * specialisti, e i tetti della catena vecchia bloccavano tutto). La catena è
+ * quella dell'ultimo messaggio letto che NON è di sistema e NON è suo; solo
+ * se non ce n'è nessuno, quella dell'ultimo messaggio non di sistema.
  * Se della catena non resta nessun messaggio che conti (solo i post del
  * membro, o finestra senza messaggi di membri), vale la depth del messaggio
  * che ha generato il turno.
  */
 export function readChainDepth(input: ReadChainInput): ReadChainResult {
   let rootId: number | null = null
+  let lastNonSystem: number | null = null
   for (const m of input.messages) {
-    if (m.author_kind !== 'system') rootId = m.root_id ?? m.id
+    if (m.author_kind === 'system') continue
+    lastNonSystem = m.root_id ?? m.id
+    // E3: il SUO post non decide la catena del turno
+    if (m.author_kind === 'agent' && m.author_id === input.memberId) continue
+    rootId = m.root_id ?? m.id
   }
+  if (rootId === null) rootId = lastNonSystem
   let maxDepth: number | null = null
   for (const m of input.messages) {
     if (rootId === null || (m.root_id ?? m.id) !== rootId) continue
@@ -470,4 +494,52 @@ export function readChainDepth(input: ReadChainInput): ReadChainResult {
     maxDepth = Math.max(maxDepth ?? -1, m.depth)
   }
   return { rootId, maxDepth: maxDepth ?? input.sourceDepth ?? -1 }
+}
+
+// ---- correzione E2 (terzo giro): il recupero dei turni di gruppo ----
+
+/**
+ * Il sollecito dell'UNICA chiamata di recupero di un turno di gruppo (E2):
+ * la consegna scritta come testo libero non l'ha letta nessuno — si pubblica
+ * ora o si tace.
+ */
+export const GROUP_RECOVERY_NUDGE =
+  "Il tuo testo NON è stato pubblicato: nel gruppo nessuno l'ha letto. Se è una risposta o una consegna per il gruppo, pubblicala ORA con post_to_group; se non hai nulla da aggiungere, chiama pass."
+
+/** La variante per il turno di CHIUSURA (E2): lì si scrive all'utente. */
+export const GROUP_CLOSING_RECOVERY_NUDGE =
+  "Il tuo testo NON è stato pubblicato: l'utente non l'ha letto. Se è un riepilogo o una comunicazione per lui, mandala ORA con send_to_user; se non hai nulla da dirgli, chiama pass."
+
+export interface GroupRecoveryInput {
+  /** il turno è finito FINISHED (sugli esiti interrotti niente recupero) */
+  finished: boolean
+  /** il membro ha dichiarato il silenzio con pass */
+  passed: boolean
+  /** il membro ha pubblicato almeno un post_to_group nel turno */
+  posted: boolean
+  /** c'è stato contatto con l'utente nel turno (send_to_user, ask_user o card) */
+  userContact: boolean
+  /** l'ultimo testo libero del modello (dopo trim decide se vale il recupero) */
+  freeText: string
+}
+
+/**
+ * needsGroupRecovery (pura, E2): un turno di gruppo finito FINISHED senza
+ * post, senza pass e senza contatto con l'utente, ma CON testo libero, è una
+ * consegna scritta come ragionamento che nessuno ha letto — il loop fa UNA
+ * chiamata di recupero col sollecito dedicato. Se anche quella risponde solo
+ * testo il turno resta PASS: il testo NON diventa mai un post (i turni di
+ * gruppo sono untrusted, il ragionamento non trapela nel gruppo).
+ */
+export function needsGroupRecovery(input: GroupRecoveryInput): boolean {
+  return input.finished && !input.passed && !input.posted && !input.userContact && input.freeText.trim() !== ''
+}
+
+/**
+ * Il set di tool della chiamata di recupero (E2): SOLO quelli del sollecito —
+ * post_to_group e pass; nel turno di chiusura send_to_user e pass.
+ */
+export function groupRecoveryTools<T extends { name: string }>(tools: ReadonlyArray<T>, closing: boolean): T[] {
+  const allowed = closing ? ['send_to_user', 'pass'] : ['post_to_group', 'pass']
+  return tools.filter((t) => allowed.includes(t.name))
 }

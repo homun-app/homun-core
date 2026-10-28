@@ -222,7 +222,15 @@ describe('ripresa dopo un crash', () => {
  */
 function scriptedDeps(
   seen: Seen[],
-  script: { post?: string; send?: string; stopReason?: 'model-error' | 'rate-limit' } = {}
+  script: {
+    post?: string; send?: string; stopReason?: 'model-error' | 'rate-limit'
+    /** correzione E2: la consegna scritta come testo libero (turno FINISHED senza post) */
+    freeText?: string
+    /** correzione E2: pass esplicito (silenzio scelto) */
+    passed?: boolean
+    /** correzione E2: turno FINISHED senza testo libero (risposta vuota) */
+    finished?: boolean
+  } = {}
 ): GroupRunnerDeps {
   return {
     runTurn: async (agentId, text, _e, _i, opts = {}) => {
@@ -239,8 +247,16 @@ function scriptedDeps(
       if (script.send !== undefined) {
         appendEntry({ agentId, kind: 'send-message', role: 'assistant', content: script.send, meta: { message: { type: 'text', text: script.send } } })
       }
+      if (script.freeText !== undefined) {
+        appendEntry({ agentId, kind: 'thinking', role: 'assistant', content: script.freeText })
+      }
+      if (script.passed) {
+        appendEntry({ agentId, kind: 'tool-call', role: 'assistant', content: 'pass', meta: { id: 'p1', name: 'pass', arguments: '{}' } })
+      }
       if (script.stopReason) {
         appendEntry({ agentId, kind: 'event', role: 'system', content: 'Turno interrotto', meta: { turnEnd: 'STOPPED', stopReason: script.stopReason } })
+      } else if (script.freeText !== undefined || script.passed || script.finished) {
+        appendEntry({ agentId, kind: 'event', role: 'system', content: 'Turno completato', meta: { turnEnd: 'FINISHED' } })
       }
     },
     interrupt: () => undefined,
@@ -489,5 +505,32 @@ describe('correzione D3: attesa del coordinatore limitata alla catena', () => {
     await runGroupTurnJob(db(), scriptedDeps([], { post: 'CONSEGNA: menu pronto.' }), jobFor(bot.id, g, u1.id), emit)
     // l'attesa è VECCHIA (prima dell'inizio della catena): la chiusura parte
     expect(closingJob(g, coord.id, u1.id)).toBeTruthy()
+  })
+})
+
+describe('correzione E2: il motivo del PASS senza pass esplicito nel registro', () => {
+  it('testo libero non pubblicato → PASS con reason "testo non pubblicato" (si distingue dal silenzio scelto)', async () => {
+    const { bot, g, u1 } = fixture()
+    const job = jobFor(bot.id, g, u1.id)
+    await runGroupTurnJob(db(), scriptedDeps([], { freeText: '@Coordinatore cena ecco la scaletta v2 completa' }), job, emit)
+    const row = groupTurnByNonce((job.payload as { nonce: string }).nonce)!
+    expect(row.outcome).toBe('PASS')
+    expect(row.reason).toBe('testo non pubblicato')
+  })
+
+  it('pass esplicito o FINISHED senza testo libero → PASS senza motivo, come prima', async () => {
+    const a = fixture()
+    const j1 = jobFor(a.bot.id, a.g, a.u1.id)
+    await runGroupTurnJob(db(), scriptedDeps([], { passed: true }), j1, emit)
+    const r1 = groupTurnByNonce((j1.payload as { nonce: string }).nonce)!
+    expect(r1.outcome).toBe('PASS')
+    expect(r1.reason).toBeFalsy()
+
+    const b = fixture()
+    const j2 = jobFor(b.bot.id, b.g, b.u1.id)
+    await runGroupTurnJob(db(), scriptedDeps([], { finished: true }), j2, emit)
+    const r2 = groupTurnByNonce((j2.payload as { nonce: string }).nonce)!
+    expect(r2.outcome).toBe('PASS')
+    expect(r2.reason).toBeFalsy()
   })
 })
