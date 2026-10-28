@@ -4,9 +4,10 @@
 // fanno match per chiave ESATTA ("name" o "name sub"), mai per prefisso.
 import { realpathSync } from 'node:fs'
 import { getPermissions, listGrants, addGrant, getRoutine } from '../store/db'
-import { sandboxMode, boxDir } from '../sandbox'
+import { sandboxMode, boxRoot, boxDir } from '../sandbox'
+import { resolveBoxPath } from '../sandbox/box-paths'
 import type { PermissionMode } from '../../shared/types'
-import { targetKey, runCommandVerdict, commandKey, isNeverAuto, isInsideBox, ruleToolMatches, mcpAnnotationMode, type McpAnnotationsLike } from './permission-rules'
+import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, type McpAnnotationsLike } from './permission-rules'
 import { analyzeCommand } from './shell-ast'
 import { updateStateVerdict, memoryScopeVerdict, type UpdateStateArgs } from './update-state'
 
@@ -179,15 +180,17 @@ export async function check(
   if (mode === 'blocked') return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
 
   // C5: in modalità host i tool di lettura sono always_allow (o coperti da
-  // grant) SOLO per i path dentro boxDir(agentId), dopo resolve+realpath
-  // (neutralizza ../ e symlink). Fuori dalla box → ask. In docker resta com'era.
+  // grant) SOLO per i path DENTRO il box condiviso (fase 11: la radice è
+  // <dir dati>/box e vale per TUTTI i bot — relativi alla home, /workspace
+  // alias della cartella comune), dopo resolve+realpath (neutralizza ../ e
+  // symlink). Fuori dal box → ask. In docker resta com'era.
   if (
     (tool === 'read-file' || tool === 'list-directory') &&
     sandboxMode() === 'host' &&
     agentId &&
-    !isInsideBox(String(input.path ?? ''), boxDir(agentId), realpathSync)
+    !resolveBoxPath(String(input.path ?? ''), boxRoot(), boxDir(agentId), realpathSync).ok
   ) {
-    return { kind: 'ask', reason: 'legge fuori dalla cartella del bot' }
+    return { kind: 'ask', reason: 'legge fuori dal box condiviso' }
   }
 
   // standing grant: match ESATTO tool+target ("Consenti sempre" su quel target)

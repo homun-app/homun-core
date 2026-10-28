@@ -27,7 +27,7 @@ import { tickScheduler, tickConnectorPolls, enqueueRoutineRun } from './schedule
 import { attachHostBridge } from './host-bridge'
 import { makeJobRunner } from './run-job'
 import { wireConnectors } from '../main/connectors/wiring'
-import { createPresence } from './presence'
+import { createPresence, mainAgentOf } from './presence'
 import { handleWebhook } from './webhooks'
 import { deliverDueHeld } from './outbox'
 import { decideNotification, notifyTexts } from './notifications'
@@ -35,6 +35,7 @@ import { enqueueUserMessage } from './enqueue'
 import { secondaryPrompts } from '../main/agent/prompts'
 import { loadTemplates, buildKickstartMessage } from '../main/templates'
 import { createOnboarding } from './onboarding'
+import { join } from 'node:path'
 import type { SandbotEvent } from '../shared/types'
 
 function resolveDataDirArgv(argv: string[]): string | null {
@@ -55,6 +56,33 @@ async function main(): Promise<void> {
   }
 
   const database = db()
+
+  // fase 11 (punto 1): migrazione una tantum dei vecchi box (uno per agente)
+  // nel box CONDIVISO — COPIA, niente cancellazioni; notice al bot principale
+  // con cosa è stato migrato e dove restano i vecchi dati (la cancellazione
+  // la decide l'utente). Idempotente: un marker nel box evita di rifarla.
+  try {
+    const { migrateLegacyBoxes } = await import('../main/sandbox')
+    const migration = await migrateLegacyBoxes(listAgents())
+    if (migration.migrated.length) {
+      const main = mainAgentOf(listAgents(), getSetting<string | null>('mainAgentId', null))
+      if (main) {
+        appendEntry({
+          agentId: main.id, kind: 'notice', role: 'system',
+          content: [
+            `Il computer dei bot ora è UNO solo, condiviso (radice: ${join(dataDir(), 'box')}).`,
+            'Ho COPIATO i vecchi box dei bot nella nuova struttura, senza cancellare nulla:',
+            ...migration.migrated.map((m) => `- ${m.from} → ${m.to}`),
+            'I dati originali restano dove sono: puoi cancellarli tu quando vuoi.'
+          ].join('\n')
+        })
+      }
+      console.log(`[sandbotd] migrazione box condiviso: copiati ${migration.migrated.length} vecchi box (gli originali restano)`)
+    }
+  } catch (e) {
+    console.error('[sandbotd] migrazione box fallita (si riprova al prossimo avvio):', e)
+  }
+
   const token = generateToken()
   let bridge: ReturnType<typeof attachHostBridge> | null = null
   // dichiarati prima della closure del server e riempiti appena pronti

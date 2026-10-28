@@ -35,7 +35,9 @@ vi.mock('../../store/db', () => ({
 
 vi.mock('../../sandbox', () => ({
   sandboxMode: () => state.sandboxMode,
-  boxDir: () => BOX
+  // fase 11: la radice è il box CONDIVISO, la home del bot ci vive dentro
+  boxRoot: () => BOX,
+  boxDir: (agentId: string) => join(BOX, 'home', agentId)
 }))
 
 const { check, grantStanding, setMcpAnnotationsLookup } = await import('../permissions')
@@ -100,19 +102,24 @@ describe('C1: grantStanding non salva mai chiavi never-auto', () => {
 })
 
 describe('C5: read-file/list-directory in modalità host', () => {
-  it('path dentro la box con always_allow → allow', async () => {
+  it('path dentro il box condiviso con always_allow → allow (anche /workspace e la home di un ALTRO bot)', async () => {
     expect((await check('read-file', { path: 'note.txt' }, 'agent_x')).kind).toBe('allow')
-    expect((await check('read-file', { path: join(BOX, 'note.txt') }, 'agent_x')).kind).toBe('allow')
+    expect((await check('read-file', { path: join(BOX, 'workspace', 'note.txt') }, 'agent_x')).kind).toBe('allow')
+    expect((await check('read-file', { path: '/workspace/progetto/report.md' }, 'agent_x')).kind).toBe('allow')
+    // fase 11: il box è condiviso — la home di un altro bot è leggibile
+    expect((await check('read-file', { path: join(BOX, 'home', 'agent_y', 'f.txt') }, 'agent_x')).kind).toBe('allow')
     expect((await check('list-directory', { path: '.' }, 'agent_x')).kind).toBe('allow')
   })
 
-  it('path fuori dalla box → ask "legge fuori dalla cartella del bot"', async () => {
-    for (const path of [join(OUTSIDE, 'id_rsa'), '../outside/id_rsa', 'link-out/id_rsa', '/etc/passwd']) {
+  it('path fuori dal box → ask "legge fuori dal box condiviso"', async () => {
+    // la home è due livelli dentro la radice: servono tre ../ per uscire;
+    // link-out è un symlink alla radice del box che punta FUORI
+    for (const path of [join(OUTSIDE, 'id_rsa'), '../../../outside/id_rsa', join(BOX, 'link-out', 'id_rsa'), '/etc/passwd']) {
       const v = await check('read-file', { path }, 'agent_x')
       expect(v.kind, path).toBe('ask')
-      if (v.kind === 'ask') expect(v.reason, path).toBe('legge fuori dalla cartella del bot')
+      if (v.kind === 'ask') expect(v.reason, path).toBe('legge fuori dal box condiviso')
     }
-    expect((await check('list-directory', { path: 'link-out' }, 'agent_x')).kind).toBe('ask')
+    expect((await check('list-directory', { path: join(BOX, 'link-out') }, 'agent_x')).kind).toBe('ask')
   })
 
   it('nemmeno una standing grant sul path fuori box basta in host', async () => {

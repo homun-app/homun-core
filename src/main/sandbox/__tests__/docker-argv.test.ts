@@ -6,15 +6,25 @@ import {
   dockerListDirArgv,
   dockerPsArgv,
   dockerStartArgv,
-  dockerCreateArgv,
-  dockerVolumeChownArgv,
-  DOCKER_WRITE_SH
+  dockerBoxCreateArgv,
+  dockerBoxChownArgv,
+  dockerBoxMigrateArgv,
+  dockerBoxMarkerCheckArgv,
+  dockerBoxMarkerWriteArgv,
+  dockerVolumeLsArgv,
+  DOCKER_WRITE_SH,
+  DOCKER_BOX_MIGRATE_SH,
+  BOX_CONTAINER,
+  BOX_VOLUME,
+  BOX_MOUNT,
+  boxHomePath,
+  DEFAULT_BOX_LIMITS
 } from '../docker-argv'
 
 describe('dockerExecArgv', () => {
-  it('argv senza shell: exec -i -w /home/box <container> sh -c <command>', () => {
-    expect(dockerExecArgv('sandbot-x', 'echo hi')).toEqual([
-      'exec', '-i', '-w', '/home/box', 'sandbot-x', 'sh', '-c', 'echo hi'
+  it('argv senza shell: exec -i -w <workdir> <container> sh -c <command>', () => {
+    expect(dockerExecArgv('sandbot-box', 'echo hi', { workdir: '/box/home/agent_x' })).toEqual([
+      'exec', '-i', '-w', '/box/home/agent_x', 'sandbot-box', 'sh', '-c', 'echo hi'
     ])
   })
 
@@ -38,25 +48,26 @@ describe('dockerExecArgv', () => {
 describe('operazioni file: path e contenuto mai interpolati in shell', () => {
   it('read: path (anche con spazi/metacaratteri) è un singolo argomento di cat', () => {
     const path = 'a b; rm -rf / # $(touch pwned)'
-    expect(dockerReadFileArgv('c', path)).toEqual(['exec', '-i', '-w', '/home/box', 'c', 'cat', '--', path])
+    expect(dockerReadFileArgv('c', path)).toEqual(['exec', '-i', '-w', BOX_MOUNT, 'c', 'cat', '--', path])
   })
 
-  it('write: sh -c costante, path come argomento posizionale, contenuto NON in argv', () => {
-    const argv = dockerWriteFileArgv('c', '/home/box/x; $(reboot)`y`')
-    expect(argv).toEqual(['exec', '-i', '-w', '/home/box', 'c', 'sh', '-c', DOCKER_WRITE_SH, 'sh', '/home/box/x; $(reboot)`y`'])
-    // lo script è fisso: crea la dir del file e riversa lo stdin byte per byte
-    expect(DOCKER_WRITE_SH).toBe('mkdir -p "$(dirname "$1")" && cat > "$1"')
+  it('write: sh -c costante, path come argomento posizionale, contenuto NON in argv, scrittura ATOMICA', () => {
+    const argv = dockerWriteFileArgv('c', '/box/home/x; $(reboot)`y`')
+    expect(argv).toEqual(['exec', '-i', '-w', BOX_MOUNT, 'c', 'sh', '-c', DOCKER_WRITE_SH, 'sh', '/box/home/x; $(reboot)`y`'])
+    // lo script è fisso: crea la dir del file, scrive lo stdin su un TEMPORANEO
+    // NELLA STESSA cartella e poi rinomina (fase 11: un altro bot non legge a metà)
+    expect(DOCKER_WRITE_SH).toBe('mkdir -p "$(dirname "$1")" && cat > "$1.sandbot-tmp" && mv -f "$1.sandbot-tmp" "$1"')
   })
 
   it('list: ls -la con path come argv', () => {
-    expect(dockerListDirArgv('c', '.')).toEqual(['exec', '-i', '-w', '/home/box', 'c', 'ls', '-la', '--', '.'])
+    expect(dockerListDirArgv('c', '.')).toEqual(['exec', '-i', '-w', BOX_MOUNT, 'c', 'ls', '-la', '--', '.'])
   })
 })
 
-describe('lifecycle & hardening (§5.2)', () => {
+describe('lifecycle & hardening del box condiviso (§5.2 + fase 11 punto 1)', () => {
   it('ps: filtro nome esatto ancorato, senza grep', () => {
-    expect(dockerPsArgv('sandbot-x')).toEqual([
-      'ps', '-a', '--format', '{{.Names}}', '--filter', 'name=^/sandbot-x$'
+    expect(dockerPsArgv(BOX_CONTAINER)).toEqual([
+      'ps', '-a', '--format', '{{.Names}}', '--filter', 'name=^/sandbot-box$'
     ])
   })
 
@@ -64,25 +75,62 @@ describe('lifecycle & hardening (§5.2)', () => {
     expect(dockerStartArgv('c')).toEqual(['start', 'c'])
   })
 
-  it('create: utente non-root, cap-drop ALL, no-new-privileges, pids/memory/cpus, rete configurabile', () => {
-    const argv = dockerCreateArgv('sandbot-x', 'sandbot-x-box', 'bridge')
+  it('create: container UNICO sandbot-box, volume sandbot-box su /box, hardening e limiti condivisi configurabili', () => {
+    const argv = dockerBoxCreateArgv(BOX_CONTAINER, BOX_VOLUME, 'bridge', DEFAULT_BOX_LIMITS)
     for (const flag of ['--user', '--cap-drop', '--security-opt', '--pids-limit', '--memory', '--cpus', '--network']) {
       expect(argv).toContain(flag)
     }
     const val = (flag: string) => argv[argv.indexOf(flag) + 1]
+    expect(argv[argv.indexOf('--name') + 1]).toBe('sandbot-box')
+    expect(argv).toContain(`${BOX_VOLUME}:${BOX_MOUNT}`)
     expect(val('--user')).toBe('1000:1000')
     expect(val('--cap-drop')).toBe('ALL')
     expect(val('--security-opt')).toBe('no-new-privileges')
-    expect(val('--pids-limit')).toBe('512')
-    expect(val('--memory')).toBe('2g')
+    // punto 1: limiti condivisi e configurabili — memoria 4g, cpu 2, pids 1024
+    expect(val('--pids-limit')).toBe('1024')
+    expect(val('--memory')).toBe('4g')
     expect(val('--cpus')).toBe('2')
     expect(val('--network')).toBe('bridge')
-    // rete isolata quando configurata
-    expect(val('--network')).not.toBe('none')
-    expect(dockerCreateArgv('c', 'v', 'none')[dockerCreateArgv('c', 'v', 'none').indexOf('--network') + 1]).toBe('none')
+    // limiti passati dal chiamante (settings sandbox.*)
+    const custom = dockerBoxCreateArgv('c', 'v', 'none', { memory: '2g', cpus: 1, pids: 512 })
+    const v2 = (f: string) => custom[custom.indexOf(f) + 1]
+    expect(v2('--memory')).toBe('2g')
+    expect(v2('--cpus')).toBe('1')
+    expect(v2('--pids-limit')).toBe('512')
+    expect(v2('--network')).toBe('none')
   })
 
-  it('init volume: one-shot chown per l’utente non-root', () => {
-    expect(dockerVolumeChownArgv('v')).toEqual(['run', '--rm', '-v', 'v:/home/box', 'ubuntu:24.04', 'chown', '-R', '1000:1000', '/home/box'])
+  it('init volume: one-shot chown del box condiviso montato su /box', () => {
+    expect(dockerBoxChownArgv(BOX_VOLUME)).toEqual(['run', '--rm', '-v', 'sandbot-box:/box', 'ubuntu:24.04', 'chown', '-R', '1000:1000', '/box'])
+  })
+
+  it('la home di un bot dentro il box condiviso', () => {
+    expect(boxHomePath('agent_x')).toBe('/box/home/agent_x')
+  })
+})
+
+describe('migrazione docker una tantum (punto 1): argv puri, copia senza cancellare', () => {
+  it('esistenza del vecchio volume: filtro nome esatto', () => {
+    expect(dockerVolumeLsArgv('sandbot-agent_x-box')).toEqual([
+      'volume', 'ls', '--format', '{{.Name}}', '--filter', 'name=^/sandbot-agent_x-box$'
+    ])
+  })
+
+  it('copia one-shot: sh -c COSTANTE, agentId come $1, vecchio volume in sola lettura', () => {
+    const argv = dockerBoxMigrateArgv('sandbot-agent_x-box', 'agent_x')
+    expect(argv).toEqual([
+      'run', '--rm',
+      '-v', 'sandbot-agent_x-box:/from:ro',
+      '-v', 'sandbot-box:/box',
+      'ubuntu:24.04', 'sh', '-c', DOCKER_BOX_MIGRATE_SH, 'sh', 'agent_x'
+    ])
+    // lo script è fisso: copia dentro la home del bot, NON cancella l'origine
+    expect(DOCKER_BOX_MIGRATE_SH).toBe('mkdir -p "/box/home/$1" && cp -a /from/. "/box/home/$1/"')
+    expect(DOCKER_BOX_MIGRATE_SH).not.toContain('rm ')
+  })
+
+  it('marker dell\'idempotenza: test e touch dentro il volume del box', () => {
+    expect(dockerBoxMarkerCheckArgv()).toEqual(['run', '--rm', '-v', 'sandbot-box:/box', 'ubuntu:24.04', 'test', '-f', '/box/.migrated-v1'])
+    expect(dockerBoxMarkerWriteArgv()).toEqual(['run', '--rm', '-v', 'sandbot-box:/box', 'ubuntu:24.04', 'touch', '/box/.migrated-v1'])
   })
 })

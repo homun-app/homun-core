@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -41,6 +41,38 @@ describe('backend host: file via fs/promises (§5.2)', () => {
     expect(r.stdout).toBe('senza-newline')
     const e = await execCommand(AGENT, 'printf "%s" "$SANDBOT_SECRET_PROVA"', { env: { SANDBOT_SECRET_PROVA: 'valore' } })
     expect(e.stdout).toBe('valore')
+  })
+
+  // ---- fase 11 (punto 1): confini dei path e scrittura atomica ----
+
+  it('`/workspace` è l\'alias della cartella comune: scrive e legge lo stesso file daQualsiasi bot', async () => {
+    await writeFileInBox(AGENT, '/workspace/weekend/luoghi.md', '# Luoghi\nBologna')
+    // dal punto di vista di un ALTRO agente è lo stesso file (box condiviso)
+    expect(await readFileInBox('agent_altro', '/workspace/weekend/luoghi.md')).toBe('# Luoghi\nBologna')
+    expect(readFileSync(join(TMP, 'box', 'workspace', 'weekend', 'luoghi.md'), 'utf8')).toBe('# Luoghi\nBologna')
+  })
+
+  it('fuori dalla radice del box → rifiuto con errore chiaro (read, write, list)', async () => {
+    // la home è due livelli dentro la radice: tre ../ escono dal box condiviso
+    for (const path of ['/etc/passwd', '../../../etc/passwd', join(TMP, 'fuori.txt')]) {
+      await expect(readFileInBox(AGENT, path)).rejects.toThrow(/esce dal box condiviso/)
+      await expect(writeFileInBox(AGENT, path, 'x')).rejects.toThrow(/esce dal box condiviso/)
+      await expect(listDirectoryInBox(AGENT, path)).rejects.toThrow(/esce dal box/)
+    }
+  })
+
+  it('scrittura ATOMICA: il contenuto arriva intero e non restano file temporanei', async () => {
+    const content = 'riga1\nriga2 senza newline finale'
+    await writeFileInBox(AGENT, 'atomico.md', content)
+    expect(await readFileInBox(AGENT, 'atomico.md')).toBe(content)
+    // il temporaneo (stessa cartella) è stato rinominato: non ne resta traccia
+    const files = readdirSync(join(TMP, 'box', 'home', AGENT))
+    expect(files.filter((f) => f.includes('sandbot-tmp'))).toHaveLength(0)
+    expect(files).toContain('atomico.md')
+    // riscrittura: di nuovo atomico, sempre un solo file
+    await writeFileInBox(AGENT, 'atomico.md', 'v2')
+    expect(await readFileInBox(AGENT, 'atomico.md')).toBe('v2')
+    expect(readdirSync(join(TMP, 'box', 'home', AGENT)).filter((f) => f.includes('sandbot-tmp'))).toHaveLength(0)
   })
 })
 

@@ -51,11 +51,19 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(identitySection(senza)).not.toContain('posta in ordine')
   })
 
-  it('computer: host vs docker, credenziali opache in entrambi', () => {
-    expect(computerSection()).toContain('cartella di lavoro persistente sul Mac')
+  it('computer: host vs docker, CONDIVISO tra i bot, /workspace comune, credenziali opache', () => {
+    expect(computerSection()).toContain('cartella di lavoro persistente')
     mode.v = 'docker'
     expect(computerSection()).toContain('container Linux persistente')
-    expect(computerSection()).toContain('{{secret:NOME}}')
+    mode.v = 'host'
+    // fase 11 (punto 1): il computer è condiviso, /workspace è lo spazio comune
+    const s = computerSection()
+    expect(s.toLowerCase()).toContain('con gli altri tuoi bot')
+    expect(s.toLowerCase()).toContain('condivis')
+    expect(s).toContain('`/workspace` è lo spazio COMUNE')
+    expect(s).toContain('La tua home è tua')
+    expect(s).toContain('Prima di rifare un lavoro, guarda se un altro bot')
+    expect(s).toContain('{{secret:NOME}}')
   })
 
   it('come parli: solo tool, un messaggio per risultato, un solo avanzamento, niente nomi interni', () => {

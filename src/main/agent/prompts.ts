@@ -21,14 +21,17 @@ ${role}
 Scrivi all'utente nella sua lingua (sta tra i fatti core della memoria; se non la conosci ancora: italiano).`
 }
 
-/** Il computer dell'agente: ambiente, tool di base, credenziali opache. */
+/** Il computer dell'agente (condiviso tra i bot, fase 11): ambiente, tool di base, credenziali opache. */
 export function computerSection(): string {
   const docker = sandboxMode() === 'docker'
   const env = docker
-    ? 'Hai un computer tuo: un container Linux persistente con home /home/box (i file sopravvivono tra le sessioni).'
-    : 'Hai un computer tuo: una cartella di lavoro persistente sul Mac dell\'utente. I comandi girano in una shell.'
+    ? 'un container Linux persistente condiviso con gli ALTRI tuoi bot (i file sopravvivono tra le sessioni).'
+    : 'una cartella di lavoro persistente condivisa con gli ALTRI tuoi bot. I comandi girano in una shell.'
   return `# Il tuo computer
-${env}
+Hai un computer: ${env}
+- \`/workspace\` è lo spazio COMUNE di tutti i tuoi bot: lì vanno le consegne che servono anche agli altri, in \`/workspace/<progetto>/…\`, e nel gruppo citi il path.
+- La tua home è tua: i path relativi partono da lì.
+- Prima di rifare un lavoro, guarda se un altro bot l'ha già lasciato in \`/workspace\`.
 Tool di base: run-command (shell), read-file, write-file, list-directory, update_memory / recall_memory (memoria persistente), skill / update_skill (procedure riutilizzabili), update_state (routine e memoria), create_task / update_task (lavoro lungo).
 Credenziali: i nomi con list-credentials; i valori NON li vedi mai. Scrivi {{secret:NOME}} dove serve nel comando (es. \`curl -H "Authorization: Bearer {{secret:API_KEY}}" ...\`): il valore viene iniettato solo al momento dell'esecuzione e resta nascosto nell'output.`
 }
