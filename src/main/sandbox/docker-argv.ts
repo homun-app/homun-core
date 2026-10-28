@@ -67,6 +67,17 @@ function pushEnvArgv(argv: string[], env: Record<string, string>): void {
   }
 }
 
+/**
+ * H2: la home del bot DENTRO il container, prima di ogni exec. Il one-shot di
+ * init crea /box/workspace e /box/home ma NON le home dei singoli bot, e gli
+ * exec girano `-w /box/home/<agentId>`: senza home l'OCI runtime rifiuta il
+ * chdir (rc 127) e il comando non parte. ARGV PURI: l'agentId è già validato
+ * come id, mkdir -p è idempotente, nessuna shell.
+ */
+export function dockerEnsureHomeArgv(container: string, agentId: string): string[] {
+  return ['exec', container, 'mkdir', '-p', boxHomePath(agentId)]
+}
+
 /** `docker exec -i -w <home del bot> [-e …] <container> sh -c <command>` — il comando del modello resta un unico elemento argv. */
 export function dockerExecArgv(container: string, command: string, opts: DockerExecOptions = {}): string[] {
   const argv = ['exec', '-i', '-w', opts.workdir ?? BOX_WORKDIR]

@@ -21,7 +21,7 @@ import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { db as dbFn } from '../store/db'
 import { createShellJob, getShellJob, updateShellJob, runningShellJobsOf, runningShellJobsAll, SHELLS_PER_AGENT_MAX, SHELLS_PER_BOX_MAX, SHELL_MAX_DURATION_MS, type ShellJob } from '../store/shell-jobs'
-import { sandboxMode, boxDir, readFileInBox, ensureBoxContainer } from '../sandbox'
+import { sandboxMode, boxDir, readFileInBox, ensureBoxContainer, ensureBotHome } from '../sandbox'
 import { dockerExecBackgroundArgv, dockerKillGroupArgv, dockerClientEnv, DOCKER_BG_WRAPPER_SH, BOX_CONTAINER, boxHomePath } from '../sandbox/docker-argv'
 import { formatShellDone } from '../../shared/agent-message'
 import { redactSecrets } from './secrets'
@@ -54,6 +54,14 @@ export function parseShellPgid(raw: string | null): { ok: true; pgid: number } |
   return { ok: true, pgid: Number(t) }
 }
 
+/**
+ * Esito dell'avvio di un comando in background (H2): ok col pid (host), o —
+ * solo in docker — l'exit code ≠ 0 di `docker exec -d` con lo stderr: -d torna
+ * subito, ma gli errori di avvio (es. il chdir di una home assente) arrivano
+ * nell'exit code, e il comando NON è mai partito.
+ */
+export type ShellLaunch = { ok: true; pid: number | null } | { ok: false; exitCode: number | null; stderr: string }
+
 export interface ShellHostDeps {
   db(): DatabaseSync
   now(): number
@@ -64,8 +72,8 @@ export interface ShellHostDeps {
   /** accoda il job user-message SHELL_DONE (default: enqueueJob della coda) */
   enqueue?(agentId: string, text: string, extraMeta: Record<string, unknown>): void
   sleep?(ms: number): Promise<void>
-  /** avvio del processo in background (default: spawn host / docker exec -d) */
-  launch?(agentId: string, command: string, env: Record<string, string>, paths: { log: string; exit: string; pid: string }): Promise<number | null>
+  /** avvio del processo in background (default: spawn host / docker exec -d); H2: in docker l'esito porta l'exit code di exec -d */
+  launch?(agentId: string, command: string, env: Record<string, string>, paths: { log: string; exit: string; pid: string }): Promise<ShellLaunch>
   /** termina il comando (default: kill del pid host / docker exec kill) */
   terminate?(agentId: string, job: ShellJob): Promise<void>
   signalRunning?(agentId: string, pid: number | null): boolean
@@ -142,11 +150,23 @@ async function killProcessGroup(deps: ShellHostDeps, pgid: number): Promise<void
 
 /** docker con argv PURI: torna l'exit code del comando (null se docker non parte). */
 async function dockerArgvExit(argv: string[]): Promise<number | null> {
+  return (await dockerArgvRun(argv)).exitCode
+}
+
+/**
+ * docker con argv PURI attendendo exit code E stderr (H2): gli errori di
+ * avvio di `exec -d` — es. il chdir di una home assente — arrivano lì.
+ */
+async function dockerArgvRun(argv: string[], env?: Record<string, string>): Promise<{ exitCode: number | null; stderr: string }> {
   const { spawn: sp } = await import('node:child_process')
   return new Promise((resolve) => {
-    const p = sp('docker', argv, { stdio: 'ignore' })
-    p.on('error', () => resolve(null))
-    p.on('close', (code) => resolve(code))
+    const p = sp('docker', argv, { env: env ? { ...process.env, ...env } : process.env, stdio: ['ignore', 'ignore', 'pipe'] })
+    let err = ''
+    p.stderr?.on('data', (d: Buffer) => {
+      if (err.length < 100_000) err += d.toString()
+    })
+    p.on('error', () => resolve({ exitCode: null, stderr: err }))
+    p.on('close', (code) => resolve({ exitCode: code, stderr: err }))
   })
 }
 
@@ -204,20 +224,25 @@ export async function startBackgroundShell(
   const id = `sh-${randomUUID().slice(0, 12)}`
   const paths = backgroundShellPaths(id)
   const mode = sandboxMode() === 'docker' ? 'docker' : 'host'
-  const launch = deps.launch ?? (async (agentId2, command, env2, p): Promise<number | null> => {
+  const launch = deps.launch ?? (async (agentId2, command, env2, p): Promise<ShellLaunch> => {
     if (mode === 'docker') {
       await ensureBoxContainer()
+      try {
+        await ensureBotHome(agentId2) // H2: -w punta alla home del bot
+      } catch (e) {
+        return { ok: false, exitCode: null, stderr: e instanceof Error ? e.message : String(e) }
+      }
       const home = boxHomePath(agentId2)
       const env = { HOME: home, ...env2 }
-      // -d: torna subito; il wrapper costante scrive pid/log/exit nel box.
-      // F2: nel client docker sull'HOST restano il daemon + i SOLI segreti;
-      // HOME del bot viaggia col valore nell'argv (-e HOME=/box/home/<id>)
-      const { spawn: sp } = await import('node:child_process')
-      sp('docker', dockerExecBackgroundArgv(BOX_CONTAINER, command, { workdir: home, env }, p), {
-        env: { ...process.env, ...dockerClientEnv(env) },
-        stdio: 'ignore'
-      })
-      return null
+      // H2: -d torna subito, ma l'exit code dice se il comando è PARTITO: si
+      // attende — un errore di avvio non lascia più la riga "running" per 6
+      // ore su un comando mai partito. Il wrapper costante scrive
+      // pid/log/exit nel box. F2: nel client docker sull'HOST restano il
+      // daemon + i SOLI segreti; HOME del bot viaggia col valore nell'argv
+      // (-e HOME=/box/home/<id>)
+      const r = await dockerArgvRun(dockerExecBackgroundArgv(BOX_CONTAINER, command, { workdir: home, env }, p), dockerClientEnv(env))
+      if (r.exitCode !== 0) return { ok: false, exitCode: r.exitCode, stderr: r.stderr }
+      return { ok: true, pid: null }
     }
     // F3: lo STESSO wrapper costante del docker, eseguito con /bin/sh: è lui
     // a scrivere pid ed exit file, quindi la chiusura non dipende dal daemon
@@ -230,14 +255,41 @@ export async function startBackgroundShell(
       stdio: 'ignore'
     })
     child.unref()
-    return child.pid ?? null
+    return { ok: true, pid: child.pid ?? null }
   })
-  const pid = await launch(agentId, rawCommand, env, paths)
+  const started = await launch(agentId, rawCommand, env, paths)
+  if (!started.ok) {
+    // H2: il comando NON è mai partito → NESSUNA riga shell_jobs (niente da
+    // attendere, riconciliare o notificare) e un result chiaro al bot
+    return { ok: false, error: await launchErrorText(deps, secretNames, started) }
+  }
   createShellJob(database, {
     id, agent_id: agentId, command: rawCommand, secret_names: secretNames,
-    mode, pid, log_path: paths.log, started_at: deps.now()
+    mode, pid: started.pid, log_path: paths.log, started_at: deps.now()
   })
   return { ok: true, shellId: id }
+}
+
+/**
+ * H2: il messaggio dell'avvio fallito, con lo stderr REDATTO coi segreti del
+ * comando (come l'output di oggi). Se la redazione non è possibile, l'esito
+ * non si mostra.
+ */
+async function launchErrorText(
+  deps: ShellHostDeps,
+  secretNames: string[],
+  failed: { exitCode: number | null; stderr: string }
+): Promise<string> {
+  const why = failed.stderr.trim().slice(0, 2_000)
+  const head = `Il comando in background non è mai partito (exit ${failed.exitCode ?? 'docker assente'}).`
+  if (!secretNames.length) return why ? `${head} ${why}` : head
+  try {
+    const used = await Promise.all(secretNames.map(async (name) => ({ name, envName: `SANDBOT_SECRET_${name}`, value: await deps.reveal!(name) })))
+    const redacted = redactSecrets(why, used)
+    return redacted ? `${head} ${redacted}` : head
+  } catch {
+    return `${head} Esito non mostrato: impossibile redarre i segreti del comando.`
+  }
 }
 
 /** Chiude la riga e (se il bot non ha già letto) accoda la notifica SHELL_DONE. */

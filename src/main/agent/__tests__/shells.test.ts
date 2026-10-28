@@ -266,6 +266,55 @@ describe('notifica SHELL_DONE e riconciliazione al riavvio', () => {
   })
 })
 
+describe('H2: avvio in docker che fallisce subito (exec -d rc ≠ 0)', () => {
+  it('rc 127: ok:false col motivo (exit + stderr), NESSUNA riga shell_jobs', async () => {
+    const t = testDeps()
+    const r = await startBackgroundShell(AGENT, 'make build', {}, [], {
+      ...t.deps,
+      launch: async () => ({ ok: false, exitCode: 127, stderr: 'OCI runtime exec failed: chdir to cwd ("/box/home/agent_x") no such file or directory' })
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      // result chiaro, mai "avviato": l'exit code e il motivo dell'errore
+      expect(r.error).toContain('non è mai partito')
+      expect(r.error).toContain('127')
+      expect(r.error).toContain('no such file or directory')
+    }
+    // il comando non è partito: nessuna riga da attendere, riconciliare o notificare
+    expect(runningShellJobsOf(db(), AGENT)).toHaveLength(0)
+    expect(runningShellJobsAll(db())).toHaveLength(0)
+  })
+
+  it('lo stderr dell\'avvio fallito è REDATTO coi segreti del comando', async () => {
+    const t = testDeps()
+    const r = await startBackgroundShell(AGENT, 'curl -H $SANDBOT_SECRET_TOKEN', {}, ['TOKEN'], {
+      ...t.deps,
+      reveal: async () => 'SK-TOKEN-SEGRETO',
+      launch: async () => ({ ok: false, exitCode: 127, stderr: 'exec failed: SK-TOKEN-SEGRETO' })
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error).toContain('[redacted:TOKEN]')
+      expect(r.error).not.toContain('SK-TOKEN-SEGRETO')
+    }
+  })
+
+  it('redazione impossibile: l\'esito non si mostra (mai segreti nel result)', async () => {
+    const t = testDeps()
+    const r = await startBackgroundShell(AGENT, 'curl -H $SANDBOT_SECRET_TOKEN', {}, ['TOKEN'], {
+      ...t.deps,
+      reveal: async () => { throw new Error('vault chiuso') },
+      launch: async () => ({ ok: false, exitCode: 127, stderr: 'exec failed' })
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error).toContain('non è mai partito')
+      expect(r.error).toContain('impossibile redarre')
+      expect(r.error).not.toContain('exec failed')
+    }
+  })
+})
+
 describe('store puro shell_jobs', () => {
   it('conteggi per agente e per box', () => {
     expect(runningShellJobsOf(db(), AGENT)).toHaveLength(0)

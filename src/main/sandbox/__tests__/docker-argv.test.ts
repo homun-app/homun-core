@@ -23,6 +23,7 @@ import {
   dockerBoxInitCheckArgv,
   dockerBoxRmArgv,
   dockerBoxWritableArgv,
+  dockerEnsureHomeArgv,
   boxNeedsRecreateForInit,
   boxEnsurePlan,
   boxCreateCheck,
@@ -333,6 +334,22 @@ describe('H1: controllo test -w e decisione use/una ricreazione/errore chiaro', 
       expect(r.error).toContain('sandbot-box')
       expect(r.error).toContain('non sono stati toccati')
     }
+  })
+})
+
+// ---- H2: la home del bot esiste prima di ogni exec in docker ----
+
+describe('H2: mkdir della home del bot nel container', () => {
+  it('argv PURI: exec <container> mkdir -p <home>, nessuna shell, il path è UN elemento', () => {
+    const argv = dockerEnsureHomeArgv(BOX_CONTAINER, 'agent_x')
+    expect(argv).toEqual(['exec', 'sandbot-box', 'mkdir', '-p', '/box/home/agent_x'])
+    expect(argv).not.toContain('sh')
+    expect(argv).not.toContain('-c')
+  })
+
+  it('un agentId ostile resta UN singolo elemento argv: niente interpolazione', () => {
+    const argv = dockerEnsureHomeArgv('c', 'x; rm -rf / # $(touch pwned)`reboot`')
+    expect(argv[argv.length - 1]).toBe('/box/home/x; rm -rf / # $(touch pwned)`reboot`')
   })
 })
 

@@ -35,6 +35,7 @@ import {
   dockerBoxInitCheckArgv,
   dockerBoxRmArgv,
   dockerBoxWritableArgv,
+  dockerEnsureHomeArgv,
   boxNeedsRecreateForInit,
   boxEnsurePlan,
   boxCreateCheck,
@@ -175,14 +176,60 @@ async function execHost(command: string, cwd: string, opts: ExecOptions): Promis
 
 async function docker(argv: string[], opts: SpawnOptions = {}): Promise<SpawnResult> {
   await ensureBoxContainer()
-  return runProcess('docker', argv, opts)
+  return dockerRunner(argv, opts)
+}
+
+/**
+ * Il runner dei comandi docker del modulo (argv puri): iniettabile nei test,
+ * così la sequenza container→home→exec e la memoria delle home si provano
+ * senza Docker (H2).
+ */
+export type DockerRunner = (argv: string[], opts?: SpawnOptions) => Promise<SpawnResult>
+
+let dockerRunner: DockerRunner = (argv, opts) => runProcess('docker', argv, opts ?? {})
+
+/** Solo per i test: sostituisce (o ripristina) il runner dei comandi docker. */
+export function setDockerRunnerForTests(runner: DockerRunner | null): void {
+  dockerRunner = runner ?? ((argv, opts) => runProcess('docker', argv, opts ?? {}))
+}
+
+/** Solo per i test: azzera la memoria delle home assicurate (container fresco). */
+export function resetBotHomesForTests(): void {
+  ensuredBotHomes.clear()
+}
+
+// H2: le home già create nel container, ricordate per agente — il mkdir avviene
+// UNA volta per container, non prima di ogni exec
+const ensuredBotHomes = new Set<string>()
+
+/**
+ * H2: la home del bot ESISTE prima di ogni exec in docker (il chiamante ha
+ * già garantito il container con ensureBoxContainer). Il one-shot di init
+ * crea /box/workspace e /box/home ma non le home dei SINGOLI bot, e ogni exec
+ * (run-command, lancio in background) usa `-w /box/home/<agentId>`: senza
+ * home l'OCI runtime rifiuta il chdir e il comando non parte. Un `mkdir -p`
+ * argv puro per agente, ricordato in memoria; il ricordo si azzera quando
+ * ensureBoxContainer crea o ricrea il container.
+ */
+export async function ensureBotHome(agentId: string): Promise<void> {
+  if (sandboxMode() !== 'docker') return
+  if (ensuredBotHomes.has(agentId)) return
+  const r = await dockerRunner(dockerEnsureHomeArgv(BOX_CONTAINER, agentId), { timeoutMs: 30_000 })
+  if (r.exitCode !== 0) {
+    throw new Error(`creazione della home ${boxHomePath(agentId)} nel container fallita: ${r.stderr || `exit ${r.exitCode}`}`)
+  }
+  ensuredBotHomes.add(agentId)
 }
 
 /** Esecuzione nel container condiviso: argv, senza shell dell'host; ogni exec gira nella home del bot con la sua HOME. */
 async function execDocker(agentId: string, command: string, opts: ExecOptions): Promise<ExecResult> {
+  // H2: -w punta alla home del bot — la home esiste PRIMA dell'exec (un'unica
+  // catena ensure: container, poi home, poi il comando)
+  await ensureBoxContainer()
+  await ensureBotHome(agentId)
   const home = boxHomePath(agentId)
   const env = { HOME: home, ...(opts.env ?? {}) }
-  const r = await docker(dockerExecArgv(BOX_CONTAINER, command, { workdir: home, env }), {
+  const r = await dockerRunner(dockerExecArgv(BOX_CONTAINER, command, { workdir: home, env }), {
     ...opts,
     // F2: nell'env del processo docker sull'HOST restano il daemon + i SOLI
     // segreti: il client docker usa HOME sua per trovare ~/.docker (contesti,
@@ -222,7 +269,7 @@ let boxNotWritableError: string | null = null
 export async function ensureBoxContainer(): Promise<void> {
   if (sandboxMode() !== 'docker') return
   if (boxNotWritableError) throw new Error(boxNotWritableError)
-  const ps = await runProcess('docker', dockerPsArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
+  const ps = await dockerRunner(dockerPsArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
   const exists = ps.exitCode === 0 && ps.stdout.trim().split('\n').includes(BOX_CONTAINER)
   const facts: BoxEnsureFacts = { exists, initOk: true }
   if (exists) {
@@ -231,31 +278,34 @@ export async function ensureBoxContainer(): Promise<void> {
     // in background: si ricrea. Si rimuove SOLO il container — il volume con i
     // dati dei bot non si tocca MAI. Inspect fallito/output inatteso: si tiene
     // il container che funziona (la ricreazione è ottimale, non vitale).
-    const init = await runProcess('docker', dockerBoxInitCheckArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
+    const init = await dockerRunner(dockerBoxInitCheckArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
     facts.initOk = !(init.exitCode === 0 && boxNeedsRecreateForInit(init.stdout))
     if (facts.initOk) {
-      const start = await runProcess('docker', dockerStartArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
+      const start = await dockerRunner(dockerStartArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
       if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
-      const w = await runProcess('docker', dockerBoxWritableArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
+      const w = await dockerRunner(dockerBoxWritableArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
       facts.writable = w.exitCode === 0
     }
   }
   const plan = boxEnsurePlan(facts)
   if (plan.kind === 'use') return
+  // H2: il container sta per essere creato o ricreato — le home assicurate
+  // finora non contano più: il ricordo si rifa dal container vero
+  ensuredBotHomes.clear()
   if (plan.kind === 'recreate') {
-    const rm = await runProcess('docker', dockerBoxRmArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
+    const rm = await dockerRunner(dockerBoxRmArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
     if (rm.exitCode !== 0) throw new Error(`rimozione del container (${plan.reason}) fallita: ${rm.stderr}`)
   }
   // creazione (prima volta o ricreazione G2/H1): il one-shot rende il volume
   // NON vuoto (workspace e home) e lo consegna all'utente del container; il
   // mount :nocopy del create non dipende dal copy-up di docker
-  const chown = await runProcess('docker', dockerBoxChownArgv(BOX_VOLUME), { timeoutMs: 60_000 })
+  const chown = await dockerRunner(dockerBoxChownArgv(BOX_VOLUME), { timeoutMs: 60_000 })
   if (chown.exitCode !== 0) throw new Error(`init volume fallito: ${chown.stderr}`)
-  const create = await runProcess('docker', dockerBoxCreateArgv(BOX_CONTAINER, BOX_VOLUME, sandboxNetwork(), boxLimits()), { timeoutMs: 60_000 })
+  const create = await dockerRunner(dockerBoxCreateArgv(BOX_CONTAINER, BOX_VOLUME, sandboxNetwork(), boxLimits()), { timeoutMs: 60_000 })
   if (create.exitCode !== 0) throw new Error(`docker create fallito: ${create.stderr}`)
-  const start = await runProcess('docker', dockerStartArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
+  const start = await dockerRunner(dockerStartArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
   if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
-  const w = await runProcess('docker', dockerBoxWritableArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
+  const w = await dockerRunner(dockerBoxWritableArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
   const check = boxCreateCheck(w.exitCode === 0)
   if (!check.ok) {
     boxNotWritableError = check.error
