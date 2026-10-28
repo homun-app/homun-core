@@ -682,6 +682,64 @@ function ModelDefaultsRow({ p }: { p: ProviderConfig }) {
   )
 }
 
+/**
+ * Fase 11 (punto 2): campo "chiave per la ricerca web" del provider Ollama.
+ * Il valore va SOLO nel vault sigillato: la UI non lo rilegge mai, chiede al
+ * daemon se la chiave è impostata (booleano).
+ */
+function WebSearchKeyRow({ p }: { p: ProviderConfig }) {
+  const [set, setSet] = useState<boolean | null>(null)
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    void api.webSearchKeySet(p.id).then(setSet).catch(() => setSet(null))
+  }, [p.id])
+
+  const save = async (key: string | null): Promise<void> => {
+    setBusy(true)
+    try {
+      await api.setWebSearchKey(p.id, key)
+      setSet(await api.webSearchKeySet(p.id))
+      setValue('')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <span className="text-[11px] uppercase tracking-wide text-neutral-500">ricerca web</span>
+      <input
+        className="w-56 rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none"
+        type="password"
+        placeholder={set ? 'chiave salvata (scrivi per sostituirla)' : 'chiave per la ricerca web di Ollama'}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      <button
+        className="rounded-lg bg-neutral-700 px-2.5 py-1.5 text-xs hover:bg-neutral-600 disabled:opacity-50"
+        disabled={busy || !value.trim()}
+        onClick={() => void save(value.trim())}
+      >
+        Salva chiave
+      </button>
+      {set && (
+        <button
+          className="rounded-lg border border-neutral-600 px-2.5 py-1.5 text-xs text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
+          disabled={busy}
+          onClick={() => void save(null)}
+        >
+          Rimuovi
+        </button>
+      )}
+      <span className={`text-xs ${set ? 'text-emerald-400' : 'text-neutral-500'}`}>
+        {set === null ? '' : set ? 'ricerca web attiva (chiave nel vault)' : 'ricerca web non attiva'}
+      </span>
+    </div>
+  )
+}
+
 function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
   const providers = useStore((s) => s.providers)
   const [edit, setEdit] = useState<ProviderConfig | null>(null)
@@ -742,6 +800,7 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
             </div>
           )}
           <ModelDefaultsRow p={p} />
+          {p.kind === 'ollama' && <WebSearchKeyRow p={p} />}
         </div>
       ))}
 

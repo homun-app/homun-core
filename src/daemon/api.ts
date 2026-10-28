@@ -619,6 +619,25 @@ export function buildApiMethods(
       if (!p) throw new Error('provider non trovato')
       return providers.listProviderModels(p)
     },
+    // fase 11 (punto 2): chiave per la ricerca web del provider Ollama — vive
+    // SOLO nel vault sigillato (mai nei settings in chiaro, mai nel contesto
+    // del modello, nei log o in argv); la UI riceve solo un booleano
+    'providers:set-web-search-key': async ([providerId, key]) => {
+      const p = providers.getProvider(providerId as string)
+      if (!p || p.kind !== 'ollama') throw new Error('la chiave per la ricerca web si imposta sul provider Ollama')
+      const { setWebSearchKey, clearWebSearchKey } = await import('../main/agent/web-tools')
+      const { getConnectorsKey } = await import('./keychain')
+      const deps = { getKey: () => getConnectorsKey() }
+      if (key === null || key === '') await clearWebSearchKey(deps)
+      else await setWebSearchKey(String(key), deps)
+    },
+    'providers:web-search-key-set': async ([providerId]) => {
+      const p = providers.getProvider(providerId as string)
+      if (!p || p.kind !== 'ollama') return false
+      const { isWebSearchKeySet } = await import('../main/agent/web-tools')
+      const { getConnectorsKey } = await import('./keychain')
+      return isWebSearchKeySet({ getKey: () => getConnectorsKey() })
+    },
 
     // ---- permessi & impostazioni ----
     'permissions:get': () => store.getPermissions(),

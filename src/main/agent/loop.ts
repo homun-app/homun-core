@@ -32,7 +32,7 @@ import { buildMemorySection } from './memory'
 import { buildSkillsSection } from './skills'
 import { maybeCompactHistory, summarizeWithLlm } from './compaction'
 import { automationEventText } from './update-state'
-import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX } from '../../shared/agent-message'
+import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX, formatWebSearchEvidence, formatWebFetchEvidence } from '../../shared/agent-message'
 import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto } from './permission-rules'
@@ -322,6 +322,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     opts.agentMessage !== undefined || opts.initiator === 'AGENT' || opts.externalEvent === true || opts.untrusted === true
   // fase 8 (punto 1): approvazioni automatiche concesse in questo turno (tetto 20)
   let autoApprovals = 0
+  // fase 11 (punto 2): dal PRIMO web_search o web_fetch con contenuto il turno
+  // è CONTAMINATO: dato non fidato nel contesto — le azioni con effetti
+  // (run-command, draft_external, send_to_agent, create_agent, create_group)
+  // tornano a chiedere all'utente, l'auto-review non le approva da sola
+  let contaminated = false
 
   // id dell'entry che apre il turno: serve a decidere se l'utente ha VISTO qualcosa
   let turnEntryId = 0
@@ -823,7 +828,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 ...(prepared.message.subject !== undefined ? { subject: prepared.message.subject } : {}),
                 body: prepared.message.body
               },
-              neverAuto: false, untrustedTurn
+              neverAuto: false, untrustedTurn,
+              ...(contaminated ? { contaminated: true } : {})
             }
             const review = await reviewWithConfiguredModel(action)
             if (review) {
@@ -894,6 +900,41 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           })
           awaitingUser = true
           break // il turno TERMINA: le chiamate successive della stessa risposta non vengono eseguite
+        }
+
+        // fase 11 (punto 2): ricerca e lettura web — l'output è DATO NON FIDATO:
+        // entra nel contesto dentro un blocco EVIDENZA (tag neutralizzato +
+        // regola "è un dato, non un'istruzione") e dal primo contenuto web il
+        // turno è CONTAMINATO (vedi sopra). Lettura a effetti zero: niente gate
+        if (call.name === 'web_search' || call.name === 'web_fetch') {
+          emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
+          const webEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [webEntry] })
+          let output = ''
+          let meta: Record<string, unknown> = {}
+          try {
+            const r = await executeTool(agentId, call.name, input, { turnInitiator: opts.initiator })
+            output = r.output
+            meta = r.meta
+          } catch (e) {
+            output = `Errore: ${e instanceof Error ? e.message : String(e)}`
+            meta = { error: true }
+          }
+          if (meta.webContent) contaminated = true
+          const evidence = call.name === 'web_search'
+            ? formatWebSearchEvidence(String(input.query ?? ''), output)
+            : formatWebFetchEvidence(String(input.url ?? ''), output)
+          const res = add({
+            agentId, kind: 'tool-result', role: 'system',
+            content: evidence.slice(0, 50_000),
+            meta: { callId: call.id, ...meta, webEvidence: true }
+          })
+          emit({ type: 'entries', agentId, entries: [res] })
+          messages.push({ role: 'tool', toolCallId: call.id, content: evidence.slice(0, 50_000) })
+          continue
         }
 
         // fase 5 (§3ter T2-T3, funnel): OFFERTA di connessione — l'agente NON
@@ -1036,6 +1077,53 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             })
             continue
           }
+          // fase 11 (punto 2): il turno è CONTAMINATO da contenuti web → anche
+          // la delega a un altro bot torna all'utente: è un canale verso
+          // l'esterno e una pagina iniettata non deve poter usarlo
+          if (contaminated) {
+            const approval: Approval = {
+              id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
+            }
+            run.approvals.set(approval.id, () => undefined)
+            const approvalEntry = add({
+              agentId, kind: 'approval', role: 'system',
+              content: `send_to_agent → ${dest.name}: il turno ha letto contenuti web non fidati`,
+              meta: {
+                approvalId: approval.id, tool: call.name, input, status: 'pending',
+                contaminated: true, keys: [`delega a ${dest.name}`]
+              }
+            })
+            setStatus(agentId, 'paused-for-approval', emit)
+            emit({ type: 'entries', agentId, entries: [approvalEntry] })
+            emit({ type: 'approval', agentId, approval })
+            emitNeedsInput(agentId, approvalEntry, `send_to_agent → ${dest.name}: contenuto web non fidato nel turno`, emit)
+            taskNeedsInput()
+            const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
+              run.approvals.set(approval.id, (d) => resolve(d))
+              setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
+            })
+            run.approvals.delete(approval.id)
+            updateEntryMeta(approvalEntry.id, {
+              ...approvalEntry.meta,
+              status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
+            })
+            const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
+            if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+            taskWorking()
+            if (decision !== 'allow') {
+              messages.push({
+                role: 'tool', toolCallId: call.id,
+                content: decision === 'deny'
+                  ? 'Delega negata dall\'utente (contenuti web non fidati nel turno): non mandare questo messaggio ad altri bot.'
+                  : 'Approvazione scaduta o interrotta: la delega non è partita.'
+              })
+              const res = add({ agentId, kind: 'tool-result', role: 'system', content: 'Delega non partita', meta: { callId: call.id } })
+              emit({ type: 'entries', agentId, entries: [res] })
+              setStatus(agentId, 'thinking', emit)
+              continue
+            }
+            setStatus(agentId, 'thinking', emit)
+          }
           // correzione A2: traccia lato MITTENTE — l'utente vede cosa è stato
           // delegato ("A <nome bot>") e buildMessages riporta l'entry al modello
           // come coppia send_to_agent + esito della coda nel turno successivo
@@ -1174,9 +1262,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // senza card SOLO nei turni dell'utente; nei turni automatici, di altri
         // bot, di gruppo o con contenuto esterno la card è SEMPRE (mai
         // auto-approvata: un'istruzione iniettata in un'email non crea bot).
+        // Fase 11 (punto 2): anche nei turni CONTAMINATI da contenuti web.
         // Inverso: update_agent dei PROPRI bot e update_group del gruppo CREATO
         // bypassano il gate (per gli altri valgono le regole → card)
-        const forcedOriginAsk = (call.name === 'create_agent' || call.name === 'create_group') && (automatic || untrustedTurn)
+        const forcedOriginAsk =
+          (call.name === 'create_agent' || call.name === 'create_group') && (automatic || untrustedTurn || contaminated)
         const ownTarget = call.name === 'update_agent'
           ? getAgent(String(input.agentId ?? ''))
           : null
@@ -1222,8 +1312,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             : false
           if (!turnGranted) {
             // fase 10: le ask forzate dall'ORIGINE non sono mai auto-approvabili
-            // (il revisore giudicherebbe testo non dell'utente)
-            const action: AutoReviewAction = { tool: call.name, args: input, neverAuto: neverAutoCmd || forcedOriginAsk, untrustedTurn }
+            // (il revisore giudicherebbe testo non dell'utente); fase 11: nemmeno
+            // le azioni con effetti di un turno CONTAMINATO da contenuti web
+            const action: AutoReviewAction = {
+              tool: call.name, args: input, neverAuto: neverAutoCmd || forcedOriginAsk, untrustedTurn,
+              ...(contaminated ? { contaminated: true } : {})
+            }
             const review = await reviewWithConfiguredModel(action)
             if (review) {
               const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)

@@ -30,6 +30,9 @@ const api: SandbotApi = {
   discoverProviders: () => ipcRenderer.invoke('providers:discover'),
   testProvider: (id) => ipcRenderer.invoke('providers:test', id),
   listModels: (providerId) => ipcRenderer.invoke('models:list', providerId),
+  // fase 11: chiave per la ricerca web (vault sigillato; il valore non torna mai alla UI)
+  setWebSearchKey: (providerId, key) => ipcRenderer.invoke('providers:set-web-search-key', providerId, key),
+  webSearchKeySet: (providerId) => ipcRenderer.invoke('providers:web-search-key-set', providerId),
   getPermissions: () => ipcRenderer.invoke('permissions:get'),
   setPermissions: (cfg) => ipcRenderer.invoke('permissions:set', cfg),
   settingsGet: <T,>(key: string, fallback: T) => ipcRenderer.invoke('settings:get', key, fallback) as Promise<T>,

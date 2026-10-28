@@ -269,6 +269,9 @@ export interface SandbotApi {
   discoverProviders(): Promise<ProviderConfig[]>
   testProvider(id: string): Promise<{ ok: boolean; error?: string; models?: ModelInfo[] }>
   listModels(providerId: string): Promise<ModelInfo[]>
+  /** fase 11: chiave per la ricerca web del provider Ollama — SOLO nel vault sigillato */
+  setWebSearchKey(providerId: string, key: string | null): Promise<void>
+  webSearchKeySet(providerId: string): Promise<boolean>
   // permessi
   getPermissions(): Promise<PermissionsConfig>
   setPermissions(cfg: PermissionsConfig): Promise<void>

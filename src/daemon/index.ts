@@ -57,6 +57,14 @@ async function main(): Promise<void> {
 
   const database = db()
 
+  // fase 11 (punto 2): la web search API di Ollama legge la chiave dal vault
+  // sigillato (chiave AES dal Keychain, come i connettori)
+  {
+    const { setWebSearchKeyGetter } = await import('../main/agent/web-tools')
+    const { getConnectorsKey } = await import('./keychain')
+    setWebSearchKeyGetter(() => getConnectorsKey())
+  }
+
   // fase 11 (punto 1): migrazione una tantum dei vecchi box (uno per agente)
   // nel box CONDIVISO — COPIA, niente cancellazioni; notice al bot principale
   // con cosa è stato migrato e dove restano i vecchi dati (la cancellazione

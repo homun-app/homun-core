@@ -40,6 +40,8 @@ export interface AutoReviewAction {
   neverAuto: boolean
   /** il turno è stato aperto da un altro bot o da un evento esterno */
   untrustedTurn: boolean
+  /** fase 11 (punto 2): il turno ha letto contenuti web (dato non fidato nel contesto) */
+  contaminated?: boolean
 }
 
 /** Esito della chiamata al revisore: già validato oppure il motivo per cui non è disponibile. */
@@ -53,6 +55,14 @@ export type AutoReviewDecision =
 
 /** Tool che cambiano il comportamento futuro del bot: mai auto-approvabili. */
 const FUTURE_CHANGING_TOOLS = new Set(['update_skill', 'update_memory', 'update_state'])
+
+/**
+ * Fase 11 (punto 2): azioni che in un turno CONTAMINATO da contenuti web
+ * tornano SEMPRE all'utente — contenuto non fidato più strumenti con effetti
+ * più canali verso l'esterno è la combinazione che rende sfruttabile
+ * un'iniezione nella pagina. L'auto-review non può approvarle da sola.
+ */
+export const CONTAMINATED_ASK_TOOLS = new Set(['run-command', 'draft_external', 'send_to_agent', 'create_agent', 'create_group'])
 
 /**
  * La decisione finale (PURO): gate già eseguito dal chiamante (qui si arriva
@@ -71,6 +81,11 @@ export function autoReviewDecision(
   if (!cfg.enabled) return { autoAllow: false, reason: 'auto-review disattivata' }
   if (action.untrustedTurn) {
     return { autoAllow: false, reason: 'turno aperto da un altro bot o da un evento esterno' }
+  }
+  // fase 11 (punto 2): le azioni con effetti di un turno contaminato da
+  // contenuti web tornano all'utente — nemmeno una regola allow le copre
+  if (action.contaminated && CONTAMINATED_ASK_TOOLS.has(action.tool)) {
+    return { autoAllow: false, reason: 'turno contaminato da contenuti web: l\'azione torna all\'utente' }
   }
   if (action.neverAuto) {
     return { autoAllow: false, reason: 'comando che esegue altri comandi (never-auto)' }
