@@ -5,46 +5,48 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   dockerExecArgv,
-  dockerReadFileArgv,
-  dockerWriteFileArgv,
-  dockerListDirArgv,
-  dockerPsArgv,
-  dockerStartArgv,
-  dockerBoxCreateArgv,
-  dockerBoxChownArgv,
-  dockerBoxMigrateArgv,
-  dockerBoxMarkerCheckArgv,
-  dockerBoxMarkerWriteArgv,
-  dockerVolumeLsArgv,
-  dockerStatSizeArgv,
-  dockerClientEnv,
-  dockerExecBackgroundArgv,
-  dockerKillGroupArgv,
-  dockerBoxInitCheckArgv,
-  dockerBoxRmArgv,
-  dockerBoxWritableArgv,
-  dockerEnsureHomeArgv,
-  boxNeedsRecreateForInit,
-  boxEnsurePlan,
-  boxCreateCheck,
-  boxImageTag,
-  dockerImageInspectArgv,
-  dockerBrowserMcpArgv,
-  browserMcpFlags,
-  DOCKER_BROWSER_WRAPPER_SH,
-  BROWSER_MCP_FORBIDDEN_FLAGS,
-  BROWSER_PID_FILE,
-  dockerContainerImageArgv,
-  dockerBuildArgv,
-  DOCKER_WRITE_SH,
-  DOCKER_BOX_INIT_SH,
-  DOCKER_BOX_MIGRATE_SH,
-  DOCKER_BG_WRAPPER_SH,
-  BOX_CONTAINER,
-  BOX_VOLUME,
-  BOX_MOUNT,
-  boxHomePath,
-  DEFAULT_BOX_LIMITS
+    dockerReadFileArgv,
+    dockerWriteFileArgv,
+    dockerListDirArgv,
+    dockerPsArgv,
+    dockerStartArgv,
+    dockerBoxCreateArgv,
+    dockerBoxChownArgv,
+    dockerBoxMigrateArgv,
+    dockerBoxMarkerCheckArgv,
+    dockerBoxMarkerWriteArgv,
+    dockerVolumeLsArgv,
+    dockerStatSizeArgv,
+    dockerClientEnv,
+    dockerExecBackgroundArgv,
+    dockerKillGroupArgv,
+    dockerBoxInitCheckArgv,
+    dockerBoxRmArgv,
+    dockerBoxWritableArgv,
+    dockerEnsureHomeArgv,
+    boxNeedsRecreateForInit,
+    boxEnsurePlan,
+    boxCreateCheck,
+    boxImageTag,
+    dockerImageInspectArgv,
+    dockerBrowserMcpArgv,
+    browserMcpFlags,
+    DOCKER_BROWSER_WRAPPER_SH,
+    BROWSER_MCP_FORBIDDEN_FLAGS,
+    BROWSER_PID_FILE,
+    dockerContainerImageArgv,
+    dockerBuildArgv,
+    DOCKER_WRITE_SH,
+    DOCKER_BOX_INIT_SH,
+    DOCKER_BOX_MIGRATE_SH,
+    DOCKER_BG_WRAPPER_SH,
+    BOX_CONTAINER,
+    BOX_VOLUME,
+    BOX_MOUNT,
+    boxHomePath,
+    DEFAULT_BOX_LIMITS
+,
+    PLAYWRIGHT_MCP_CONFIG, PLAYWRIGHT_MCP_CONFIG_JSON
 } from '../docker-argv'
 
 /** 0c: nei test l'immagine del box è un tag qualunque derivato dal contenuto. */
@@ -224,11 +226,28 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
       ['--no-webmcp', null], ['--block-service-workers', null],
       ['--proxy-server', 'http://host.docker.internal:18765'],
       ['--timeout-navigation', '30000'], ['--viewport-size', '1280x800'],
-      ['--image-responses', 'omit'], ['--idle-timeout', '600000']
+      ['--image-responses', 'omit'], ['--idle-timeout', '600000'],
+      // fase 12 (0e): --config obbligatorio, il file del Dockerfile che spegne
+      // il traffico di fondo di Chromium
+      ['--config', '/etc/sandbot/playwright-mcp.json']
     ] as const) {
       expect(flags, `flag ${f}`).toContain(f)
       if (v !== null) expect(flags[flags.indexOf(f) + 1]).toBe(v)
     }
+  })
+
+  it('fase 12 0e: il Dockerfile crea /etc/sandbot/playwright-mcp.json con la STESSA stringa del flag --config', () => {
+    const dockerfile = readFileSync('resources/box/Dockerfile', 'utf8')
+    // il file è di root e leggibile da tutti, creato con RUN printf (il
+    // contesto resta la sola cartella del Dockerfile: niente COPY)
+    expect(dockerfile).toContain('mkdir -p /etc/sandbot')
+    expect(dockerfile).toContain(`printf '%s\\n'`)
+    expect(dockerfile).toContain(PLAYWRIGHT_MCP_CONFIG_JSON)
+    expect(dockerfile).toContain('> /etc/sandbot/playwright-mcp.json')
+    expect(dockerfile).toContain('chmod 644 /etc/sandbot/playwright-mcp.json')
+    // il flag punta a quel file
+    const flags = browserMcpFlags('agent_x', 18765)
+    expect(flags[flags.indexOf('--config') + 1]).toBe(PLAYWRIGHT_MCP_CONFIG)
   })
 
   it('MAI un flag vietato nel launcher', () => {

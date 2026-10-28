@@ -184,3 +184,44 @@ describe('evidenza del browser: blocco <pagina_web via="browser"> col tag neutra
     expect(evidence.split('</pagina_web>').length - 1).toBe(1)
   })
 })
+
+// ---- fase 12 (punto 0): 0a probe interno del tipo di campo, 0c screenshot ----
+
+import { probeFieldType, fieldIsCredentialRef } from '../browser'
+import { fieldIsCredential } from '../browser-guard'
+
+describe('fase 12 0a: il probe INTERNO del tipo di campo (browser_evaluate, mai esposto)', () => {
+  it('browser_evaluate non è MALE tra i tool offerti al modello', () => {
+    expect(browserToolDefs.map((t) => t.name)).not.toContain('browser_evaluate')
+  })
+  it('campo type=password SENZA nome (login del finto) → il probe lo vede e fieldIsCredential scatta', async () => {
+    await callBrowserTool(AGENT, 'browser_open', { url: 'https://spa.example/login' })
+    // il campo e9 NON ha nome accessibile nello snapshot: `textbox [ref=e9]`
+    expect(refInfoOf(AGENT, 'e9')).toEqual({ role: 'textbox', name: '', text: '' })
+    const probe = await probeFieldType(AGENT, 'e9')
+    expect(probe.ok).toBe(true)
+    if (probe.ok) {
+      expect(probe.info.type).toBe('password')
+      expect(fieldIsCredential(probe.info)).toBe(true)
+    }
+    expect(await fieldIsCredentialRef(AGENT, 'e9')).toBe(true)
+  })
+  it('ref senza campo nella pagina → valutazione NON riuscita (ok:false → il loop chiede, mai free)', async () => {
+    await callBrowserTool(AGENT, 'browser_open', { url: 'https://spa.example/menu' })
+    const probe = await probeFieldType(AGENT, 'e1')
+    expect(probe.ok).toBe(false)
+    expect(await fieldIsCredentialRef(AGENT, 'e1')).toBeNull()
+  })
+})
+
+describe('fase 12 0c: il result dello screenshot è solo il path (più l\'eventuale Error)', () => {
+  it('nessun ### Ran Playwright code né link alle uscite del server', async () => {
+    const r = await callBrowserTool(AGENT, 'browser_screenshot', {})
+    expect(r.output).toContain('Screenshot salvato nel box: ')
+    expect(r.output).toMatch(/\.png$/)
+    expect(r.output).not.toContain('### Ran Playwright code')
+    expect(r.output).not.toContain('.browser/output')
+    expect(r.output).not.toContain('Screenshot saved to')
+    expect(r.meta.screenshot).toMatch(/\.browser\/screens\/.+\.png$/)
+  })
+})

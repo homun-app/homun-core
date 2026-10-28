@@ -16,6 +16,18 @@
 #   e renderebbe i binari del browser modificabili dal bot.
 FROM mcr.microsoft.com/playwright:v1.64.1-noble
 
+# fase 12 (0e): la configurazione del server MCP che spegne il traffico di
+# fondo di Chromium (component update, sync, telemetry: connessioni non
+# richieste verso googleapis.com viste dal proxy). File di root, leggibile da
+# tutti; il contesto della build resta la sola cartella del Dockerfile, quindi
+# niente COPY: il contenuto è la STESSA stringa di PLAYWRIGHT_MCP_CONFIG_JSON
+# (src/main/sandbox/docker-argv.ts) e il test la confronta.
+RUN mkdir -p /etc/sandbot \
+ && printf '%s\n' \
+      '{"browser":{"launchOptions":{"args":["--disable-background-networking","--disable-component-update","--disable-sync","--no-pings","--disable-domain-reliability","--disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication"]}}}' \
+      > /etc/sandbot/playwright-mcp.json \
+ && chmod 644 /etc/sandbot/playwright-mcp.json
+
 RUN npm install -g @playwright/mcp@0.0.83 \
  && PWCLI="$(npm root -g)/@playwright/mcp/node_modules/playwright/cli.js" \
  && node "$PWCLI" install chromium \

@@ -458,7 +458,12 @@ vi.mock('../../vault', () => ({
 // veri); disponibilità, refInfo ed esecuzione sono guidate dai test
 const browserState = vi.hoisted(() => ({
   available: false,
-  calls: [] as Array<{ tool: string; input: Record<string, unknown> }>
+  calls: [] as Array<{ tool: string; input: Record<string, unknown> }>,
+  /**
+   * Fase 12 (0a): il result del probe INTERNO del tipo di campo
+   * (fieldIsCredentialRef): true/false = valutazione riuscita, null = errore.
+   */
+  fieldProbe: null as boolean | null
 }))
 vi.mock('../browser', async (importOriginal) => {
   const real = await importOriginal<typeof import('../browser')>()
@@ -472,7 +477,12 @@ vi.mock('../browser', async (importOriginal) => {
       ref === 'e8' ? { role: 'button', name: 'Conferma prenotazione', text: '' }
         : ref === 'e6' ? { role: 'textbox', name: 'Numero carta', text: '' }
         : ref === 'e2' ? { role: 'link', name: 'Vedi il menu', text: '' }
+        // fase 12 (0a): il campo password SENZA nome accessibile (rev. su
+        // quotes.toscrape.com/login): ref valido e presente, nome vuoto
+        : ref === 'e9' ? { role: 'textbox', name: '', text: '' }
         : null,
+    // fase 12 (0a): il probe interno del tipo di campo, guidato dal test
+    fieldIsCredentialRef: async () => browserState.fieldProbe,
     callBrowserTool: async (_agentId: string, tool: string, input: Record<string, unknown>) => {
       browserState.calls.push({ tool, input })
       return {
@@ -3753,5 +3763,78 @@ describe('fase 11b: il browser del bot nel loop', () => {
       const d = autoReviewDecision(cfg, { tool, neverAuto: false, untrustedTurn: false, contaminated: true }, reviewer, 0)
       expect(d.autoAllow, tool).toBe(false)
     }
+  })
+})
+
+// ---- fase 12 (punto 0): residui della fase 11b nel loop ----
+
+describe('fase 12 0a/0d: probe interno del tipo di campo e card di press_key', () => {
+  beforeEach(() => {
+    browserState.available = false
+    browserState.calls.length = 0
+    browserState.fieldProbe = null
+  })
+
+  it('0a: campo password SENZA nome accessibile → DENY dal tipo letto con browser_evaluate interno', async () => {
+    browserState.available = true
+    browserState.fieldProbe = true
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p1', name: 'browser_type', arguments: JSON.stringify({ ref: 'e9', text: 'segretissima' }) }] },
+      { toolCalls: [{ id: 'p2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'compila il login', emit)
+    // niente card: il deny è immediato, dal TIPO di campo (il nome è vuoto)
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
+    expect(browserState.calls).toHaveLength(0)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('Non scrivo MAI password')
+  })
+
+  it('0a: valutazione fallita (errore MCP o result non leggibile) → ASK "non riesco a verificare il tipo del campo", mai free', async () => {
+    browserState.available = true
+    browserState.fieldProbe = null
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p3', name: 'browser_type', arguments: JSON.stringify({ ref: 'e9', text: 'qualcosa' }) }] },
+      { toolCalls: [{ id: 'p4', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    const turn = runTurn(AGENT, 'compila il campo', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.content).toContain('non riesco a verificare il tipo del campo')
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
+    await turn
+    // il deny dell'utente non esegue nulla
+    expect(browserState.calls).toHaveLength(0)
+  })
+
+  it('0a: browser_evaluate resta FUORI dai tool offerti al modello (solo il daemon lo chiama)', async () => {
+    browserState.available = true
+    let seen: string[] = []
+    h.llm.queue = [
+      async (_msgs: unknown[], tools: Array<{ name: string }>) => { seen = tools.map((t) => t.name); return { text: 'ok' } }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    expect(seen).not.toContain('browser_evaluate')
+  })
+
+  it('0d: la card di press_key dice "tasto Enter in <url>", non "su ref ?"', async () => {
+    browserState.available = true
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p5', name: 'browser_press_key', arguments: JSON.stringify({ key: 'Enter' }) }] },
+      { toolCalls: [{ id: 'p6', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    const turn = runTurn(AGENT, 'premi invio', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.content).toContain('browser_press_key tasto Enter in https://spa.example/prenota')
+    expect(appr.content).not.toContain('su ref')
+    expect(appr.meta?.keys).toContain('browser_press_key Enter')
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
+    await turn
+    expect(browserState.calls).toHaveLength(0)
   })
 })

@@ -24,7 +24,7 @@ import type { ToolDef } from './llm'
 import { checkUrl } from './web-guard'
 import {
   refInfo, truncateSnapshot, snapshotChallenge, browserPageUrl, composeBrowserResult,
-  SNAPSHOT_BLOCKED_NOTE, type RefInfo
+  errorSection, fieldIsCredential, SNAPSHOT_BLOCKED_NOTE, type RefInfo, type FieldProbeInfo
 } from './browser-guard'
 import {
   dockerBrowserMcpArgv, browserMcpFlags, BOX_CONTAINER, BROWSER_PID_FILE,
@@ -338,6 +338,57 @@ const SNAPSHOT_AFTER_ACTIONS = new Set([
 const isConnectionError = (e: unknown): boolean =>
   /connection closed|not connected/i.test(e instanceof Error ? e.message : String(e))
 
+// ---- fase 12 (0a): il tipo di campo letto DENTRO la pagina ----
+
+/**
+ * La funzione COSTANTE della verifica interna del campo (0a): lo schema reale
+ * di browser_evaluate nella 0.0.83 è {function, target?, element?} — obbligatorio
+ * solo `function`. La funzione è del daemon, MAI del modello: il result non
+ * entra nel contesto, non contamina e non aggiorna lo snapshot.
+ */
+export const FIELD_PROBE_FN =
+  "(el) => ({ type: el.type || '', autocomplete: el.autocomplete || '', name: el.name || '', id: el.id || '', placeholder: el.placeholder || '', label: (el.labels && el.labels[0] ? el.labels[0].textContent : '') || '', aria: el.getAttribute('aria-label') || '' })"
+
+/**
+ * Chiama INTERNAMENTE browser_evaluate sul campo del ref (0a): serve al
+ * daemon per sapere se browser_type finisce in un campo di credenziali anche
+ * quando il campo NON ha nome accessibile nello snapshot. Mai esposto al
+ * modello: il result non entra nel contesto. ok:false su errore MCP o result
+ * non leggibile (il chiamante in quel caso chiede all'utente, mai free).
+ */
+export async function probeFieldType(
+  agentId: string,
+  ref: string
+): Promise<{ ok: true; info: FieldProbeInfo } | { ok: false }> {
+  try {
+    const session = await getBrowserSession(agentId)
+    const res = await session.client.callTool({
+      name: 'browser_evaluate',
+      arguments: { function: FIELD_PROBE_FN, target: ref }
+    })
+    if ((res as { isError?: boolean }).isError) return { ok: false }
+    const info = JSON.parse(mcpText(res)) as Partial<FieldProbeInfo>
+    if (typeof info !== 'object' || info === null) return { ok: false }
+    return {
+      ok: true,
+      info: {
+        type: String(info.type ?? ''), autocomplete: String(info.autocomplete ?? ''),
+        name: String(info.name ?? ''), id: String(info.id ?? ''),
+        placeholder: String(info.placeholder ?? ''), label: String(info.label ?? ''),
+        aria: String(info.aria ?? '')
+      }
+    }
+  } catch {
+    return { ok: false }
+  }
+}
+
+/** Il tipo di campo del ref è di credenziali/pagamento? (0a, per il loop). */
+export async function fieldIsCredentialRef(agentId: string, ref: string): Promise<boolean | null> {
+  const probe = await probeFieldType(agentId, ref)
+  return probe.ok ? fieldIsCredential(probe.info) : null
+}
+
 /**
  * Esegue un tool del browser mappandolo sulla chiamata MCP (punto 2). I tool
  * che riportano contenuto di pagina (snapshot) portano meta.browserPage: il
@@ -426,9 +477,11 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
       // home del bot): finisce in .browser/screens/<id>.png nel box
       const filename = `.browser/screens/${randomUUID().slice(0, 8)}.png`
       const res = await session.client.callTool({ name: 'browser_take_screenshot', arguments: { filename, type: 'png' } })
-      const raw = mcpText(res)
+      // fase 12 (0c): al modello solo il path del file e l'eventuale errore —
+      // niente `### Ran Playwright code` né link alle uscite del server
+      const err = errorSection(mcpText(res))
       const path = `${boxHomePath(agentId)}/${filename}`
-      return { output: `Screenshot salvato nel box: ${path}${raw ? `\n${raw.slice(0, 500)}` : ''}`, meta: { screenshot: path } }
+      return { output: `Screenshot salvato nel box: ${path}${err ? `\n${err}` : ''}`, meta: { screenshot: path } }
     }
     case 'browser_close':
       mcpName = 'browser_close'

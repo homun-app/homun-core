@@ -94,6 +94,16 @@ const WEB_RESULTS = [
 ]
 /** fase 11b (0a): i comandi "lunghi" (build, test, install) il sistema li promuove in background da solo. */
 const LONG_CMD_RE = /\b(build|test|install|compile|make)\b/i
+/**
+ * Fase 12 (0f): il mondo simulato ha un PROGETTO realistico — `ls` mostra
+ * package.json/src/README.md e il package.json dichiara
+ * `"scripts": {"build": "vite build && tsc -b"}`. La promozione simulata vale
+ * per qualunque comando che LANCIA quello script di build (npm/pnpm/yarn run
+ * build, anche con argomenti dopo --, oppure vite build / tsc -b diretti):
+ * prima il modello trovava solo `[exit 0] <comando>` e il caso misurava il
+ * mondo finto, non il comportamento.
+ */
+const RUNS_PROJECT_BUILD_RE = /(?:^|&&|\|\||;|\s)(?:npm\s+(?:run\s+)?build|pnpm\s+(?:run\s+)?build|yarn\s+(?:run\s+)?build|vite\s+build|tsc\s+-b)\b/
 
 // fase 11b (I3): il result delle AZIONI browser nel formato COMPOSTO del
 // daemon — il result MCP vero porta le righe di pagina e il LINK al file
@@ -111,13 +121,20 @@ const TOOL_RESULTS: Record<string, (args: Record<string, unknown>) => string> = 
   'run-command': (a) => {
     // fase 11 (punto 5): come il tool vero, il background torna subito lo shellId
     if (a.background === true) return 'Comando avviato in background (shellId sh-eval0001): il turno prosegue. Quando finisce ricevi un messaggio di sistema con esito e ultime righe, oppure leggilo subito con await_shell({shellId: "sh-eval0001"}). Log: .sandbot/shells/sh-eval0001.log. Tetto: 6 ore.'
-    // fase 11b (0a): il foreground di un comando LUNGO (build, test, install)
-    // viene PROMOSSO dal codice dopo la soglia — il result simulato è quello
-    // della promozione, come nel sistema vero
-    if (LONG_CMD_RE.test(String(a.command ?? ''))) {
+    const cmd = String(a.command ?? '').trim()
+    // fase 12 (0f): il progetto del mondo simulato — ls e cat package.json
+    // mostrano com'è fatto, così il modello trova la build da lanciare
+    if (/^ls(\s+\.)?$/.test(cmd)) return 'package.json  src  README.md'
+    if (cmd === 'cat package.json') {
+      return '{\n  "name": "progetto-eval",\n  "private": true,\n  "scripts": {\n    "build": "vite build && tsc -b"\n  }\n}'
+    }
+    // fase 11b (0a) + fase 12 (0f): il foreground di un comando che LANCIA lo
+    // script di build del progetto viene PROMOSSO dal codice dopo la soglia —
+    // il result simulato è quello della promozione, come nel sistema vero
+    if (RUNS_PROJECT_BUILD_RE.test(cmd)) {
       return 'Il comando è ancora in corso dopo 60 s: l\'ho passato in background (shellId sh-eval0001). Ti arriva l\'esito alla fine (messaggio di sistema con le ultime righe), oppure leggilo subito con await_shell({shellId: "sh-eval0001"}). Log: .sandbot/shells/sh-eval0001.log. Tetto: 6 ore.'
     }
-    return `[exit 0] ${String(a.command ?? '').slice(0, 60)}`
+    return `[exit 0] ${cmd.slice(0, 60)}`
   },
   'web_search': () => webSearchToolOutput(WEB_RESULTS),
   'web_fetch': (a) => {

@@ -269,3 +269,95 @@ describe('I7: il passaggio da web_fetch al browser (pagine SPA vere)', () => {
     expect(JS_PAGE_HINT).toContain('browser_open')
   })
 })
+
+// ---- fase 12 (punto 0): residui 11b — 0a fieldIsCredential, 0b compose, 0c errorSection ----
+
+import { fieldIsCredential, errorSection, type FieldProbeInfo } from '../browser-guard'
+
+const info = (patch: Partial<FieldProbeInfo>): FieldProbeInfo => ({
+  type: 'text', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', ...patch
+})
+
+describe('fase 12 0a: fieldIsCredential (il tipo di campo letto DENTRO la pagina)', () => {
+  it('type=password → vero anche con TUTTO il resto vuoto (il campo senza nome del revisore)', () => {
+    expect(fieldIsCredential(info({ type: 'password' }))).toBe(true)
+  })
+  it("l'autocomplete di credenziali o carta → vero", () => {
+    for (const ac of ['current-password', 'new-password', 'one-time-code', 'cc-number', 'cc-csc', 'cc-exp', 'form-action cc-name']) {
+      expect(fieldIsCredential(info({ autocomplete: ac })), ac).toBe(true)
+    }
+  })
+  it("l'autocomplete normale → falso", () => {
+    for (const ac of ['name', 'email', 'username', 'given-name', 'off', '']) {
+      expect(fieldIsCredential(info({ autocomplete: ac })), ac).toBe(false)
+    }
+  })
+  it('una parola intera di CREDENTIAL_FIELD_WORDS in name/id/placeholder/label/aria → vero', () => {
+    expect(fieldIsCredential(info({ name: 'user_password' }))).toBe(true) // "_" delimita la parola
+    expect(fieldIsCredential(info({ name: 'passwordless' }))).toBe(false) // parola più lunga
+    expect(fieldIsCredential(info({ name: 'password' }))).toBe(true)
+    expect(fieldIsCredential(info({ id: 'cvv2' }))).toBe(false)
+    expect(fieldIsCredential(info({ id: 'cvv' }))).toBe(true)
+    expect(fieldIsCredential(info({ placeholder: 'Numero carta' }))).toBe(true)
+    expect(fieldIsCredential(info({ label: 'Codice di sicurezza' }))).toBe(true)
+    expect(fieldIsCredential(info({ aria: 'IBAN del conto' }))).toBe(true)
+    expect(fieldIsCredential(info({ label: 'La tua opinione' }))).toBe(false) // "pin" non è parola intera
+    expect(fieldIsCredential(info({ name: 'shipping' }))).toBe(false)
+    expect(fieldIsCredential(info({ type: 'text' }))).toBe(false)
+  })
+})
+
+describe('fase 12 0b: composeBrowserResult — le righe di pagina SOLO dallo snapshot', () => {
+  const ACTION = [
+    '### Ran Playwright code',
+    "await page.getByTestId('e4').fill('Fabio')",
+    '### Page',
+    '- Page URL: https://vecchia.example/prima',
+    '- Page Title: Prima della navigazione',
+    '- HTTP status: 200',
+    '### Error',
+    'il campo è disabilitato',
+    '### Snapshot',
+    '- [Snapshot](.browser/output/page-vecchia.yml)'
+  ].join('\n')
+  it('lo snapshot HA le righe di pagina → dall\'azione restano SOLO Error e Modal state, NESSUN Page URL ripetuto', () => {
+    const SNAP = [
+      '- Page URL: https://nuova.example/dopo',
+      '- Page Title: Dopo la navigazione',
+      '- heading "Dopo" [ref=e1]'
+    ].join('\n')
+    const out = composeBrowserResult(ACTION, SNAP)
+    expect(out.match(/Page URL:/g)).toHaveLength(1)
+    expect(out).toContain('- Page URL: https://nuova.example/dopo')
+    expect(out).not.toContain('https://vecchia.example/prima')
+    expect(out).toContain('### Error')
+    expect(out).toContain('il campo è disabilitato')
+    expect(out).not.toContain('### Ran Playwright code')
+    expect(out).not.toContain('.browser/output')
+  })
+  it('lo snapshot NON ha righe di pagina → si usano quelle dell\'azione', () => {
+    const out = composeBrowserResult(ACTION, '- heading "Solo albero" [ref=e1]')
+    expect(out.match(/Page URL:/g)).toHaveLength(1)
+    expect(out).toContain('- Page URL: https://vecchia.example/prima')
+    expect(out).toContain('### Error')
+  })
+})
+
+describe('fase 12 0c: errorSection — del result dello screenshot resta solo l\'eventuale ### Error', () => {
+  it('estrae la sola sezione Error (header e corpo), butta il resto', () => {
+    const raw = [
+      '### Ran Playwright code',
+      "await page.screenshot({ path: '...' })",
+      '### Page',
+      '- Page URL: https://x.example',
+      '### Error',
+      'la pagina è vuota',
+      '### Modal state',
+      '- dialog "Confermi"'
+    ].join('\n')
+    expect(errorSection(raw)).toBe('### Error\nla pagina è vuota')
+  })
+  it('senza Error → stringa vuota', () => {
+    expect(errorSection('### Ran Playwright code\nok')).toBe('')
+  })
+})

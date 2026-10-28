@@ -416,6 +416,9 @@ export const DOCKER_BROWSER_WRAPPER_SH = [
  * browser (punto 3); il profilo è persistente PER BOT (come in Grok);
  * --output-max-size è il tetto di spazio delle uscite del server nel box
  * condiviso (snapshot .yml e log di console a ogni azione, I8).
+ * Fase 12 (0e): --config obbligatorio col file /etc/sandbot/playwright-mcp.json
+ * del Dockerfile — spegne il traffico di fondo di Chromium (component update,
+ * sync, telemetry): connessioni non richieste, rumore nel proxy e privacy.
  */
 export function browserMcpFlags(agentId: string, proxyPort: number): string[] {
   const home = boxHomePath(agentId)
@@ -431,7 +434,8 @@ export function browserMcpFlags(agentId: string, proxyPort: number): string[] {
     '--timeout-navigation', '30000',
     '--viewport-size', '1280x800',
     '--image-responses', 'omit',
-    '--idle-timeout', String(BROWSER_IDLE_MS)
+    '--idle-timeout', String(BROWSER_IDLE_MS),
+    '--config', PLAYWRIGHT_MCP_CONFIG
   ]
 }
 
@@ -439,6 +443,17 @@ export function browserMcpFlags(agentId: string, proxyPort: number): string[] {
 export const BROWSER_MCP_FORBIDDEN_FLAGS = [
   '--allow-unrestricted-file-access', '--cdp-endpoint', '--extension', '--caps'
 ] as const
+
+/**
+ * Fase 12 (0e): il file di configurazione del server MCP creato dal Dockerfile
+ * (di root, leggibile da tutti): launchOptions.args che spegne il traffico di
+ * fondo di Chromium. Flag obbligatorio del launcher.
+ */
+export const PLAYWRIGHT_MCP_CONFIG = '/etc/sandbot/playwright-mcp.json'
+
+/** Le launchOptions del file (pure, per il test sul contenuto del Dockerfile). */
+export const PLAYWRIGHT_MCP_CONFIG_JSON =
+  '{"browser":{"launchOptions":{"args":["--disable-background-networking","--disable-component-update","--disable-sync","--no-pings","--disable-domain-reliability","--disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication"]}}}'
 
 /**
  * L'argv del launcher del browser di un bot (puro): `docker exec -i` con

@@ -989,7 +989,20 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             pushResult(browser.BROWSER_UNAVAILABLE, { browserUnavailable: true })
             continue
           }
-          const risk = guard.browserActionRisk(call.name, input, browser.refInfoOf(agentId, String(input.ref ?? '')))
+          let risk = guard.browserActionRisk(call.name, input, browser.refInfoOf(agentId, String(input.ref ?? '')))
+          // fase 12 (0a): per browser_type col ref valido e presente il daemon
+          // verifica INTERNAMENTE il tipo di campo con browser_evaluate (mai
+          // esposto al modello): un input type=password senza etichetta non ha
+          // nome accessibile e il deny sul nome non scatta. Valutazione fallita
+          // → ask (mai free: "non riesco a verificare il tipo del campo")
+          if (call.name === 'browser_type' && risk.kind === 'free') {
+            const credential = await browser.fieldIsCredentialRef(agentId, String(input.ref ?? ''))
+            if (credential === null) {
+              risk = { kind: 'ask', reason: 'non riesco a verificare il tipo del campo' }
+            } else if (credential) {
+              risk = { kind: 'deny', reason: guard.CREDENTIAL_DENY_TEXT }
+            }
+          }
           if (risk.kind === 'deny') {
             pushResult(risk.reason, { browserDeny: true })
             continue
@@ -1013,11 +1026,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             }
             if (!autoAllowed) {
               // la card mostra URL corrente, elemento (ruolo e nome dallo
-              // snapshot) e testo da scrivere
+              // snapshot) e testo da scrivere. Fase 12 (0d): press_key dice il
+              // TASTO, non "su ref ?" (il tasto non ha ref)
               const url = browser.lastUrlOf(agentId) ?? '(nessuna pagina aperta)'
               const info = browser.refInfoOf(agentId, String(input.ref ?? ''))
               // il nome accessibile, o il testo in linea quando manca (generic)
               const elem = info ? `${info.role} "${info.name || info.text}"` : `ref ${String(input.ref ?? '?')}`
+              const target = call.name === 'browser_press_key' ? `tasto ${String(input.key ?? '?')}` : `su ${elem}`
               const testo = call.name === 'browser_type' ? ` — testo: "${String(input.text ?? '').slice(0, 80)}"` : ''
               const approval: Approval = {
                 id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
@@ -1025,7 +1040,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               run.approvals.set(approval.id, () => undefined)
               const approvalEntry = add({
                 agentId, kind: 'approval', role: 'system',
-                content: `${call.name} su ${elem} in ${url}${testo}: ${risk.reason}`,
+                content: `${call.name} ${target} in ${url}${testo}: ${risk.reason}`,
                 meta: {
                   approvalId: approval.id, tool: call.name, input, status: 'pending',
                   browser: {
@@ -1033,7 +1048,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                     ...(info ? { element: info } : {}),
                     ...(call.name === 'browser_type' ? { text: String(input.text ?? '') } : {})
                   },
-                  keys: [`${call.name} ${elem}`]
+                  keys: [`${call.name} ${call.name === 'browser_press_key' ? String(input.key ?? '?') : elem}`]
                 }
               })
               setStatus(agentId, 'paused-for-approval', emit)

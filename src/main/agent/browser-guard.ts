@@ -161,6 +161,44 @@ export function browserActionRisk(
   return { kind: 'free' }
 }
 
+// ---- fase 12 (0a): il tipo di campo letto DENTRO la pagina (browser_evaluate interno) ----
+
+/**
+ * Le informazioni del campo raccolte dal daemon con la chiamata MCP
+ * `browser_evaluate` INTERNA (mai esposta al modello): un `<input
+ * type="password">` senza etichetta compare nello snapshot come
+ * `textbox [ref=f1e18]`, senza nome — il deny sul nome accessibile non scatta.
+ */
+export interface FieldProbeInfo {
+  type: string
+  autocomplete: string
+  name: string
+  id: string
+  placeholder: string
+  label: string
+  aria: string
+}
+
+/**
+ * Il prefisso dell'autocomplete che indica credenziali o dati di pagamento:
+ * `current-password`, `new-password`, `one-time-code` o i campi carta (`cc-…`).
+ */
+const AUTOCOMPLETE_CREDENTIAL_RE = /(^|\s)(current-password|new-password|one-time-code|cc-)/
+
+/**
+ * fieldIsCredential (pura, 0a): il campo è di credenziali o pagamento per il
+ * TIPO, per l'autocomplete o per una parola intera in name/id/placeholder/
+ * label/aria → il deny di browser_type scatta anche senza nome accessibile.
+ */
+export function fieldIsCredential(info: FieldProbeInfo): boolean {
+  if (info.type === 'password') return true
+  if (AUTOCOMPLETE_CREDENTIAL_RE.test(info.autocomplete)) return true
+  return matchesWholeWord(
+    `${info.name} ${info.id} ${info.placeholder} ${info.label} ${info.aria}`,
+    CREDENTIAL_FIELD_WORDS
+  )
+}
+
 // ---- il passaggio da web_fetch al browser (decisione in codice) ----
 // looksJsBuiltPage e JS_PAGE_HINT vivono in web-guard (li usa anche web_fetch)
 export { looksJsBuiltPage, JS_PAGE_HINT } from './web-guard'
@@ -221,14 +259,22 @@ const ACTION_KEEP_LINE = /^\s*-\s+(?:Page URL|Page Title|HTTP status):/
 /** Le sezioni del result dell'azione che passano: l'errore e lo stato modale. */
 const ACTION_KEEP_SECTION = /^\s*###\s*(?:Error|Modal state)\s*$/
 
+/** Una riga di pagina (`- Page URL: …`, con o senza il trattino iniziale). */
+const PAGE_LINE_RE = /(?:^|\n)\s*(?:-\s+)?(?:Page URL|Page Title|HTTP status):/
+
 /**
  * Il result che il modello vede dopo un'azione (PURO): le righe di pagina e le
- * sezioni Error/Modal state del result dell'azione, più lo snapshot INLINE
- * chiesto a parte dal daemon — le azioni di Playwright MCP 0.0.83 scrivono lo
- * snapshot in un FILE e solo browser_snapshot lo restituisce inline, quindi
- * senza questo montaggio il modello non vedrebbe mai la pagina.
+ * sezioni Error/Modal state, più lo snapshot INLINE chiesto a parte dal daemon
+ * — le azioni di Playwright MCP 0.0.83 scrivono lo snapshot in un FILE e solo
+ * browser_snapshot lo restituisce inline, quindi senza questo montaggio il
+ * modello non vedrebbe mai la pagina.
+ * Fase 12 (0b): le righe di pagina si prendono dallo SNAPSHOT, che è il più
+ * recente (la navigazione dell'azione può averle già cambiate): dall'azione
+ * restano solo `### Error` e `### Modal state`. Se lo snapshot non ha righe
+ * di pagina, si usano quelle dell'azione.
  */
 export function composeBrowserResult(actionText: string, snapshotText: string): string {
+  const snapshotHasPage = PAGE_LINE_RE.test(snapshotText)
   const kept: string[] = []
   let inSection = false
   for (const line of actionText.split('\n')) {
@@ -242,10 +288,33 @@ export function composeBrowserResult(actionText: string, snapshotText: string): 
       continue
     }
     if (ACTION_KEEP_LINE.test(line)) {
-      kept.push(line)
+      if (!snapshotHasPage) kept.push(line)
       continue
     }
     if (inSection) kept.push(line) // il corpo di ### Error / ### Modal state
   }
   return [kept.join('\n').trim(), snapshotText.trim()].filter(Boolean).join('\n')
+}
+
+/**
+ * La sola sezione `### Error` di un result MCP (pura, 0c): è ciò che resta del
+ * result di browser_screenshot oltre al path del file (niente `### Ran
+ * Playwright code` né link alle uscite).
+ */
+export function errorSection(mcpResultText: string): string {
+  const kept: string[] = []
+  let inError = false
+  for (const line of mcpResultText.split('\n')) {
+    if (ACTION_KEEP_SECTION.test(line)) {
+      inError = line.trim() === '### Error'
+      if (inError) kept.push(line)
+      continue
+    }
+    if (/^\s*###/.test(line)) {
+      inError = false
+      continue
+    }
+    if (inError) kept.push(line)
+  }
+  return kept.join('\n').trim()
 }
