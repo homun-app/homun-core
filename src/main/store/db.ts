@@ -10,6 +10,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { JOBS_DDL } from './jobs'
 import { GROUPS_DDL } from './groups'
+import { SHELL_JOBS_DDL } from './shell-jobs'
 import type { Agent, TranscriptEntry, PermissionsConfig, RoutineTrigger } from '../../shared/types'
 
 let _dir: string | null = null
@@ -99,6 +100,7 @@ function open(): DatabaseSync {
     );
     ${JOBS_DDL}
     ${GROUPS_DDL}
+    ${SHELL_JOBS_DDL}
   `)
   // fase 4: colonne nuove delle routine per i DB esistenti (CREATE TABLE IF
   // NOT EXISTS non le aggiunge); provenance distingue le routine dell'utente
@@ -357,6 +359,15 @@ export function getPermissions(): PermissionsConfig {
       { tool: 'update_group', pattern: '*', mode: 'needs_approval' },
       { tool: 'post_to_group', pattern: '*', mode: 'always_allow' },
       { tool: 'pass', pattern: '*', mode: 'always_allow' },
+      // fase 11: i tool web sono letture (l'output è sempre dato non fidato:
+      // blocco evidenza + contaminazione del turno); await_shell legge lo
+      // stato dei COMANDI GIÀ approvati col gate di run-command; lo scambio
+      // di file col Mac chiede SEMPRE (policy dedicata nel loop)
+      { tool: 'web_search', pattern: '*', mode: 'always_allow' },
+      { tool: 'web_fetch', pattern: '*', mode: 'always_allow' },
+      { tool: 'await_shell', pattern: '*', mode: 'always_allow' },
+      { tool: 'copy_to_box', pattern: '*', mode: 'needs_approval' },
+      { tool: 'copy_from_box', pattern: '*', mode: 'needs_approval' },
       { tool: 'mcp__*', pattern: '*', mode: 'needs_approval' }
     ]
   })

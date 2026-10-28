@@ -259,6 +259,9 @@ async function main(): Promise<void> {
       const paused = presence.maybePauseForAway()
       if (paused > 0) console.log(`[sandbotd] utente assente: ${paused} routine in pausa (pausedForAway)`)
       deliverDueHeld(emit, now, () => presence.lastSeen())
+      // fase 11 (punto 3): il tick dei comandi in background (exit file comparsi
+      // in docker, scadenza delle 6 ore) — le notifiche SHELL_DONE partono da qui
+      void import('../main/agent/shells').then((m) => m.tickShellJobs()).catch((e) => console.error('[sandbotd] shell jobs:', e))
       worker.poke()
     } catch (e) {
       console.error('[sandbotd] scheduler:', e)

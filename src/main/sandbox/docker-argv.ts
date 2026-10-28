@@ -145,3 +145,32 @@ export function dockerBoxMarkerWriteArgv(): string[] {
   return ['run', '--rm', '-v', `${BOX_VOLUME}:${BOX_MOUNT}`, 'ubuntu:24.04', 'touch', BOX_MIGRATION_MARKER]
 }
 
+// ---- fase 11 (punto 3): comandi in background con docker exec -d ----
+
+/**
+ * Il wrapper COSTANTE del comando in background (puro): il comando, il log,
+ * l'exit code e il pid entrano come argomenti posizionali ($1..$4) — il
+ * wrapper scrive il pid, riversa lo stdout/stderr sul log e poi l'exit code
+ * negli stessi path usati dalla modalità host, dentro il box.
+ */
+export const DOCKER_BG_WRAPPER_SH = 'echo $$ > "$4"; "$1" > "$2" 2>&1; echo $? > "$3"'
+
+export function dockerExecBackgroundArgv(
+  container: string,
+  command: string,
+  opts: DockerExecOptions,
+  paths: { log: string; exit: string; pid: string }
+): string[] {
+  const argv = ['exec', '-d', '-w', opts.workdir ?? BOX_MOUNT]
+  for (const key of Object.keys(opts.env ?? {})) argv.push('-e', key)
+  argv.push(container, 'sh', '-c', DOCKER_BG_WRAPPER_SH, 'sh', command, paths.log, paths.exit, paths.pid)
+  return argv
+}
+
+/** Kill di un processo nel container leggendo il pid dal file dentro il box. */
+export const DOCKER_KILL_SH = 'kill "$(cat "$1")" 2>/dev/null'
+
+export function dockerKillArgv(container: string, pidFile: string): string[] {
+  return ['exec', container, 'sh', '-c', DOCKER_KILL_SH, 'sh', pidFile]
+}
+

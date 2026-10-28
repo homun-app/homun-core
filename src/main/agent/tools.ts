@@ -81,15 +81,29 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'run-command',
-    description: "Esegue un comando shell nel computer dell'agente (sandbox persistente). Restituisce stdout/stderr e exit code. Per usare una credenziale del vault scrivi {{secret:NOME}} dove serve il valore (es. `curl -H \"Authorization: Bearer {{secret:API_KEY}}\"`): viene sostituita al momento dell'esecuzione con la variabile d'ambiente $SANDBOT_SECRET_NOME e il valore non appare mai nel transcript.",
+    description: "Esegue un comando shell nel computer dell'agente (sandbox persistente). Restituisce stdout/stderr e exit code. Per i comandi LUNGHI (build, test, download) usa background: true: parte subito e torna un shellId, il turno prosegue e alla fine ricevi un messaggio di sistema con l'esito (o lo leggi con await_shell). Per usare una credenziale del vault scrivi {{secret:NOME}} dove serve il valore (es. `curl -H \"Authorization: Bearer {{secret:API_KEY}}\"`): viene sostituita al momento dell'esecuzione con la variabile d'ambiente $SANDBOT_SECRET_NOME e il valore non appare mai nel transcript.",
     parameters: {
       type: 'object',
       properties: {
         command: { type: 'string', description: 'Il comando da eseguire' },
         workingDirectory: { type: 'string', description: 'Directory di lavoro opzionale (default: home del box)' },
-        timeout: { type: 'number', description: 'Timeout in secondi (default 120)' }
+        timeout: { type: 'number', description: 'Timeout in secondi (default 120; per i background vale il tetto di 6 ore)' },
+        background: { type: 'boolean', description: 'True per i comandi lunghi: parte in background, torna subito {shellId} e alla fine arrivano esito e ultime righe (default false)' }
       },
       required: ['command']
+    }
+  },
+  {
+    name: 'await_shell',
+    description: "Attende l'esito di un comando avviato con run-command background:true (max 60 s per impostazione predefinita, poi restituisce lo stato attuale): stato, exit code e le ultime 200 righe del log. Con kill: true termina il comando. Non attendere in loop: se è ancora in corso, di' all'utente che lo avviserai quando finisce.",
+    parameters: {
+      type: 'object',
+      properties: {
+        shellId: { type: 'string', description: 'Id tornato da run-command con background: true' },
+        timeout_sec: { type: 'number', description: 'Secondi di attesa (default 60, massimo 60)' },
+        kill: { type: 'boolean', description: 'True per terminare il comando (opzionale)' }
+      },
+      required: ['shellId']
     }
   },
   {
@@ -560,7 +574,6 @@ export async function executeTool(
   switch (tool) {
     case 'run-command': {
       const raw = String(input.command ?? '')
-      const timeoutMs = Math.min(600, Number(input.timeout ?? 120)) * 1000
       // §5.6: i riferimenti {{secret:NOME}} si risolvono SOLO qui, al momento
       // dell'esecuzione — il valore entra nell'env del processo, mai nel comando
       const { revealSecret, listSecretNames } = await import('../vault')
@@ -571,6 +584,19 @@ export async function executeTool(
           meta: { vault: true, missing: res.missing }
         }
       }
+      // fase 11 (punto 3): i comandi LUNGHI girano in background — lo STESSO
+      // gate permessi è già passato (sta a monte, nel loop); qui parte e torna
+      // subito lo shellId, l'esito arriverà come job SHELL_DONE (o await_shell)
+      if (input.background === true) {
+        const { startBackgroundShell, backgroundShellPaths } = await import('./shells')
+        const started = await startBackgroundShell(agentId, res.command, res.env, res.used.map((s) => s.name))
+        if (!started.ok) return { output: started.error, meta: {} }
+        return {
+          output: `Comando avviato in background (shellId ${started.shellId}): il turno prosegue. Quando finisce ricevi un messaggio di sistema con esito e ultime righe, oppure leggilo subito con await_shell({shellId: "${started.shellId}"}). Log: ${backgroundShellPaths(started.shellId).log}. Tetto: 6 ore.`,
+          meta: { shellId: started.shellId, background: true }
+        }
+      }
+      const timeoutMs = Math.min(600, Number(input.timeout ?? 120)) * 1000
       const r = await sandbox.execCommand(agentId, res.command, { timeoutMs, env: res.env })
       const redact = (t: string) => redactSecrets(t, res.used)
       const parts: string[] = []
@@ -582,6 +608,16 @@ export async function executeTool(
         output: parts.join('\n'),
         meta: { exitCode: r.exitCode, trimmed: r.trimmed, secretRefs: res.used.map((s) => s.name) }
       }
+    }
+    case 'await_shell': {
+      // fase 11 (punto 3): attesa/kill di un comando in background — i comandi
+      // sono già passati dal gate di run-command all'avvio
+      const { awaitShell } = await import('./shells')
+      const out = await awaitShell(agentId, String(input.shellId ?? ''), {
+        ...(input.timeout_sec !== undefined && input.timeout_sec !== null ? { timeoutSec: Number(input.timeout_sec) } : {}),
+        ...(input.kill === true ? { kill: true } : {})
+      })
+      return { output: out, meta: { shell: true } }
     }
     case 'read-file': {
       let content = await sandbox.readFileInBox(agentId, String(input.path ?? ''))

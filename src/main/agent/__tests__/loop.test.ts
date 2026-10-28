@@ -3348,3 +3348,26 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
     expect([...CONTAMINATED_ASK_TOOLS].sort()).toEqual(['create_agent', 'create_group', 'draft_external', 'run-command', 'send_to_agent'])
   })
 })
+
+// ---- fase 11 (punto 3): i comandi in background passano dallo STESSO gate ----
+
+describe('fase 11 (punto 3): run-command background nel loop', () => {
+  it('background:true passa dal gate permessi PRIMA di partire; negato non parte nulla', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'bg1', name: 'run-command', arguments: JSON.stringify({ command: 'sleep 60', background: true }) }] },
+      { text: '.' }
+    ]
+    const turn = runTurn(AGENT, 'lancia la build in background', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.tool).toBe('run-command')
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny', 'once')
+    await turn
+    // negato: NESSUN comando partito (né foreground né background)
+    expect(h.sandboxMock.exec.calls).toBe(0)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('Denied by user')
+  })
+})
