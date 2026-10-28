@@ -3257,6 +3257,17 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
     expect(String(toolMsg.content)).toContain('</pagina_web>')
   })
 
+  it('web_fetch dopo un redirect: url= è l\'URL FINALE e richiesto= quello di partenza (G3)', async () => {
+    setWebFetchForTests(async () => ({ ok: true, text: '# Menu arrivato', contentType: 'text/html', finalUrl: 'https://da-leo.example/menu-definitivo', downloadedBytes: 100 }))
+    h.llm.queue = [
+      { toolCalls: [{ id: 'g1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://da-leo.example/menu' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'apri il menu', emit)
+    const toolMsg = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(toolMsg.content)).toContain('<pagina_web url="https://da-leo.example/menu-definitivo" richiesto="https://da-leo.example/menu">')
+  })
+
   it('ricerca NON attiva: result chiaro (niente strade alternative) e NESSUNA contaminazione', async () => {
     // nessun provider registrato e nessuna chiave → ricerca non attiva
     enableAutoReview()

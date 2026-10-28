@@ -142,7 +142,7 @@ describe('htmlToMarkdown (puro)', () => {
     expect(md).toContain('# Titolo')
     expect(md).toContain('## Sotto')
     expect(md).toContain('**importante**')
-    expect(md).toContain('[un link](https://x.example)')
+    expect(md).toContain('[un link](https://x.example/)') // G3: URL normalizzato da new URL
     expect(md).toContain('- uno')
     expect(md).toContain('- due')
     expect(md).not.toContain('menu rumore')
@@ -152,6 +152,39 @@ describe('htmlToMarkdown (puro)', () => {
 
   it('entità decodificate', () => {
     expect(decodeEntities('a &amp; b &lt;c&gt; &quot;d&quot; &#39;e&#39; &nbsp;')).toBe("a & b <c> \"d\" 'e'  ")
+  })
+
+  it('G3: un href RELATIVO diventa assoluto risolto contro la base (URL finale della pagina)', () => {
+    const html = '<article><p>Vedi <a href="/wiki/Speciale:Map/Trastevere">la mappa</a> e <a href="../Luoghi">i luoghi</a>.</p></article>'
+    const md = htmlToMarkdown(html, 'https://it.wikipedia.org/wiki/Trastevere')
+    expect(md).toContain('[la mappa](https://it.wikipedia.org/wiki/Speciale:Map/Trastevere)')
+    expect(md).toContain('[i luoghi](https://it.wikipedia.org/Luoghi)')
+    expect(md).not.toContain('](/wiki/')
+  })
+
+  it('G3: javascript:, mailto: e tel: restano TESTO senza link (solo http(s) sono link)', () => {
+    const html = [
+      '<article>',
+      '<a href="javascript:alert(1)">clicca</a>',
+      '<a href="mailto:info@example.org">scrivici</a>',
+      '<a href="tel:+39061234">chiamaci</a>',
+      '<a href="https://x.example/ok">un link vero</a>',
+      '</article>'
+    ].join('')
+    const md = htmlToMarkdown(html, 'https://base.example/pagina')
+    expect(md).toContain('clicca')
+    expect(md).toContain('scrivici')
+    expect(md).toContain('chiamaci')
+    // i protocolli non-http(s) non compaiono MAI come link
+    expect(md).not.toContain('javascript:')
+    expect(md).not.toContain('mailto:')
+    expect(md).not.toContain('tel:')
+    expect(md).toContain('[un link vero](https://x.example/ok)')
+  })
+
+  it('G3: href relativo SENZA base non diventa un link rotto (resta testo)', () => {
+    const md = htmlToMarkdown('<article><a href="/altrove">vai</a></article>')
+    expect(md).toBe('vai')
   })
 })
 
@@ -242,6 +275,20 @@ describe('webFetch: difese SSRF (validazione ALLA CONNESSIONE, F4)', () => {
     const r = await webFetch('http://public.example/a', { transport: f.transport, lookup: async () => ['93.184.216.34'] })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toContain('redirect')
+  })
+
+  it('G3: dopo un redirect i link della pagina si risolvono contro l\'URL FINALE', async () => {
+    const f = fakeTransport((url): { status: number; headers: Record<string, string>; body?: string } => {
+      if (url.pathname === '/partenza') return { status: 302, headers: { location: '/arrivo/pagina' } }
+      return { status: 200, headers: { 'content-type': 'text/html' }, body: '<article><a href="relativo">un link</a></article>' }
+    })
+    const r = await webFetch('http://public.example/partenza', { transport: f.transport, lookup: async () => ['93.184.216.34'] })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.finalUrl).toBe('http://public.example/arrivo/pagina')
+      // href RELATIVO (senza /): si risolve contro l'URL FINALE, non la partenza
+      expect(r.text).toContain('[un link](http://public.example/arrivo/relativo)')
+    }
   })
 
   it('scadenza TOTALE di 20 s e tetto dei 3 MB passati al trasporto', async () => {
@@ -394,7 +441,7 @@ describe('web_fetch contro un server http locale (flag di test)', () => {
     if (r.ok) {
       expect(r.finalUrl).toBe(`${url}/arrivo`)
       expect(r.text).toContain('# Page title')
-      expect(r.text).toContain('[link](/x)')
+      expect(r.text).toContain(`[link](${url}/x)`) // G3: link assoluto contro l'URL finale
     }
   })
 

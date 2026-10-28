@@ -32,6 +32,9 @@ import {
   dockerBoxMigrateArgv,
   dockerBoxMarkerCheckArgv,
   dockerBoxMarkerWriteArgv,
+  dockerBoxInitCheckArgv,
+  dockerBoxRmArgv,
+  boxNeedsRecreateForInit,
   dockerVolumeLsArgv,
   dockerClientEnv,
   BOX_CONTAINER,
@@ -209,11 +212,22 @@ export async function ensureBoxContainer(): Promise<void> {
   const ps = await runProcess('docker', dockerPsArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
   const exists = ps.exitCode === 0 && ps.stdout.trim().split('\n').includes(BOX_CONTAINER)
   if (exists) {
-    const start = await runProcess('docker', dockerStartArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
-    if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
-    return
+    // G2: un container nato PRIMA di --init non raccoglie gli zombie (PID 1 è
+    // `sleep infinity`) e con --pids-limit condiviso li accumula a ogni comando
+    // in background: si ricrea. Si rimuove SOLO il container — il volume con i
+    // dati dei bot non si tocca MAI. Inspect fallito/output inatteso: si tiene
+    // il container che funziona (la ricreazione è ottimale, non vitale).
+    const init = await runProcess('docker', dockerBoxInitCheckArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
+    if (!(init.exitCode === 0 && boxNeedsRecreateForInit(init.stdout))) {
+      const start = await runProcess('docker', dockerStartArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
+      if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
+      return
+    }
+    const rm = await runProcess('docker', dockerBoxRmArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
+    if (rm.exitCode !== 0) throw new Error(`rimozione del container senza init fallita: ${rm.stderr}`)
   }
-  // prima creazione: il volume è di root, il container gira non-root senza caps
+  // creazione (prima volta o ricreazione G2): il volume è di root, il
+  // container gira non-root senza caps
   const chown = await runProcess('docker', dockerBoxChownArgv(BOX_VOLUME), { timeoutMs: 60_000 })
   if (chown.exitCode !== 0) throw new Error(`init volume fallito: ${chown.stderr}`)
   const create = await runProcess('docker', dockerBoxCreateArgv(BOX_CONTAINER, BOX_VOLUME, sandboxNetwork(), boxLimits()), { timeoutMs: 60_000 })

@@ -19,11 +19,13 @@ import {
   dockerStatSizeArgv,
   dockerClientEnv,
   dockerExecBackgroundArgv,
-  dockerKillArgv,
+  dockerKillGroupArgv,
+  dockerBoxInitCheckArgv,
+  dockerBoxRmArgv,
+  boxNeedsRecreateForInit,
   DOCKER_WRITE_SH,
   DOCKER_BOX_MIGRATE_SH,
   DOCKER_BG_WRAPPER_SH,
-  DOCKER_KILL_SH,
   BOX_CONTAINER,
   BOX_VOLUME,
   BOX_MOUNT,
@@ -95,7 +97,7 @@ describe('lifecycle & hardening del box condiviso (§5.2 + fase 11 punto 1)', ()
 
   it('create: container UNICO sandbot-box, volume sandbot-box su /box, hardening e limiti condivisi configurabili', () => {
     const argv = dockerBoxCreateArgv(BOX_CONTAINER, BOX_VOLUME, 'bridge', DEFAULT_BOX_LIMITS)
-    for (const flag of ['--user', '--cap-drop', '--security-opt', '--pids-limit', '--memory', '--cpus', '--network']) {
+    for (const flag of ['--user', '--cap-drop', '--security-opt', '--init', '--pids-limit', '--memory', '--cpus', '--network']) {
       expect(argv).toContain(flag)
     }
     const val = (flag: string) => argv[argv.indexOf(flag) + 1]
@@ -246,11 +248,40 @@ describe('DOCKER_BG_WRAPPER_SH col vero /bin/sh (F1)', () => {
     expect(argv.join(' ')).not.toContain('SEGRETO')
   })
 
-  it('kill nel container: TERM al GRUPPO (pid negativo letto dal file)', () => {
-    expect(DOCKER_KILL_SH).toBe('kill -TERM -- -"$(cat "$1")" 2>/dev/null')
-    expect(dockerKillArgv('sandbot-box', '.sandbot/shells/sh-1.pid')).toEqual([
-      'exec', 'sandbot-box', 'sh', '-c', DOCKER_KILL_SH, 'sh', '.sandbot/shells/sh-1.pid'
-    ])
+  it('kill nel container (G1): ARGV PURI al kill di procps — TERM, KILL e il segnale 0 di esistenza, tutti al GRUPPO', () => {
+    // niente `sh -c`: il kill INTERNO di dash non accetta `--` (Illegal number: -)
+    expect(dockerKillGroupArgv('sandbot-box', 15, 'TERM')).toEqual(['exec', 'sandbot-box', 'kill', '-TERM', '--', '-15'])
+    expect(dockerKillGroupArgv('sandbot-box', 15, 'KILL')).toEqual(['exec', 'sandbot-box', 'kill', '-KILL', '--', '-15'])
+    expect(dockerKillGroupArgv('sandbot-box', 15, '0')).toEqual(['exec', 'sandbot-box', 'kill', '-0', '--', '-15'])
+    for (const argv of [dockerKillGroupArgv('sandbot-box', 15, 'TERM'), dockerKillGroupArgv('sandbot-box', 15, '0')]) {
+      expect(argv).not.toContain('sh')
+      expect(argv).not.toContain('-c')
+    }
+  })
+})
+
+// ---- G2: --init (tini raccoglie gli zombie) e la ricreazione del container vecchio ----
+
+describe('G2: init del container e migrazione senza toccare il volume', () => {
+  it('inspect dell\'init: argv puro, formato fisso true/false', () => {
+    expect(dockerBoxInitCheckArgv(BOX_CONTAINER)).toEqual(['inspect', '-f', '{{.HostConfig.Init}}', 'sandbot-box'])
+  })
+
+  it('rimozione per la ricreazione: SOLO il container, il volume mai nominato', () => {
+    const argv = dockerBoxRmArgv(BOX_CONTAINER)
+    expect(argv).toEqual(['rm', '-f', 'sandbot-box'])
+    expect(argv.join(' ')).not.toContain('volume')
+  })
+
+  it('decisione pura ricreare sì/no: solo un "false" esplicito ricrea', () => {
+    expect(boxNeedsRecreateForInit('false')).toBe(true)
+    expect(boxNeedsRecreateForInit('false\n')).toBe(true) // docker inspect chiude a capo
+    expect(boxNeedsRecreateForInit('true')).toBe(false)
+    expect(boxNeedsRecreateForInit('true\n')).toBe(false)
+    // inspect fallito o output inatteso: si tiene il container che funziona
+    for (const weird of ['', '\n', 'Error: No such object', 'False']) {
+      expect(boxNeedsRecreateForInit(weird), JSON.stringify(weird)).toBe(false)
+    }
   })
 })
 

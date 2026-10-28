@@ -188,4 +188,16 @@ describe('blocchi evidenza web (formatWebSearchEvidence / formatWebFetchEvidence
     expect(formatWebFetchEvidence('https://x.example/a"b', 't')).toContain('url="https://x.example/a\'b"')
     expect(formatWebSearchEvidence('q"uote', 'r')).toContain('query="q\'uote"')
   })
+
+  it('G3: dopo un redirect url= è l\'URL FINALE e richiesto= cita quello di partenza', () => {
+    const out = formatWebFetchEvidence('https://x.example/arrivo', 'contenuto', 'https://x.example/partenza')
+    expect(out).toContain('<pagina_web url="https://x.example/arrivo" richiesto="https://x.example/partenza">')
+    expect(out).toContain(WEB_EVIDENCE_RULE)
+  })
+
+  it('G3: senza redirect (URL finale = richiesto) niente attributo richiesto=', () => {
+    const out = formatWebFetchEvidence('https://x.example/pagina', 'contenuto', 'https://x.example/pagina')
+    expect(out).toContain('<pagina_web url="https://x.example/pagina">')
+    expect(out).not.toContain('richiesto=')
+  })
 })

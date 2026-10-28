@@ -944,7 +944,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
           const evidence = call.name === 'web_search'
             ? formatWebSearchEvidence(String(input.query ?? ''), output)
-            : formatWebFetchEvidence(String(input.url ?? ''), output)
+            // G3: url= è l'URL FINALE della lettura (meta.finalUrl, redirect
+            // compresi); l'URL di partenza, se diverso, va in richiesto=
+            : formatWebFetchEvidence(String(meta.finalUrl ?? input.url ?? ''), output, String(input.url ?? ''))
           const res = add({
             agentId, kind: 'tool-result', role: 'system',
             content: evidence.slice(0, 50_000),

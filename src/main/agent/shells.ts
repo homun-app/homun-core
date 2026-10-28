@@ -22,7 +22,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { db as dbFn } from '../store/db'
 import { createShellJob, getShellJob, updateShellJob, runningShellJobsOf, runningShellJobsAll, SHELLS_PER_AGENT_MAX, SHELLS_PER_BOX_MAX, SHELL_MAX_DURATION_MS, type ShellJob } from '../store/shell-jobs'
 import { sandboxMode, boxDir, readFileInBox, ensureBoxContainer } from '../sandbox'
-import { dockerExecBackgroundArgv, dockerKillArgv, dockerClientEnv, DOCKER_BG_WRAPPER_SH, BOX_CONTAINER, boxHomePath } from '../sandbox/docker-argv'
+import { dockerExecBackgroundArgv, dockerKillGroupArgv, dockerClientEnv, DOCKER_BG_WRAPPER_SH, BOX_CONTAINER, boxHomePath } from '../sandbox/docker-argv'
 import { formatShellDone } from '../../shared/agent-message'
 import { redactSecrets } from './secrets'
 
@@ -39,6 +39,19 @@ export function backgroundShellPaths(id: string): { log: string; exit: string; p
 export function lastLines(text: string, n: number): string {
   const lines = text.split('\n')
   return lines.slice(Math.max(0, lines.length - n)).join('\n')
+}
+
+/**
+ * Il pgid letto dal pid file del wrapper (G1, puro): un INTERO POSITIVO, o il
+ * motivo per cui NON si uccide nulla — un pid file vuoto o non numerico non
+ * diventa mai un kill (un pgid a caso prenderebbe processi innocenti del box).
+ */
+export function parseShellPgid(raw: string | null): { ok: true; pgid: number } | { ok: false; reason: string } {
+  const t = raw?.trim() ?? ''
+  if (!/^\d+$/.test(t) || Number(t) <= 0) {
+    return { ok: false, reason: `pid file ${t === '' ? 'vuoto' : `non numerico ("${t.slice(0, 50)}")`}: nessun kill` }
+  }
+  return { ok: true, pgid: Number(t) }
 }
 
 export interface ShellHostDeps {
@@ -127,20 +140,44 @@ async function killProcessGroup(deps: ShellHostDeps, pgid: number): Promise<void
   } catch { /* già morto */ }
 }
 
+/** docker con argv PURI: torna l'exit code del comando (null se docker non parte). */
+async function dockerArgvExit(argv: string[]): Promise<number | null> {
+  const { spawn: sp } = await import('node:child_process')
+  return new Promise((resolve) => {
+    const p = sp('docker', argv, { stdio: 'ignore' })
+    p.on('error', () => resolve(null))
+    p.on('close', (code) => resolve(code))
+  })
+}
+
 /**
- * Terminazione di default (F3): in host kill del GRUPPO letto dal pid file
- * (lo scrive il wrapper; fallback al pid del DB); in docker `kill -TERM -- -<pgid>`
- * nel container, pure lui dal pid file.
+ * Terminazione di default (F3 + G1): in host kill del GRUPPO letto dal pid
+ * file (lo scrive il wrapper; fallback al pid del DB); in docker ARGV PURI al
+ * /usr/bin/kill di procps del container (`kill -TERM -- -<pgid>`, niente `sh
+ * -c`: il kill interno di dash non accetta `--`) col pgid letto dal pid file
+ * e validato intero positivo — e come in host, dopo 5 s di grazia col segnale
+ * 0 di esistenza, SIGKILL se il gruppo è ancora vivo.
  */
 function defaultTerminate(deps: ShellHostDeps): (agentId: string, job: ShellJob) => Promise<void> {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
   return async (agentId, job) => {
+    const parsed = parseShellPgid(await deps.readBoxFile?.(agentId, backgroundShellPaths(job.id).pid) ?? null)
     if (job.mode === 'docker') {
-      const { spawn: sp } = await import('node:child_process')
-      sp('docker', dockerKillArgv(BOX_CONTAINER, backgroundShellPaths(job.id).pid), { stdio: 'ignore' })
+      if (!parsed.ok) {
+        // nessun kill con un pgid a caso: il motivo resta nel log del daemon
+        console.warn(`[shells] ${job.id}: ${parsed.reason}`)
+        return
+      }
+      await dockerArgvExit(dockerKillGroupArgv(BOX_CONTAINER, parsed.pgid, 'TERM'))
+      for (let i = 0; i < 10; i++) {
+        await sleep(500)
+        // segnale 0 = sola esistenza del gruppo (rc != 0, docker incluso, = morto)
+        if (await dockerArgvExit(dockerKillGroupArgv(BOX_CONTAINER, parsed.pgid, '0')) !== 0) return
+      }
+      await dockerArgvExit(dockerKillGroupArgv(BOX_CONTAINER, parsed.pgid, 'KILL'))
       return
     }
-    const pidRaw = await deps.readBoxFile?.(agentId, backgroundShellPaths(job.id).pid) ?? null
-    const pgid = pidRaw !== null && pidRaw.trim() !== '' && Number.isFinite(Number(pidRaw.trim())) ? Number(pidRaw.trim()) : job.pid
+    const pgid = parsed.ok ? parsed.pgid : job.pid
     if (pgid) await killProcessGroup(deps, pgid)
   }
 }

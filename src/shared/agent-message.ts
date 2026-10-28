@@ -102,10 +102,17 @@ export function formatWebSearchEvidence(query: string, resultsText: string): str
   ].join('\n')
 }
 
-/** Il testo di una pagina dentro il blocco <pagina_web url=…> (tag neutralizzato). */
-export function formatWebFetchEvidence(url: string, pageText: string): string {
+/**
+ * Il testo di una pagina dentro il blocco <pagina_web url=…> (tag
+ * neutralizzato). G3: url= è l'URL FINALE (dopo i redirect) — è dove la
+ * pagina è stata letta DAVVERO; se la richiesta è partita da un URL diverso,
+ * lo si cita in richiesto=, così il modello sa sia dove è arrivato sia cosa
+ * aveva chiesto di aprire.
+ */
+export function formatWebFetchEvidence(finalUrl: string, pageText: string, requestedUrl?: string): string {
+  const richiesto = requestedUrl && requestedUrl !== finalUrl ? ` richiesto="${requestedUrl.replace(/"/g, "'").slice(0, 500)}"` : ''
   return [
-    `<pagina_web url="${url.replace(/"/g, "'").slice(0, 500)}">`,
+    `<pagina_web url="${finalUrl.replace(/"/g, "'").slice(0, 500)}"${richiesto}>`,
     neutralizeClosingTag(pageText, 'pagina_web'),
     '</pagina_web>',
     WEB_EVIDENCE_RULE

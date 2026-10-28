@@ -111,10 +111,33 @@ export function dockerStartArgv(container: string): string[] {
   return ['start', container]
 }
 
+/** G2: l'init (tini) del container esistente — `inspect -f` stampa true/false, argv puro. */
+export function dockerBoxInitCheckArgv(container: string): string[] {
+  return ['inspect', '-f', '{{.HostConfig.Init}}', container]
+}
+
+/** G2: rimozione del SOLO container da ricreare (il volume non si tocca MAI). */
+export function dockerBoxRmArgv(container: string): string[] {
+  return ['rm', '-f', container]
+}
+
 /**
- * Hardening del container condiviso a creazione (§5.2 + punto 1): non-root,
- * cap-drop, no-new-privs, limiti CONDIVISI e configurabili (memoria 4g,
- * cpu 2, pids 1024 di default). Volume unico montato su /box.
+ * G2 (puro): il container esistente va RICREATO perché è nato senza --init?
+ * L'output di dockerBoxInitCheckArgv è `true`/`false`; qualunque altra cosa
+ * (vuoto, errore, testo inatteso) NON ricrea: si tiene il container che
+ * funziona, la ricreazione è ottimale non vitale.
+ */
+export function boxNeedsRecreateForInit(inspectOutput: string): boolean {
+  return inspectOutput.trim() === 'false'
+}
+
+/**
+ * Hardening del container condiviso a creazione (§5.2 + punto 1 + G2):
+ * non-root, cap-drop, no-new-privs, limiti CONDIVISI e configurabili (memoria
+ * 4g, cpu 2, pids 1024 di default). Volume unico montato su /box. `--init` è
+ * tini di Docker (G2): PID 1 raccoglie i processi zombie — con `sleep
+ * infinity` non lo farebbe, e gli zombie di un box a vita lunga consumerebbero
+ * il tetto --pids-limit condiviso.
  */
 export function dockerBoxCreateArgv(container: string, volume: string, network: 'bridge' | 'none', limits: BoxLimits): string[] {
   return [
@@ -123,6 +146,7 @@ export function dockerBoxCreateArgv(container: string, volume: string, network: 
     '--user', CONTAINER_USER,
     '--cap-drop', 'ALL',
     '--security-opt', 'no-new-privileges',
+    '--init',
     '--pids-limit', String(limits.pids),
     '--memory', limits.memory,
     '--cpus', String(limits.cpus),
@@ -214,13 +238,17 @@ export function dockerExecBackgroundArgv(
 }
 
 /**
- * Kill del GRUPPO di processi del comando nel container (F1): il pid nel file
- * è il pgid (setsid), il TERM negativo termina anche i figli.
+ * Kill del GRUPPO di processi del comando nel container (F1 + G1): ARGV PURI,
+ * niente `sh -c` — in ubuntu:24.04 /bin/sh è dash e il suo kill INTERNO non
+ * accetta `--` (`sh: 1: kill: Illegal number: -`). Senza shell docker exec
+ * esegue il /usr/bin/kill di procps, che lo accetta: il pid del file è il
+ * pgid (setsid), l'operando negativo termina tutto il gruppo. '0' è il segnale
+ * di sola ESISTENZA (il controllo dopo la grazia), TERM e KILL come in host.
  */
-export const DOCKER_KILL_SH = 'kill -TERM -- -"$(cat "$1")" 2>/dev/null'
+export type DockerKillSignal = 'TERM' | 'KILL' | '0'
 
-export function dockerKillArgv(container: string, pidFile: string): string[] {
-  return ['exec', container, 'sh', '-c', DOCKER_KILL_SH, 'sh', pidFile]
+export function dockerKillGroupArgv(container: string, pgid: number, signal: DockerKillSignal): string[] {
+  return ['exec', container, 'kill', `-${signal}`, '--', `-${pgid}`]
 }
 
 /**

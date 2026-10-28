@@ -471,7 +471,8 @@ export async function webFetch(rawUrl: string, deps: WebFetchDeps = {}): Promise
   const truncatedNote = hop.truncated ? '\n\n[pagina troncata: oltre i 3 MB ho tenuto i primi 3 MB]' : ''
 
   if (contentType.includes('html')) {
-    const text = htmlToMarkdown(bodyText())
+    // G3: la base per i link è l'URL FINALE (dopo i redirect)
+    const text = htmlToMarkdown(bodyText(), current.toString())
     if (challengeBlocked(hop.status, bodyText(), text)) {
       return { ok: false, blocked: true, reason: 'la pagina richiede un captcha: NON aggirare il blocco, segnala all\'utente che la pagina non è leggibile' }
     }
@@ -516,12 +517,29 @@ export function decodeEntities(s: string): string {
 }
 
 /**
+ * G3 (puro): l'href risolto contro la base (l'URL FINALE della pagina), SOLO
+ * se il protocollo è http(s) — un href relativo diventa un link citabile
+ * fuori dalla pagina; `mailto:`, `javascript:` e simili non sono link. URL
+ * irrisolvibile (relativo senza base, malformato) → null: resta il testo.
+ */
+function resolveLinkHref(href: string, baseUrl?: string): string | null {
+  try {
+    const u = new URL(href, baseUrl)
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.toString() : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Estrazione dell'articolo e conversione essenziale in markdown (puro): via
  * script/style/nav ealtro rumore; se c'è <article> o <main> si usa quello;
  * heading, link, liste, grassetti e codice diventano markdown; il resto dei
  * tag si elimina. Non è un parser HTML completo: è la lettura essenziale.
+ * G3: gli href si risolvono contro baseUrl (l'URL finale): i link in output
+ * sono ASSOLUTI e apribili davvero, e solo http(s).
  */
-export function htmlToMarkdown(html: string): string {
+export function htmlToMarkdown(html: string, baseUrl?: string): string {
   let s = html
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<(script|style|noscript|svg|template|iframe|form)[\s\S]*?<\/\1>/gi, '')
@@ -536,7 +554,8 @@ export function htmlToMarkdown(html: string): string {
     .replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_, lvl: string, inner: string) => `\n\n${'#'.repeat(Number(lvl))} ${inner.replace(/<[^>]+>/g, '').trim()}`)
     .replace(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href: string, inner: string) => {
       const label = inner.replace(/<[^>]+>/g, '').trim()
-      return label && href && !href.startsWith('javascript:') ? `[${label}](${href})` : label
+      const url = resolveLinkHref(href, baseUrl)
+      return label && url ? `[${label}](${url})` : label
     })
     .replace(/<img\s[^>]*alt=["']([^"']*)["'][^>]*>/gi, (_, alt: string) => (alt ? ` ![${alt}]` : ''))
     .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, inner: string) => `\n- ${inner.replace(/<[^>]+>/g, '').trim()}`)

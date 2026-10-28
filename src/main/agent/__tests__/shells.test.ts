@@ -16,7 +16,7 @@ const { setDataDir, db } = await import('../../store/db')
 setDataDir(TMP)
 
 const {
-  startBackgroundShell, awaitShell, tickShellJobs, backgroundShellPaths, lastLines
+  startBackgroundShell, awaitShell, tickShellJobs, backgroundShellPaths, lastLines, parseShellPgid
 } = await import('../shells')
 import { getShellJob, runningShellJobsOf, runningShellJobsAll, createShellJob, updateShellJob, SHELLS_PER_AGENT_MAX, SHELLS_PER_BOX_MAX } from '../../store/shell-jobs'
 
@@ -57,6 +57,15 @@ describe('pure: path e righe finali', () => {
   it('lastLines: le ultime N righe', () => {
     expect(lastLines('1\n2\n3\n4\n5', 2)).toBe('4\n5')
     expect(lastLines('solo', 10)).toBe('solo')
+  })
+  it('G1 parseShellPgid: solo un INTERO POSITIVO va al kill; pid file vuoto o non numerico → NESSUN kill col motivo', () => {
+    expect(parseShellPgid('15\n')).toEqual({ ok: true, pgid: 15 }) // il wrapper scrive con echo: newline finale
+    expect(parseShellPgid(' 7 ')).toEqual({ ok: true, pgid: 7 })
+    for (const bad of [null, '', '\n', '  ', 'abc', '1.5', '-3', '0', '15 7', 'kill -TERM']) {
+      const r = parseShellPgid(bad)
+      expect(r.ok, JSON.stringify(bad)).toBe(false)
+      if (!r.ok) expect(r.reason).toContain('nessun kill')
+    }
   })
 })
 
