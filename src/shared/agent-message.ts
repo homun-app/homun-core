@@ -119,6 +119,21 @@ export function formatWebFetchEvidence(finalUrl: string, pageText: string, reque
   ].join('\n')
 }
 
+/**
+ * Fase 11b (punto 2): il contenuto letto col BROWSER del bot — stesso blocco
+ * evidenza della fetch ma con via="browser", così il modello (e i test)
+ * distinguono la pagina letta dal browser da quella letta da web_fetch. L'URL
+ * è quello CORRENTE della pagina, preso dal result MCP.
+ */
+export function formatWebBrowserEvidence(url: string, content: string): string {
+  return [
+    `<pagina_web url="${url.replace(/"/g, "'").slice(0, 500)}" via="browser">`,
+    neutralizeClosingTag(content, 'pagina_web'),
+    '</pagina_web>',
+    WEB_EVIDENCE_RULE
+  ].join('\n')
+}
+
 // ---- fase 11 (punto 3): l'esito di un comando in background come evidenza ----
 
 /**

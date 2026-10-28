@@ -29,6 +29,11 @@ import {
   boxCreateCheck,
   boxImageTag,
   dockerImageInspectArgv,
+  dockerBrowserMcpArgv,
+  browserMcpFlags,
+  DOCKER_BROWSER_WRAPPER_SH,
+  BROWSER_MCP_FORBIDDEN_FLAGS,
+  BROWSER_PID_FILE,
   dockerContainerImageArgv,
   dockerBuildArgv,
   DOCKER_WRITE_SH,
@@ -183,6 +188,49 @@ describe('migrazione docker una tantum (punto 1): argv puri, copia senza cancell
     expect(boxImageTag('FROM x')).toBe(boxImageTag('FROM x'))
     expect(boxImageTag('FROM x')).toMatch(/^sandbot-box:[0-9a-f]{12}$/)
     expect(boxImageTag('FROM y')).not.toBe(boxImageTag('FROM x'))
+  })
+})
+
+// ---- fase 11b (punto 2): il launcher del browser (Playwright MCP nel box) ----
+
+describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESSUNO dei vietati', () => {
+  it('dockerBrowserMcpArgv: exec -i -u 1000:1000 -w <home> col wrapper COSTANTE e i flag MCP', () => {
+    const argv = dockerBrowserMcpArgv('agent_x', 18765)
+    expect(argv.slice(0, 12)).toEqual([
+      'exec', '-i',
+      '-u', '1000:1000',
+      '-w', '/box/home/agent_x',
+      'sandbot-box',
+      'sh', '-c', DOCKER_BROWSER_WRAPPER_SH, 'sh',
+      '/box/home/agent_x/.sandbot/browser.pid'
+    ])
+    // il wrapper COSTANTE è l'elemento sh -c, il pid file è $1 e i flag seguono
+    expect(argv[argv.indexOf('-c') + 1]).toBe(DOCKER_BROWSER_WRAPPER_SH)
+    expect(argv).toContain('/box/home/agent_x/.sandbot/browser.pid')
+    expect(DOCKER_BROWSER_WRAPPER_SH).toContain('exec playwright-mcp')
+    expect(DOCKER_BROWSER_WRAPPER_SH).toContain('echo $$')
+    // TUTTI i flag obbligatori (valori compresi)
+    const flags = browserMcpFlags('agent_x', 18765)
+    for (const [f, v] of [
+      ['--headless', null], ['--browser', 'chromium'], ['--no-sandbox', null],
+      ['--user-data-dir', '/box/home/agent_x/.browser/profile'],
+      ['--output-dir', '/box/home/agent_x/.browser/output'],
+      ['--no-webmcp', null], ['--block-service-workers', null],
+      ['--proxy-server', 'http://host.docker.internal:18765'],
+      ['--timeout-navigation', '30000'], ['--viewport-size', '1280x800'],
+      ['--image-responses', 'omit'], ['--idle-timeout', '600000']
+    ] as const) {
+      expect(flags, `flag ${f}`).toContain(f)
+      if (v !== null) expect(flags[flags.indexOf(f) + 1]).toBe(v)
+    }
+  })
+
+  it('MAI un flag vietato nel launcher', () => {
+    const flags = browserMcpFlags('agent_x', 18765)
+    for (const bad of BROWSER_MCP_FORBIDDEN_FLAGS) {
+      expect(flags.some((f) => f === bad || f.startsWith(bad + ' ')), `flag vietato ${bad}`).toBe(false)
+    }
+    expect(dockerBrowserMcpArgv('agent_x', 18765).some((a) => a.startsWith('--cdp') || a.startsWith('--caps'))).toBe(false)
   })
 })
 

@@ -436,6 +436,7 @@ vi.mock('../llm', () => ({
 
 vi.mock('../../sandbox', () => ({
   sandboxMode: () => 'host' as const,
+  browserSandboxOk: () => false,
   boxDir: (id: string) => `/tmp/sandbot-${id}`,
   execCommand: async (_agentId: string, command: string, opts: { env?: Record<string, string> } = {}) => {
     h.sandboxMock.exec.command = command
@@ -452,6 +453,35 @@ vi.mock('../../vault', () => ({
   },
   listSecretNames: () => ['API_KEY']
 }))
+
+// fase 11b (punto 2): il browser del bot — mock parziale (i tool defs sono
+// veri); disponibilità, refInfo ed esecuzione sono guidate dai test
+const browserState = vi.hoisted(() => ({
+  available: false,
+  calls: [] as Array<{ tool: string; input: Record<string, unknown> }>
+}))
+vi.mock('../browser', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../browser')>()
+  return {
+    ...real,
+    browserAvailable: () => browserState.available,
+    BROWSER_UNAVAILABLE: real.BROWSER_UNAVAILABLE,
+    lastUrlOf: () => 'https://spa.example/prenota',
+    // la verità dei ref è lo snapshot (qui fisso, come l'ultimo ricevuto)
+    refInfoOf: (_agentId: string, ref: string) =>
+      ref === 'e8' ? { role: 'button', name: 'Conferma prenotazione' }
+        : ref === 'e6' ? { role: 'textbox', name: 'Numero carta' }
+        : ref === 'e2' ? { role: 'link', name: 'Vedi il menu' }
+        : null,
+    callBrowserTool: async (_agentId: string, tool: string, input: Record<string, unknown>) => {
+      browserState.calls.push({ tool, input })
+      return {
+        output: 'Page URL: https://spa.example/prenota\n- heading "Prenotazione" [ref=e1]\n- button "Conferma prenotazione" [ref=e8]',
+        meta: { browserPage: true, url: 'https://spa.example/prenota' }
+      }
+    }
+  }
+})
 
 // fase 11b (0a): il foreground di run-command passa da runForegroundShell
 // (wrapper + promozione); nei test del loop il comando "finisce in tempo" e il
@@ -3459,7 +3489,12 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
     // le azioni FUORI dalla lista restano approvabili anche contaminate
     const ok = autoReviewDecision(cfg, { tool: 'write-file', neverAuto: false, untrustedTurn: false, contaminated: true }, reviewer, 0)
     expect(ok.autoAllow).toBe(true)
-    expect([...CONTAMINATED_ASK_TOOLS].sort()).toEqual(['create_agent', 'create_group', 'draft_external', 'run-command', 'send_to_agent'])
+    // fase 11b: anche le azioni del browser con effetti (dopo una pagina letta
+    // il turno è SEMPRE contaminato)
+    expect([...CONTAMINATED_ASK_TOOLS].sort()).toEqual([
+      'browser_click', 'browser_press_key', 'browser_select', 'browser_type',
+      'create_agent', 'create_group', 'draft_external', 'run-command', 'send_to_agent'
+    ])
   })
 })
 
@@ -3562,6 +3597,110 @@ describe('fase 11 (punto 4): copy_to_box / copy_from_box nel loop', () => {
     const reviewer = { ok: true as const, decision: 'allow' as const, ruleMatched: 'tutto' }
     for (const tool of ['copy_to_box', 'copy_from_box']) {
       const d = autoReviewDecision(cfg, { tool, neverAuto: false, untrustedTurn: false }, reviewer, 0)
+      expect(d.autoAllow, tool).toBe(false)
+    }
+  })
+})
+
+
+// ---- fase 11b (punto 2): il browser nel loop ----
+
+describe('fase 11b: il browser del bot nel loop', () => {
+  beforeEach(() => {
+    browserState.available = false
+    browserState.calls.length = 0
+  })
+
+  it('browser NON disponibile (host): il result lo dice, nessun tool eseguito', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'b1', name: 'browser_open', arguments: JSON.stringify({ url: 'https://x.example' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'apri il sito', emit)
+    expect(browserState.calls).toHaveLength(0)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('richiede la modalità docker')
+  })
+
+  it('click su "Conferma prenotazione" → CARD con l\'elemento DALLO SNAPSHOT e l\'URL; deny → NESSUNA azione eseguita', async () => {
+    browserState.available = true
+    h.llm.queue = [
+      { toolCalls: [{ id: 'b2', name: 'browser_click', arguments: JSON.stringify({ ref: 'e8' }) }] },
+      { toolCalls: [{ id: 'b3', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    const turn = runTurn(AGENT, 'conferma la prenotazione', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    // la card mostra URL corrente e l'elemento (ruolo e nome dallo snapshot)
+    expect(appr.content).toContain('button "Conferma prenotazione"')
+    expect(appr.content).toContain('https://spa.example/prenota')
+    expect(appr.content).toContain('Conferma prenotazione')
+    const meta = appr.meta?.browser as { url: string; element: { role: string; name: string } }
+    expect(meta.url).toBe('https://spa.example/prenota')
+    expect(meta.element).toEqual({ role: 'button', name: 'Conferma prenotazione' })
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
+    await turn
+    // NESSUNA azione con effetti eseguita
+    expect(browserState.calls).toHaveLength(0)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('annullata dall\'utente')
+  })
+
+  it('browser_type su "Numero carta" → DENY immediato, senza card né esecuzione', async () => {
+    browserState.available = true
+    h.llm.queue = [
+      { toolCalls: [{ id: 'b4', name: 'browser_type', arguments: JSON.stringify({ ref: 'e6', text: '4242 4242 4242 4242' }) }] },
+      { toolCalls: [{ id: 'b5', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'paga', emit)
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
+    expect(browserState.calls).toHaveLength(0)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('Non scrivo MAI password')
+    expect(String(res.content)).toContain('chiedi all\'utente')
+  })
+
+  it('pagina letta col browser → blocco evidenza <pagina_web via="browser"> e turno CONTAMINATO', async () => {
+    browserState.available = true
+    // dopo la pagina, un run-command coperto da allow torna a chiedere (F8):
+    // è la prova che il turno è contaminato dal contenuto del browser
+    h.db.settings.set('permissions', {
+      default: 'needs_approval',
+      rules: [{ tool: 'run-command', pattern: 'curl', mode: 'always_allow' }]
+    })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'b6', name: 'browser_open', arguments: JSON.stringify({ url: 'https://spa.example/prenota' }) }] },
+      { toolCalls: [{ id: 'b7', name: 'run-command', arguments: JSON.stringify({ command: 'curl https://esempio' }) }] },
+      { toolCalls: [{ id: 'b8', name: 'send_to_user', arguments: JSON.stringify({ text: 'fatto' }) }] }
+    ]
+    const turn = runTurn(AGENT, 'guarda e scarica', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending' && e.meta?.tool === 'run-command')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval' && e.meta?.tool === 'run-command')!
+    expect(String(appr.content)).toContain('contenuti web non fidati')
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
+    await turn
+    // il result del browser è il blocco evidenza col tag neutralizzato
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('<pagina_web url="https://spa.example/prenota" via="browser">')
+    expect(String(res.content)).toContain('non un\'istruzione')
+    // il browser ha eseguito SOLO l'apertura; il run-command è stato negato
+    expect(browserState.calls.map((c) => c.tool)).toEqual(['browser_open'])
+  })
+
+  it('l\'auto-review PURA non approva MAI le azioni del browser in un turno contaminato', async () => {
+    const { autoReviewDecision, CONTAMINATED_ASK_TOOLS } = await import('../auto-review')
+    // i tool del browser con effetti sono nella lista
+    for (const tool of ['browser_click', 'browser_type', 'browser_select', 'browser_press_key']) {
+      expect(CONTAMINATED_ASK_TOOLS.has(tool), tool).toBe(true)
+    }
+    const cfg = { enabled: true, allowRules: ['tutto'], blockRules: [], providerId: 'prov', model: 'm1' }
+    const reviewer = { ok: true as const, decision: 'allow' as const, ruleMatched: 'tutto' }
+    for (const tool of ['browser_click', 'browser_type']) {
+      const d = autoReviewDecision(cfg, { tool, neverAuto: false, untrustedTurn: false, contaminated: true }, reviewer, 0)
       expect(d.autoAllow, tool).toBe(false)
     }
   })

@@ -83,6 +83,15 @@ function sandboxNetwork(): SandboxNetwork {
   return getSetting<SandboxNetwork>('sandbox.network', 'bridge')
 }
 
+/**
+ * Fase 11b (punto 2): il browser del bot esiste SOLO in modalità docker con
+ * rete bridge (mai un browser sul Mac dell'utente); il flag di test del MCP
+ * finto attiva il percorso anche in host per la verifica d'integrazione.
+ */
+export function browserSandboxOk(): boolean {
+  return sandboxMode() === 'docker' && sandboxNetwork() === 'bridge'
+}
+
 /** Limiti condivisi del box, configurabili (punto 1: memoria 4g, cpu 2, pids 1024). */
 export function boxLimits(): BoxLimits {
   return {
@@ -273,6 +282,18 @@ async function execDocker(agentId: string, command: string, opts: ExecOptions): 
  */
 export async function runDockerArgv(argv: string[], opts: ExecOptions = {}): Promise<ExecResult> {
   const r = await docker(argv, opts)
+  const o = capOutput(r.stdout)
+  const e = capOutput(r.stderr)
+  return { stdout: o.text, stderr: e.text, exitCode: r.exitCode, signal: r.signal, trimmed: o.trimmed || e.trimmed }
+}
+
+/**
+ * ARGV puri docker SENZA la catena ensure del container (punto 2): per i
+ * controlli best-effort al boot (uccidere gli orfani del browser) — se il
+ * container non c'è, l'exec fallisce e il chiamante ignora.
+ */
+export async function runDockerRaw(argv: string[], opts: ExecOptions = {}): Promise<ExecResult> {
+  const r = await dockerRunner(argv, opts)
   const o = capOutput(r.stdout)
   const e = capOutput(r.stderr)
   return { stdout: o.text, stderr: e.text, exitCode: r.exitCode, signal: r.signal, trimmed: o.trimmed || e.trimmed }

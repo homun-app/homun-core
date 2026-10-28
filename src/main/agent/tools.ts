@@ -703,9 +703,22 @@ export async function executeTool(
           meta: { ...(outcome.blocked ? { blocked: true } : {}), ...(outcome.unsupported ? { unsupported: true } : {}) }
         }
       }
+      // fase 11b (punto 2): pagina costruita in JavaScript e browser
+      // disponibile → il result lo dice al modello (con un blocco o un captcha
+      // non si arriva qui: nessun suggerimento da quelle pagine)
+      let hint = ''
+      if (outcome.jsBuilt) {
+        try {
+          const { browserAvailable } = await import('./browser')
+          const { JS_PAGE_HINT } = await import('./web-guard')
+          if (browserAvailable()) hint = '\n\n' + JS_PAGE_HINT
+        } catch {
+          // browser non interrogabile: nessun suggerimento
+        }
+      }
       return {
-        output: webFetchWindowOutput(outcome.text, offset),
-        meta: { webContent: true, finalUrl: outcome.finalUrl }
+        output: webFetchWindowOutput(outcome.text, offset) + hint,
+        meta: { webContent: true, finalUrl: outcome.finalUrl, ...(outcome.jsBuilt ? { jsBuilt: true } : {}) }
       }
     }
     case 'recall_memory': {

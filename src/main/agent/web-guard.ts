@@ -112,6 +112,23 @@ export function resolveRedirect(from: URL, location: string): URL {
   return new URL(location, from)
 }
 
+// ---- fase 11b (punto 2): il passaggio da web_fetch al browser ----
+
+/** La nota che il result di web_fetch aggiunge su una pagina costruita in JavaScript. */
+export const JS_PAGE_HINT = 'La pagina sembra costruita in JavaScript: se ti serve, aprila con browser_open.'
+
+/**
+ * Una pagina HTML letta da web_fetch sembra costruita in JavaScript (puro)?
+ * Dopo l'estrazione resta pochissimo testo e ci sono molti `<script>`: è il
+ * segnale che serve il BROWSER, non la fetch. Con un blocco o un captcha il
+ * chiamante non aggiunge NESSUN suggerimento (il browser non aggira i blocchi).
+ */
+export function looksJsBuiltPage(rawHtml: string, extractedText: string): boolean {
+  const scripts = (rawHtml.match(/<script\b/gi) ?? []).length
+  const textLen = extractedText.replace(/\s+/g, ' ').trim().length
+  return scripts >= 4 && textLen < 500
+}
+
 // ---- troncamento con offset (il modello vede al più 20.000 caratteri) ----
 
 export interface TextWindow {

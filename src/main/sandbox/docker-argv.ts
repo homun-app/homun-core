@@ -382,3 +382,77 @@ export function dockerBuildArgv(tag: string, dockerfilePath: string, contextDir:
   return ['build', '-t', tag, '-f', dockerfilePath, contextDir]
 }
 
+// ---- fase 11b (punto 2): il browser del bot — Playwright MCP nel container ----
+
+/** Il pid file dell'istanza browser di un bot (relativo alla SUA home nel box). */
+export const BROWSER_PID_FILE = '.sandbot/browser.pid'
+
+/** Chiusura per inattività: 10 minuti senza azioni (lato nostro + --idle-timeout). */
+export const BROWSER_IDLE_MS = 10 * 60_000
+
+/** Al massimo 3 browser contemporanei per box (Chromium pesa e il box ha 4g). */
+export const BROWSERS_PER_BOX_MAX = 3
+
+/**
+ * Il wrapper COSTANTE del server browser (punto 2): il pid va nel file della
+ * home del bot (per uccidere gli orfani: se il daemon muore, il processo nel
+ * container NON muore da solo), poi `exec playwright-mcp "$@"`. Con setsid il
+ * pid scritto è anche il pgid: il kill di gruppo (G1) prende tutto l'albero.
+ */
+export const DOCKER_BROWSER_WRAPPER_SH = [
+  'mkdir -p "$(dirname "$1")"',
+  'if command -v setsid >/dev/null 2>&1; then',
+  "  exec setsid sh -c 'echo $$ >\"$1\" && shift && exec playwright-mcp \"$@\"' sh \"$@\"",
+  'else',
+  '  echo $$ >"$1"',
+  '  shift',
+  '  exec playwright-mcp "$@"',
+  'fi'
+].join('\n')
+
+/**
+ * I flag del server Playwright MCP (puro): tutti quelli OBBLIGATORI e NESSUNO
+ * dei vietati. --no-sandbox perché il container hardened non concede gli user
+ * namespace (il confine è il container); --no-webmcp perché una pagina ostile
+ * non può offrire tool al modello; --proxy-server è il confine di rete del
+ * browser (punto 3); il profilo è persistente PER BOT (come in Grok).
+ */
+export function browserMcpFlags(agentId: string, proxyPort: number): string[] {
+  const home = boxHomePath(agentId)
+  return [
+    '--headless', '--browser', 'chromium',
+    '--no-sandbox',
+    '--user-data-dir', `${home}/.browser/profile`,
+    '--output-dir', `${home}/.browser/output`,
+    '--no-webmcp',
+    '--block-service-workers',
+    '--proxy-server', `http://host.docker.internal:${proxyPort}`,
+    '--timeout-navigation', '30000',
+    '--viewport-size', '1280x800',
+    '--image-responses', 'omit',
+    '--idle-timeout', String(BROWSER_IDLE_MS)
+  ]
+}
+
+/** Flag VIETATI del server MCP (punto 2): mai accesso ai file senza limiti, mai CDP esterno, mai estensioni, mai devtools. */
+export const BROWSER_MCP_FORBIDDEN_FLAGS = [
+  '--allow-unrestricted-file-access', '--cdp-endpoint', '--extension', '--caps'
+] as const
+
+/**
+ * L'argv del launcher del browser di un bot (puro): `docker exec -i` con
+ * l'utente e la home del bot, il wrapper COSTANTE (pid file come $1) e i flag
+ * del server MCP come argomenti posizionali dopo `sh <pidfile>`.
+ */
+export function dockerBrowserMcpArgv(agentId: string, proxyPort: number): string[] {
+  return [
+    'exec', '-i',
+    '-u', CONTAINER_USER,
+    '-w', boxHomePath(agentId),
+    BOX_CONTAINER,
+    'sh', '-c', DOCKER_BROWSER_WRAPPER_SH, 'sh',
+    `${boxHomePath(agentId)}/${BROWSER_PID_FILE}`,
+    ...browserMcpFlags(agentId, proxyPort)
+  ]
+}
+

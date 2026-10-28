@@ -95,6 +95,16 @@ async function main(): Promise<void> {
     console.error('[sandbotd] migrazione box fallita (si riprova al prossimo avvio):', e)
   }
 
+  // fase 11b (punto 2): gli orfani del browser (server Playwright MCP rimasti
+  // vivi nel container alla morte del daemon) si uccidono dal pid file —
+  // best effort: senza docker o senza container non c'è nessun orfano
+  try {
+    const { killBrowserOrphans } = await import('../main/agent/browser')
+    await killBrowserOrphans(listAgents().map((a) => a.id))
+  } catch {
+    // niente da uccidere
+  }
+
   const token = generateToken()
   let bridge: ReturnType<typeof attachHostBridge> | null = null
   // dichiarati prima della closure del server e riempiti appena pronti

@@ -62,8 +62,14 @@ const FUTURE_CHANGING_TOOLS = new Set(['update_skill', 'update_memory', 'update_
  * tornano SEMPRE all'utente — contenuto non fidato più strumenti con effetti
  * più canali verso l'esterno è la combinazione che rende sfruttabile
  * un'iniezione nella pagina. L'auto-review non può approvarle da sola.
+ * Fase 11b (punto 2): anche le azioni del BROWSER con effetti sui siti — dopo
+ * una pagina letta il turno è SEMPRE contaminato, quindi le ask di click di
+ * invio/acquisto/prenotazione non vengono mai approvate da sole.
  */
-export const CONTAMINATED_ASK_TOOLS = new Set(['run-command', 'draft_external', 'send_to_agent', 'create_agent', 'create_group'])
+export const CONTAMINATED_ASK_TOOLS = new Set([
+  'run-command', 'draft_external', 'send_to_agent', 'create_agent', 'create_group',
+  'browser_click', 'browser_type', 'browser_select', 'browser_press_key'
+])
 
 /**
  * F8 (PURO): nel turno CONTAMINATO da contenuti web un verdetto allow (dalla

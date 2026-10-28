@@ -5,7 +5,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 // il prompt base dipende dalla modalità sandbox solo per la sezione computer
 const mode = vi.hoisted(() => ({ v: 'host' as 'host' | 'docker' }))
-vi.mock('../../sandbox', () => ({ sandboxMode: () => mode.v }))
+// fase 11b: la sezione browser dipende dalla disponibilità del browser
+const browserOk = vi.hoisted(() => ({ v: false }))
+vi.mock('../../sandbox', () => ({ sandboxMode: () => mode.v, browserSandboxOk: () => browserOk.v }))
 
 import {
   systemPrompt, identitySection, computerSection, talkingSection, initiativeSection,

@@ -17,7 +17,7 @@ import { createConnectorsSecretStore } from '../connectors/sealed-store'
 import { getSetting, setSetting } from '../store/db'
 import {
   checkUrl, resolveRedirect, resolvedIpsAllowed, sliceWithOffset, isForbiddenIp, literalHostIp,
-  loopbackAllowedForTests
+  loopbackAllowedForTests, looksJsBuiltPage
 } from './web-guard'
 import {
   WEB_FETCH_TIMEOUT_MS, WEB_FETCH_MAX_BYTES, WEB_FETCH_MAX_REDIRECTS, WEB_FETCH_CACHE_MS,
@@ -172,7 +172,7 @@ export interface WebFetchDeps {
 }
 
 export type WebFetchOutcome =
-  | { ok: true; text: string; contentType: string; finalUrl: string; downloadedBytes: number; truncated?: boolean }
+  | { ok: true; text: string; contentType: string; finalUrl: string; downloadedBytes: number; truncated?: boolean; jsBuilt?: boolean }
   | { ok: false; reason: string; blocked?: boolean; unsupported?: boolean }
 
 /** Cache per URL di 15 minuti (punto 2): dentro al modulo, iniettabile l'orologio. */
@@ -472,14 +472,19 @@ export async function webFetch(rawUrl: string, deps: WebFetchDeps = {}): Promise
 
   if (contentType.includes('html')) {
     // G3: la base per i link è l'URL FINALE (dopo i redirect)
-    const text = htmlToMarkdown(bodyText(), current.toString())
-    if (challengeBlocked(hop.status, bodyText(), text)) {
+    const raw = bodyText()
+    const text = htmlToMarkdown(raw, current.toString())
+    if (challengeBlocked(hop.status, raw, text)) {
       return { ok: false, blocked: true, reason: 'la pagina richiede un captcha: NON aggirare il blocco, segnala all\'utente che la pagina non è leggibile' }
     }
+    // fase 11b (punto 2): pagina costruita in JavaScript? Il result di
+    // web_fetch lo dichiara al modello (che può aprirla col browser); con un
+    // blocco o un captcha non si arriva qui (esiti blocked sopra)
     return {
       ok: true, text: text + truncatedNote, contentType: 'text/html',
       finalUrl: current.toString(), downloadedBytes: hop.body.length,
-      ...(hop.truncated ? { truncated: true } : {})
+      ...(hop.truncated ? { truncated: true } : {}),
+      ...(looksJsBuiltPage(raw, text) ? { jsBuilt: true } : {})
     }
   }
   if (contentType.startsWith('text/') || contentType.includes('json')) {

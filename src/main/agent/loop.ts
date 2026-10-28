@@ -32,7 +32,7 @@ import { buildMemorySection } from './memory'
 import { buildSkillsSection } from './skills'
 import { maybeCompactHistory, summarizeWithLlm } from './compaction'
 import { automationEventText } from './update-state'
-import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX, formatWebSearchEvidence, formatWebFetchEvidence } from '../../shared/agent-message'
+import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX, formatWebSearchEvidence, formatWebFetchEvidence, formatWebBrowserEvidence } from '../../shared/agent-message'
 import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto } from './permission-rules'
@@ -587,6 +587,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     } catch {
       // MCP non disponibile: prosegue coi tool base
     }
+    // fase 11b (punto 2): i tool del browser compaiono SOLO quando il browser
+    // è disponibile (docker + rete bridge): in host il modello non li vede
+    try {
+      const { browserToolDefs, browserAvailable } = await import('./browser')
+      if (browserAvailable()) allTools = [...allTools, ...browserToolDefs]
+    } catch {
+      // browser non disponibile: prosegue senza
+    }
     // correzione E2: i tool del passo corrente — la chiamata di recupero di un
     // turno di gruppo li restringe a quelli del sollecito
     let turnTools = allTools
@@ -954,6 +962,131 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           })
           emit({ type: 'entries', agentId, entries: [res] })
           messages.push({ role: 'tool', toolCallId: call.id, content: evidence.slice(0, 50_000) })
+          continue
+        }
+
+        // fase 11b (punto 2): il BROWSER del bot — il gradino dopo la ricerca e
+        // la lettura web. Intercettato perché il confine sta qui: URL validato
+        // (checkUrl in callBrowserTool), classificazione PURA del rischio delle
+        // azioni con effetti (refInfo dall'ULTIMO SNAPSHOT ricevuto, mai da ciò
+        // che il modello dice dell'elemento), blocco evidenza + contaminazione
+        // per tutto ciò che è contenuto di pagina
+        if (call.name.startsWith('browser_')) {
+          emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
+          const bEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [bEntry] })
+          const browser = await import('./browser')
+          const guard = await import('./browser-guard')
+          const pushResult = (content: string, meta: Record<string, unknown> = {}): void => {
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: content.slice(0, 50_000), meta: { callId: call.id, ...meta } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            messages.push({ role: 'tool', toolCallId: call.id, content: content.slice(0, 50_000) })
+          }
+          if (!browser.browserAvailable()) {
+            pushResult(browser.BROWSER_UNAVAILABLE, { browserUnavailable: true })
+            continue
+          }
+          const risk = guard.browserActionRisk(call.name, input, browser.refInfoOf(agentId, String(input.ref ?? '')))
+          if (risk.kind === 'deny') {
+            pushResult(risk.reason, { browserDeny: true })
+            continue
+          }
+          if (risk.kind === 'ask') {
+            // auto-review come per le altre ask; nel turno contaminato (dopo
+            // una pagina letta lo è SEMPRE) CONTAMINATED_ASK_TOOLS non lascia
+            // approvare da sola: la card va all'utente
+            let autoAllowed: { ruleMatched: string; reason?: string } | null = null
+            const action: AutoReviewAction = {
+              tool: call.name, args: input, neverAuto: false, untrustedTurn,
+              ...(contaminated ? { contaminated: true } : {})
+            }
+            const review = await reviewWithConfiguredModel(action)
+            if (review) {
+              const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
+              if (decision.autoAllow) {
+                autoAllowed = { ruleMatched: decision.ruleMatched, ...(decision.reason ? { reason: decision.reason } : {}) }
+                autoApprovals++
+              }
+            }
+            if (!autoAllowed) {
+              // la card mostra URL corrente, elemento (ruolo e nome dallo
+              // snapshot) e testo da scrivere
+              const url = browser.lastUrlOf(agentId) ?? '(nessuna pagina aperta)'
+              const info = browser.refInfoOf(agentId, String(input.ref ?? ''))
+              const elem = info ? `${info.role} "${info.name}"` : `ref ${String(input.ref ?? '?')}`
+              const testo = call.name === 'browser_type' ? ` — testo: "${String(input.text ?? '').slice(0, 80)}"` : ''
+              const approval: Approval = {
+                id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
+              }
+              run.approvals.set(approval.id, () => undefined)
+              const approvalEntry = add({
+                agentId, kind: 'approval', role: 'system',
+                content: `${call.name} su ${elem} in ${url}${testo}: ${risk.reason}`,
+                meta: {
+                  approvalId: approval.id, tool: call.name, input, status: 'pending',
+                  browser: {
+                    url,
+                    ...(info ? { element: info } : {}),
+                    ...(call.name === 'browser_type' ? { text: String(input.text ?? '') } : {})
+                  },
+                  keys: [`${call.name} ${elem}`]
+                }
+              })
+              setStatus(agentId, 'paused-for-approval', emit)
+              emit({ type: 'entries', agentId, entries: [approvalEntry] })
+              emit({ type: 'approval', agentId, approval })
+              emitNeedsInput(agentId, approvalEntry, `${call.name}: ${risk.reason}`, emit)
+              taskNeedsInput()
+              const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
+                run.approvals.set(approval.id, (d) => resolve(d))
+                setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
+              })
+              run.approvals.delete(approval.id)
+              updateEntryMeta(approvalEntry.id, {
+                ...approvalEntry.meta,
+                status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
+              })
+              const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
+              if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+              taskWorking()
+              if (decision !== 'allow') {
+                setStatus(agentId, 'thinking', emit)
+                pushResult(
+                  decision === 'deny' ? 'Azione del browser annullata dall\'utente: non riprovarla senza il suo ok.' : 'Approvazione scaduta o interrotta: azione del browser non eseguita.',
+                  { browserAsk: 'denied' }
+                )
+                continue
+              }
+              setStatus(agentId, 'thinking', emit)
+            }
+          }
+          let bOutput = ''
+          let bMeta: Record<string, unknown> = {}
+          try {
+            const r = await browser.callBrowserTool(agentId, call.name, input)
+            bOutput = r.output
+            bMeta = r.meta
+          } catch (e) {
+            bOutput = `Errore del browser: ${e instanceof Error ? e.message : String(e)}`
+            bMeta = { error: true }
+          }
+          if (bMeta.browserPage && !bMeta.browserError) {
+            // contenuto di pagina → blocco evidenza col tag neutralizzato e
+            // CONTAMINAZIONE del turno (come web_fetch): il dato non fidato
+            // non sblocca da solo le azioni con effetti
+            if (!contaminated) {
+              run.turnAllows.clear()
+              run.turnGrantEpoch++
+            }
+            contaminated = true
+            const evidence = formatWebBrowserEvidence(String(bMeta.url ?? ''), bOutput)
+            pushResult(evidence, { ...bMeta, webEvidence: true })
+            continue
+          }
+          pushResult(bOutput, bMeta)
           continue
         }
 
