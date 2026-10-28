@@ -207,14 +207,20 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
     // il wrapper COSTANTE è l'elemento sh -c, il pid file è $1 e i flag seguono
     expect(argv[argv.indexOf('-c') + 1]).toBe(DOCKER_BROWSER_WRAPPER_SH)
     expect(argv).toContain('/box/home/agent_x/.sandbot/browser.pid')
+    // I2: NIENTE setsid (il processo di docker exec è già leader di sessione:
+    // setsid forkhere e il padre chiude lo stdio del client) e il pid si scrive
+    // PRIMA dell'exec — quel pid è anche il pgid per il kill di gruppo
+    expect(DOCKER_BROWSER_WRAPPER_SH).not.toContain('setsid')
+    expect(DOCKER_BROWSER_WRAPPER_SH.indexOf('echo $$')).toBeLessThan(DOCKER_BROWSER_WRAPPER_SH.indexOf('exec playwright-mcp'))
     expect(DOCKER_BROWSER_WRAPPER_SH).toContain('exec playwright-mcp')
     expect(DOCKER_BROWSER_WRAPPER_SH).toContain('echo $$')
-    // TUTTI i flag obbligatori (valori compresi)
+    // TUTTI i flag obbligatori (valori compresi), con il tetto delle uscite (I8)
     const flags = browserMcpFlags('agent_x', 18765)
     for (const [f, v] of [
       ['--headless', null], ['--browser', 'chromium'], ['--no-sandbox', null],
       ['--user-data-dir', '/box/home/agent_x/.browser/profile'],
       ['--output-dir', '/box/home/agent_x/.browser/output'],
+      ['--output-max-size', '52428800'],
       ['--no-webmcp', null], ['--block-service-workers', null],
       ['--proxy-server', 'http://host.docker.internal:18765'],
       ['--timeout-navigation', '30000'], ['--viewport-size', '1280x800'],

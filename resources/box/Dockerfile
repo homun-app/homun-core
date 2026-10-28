@@ -6,15 +6,18 @@
 # - il server Playwright MCP versione ESATTA 0.0.83 (dipende da playwright
 #   1.64.0-alpha): è lui il browser del bot, via stdio;
 # - il Chromium si installa A BUILD TIME con la CLI della playwright usata da
-#   @playwright/mcp (risolta dal SUO albero di dipendenze, annidato o hoisted):
-#   stessa versione del driver, mai browser mancanti o sbagliati, MAI download
-#   a runtime (niente npx …@latest);
+#   @playwright/mcp (installato GLOBALE: require.resolve NON cerca nei moduli
+#   globali di npm, quindi la CLI si prende dal path di `npm root -g` — stessa
+#   versione del driver, mai browser mancanti o sbagliati, MAI download a
+#   runtime, niente npx …@latest);
 # - `playwright-mcp --help` fa FALLIRE la build se qualcosa manca;
-# - i browser restano leggibili dall'utente 1000:1000 con cui gira il box.
+# - i browser restano di ROOT: leggibili ed eseguibili da tutti ma NON
+#   scrivibili dal bot (uid 1000). Il chown -R duplicherebbe ~700 MB nel layer
+#   e renderebbe i binari del browser modificabili dal bot.
 FROM mcr.microsoft.com/playwright:v1.64.1-noble
 
 RUN npm install -g @playwright/mcp@0.0.83 \
- && PWCLI="$(node -p "require.resolve('playwright/cli.js', { paths: [require('path').dirname(require.resolve('@playwright/mcp/package.json'))] })")" \
+ && PWCLI="$(npm root -g)/@playwright/mcp/node_modules/playwright/cli.js" \
  && node "$PWCLI" install chromium \
  && playwright-mcp --help >/dev/null \
- && chown -R 1000:1000 "${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}"
+ && chmod -R a+rX,go-w "${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}"

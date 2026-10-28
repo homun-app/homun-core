@@ -10,16 +10,20 @@
 // Ciclo di vita: chiusura dopo 10 minuti senza azioni (nostri + --idle-timeout
 // del server), al massimo 3 browser per box, kill dell'orfano dal pid file al
 // boot e prima di ogni avvio (se il daemon muore, il processo nel container
-// non muore da solo). SOLO in docker con rete bridge: mai un browser sul Mac
-// dell'utente; il flag di test SANDBOT_TEST_FAKE_BROWSER_MCP=<path> sostituisce
-// `docker exec …` con `node <path>` (verifica d'integrazione, non esiste in
-// produzione).
+// non muore da solo). Il trasporto che si chiude toglie SUBITO la sessione e
+// l'azione riparte UNA volta con una sessione nuova (solo browser_open ripete:
+// le altre dicono di riaprire la pagina). Le azioni NON restituiscono lo
+// snapshot inline (0.0.83 lo scrive in un file): lo chiede il daemon e il
+// result al modello è il montaggio compatto di righe di pagina + snapshot.
+// SOLO in docker con rete bridge: mai un browser sul Mac dell'utente; il flag
+// di test SANDBOT_TEST_FAKE_BROWSER_MCP=<path> sostituisce `docker exec …`
+// con `node <path>` (verifica d'integrazione, non esiste in produzione).
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { ToolDef } from './llm'
 import { checkUrl } from './web-guard'
 import {
-  refInfo, truncateSnapshot, snapshotChallenge, browserPageUrl,
+  refInfo, truncateSnapshot, snapshotChallenge, browserPageUrl, composeBrowserResult,
   SNAPSHOT_BLOCKED_NOTE, type RefInfo
 } from './browser-guard'
 import {
@@ -185,6 +189,7 @@ export function refInfoOf(agentId: string, ref: string): RefInfo | null {
 
 /** Solo per i test: azzera le sessioni (chiudendo i client). */
 export async function resetBrowserForTests(): Promise<void> {
+  sessionFlights.clear()
   for (const [id, s] of sessions) {
     clearTimeout(s.closeTimer)
     await s.client.close().catch(() => undefined)
@@ -242,19 +247,19 @@ export async function killBrowserOrphans(agentIds: ReadonlyArray<string>): Promi
  * L'istanza browser di un bot, AVVIO LAZY: docker exec col wrapper costante
  * (o `node <path>` col flag di test). Prima dell'avvio: container, home e kill
  * dell'orfano. Oltre BROWSERS_PER_BOX_MAX istanze non si parte (Chromium pesa).
+ * SINGLE-FLIGHT per bot: due chiamate concorrenti condividono la stessa
+ * partenza, mai due server per lo stesso bot (I4).
  */
-async function getBrowserSession(agentId: string): Promise<BrowserSession> {
-  const existing = sessions.get(agentId)
-  if (existing) {
-    touchSession(agentId, existing)
-    return existing
-  }
+const sessionFlights = new Map<string, Promise<BrowserSession>>()
+
+async function startBrowserSession(agentId: string): Promise<BrowserSession> {
   if (sessions.size >= BROWSERS_PER_BOX_MAX) {
     throw new Error(`Limite raggiunto: al massimo ${BROWSERS_PER_BOX_MAX} browser contemporanei per box (Chromium pesa e il box ha memoria condivisa). Chiudine uno con browser_close o riprova più tardi.`)
   }
   const proxyPort = await ensureBrowserProxy()
   let command = 'docker'
   let args: string[]
+  let env: Record<string, string> | undefined
   const fakeMcp = process.env.SANDBOT_TEST_FAKE_BROWSER_MCP
   if (fakeMcp) {
     // MODALITÀ TEST: il server MCP finto al posto di docker exec — SOLO il suo
@@ -262,6 +267,13 @@ async function getBrowserSession(agentId: string): Promise<BrowserSession> {
     // il wrapper e il pid file restano un percorso docker: qui non ci sono orfani)
     command = 'node'
     args = [fakeMcp]
+    // flag del finto per la sessione morta (I4): la N-esima chiamata muore senza
+    // rispondere. Si consuma QUI (una morte sola: le sessioni dopo restano vive)
+    const dieOnCall = process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL
+    if (dieOnCall) {
+      env = { SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL: dieOnCall }
+      delete process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL
+    }
   } else {
     await ensureBoxContainer()
     await ensureBotHome(agentId) // -w punta alla home del bot
@@ -269,13 +281,35 @@ async function getBrowserSession(agentId: string): Promise<BrowserSession> {
     args = dockerBrowserMcpArgv(agentId, proxyPort)
   }
   const client = new Client({ name: 'sandbot', version: '0.1.0' })
-  await client.connect(new StdioClientTransport({ command, args }))
+  await client.connect(new StdioClientTransport(env ? { command, args, env } : { command, args }))
   const session: BrowserSession = {
     client, snapshot: '', url: '', lastActionAt: Date.now(), closeTimer: setTimeout(() => undefined, BROWSER_IDLE_MS)
+  }
+  // I4: il trasporto chiuso (server morto o idle timeout del server) toglie la
+  // sessione dalla mappa e ferma il suo timer, subito — mai "Not connected"
+  // per i dieci minuti del timer nostro
+  client.onclose = () => {
+    clearTimeout(session.closeTimer)
+    if (sessions.get(agentId) === session) sessions.delete(agentId)
   }
   sessions.set(agentId, session)
   touchSession(agentId, session)
   return session
+}
+
+async function getBrowserSession(agentId: string): Promise<BrowserSession> {
+  const existing = sessions.get(agentId)
+  if (existing) {
+    touchSession(agentId, existing)
+    return existing
+  }
+  const inFlight = sessionFlights.get(agentId)
+  if (inFlight) return inFlight
+  const p = startBrowserSession(agentId).finally(() => {
+    sessionFlights.delete(agentId)
+  })
+  sessionFlights.set(agentId, p)
+  return p
 }
 
 /** Il testo di un result MCP (parti text, come il client dei connettori). */
@@ -290,12 +324,48 @@ export interface BrowserToolResult {
 }
 
 /**
+ * Le azioni che possono cambiare la pagina (I3): dopo ognuna il daemon chiama
+ * browser_snapshot, perché le azioni di Playwright MCP 0.0.83 scrivono lo
+ * snapshot in un FILE (il result porta solo il link) e senza chiederlo a parte
+ * il modello non vedrebbe mai la pagina né i ref.
+ */
+const SNAPSHOT_AFTER_ACTIONS = new Set([
+  'browser_open', 'browser_click', 'browser_type', 'browser_select',
+  'browser_press_key', 'browser_back', 'browser_tabs', 'browser_wait'
+])
+
+/** L'errore di una sessione morta: il trasporto chiuso rigetta così (I4). */
+const isConnectionError = (e: unknown): boolean =>
+  /connection closed|not connected/i.test(e instanceof Error ? e.message : String(e))
+
+/**
  * Esegue un tool del browser mappandolo sulla chiamata MCP (punto 2). I tool
  * che riportano contenuto di pagina (snapshot) portano meta.browserPage: il
  * loop lo incarta nel blocco evidenza e contamina il turno. Lo screenshot
  * salva il file nel box e dà il path: nessun contenuto di pagina in contesto.
+ * I4: un errore di connessione (server morto) toglie la sessione e RIPROVA UNA
+ * volta con una sessione nuova — ma SOLO browser_open ripete l'azione: un click
+ * ripetuto su un browser nuovo agirebbe su una pagina diversa, quindi le altre
+ * azioni ricevono il result che dice di riaprire la pagina.
  */
 export async function callBrowserTool(agentId: string, tool: string, input: Record<string, unknown>): Promise<BrowserToolResult> {
+  try {
+    return await runBrowserTool(agentId, tool, input)
+  } catch (e) {
+    if (!isConnectionError(e)) throw e
+    const msg = e instanceof Error ? e.message : String(e)
+    await closeBrowser(agentId) // via la sessione morta (e il suo timer)
+    if (tool !== 'browser_open') {
+      return {
+        output: `Errore del browser: ${msg}. La sessione è stata riavviata e lo stato della pagina è perso: riapri la pagina con browser_open, poi ripeti l'azione.`,
+        meta: { browserError: true, browserRestarted: true }
+      }
+    }
+    return await runBrowserTool(agentId, tool, input) // UNA volta, sessione NUOVA
+  }
+}
+
+async function runBrowserTool(agentId: string, tool: string, input: Record<string, unknown>): Promise<BrowserToolResult> {
   const session = await getBrowserSession(agentId)
   const ref = String(input.ref ?? '')
   let mcpName: string
@@ -369,14 +439,27 @@ export async function callBrowserTool(agentId: string, tool: string, input: Reco
   }
   const res = await session.client.callTool({ name: mcpName, arguments: mcpArgs })
   const raw = mcpText(res)
-  // lo stato del bot si aggiorna dal result: l'URL corrente della pagina e
-  // l'ultimo snapshot (se il result ne porta uno) sono la verità per i ref
-  const pageUrl = browserPageUrl(raw)
+  // I3: lo snapshot per lo stato e per il modello si chiede A PARTE dopo le
+  // azioni (l'azione lo scrive in un file); anche dopo un errore dell'azione,
+  // perché la pagina può essere cambiata lo stesso. browser_snapshot invece lo
+  // restituisce inline: aggiorna lo stato direttamente
+  let snapshotRaw = ''
+  if (SNAPSHOT_AFTER_ACTIONS.has(tool)) {
+    const snap = await session.client.callTool({ name: 'browser_snapshot', arguments: {} })
+    snapshotRaw = mcpText(snap)
+    if (snapshotRaw) session.snapshot = snapshotRaw.slice(0, 200_000)
+  } else if (raw.includes('[ref=')) {
+    session.snapshot = raw.slice(0, 200_000)
+  }
+  // l'URL corrente: dal result dell'azione, o dallo snapshot ricevuto a parte
+  const pageUrl = browserPageUrl(raw) ?? browserPageUrl(snapshotRaw)
   if (pageUrl) session.url = pageUrl
   else if (tool === 'browser_open') session.url = String(mcpArgs.url ?? session.url)
-  if (raw.includes('[ref=')) session.snapshot = raw.slice(0, 200_000)
-  const truncated = truncateSnapshot(raw)
-  const challenge = snapshotChallenge(raw)
+  // il result al modello è COMPATTO e uguale per tutte le azioni: righe di
+  // pagina ed eventuali Error/Modal state dall'azione, più lo snapshot inline
+  const composed = SNAPSHOT_AFTER_ACTIONS.has(tool) ? composeBrowserResult(raw, snapshotRaw) : raw
+  const truncated = truncateSnapshot(composed)
+  const challenge = snapshotChallenge(composed)
   const output = challenge ? `${truncated.text}\n\n${SNAPSHOT_BLOCKED_NOTE}` : truncated.text
   return {
     output,

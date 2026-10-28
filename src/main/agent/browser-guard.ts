@@ -8,52 +8,91 @@ import { WEB_FETCH_MAX_CHARS } from '../../shared/web-limits'
 import { CHALLENGE_SIGNATURES, challengeBlocked } from './web-tools'
 
 /**
- * Nomi di pulsanti/link che indicano INVIO o IMPEGNO (ask): lista in una
- * costante, test case-insensitive, IT ed EN (punto 2).
+ * Parole e frasi (IT ed EN) che indicano INVIO o IMPEGNO sul NOME o sul TESTO
+ * dell'elemento cliccato (ask), di QUALUNQUE ruolo: "Conferma prenotazione",
+ * "Submit order", "Paga ora", "place order", "Iscriviti"…
  */
-export const COMMIT_BUTTON_NAMES = [
-  'invia', 'conferma', 'prenota', 'acquista', 'paga', 'ordina', 'compra', 'iscriviti',
-  'registrati', 'elimina', 'cancella', 'pubblica',
-  'submit', 'send', 'confirm', 'book', 'buy', 'pay', 'order', 'checkout', 'sign up', 'delete', 'publish'
+export const COMMIT_WORDS = [
+  // IT
+  'invia', 'invio', 'inviare', 'conferma', 'confermo', 'confermare', 'prenota', 'prenoto',
+  'prenotare', 'acquista', 'acquisto', 'acquistare', 'paga', 'pago', 'pagare', 'ordina',
+  'ordino', 'compra', 'compro', 'iscriviti', 'registrati', 'elimina', 'cancella', 'pubblica',
+  'procedi al pagamento', 'paga ora', 'conferma ordine',
+  // EN
+  'submit', 'send', 'confirm', 'book', 'buy', 'pay', 'order', 'place order', 'checkout',
+  'sign up', 'subscribe', 'delete', 'publish'
 ] as const
 
 /**
- * Nomi dei campi in cui il bot NON scrive MAI credenziali o dati di pagamento
- * (deny): ruolo textbox con un nome che contiene una di queste (IT ed EN).
+ * Parole e frasi dei campi in cui il bot NON scrive MAI credenziali o dati di
+ * pagamento (deny), di QUALUNQUE ruolo in cui si scrive: password, carta,
+ * CVV, IBAN, "codice fiscale", "numero carta"… (IT ed EN).
  */
-export const CREDENTIAL_FIELD_NAMES = [
-  'password', 'passphrase', 'carta', 'card', 'cvv', 'cvc', 'iban',
-  'codice fiscale', 'fiscal code', 'pagamento', 'payment', 'pin'
+export const CREDENTIAL_FIELD_WORDS = [
+  'password', 'passphrase', 'carta', 'card', 'cvv', 'cvc', 'iban', 'pin',
+  'codice fiscale', 'fiscal code', 'card number', 'numero carta', 'security code',
+  'codice di sicurezza'
 ] as const
 
 /** I tool del browser che agiscono su un elemento tramite ref. */
 export const REF_TOOLS = new Set(['browser_click', 'browser_type', 'browser_select'])
 
-const matchesAny = (name: string, words: readonly string[]): boolean => {
-  const low = name.toLowerCase()
-  return words.some((w) => low.includes(w))
+/**
+ * Un ref valido (I5): ESATTAMENTE `[A-Za-z0-9]+` (i formati reali di Playwright
+ * MCP sono `e12`, `f5e44`). Qualunque altro valore — selettori CSS, `text=…`,
+ * spazi, parentesi — non è un ref e NON si ripulisce né si passa a MCP: una
+ * pagina ostile può mettere un attributo `e5` sul pulsante "Paga" e un ref
+ * `[e5]` verrebbe usato come selettore di attributo.
+ */
+export const VALID_REF_RE = /^[A-Za-z0-9]+$/
+
+/** Il deny quando il ref non è un ref dello snapshot (I5). */
+export const INVALID_REF_DENY_TEXT =
+  'Questo non è un ref dello snapshot: selettori, path e composizioni non si passano al browser. Usa solo i ref dello snapshot (es. e12).'
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Confronto per PAROLA INTERA, case-insensitive e Unicode (`\P{L}`): una voce
+ * della lista conta solo come parola o frase intera, mai come pezzo di un'altra
+ * parola ("Facebook" non contiene "book", "Shipping address" non contiene
+ * "pin", "La tua opinione" non contiene "pin").
+ */
+const matchesWholeWord = (text: string, words: readonly string[]): boolean => {
+  const low = text.toLowerCase()
+  return words.some((w) => {
+    const body = w.toLowerCase().split(/\s+/).map(escapeRe).join('\\s+')
+    return new RegExp(`(?<![\\p{L}\\p{N}])${body}(?![\\p{L}\\p{N}])`, 'u').test(low)
+  })
 }
 
-/** Ruolo e nome di un elemento dello snapshot (null se il ref non c'è). */
+/** Ruolo, nome e testo di un elemento dello snapshot (null se il ref non c'è). */
 export interface RefInfo {
   role: string
+  /** il nome accessibile, tra virgolette nella riga dello snapshot */
   name: string
+  /** il testo in linea dopo `:` sulla stessa riga, se c'è (es. `- generic [ref=e5] [cursor=pointer]: Paga ora`) */
+  text: string
 }
 
 /**
  * Il parser dei ref (PURO): cerca nell'ultimo snapshot la riga con
- * `[ref=<ref>]` e ne estrae ruolo e nome accessibile, nel formato di
- * Playwright MCP (`- button "Conferma" [ref=s3e12]`). Il campo `element` che
+ * `[ref=<ref>]` e ne estrae ruolo, nome accessibile e testo in linea dopo `:`,
+ * nel formato di Playwright MCP (`- button "Conferma" [ref=s3e12]`,
+ * `- generic [ref=e5] [cursor=pointer]: Paga ora`). Il campo `element` che
  * scrive il modello NON vale: la verità è lo snapshot che il daemon ha ricevuto.
  */
 export function refInfo(snapshot: string | null, ref: string): RefInfo | null {
   if (!snapshot || !ref) return null
   const token = ref.replace(/[^\w:-]/g, '') // il ref è opaco: niente regex injection
   if (!token) return null
-  const re = new RegExp(`^\\s*-\\s+(\\w+)(?:\\s+"([^"]*)")?[^\\n]*\\[ref=${token}(?:\\]|,|\\s)`, 'm')
+  const re = new RegExp(`^\\s*-\\s+(\\w+)(?:\\s+"([^"]*)")?[^\\n]*?\\[ref=${token}(?:\\]|,|\\s)([^\\n]*)`, 'm')
   const m = re.exec(snapshot)
   if (!m) return null
-  return { role: m[1]!.toLowerCase(), name: m[2] ?? '' }
+  // il testo in linea: il primo `:` DOPO il ref (quelli del nome sono tra virgolette)
+  const rest = m[3] ?? ''
+  const colon = rest.indexOf(':')
+  return { role: m[1]!.toLowerCase(), name: m[2] ?? '', text: colon >= 0 ? rest.slice(colon + 1).trim() : '' }
 }
 
 export type BrowserActionRisk =
@@ -66,24 +105,31 @@ export const CREDENTIAL_DENY_TEXT =
   'Non scrivo MAI password, dati di carta o credenziali in un sito: chiedi all\'utente di completare lui questo passaggio (puoi dirgli il campo esatto e la pagina).'
 
 /**
- * La classificazione PURA del rischio di un'azione del browser (punto 2).
- * `ref` è il ruolo+nome ricavato dall'ULTIMO snapshot (refInfo): ciò che il
- * modello dice dell'elemento non conta. Regole:
- * - ask: un ref NON presente nell'ultimo snapshot; browser_type con
- *   submit:true; un click su un pulsante/link il cui nome indica invio o
- *   impegno (COMMIT_BUTTON_NAMES, IT ed EN);
- * - deny: browser_type su un campo password o carta (ruolo textbox + nome
- *   CREDENTIAL_FIELD_NAMES) — il bot non scrive mai credenziali o pagamenti;
+ * La classificazione PURA del rischio di un'azione del browser (punto 2, I5 e
+ * I6). `ref` è ruolo+nome+testo ricavato dall'ULTIMO snapshot (refInfo): ciò
+ * che il modello dice dell'elemento non conta. Regole:
+ * - deny: un ref che NON è esattamente `^[A-Za-z0-9]+$` (I5: selettori e
+ *   composizioni non passano mai a MCP); browser_type su un campo di
+ *   credenziali o pagamento (QUALUNQUE ruolo, parola intera);
+ * - ask: un ref ben formato ma NON presente nell'ultimo snapshot;
+ *   browser_type con submit:true; un click su un elemento il cui nome o testo
+ *   indica invio/impegno (COMMIT_WORDS, qualunque ruolo); browser_press_key
+ *   con Enter/NumpadEnter (Invio può inviare il modulo);
  * - free: navigazione, lettura, click su link/pulsanti non di invio,
- *   digitazione in campi normali (es. ricerca).
+ *   digitazione in campi normali (es. ricerca), gli altri tasti.
  */
 export function browserActionRisk(
   tool: string,
   args: Record<string, unknown>,
   ref: RefInfo | null
 ): BrowserActionRisk {
-  if (REF_TOOLS.has(tool)) {
-    const askedRef = String(args.ref ?? '')
+  const askedRef = String(args.ref ?? '')
+  // I5: il ref degli strumenti che agiscono su un elemento (e il ref opzionale
+  // di browser_snapshot) deve essere ESATTAMENTE un ref dello snapshot
+  if (REF_TOOLS.has(tool) || (tool === 'browser_snapshot' && askedRef !== '')) {
+    if (!VALID_REF_RE.test(askedRef)) {
+      return { kind: 'deny', reason: INVALID_REF_DENY_TEXT }
+    }
     if (!ref) {
       return {
         kind: 'ask',
@@ -91,19 +137,26 @@ export function browserActionRisk(
       }
     }
   }
+  // le parole si cercano nel nome accessibile E nel testo in linea (I6)
+  const words = `${ref?.name ?? ''} ${ref?.text ?? ''}`.trim()
   if (tool === 'browser_type') {
-    if (ref && ref.role === 'textbox' && matchesAny(ref.name, CREDENTIAL_FIELD_NAMES)) {
+    if (ref && matchesWholeWord(words, CREDENTIAL_FIELD_WORDS)) {
       return { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
     }
     if (args.submit === true) {
-      return { kind: 'ask', reason: `browser_type con submit: true invia il modulo (campo "${ref?.name ?? '?'}")` }
+      return { kind: 'ask', reason: `browser_type con submit: true invia il modulo (campo "${ref?.name || ref?.text || '?'}")` }
     }
     return { kind: 'free' }
   }
-  if (tool === 'browser_click' && ref && (ref.role === 'button' || ref.role === 'link')) {
-    if (matchesAny(ref.name, COMMIT_BUTTON_NAMES)) {
-      return { kind: 'ask', reason: `click su "${ref.name}" (${ref.role}): un'azione che invia, compra o impegna` }
+  if (tool === 'browser_press_key') {
+    const key = String(args.key ?? '')
+    if (key === 'Enter' || key === 'NumpadEnter') {
+      return { kind: 'ask', reason: 'Invio può inviare il modulo (come browser_type con submit: true): se c\'è un modulo compilato, questo lo spedisce' }
     }
+    return { kind: 'free' }
+  }
+  if (tool === 'browser_click' && ref && matchesWholeWord(words, COMMIT_WORDS)) {
+    return { kind: 'ask', reason: `click su "${ref.name || ref.text}" (${ref.role}): un'azione che invia, compra o impegna` }
   }
   return { kind: 'free' }
 }
@@ -154,4 +207,45 @@ export function truncateSnapshot(text: string): { text: string; truncated: boole
 export function browserPageUrl(mcpResultText: string): string | null {
   const m = /(?:^|\n)\s*(?:-\s+)?Page URL:\s*(\S+)/i.exec(mcpResultText)
   return m ? m[1]! : null
+}
+
+// ---- il result composto delle azioni (I3) ----
+
+/**
+ * Le righe del result dell'azione che passano al modello: lo stato della
+ * pagina. MAI `### Ran Playwright code`, i link `.browser/output/…` né le
+ * righe `### Events` (rumore, e path del box che il modello non deve usare).
+ */
+const ACTION_KEEP_LINE = /^\s*-\s+(?:Page URL|Page Title|HTTP status):/
+
+/** Le sezioni del result dell'azione che passano: l'errore e lo stato modale. */
+const ACTION_KEEP_SECTION = /^\s*###\s*(?:Error|Modal state)\s*$/
+
+/**
+ * Il result che il modello vede dopo un'azione (PURO): le righe di pagina e le
+ * sezioni Error/Modal state del result dell'azione, più lo snapshot INLINE
+ * chiesto a parte dal daemon — le azioni di Playwright MCP 0.0.83 scrivono lo
+ * snapshot in un FILE e solo browser_snapshot lo restituisce inline, quindi
+ * senza questo montaggio il modello non vedrebbe mai la pagina.
+ */
+export function composeBrowserResult(actionText: string, snapshotText: string): string {
+  const kept: string[] = []
+  let inSection = false
+  for (const line of actionText.split('\n')) {
+    if (ACTION_KEEP_SECTION.test(line)) {
+      inSection = true
+      kept.push(line)
+      continue
+    }
+    if (/^\s*###/.test(line)) {
+      inSection = false // le altre sezioni (Ran code, Snapshot-link, Events) si buttano
+      continue
+    }
+    if (ACTION_KEEP_LINE.test(line)) {
+      kept.push(line)
+      continue
+    }
+    if (inSection) kept.push(line) // il corpo di ### Error / ### Modal state
+  }
+  return [kept.join('\n').trim(), snapshotText.trim()].filter(Boolean).join('\n')
 }

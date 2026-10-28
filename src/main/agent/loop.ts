@@ -1016,7 +1016,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               // snapshot) e testo da scrivere
               const url = browser.lastUrlOf(agentId) ?? '(nessuna pagina aperta)'
               const info = browser.refInfoOf(agentId, String(input.ref ?? ''))
-              const elem = info ? `${info.role} "${info.name}"` : `ref ${String(input.ref ?? '?')}`
+              // il nome accessibile, o il testo in linea quando manca (generic)
+              const elem = info ? `${info.role} "${info.name || info.text}"` : `ref ${String(input.ref ?? '?')}`
               const testo = call.name === 'browser_type' ? ` — testo: "${String(input.text ?? '').slice(0, 80)}"` : ''
               const approval: Approval = {
                 id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()

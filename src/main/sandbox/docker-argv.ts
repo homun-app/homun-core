@@ -396,18 +396,16 @@ export const BROWSERS_PER_BOX_MAX = 3
 /**
  * Il wrapper COSTANTE del server browser (punto 2): il pid va nel file della
  * home del bot (per uccidere gli orfani: se il daemon muore, il processo nel
- * container NON muore da solo), poi `exec playwright-mcp "$@"`. Con setsid il
- * pid scritto è anche il pgid: il kill di gruppo (G1) prende tutto l'albero.
+ * container NON muore da solo), poi `exec playwright-mcp "$@"`. NIENTE setsid
+ * (I2): il processo di docker exec è GIÀ leader di sessione e di gruppo, setsid
+ * in quel caso forka e il padre esce subito CHIUDENDO lo stdio del client MCP;
+ * il pid scritto è anche il pgid, quindi il kill di gruppo (G1) resta valido.
  */
 export const DOCKER_BROWSER_WRAPPER_SH = [
   'mkdir -p "$(dirname "$1")"',
-  'if command -v setsid >/dev/null 2>&1; then',
-  "  exec setsid sh -c 'echo $$ >\"$1\" && shift && exec playwright-mcp \"$@\"' sh \"$@\"",
-  'else',
-  '  echo $$ >"$1"',
-  '  shift',
-  '  exec playwright-mcp "$@"',
-  'fi'
+  'echo $$ >"$1"',
+  'shift',
+  'exec playwright-mcp "$@"'
 ].join('\n')
 
 /**
@@ -415,7 +413,9 @@ export const DOCKER_BROWSER_WRAPPER_SH = [
  * dei vietati. --no-sandbox perché il container hardened non concede gli user
  * namespace (il confine è il container); --no-webmcp perché una pagina ostile
  * non può offrire tool al modello; --proxy-server è il confine di rete del
- * browser (punto 3); il profilo è persistente PER BOT (come in Grok).
+ * browser (punto 3); il profilo è persistente PER BOT (come in Grok);
+ * --output-max-size è il tetto di spazio delle uscite del server nel box
+ * condiviso (snapshot .yml e log di console a ogni azione, I8).
  */
 export function browserMcpFlags(agentId: string, proxyPort: number): string[] {
   const home = boxHomePath(agentId)
@@ -424,6 +424,7 @@ export function browserMcpFlags(agentId: string, proxyPort: number): string[] {
     '--no-sandbox',
     '--user-data-dir', `${home}/.browser/profile`,
     '--output-dir', `${home}/.browser/output`,
+    '--output-max-size', '52428800',
     '--no-webmcp',
     '--block-service-workers',
     '--proxy-server', `http://host.docker.internal:${proxyPort}`,

@@ -469,9 +469,9 @@ vi.mock('../browser', async (importOriginal) => {
     lastUrlOf: () => 'https://spa.example/prenota',
     // la verità dei ref è lo snapshot (qui fisso, come l'ultimo ricevuto)
     refInfoOf: (_agentId: string, ref: string) =>
-      ref === 'e8' ? { role: 'button', name: 'Conferma prenotazione' }
-        : ref === 'e6' ? { role: 'textbox', name: 'Numero carta' }
-        : ref === 'e2' ? { role: 'link', name: 'Vedi il menu' }
+      ref === 'e8' ? { role: 'button', name: 'Conferma prenotazione', text: '' }
+        : ref === 'e6' ? { role: 'textbox', name: 'Numero carta', text: '' }
+        : ref === 'e2' ? { role: 'link', name: 'Vedi il menu', text: '' }
         : null,
     callBrowserTool: async (_agentId: string, tool: string, input: Record<string, unknown>) => {
       browserState.calls.push({ tool, input })
@@ -3659,13 +3659,43 @@ describe('fase 11b: il browser del bot nel loop', () => {
     expect(appr.content).toContain('Conferma prenotazione')
     const meta = appr.meta?.browser as { url: string; element: { role: string; name: string } }
     expect(meta.url).toBe('https://spa.example/prenota')
-    expect(meta.element).toEqual({ role: 'button', name: 'Conferma prenotazione' })
+    expect(meta.element).toEqual({ role: 'button', name: 'Conferma prenotazione', text: '' })
     resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
     await turn
     // NESSUNA azione con effetti eseguita
     expect(browserState.calls).toHaveLength(0)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
     expect(String(res.content)).toContain('annullata dall\'utente')
+  })
+
+  it('I5: click su un ref SELETTORE ([e2]) → DENY immediato, senza card né esecuzione', async () => {
+    browserState.available = true
+    h.llm.queue = [
+      { toolCalls: [{ id: 'b9', name: 'browser_click', arguments: JSON.stringify({ ref: '[e2]' }) }] },
+      { toolCalls: [{ id: 'b10', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'clicca', emit)
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
+    expect(browserState.calls).toHaveLength(0)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('Usa solo i ref dello snapshot (es. e12)')
+  })
+
+  it('I6: press_key Enter → CARD (Invio può inviare il modulo), anche senza aver scritto', async () => {
+    browserState.available = true
+    h.llm.queue = [
+      { toolCalls: [{ id: 'b11', name: 'browser_press_key', arguments: JSON.stringify({ key: 'Enter' }) }] },
+      { toolCalls: [{ id: 'b12', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    const turn = runTurn(AGENT, 'premi invio', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.content).toContain('Invio può inviare il modulo')
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
+    await turn
+    expect(browserState.calls).toHaveLength(0)
   })
 
   it('browser_type su "Numero carta" → DENY immediato, senza card né esecuzione', async () => {

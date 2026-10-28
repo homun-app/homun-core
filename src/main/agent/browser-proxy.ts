@@ -69,18 +69,31 @@ const denyConnect = (socket: net.Socket, reason: string): void => {
 }
 
 /**
- * Il server proxy (CONNECT per https, URI assoluta per http): ogni richiesta
+ * Le intestazioni hop-by-hop e del proxy che NON si inoltrano a monte (I9):
+ * `connection`, `keep-alive`, `te`, `trailer`, `upgrade` muoiono allo hop, e
+ * `proxy-connection`/`proxy-authorization` parlano col PROXY, non col server.
+ */
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection', 'keep-alive', 'proxy-connection', 'proxy-authorization', 'te', 'trailer', 'upgrade'
+])
+
+/**
+ * Il server proxy (CONNECT per https, http in forma d'ORIGINE): ogni richiesta
  * risolve l'host, decide con proxyDecision e si connette SOLO agli IP validati
  * (niente seconda risoluzione: anti-TOCTOU come la lookup di web_fetch).
+ * A monte vanno `pathname + search` della URL, non la URI assoluta della
+ * richiesta di proxy (i server severi rispondono 400 alla forma assoluta, I9).
  * Nessun log di URL completi con query string: solo host e porta.
  */
 export function createBrowserProxy(): http.Server {
   const server = http.createServer((req, res) => {
     void (async () => {
       let target: { host: string; port: number } | null = null
+      let originPath = ''
       try {
         const u = new URL(req.url ?? '')
         target = parseTarget(`${u.hostname.replace(/^\[|\]$/g, '')}:${u.port || (u.protocol === 'https:' ? '443' : '80')}`, 80)
+        originPath = u.pathname + u.search
       } catch {
         target = null
       }
@@ -102,9 +115,16 @@ export function createBrowserProxy(): http.Server {
         res.end(`${decision.reason}\r\n`)
         return
       }
+      // le intestazioni end-to-end passano, le hop-by-hop e le proxy-… no (I9)
+      const headers: Record<string, string> = {}
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (HOP_BY_HOP_HEADERS.has(k.toLowerCase())) continue
+        headers[k] = Array.isArray(v) ? v.join(', ') : String(v)
+      }
+      headers.host = req.headers.host ?? target.host
       // ci si connette all'IP VALIDATO (mai una seconda risoluzione non controllata)
       const upstream = http.request(
-        { host: ips[0], port: target.port, method: req.method, path: req.url, headers: { ...req.headers, host: req.headers.host ?? target.host } },
+        { host: ips[0], port: target.port, method: req.method, path: originPath, headers },
         (ur) => {
           res.writeHead(ur.statusCode ?? 502, ur.headers)
           ur.pipe(res)

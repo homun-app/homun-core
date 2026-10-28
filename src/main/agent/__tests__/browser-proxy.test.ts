@@ -52,6 +52,8 @@ let echo: net.Server
 let echoPort = 0
 let web: http.Server
 let webPort = 0
+// I9: cosa ha ricevuto il server a monte (path in forma d'origine e header)
+let seen: { url?: string; headers: http.IncomingHttpHeaders } = { headers: {} }
 
 beforeAll(async () => {
   // un server TCP che fa eco (per il tunnel CONNECT) e un server http (per la
@@ -61,6 +63,7 @@ beforeAll(async () => {
   echoPort = (echo.address() as net.AddressInfo).port
   web = http.createServer((req, res) => {
     if (req.url?.includes('segreta')) {
+      seen = { url: req.url, headers: req.headers }
       res.writeHead(200, { 'content-type': 'text/plain' })
       res.end('risposta-del-server-locale')
     } else {
@@ -79,11 +82,11 @@ afterAll(async () => {
 })
 
 /** Richiesta http attraverso il proxy (URI assoluta, come fa Chrome). */
-function proxyGet(url: string): Promise<{ status: number; body: string }> {
+function proxyGet(url: string, extraHeaders: Record<string, string> = {}): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const u = new URL(url)
     const req = http.request(
-      { host: '127.0.0.1', port: proxyPort, method: 'GET', path: url, headers: { host: u.host } },
+      { host: '127.0.0.1', port: proxyPort, method: 'GET', path: url, headers: { host: u.host, ...extraHeaders } },
       (res) => {
         let body = ''
         res.on('data', (d: Buffer) => { body += d.toString() })
@@ -139,6 +142,41 @@ describe('il server proxy (flag di test per il loopback)', () => {
       const r = await proxyGet(`http://127.0.0.1:${webPort}/?segreta=1`)
       expect(r.status).toBe(200)
       expect(r.body).toContain('risposta-del-server-locale')
+    } finally {
+      if (prev === undefined) delete process.env[LOOPBACK_FLAG]
+      else process.env[LOOPBACK_FLAG] = prev
+    }
+  })
+
+  it('I9: a monte va il path in FORMA D\'ORIGINE (pathname+search), non la URI assoluta', async () => {
+    const prev = process.env[LOOPBACK_FLAG]
+    process.env[LOOPBACK_FLAG] = '1'
+    try {
+      seen = { headers: {} }
+      const r = await proxyGet(`http://127.0.0.1:${webPort}/pagina?segreta=1&x=2`)
+      expect(r.status).toBe(200)
+      expect(seen.url).toBe('/pagina?segreta=1&x=2') // mai http://127.0.0.1:…/pagina?…
+    } finally {
+      if (prev === undefined) delete process.env[LOOPBACK_FLAG]
+      else process.env[LOOPBACK_FLAG] = prev
+    }
+  })
+
+  it('I9: le intestazioni hop-by-hop e del proxy NON arrivano al server', async () => {
+    const prev = process.env[LOOPBACK_FLAG]
+    process.env[LOOPBACK_FLAG] = '1'
+    try {
+      seen = { headers: {} }
+      const r = await proxyGet(`http://127.0.0.1:${webPort}/?segreta=1`, {
+        'proxy-authorization': 'Basic dXNlcjpwYXNz',
+        'proxy-connection': 'keep-alive',
+        connection: 'keep-alive'
+      })
+      expect(r.status).toBe(200)
+      expect(seen.headers['proxy-authorization']).toBeUndefined()
+      expect(seen.headers['proxy-connection']).toBeUndefined()
+      // gli header end-to-end passano
+      expect(seen.headers.host).toBe(`127.0.0.1:${webPort}`)
     } finally {
       if (prev === undefined) delete process.env[LOOPBACK_FLAG]
       else process.env[LOOPBACK_FLAG] = prev

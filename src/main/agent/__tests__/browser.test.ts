@@ -1,7 +1,11 @@
-// Test del MANAGER del browser (fase 11b, punto 2) con il server MCP FINTO
-// (scripts/fake-browser-mcp.mjs, flag SANDBOT_TEST_FAKE_BROWSER_MCP): avvio
-// lazy, snapshot/URL di stato, troncamento, sfida, tetto delle 3 istanze per
-// box e il formatter del blocco evidenza. Nessun Docker, nessuna rete reale.
+// Test del MANAGER del browser (fase 11b, punto 2 + I3/I4) con il server MCP
+// FINTO FEDELE al vero (scripts/fake-browser-mcp.mjs, flag
+// SANDBOT_TEST_FAKE_BROWSER_MCP): le azioni restituiscono il LINK al file
+// dello snapshot e il daemon lo chiede a parte, quindi il result al modello è
+// il COMPOSTO. Avvio lazy, snapshot/URL di stato, troncamento, sfida, tetto
+// delle 3 istanze per box, la sessione che MUORE e si ricrea (flag
+// SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL del finto) e il formatter del
+// blocco evidenza. Nessun Docker, nessuna rete reale.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -15,7 +19,7 @@ setDataDir(TMP)
 process.env.SANDBOT_TEST_FAKE_BROWSER_MCP = resolve('scripts/fake-browser-mcp.mjs')
 
 const {
-  browserAvailable, callBrowserTool, resetBrowserForTests, lastSnapshotOf, lastUrlOf,
+  browserAvailable, callBrowserTool, closeBrowser, resetBrowserForTests, lastSnapshotOf, lastUrlOf,
   refInfoOf, BROWSER_UNAVAILABLE, browserToolDefs
 } = await import('../browser')
 import { formatWebBrowserEvidence, WEB_EVIDENCE_RULE } from '../../../shared/agent-message'
@@ -29,6 +33,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await resetBrowserForTests()
   delete process.env.SANDBOT_TEST_FAKE_BROWSER_MCP
+  delete process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL
   rmSync(TMP, { recursive: true, force: true })
 })
 
@@ -43,14 +48,19 @@ describe('il browser col MCP finto (avvio lazy, stato, tetti)', () => {
     expect(names.some((n) => n.includes('evaluate') || n.includes('fill_form') || n.includes('upload'))).toBe(false)
   })
 
-  it('browser_open: snapshot ricevuto, URL di stato aggiornata, refInfo vede gli elementi', async () => {
+  it('I3: browser_open → il COMPOSTO (righe di pagina + snapshot inline), MAI codice né link al file', async () => {
     const r = await callBrowserTool(AGENT, 'browser_open', { url: 'https://spa.example/offerte' })
     expect(r.meta.browserPage).toBe(true)
     expect(r.meta.url).toBe('https://spa.example/offerte')
+    expect(r.output).toContain('- Page URL: https://spa.example/offerte')
+    expect(r.output).toContain('- Page Title: Offerte del weekend')
     expect(r.output).toContain('Offerte del weekend')
     expect(r.output).toContain('[ref=e2]')
+    // il formato del server vero (azioni col link al file) NON passa al modello
+    expect(r.output).not.toContain('### Ran Playwright code')
+    expect(r.output).not.toContain('.browser/output')
     // lo snapshot di stato è la verità per i ref
-    expect(refInfoOf(AGENT, 'e2')).toEqual({ role: 'link', name: 'Vedi il menu' })
+    expect(refInfoOf(AGENT, 'e2')).toEqual({ role: 'link', name: 'Vedi il menu', text: '' })
     expect(refInfoOf(AGENT, 'e99')).toBeNull()
     expect(lastUrlOf(AGENT)).toBe('https://spa.example/offerte')
   })
@@ -64,11 +74,21 @@ describe('il browser col MCP finto (avvio lazy, stato, tetti)', () => {
     expect(cred.output).toContain('credenziali')
   })
 
-  it('il click che naviga aggiorna URL e snapshot (Page URL dal result MCP)', async () => {
+  it('I3: il click che naviga aggiorna URL e snapshot (chiesto A PARTE, Page URL dal result)', async () => {
     const r = await callBrowserTool(AGENT, 'browser_click', { ref: 'e2' })
     expect(r.meta.url).toBe('https://spa.example/menu')
     expect(r.output).toContain('Menu del weekend')
-    expect(refInfoOf(AGENT, 'e1')).toEqual({ role: 'heading', name: 'Menu del weekend' })
+    expect(r.output).toContain('- Page URL: https://spa.example/menu')
+    expect(r.output).not.toContain('### Ran Playwright code')
+    expect(refInfoOf(AGENT, 'e1')).toEqual({ role: 'heading', name: 'Menu del weekend', text: '' })
+  })
+
+  it('I3: press_key e wait sono azioni COMPOSTE anche loro (snapshot dopo l\'azione)', async () => {
+    const k = await callBrowserTool(AGENT, 'browser_press_key', { key: 'Enter' })
+    expect(k.output).toContain('- Page URL: https://spa.example/menu')
+    expect(k.output).toContain('Menu del weekend')
+    const w = await callBrowserTool(AGENT, 'browser_wait', { seconds: 1 })
+    expect(w.output).toContain('Menu del weekend')
   })
 
   it('lo snapshot lungo si tronca a 20k con la nota (funzione pura)', () => {
@@ -86,6 +106,9 @@ describe('il browser col MCP finto (avvio lazy, stato, tetti)', () => {
     // chi ha già l'istanza continua a lavorare
     const r = await callBrowserTool('agent_b2', 'browser_snapshot', {})
     expect(r.meta.browserPage).toBe(true)
+    // si liberano i posti per i test che seguono (le sessioni restano finché idle)
+    await closeBrowser('agent_b1')
+    await closeBrowser('agent_b2')
   })
 
   it('browser_screenshot: file nel box col path nel result (nessun contenuto di pagina in contesto)', async () => {
@@ -102,11 +125,51 @@ describe('il browser col MCP finto (avvio lazy, stato, tetti)', () => {
   })
 
   it("l'istanza si CHIUDE e la successiva chiamata la riapre (lazy)", async () => {
-    const { closeBrowser } = await import('../browser')
     await closeBrowser(AGENT)
     expect(lastSnapshotOf(AGENT)).toBeNull()
     const r = await callBrowserTool(AGENT, 'browser_snapshot', {})
     expect(r.output).toContain('(nessuna pagina aperta)') // Stato nuovo: nessuna pagina
+  })
+
+  it('I4: la sessione MUORE durante la chiamata → via la sessione, browser_open RIPROVA una volta e riesce', async () => {
+    // il finto muore ALLA PRIMA chiamata senza rispondere (flag suo, consumato
+    // dal daemon alla prima partenza): il trasporto chiuso rigetta Connection
+    // closed, la sessione si ricrea e l'APERTURA si ripete sicura
+    process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL = '1'
+    try {
+      const r = await callBrowserTool('agent_i4a', 'browser_open', { url: 'https://spa.example/offerte' })
+      expect(r.meta.browserPage).toBe(true)
+      expect(r.output).toContain('- Page URL: https://spa.example/offerte')
+      expect(r.output).toContain('Offerte del weekend')
+      // la sessione ricreata è VIVA: le chiamate dopo rispondono
+      const s = await callBrowserTool('agent_i4a', 'browser_snapshot', {})
+      expect(s.output).toContain('Offerte del weekend')
+    } finally {
+      delete process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL
+      await closeBrowser('agent_i4a').catch(() => undefined)
+    }
+  })
+
+  it('I4: azione NON browser_open con sessione morta → NON si ripete alla cieca, dice di RIAPRIRE la pagina', async () => {
+    // morte alla QUARTA chiamata: apertura (2 chiamate) a posto, il click muore
+    // sul suo snapshot — un click ripetuto su un browser nuovo agirebbe su una
+    // pagina diversa, quindi il result manda alla RIAPERTURA
+    process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL = '4'
+    try {
+      const open = await callBrowserTool('agent_i4b', 'browser_open', { url: 'https://spa.example/offerte' })
+      expect(open.output).toContain('Offerte del weekend')
+      const click = await callBrowserTool('agent_i4b', 'browser_click', { ref: 'e2' })
+      expect(click.meta.browserError).toBe(true)
+      expect(click.meta.browserRestarted).toBe(true)
+      expect(click.output).toContain('Errore del browser')
+      expect(click.output).toContain('riapri la pagina con browser_open')
+      // e la riapertura su una sessione NUOVA funziona
+      const again = await callBrowserTool('agent_i4b', 'browser_open', { url: 'https://spa.example/menu' })
+      expect(again.output).toContain('Menu del weekend')
+    } finally {
+      delete process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL
+      await closeBrowser('agent_i4b').catch(() => undefined)
+    }
   })
 })
 

@@ -118,15 +118,30 @@ export function resolveRedirect(from: URL, location: string): URL {
 export const JS_PAGE_HINT = 'La pagina sembra costruita in JavaScript: se ti serve, aprila con browser_open.'
 
 /**
- * Una pagina HTML letta da web_fetch sembra costruita in JavaScript (puro)?
- * Dopo l'estrazione resta pochissimo testo e ci sono molti `<script>`: è il
- * segnale che serve il BROWSER, non la fetch. Con un blocco o un captcha il
- * chiamante non aggiunge NESSUN suggerimento (il browser non aggira i blocchi).
+ * Una pagina HTML letta da web_fetch sembra costruita in JavaScript (puro,
+ * I7)? Il testo estratto resta sotto i 500 caratteri, c'è almeno uno
+ * `<script>`, e vale almeno una di queste: i byte dentro gli script inline più
+ * il numero di script esterni × 1000 superano il doppio del testo (le SPA
+ * vere spesso hanno UN SOLO bundle: basta lui); c'è un `<noscript>`; c'è un
+ * contenitore di mount VUOTO (`<div id="root|app|__next|__nuxt">` senza
+ * testo). Con un blocco o un captcha il chiamante non aggiunge NESSUN
+ * suggerimento (il browser non aggira i blocchi).
  */
 export function looksJsBuiltPage(rawHtml: string, extractedText: string): boolean {
-  const scripts = (rawHtml.match(/<script\b/gi) ?? []).length
   const textLen = extractedText.replace(/\s+/g, ' ').trim().length
-  return scripts >= 4 && textLen < 500
+  if (textLen >= 500) return false
+  const scripts = rawHtml.match(/<script\b[^>]*>[\s\S]*?<\/script\s*>|<script\b[^>]*\/>/gi) ?? []
+  if (!scripts.length) return false
+  if (/<noscript\b/i.test(rawHtml)) return true
+  if (/<div\b[^>]*\bid\s*=\s*["'](?:root|app|__next|__nuxt)["'][^>]*>\s*<\/div\s*>/i.test(rawHtml)) return true
+  let inlineBytes = 0
+  let external = 0
+  for (const s of scripts) {
+    const open = /^<script\b[^>]*>/i.exec(s)?.[0] ?? ''
+    if (/\ssrc\s*=/i.test(open)) external++
+    else inlineBytes += Math.max(0, s.length - open.length - 9) // 9 = '</script>'
+  }
+  return inlineBytes + external * 1000 > 2 * textLen
 }
 
 // ---- troncamento con offset (il modello vede al più 20.000 caratteri) ----
