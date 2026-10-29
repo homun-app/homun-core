@@ -56,8 +56,12 @@ export function buildMcpAuthResolver(deps: AuthResolverDeps): McpAuthResolver {
   /**
    * M2: il provider OAuth dei server NON del catalogo (registro, url, plugin):
    * token sotto cfg.id, redirect di riserva del trasporto, CIMD
-   * dall'impostazione. Usato sia dal ramo plugin (server http OAuth senza
-   * header, es. linear) sia dal ramo registro/url.
+   * dall'impostazione. Fase 14 (punto 0a): SILENZIOSO — non registra client
+   * (registration 'existing-only'): senza client salvato la connessione
+   * rifiuta PRIMA della DCR e il server va in needs_auth (bottone
+   * Connetti/Riconnetti); il client lo registra solo il flusso interattivo,
+   * col redirect del suo callback. Usato sia dal ramo plugin (server http
+   * OAuth senza header, es. linear) sia dal ramo registro/url.
    */
   const nonCatalogOAuthProvider = (cfg: McpServerConfig) => {
     const cimd = deps.getSetting<string>('connectors.oauth.clientMetadataUrl', '')
@@ -66,6 +70,7 @@ export function buildMcpAuthResolver(deps: AuthResolverDeps): McpAuthResolver {
       redirectUrl: 'http://127.0.0.1:9/callback',
       openExternal: silentOpen,
       store: deps.store,
+      registration: 'existing-only',
       ...(cimd ? { clientMetadataUrl: cimd } : {})
     })
   }
@@ -98,6 +103,9 @@ export function buildMcpAuthResolver(deps: AuthResolverDeps): McpAuthResolver {
             scope: entry.scopes?.join(' '),
             openExternal: silentOpen,
             store: deps.store,
+            // fase 14 (0a): anche il catalogo, connesso fuori dal flusso
+            // interattivo, non registra client — stessa difesa del non-catalogo
+            registration: 'existing-only',
             ...(entry.clientRegistration === 'static'
               ? {
                   staticClient: async () => (await deps.store.read<{ client_id: string; client_secret?: string }>(entry.id, 'staticClient')) ?? null,

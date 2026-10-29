@@ -19,6 +19,7 @@
 // state) così i test girano contro un authorization server finto in memoria.
 import { randomBytes } from 'node:crypto'
 import { auth } from '@modelcontextprotocol/sdk/client/auth.js'
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { OAuthClientProvider, OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js'
 import type {
   OAuthClientMetadata,
@@ -33,6 +34,14 @@ export interface StaticClientCredentials {
   client_id: string
   client_secret?: string
 }
+
+/**
+ * Fase 14 (punto 0a): l'errore del provider SILENZIOSO senza client salvato.
+ * UnauthorizedError → chi connette (ensure di mcp/index) segna il server
+ * needs_auth, col bottone Connetti/Riconnetti dell'utente.
+ */
+export const SILENT_NO_CLIENT_MSG =
+  'nessun client OAuth salvato per questo server e la connessione silenziosa non ne registra: connetti il server col bottone Connetti/Riconnetti (il flusso interattivo registra e salva il client)'
 
 export interface OAuthProviderDeps {
   /** Server MCP a cui i segreti appartengono (chiave dello store cifrato). */
@@ -52,6 +61,18 @@ export interface OAuthProviderDeps {
   stateFactory?(): string
   /** Fase 13 (punto 6): URL del Client ID Metadata Document ospitato dall'utente (CIMD). */
   clientMetadataUrl?: string
+  /**
+   * Fase 14 (punto 0a): 'all' (default) — il provider registra client (DCR) e
+   * li salva; 'existing-only' — il provider del trasporto SILENZIOSO (connessione
+   * fuori dal flusso interattivo: mcp:test, inizio turno, toolsOfServer):
+   * NIENTE registrazione. Senza client salvato, clientInformation() throwa
+   * UnauthorizedError PRIMA della DCR (l'endpoint /register non viene mai
+   * chiamato) e la connessione rifiuta: il server finisce in needs_auth come
+   * per un token scaduto, con il bottone Connetti/Riconnetti dell'utente.
+   * Con clientMetadataUrl (CIMD) il comportamento è invariato: l'URL-based
+   * client id non ha bisogno di registrazione.
+   */
+  registration?: 'all' | 'existing-only'
 }
 
 /**
@@ -108,12 +129,28 @@ export function createOAuthProvider(
           redirect_uris: [deps.redirectUrl]
         }
       }
-      return (await deps.store.read<OAuthClientInformationMixed>(deps.serverId, fields.clientInformation)) ?? undefined
+      const stored = (await deps.store.read<OAuthClientInformationMixed>(deps.serverId, fields.clientInformation)) ?? undefined
+      // fase 14 (0a): il provider SILENZIOSO non registra client. Senza uno
+      // salvato, l'UnauthorizedError fa rifiutare la connessione PRIMA della
+      // DCR (l'endpoint /register non si tocca mai) e il server va in
+      // needs_auth. Con CIMD si prosegue normale: l'URL-based client id non
+      // ha bisogno né di client salvato né di registrazione.
+      if (!stored && deps.registration === 'existing-only' && !deps.clientMetadataUrl) {
+        throw new UnauthorizedError(SILENT_NO_CLIENT_MSG)
+      }
+      return stored
     },
 
-    async saveClientInformation(clientInformation: OAuthClientInformationMixed): Promise<void> {
-      await deps.store.write(deps.serverId, fields.clientInformation, clientInformation)
-    },
+    // fase 14 (0a): 'existing-only' NON espone saveClientInformation — senza
+    // un client salvato l'SDK throwa prima di chiamare /register (rete di
+    // sicurezza per qualunque percorso che leggesse il client altrove)
+    ...(deps.registration === 'existing-only'
+      ? {}
+      : {
+          async saveClientInformation(clientInformation: OAuthClientInformationMixed): Promise<void> {
+            await deps.store.write(deps.serverId, fields.clientInformation, clientInformation)
+          }
+        }),
 
     async tokens(): Promise<OAuthTokens | undefined> {
       return (await deps.store.read<OAuthTokens>(deps.serverId, fields.tokens)) ?? undefined
@@ -185,6 +222,18 @@ export async function authorizeWithLoopback(
   const cb = await startCallbackServer({ expectedState: state, ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}) })
   try {
     const provider = providerFor(cb.url, () => state)
+    // fase 14 (punto 0a): un client salvato che NON contiene il redirect di
+    // QUESTO flusso fra i suoi redirect_uris non serve (p.es. registrato dal
+    // trasporto silenzioso con http://127.0.0.1:9/callback, o da un flusso
+    // precedente su un'altra porta): un authorization server che non accetta
+    // ogni porta di loopback (RFC 8252 §7.3 lo chiede, molti non lo fanno)
+    // rifiuterebbe la richiesta. Si BUTTA prima di auth(): l'SDK registra di
+    // nuovo col redirect del callback di questo flusso.
+    const savedInfo = await Promise.resolve(provider.clientInformation()).catch(() => undefined)
+    const savedRedirects = (savedInfo as { redirect_uris?: string[] } | undefined)?.redirect_uris
+    if (savedInfo && !(savedRedirects ?? []).includes(cb.url)) {
+      await provider.invalidateCredentials?.('client')
+    }
     let result = await auth(provider, { serverUrl })
     if (result === 'REDIRECT') {
       const { code, iss } = await cb.waitForCode()
