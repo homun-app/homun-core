@@ -530,11 +530,13 @@ export function buildApiMethods(
             setSetting: store.setSetting
           })
           if (sec.bearerToken) {
-            await sealed.write(cfg.id, 'bearer', sec.bearerToken)
+            const { SECRET_KIND } = await import('../main/connectors/install')
+            await sealed.write(cfg.id, SECRET_KIND.bearer, sec.bearerToken)
             cfg.auth = { kind: 'bearer' }
             x.saveServers(x.listServers())
           } else if (sec.headers) {
-            await sealed.write(cfg.id, 'staticHeaders', sec.headers)
+            const { SECRET_KIND } = await import('../main/connectors/install')
+            await sealed.write(cfg.id, SECRET_KIND.headers, sec.headers)
             cfg.auth = { kind: 'headers' }
             x.saveServers(x.listServers())
           }
@@ -592,7 +594,10 @@ export function buildApiMethods(
       const mcpMod = await mcp()
       const { installedPlugins } = await import('../main/connectors/install')
       const { getSetting } = store
+      const states = getSetting<Record<string, { status?: string }>>('connectors.state', {})
       const servers = mcpMod.listServers().filter((s) => s.source || s.needsAuth)
+        // L1: needsReauth dice alla scheda Installati quando mostrare "Riconnetti"
+        .map((s) => ({ ...s, needsReauth: s.auth?.kind === 'oauth' && !s.catalogId && states[s.id]?.status === 'needs_auth' }))
       // punto 4: "nuova versione disponibile" se lo sha del marketplace è
       // cambiato rispetto a quello installato (aggiornare = nuova card)
       const plugins = installedPlugins({ getSetting }).map((p) => ({ ...p, updateAvailable: false }))
@@ -616,12 +621,18 @@ export function buildApiMethods(
       const entry = store.getEntries(aid).find((e) => e.id === (entryId as number))
       const message = entry?.meta?.message as SendMessagePayload | undefined
       if (!entry || entry.kind !== 'send-message' || message?.type !== 'mcp-server') throw new Error('Proposta di server non trovata')
-      if (entry.meta?.status === 'installed' || entry.meta?.status === 'declined') throw new Error('Proposta già gestita')
+      const status = entry.meta?.status as string | undefined
+      // L8: lo stato 'installing' si segna PRIMA di iniziare — due click ravvicinati
+      // non installano due volte
+      if (status === 'installed' || status === 'declined') throw new Error('Proposta già gestita')
+      if (status === 'installing') throw new Error('installazione in corso')
       if (decision !== 'add') {
         store.updateEntryMeta(entry.id, { ...entry.meta, status: 'declined' })
         emitUpdatedEntry(aid, entry.id)
         return { ok: true, installed: false }
       }
+      store.updateEntryMeta(entry.id, { ...entry.meta, status: 'installing' })
+      emitUpdatedEntry(aid, entry.id)
       const { installMcpServer } = await import('../main/connectors/install')
       const r = await installMcpServer(message, aid, (await installBridge()).getInstallDeps())
       store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
@@ -637,12 +648,20 @@ export function buildApiMethods(
       const entry = store.getEntries(aid).find((e) => e.id === (entryId as number))
       const message = entry?.meta?.message as SendMessagePayload | undefined
       if (!entry || entry.kind !== 'send-message' || message?.type !== 'plugin') throw new Error('Proposta di plugin non trovata')
-      if (entry.meta?.status === 'installed' || entry.meta?.status === 'declined') throw new Error('Proposta già gestita')
+      const status = entry.meta?.status as string | undefined
+      // L8: come la card del server — 'installing' prima di iniziare
+      if (status === 'installed' || status === 'declined') throw new Error('Proposta già gestita')
+      if (status === 'installing') throw new Error('installazione in corso')
       if (decision !== 'install') {
+        // L7: il "No" cancella lo staging che la card teneva in attesa
+        const { discardPluginProposal } = await import('../main/connectors/install')
+        discardPluginProposal(String(message.id))
         store.updateEntryMeta(entry.id, { ...entry.meta, status: 'declined' })
         emitUpdatedEntry(aid, entry.id)
         return { ok: true, installed: false }
       }
+      store.updateEntryMeta(entry.id, { ...entry.meta, status: 'installing' })
+      emitUpdatedEntry(aid, entry.id)
       const { installPlugin } = await import('../main/connectors/install')
       const r = await installPlugin(message, aid, (await installBridge()).getInstallDeps(), store.setSetting, store.getSetting)
       store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
@@ -655,16 +674,21 @@ export function buildApiMethods(
     /** Valori di chiavi/header/variabili/userConfig di un server: SOLO nello store cifrato. */
     'connectors:save-server-values': async ([serverId, kind, values]) => {
       const { getInstallDeps } = await import('../main/connectors/install-bridge')
+      const { SECRET_KIND } = await import('../main/connectors/install')
       const deps = getInstallDeps()
       const v = (values ?? {}) as Record<string, string>
-      if (kind === 'bearer') await deps.store.write(String(serverId), 'bearer', v.token ?? '')
-      else await deps.store.write(String(serverId), String(kind), v)
+      // L1: la UI passa uno dei kind di SECRET_KIND; un kind sconosciuto si rifiuta
+      const kindStr = String(kind) as keyof typeof SECRET_KIND
+      if (!(kindStr in SECRET_KIND)) throw new Error(`tipo di valore non valido: ${String(kind)}`)
+      const storeKey = SECRET_KIND[kindStr]
+      if (kindStr === 'bearer') await deps.store.write(String(serverId), storeKey, v.token ?? '')
+      else await deps.store.write(String(serverId), storeKey, v)
       // needsAuth si pulisce solo quando TUTTE le chiavi attese sono arrivate
       const mcpMod = await mcp()
       const servers = mcpMod.listServers()
       const cfg = servers.find((x) => x.id === serverId)
       if (cfg?.needsAuth) {
-        const saved = (await deps.store.read<Record<string, string>>(String(serverId), String(kind))) ?? {}
+        const saved = (await deps.store.read<Record<string, string>>(String(serverId), storeKey)) ?? {}
         if (cfg.needsAuth.keys.every((k) => saved[k])) {
           cfg.needsAuth = undefined
           mcpMod.saveServers(servers)
@@ -696,9 +720,20 @@ export function buildApiMethods(
     /** Disinstallazione di un server del registro/plugin/gateway (solo dalle Impostazioni). */
     'connectors:uninstall-server': async ([id]) => {
       const mcpMod = await mcp()
+      const { getInstallDeps } = await import('../main/connectors/install-bridge')
+      // L2: i segreti seguono il server (store cifrato) e il client vivo si chiude
+      await getInstallDeps().store.removeAll(String(id)).catch(() => undefined)
+      mcpMod.disconnectServer(String(id))
       mcpMod.saveServers(mcpMod.listServers().filter((s) => s.id !== id))
       emit({ type: 'connectors' })
       return { ok: true }
+    },
+    /** L1: la card "Riconnetti" della scheda Installati rifà l'OAuth del server scaduto. */
+    'connectors:reconnect-server': async ([id]) => {
+      const { reconnectServer } = await import('../main/connectors/install')
+      const r = await reconnectServer(String(id), (await installBridge()).getInstallDeps(), store.getSetting, store.setSetting)
+      emit({ type: 'connectors' })
+      return r
     },
     /** Disinstallazione di un plugin: cartelle (Mac e box), server, skill. */
     'plugins:uninstall': async ([name, marketplace]) => {

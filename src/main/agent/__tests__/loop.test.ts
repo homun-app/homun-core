@@ -4520,7 +4520,7 @@ describe('fase 13: add_mcp_server / install_plugin / find_tools / result MCP', (
     const card = h.db.entries.find((e) => e.kind === 'send-message')
     expect(card).toBeTruthy()
     expect(card?.meta?.message).toMatchObject({
-      type: 'mcp-server', id: 'registry:com.notion/mcp', name: 'mcp',
+      type: 'mcp-server', id: 'registry:com.notion/mcp', name: 'com.notion/mcp',
       trust: 'dominio verificato (notion.com)', runtime: { kind: 'remote', host: 'mcp.notion.com' }
     })
     expect(card?.meta?.status).toBe('pending')

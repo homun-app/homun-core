@@ -389,13 +389,24 @@ export function dockerBuildArgv(tag: string, dockerfilePath: string, contextDir:
  * `npx -y <identifier>@<version>` con la versione FISSATA a quella del
  * registro; le variabili d'ambiente passano come `-e NOME` col SOLO nome: il
  * valore viaggia nell'ambiente del processo figlio del client docker, MAI in
- * argv (regola dei segreti).
+ * argv (regola dei segreti). L'aggiunta di fase 13 correzioni: anche
+ * `-e HOME=<home del bot>` come execDocker — il valore non è un segreto e
+ * senza HOME la cache di npx finisce nella home di sistema dell'utente 1000.
  */
-export function dockerStdioMcpArgv(opts: { workdir: string; command: string; args?: string[]; envKeys?: string[] }): string[] {
-  const argv = ['exec', '-i', '-u', CONTAINER_USER, '-w', opts.workdir]
+export function dockerStdioMcpArgv(opts: { workdir: string; command: string; args?: string[]; envKeys?: string[]; home?: string }): string[] {
+  const argv = ['exec', '-i', '-u', CONTAINER_USER, '-w', opts.workdir, '-e', `HOME=${opts.home ?? opts.workdir}`]
   for (const key of opts.envKeys ?? []) argv.push('-e', key)
   argv.push(BOX_CONTAINER, opts.command, ...(opts.args ?? []))
   return argv
+}
+
+/**
+ * Fase 13 (correzione L5): crea la cartella PADRE della copia del plugin nel
+ * box prima del docker cp (docker cp NON crea le cartelle intermedie e
+ * l'errore "Could not find the file" si ignorava).
+ */
+export function dockerMkdirArgv(container: string, path: string): string[] {
+  return ['exec', container, 'mkdir', '-p', '--', path]
 }
 
 /**

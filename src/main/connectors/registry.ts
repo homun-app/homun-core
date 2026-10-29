@@ -118,11 +118,14 @@ export function clearRegistryCache(): void {
 }
 
 /**
- * Cerca nel registro (rete, host fisso): parsed entries oppure null se
- * irraggiungibile/malformato — il chiamante risponde comunque con le altre
- * fonti e una riga "registro pubblico non raggiungibile". Cache 10 minuti
- * per query; il timeout è quello della webFetch (8 s qui, non i minuti del
- * browser).
+ * Cerca nel registro (rete, host fisso): le voci trovate (anche ZERO: il
+ * registro che risponde con `{servers:[]}` non è "giù"), oppure null per
+ * errore di rete o risposta non JSON — il chiamante risponde comunque con le
+ * altre fonti e una riga "registro pubblico non raggiungibile". L8: null NON
+ * si mette in cache (prima un errore faceva credere "giù" alla prima chiamata
+ * e "zero risultati" alla seconda); i risultati validi restano in cache 10
+ * minuti per query; il timeout è quello della webFetch (8 s qui, non i
+ * minuti del browser).
  */
 export async function fetchRegistryEntries(
   query: string,
@@ -137,14 +140,12 @@ export async function fetchRegistryEntries(
   let entries: RegistryEntry[] | null = null
   try {
     const outcome = await fetchOutcome(registrySearchUrl(query, limit))
-    if (outcome.ok) {
-      const parsed = parseRegistryResponse(JSON.parse(outcome.text))
-      if (parsed.length) entries = parsed
-    }
+    if (outcome.ok) entries = parseRegistryResponse(JSON.parse(outcome.text))
   } catch {
     entries = null // risposta non JSON o rete giù: riga di registro irraggiungibile
   }
-  queryCache.set(key, { at: now(), entries: entries ?? [] })
+  if (entries === null) return null // errore: niente cache, alla prossima si riprova
+  queryCache.set(key, { at: now(), entries })
   return entries
 }
 
@@ -165,7 +166,7 @@ export async function findRegistryEntry(
 export type RegistryRuntime =
   | { kind: 'remote'; url: string; secretHeader?: string }
   | { kind: 'box-npm'; identifier: string; version: string }
-  | { kind: 'not-installable'; registryType: string }
+  | { kind: 'not-installable'; registryType: string; reason?: string }
 
 /** Hook di test della verifica d'integrazione: remoto http locale (in produzione SOLO https). */
 const remoteUrlOk = (u: string): boolean =>
@@ -175,7 +176,9 @@ const remoteUrlOk = (u: string): boolean =>
  * La modalità di esecuzione di una voce del registro (pura): i `remotes`
  * vincono sui `packages` (il server ufficiale espone entrambi); un remote con
  * header `isSecret` richiede una chiave; un pacchetto npm stdio gira NEL BOX
- * (docker exec); pypi/oci/altro non si installano in questa fase.
+ * (docker exec) con la versione FISSATA a quella dichiarata — un pacchetto
+ * senza `version` NON si installa (con "latest" il codice girato cambierebbe
+ * in silenzio); pypi/oci/altro non si installano in questa fase.
  */
 export function registryRuntime(e: RegistryEntry): RegistryRuntime | null {
   const remote = (e.server.remotes ?? []).find((r) => typeof r.url === 'string' && remoteUrlOk(r.url))
@@ -184,7 +187,10 @@ export function registryRuntime(e: RegistryEntry): RegistryRuntime | null {
     return { kind: 'remote', url: remote.url!, ...(secret ? { secretHeader: secret.name! } : {}) }
   }
   const pkg = (e.server.packages ?? []).find((p) => p.transport?.type === 'stdio' && p.registryType === 'npm' && p.identifier)
-  if (pkg) return { kind: 'box-npm', identifier: pkg.identifier!, version: pkg.version ?? 'latest' }
+  if (pkg) {
+    if (!pkg.version) return { kind: 'not-installable', registryType: 'npm', reason: 'versione non dichiarata' }
+    return { kind: 'box-npm', identifier: pkg.identifier!, version: pkg.version }
+  }
   const other = (e.server.packages ?? [])[0]
   if (other?.registryType) return { kind: 'not-installable', registryType: other.registryType }
   return null

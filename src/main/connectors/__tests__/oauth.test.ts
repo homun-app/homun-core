@@ -35,6 +35,12 @@ interface FakeAs {
   rejectRefresh: boolean
   /** fase 13 (punto 6): parametro iss della redirect (RFC 9207), se impostato */
   issParam: string | null
+  /**
+   * fase 13 (correzione L8): i metadati dichiarano
+   * authorization_response_iss_parameter_supported (RFC 9207): la redirect
+   * DEVE portare iss
+   */
+  issSupported: boolean
   /** fase 13 (punto 6): gli ultimi metadati ricevuti dalla DCR */
   lastRegistrationMeta: Record<string, unknown> | null
 }
@@ -51,6 +57,7 @@ async function startFakeAs(): Promise<FakeAs> {
     registrations: 0,
     rejectRefresh: false,
     issParam: null,
+    issSupported: false,
     lastRegistrationMeta: null
   }
   let n = 0
@@ -74,7 +81,8 @@ async function startFakeAs(): Promise<FakeAs> {
         response_types_supported: ['code'],
         grant_types_supported: ['authorization_code', 'refresh_token'],
         code_challenge_methods_supported: ['S256'],
-        token_endpoint_auth_methods_supported: ['none']
+        token_endpoint_auth_methods_supported: ['none'],
+        ...(as.issSupported ? { authorization_response_iss_parameter_supported: true } : {})
       })
     }
     if (req.method === 'POST' && url.pathname === '/register') {
@@ -215,6 +223,7 @@ afterAll(() => {
 afterEach(() => {
   as.rejectRefresh = false
   as.issParam = null
+  as.issSupported = false
   as.lastRegistrationMeta = null
   // lo stato dell'AS è condiviso tra i test del file: si azzera qui
   as.registrations = 0
@@ -350,6 +359,18 @@ describe('fase 13 (punto 6): application_type native, iss della redirect (RFC 92
     const r = await manager.runConnect(ENTRY)
     expect(r.status).toBe('error')
     expect(r.message).toContain('issuer non corrispondente')
+    // il codice emesso NON è mai stato speso
+    expect(as.codes.size).toBe(1)
+    expect(as.accessTokens.length).toBe(0)
+  })
+
+  it('L8: AS che DICHIARA iss (RFC 9207) e redirect SENZA iss → rifiuto, il codice NON si riscatta', async () => {
+    as.issSupported = true
+    as.issParam = null // la redirect NON porta iss
+    const { manager } = makeEnv(as)
+    const r = await manager.runConnect(ENTRY)
+    expect(r.status).toBe('error')
+    expect(r.message).toContain('issuer assente nella redirect')
     // il codice emesso NON è mai stato speso
     expect(as.codes.size).toBe(1)
     expect(as.accessTokens.length).toBe(0)

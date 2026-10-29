@@ -89,6 +89,7 @@ const api: SandbotApi = {
   connectorsSetEnabledFor: (kind, id, agentIds) =>
     ipcRenderer.invoke('connectors:set-enabled-for', kind, id, agentIds),
   connectorsUninstallServer: (id) => ipcRenderer.invoke('connectors:uninstall-server', id),
+  connectorsReconnectServer: (id) => ipcRenderer.invoke('connectors:reconnect-server', id),
   connectorsAddGateway: (input) => ipcRenderer.invoke('connectors:add-gateway', input),
   connectorsGatewayPresets: () => ipcRenderer.invoke('connectors:gateway-presets'),
   connectorsSetClientMetadataUrl: (url) => ipcRenderer.invoke('connectors:set-client-metadata-url', url),

@@ -22,7 +22,7 @@ import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.
 import { getSetting, setSetting } from '../store/db'
 import { setMcpAnnotationsLookup } from '../agent/permissions'
 import { dockerStdioMcpArgv } from '../sandbox/docker-argv'
-import { boxOwnerOf } from '../sandbox'
+import { boxOwnerOf, ensureBoxContainer, ensureBotHome } from '../sandbox'
 import type { ToolDef } from '../agent/llm'
 
 export interface McpServerConfig {
@@ -48,8 +48,17 @@ export interface McpServerConfig {
    * fase 13 (punto 2): server stdio che gira NEL BOX — docker exec con utente
    * e workdir del bot; `envKeys` passano come `-e NOME` col valore preso
    * dall'ambiente del processo figlio, MAI in argv (regola dei segreti).
+   * `home` è la home del bot nel box (L1: l'exec porta anche `-e HOME`, come
+   * execDocker — senza, la cache di npx finisce nella home di sistema).
    */
-  box?: { workdir: string; command: string; args?: string[]; envKeys?: string[] }
+  box?: { workdir: string; command: string; args?: string[]; envKeys?: string[]; home?: string }
+  /**
+   * fase 13 (correzione L1): la dichiarazione del server di PLUGIN (template
+   * pubblici del repository, placeholder NON sostituiti): url, headers ed env
+   * si ricalcolano alla connessione con i valori ${user_config.KEY} dello store.
+   * Mai un valore dell'utente qui dentro.
+   */
+  pluginSpec?: { url?: string; headers?: Record<string, string>; env?: Record<string, string> }
   /** fase 13: installato ma in attesa di valori che l'utente inserisce nelle Impostazioni */
   needsAuth?: { kind: 'key' | 'env' | 'settings'; keys: string[] }
   /** fase 13: fiducia mostrata nella scheda Installati (dominio verificato, …) */
@@ -106,8 +115,10 @@ export interface McpToolInfo {
 export interface McpAuth {
   authProvider?: OAuthClientProvider
   headers?: Record<string, string>
-  /** fase 13: env del processo figlio per i server stdio NEL BOX (valori MAI in argv) */
+  /** fase 13 (correzione L1): env del processo figlio per i server stdio NEL BOX (valori MAI in argv) */
   stdioEnv?: Record<string, string>
+  /** fase 13 (correzione L1): l'url RISOLTO del server di plugin (placeholder sostituito), se serve */
+  url?: string
 }
 export type McpAuthResolver = (cfg: McpServerConfig) => McpAuth | Promise<McpAuth>
 let authResolver: McpAuthResolver = () => ({})
@@ -115,6 +126,46 @@ let authResolver: McpAuthResolver = () => ({})
 /** Registra il resolver d'autenticazione (il daemon lo collega ai connettori). */
 export function setMcpAuthResolver(fn: McpAuthResolver): void {
   authResolver = fn
+}
+
+/**
+ * L4: la catena container→home→exec del server stdio nel box, iniettabile per
+ * i test (il default chiama ensureBoxContainer/ensureBotHome del sandbox): il
+ * loader le chiama IN QUELL'ORDINE prima dello StdioClientTransport.
+ */
+interface BoxEnsurePair {
+  ensureBox(): Promise<void>
+  ensureHome(agentId: string): Promise<void>
+}
+const defaultBoxEnsure: BoxEnsurePair = {
+  ensureBox: () => ensureBoxContainer(),
+  ensureHome: (agentId) => ensureBotHome(agentId)
+}
+let boxEnsure: BoxEnsurePair = defaultBoxEnsure
+
+/** Solo per i test: sostituisce (o ripristina) la catena ensure del box. */
+export function setMcpBoxEnsureForTests(pair: BoxEnsurePair | null): void {
+  boxEnsure = pair ?? defaultBoxEnsure
+}
+
+/**
+ * L4: il proprietario della workdir del server nel box (puro) — la home del
+ * bot (/box/home/<id>) per i server del registro, oppure la `home` dichiarata
+ * dai server di plugin (la workdir è la cartella del plugin, non la home).
+ */
+export function boxOwnerOfWorkdir(box: { workdir: string; home?: string }): string | null {
+  return /^\/box\/home\/([^/]+)/.exec(box.home ?? box.workdir)?.[1] ?? null
+}
+
+/**
+ * L1: l'argv del server stdio nel box (puro) — le envKeys sono ESATTAMENTE le
+ * chiavi di ciò che il resolver ha risolto (env del registro o env del plugin
+ * coi placeholder sostituiti), non l'elenco statico della config.
+ */
+export function boxStdioArgv(cfg: McpServerConfig, stdioEnv?: Record<string, string>): string[] {
+  const box = cfg.box!
+  const envKeys = stdioEnv && Object.keys(stdioEnv).length ? Object.keys(stdioEnv) : box.envKeys
+  return dockerStdioMcpArgv({ ...box, envKeys })
 }
 
 export function listServers(): McpServerConfig[] {
@@ -156,9 +207,15 @@ async function connect(cfg: McpServerConfig): Promise<Client> {
   if (cfg.transport === 'stdio') {
     if (cfg.box) {
       // fase 13: server stdio di registro/plugin — gira NEL BOX (docker exec),
-      // mai sul Mac; le env col solo NOME in argv, i valori nell'env del figlio
+      // mai sul Mac; le env col solo NOME in argv, i valori nell'env del figlio.
+      // L4: il box esiste PRIMA dell'exec (container, poi home, poi exec — la
+      // stessa catena di execDocker), altrimenti su un daemon nuovo l'errore è
+      // "No such container" mascherato da "Connection closed"
+      const owner = boxOwnerOfWorkdir(cfg.box)
+      await boxEnsure.ensureBox()
+      if (owner) await boxEnsure.ensureHome(boxOwnerOf(owner))
       const a = await authResolver(cfg)
-      const argv = dockerStdioMcpArgv(cfg.box)
+      const argv = boxStdioArgv(cfg, a.stdioEnv)
       await client.connect(
         a.stdioEnv && Object.keys(a.stdioEnv).length
           ? new StdioClientTransport({ command: 'docker', args: argv, env: { ...process.env, ...a.stdioEnv } as Record<string, string> })
@@ -169,8 +226,10 @@ async function connect(cfg: McpServerConfig): Promise<Client> {
     await client.connect(new StdioClientTransport({ command: cfg.command ?? '', args: cfg.args ?? [] }))
   } else {
     const a = await authResolver(cfg)
+    // L1: l'url di un server di plugin arriva RISOLTO dal resolver (i
+    // placeholder ${user_config.KEY} non sono un URL valido)
     await client.connect(
-      new StreamableHTTPClientTransport(new URL(cfg.url ?? 'http://localhost'), {
+      new StreamableHTTPClientTransport(new URL(a.url ?? cfg.url ?? 'http://localhost'), {
         ...(a.authProvider ? { authProvider: a.authProvider } : {}),
         ...(a.headers ? { requestInit: { headers: a.headers } } : {})
       })
@@ -215,6 +274,17 @@ export async function testServer(id: string): Promise<{ ok: boolean; error?: str
     if (e instanceof UnauthorizedError) markNeedsAuth(cfg, 'token scaduto: riconnetti')
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
+}
+
+/**
+ * L2: chiude il client vivo di un server e lo toglie dalla cache — alla
+ * disinstallazione, insieme ai segreti, così un server reinstallato non
+ * riusa la connessione (e le credenziali) di quello tolto.
+ */
+export function disconnectServer(id: string): void {
+  const hit = cache.get(id)
+  cache.delete(id)
+  if (hit) void hit.client.close().catch(() => undefined)
 }
 
 /** Tool completi di un server (nome, descrizione, annotazioni) per la UI "Connetti app". */

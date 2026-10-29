@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest'
 import fixture from './fixtures/registry-notion.json'
 import { loadCatalog } from '../index'
 import {
-  parseRegistryResponse, registryEnvVars, registryRuntime, registrySearchUrl, registrySiteUrl, registryTrust
+  parseRegistryResponse, registryEnvVars, registryRuntime, registrySearchUrl, registrySiteUrl, registryTrust,
+  fetchRegistryEntries, clearRegistryCache, type RegistryFetchDeps
 } from '../registry'
 import {
   formatConnectorLine, formatSearchResults, mergeConnectorResults, SEARCH_MAX_ROWS,
@@ -85,10 +86,64 @@ describe('parseRegistryResponse — fixture REALE (3 voci notion)', () => {
     expect(registryRuntime({ server: { name: 'x/y', packages: [{ registryType: 'oci' }] } }))
       .toEqual({ kind: 'not-installable', registryType: 'oci' })
   })
+  it('L8: pacchetto npm SENZA versione → not-installable "versione non dichiarata" (mai latest)', () => {
+    expect(registryRuntime({ server: { name: 'x/y', packages: [{ registryType: 'npm', identifier: 'qualcosa', transport: { type: 'stdio' } }] } }))
+      .toEqual({ kind: 'not-installable', registryType: 'npm', reason: 'versione non dichiarata' })
+  })
   it('l\'URL di ricerca v0.1: search + version=latest + limit', () => {
     expect(registrySearchUrl('notion', 3)).toBe(
       'https://registry.modelcontextprotocol.io/v0.1/servers?search=notion&version=latest&limit=3'
     )
+  })
+})
+
+// ---- L8: fetchRegistryEntries — registro giù vs zero risultati, e la cache ----
+
+// l'esito ok del fetch SSRF (WebFetchOutcome completo, iniettabile)
+const okFetchOutcome = (body: unknown): { ok: true; text: string; contentType: string; finalUrl: string; downloadedBytes: number } =>
+  ({ ok: true, text: typeof body === 'string' ? body : JSON.stringify(body), contentType: 'application/json', finalUrl: 'https://registry.example/', downloadedBytes: 1 })
+
+describe('L8: fetchRegistryEntries — null solo per errore (non in cache), [] per zero risultati (in cache)', () => {
+  const fixtureAsEntry = parseRegistryResponse(fixture)[0]!
+
+  it('zero risultati: [] (NON la riga "registro non raggiungibile"), e la SECONDA chiamata è in cache', async () => {
+    clearRegistryCache()
+    let calls = 0
+    const deps: RegistryFetchDeps = { fetchOutcome: async () => { calls++; return okFetchOutcome({ servers: [] }) } }
+    await expect(fetchRegistryEntries('zzz-inesistente', 8, deps)).resolves.toEqual([])
+    // zero risultati va in cache: la seconda chiamata non rifà il fetch
+    await expect(fetchRegistryEntries('zzz-inesistente', 8, deps)).resolves.toEqual([])
+    expect(calls).toBe(1)
+  })
+
+  it('errore di rete o JSON: null, NON in cache — la seconda chiamata ci RIPROVA', async () => {
+    clearRegistryCache()
+    let calls = 0
+    const deps: RegistryFetchDeps = { fetchOutcome: async () => { calls++; throw new Error('rete giù') } }
+    await expect(fetchRegistryEntries('notion', 8, deps)).resolves.toBeNull()
+    await expect(fetchRegistryEntries('notion', 8, deps)).resolves.toBeNull()
+    expect(calls).toBe(2) // PRIMA della correzione la seconda chiamata restituiva [] dalla cache
+  })
+
+  it('risposta non JSON: null', async () => {
+    clearRegistryCache()
+    const deps: RegistryFetchDeps = { fetchOutcome: async () => okFetchOutcome('<html>non json</html>') }
+    await expect(fetchRegistryEntries('notion', 8, deps)).resolves.toBeNull()
+  })
+
+  it('voci valide: in cache 10 minuti (il tempo non passa → stesso risultato)', async () => {
+    clearRegistryCache()
+    let t = 1_000
+    let calls = 0
+    const deps: RegistryFetchDeps = {
+      fetchOutcome: async () => { calls++; return okFetchOutcome({ servers: [fixtureAsEntry] }) },
+      now: () => t
+    }
+    const first = await fetchRegistryEntries('notion', 8, deps)
+    expect(first).toHaveLength(1)
+    t += 5 * 60_000 // 5 minuti: dentro la cache
+    await expect(fetchRegistryEntries('notion', 8, deps)).resolves.toBe(first)
+    expect(calls).toBe(1)
   })
 })
 

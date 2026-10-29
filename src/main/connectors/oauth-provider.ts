@@ -188,7 +188,16 @@ export async function authorizeWithLoopback(
     let result = await auth(provider, { serverUrl })
     if (result === 'REDIRECT') {
       const { code, iss } = await cb.waitForCode()
-      const expected = (await provider.discoveryState?.())?.authorizationServerUrl
+      const discovery = await provider.discoveryState?.()
+      const expected = discovery?.authorizationServerUrl
+      // RFC 9207: se i metadati dichiarano authorization_response_iss_parameter_supported
+      // la redirect DEVE portare iss — senza, la risposta potrebbe non venire
+      // dall'authorization server scoperto e il codice non si riscatta
+      const issSupported = (discovery?.authorizationServerMetadata as { authorization_response_iss_parameter_supported?: boolean } | undefined)
+        ?.authorization_response_iss_parameter_supported === true
+      if (issSupported && !iss) {
+        throw new Error('issuer assente nella redirect (RFC 9207): l\'authorization server lo dichiara obbligatorio')
+      }
       if (iss && expected && !issuersMatch(iss, expected)) {
         throw new Error(`issuer non corrispondente: la redirect dichiara ${iss}, l'authorization server scoperto è ${expected}`)
       }

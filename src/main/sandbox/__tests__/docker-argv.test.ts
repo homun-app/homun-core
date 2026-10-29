@@ -8,6 +8,7 @@ import {
   dockerCpDirArgv,
   dockerChmodReadOnlyArgv,
   dockerRmDirArgv,
+  dockerMkdirArgv,
   dockerExecArgv,
     dockerReadFileArgv,
     dockerWriteFileArgv,
@@ -499,27 +500,35 @@ describe('il launcher del browser di un SOTTOAGENTE', () => {
 // ---- fase 13 (punto 2): i server MCP stdio del registro/plugin nel BOX ----
 
 describe('fase 13: argv del server MCP stdio nel box (dockerStdioMcpArgv)', () => {
-  it('docker exec -i -u 1000:1000 -w <home> sandbot-box npx -y <identifier>@<version>, SENZA wrapper né setsid', () => {
+  it('docker exec -i -u 1000:1000 -w <home> [-e HOME=<home del bot>] sandbot-box npx …, SENZA wrapper né setsid', () => {
     const argv = dockerStdioMcpArgv({ workdir: '/box/home/agent_x', command: 'npx', args: ['-y', '@foreverworks/mcp-notion@0.1.0'] })
     expect(argv).toEqual([
-      'exec', '-i', '-u', '1000:1000', '-w', '/box/home/agent_x',
+      'exec', '-i', '-u', '1000:1000', '-w', '/box/home/agent_x', '-e', 'HOME=/box/home/agent_x',
       'sandbot-box', 'npx', '-y', '@foreverworks/mcp-notion@0.1.0'
     ])
     expect(argv.join(' ')).not.toContain('setsid')
     expect(argv.join(' ')).not.toContain('sh -c')
+    // L1: il server di plugin dichiara la SUA home (la workdir è la cartella
+    // del plugin): HOME arriva uguale a execDocker
+    const plugin = dockerStdioMcpArgv({ workdir: '/box/plugins/mp/demo/abc', home: '/box/home/agent_x', command: 'node', args: ['run.js'] })
+    expect(plugin).toContain('-e')
+    expect(plugin[plugin.indexOf('-e') + 1]).toBe('HOME=/box/home/agent_x')
   })
-  it('le variabili d\'ambiente passano col SOLO nome (-e NOME): il VALORE mai in argv', () => {
+  it('le variabili SEGRETE passano col SOLO nome (-e NOME): il VALORE mai in argv (HOME non è un segreto, come execDocker)', () => {
     const argv = dockerStdioMcpArgv({
       workdir: '/box/home/a', command: 'npx', args: ['-y', 'x@1.0.0'],
       envKeys: ['NOTION_TOKENS_DIR', 'API_KEY']
     })
     expect(argv).toEqual([
-      'exec', '-i', '-u', '1000:1000', '-w', '/box/home/a',
+      'exec', '-i', '-u', '1000:1000', '-w', '/box/home/a', '-e', 'HOME=/box/home/a',
       '-e', 'NOTION_TOKENS_DIR', '-e', 'API_KEY',
       'sandbot-box', 'npx', '-y', 'x@1.0.0'
     ])
-    // nessun valore segreto può finire nell'argv: solo i NOMI delle chiavi
-    expect(argv.filter((a) => a.includes('=')).length).toBe(0)
+    // solo HOME (=VALORE) e i NOMI delle chiavi segrete: nessun altro valore in argv
+    expect(argv.filter((a) => a.includes('='))).toEqual(['HOME=/box/home/a'])
+  })
+  it('L5: dockerMkdirArgv crea la cartella PADRE della copia del plugin (docker cp non la crea)', () => {
+    expect(dockerMkdirArgv('sandbot-box', '/box/plugins/mp/demo')).toEqual(['exec', 'sandbot-box', 'mkdir', '-p', '--', '/box/plugins/mp/demo'])
   })
   it('dockerCpDirArgv / dockerChmodReadOnlyArgv / dockerRmDirArgv: copia nel box, sola lettura, rimozione esatta', () => {
     expect(dockerCpDirArgv('/tmp/p', '/box/plugins/mp/demo/abc')).toEqual(['cp', '/tmp/p', 'sandbot-box:/box/plugins/mp/demo/abc'])

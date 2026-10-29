@@ -4,7 +4,7 @@ import { api, useStore } from '../store'
 import { describeTrigger } from '../../../shared/cron-human'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
 import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo, AutoReviewSettings } from '../../../shared/types'
-import { DEFAULT_AUTO_REVIEW } from '../../../shared/types'
+import { DEFAULT_AUTO_REVIEW, SECRET_KIND_FOR_NEEDS } from '../../../shared/types'
 // fase 10 (residuo 0d): i default per kind (modulo puro, nessuna dipendenza node)
 import { modelDefaultsFor } from '../../../main/agent/model-defaults'
 
@@ -283,10 +283,11 @@ function ClientMetadataUrlRow() {
 
 /** Scheda Installati: server del registro/plugin/gateway con fonte, fiducia, stato, enabledFor, disinstalla. */
 function InstalledTab() {
-  const [data, setData] = useState<{ servers: McpServerInfo[]; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> } | null>(null)
+  const [data, setData] = useState<{ servers: Array<McpServerInfo & { needsReauth?: boolean }>; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> } | null>(null)
   const agents = useStore((s) => s.agents)
   const [values, setValues] = useState<Record<string, string>>({})
-  const refresh = async (): Promise<void> => { setData(await api.connectorsInstalled() as { servers: McpServerInfo[]; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> }) }
+  const [reconnectMsg, setReconnectMsg] = useState('')
+  const refresh = async (): Promise<void> => { setData(await api.connectorsInstalled() as { servers: Array<McpServerInfo & { needsReauth?: boolean }>; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> }) }
   useEffect(() => { void refresh() }, [])
   if (data === null) return <p className="text-xs text-neutral-600">installati…</p>
 
@@ -333,8 +334,22 @@ function InstalledTab() {
               <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-neutral-400">{src?.kind ?? 'manuale'}</span>
               {sv.trustLabel && <span className="text-[10px] text-neutral-500">{sv.trustLabel}</span>}
               <span className="flex-1 truncate text-xs text-neutral-600">{sv.transport === 'http' ? sv.url : `${sv.box?.command ?? ''} ${(sv.box?.args ?? []).join(' ')}`}</span>
+              {/* L1: sessione OAuth scaduta di un server non del catalogo → rifà authorizeWithLoopback */}
+              {sv.needsReauth && (
+                <button
+                  className="rounded-lg bg-neutral-700 px-2 py-0.5 text-xs text-white hover:bg-neutral-600"
+                  onClick={async () => {
+                    const r = await api.connectorsReconnectServer(sv.id).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
+                    setReconnectMsg(r.ok ? (r.message ?? 'riconnesso') : `riconnessione non riuscita: ${'error' in r ? r.error : ''}`)
+                    await refresh()
+                  }}
+                >
+                  Riconnetti
+                </button>
+              )}
               <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.connectorsUninstallServer(sv.id); await refresh() }}>disinstalla</button>
             </div>
+            {reconnectMsg && <p className="mt-1 text-[11px] text-neutral-500">{reconnectMsg}</p>}
             {enabledForEditor('server', sv.id, sv.enabledFor)}
             {needs?.keys?.length ? (
               <div className="mt-2 space-y-1 border-t border-neutral-800 pt-2">
@@ -355,7 +370,9 @@ function InstalledTab() {
                   onClick={async () => {
                     const vals: Record<string, string> = {}
                     for (const k of needs.keys ?? []) if (values[`${sv.id}:${k}`]?.trim()) vals[k] = values[`${sv.id}:${k}`]!.trim()
-                    await api.connectorsSaveServerValues(sv.id, needs.kind === 'key' ? 'headers' : needs.kind === 'env' ? 'env' : 'userConfig', vals)
+                    // L1: il kind è quello di SECRET_KIND (mappato da needsAuth.kind) —
+                    // lo STESSO che il resolver legge alla connessione
+                    await api.connectorsSaveServerValues(sv.id, SECRET_KIND_FOR_NEEDS[needs.kind as keyof typeof SECRET_KIND_FOR_NEEDS], vals)
                     setValues({})
                     await refresh()
                   }}

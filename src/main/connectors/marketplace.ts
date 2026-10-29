@@ -10,7 +10,7 @@
 // flag di test), tetti di dimensione/file/tempo e rifiuto dei symlink che
 // escono dalla cartella.
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, cpSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, mkdtempSync, cpSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
@@ -104,10 +104,11 @@ function optRef(v: unknown): { ref?: string; sha?: string } {
 
 /**
  * La sorgente di una voce (pura): il formato REALE di marketplace.json usa
- * `source` come STRINGA relativa ("./plugins/x") o oggetto con sourceType
- * ("url" | "github" | "git-subdir" | "npm" | "archive" | "command"). Le
- * sorgenti relativa/github/url/git-subdir sono supportate; npm/archive/command
- * sono riconosciute ma NON supportate (command esegue codice sulla macchina
+ * `source` come STRINGA relativa ("./plugins/x") o oggetto col TIPO nella
+ * chiave `source` stessa: {"source":"git-subdir","url":…,"path":…,"ref":…}.
+ * (La chiave `sourceType` non esiste nel formato vero.) Le sorgenti
+ * relativa/github/url/git-subdir sono supportate; npm/archive/command sono
+ * riconosciute ma NON supportate (command esegue codice sulla macchina
  * dell'utente: non sarà mai supportata).
  */
 function parsePluginSource(s: unknown): PluginSource | null {
@@ -115,7 +116,7 @@ function parsePluginSource(s: unknown): PluginSource | null {
   if (typeof s === 'string' && s.startsWith('./')) return { kind: 'relative', path: s }
   if (!s || typeof s !== 'object') return null
   const o = s as Record<string, unknown>
-  const type = typeof o.sourceType === 'string' ? o.sourceType : null
+  const type = typeof o.source === 'string' ? o.source : null
   const rel = typeof o.relativePath === 'string' ? o.relativePath : typeof o.path === 'string' && (type === 'relative') ? o.path : null
   if (rel) return { kind: 'relative', path: rel }
   if (type === 'github' || (!type && typeof o.repo === 'string' && o.repo)) {
@@ -254,7 +255,10 @@ export function relativeSourceError(path: string): string | null {
 
 export interface StagingResult {
   ok: true
+  /** la cartella del PLUGIN (per git-subdir è la sotto-cartella, non il repo) */
   dir: string
+  /** la RADICE dello staging (repo clonato o cartella temporanea): da cancellare SEMPRE */
+  root: string
   /** commit effettivo (git rev-parse HEAD) */
   sha: string
   /** i primi 12 caratteri dello sha (path di installazione e card) */
@@ -267,6 +271,11 @@ export type StagingOutcome = StagingResult | { ok: false; error: string }
  * sicuro + checkout dello sha se c'è + sparse-checkout per git-subdir +
  * copia dalla cartella relativa per le sorgenti relative + tetti + symlink.
  * Non esegue NIENTE del plugin: git con hook disattivati, solo download.
+ *
+ * L3: per git-subdir il plugin vive in `source.path` — la cartella restituita
+ * è QUELLA (prima si ispezionava la radice del repo e 102 dei 315 plugin
+ * ufficiali risultavano vuoti). L7: un solo try/finally cancella lo staging
+ * su OGNI esito non ok.
  */
 export async function stagePlugin(
   source: PluginSource,
@@ -276,6 +285,7 @@ export async function stagePlugin(
   const run = deps.run ?? defaultRun
   const mkd = deps.mkdtemp ?? ((prefix: string) => mkdtempSync(join(tmpdir(), prefix)))
   const staging = mkd('sandbot-plugin-')
+  let done = false
   try {
     if (source.kind === 'relative') {
       const err = relativeSourceError(source.path)
@@ -287,7 +297,9 @@ export async function stagePlugin(
       if (!existsSync(from)) return { ok: false, error: `cartella del plugin assente nel marketplace: ${source.path}` }
       cpSync(from, staging, { recursive: true })
       const shaR = await run(['rev-parse', 'HEAD'], { cwd: marketplaceDir })
-      return finishStaging(staging, shaR.code === 0 ? shaR.stdout.trim() : '')
+      const out = finishStaging(staging, staging, shaR.code === 0 ? shaR.stdout.trim() : '')
+      done = out.ok
+      return out
     }
     const url = source.kind === 'github'
       ? githubRepoUrl(source.repo)
@@ -310,39 +322,52 @@ export async function stagePlugin(
       }
     }
     if (source.kind === 'git-subdir') {
-      if (source.path.split('/').includes('..')) return { ok: false, error: `il path di git-subdir non può contenere ".." (${source.path})` }
+      // L3: il path deve essere relativo, interno e senza ..
+      if (isAbsolute(source.path) || source.path.split('/').includes('..')) {
+        return { ok: false, error: `il path di git-subdir non è un path relativo interno (${source.path})` }
+      }
       const sp = await run(['sparse-checkout', 'set', source.path], { cwd: staging })
       if (sp.code !== 0) return { ok: false, error: `sparse-checkout non riuscito per ${source.path}` }
+      // dopo il checkout la cartella del plugin ESISTE, è una directory reale
+      // (non un symlink) e resta dentro lo staging
+      const dir = resolve(staging, source.path)
+      const rel = relative(staging, dir)
+      let stat: { isDirectory(): boolean; isSymbolicLink(): boolean } | null = null
+      try { stat = lstatSync(dir) } catch { stat = null }
+      if (rel.startsWith('..') || isAbsolute(rel) || !stat || !stat.isDirectory() || stat.isSymbolicLink()) {
+        return { ok: false, error: `cartella del plugin assente nel repository: ${source.path}` }
+      }
+      const shaR = await run(['rev-parse', 'HEAD'], { cwd: staging })
+      const out = finishStaging(staging, dir, shaR.code === 0 ? shaR.stdout.trim() : '')
+      done = out.ok
+      return out
     }
     const shaR = await run(['rev-parse', 'HEAD'], { cwd: staging })
-    return finishStaging(staging, shaR.code === 0 ? shaR.stdout.trim() : '')
+    const out = finishStaging(staging, staging, shaR.code === 0 ? shaR.stdout.trim() : '')
+    done = out.ok
+    return out
   } catch (e) {
-    rmSync(staging, { recursive: true, force: true })
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  } finally {
+    // L7: staging cancellato su ogni esito non ok, compreso il primo return
+    // che throwa — lo staging intero (radice), comunque
+    if (!done) rmSync(staging, { recursive: true, force: true })
   }
 }
 
-/** Tetti + symlink che escono + sha12: la coda comune di stagePlugin. */
-function finishStaging(staging: string, sha: string): StagingOutcome {
-  const stats = dirStats(staging)
-  if (stats.files > PLUGIN_MAX_FILES) {
-    rmSync(staging, { recursive: true, force: true })
-    return { ok: false, error: `troppi file (${stats.files} > ${PLUGIN_MAX_FILES})` }
-  }
-  if (stats.bytes > PLUGIN_MAX_BYTES) {
-    rmSync(staging, { recursive: true, force: true })
-    return { ok: false, error: `plugin troppo grande (${stats.bytes} byte > ${PLUGIN_MAX_BYTES})` }
-  }
-  const esc = findEscapingSymlink(staging)
-  if (esc) {
-    rmSync(staging, { recursive: true, force: true })
-    return { ok: false, error: `link simbolico che esce dalla cartella del plugin: ${esc}` }
-  }
-  if (!VALID_SHA_RE.test(sha)) {
-    rmSync(staging, { recursive: true, force: true })
-    return { ok: false, error: 'commit non leggibile (git rev-parse HEAD)' }
-  }
-  return { ok: true, dir: staging, sha, sha12: sha.slice(0, 12) }
+/**
+ * Tetti + symlink che escono + sha12: la coda comune di stagePlugin. I tetti e
+ * i symlink si contano sulla CARTELLA DEL PLUGIN (L3); la pulizia la fa il
+ * finally di stagePlugin.
+ */
+function finishStaging(root: string, dir: string, sha: string): StagingOutcome {
+  const stats = dirStats(dir)
+  if (stats.files > PLUGIN_MAX_FILES) return { ok: false, error: `troppi file (${stats.files} > ${PLUGIN_MAX_FILES})` }
+  if (stats.bytes > PLUGIN_MAX_BYTES) return { ok: false, error: `plugin troppo grande (${stats.bytes} byte > ${PLUGIN_MAX_BYTES})` }
+  const esc = findEscapingSymlink(dir)
+  if (esc) return { ok: false, error: `link simbolico che esce dalla cartella del plugin: ${esc}` }
+  if (!VALID_SHA_RE.test(sha)) return { ok: false, error: 'commit non leggibile (git rev-parse HEAD)' }
+  return { ok: true, dir, root, sha, sha12: sha.slice(0, 12) }
 }
 
 // ---- inspectPlugin(dir): COSA contiene davvero il plugin (puro sul fs) ----

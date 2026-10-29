@@ -391,9 +391,11 @@ export interface SandbotApi {
   // fase 13: registro, plugin, marketplace, gateway (installazione SOLO dal click)
   connectorsInstalled(): Promise<{ servers: McpServerInfo[]; plugins: unknown[] }>
   connectorsResolveMcpServer(agentId: string, entryId: number, decision: 'add' | 'no'): Promise<{ ok: boolean; installed?: boolean; message?: string; error?: string }>
-  connectorsSaveServerValues(serverId: string, kind: 'bearer' | 'headers' | 'env' | 'userConfig', values: Record<string, string>): Promise<{ ok: boolean }>
+  connectorsSaveServerValues(serverId: string, kind: SecretKind, values: Record<string, string>): Promise<{ ok: boolean }>
   connectorsSetEnabledFor(kind: 'server' | 'plugin', id: string, agentIds: string[]): Promise<{ ok: boolean }>
   connectorsUninstallServer(id: string): Promise<{ ok: boolean }>
+  /** fase 13 (correzione L1): rifà l'OAuth di un server del registro/plugin la cui sessione è scaduta */
+  connectorsReconnectServer(id: string): Promise<{ ok: boolean; message?: string; error?: string }>
   connectorsAddGateway(input: { name: string; url: string; auth: 'oauth' | 'bearer' | 'headers'; preset?: string; headerName?: string; token?: string; headers?: Record<string, string> }): Promise<McpServerInfo>
   connectorsGatewayPresets(): Promise<{ presets: Array<{ id: string; name: string; auth: string; headerName?: string; help: string }>; warning: string }>
   connectorsSetClientMetadataUrl(url: string): Promise<{ ok: boolean }>
@@ -649,6 +651,27 @@ export interface BotTemplate {
 /** Un template come lo vede la UI. */
 export type TemplateInfo = BotTemplate
 
+/**
+ * Fase 13 (correzione L1): UN solo nome per ogni tipo di segreto. La chiave
+ * logica (quella che UI e RPC si passano) mappa alla chiave dello store cifrato:
+ * prima la scheda Installati scriveva 'headers' e il resolver leggeva
+ * 'staticHeaders', e la chiave non arrivava mai al server.
+ */
+export const SECRET_KIND = {
+  headers: 'staticHeaders',
+  env: 'env',
+  userConfig: 'userConfig',
+  bearer: 'bearer'
+} as const
+export type SecretKind = keyof typeof SECRET_KIND
+
+/** Il needsAuth.kind del server (key/env/settings) → tipo di segreto dello store. */
+export const SECRET_KIND_FOR_NEEDS: Record<'key' | 'env' | 'settings', SecretKind> = {
+  key: 'headers',
+  env: 'env',
+  settings: 'userConfig'
+}
+
 export interface McpServerInfo {
   id: string
   name: string
@@ -670,10 +693,18 @@ export interface McpServerInfo {
     | { kind: 'gateway'; preset?: string }
   /** fase 13: server stdio che gira nel box (docker exec) */
   box?: { workdir: string; command: string; args?: string[]; envKeys?: string[] }
+  /**
+   * fase 13 (correzione L1): la DICHIARAZIONE del server di plugin (template
+   * pubblici del repository, placeholder NON sostituiti — mai valori dell'utente):
+   * url, headers ed env si ricalcolano alla connessione con i valori dello store.
+   */
+  pluginSpec?: { url?: string; headers?: Record<string, string>; env?: Record<string, string> }
   /** fase 13: installato ma in attesa di valori dalle Impostazioni */
   needsAuth?: { kind: 'key' | 'env' | 'settings'; keys: string[] }
   /** fase 13: fiducia della scheda Installati */
   trustLabel?: string
+  /** fase 13 (correzione L1): OAuth scaduto/da rifare → bottone "Riconnetti" nella scheda Installati */
+  needsReauth?: boolean
 }
 
 /**
