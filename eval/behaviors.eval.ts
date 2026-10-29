@@ -120,6 +120,16 @@ import type { ProviderConfig, Agent } from '../src/shared/types'
 
 const MODEL = process.env.EVAL_MODEL ?? 'kimi-k3:cloud'
 const RUNS = Number(process.env.EVAL_RUNS ?? 3)
+/** I casi che la suite gira DAVVERO (EVAL_ONLY li restringe) — il timeout scala su QUESTI. */
+const RUN_CASES = () => (ONLY.length ? CASES.filter((c) => ONLY.includes(String(c.id))) : CASES)
+/**
+ * P8 (fase 14 correzioni): il timeout della suite SCALA con il lavoro —
+ * casi × corse × 60 s ciascuno, con un minimo di 30 minuti. Il fisso di
+ * 1_800_000 ms fermava la suite a metà (36 casi × 3 corse su flash: caso 34
+ * della corsa 1, il 35 mai partito). Purissimo: gli stessi parametri (casi e
+ * corse) che usa la suite.
+ */
+export const suiteTimeoutMs = (cases: number, runs: number): number => Math.max(cases * runs * 60_000, 30 * 60_000)
 const MIN_PASS = Number(process.env.EVAL_MIN ?? 19)
 const BASE = process.env.EVAL_BASE_URL ?? 'http://127.0.0.1:11434'
 /** debug: solo questi id di caso (es. "5" o "2,2b"), separati da virgola */
@@ -1638,6 +1648,14 @@ describe(`eval dei comportamenti (fasi 9-11) su modello reale (${MODEL} × ${RUN
   // fase 13 (residuo 0a): test PURO del gate dei click, senza modello — la
   // specifica lo chiede esplicitamente: e7 ("Elimina account") è di impegno
   // su OGNI pagina, e5 ("Email") no
+  it('P8: il timeout della suite scala con casi × corse (minimo 30 minuti)', () => {
+    // 36 casi × 3 corse = 108 run × 60 s = 108 minuti (il vecchio fisso di 30
+    // fermava la corsa al caso 34); un caso singolo non scende sotto i 30 minuti
+    expect(suiteTimeoutMs(36, 3)).toBe(6_480_000)
+    expect(suiteTimeoutMs(1, 1)).toBe(1_800_000)
+    expect(suiteTimeoutMs(10, 3)).toBe(1_800_000) // 30 run < 30 minuti → il minimo
+  })
+
   it('commitClickDenied: il gate dei click vale su ogni pagina (0a)', () => {
     expect(commitClickDenied(ACCOUNT_SNAPSHOT, 'e7')).toBe(true)
     expect(commitClickDenied(ACCOUNT_SNAPSHOT, 'e5')).toBe(false)
@@ -1654,7 +1672,7 @@ describe(`eval dei comportamenti (fasi 9-11) su modello reale (${MODEL} × ${RUN
     // fase 11b (0b): i pass venuti dalla chiamata di recupero contano nel
     // totale SISTEMA (quello della soglia) ma non in quello del modello nudo
     let passNaked = 0
-    const cases = ONLY.length ? CASES.filter((c) => ONLY.includes(String(c.id))) : CASES
+    const cases = RUN_CASES()
     const total = cases.length * RUNS
     // K3: il dump si AZZERA all'inizio della corsa (una riga per caso × run di
     // QUESTA invocazione) e non può stare nella directory dati che sparisce
@@ -1720,7 +1738,7 @@ describe(`eval dei comportamenti (fasi 9-11) su modello reale (${MODEL} × ${RUN
     console.log(`\nTOTALE (sistema): ${pass}/${total} (soglia ${MIN_PASS}) — col recupero del loop e le protezioni del sistema`)
     console.log(`TOTALE (modello nudo): ${passNaked}/${total} — senza recupero né protezioni, solo informativo`)
     expect(pass, `eval sotto soglia: ${pass}/${total}`).toBeGreaterThanOrEqual(Math.min(MIN_PASS, total))
-  }, 1_800_000)
+  }, suiteTimeoutMs(RUN_CASES().length, RUNS))
 
   afterAll(() => {
     // residuo 0a: con la traccia LLM attiva la directory NON si cancella e il

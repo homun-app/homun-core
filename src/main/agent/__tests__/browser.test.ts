@@ -6,7 +6,7 @@
 // delle 3 istanze per box, la sessione che MUORE e si ricrea (flag
 // SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL del finto) e il formatter del
 // blocco evidenza. Nessun Docker, nessuna rete reale.
-import { describe, expect, it, beforeAll, afterAll } from 'vitest'
+import { describe, expect, it, beforeAll, afterAll, afterEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -170,6 +170,50 @@ describe('il browser col MCP finto (avvio lazy, stato, tetti)', () => {
       delete process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL
       await closeBrowser('agent_i4b').catch(() => undefined)
     }
+  })
+})
+
+// ---- P2 (fase 14 correzioni): la copia dello screenshot col runner docker FINTO ----
+
+import { copyBrowserScreenshot } from '../browser'
+import { setDockerRunnerForTests } from '../../sandbox'
+
+describe('P2: copia dello screenshot — lettura come 1001, scrittura atomica come 1000, rm come 1001', () => {
+  afterEach(() => setDockerRunnerForTests(null))
+
+  it('i TRE argv in ordine: base64 come 1001 → DOCKER_WRITE_B64 come 1000 (stdin col base64) → rm come 1001', async () => {
+    const calls: Array<{ argv: string[]; input?: string }> = []
+    setDockerRunnerForTests(async (argv, opts) => {
+      calls.push({ argv, input: opts?.input })
+      // la LETTURA (base64) risponde coi byte codificati; le altre vanno bene
+      if (argv.includes('base64')) return { stdout: 'aGVsbG8=', stderr: '', exitCode: 0, signal: null }
+      return { stdout: '', stderr: '', exitCode: 0, signal: null }
+    })
+    const err = await copyBrowserScreenshot('agent_x', 'screenshot-ab12cd34.png', '/box/home/agent_x/.browser/screens/ab12cd34.png')
+    expect(err).toBeNull()
+    expect(calls).toHaveLength(3)
+    // 1. lettura dei byte COME 1001 (il file nel volume privato è di pwuser)
+    expect(calls[0]!.argv).toEqual(['exec', '-u', '1001:1001', 'sandbot-box', 'base64', '-w', '0', '--', '/browser/agent_x/screenshot-ab12cd34.png'])
+    expect(calls[0]!.input).toBeUndefined() // niente stdin nella lettura
+    // 2. scrittura atomica COME 1000 nella home del bot, col base64 sullo stdin
+    expect(calls[1]!.argv.slice(0, 3)).toEqual(['exec', '-i', '-u'])
+    expect(calls[1]!.argv).toContain('1000:1000')
+    expect(calls[1]!.argv).toContain('/box/home/agent_x/.browser/screens/ab12cd34.png')
+    expect(calls[1]!.input).toBe('aGVsbG8=')
+    // 3. cancellazione dell'originale COME 1001
+    expect(calls[2]!.argv).toEqual(['exec', '-u', '1001:1001', 'sandbot-box', 'rm', '-f', '--', '/browser/agent_x/screenshot-ab12cd34.png'])
+  })
+
+  it('lettura fallita → errore CHIARO e NESSUNA scrittura', async () => {
+    const calls: string[][] = []
+    setDockerRunnerForTests(async (argv) => {
+      calls.push(argv)
+      if (argv.includes('base64')) return { stdout: '', stderr: 'Permission denied', exitCode: 1, signal: null }
+      return { stdout: '', stderr: '', exitCode: 0, signal: null }
+    })
+    const err = await copyBrowserScreenshot('agent_x', 'nope.png', '/box/home/agent_x/.browser/screens/nope.png')
+    expect(err).toContain('lettura dello screenshot')
+    expect(calls).toHaveLength(1) // nessuna scrittura, nessun rm
   })
 })
 

@@ -45,7 +45,6 @@ import {
     browserMcpFlags,
     DOCKER_BROWSER_WRAPPER_SH,
     BROWSER_MCP_FORBIDDEN_FLAGS,
-    BROWSER_PID_FILE,
     dockerContainerImageArgv,
     dockerBuildArgv,
     DOCKER_WRITE_SH,
@@ -60,8 +59,19 @@ import {
     boxHomePath,
     DEFAULT_BOX_LIMITS
 ,
-    PLAYWRIGHT_MCP_CONFIG, PLAYWRIGHT_MCP_CONFIG_JSON, browserPidFile
+    PLAYWRIGHT_MCP_CONFIG, PLAYWRIGHT_MCP_CONFIG_JSON
 } from '../docker-argv'
+
+// ---- fase 14 correzioni (P1+P2): il browser come pwuser nel volume /browser ----
+
+import {
+  BROWSER_USER, BROWSER_VOLUME, BROWSER_MOUNT, browserStateDir, browserProfilePath, browserPidFile,
+  dockerBrowserVolumeCreateArgv, dockerBrowserRootArgv, DOCKER_BROWSER_ROOT_SH, dockerBrowserWritableArgv,
+  dockerBrowserOldProfileRmArgv, dockerBrowserReadFileArgv,
+  dockerBrowserReadB64Argv, dockerBrowserWriteB64Argv, DOCKER_WRITE_B64_SH, dockerBrowserRmFileArgv,
+  boxHasBrowserMountRw
+} from '../docker-argv'
+import { readFileSync as rf } from 'node:fs'
 
 /** 0c: nei test l'immagine del box è un tag qualunque derivato dal contenuto. */
 const IMG = boxImageTag('FROM mcr.microsoft.com/playwright:v1.64.1-noble')
@@ -143,6 +153,10 @@ describe('lifecycle & hardening del box condiviso (§5.2 + fase 11 punto 1)', ()
     // M4: il volume DEDICATO dei plugin montato /plugins:ro — la sola lettura
     // la impone il KERNEL, non un chmod revocabile dal bot
     expect(argv).toContain('sandbot-plugins:/plugins:ro')
+    // P2 (fase 14 correzioni): il volume DEDICATO del browser montato /browser
+    // rw — TUTTO lo stato del browser è di 1001 e fuori dalla portata del bot
+    expect(argv).toContain('sandbot-browser:/browser')
+    expect(argv).toContainEqual('-v')
     expect(val('--user')).toBe('1000:1000')
     expect(val('--cap-drop')).toBe('ALL')
     expect(val('--security-opt')).toBe('no-new-privileges')
@@ -213,21 +227,21 @@ describe('migrazione docker una tantum (punto 1): argv puri, copia senza cancell
 // ---- fase 11b (punto 2): il launcher del browser (Playwright MCP nel box) ----
 
 describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESSUNO dei vietati', () => {
-  it('dockerBrowserMcpArgv: exec -i -u 1001:1001 (sbrowser, fase 14 7a) -w <home> col wrapper COSTANTE e i flag MCP', () => {
+  it('dockerBrowserMcpArgv: exec -i -u 1001:1001 (pwuser, P2) -w /browser/<owner> col wrapper COSTANTE e i flag MCP', () => {
     const argv = dockerBrowserMcpArgv('agent_x', 18765)
     expect(argv.slice(0, 12)).toEqual([
       'exec', '-i',
       '-u', '1001:1001',
-      '-w', '/box/home/agent_x',
+      '-w', '/browser/agent_x',
       'sandbot-box',
       'sh', '-c', DOCKER_BROWSER_WRAPPER_SH, 'sh',
-      '/box/home/agent_x/.sandbot/browser.pid'
+      '/browser/agent_x/mcp.pid'
     ])
     // il wrapper COSTANTE è l'elemento sh -c, il pid file è $1 e i flag seguono
     expect(argv[argv.indexOf('-c') + 1]).toBe(DOCKER_BROWSER_WRAPPER_SH)
-    expect(argv).toContain('/box/home/agent_x/.sandbot/browser.pid')
+    expect(argv).toContain('/browser/agent_x/mcp.pid')
     // I2: NIENTE setsid (il processo di docker exec è già leader di sessione:
-    // setsid forkhere e il padre chiude lo stdio del client) e il pid si scrive
+    // setsid forka e il padre chiude lo stdio del client) e il pid si scrive
     // PRIMA dell'exec — quel pid è anche il pgid per il kill di gruppo
     expect(DOCKER_BROWSER_WRAPPER_SH).not.toContain('setsid')
     expect(DOCKER_BROWSER_WRAPPER_SH.indexOf('echo $$')).toBeLessThan(DOCKER_BROWSER_WRAPPER_SH.indexOf('exec playwright-mcp'))
@@ -237,8 +251,8 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
     const flags = browserMcpFlags('agent_x', 18765)
     for (const [f, v] of [
       ['--headless', null], ['--browser', 'chromium'], ['--no-sandbox', null],
-      ['--user-data-dir', '/box/browser/agent_x/profile'],
-      ['--output-dir', '/box/home/agent_x/.browser/output'],
+      ['--user-data-dir', '/browser/agent_x/profile'],
+      ['--output-dir', '/browser/agent_x/output'],
       ['--output-max-size', '52428800'],
       ['--no-webmcp', null], ['--block-service-workers', null],
       ['--proxy-server', 'http://host.docker.internal:18765'],
@@ -371,9 +385,13 @@ describe('DOCKER_BG_WRAPPER_SH col vero /bin/sh (F1)', () => {
 
   it('kill nel container (G1): ARGV PURI al kill di procps — TERM, KILL e il segnale 0 di esistenza, tutti al GRUPPO', () => {
     // niente `sh -c`: il kill INTERNO di dash non accetta `--` (Illegal number: -)
-    expect(dockerKillGroupArgv('sandbot-box', 15, 'TERM')).toEqual(['exec', 'sandbot-box', 'kill', '-TERM', '--', '-15'])
-    expect(dockerKillGroupArgv('sandbot-box', 15, 'KILL')).toEqual(['exec', 'sandbot-box', 'kill', '-KILL', '--', '-15'])
-    expect(dockerKillGroupArgv('sandbot-box', 15, '0')).toEqual(['exec', 'sandbot-box', 'kill', '-0', '--', '-15'])
+    // di DEFAULT gira come l'utente del container (1000:1000, i comandi del bot)
+    expect(dockerKillGroupArgv('sandbot-box', 15, 'TERM')).toEqual(['exec', '-u', '1000:1000', 'sandbot-box', 'kill', '-TERM', '--', '-15'])
+    expect(dockerKillGroupArgv('sandbot-box', 15, 'KILL')).toEqual(['exec', '-u', '1000:1000', 'sandbot-box', 'kill', '-KILL', '--', '-15'])
+    expect(dockerKillGroupArgv('sandbot-box', 15, '0')).toEqual(['exec', '-u', '1000:1000', 'sandbot-box', 'kill', '-0', '--', '-15'])
+    // P2: il kill degli orfani del browser gira COME 1001 (il server è di pwuser:
+    // come 1000 riceverebbe EPERM e l'orfano terrebbe il SingletonLock)
+    expect(dockerKillGroupArgv('sandbot-box', 15, 'TERM', '1001:1001')).toEqual(['exec', '-u', '1001:1001', 'sandbot-box', 'kill', '-TERM', '--', '-15'])
     for (const argv of [dockerKillGroupArgv('sandbot-box', 15, 'TERM'), dockerKillGroupArgv('sandbot-box', 15, '0')]) {
       expect(argv).not.toContain('sh')
       expect(argv).not.toContain('-c')
@@ -445,6 +463,15 @@ describe('H1: controllo test -w e decisione use/una ricreazione/errore chiaro', 
     expect(boxEnsurePlan({ exists: true, initOk: true, pluginsMountOk: undefined, writable: true })).toEqual({ kind: 'use' })
   })
 
+  it('P2: decisione pura con browserMountOk — mount /browser:rw mancante ricrea il SOLO container, inspect fallito NON ricrea', () => {
+    expect(boxEnsurePlan({ exists: true, initOk: true, pluginsMountOk: true, browserMountOk: false, writable: true })).toEqual({ kind: 'recreate', reason: 'mount-browser-mancante' })
+    expect(boxEnsurePlan({ exists: true, initOk: true, browserMountOk: false, writable: false })).toEqual({ kind: 'recreate', reason: 'mount-browser-mancante' })
+    // con il mount del browser a posto (o inspect non riuscito) NON è quella la ragione
+    expect(boxEnsurePlan({ exists: true, initOk: true, pluginsMountOk: true, browserMountOk: true, writable: true })).toEqual({ kind: 'use' })
+    expect(boxEnsurePlan({ exists: true, initOk: true, browserMountOk: undefined, writable: true })).toEqual({ kind: 'use' })
+    expect(boxEnsurePlan({ exists: true, initOk: true, browserMountOk: undefined, writable: false })).toEqual({ kind: 'recreate', reason: 'volume-di-root' })
+  })
+
   it('M4/N1: inspect dei mount sulla vista EFFETTIVA .Mounts e boxHasPluginsMountRo (puro)', () => {
     // N1: il template è FISSATO dal test — .Mounts è la vista effettiva dei
     // mount e vale per -v e --mount; un ritorno a .HostConfig.Mounts (che per
@@ -454,12 +481,21 @@ describe('H1: controllo test -w e decisione use/una ricreazione/errore chiaro', 
     expect(dockerBoxMountsArgv(BOX_CONTAINER)[2]).toContain('.Mounts')
     expect(dockerBoxMountsArgv(BOX_CONTAINER)[2]).not.toContain('.HostConfig.Mounts')
     // fixture VERA: l'output di quel template sul box creato dal nostro codice
-    // (Binds: "sandbot-box:/box:nocopy","sandbot-plugins:/plugins:ro")
-    expect(boxHasPluginsMountRo('/box:rw /plugins:ro ')).toBe(true)
+    // (Binds: "sandbot-box:/box:nocopy","sandbot-plugins:/plugins:ro",
+    // "sandbot-browser:/browser") — l'ORDINE delle voci dipende da Docker
+    expect(boxHasPluginsMountRo('/box:rw /browser:rw /plugins:ro ')).toBe(true)
+    expect(boxHasPluginsMountRo('/plugins:ro /browser:rw /box:rw ')).toBe(true) // ordine non assunto
     expect(boxHasPluginsMountRo('/box:rw ')).toBe(false) // nato prima di M4
     expect(boxHasPluginsMountRo('/plugins:rw ')).toBe(false) // montato rw: non basta
     expect(boxHasPluginsMountRo('')).toBe(false) // inspect fallito
     expect(boxHasPluginsMountRo('Error: No such object')).toBe(false)
+    // P2: il mount del browser /browser:rw, stessa forma
+    expect(boxHasBrowserMountRw('/box:rw /browser:rw /plugins:ro ')).toBe(true)
+    expect(boxHasBrowserMountRw('/plugins:ro /browser:rw /box:rw ')).toBe(true)
+    expect(boxHasBrowserMountRw('/box:rw /plugins:ro ')).toBe(false) // nato prima di P2
+    expect(boxHasBrowserMountRw('/browser:ro ')).toBe(false) // montato ro: non basta
+    expect(boxHasBrowserMountRw('')).toBe(false)
+    expect(boxHasBrowserMountRw('Error: No such object')).toBe(false)
   })
 
   it('punto 1: argv PURI di build, esistenza immagine e immagine del container', () => {
@@ -513,24 +549,27 @@ describe('dimensione di un file nel box: argv PURI (F6)', () => {
   })
 })
 
-// ---- fase 12 (punto 1): il browser del FIGLIO (istanza propria, --isolated) ----
+// ---- fase 12 (punto 1) + P2: il browser del FIGLIO (istanza propria, --isolated) ----
 
 describe('il launcher del browser di un SOTTOAGENTE', () => {
-  it('child: --isolated AL POSTO di --user-data-dir, output-dir separato, pid file col suo id, -w la home del PADRE', () => {
-    const flags = browserMcpFlags('sub_a1b2c3d4', 18765, { child: true, home: '/box/home/agent_padre' })
+  it('child: --isolated AL POSTO di --user-data-dir, output-dir e pid file col suo id NEL volume del padre, -w /browser/<owner>, e gira ANCHE lui come 1001', () => {
+    const flags = browserMcpFlags('sub_a1b2c3d4', 18765, { child: true, owner: 'agent_padre' })
     expect(flags).toContain('--isolated')
     expect(flags).not.toContain('--user-data-dir')
-    expect(flags[flags.indexOf('--output-dir') + 1]).toBe('/box/home/agent_padre/.browser/output-sub_a1b2c3d4')
-    const argv = dockerBrowserMcpArgv('sub_a1b2c3d4', 18765, { child: true, home: '/box/home/agent_padre' })
-    expect(argv).toContain('/box/home/agent_padre/.sandbot/browser-sub_a1b2c3d4.pid')
-    expect(argv[argv.indexOf('-w') + 1]).toBe('/box/home/agent_padre')
+    expect(flags[flags.indexOf('--output-dir') + 1]).toBe('/browser/agent_padre/output-sub_a1b2c3d4')
+    const argv = dockerBrowserMcpArgv('sub_a1b2c3d4', 18765, { child: true, owner: 'agent_padre' })
+    expect(argv).toContain('/browser/agent_padre/mcp-sub_a1b2c3d4.pid')
+    expect(argv[argv.indexOf('-w') + 1]).toBe('/browser/agent_padre')
+    // P2: il figlio gira COME 1001 pure lui (niente più 1000: il suo stato sta
+    // nel volume privato del browser, non nella home del padre)
+    expect(argv[argv.indexOf('-u') + 1]).toBe('1001:1001')
     // il flag --config resta obbligatorio anche per il figlio
     expect(flags[flags.indexOf('--config') + 1]).toBe(PLAYWRIGHT_MCP_CONFIG)
   })
 
-  it('browserPidFile: padre e figlio non si pestano il pid file', () => {
-    expect(browserPidFile('agent_x', false)).toBe('.sandbot/browser.pid')
-    expect(browserPidFile('sub_a1b2c3d4', true)).toBe('.sandbot/browser-sub_a1b2c3d4.pid')
+  it('browserPidFile: padre e figlio non si pestano il pid file (tutti in /browser/<owner>)', () => {
+    expect(browserPidFile('agent_x')).toBe('/browser/agent_x/mcp.pid')
+    expect(browserPidFile('agent_x', 'sub_a1b2c3d4')).toBe('/browser/agent_x/mcp-sub_a1b2c3d4.pid')
   })
 })
 
@@ -602,52 +641,86 @@ describe('fase 13: argv del server MCP stdio nel box (dockerStdioMcpArgv)', () =
   })
 })
 
-// ---- fase 14 (punto 7a): il browser con un UTENTE SUO (sbrowser, 1001) ----
+// ---- fase 14 (punto 7a) + correzioni P2: il browser come pwuser (1001) nel volume /browser ----
 
-import {
-  BROWSER_USER, browserProfilePath, dockerBrowserInitArgv, DOCKER_BROWSER_INIT_SH
-} from '../docker-argv'
-import { readFileSync as rf } from 'node:fs'
-
-describe('fase 14 7a: il browser gira come 1001:1001 col profilo FUORI dalla home del bot', () => {
-  it('il launcher del bot PRINCIPALE: -u 1001:1001 e --user-data-dir /box/browser/<owner>/profile', () => {
+describe('fase 14 7a + P2: il browser gira come pwuser (1001:1001) con lo stato nel volume /browser', () => {
+  it('il launcher del bot PRINCIPALE: -u 1001:1001 e --user-data-dir /browser/<owner>/profile', () => {
     expect(BROWSER_USER).toBe('1001:1001')
-    expect(browserProfilePath('agent_x')).toBe('/box/browser/agent_x/profile')
+    expect(browserProfilePath('agent_x')).toBe('/browser/agent_x/profile')
+    expect(browserStateDir('agent_x')).toBe('/browser/agent_x')
     const argv = dockerBrowserMcpArgv('agent_x', 18765)
     expect(argv[argv.indexOf('-u') + 1]).toBe('1001:1001')
     const flags = browserMcpFlags('agent_x', 18765)
-    expect(flags[flags.indexOf('--user-data-dir') + 1]).toBe('/box/browser/agent_x/profile')
-    // NESSUN --user-data-dir sotto /box/home (il profilo non è leggibile dal bot)
-    expect(flags.some((f, i) => f === '--user-data-dir' && flags[i + 1]!.startsWith('/box/home'))).toBe(false)
+    expect(flags[flags.indexOf('--user-data-dir') + 1]).toBe('/browser/agent_x/profile')
+    // NESSUN path del browser sotto /box/home (né profilo, né output, né pid):
+    // la shell del bot non deve vederli
+    const browserPaths = [...flags, ...argv].filter((a) => typeof a === 'string' && a.includes('/browser'))
+    expect(browserPaths.length).toBeGreaterThan(0)
+    expect([...flags, ...argv].some((a) => typeof a === 'string' && a.includes('/box/home') && a.includes('browser'))).toBe(false)
   })
 
-  it('il FIGLIO (--isolated) resta COME PRIMA: uid 1000, niente profilo persistente', () => {
-    const argv = dockerBrowserMcpArgv('sub_a1b2c3d4', 18765, { child: true, home: '/box/home/agent_padre' })
-    expect(argv[argv.indexOf('-u') + 1]).toBe('1000:1000')
-    const flags = browserMcpFlags('sub_a1b2c3d4', 18765, { child: true, home: '/box/home/agent_padre' })
+  it('il FIGLIO (--isolated): nessun profilo persistente, MAI uid 1000 nel launcher', () => {
+    const argv = dockerBrowserMcpArgv('sub_a1b2c3d4', 18765, { child: true, owner: 'agent_padre' })
+    expect(argv[argv.indexOf('-u') + 1]).toBe('1001:1001')
+    const flags = browserMcpFlags('sub_a1b2c3d4', 18765, { child: true, owner: 'agent_padre' })
     expect(flags).toContain('--isolated')
     expect(flags).not.toContain('--user-data-dir')
   })
 
-  it('il one-shot ROOT dei permessi: profilo 0700 di 1001, output del gruppo 1000 (g+rwX, setgid), profilo VECCHIO cancellato', () => {
-    const argv = dockerBrowserInitArgv('sandbot-box', 'agent_x')
-    expect(argv).toEqual(['exec', '-u', '0', 'sandbot-box', 'sh', '-c', DOCKER_BROWSER_INIT_SH, 'sh', '/box/browser/agent_x/profile', 'agent_x'])
-    // sh -c COSTANTE: l'owner viaggia come argomento posizionale, mai in una shell
-    expect(DOCKER_BROWSER_INIT_SH).toContain('chown -R 1001:1001')
-    expect(DOCKER_BROWSER_INIT_SH).toContain('chmod 0700 "$1"')
-    // le cartelle di output nella home del bot: gruppo 1000, g+w, setgid
-    expect(DOCKER_BROWSER_INIT_SH).toContain('chgrp -R 1000')
-    expect(DOCKER_BROWSER_INIT_SH).toContain('g+rwX')
-    expect(DOCKER_BROWSER_INIT_SH).toContain('chmod g+s')
-    // lo screenshot resta nella home del bot (il bot lo legge come oggi)
-    expect(DOCKER_BROWSER_INIT_SH).toContain('.browser/screens')
-    // il profilo VECCHIO si CANCELLA (non si migra: quei cookie li ha già visti la shell)
-    expect(DOCKER_BROWSER_INIT_SH).toContain('rm -rf "$H/.browser/profile"')
+  it('P2: il one-shot ROOT tocca SOLO la radice del volume /browser (stringa COSTANTE, contenitore --rm separato)', () => {
+    expect(dockerBrowserVolumeCreateArgv()).toEqual(['volume', 'create', 'sandbot-browser'])
+    expect(dockerBrowserRootArgv(IMG)).toEqual(['run', '--rm', '-v', 'sandbot-browser:/browser', IMG, 'sh', '-c', DOCKER_BROWSER_ROOT_SH])
+    // la stringa è COSTANTE e fissa: chown+chmod della SOLA radice, niente -R,
+    // niente percorsi dentro /box (regola: un one-shot di root non tocca MAI
+    // un percorso che il bot può scrivere)
+    expect(DOCKER_BROWSER_ROOT_SH).toBe('chown 1001:1001 /browser && chmod 0700 /browser')
+    expect(DOCKER_BROWSER_ROOT_SH).not.toContain('-R')
+    expect(DOCKER_BROWSER_ROOT_SH).not.toContain('/box')
+    // il controllo come 1001 dopo lo start: argv PURO, test POSIX (-a = AND)
+    expect(dockerBrowserWritableArgv('sandbot-box')).toEqual([
+      'exec', '-u', '1001:1001', 'sandbot-box', 'test', '-O', '/browser', '-a', '-w', '/browser'
+    ])
   })
 
-  it('il Dockerfile crea l\'utente sbrowser: uid 1001, gruppo suo, gruppo supplementare 1000', () => {
+  it('P2: il profilo VECCHIO nella home del bot si cancella COME 1000 (file del bot: nessun root, nessun privilegio)', () => {
+    expect(dockerBrowserOldProfileRmArgv('sandbot-box', 'agent_x')).toEqual([
+      'exec', '-u', '1000:1000', 'sandbot-box', 'rm', '-rf', '--', '/box/home/agent_x/.browser/profile'
+    ])
+  })
+
+  it('P2: la copia dello screenshot — lettura base64 come 1001, scrittura atomica come 1000, rm come 1001', () => {
+    // lettura: base64 (il PNG nel canale stdout di una stringa JS non si
+    // corrompe), come 1001, path come argomento
+    expect(dockerBrowserReadB64Argv('sandbot-box', '/browser/agent_x/screenshot-ab12cd34.png')).toEqual([
+      'exec', '-u', '1001:1001', 'sandbot-box', 'base64', '-w', '0', '--', '/browser/agent_x/screenshot-ab12cd34.png'
+    ])
+    // scrittura: la STESSA forma atomica di DOCKER_WRITE_SH ma con base64 -d
+    // sullo stdin, COME 1000, nella home del bot
+    expect(dockerBrowserWriteB64Argv('sandbot-box', '/box/home/agent_x/.browser/screens/ab12cd34.png')).toEqual([
+      'exec', '-i', '-u', '1000:1000', '-w', '/box', 'sandbot-box', 'sh', '-c', DOCKER_WRITE_B64_SH,
+      'sh', '/box/home/agent_x/.browser/screens/ab12cd34.png'
+    ])
+    expect(DOCKER_WRITE_B64_SH).toBe('mkdir -p "$(dirname "$1")" && base64 -d >"$1.sandbot-tmp" && mv -f "$1.sandbot-tmp" "$1"')
+    // cancellazione dell'originale nel volume privato, come 1001
+    expect(dockerBrowserRmFileArgv('sandbot-box', '/browser/agent_x/screenshot-ab12cd34.png')).toEqual([
+      'exec', '-u', '1001:1001', 'sandbot-box', 'rm', '-f', '--', '/browser/agent_x/screenshot-ab12cd34.png'
+    ])
+    // la lettura del pid file degli orfani: cat come 1001 (il file è suo)
+    expect(dockerBrowserReadFileArgv('sandbot-box', '/browser/agent_x/mcp.pid')).toEqual([
+      'exec', '-i', '-u', '1001:1001', '-w', '/browser', 'sandbot-box', 'cat', '--', '/browser/agent_x/mcp.pid'
+    ])
+  })
+
+  it('P1: il Dockerfile NON crea utenti (useradd con uid 1001 VIETATO) e VERIFICA pwuser 1001:1001', () => {
     const dockerfile = rf('resources/box/Dockerfile', 'utf8')
-    expect(dockerfile).toMatch(/useradd\s+--uid 1001\s+--user-group\s+--groups 1000\b/)
-    expect(dockerfile).toContain('sbrowser')
+    // NESSUN useradd con uid 1001: l'immagine base Playwright porta già
+    // pwuser (1001:1001) — un secondo utente con quell'uid farebbe FALLIRE la
+    // build (UID 1001 is not unique, P1)
+    expect(dockerfile).not.toMatch(/useradd\s+[^#\n]*--uid\s+1001/)
+    expect(dockerfile).not.toContain('sbrowser')
+    // la riga di VERIFICA c'è: se l'immagine base cambia utente o uid, la build
+    // FALLISCE in modo chiaro invece di far girare il browser con uid inatteso
+    expect(dockerfile).toContain('test "$(id -u pwuser)" = 1001 && test "$(id -g pwuser)" = 1001')
+    expect(dockerfile).toContain('pwuser')
   })
 })

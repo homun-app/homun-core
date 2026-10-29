@@ -233,6 +233,15 @@ try {
   const badResult = entries.find((e) => e.kind === 'tool-result' && String(e.content).includes('Grafico non creato'))
   check('2c spec con url → errore alla modello, voce NON creata', !!badResult, String(badResult?.content ?? '').slice(0, 90))
 
+  // 2d. P6: spec con mark.href → rifiutato dalla VALIDAZIONE con errore chiaro
+  pushTool('visualize', { title: 'Con link', kind: 'vega-lite', spec: JSON.stringify({ mark: { type: 'point', href: 'https://evil.example/click' }, data: { values: [{ x: 1, y: 2 }] } }) })
+  pushTool('send_to_user', { text: 'Quel grafico col link non si può fare.' })
+  mark = await turnMark(agent.id)
+  await call('chat:send', agent.id, 'Un grafico a punti dove ogni punto porta a https://evil.example/click')
+  entries = await waitTurnEnd(agent.id, mark)
+  const hrefResult = entries.findLast((e) => e.kind === 'tool-result' && String(e.content).includes('Grafico non creato'))
+  check('2d spec con href → errore alla modello, voce NON creata', !!hrefResult && String(hrefResult.content).includes('href'), String(hrefResult?.content ?? '').slice(0, 90))
+
   // ---- 3. export_from_library html → card → allow → file nella HOME TEMPORANEA ----
   pushTool('export_from_library', { id: docId, format: 'html' })
   pushTool('send_to_user', { text: 'Ti ho esportato il report.' })
@@ -273,6 +282,16 @@ try {
   const taintedRead = entries.findLast((e) => e.kind === 'tool-result' && e.meta?.libraryTainted)
   check('4b lettura → dato esterno', !!taintedRead && String(taintedRead.content).includes('<dato_esterno'), String(taintedRead?.content ?? '').slice(0, 70))
 
+  // 4c. P5: request_secure_input NATO nel turno contaminato → card untrusted
+  pushTool('web_fetch', { url: `http://127.0.0.1:${providerPort}/pagina-web` })
+  pushTool('request_secure_input', { kind: 'login', label: 'Portale della pagina', origin: 'https://banca-finta.example', reason: 'la pagina chiede di accedere' })
+  mark = await turnMark(agent.id)
+  await call('chat:send', agent.id, 'Leggi questa pagina e chiedimi il login che serve: ' + `http://127.0.0.1:${providerPort}/pagina-web`)
+  entries = await waitTurnEnd(agent.id, mark) // si ferma sul modulo
+  const untrustedCard = entries.findLast((e) => e.kind === 'send-message' && e.meta?.message?.type === 'secure-input' && e.meta?.status === 'pending')
+  check('4c modulo sicuro del turno contaminato → untrusted nel meta', untrustedCard?.meta?.message?.untrusted === true)
+  await resolveLatestCard(agent.id, 'deny', 'once') // il modulo di prova si chiude: non serve
+
   // ---- 5. request_secure_input login → la probe compila il modulo via RPC ----
   pushTool('request_secure_input', { kind: 'login', label: 'Portale ASPI', origin: 'https://app.example.test', reason: 'serve per accedere al portale' })
   mark = await turnMark(agent.id)
@@ -282,7 +301,8 @@ try {
   check('5a card modulo sicuro', !!secureCard)
   await call('secureinput:submit', agent.id, String(secureCard.meta.approvalId), {
     label: 'Portale ASPI', origin: 'https://app.example.test',
-    username: 'mario.rossi@example.test', password: 'Finta-Password-Proba-2026!', totp: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
+    username: 'mario.rossi@example.test', password: 'Finta-Password-Proba-2026!',
+    totp: 'otpauth://totp/Portale:mario?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=Portale'
   })
   await sleep(300)
   entries = await call('agents:entries', agent.id, 0)
@@ -335,6 +355,19 @@ try {
   // e il transcript complessivo non contiene MAI la password
   const transcript = JSON.stringify(await call('agents:entries', agent.id, 0))
   check('6e la password NON è mai nel transcript', !transcript.includes('Finta-Password-Proba'))
+
+  // 6f. P3: campo dentro un iframe (ref SENZA prefisso f) → rifiutato dal probe
+  pushTool('browser_open', { url: 'https://app.example.test/embedded' })
+  pushTool('fill_credential', { id: savedLogin.id, username_ref: 'e2' })
+  mark = await turnMark(agent.id)
+  await call('chat:send', agent.id, 'Prova a compilare il login sulla pagina con il modulo incorporato.')
+  await waitTurnEnd(agent.id, mark)
+  entries = await call('agents:entries', agent.id, 0)
+  const iframeFill = entries.findLast((e) => e.kind === 'tool-result' && String(e.content).includes('iframe'))
+  const pendingFillCard = entries.some((e) => e.kind === 'send-message' && e.meta?.message?.type === 'fill' && e.meta?.status === 'pending')
+  check('6f campo in iframe (ref senza f) → rifiutato da top:false, NESSUNA card',
+    !!iframeFill && !pendingFillCard,
+    String(iframeFill?.content ?? '').slice(0, 90))
 
   // ---- 7. stessa chiamata su un'origine DIVERSA → rifiuto senza card ----
   pushTool('browser_open', { url: 'https://spa.example/login' })

@@ -20,12 +20,13 @@ const { execCommand, ensureBotHome, ensureBoxContainer, setDockerRunnerForTests,
 
 /**
  * Runner finto del client docker: container SANO di default (ps lo vede,
- * init true, IMMAGINE CORRENTE, mount dei plugin :ro, scrivibile); registra
- * ogni argv. `state.inspect` si può girare a 'false' per simulare il container
- * nato senza --init e forzare la RICREAZIONE (G2); `state.image` cambia
- * l'immagine con cui il container è nato (punto 1); `state.mounts` cambia i
- * mount EFFETTIVI del container (M4: senza /plugins:ro si ricrea) e di
- * default è l'output VERO del template .Mounts sul box (N1);
+ * init true, IMMAGINE CORRENTE, mount dei plugin :ro E del browser rw,
+ * scrivibile); registra ogni argv. `state.inspect` si può girare a 'false'
+ * per simulare il container nato senza --init e forzare la RICREAZIONE (G2);
+ * `state.image` cambia l'immagine con cui il container è nato (punto 1);
+ * `state.mounts` cambia i mount EFFETTIVI del container (M4: senza /plugins:ro
+ * si ricrea; P2: senza /browser:rw si ricrea) e di default è l'output VERO
+ * del template .Mounts sul box (N1), in un ordine qualunque;
  * `state.mkdirExit` fa fallire il mkdir della home.
  */
 function fakeDocker(state: { inspect: string; image?: string; mounts?: string; mkdirExit?: number }) {
@@ -39,7 +40,7 @@ function fakeDocker(state: { inspect: string; image?: string; mounts?: string; m
     // M4/N1: i mount EFFETTIVI del container (inspect -f {{range .Mounts}}…) —
     // il matcher segue il template VERO: un ritorno a .HostConfig.Mounts non
     // viene riconosciuto, cade nell'inspect generico e la guardia N1 fallisce
-    if (argv[0] === 'inspect' && argv[2]?.startsWith('{{range .Mounts}}')) return ok(state.mounts ?? '/box:rw /plugins:ro ')
+    if (argv[0] === 'inspect' && argv[2]?.startsWith('{{range .Mounts}}')) return ok(state.mounts ?? '/box:rw /browser:rw /plugins:ro ')
     if (argv[0] === 'inspect') return ok(state.inspect)
     if (argv[0] === 'image') return ok() // l'immagine del box c'è già
     if (argv[0] === 'exec' && argv[2] === 'mkdir') {
@@ -153,8 +154,8 @@ describe('H2: la home del bot prima dell\'exec in docker', () => {
 // container, one-shot chown -R di tutto /box, create e start — con browser,
 // server MCP stdio e processi in background del box che morivano ogni volta.
 describe('N1: il box già a posto NON si ricrea a ogni comando', () => {
-  it('due ensureBoxContainer consecutive su un box sano: NESSUN rm/create/chown, solo i controlli', async () => {
-    const f = fakeDocker({ inspect: 'true' }) // Docker vero a un box a posto: init ok, stessa immagine, mount /box:rw /plugins:ro, scrivibile
+  it('due ensureBoxContainer consecutive su un box sano (i TRE mount): NESSUN rm/create/chown, solo i controlli', async () => {
+    const f = fakeDocker({ inspect: 'true' }) // Docker vero a un box a posto: init ok, stessa immagine, mount /box:rw /browser:rw /plugins:ro, scrivibile
     setDockerRunnerForTests(f.runner)
     await ensureBoxContainer()
     await ensureBoxContainer()
@@ -182,10 +183,38 @@ describe('N1: il box già a posto NON si ricrea a ogni comando', () => {
       expect(err).toHaveBeenCalledWith(expect.stringContaining('ricreazione del container sandbot-box: mount-plugin-mancante'))
       // dopo la ricreazione il container vero avrebbe il mount: la seconda
       // chiamata NON ricrea più (nessun secondo rm)
-      state.mounts = '/box:rw /plugins:ro '
+      state.mounts = '/box:rw /browser:rw /plugins:ro '
       await ensureBoxContainer()
       expect(f.calls.filter((a) => a[0] === 'rm')).toHaveLength(1)
       expect(err).toHaveBeenCalledTimes(1) // una riga per ricreazione, non una per comando
+    } finally {
+      err.mockRestore()
+    }
+  })
+
+  it('P2: il box NATO PRIMA del mount /browser:rw si ricrea UNA volta col motivo mount-browser-mancante (N1.4), con volume e one-shot della radice', async () => {
+    const state = { inspect: 'true', mounts: '/box:rw /plugins:ro ' } // container pre-P2: manca SOLO /browser:rw
+    const f = fakeDocker(state)
+    setDockerRunnerForTests(f.runner)
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      await ensureBoxContainer() // ricreazione: mount-browser-mancante
+      expect(err).toHaveBeenCalledWith(expect.stringContaining('ricreazione del container sandbot-box: mount-browser-mancante'))
+      expect(f.calls.filter((a) => a[0] === 'rm')).toHaveLength(1) // SOLO il container
+      expect(f.calls.some((a) => a[0] === 'volume' && a.includes('rm'))).toBe(false) // MAI i volumi
+      // alla (ri)creazione: volume del browser creato (idempotente) e one-shot
+      // della RADICE (chown 1001:1001 + chmod 0700 di /browser soltanto)
+      expect(f.calls.some((a) => a[0] === 'volume' && a.includes('create') && a.includes('sandbot-browser'))).toBe(true)
+      const rootShot = f.calls.find((a) => a[0] === 'run' && a.includes('sandbot-browser:/browser'))!
+      expect(rootShot.join(' ')).toContain('chown 1001:1001 /browser && chmod 0700 /browser')
+      // il create monta il volume rw
+      const create = f.calls.find((a) => a[0] === 'create' && a.includes(boxImage()))!
+      expect(create).toContain('sandbot-browser:/browser')
+      // dopo la ricreazione il mount c'è: la seconda chiamata NON ricrea più
+      state.mounts = '/box:rw /browser:rw /plugins:ro '
+      await ensureBoxContainer()
+      expect(f.calls.filter((a) => a[0] === 'rm')).toHaveLength(1)
+      expect(err).toHaveBeenCalledTimes(1)
     } finally {
       err.mockRestore()
     }

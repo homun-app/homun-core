@@ -136,6 +136,13 @@ export function SecureInputCard({ entry }: { entry: TranscriptEntry }) {
     <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-sky-800/50 bg-sky-950/20 px-4 py-3">
       <p className="text-[10px] font-medium uppercase tracking-wide text-sky-300/80">Modulo sicuro — {card.kind === 'login' ? 'login' : 'secret'}</p>
       <p className="mt-1 text-sm text-neutral-100">{card.reason}</p>
+      {/* P5 (fase 14 correzioni): la richiesta nasce dopo contenuti letti dal
+          web — l'utente controlla l'origine PRIMA di compilare, ed è in evidenza */}
+      {card.untrusted && (
+        <p className="mt-2 rounded-lg border border-amber-700/60 bg-amber-950/30 px-2 py-1.5 text-xs text-amber-300">
+          ⚠ Richiesta nata dopo contenuti letti dal web: controlla che l'origine sia davvero quella del sito.
+        </p>
+      )}
       {done ? (
         <p className="mt-2 text-xs text-neutral-500">{m.status === 'allowed' ? '✓ salvato nel vault' : 'annullato'}</p>
       ) : (
@@ -143,7 +150,12 @@ export function SecureInputCard({ entry }: { entry: TranscriptEntry }) {
           {card.kind === 'login' ? (
             <>
               <input className="w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none" placeholder="Etichetta (es. Portale ASPI)" value={label} onChange={(e) => setLabel(e.target.value)} />
-              <input className="w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none" placeholder="Origine https://…" value={origin} onChange={(e) => setOrigin(e.target.value)} />
+              <input
+                className={`w-full rounded-lg px-3 py-1.5 text-sm outline-none ${card.untrusted ? 'border border-amber-600 bg-amber-950/20 text-amber-200' : 'bg-neutral-900'}`}
+                placeholder="Origine https://…"
+                value={origin}
+                onChange={(e) => setOrigin(e.target.value)}
+              />
               <input type="password" autoComplete="off" className="w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none" placeholder="Nome utente" value={username} onChange={(e) => setUsername(e.target.value)} />
               <input type="password" autoComplete="new-password" className="w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
               <input type="password" autoComplete="off" className="w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none" placeholder="Segreto TOTP (opzionale)" value={totp} onChange={(e) => setTotp(e.target.value)} />

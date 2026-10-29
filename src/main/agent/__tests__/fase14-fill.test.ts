@@ -332,6 +332,91 @@ describe('7d: il flusso completo di fill_credential col MCP finto', () => {
   })
 })
 
+// ---- P3 (fase 14 correzioni): origine del FRAME del campo, verificata prima
+// della card e subito prima di OGNI browser_type; TOTP prima di qualunque
+// scrittura ----
+
+describe('P3: l\'origine del campo si verifica nel probe (frame), prima della card e prima di ogni scrittura', () => {
+  /** Il probe del finto, con origine/top sovrascrivibili per numero di chiamata. */
+  const probeWithOverrides = (overrides: Array<{ origin?: string; top?: boolean }>) => {
+    let n = 0
+    return async (ref: string) => {
+      const probe = await browser.probeFieldType(AGENT, ref)
+      const o = overrides[Math.min(n, overrides.length - 1)]
+      n++
+      if (!probe.ok) return probe
+      return { ok: true as const, info: { ...probe.info, ...(o?.origin !== undefined ? { origin: o.origin } : {}), ...(o?.top !== undefined ? { top: o.top } : {}) } }
+    }
+  }
+  /** typeInto che conta le chiamate (per dire "zero browser_type"). */
+  const countingTypeInto = () => {
+    const calls: Array<{ ref: string; value: string }> = []
+    return {
+      calls,
+      typeInto: async (ref: string, value: string) => {
+        calls.push({ ref, value })
+        return { ok: true as const }
+      }
+    }
+  }
+
+  it('cambio di origine fra la card e il fill → la pagina è cambiata, NESSUN browser_type', async () => {
+    await browser.callBrowserTool(AGENT, 'browser_open', { url: 'https://app.example.test/login' })
+    const t = countingTypeInto()
+    // i primi due probe (prima della card: e2 ed e3) sono a posto; dal terzo
+    // (il ri-controllo prima di OGNI browser_type) l'origine è un'altra
+    const r = await runFillCredential(
+      { id: LOGIN.id, username_ref: 'e2', password_ref: 'e3' },
+      depsOf({ decision: 'allow-turn', asked: 0 }, { probe: probeWithOverrides([{}, {}, { origin: 'https://evil.example.test' }]), typeInto: t.typeInto })
+    )
+    expect(t.calls).toHaveLength(0) // NESSUN browser_type
+    expect(r.output).toContain('la pagina è cambiata durante l\'approvazione')
+    expect(r.output).toContain('login non compilato')
+  })
+
+  it('cambio di origine DOPO il primo campo → ci si ferma: compilato solo in parte', async () => {
+    await browser.callBrowserTool(AGENT, 'browser_open', { url: 'https://app.example.test/login' })
+    const t = countingTypeInto()
+    // e2 pre-card ok, e3 pre-card ok, ri-controllo e2 ok (username scritto),
+    // ri-controllo e3: origine cambiata → STOP, la password non si scrive
+    const r = await runFillCredential(
+      { id: LOGIN.id, username_ref: 'e2', password_ref: 'e3' },
+      depsOf({ decision: 'allow-turn', asked: 0 }, { probe: probeWithOverrides([{}, {}, {}, { origin: 'https://evil.example.test' }]), typeInto: t.typeInto })
+    )
+    expect(t.calls).toHaveLength(1) // solo lo username
+    expect(r.output).toContain('la pagina è cambiata durante l\'approvazione')
+    expect(r.output).toContain('compilato solo in parte: utente')
+    expect(t.calls[0]!.value).toBe(LOGIN.username)
+  })
+
+  it('campo in un iframe con ref SENZA prefisso f → rifiutato da top:false (origine del frame)', async () => {
+    await browser.callBrowserTool(AGENT, 'browser_open', { url: 'https://app.example.test/embedded' })
+    const approvals = { decision: 'allow-turn' as const, asked: 0 }
+    const t = countingTypeInto()
+    const r = await runFillCredential(
+      { id: LOGIN.id, username_ref: 'e2' }, // e2 NON ha prefisso f: la difesa del prefisso non scatta
+      depsOf(approvals, { typeInto: t.typeInto })
+    )
+    expect(approvals.asked).toBe(0) // rifiutato PRIMA della card
+    expect(r.denied).toBe(true)
+    expect(r.output).toContain('iframe')
+    expect(t.calls).toHaveLength(0)
+  })
+
+  it('totp_ref SENZA segreto nel login → errore PRIMA di scrivere qualunque campo (zero browser_type)', async () => {
+    const noTotp = await vault.saveLogin({ label: 'Senza TOTP', origins: ['https://app.example.test'], username: 'utente2', password: 'pw2-finta' })
+    await browser.callBrowserTool(AGENT, 'browser_open', { url: 'https://app.example.test/login' })
+    const t = countingTypeInto()
+    const r = await runFillCredential(
+      { id: noTotp, username_ref: 'e2', password_ref: 'e3', totp_ref: 'e4' },
+      depsOf({ decision: 'allow-turn', asked: 0 }, { typeInto: t.typeInto })
+    )
+    expect(r.output).toContain('TOTP')
+    expect(t.calls).toHaveLength(0) // né utente né password: niente è stato scritto
+    expect(r.filled).toBeUndefined()
+  })
+})
+
 describe('7e: request_secure_input — i valori salvati NON compaiono mai nel transcript', () => {
   it('la RPC secureinput:submit salva nel vault e l\'esito è solo "salvato: …"', async () => {
     // quello che fa l'RPC del daemon (api.ts) quando l'utente compila il modulo
@@ -345,5 +430,51 @@ describe('7e: request_secure_input — i valori salvati NON compaiono mai nel tr
     // il login c'è, cifrato
     const l = await vault.getLoginForFill(id)
     expect(l.password).toBe(password)
+  })
+})
+
+// ---- P4 (fase 14 correzioni): il segreto TOTP si VALIDA al salvataggio ----
+
+describe('P4: parseTotpSecret — base32 o URI otpauth, verificati PRIMA di cifrare', () => {
+  it('base32 con spazi e minuscole → ok e NORMALIZZATO (maiuscole, senza spazi né padding)', () => {
+    const r = cred.parseTotpSecret(' gezd gnbv gy3t qojq gezd gnbv gy3t qojq ')
+    expect(r).toEqual({ ok: true, secret: TOTP_SECRET })
+    // e il codice che ne esce è lo STESSO del segreto già normalizzato
+    if (r.ok) expect(cred.totpCode(r.secret, 1_700_000_000_000)).toBe(cred.totpCode(TOTP_SECRET, 1_700_000_000_000))
+  })
+
+  it('URI otpauth://totp con secret → ok (il segreto si estrae e si normalizza)', async () => {
+    const r = cred.parseTotpSecret('otpauth://totp/Portale:utente?secret=gezd%20gnbvgy3tqojqgezDGNBVGY3TQOJQ&issuer=Portale')
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.secret).toBe(TOTP_SECRET)
+    // via saveLogin: l'URI è ciò che i siti mostrano sotto il QR
+    const id = await vault.saveLogin({ label: 'Da URI', origins: ['https://uri.example.test'], username: 'u', password: 'p', totp: `otpauth://totp/X?secret=${TOTP_SECRET}` })
+    const l = await vault.getLoginForFill(id)
+    expect(l.totp).toBe(TOTP_SECRET)
+  })
+
+  it('URI con digits=8 (o algorithm/period diversi) → errore chiaro "non supportato", MAI un codice sbagliato in silenzio', () => {
+    for (const uri of [
+      `otpauth://totp/X?secret=${TOTP_SECRET}&digits=8`,
+      `otpauth://totp/X?secret=${TOTP_SECRET}&algorithm=SHA256`,
+      `otpauth://totp/X?secret=${TOTP_SECRET}&period=60`,
+      'otpauth://hotp/X?secret=ABC&counter=1'
+    ]) {
+      const r = cred.parseTotpSecret(uri)
+      expect(r.ok, uri).toBe(false)
+      if (!r.ok) expect(r.error).toContain('non supportat')
+    }
+  })
+
+  it('stringa non base32 → rifiutata da saveLogin, e l\'errore NON contiene il valore', async () => {
+    const notBase32 = 'questo-non-e-base32-!!!'
+    const r = cred.parseTotpSecret(notBase32)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).not.toContain(notBase32)
+    await expect(vault.saveLogin({ label: 'Male', origins: ['https://male.example.test'], username: 'u', password: 'p', totp: notBase32 }))
+      .rejects.toThrow(/base32/)
+    // niente URI senza secret
+    await expect(vault.saveLogin({ label: 'Male2', origins: ['https://male.example.test'], username: 'u', password: 'p', totp: 'otpauth://totp/X?issuer=Y' }))
+      .rejects.toThrow(/secret/)
   })
 })

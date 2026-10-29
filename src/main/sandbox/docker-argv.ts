@@ -186,11 +186,18 @@ export interface BoxEnsureFacts {
    * /box non si tocca MAI); undefined = inspect non riuscito → si tiene.
    */
   pluginsMountOk?: boolean
+  /**
+   * P2 (fase 14 correzioni): il container ha il volume del browser montato
+   * /browser:rw. false = nato prima della correzione → ricreazione (solo il
+   * container, i volumi non si toccano MAI); undefined = inspect non riuscito
+   * → si tiene.
+   */
+  browserMountOk?: boolean
 }
 
 export type BoxEnsurePlan =
   | { kind: 'use' }
-  | { kind: 'recreate'; reason: 'senza-init' | 'volume-di-root' | 'immagine-vecchia' | 'mount-plugin-mancante' }
+  | { kind: 'recreate'; reason: 'senza-init' | 'volume-di-root' | 'immagine-vecchia' | 'mount-plugin-mancante' | 'mount-browser-mancante' }
   | { kind: 'create' }
 
 /**
@@ -203,12 +210,17 @@ export type BoxEnsurePlan =
  * stessa regola di G2/H1: si ricrea il SOLO container, il volume non si tocca.
  * M4: container nato SENZA il mount /plugins:ro (prima della correzione) →
  * stessa regola: si ricrea il SOLO container, il volume /box resta intatto.
+ * P2 (fase 14 correzioni): container nato SENZA il mount /browser:rw (prima
+ * della correzione) → stessa regola: si ricrea il SOLO container, i volumi
+ * restano intatti (la ricreazione ripassa dal one-shot della radice di
+ * /browser, che è idempotente).
  */
 export function boxEnsurePlan(facts: BoxEnsureFacts): BoxEnsurePlan {
   if (!facts.exists) return { kind: 'create' }
   if (!facts.initOk) return { kind: 'recreate', reason: 'senza-init' }
   if (facts.imageOk === false) return { kind: 'recreate', reason: 'immagine-vecchia' }
   if (facts.pluginsMountOk === false) return { kind: 'recreate', reason: 'mount-plugin-mancante' }
+  if (facts.browserMountOk === false) return { kind: 'recreate', reason: 'mount-browser-mancante' }
   return facts.writable ? { kind: 'use' } : { kind: 'recreate', reason: 'volume-di-root' }
 }
 
@@ -226,19 +238,24 @@ export function boxCreateCheck(writable: boolean): { ok: true } | { ok: false; e
 }
 
 /**
- * Hardening del container condiviso a creazione (§5.2 + punto 1 + G2 + M4):
- * non-root, cap-drop, no-new-privs, limiti CONDIVISI e configurabili (memoria
- * 4g, cpu 2, pids 1024 di default). Volume unico montato su /box. `--init` è
- * tini di Docker (G2): PID 1 raccoglie i processi zombie — con `sleep
- * infinity` non lo farebbe, e gli zombie di un box a vita lunga consumerebbero
- * il tetto --pids-limit condiviso. H1: il volume è montato `:nocopy` — alla
- * prima mount di un volume VUOTO docker copia nel volume contenuto E
- * proprietà della cartella di destinazione dell'immagine, e `-w /box` la fa
- * nascere di root nel rootfs: il chown del one-shot verrebbe sovrascritto e,
- * non-root con --cap-drop ALL, nessuno scriverebbe più nulla nel box.
- * M4: il volume DEDICATO dei plugin è montato `/plugins:ro` — la sola
+ * Hardening del container condiviso a creazione (§5.2 + punto 1 + G2 + M4 +
+ * P2 fase 14 correzioni): non-root, cap-drop, no-new-privs, limiti CONDIVISI e
+ * configurabili (memoria 4g, cpu 2, pids 1024 di default). Volume unico montato
+ * su /box. `--init` è tini di Docker (G2): PID 1 raccoglie i processi zombie —
+ * con `sleep infinity` non lo farebbe, e gli zombie di un box a vita lunga
+ * consumerebbero il tetto --pids-limit condiviso. H1: il volume è montato
+ * `:nocopy` — alla prima mount di un volume VUOTO docker copia nel volume
+ * contenuto E proprietà della cartella di destinazione dell'immagine, e `-w
+ * /box` la fa nascere di root nel rootfs: il chown del one-shot verrebbe
+ * sovrascritto e, non-root con --cap-drop ALL, nessuno scriverebbe più nulla
+ * nel box. M4: il volume DEDICATO dei plugin è montato `/plugins:ro` — la sola
  * lettura la impone il KERNEL, non un chmod (che il bot, proprietario di
  * /box, potrebbe scavalcare riscrivendo workdir e codice dei server stdio).
+ * P2: il volume DEDICATO del browser è montato `/browser` (rw) — TUTTO lo
+ * stato del browser (profilo, output, pid) vive lì, di proprietà di 1001
+ * (pwuser): la shell del bot (1000) non può né elencarlo né prepararne percorsi
+ * in anticipo, e il cookie di sessione di un login non finisce in un file che
+ * il bot può leggere.
  */
 export function dockerBoxCreateArgv(container: string, volume: string, network: 'bridge' | 'none', limits: BoxLimits, image: string): string[] {
   return [
@@ -254,6 +271,7 @@ export function dockerBoxCreateArgv(container: string, volume: string, network: 
     '--network', network,
     '-v', `${volume}:${BOX_MOUNT}:nocopy`,
     '-v', `${PLUGINS_VOLUME}:${PLUGINS_MOUNT}:ro`,
+    '-v', `${BROWSER_VOLUME}:${BROWSER_MOUNT}`,
     '-w', BOX_MOUNT,
     '-i',
     image,
@@ -319,8 +337,9 @@ export function dockerPluginsRmHelperArgv(helper: string): string[] {
  * compare in `.HostConfig.Mounts` (che elenca solo i `--mount`: output
  * sempre vuoto → ricreazione a OGNI comando), mentre `.Mounts` vale per
  * `-v` e `--mount` indistintamente. Sul box vero l'output è
- * `/box:rw /plugins:ro ` (Binds: `sandbot-box:/box:nocopy`,
- * `sandbot-plugins:/plugins:ro`).
+ * `/box:rw /browser:rw /plugins:ro ` in un ORDINE che dipende da Docker
+ * (Binds: `sandbot-box:/box:nocopy`, `sandbot-plugins:/plugins:ro`,
+ * `sandbot-browser:/browser`) — i controlli non assumono l'ordine.
  */
 export function dockerBoxMountsArgv(container: string): string[] {
   return ['inspect', '-f', '{{range .Mounts}}{{.Destination}}:{{if .RW}}rw{{else}}ro{{end}} {{end}}', container]
@@ -334,6 +353,16 @@ export function dockerBoxMountsArgv(container: string): string[] {
  */
 export function boxHasPluginsMountRo(inspectOutput: string): boolean {
   return inspectOutput.trim().split(/\s+/).includes(`${PLUGINS_MOUNT}:ro`)
+}
+
+/**
+ * P2 (puro): il container ha il volume del browser montato `/browser` in
+ * LETTURA/SCRITTURA? L'output di dockerBoxMountsArgv è `/box:rw /browser:rw
+ * /plugins:ro ` e l'ORDINE delle voci dipende da Docker: il controllo non lo
+ * assume. Qualunque altra cosa (vuoto, errore) NON ricrea (come M4/G2).
+ */
+export function boxHasBrowserMountRw(inspectOutput: string): boolean {
+  return inspectOutput.trim().split(/\s+/).includes(`${BROWSER_MOUNT}:rw`)
 }
 
 /**
@@ -430,11 +459,14 @@ export function dockerExecBackgroundArgv(
  * esegue il /usr/bin/kill di procps, che lo accetta: il pid del file è il
  * pgid (setsid), l'operando negativo termina tutto il gruppo. '0' è il segnale
  * di sola ESISTENZA (il controllo dopo la grazia), TERM e KILL come in host.
+ * P2 (fase 14 correzioni): il kill degli orfani del browser passa `user`
+ * 1001:1001 — il server MCP del browser è di pwuser, e un kill come 1000
+ * riceverebbe EPERM lasciando l'orfano col SingletonLock del profilo.
  */
 export type DockerKillSignal = 'TERM' | 'KILL' | '0'
 
-export function dockerKillGroupArgv(container: string, pgid: number, signal: DockerKillSignal): string[] {
-  return ['exec', container, 'kill', `-${signal}`, '--', `-${pgid}`]
+export function dockerKillGroupArgv(container: string, pgid: number, signal: DockerKillSignal, user: string = CONTAINER_USER): string[] {
+  return ['exec', '-u', user, container, 'kill', `-${signal}`, '--', `-${pgid}`]
 }
 
 /**
@@ -503,19 +535,15 @@ export function dockerRmDirArgv(boxPath: string, image: string): string[] {
   return ['exec', BOX_CONTAINER, 'rm', '-rf', '--', boxPath]
 }
 
-// ---- fase 11b (punto 2): il browser del bot — Playwright MCP nel container ----
-
-/** Il pid file dell'istanza browser di un bot (relativo alla SUA home nel box). */
-export const BROWSER_PID_FILE = '.sandbot/browser.pid'
-
-/**
- * Fase 12 (punto 1): il pid file del browser di un bot — per un FIGLIO il nome
- * porta il suo id (sta comunque nella home del PADRE: due Chromium non si
- * pestano il pid file) e il flag `--isolated` al posto del profilo persistente.
- */
-export function browserPidFile(agentId: string, child: boolean): string {
-  return child ? `.sandbot/browser-${agentId}.pid` : BROWSER_PID_FILE
-}
+// ---- fase 11b (punto 2) + fase 14 correzioni (P2): il browser del bot ----
+//
+// REGOLA DEL MODULO (P2): un one-shot di root non tocca MAI un percorso che
+// il bot può scrivere. I one-shot di root (dockerBoxChownArgv, i helper dei
+// plugin, dockerBrowserRootArgv) lavorano SOLO sulla radice di volumi interi
+// o in contenitori usa-e-getta separati: chown -R / chmod -R / rm -rf di root
+// su percorsi controllabili dal bot sarebbero attaccabili via symlink. Il box
+// gira con --cap-drop ALL e no-new-privileges: root lì DENTRO non ha poteri,
+// quindi nel container del box non c'è NESSUN exec di root.
 
 /** Chiusura per inattività: 10 minuti senza azioni (lato nostro + --idle-timeout). */
 export const BROWSER_IDLE_MS = 10 * 60_000
@@ -523,64 +551,97 @@ export const BROWSER_IDLE_MS = 10 * 60_000
 /** Al massimo 3 browser contemporanei per box (Chromium pesa e il box ha 4g). */
 export const BROWSERS_PER_BOX_MAX = 3
 
-// ---- fase 14 (punto 7a): il browser con un UTENTE SUO ----
+/** Il volume persistente dello stato del browser (montato /browser rw nel box). */
+export const BROWSER_VOLUME = 'sandbot-browser'
+
+/** Punto di montaggio del volume del browser nel container del box. */
+export const BROWSER_MOUNT = '/browser'
+
+/** Il volume del browser si crea se manca (volume create è idempotente). */
+export function dockerBrowserVolumeCreateArgv(): string[] {
+  return ['volume', 'create', BROWSER_VOLUME]
+}
 
 /**
- * L'utente del solo processo Playwright MCP (punto 7a): uid/gid 1001, gruppo
- * supplementare 1000 (scrive screenshot e pid nella home del bot, gruppo del
- * bot). La shell del bot resta 1000: il profilo di Chromium (0700, di 1001)
- * NON è leggibile né ptrace-abile dai comandi del bot — il cookie di sessione
- * di un login non finisce nel loro contesto.
+ * L'utente di TUTTI i processi del browser (P1+P2): pwuser, il non-root
+ * 1001:1001 che l'immagine base Playwright prevede apposta per il browser
+ * (il Dockerfile ne VERIFICA uid e gid a build time). La shell del bot resta
+ * 1000 e NON vede niente di ciò che sta sotto /browser (0700 di 1001): nemmeno
+ * il cookie di sessione di un login, e nemmeno le uscite del server MCP
+ * (snapshot .yml con i campi compilati).
  */
 export const BROWSER_USER = '1001:1001'
 
+/** La cartella dello stato del browser di un proprietario: /browser/<owner>. */
+export function browserStateDir(owner: string): string {
+  return `${BROWSER_MOUNT}/${owner}`
+}
+
 /**
- * Il profilo del browser di un bot DENTRO il volume, fuori dalla home del bot
- * (punto 7a): /box/browser/<owner>/profile, mode 0700, proprietario 1001.
+ * Il profilo del browser del PROPRIETARIO (principale): nel volume del
+ * browser, MAI sotto /box/home — lo crea il wrapper stesso come 1001 con
+ * mkdir -p (nessun root), e il bot (1000) non può né leggerlo né prepararlo.
  */
 export function browserProfilePath(owner: string): string {
-  return `${BOX_MOUNT}/browser/${owner}/profile`
+  return `${browserStateDir(owner)}/profile`
 }
 
 /**
- * Il one-shot ROOT che prepara il terreno del browser (punto 7a), sul modello
- * della home del bot: profilo nuovo di proprietà di 1001 e 0700; le cartelle
- * di output nella home del bot (pid, screenshot, output del server) scrivibili
- * da 1001 via GRUPPO 1000 (g+rwX, setgid: i file nuovi nascono del gruppo
- * giusto); il profilo VECCHIO in /box/home/<owner>/.browser/profile si
- * CANCELLA (non si migra: quei cookie li ha già visti la shell del bot).
- * La stringa sh -c è COSTANTE, l'owner viaggia come $1.
+ * Il one-shot ROOT della RADICE del volume del browser (P2), sul modello di
+ * dockerBoxChownArgv: chown e chmod della SOLA radice /browser, stringa sh -c
+ * COSTANTE, contenitore usa-e-getta separato (--rm), eseguito quando si crea
+ * (o ricrea) il box — idempotente. Tutto ciò che sta sotto /browser lo crea
+ * il wrapper del server come 1001: la regola del modulo (niente root su
+ * percorsi del bot) resta intatta perché /browser NON è scrivibile dal bot.
  */
-export const DOCKER_BROWSER_INIT_SH = [
-  'mkdir -p "$(dirname "$1")" "$1"',
-  'chown -R 1001:1001 "$(dirname "$1")"',
-  'chmod 0700 "$1"',
-  'H="/box/home/$2"',
-  'mkdir -p "$H/.sandbot" "$H/.browser/screens" "$H/.browser/output"',
-  'chgrp -R 1000 "$H/.sandbot" "$H/.browser/screens" "$H/.browser/output"',
-  'chmod -R g+rwX "$H/.sandbot" "$H/.browser/screens" "$H/.browser/output"',
-  'chmod g+s "$H/.browser/screens" "$H/.browser/output"',
-  'rm -rf "$H/.browser/profile"'
-].join('\n')
+export const DOCKER_BROWSER_ROOT_SH = `chown ${BROWSER_USER} ${BROWSER_MOUNT} && chmod 0700 ${BROWSER_MOUNT}`
 
-/**
- * L'argv del one-shot dei permessi del browser (punto 7a): root nel container
- * del box; $1 = path del profilo nuovo, $2 = id del PROPRIETARIO della home
- * (le cartelle di output stanno in /box/home/<owner>/.browser).
- */
-export function dockerBrowserInitArgv(container: string, owner: string): string[] {
-  return ['exec', '-u', '0', container, 'sh', '-c', DOCKER_BROWSER_INIT_SH, 'sh', browserProfilePath(owner), owner]
+/** L'argv del one-shot della radice del volume del browser (P2). */
+export function dockerBrowserRootArgv(image: string): string[] {
+  return ['run', '--rm', '-v', `${BROWSER_VOLUME}:${BROWSER_MOUNT}`, image, 'sh', '-c', DOCKER_BROWSER_ROOT_SH]
 }
 
 /**
- * Il wrapper COSTANTE del server browser (punto 2): il pid va nel file della
- * home del bot (per uccidere gli orfani: se il daemon muore, il processo nel
- * container NON muore da solo), poi `exec playwright-mcp "$@"`. NIENTE setsid
- * (I2): il processo di docker exec è GIÀ leader di sessione e di gruppo, setsid
- * in quel caso forka e il padre esce subito CHIUDENDO lo stdio del client MCP;
- * il pid scritto è anche il pgid, quindi il kill di gruppo (G1) resta valido.
- * Fase 14 (7a): il pid file sta in una cartella di gruppo 1000 scrivibile da
- * 1001 (la prepara il one-shot), quindi il wrapper gira anche come sbrowser.
+ * Il controllo del terreno del browser DOPO lo start, come 1001 (P2), sul
+ * modello del controllo di scrivibilità di /box (H1): argv PURO, `test` con
+ * `-a` (AND del test POSIX) dentro il container con l'utente GIUSTO — la
+ * radice del volume è PROPRIETÀ di 1001 (-O) e scrivibile (-w).
+ */
+export function dockerBrowserWritableArgv(container: string): string[] {
+  return ['exec', '-u', BROWSER_USER, container, 'test', '-O', BROWSER_MOUNT, '-a', '-w', BROWSER_MOUNT]
+}
+
+/**
+ * La cancellazione del profilo VECCHIO (fase 14 7a) rimasto nella home del
+ * bot dalle versioni precedenti (P2): file del BOT (1000), quindi via exec
+ * come 1000 — nessun privilegio in gioco, nessun symlink da sfruttare, e un
+ * rm di una cartella assente non costa nulla. Si esegue prima di ogni avvio
+ * del browser PRINCIPALE: quel profilo non si migra, quei cookie li ha già
+ * visti la shell del bot.
+ */
+export function dockerBrowserOldProfileRmArgv(container: string, owner: string): string[] {
+  return ['exec', '-u', CONTAINER_USER, container, 'rm', '-rf', '--', `${boxHomePath(owner)}/.browser/profile`]
+}
+
+/**
+ * Il pid file dell'istanza browser di un proprietario, nel volume del browser
+ * (P2): per un FIGLIO il nome porta il suo id. È di 1001 e sta in 0700 di
+ * 1001: la shell del bot NON può leggerlo né scriverlo (non può nemmeno
+ * fingere un orfano da uccidere).
+ */
+export function browserPidFile(owner: string, child?: string): string {
+  return `${browserStateDir(owner)}/${child ? `mcp-${child}.pid` : 'mcp.pid'}`
+}
+
+/**
+ * Il wrapper COSTANTE del server browser (punto 2): il pid va nel file del
+ * volume del browser (per uccidere gli orfani: se il daemon muore, il
+ * processo nel container NON muore da solo), poi `exec playwright-mcp "$@"`.
+ * NIENTE setsid (I2): il processo di docker exec è GIÀ leader di sessione e di
+ * gruppo, setsid in quel caso forka e il padre esce subito CHIUDENDO lo stdio
+ * del client MCP; il pid scritto è anche il pgid, quindi il kill di gruppo
+ * (G1) resta valido. P2: gira come 1001 (pwuser) e la cartella del pid se la
+ * crea LUI con mkdir -p — nessun root, nessun gruppo supplementare.
  */
 export const DOCKER_BROWSER_WRAPPER_SH = [
   'mkdir -p "$(dirname "$1")"',
@@ -600,19 +661,21 @@ export const DOCKER_BROWSER_WRAPPER_SH = [
  * Fase 12 (0e): --config obbligatorio col file /etc/sandbot/playwright-mcp.json
  * del Dockerfile — spegne il traffico di fondo di Chromium (component update,
  * sync, telemetry): connessioni non richieste, rumore nel proxy e privacy.
- * Fase 14 (7a): il profilo del bot PRINCIPALE sta in /box/browser/<owner>/
- * profile (di 1001, 0700), MAI sotto /box/home — la shell del bot (1000) non
- * può leggerlo. I FIGLI (--isolated) restano come prima.
+ * P2 (fase 14 correzioni): TUTTI i browser — principale e FIGLI — girano come
+ * 1001 con lo stato nel volume /browser/<owner> (profilo, output con anche le
+ * uscite dei figli, pid): MAI un path del browser sotto /box/home, dove la
+ * shell del bot potrebbe leggerlo (le uscite .yml contengono i campi compilati).
+ * Il figlio resta --isolated (due Chromium sullo stesso profilo si bloccano).
  */
-export function browserMcpFlags(agentId: string, proxyPort: number, opts: { child?: boolean; home?: string } = {}): string[] {
-  const home = opts.home ?? boxHomePath(agentId)
+export function browserMcpFlags(agentId: string, proxyPort: number, opts: { child?: boolean; owner?: string } = {}): string[] {
+  const owner = opts.owner ?? agentId
   return [
     '--headless', '--browser', 'chromium',
     '--no-sandbox',
     // fase 12 (punto 1): il figlio usa --isolated AL POSTO del profilo
     // persistente (due Chromium sullo stesso profilo si bloccano a vicenda)
-    ...(opts.child ? ['--isolated'] : ['--user-data-dir', browserProfilePath(agentId)]),
-    '--output-dir', opts.child ? `${home}/.browser/output-${agentId}` : `${home}/.browser/output`,
+    ...(opts.child ? ['--isolated'] : ['--user-data-dir', browserProfilePath(owner)]),
+    '--output-dir', opts.child ? `${browserStateDir(owner)}/output-${agentId}` : `${browserStateDir(owner)}/output`,
     '--output-max-size', '52428800',
     '--no-webmcp',
     '--block-service-workers',
@@ -643,21 +706,61 @@ export const PLAYWRIGHT_MCP_CONFIG_JSON =
 
 /**
  * L'argv del launcher del browser di un bot (puro): `docker exec -i` col
- * wrapper COSTANTE (pid file come $1) e i flag del server MCP come argomenti
- * posizionali dopo `sh <pidfile>`. Fase 14 (7a): il browser del bot
- * PRINCIPALE gira come 1001:1001 (sbrowser, profilo suo in /box/browser);
- * il browser di un FIGLIO (--isolated) resta 1000:1000 come prima.
+ * wrapper COSTANTE (pid file come $1, assoluto in /browser/<owner>) e i flag
+ * del server MCP. P2: il browser — PRINCIPALE e FIGLIO — gira come 1001:1001
+ * (pwuser) con `-w /browser/<owner>`: la home del bot non serve più al
+ * browser, e il bot non vede nulla del suo stato.
  */
-export function dockerBrowserMcpArgv(agentId: string, proxyPort: number, opts: { child?: boolean; home?: string } = {}): string[] {
-  const home = opts.home ?? boxHomePath(agentId)
+export function dockerBrowserMcpArgv(agentId: string, proxyPort: number, opts: { child?: boolean; owner?: string } = {}): string[] {
+  const owner = opts.owner ?? agentId
   return [
     'exec', '-i',
-    '-u', opts.child ? CONTAINER_USER : BROWSER_USER,
-    '-w', home,
+    '-u', BROWSER_USER,
+    '-w', browserStateDir(owner),
     BOX_CONTAINER,
     'sh', '-c', DOCKER_BROWSER_WRAPPER_SH, 'sh',
-    `${home}/${browserPidFile(agentId, opts.child === true)}`,
+    browserPidFile(owner, opts.child === true ? agentId : undefined),
     ...browserMcpFlags(agentId, proxyPort, opts)
   ]
+}
+
+/**
+ * Lettura di un file del volume del browser COME 1001 (P2): il pid file degli
+ * orfani è di 1001 in una cartella 0700 di 1001 — la shell del bot (1000) non
+ * può arrivarci, il daemon ci arriva col suo exec. Path come argomento di
+ * cat, mai shell.
+ */
+export function dockerBrowserReadFileArgv(container: string, path: string): string[] {
+  return ['exec', '-i', '-u', BROWSER_USER, '-w', BROWSER_MOUNT, container, 'cat', '--', path]
+}
+
+// ---- P2: la copia dello screenshot (volume privato → home del bot) ----
+
+/**
+ * Lettura dei byte di un file del volume del browser come base64 (P2): il
+ * daemon legge COME 1001 (il file è suo) e i byte PNG attraversano il canale
+ * stdout CODIFICATI — un `cat` nudo finirebbe in una stringa JS UTF-8 e i
+ * byte binari si corromperebbero. `-w 0`: niente a capo ogni 76 colonne.
+ */
+export function dockerBrowserReadB64Argv(container: string, path: string): string[] {
+  return ['exec', '-u', BROWSER_USER, container, 'base64', '-w', '0', '--', path]
+}
+
+/**
+ * La scrittura atomica dei byte decodificati, COME 1000, nella home del bot
+ * (P2): la STESSA forma di DOCKER_WRITE_SH (temporaneo nella STESSA cartella,
+ * poi rename atomico) ma stdin è base64 che `base64 -d` decodifica — così il
+ * PNG attraversa il canale testale senza corrompersi e il file finale è di
+ * 1000, leggibile dal bot come prima.
+ */
+export const DOCKER_WRITE_B64_SH = 'mkdir -p "$(dirname "$1")" && base64 -d >"$1.sandbot-tmp" && mv -f "$1.sandbot-tmp" "$1"'
+
+export function dockerBrowserWriteB64Argv(container: string, path: string): string[] {
+  return ['exec', '-i', '-u', CONTAINER_USER, '-w', BOX_MOUNT, container, 'sh', '-c', DOCKER_WRITE_B64_SH, 'sh', path]
+}
+
+/** Cancellazione dell'originale nella copia dello screenshot, COME 1001 (P2). */
+export function dockerBrowserRmFileArgv(container: string, path: string): string[] {
+  return ['exec', '-u', BROWSER_USER, container, 'rm', '-f', '--', path]
 }
 

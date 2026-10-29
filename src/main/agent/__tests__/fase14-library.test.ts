@@ -166,6 +166,32 @@ describe('punto 3: grafici Vega-Lite e Mermaid', () => {
     expect(charts.validateVegaLiteSpec(nested).ok).toBe(false)
   })
 
+  it("P6: href a QUALUNQUE profondità → rifiutato con l'errore chiaro (mark.href e encoding.href), anche nel renderer", async () => {
+    // mark.href: il link che Vega-Lite rende cliccabile — prima della correzione
+    // arrivava alla resa e moriva con loader._loader.sanitize is not a function
+    const markHref = charts.validateVegaLiteSpec(JSON.stringify({
+      mark: { type: 'point', href: 'https://evil.example/click' },
+      data: { values: [{ x: 1, y: 2 }] }
+    }))
+    expect(markHref.ok).toBe(false)
+    if (!markHref.ok) expect(markHref.error).toContain('chiave "href" non ammessa (link nei grafici)')
+    // encoding.href, anche NIDIFICATO in un layer
+    const nested = charts.validateVegaLiteSpec(JSON.stringify({
+      mark: 'point',
+      layer: [{ mark: 'point', encoding: { href: { field: 'link', type: 'nominal' } }, data: { values: [] } }],
+      data: { values: [] }
+    }))
+    expect(nested.ok).toBe(false)
+    if (!nested.ok) expect(nested.error).toContain('href')
+    // il RENDERER rifiuta le stesse chiave (l'anteprima non renderizza link)
+    const { vegaSpecHasKey, VEGA_FORBIDDEN_KEYS, renderVegaLiteInRenderer } = await import('../../../renderer/src/vega-render')
+    for (const key of VEGA_FORBIDDEN_KEYS) {
+      expect(vegaSpecHasKey({ mark: { type: 'point', [key]: 'x' }, data: { values: [] } }, key), key).toBe(true)
+    }
+    expect(vegaSpecHasKey({ mark: 'point', data: { values: [{ a: 1 }] } }, 'href')).toBe(false)
+    expect(await renderVegaLiteInRenderer(JSON.stringify({ mark: { type: 'point', href: 'https://x.example' }, data: { values: [] } }))).toBeNull()
+  })
+
   it('loader vietato; spec oltre 200 KB vietata; righe oltre 5000 vietate', () => {
     expect(charts.validateVegaLiteSpec(JSON.stringify({ mark: 'point', loader: {}, data: { values: [] } })).ok).toBe(false)
     const big = JSON.stringify({ mark: 'point', data: { values: [{ x: 'y'.repeat(220 * 1024) }] } })

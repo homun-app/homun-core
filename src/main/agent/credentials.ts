@@ -63,6 +63,57 @@ export function totpCode(secretBase32: string, atMs: number = Date.now()): strin
   return String(bin % 10 ** TOTP_DIGITS).padStart(TOTP_DIGITS, '0')
 }
 
+// ---- il segreto TOTP al salvataggio (P4, fase 14 correzioni) ----
+
+/** Il risultato della lettura del segreto TOTP (puro). */
+export type TotpSecretCheck =
+  | { ok: true; secret: string }
+  | { ok: false; error: string }
+
+/**
+ * Il segreto TOTP accettato da saveLogin (puro, P4): base32 (spazi, minuscole
+ * e padding ammessi e normalizzati via) oppure un URI `otpauth://totp/…?
+ * secret=…` come quelli che i siti mostrano sotto il QR. Dall'URI si estrae
+ * `secret`; algorithm/digits/period diversi da SHA1/6/30 sono NON SUPPORTATI
+ * e si rifiutano con errore chiaro — mai un codice sbagliato in silenzio. Il
+ * segreto si VERIFICA con base32Decode prima di tornarlo: gli errori non
+ * contengono MAI il valore (vanno all'utente nel modulo, non al modello).
+ */
+export function parseTotpSecret(input: string): TotpSecretCheck {
+  const raw = input.trim()
+  if (!raw) return { ok: false, error: 'il segreto TOTP è vuoto' }
+  let candidate = raw
+  if (/^otpauth:\/\//i.test(raw)) {
+    let u: URL
+    try {
+      u = new URL(raw)
+    } catch {
+      return { ok: false, error: 'URI otpauth non valido: copia il segreto base32 mostrato sotto il QR' }
+    }
+    if (u.protocol !== 'otpauth:') return { ok: false, error: 'serve un URI otpauth:// (TOTP)' }
+    const type = u.host.toLowerCase()
+    if (type !== 'totp') return { ok: false, error: `URI otpauth di tipo "${u.host}" non supportato: serve totp` }
+    const secret = u.searchParams.get('secret') ?? ''
+    if (!secret.trim()) return { ok: false, error: 'l\'URI otpauth non contiene il parametro secret' }
+    const algorithm = (u.searchParams.get('algorithm') ?? 'SHA1').toUpperCase()
+    const digits = u.searchParams.get('digits') ?? '6'
+    const period = u.searchParams.get('period') ?? '30'
+    if (algorithm !== 'SHA1' || digits !== '6' || period !== '30') {
+      return { ok: false, error: `TOTP non supportato (algorithm ${algorithm}, digits ${digits}, period ${period}): solo SHA1, 6 cifre, 30 secondi` }
+    }
+    candidate = secret
+  }
+  // normalizzazione: maiuscole, senza spazi né padding
+  const normalized = candidate.toUpperCase().replace(/[\s=]/g, '')
+  if (!normalized) return { ok: false, error: 'il segreto TOTP è vuoto' }
+  try {
+    base32Decode(normalized)
+  } catch {
+    return { ok: false, error: 'il segreto TOTP non è base32 valido: copialo di nuovo dal sito (o l\'URI otpauth sotto il QR)' }
+  }
+  return { ok: true, secret: normalized }
+}
+
 // ---- l'origine della pagina (punto 7d, controllo 1) ----
 
 /**
@@ -167,6 +218,57 @@ export function checkFieldKind(
     return { ok: false, error: 'totp_ref punta a un campo password: il codice va in un campo di testo' }
   }
   return { ok: true }
+}
+
+/**
+ * Il controllo del FRAME del campo (puro, P3 fase 14 correzioni): il campo sta
+ * nel documento TOP e la sua ORIGINE è quella attesa — l'origine del login
+ * (una delle sue) PRIMA della card, quella APPROVATA subito prima di ogni
+ * scrittura. È il confronto che fanno i password manager (1Password,
+ * Bitwarden): l'origine del FRAME del campo al momento del fill, non l'ultima
+ * URL nota della sessione (che per browser_open è l'URL richiesta, non quella
+ * finale dopo i redirect). `info` nullo = verifica impossibile → rifiuto.
+ */
+export function checkFieldFrame(
+  info: { origin: string; top: boolean } | null,
+  expectedOrigins: string[]
+): FieldKindCheck {
+  if (!info) {
+    return { ok: false, error: 'non riesco a leggere l\'origine del campo dentro la pagina (verifica del frame): rifiutato' }
+  }
+  if (info.top !== true) {
+    return { ok: false, error: 'il campo sta in un iframe: una cornice può avere un\'altra origine. Usa un campo della pagina principale.' }
+  }
+  if (!expectedOrigins.includes(info.origin)) {
+    return {
+      ok: false,
+      error: `l'origine del campo (${info.origin || '(sconosciuta)'}) non è quella del login (${expectedOrigins.join(', ')}): la pagina è cambiata o non è quella giusta`
+    }
+  }
+  return { ok: true }
+}
+
+/**
+ * Il controllo completo del campo subito prima di OGNI scrittura (puro, P3):
+ * nuovo probe → origine APPROVATA (quella mostrata nella card), campo nel
+ * documento TOP e tipo ancora valido. Se la pagina è cambiata durante
+ * l'approvazione (navigazione, redirect, DOM sostituito) il fill si ferma.
+ */
+export function checkFieldForWrite(
+  kind: 'username' | 'password' | 'totp',
+  info: FieldProbeLike | null,
+  approvedOrigin: string
+): FieldKindCheck {
+  const frame = checkFieldFrame(info, [approvedOrigin])
+  if (!frame.ok) return frame
+  return checkFieldKind(kind, info)
+}
+
+/** Il minimo che serve dei due controlli di campo (tipo del probe). */
+export interface FieldProbeLike {
+  type: string
+  origin: string
+  top: boolean
 }
 
 // ---- l'esito per il modello (mai i valori) ----

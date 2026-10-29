@@ -1,9 +1,10 @@
 // Grafici e documenti — modulo PURO della validazione (fase 14, punti 2-3-5):
 // i grafici sono SOLO dichiarativi (Vega-Lite JSON o Mermaid), MAI HTML o
 // JavaScript scritti dal modello. Qui vivono le regole:
-// - Vega-Lite: JSON valido fino a 200 KB, NESSUNA chiave `url` a qualunque
-//   profondità e nessun `loader`: i dati sono solo inline (data.values /
-//   datasets), al massimo 5000 righe — un grafico non fa richieste di rete;
+// - Vega-Lite: JSON valido fino a 200 KB, NESSUNA chiave `url` né `href` a
+//   qualunque profondità e nessun `loader`: i dati sono solo inline
+//   (data.values / datasets), al massimo 5000 righe — un grafico non fa
+//   richieste di rete né link cliccabili (P6 fase 14 correzioni);
 // - Mermaid: sorgente fino a 50 KB (lo rende la UI in modalità strict);
 // - i blocchi ```vega-lite / ```mermaid di un documento si validano PRIMA di
 //   scrivere qualunque versione: un blocco non valido fa fallire la chiamata
@@ -31,10 +32,14 @@ export type ChartSpecCheck =
   | { ok: false; error: string }
 
 /**
- * La validazione PURA di una spec Vega-Lite (punto 3): JSON, tetto, NESSUNA
- * chiave `url` a qualunque profondità, nessun `loader`, dati solo inline col
- * tetto delle righe. `url` si cerca ovunque (anche in transform, layer, facet:
- * un deep-link in una chiave ignota non deve passare).
+ * La validazione PURA di una spec Vega-Lite (punto 3 + P6 fase 14 correzioni):
+ * JSON, tetto, NESSUNA chiave `url` né `href` a qualunque profondità, nessun
+ * `loader`, dati solo inline col tetto delle righe. `url` si cerca ovunque
+ * (anche in transform, layer, facet: un deep-link in una chiave ignota non
+ * deve passare); P6: anche `href` (il link di mark/encoding che Vega-Lite
+ * rende cliccabile) si rifiuta a qualunque profondità — arrivava alla resa e
+ * falliva con `loader._loader.sanitize is not a function`, incomprensibile
+ * per il modello.
  */
 export function validateVegaLiteSpec(raw: string): ChartSpecCheck {
   if (!raw.trim()) return { ok: false, error: 'spec Vega-Lite vuota' }
@@ -52,6 +57,8 @@ export function validateVegaLiteSpec(raw: string): ChartSpecCheck {
   }
   const forbidden = findKey(spec, 'url')
   if (forbidden) return { ok: false, error: `chiave "url" non ammessa (${forbidden}): i dati del grafico sono solo inline (data.values), il grafico non fa richieste di rete` }
+  const href = findKey(spec, 'href')
+  if (href) return { ok: false, error: `chiave "href" non ammessa (link nei grafici) (${href})` }
   if (findKey(spec, 'loader')) return { ok: false, error: 'chiave "loader" non ammessa: il caricamento dei dati lo decide il daemon, non la spec' }
   const rows = countInlineRows(spec)
   if (rows > VEGA_MAX_ROWS) {

@@ -1780,11 +1780,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             continue
           }
           const approval: Approval = { id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now() }
+          // P5 (fase 14 correzioni): una pagina ostile può spingere il modello a
+          // chiedere un login con l'origine GIA' precompilata — come save_contact,
+          // una richiesta nata in un turno contaminato porta untrusted e la UI
+          // dice all'utente di controllare che l'origine sia davvero quella del sito
           const decision = await awaitCard(approval, 'send-message', `Modulo sicuro (${kind === 'login' ? `login «${label}»` : `secret ${name}`}): ${reason}`, {
             message: {
               type: 'secure-input', kind,
               ...(kind === 'login' ? { label, ...(origin ? { origin } : {}) } : { name }),
-              reason
+              reason,
+              ...(contaminated ? { untrusted: true as const } : {})
             },
             tool: call.name, input, secureInput: true
           })

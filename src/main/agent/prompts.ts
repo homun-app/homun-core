@@ -178,7 +178,7 @@ export function documentsCredentialsSection(opts: { credentials?: boolean } = {}
 - Per un login si usano list-credentials e fill_credential (il valore va dal vault al campo). MAI password, codici o chiavi in chat o in browser_type: se mancano, si usa request_secure_input.
 - Se l'utente scrive una password in chat, non la si usa: gli si propone request_secure_input.`
   return `# Documenti e credenziali
-- Un report, un piano o un testo lungo va in write_document, NON nel messaggio; per modificarlo si usa edit_document con sostituzioni esatte.
+- Un report, un piano o un testo lungo va in write_document, NON nel messaggio: nel messaggio una o due frasi su cosa hai fatto (la card mostra già il documento), senza riassunto a punti. Per modificarlo si usa edit_document con sostituzioni esatte.
 - I grafici si fanno con visualize (Vega-Lite o Mermaid); i file prodotti nel box che l'utente vuole tenere vanno in save_to_library.
 - Un contatto nuovo si salva solo con save_contact (card di conferma).${cred}`
 }

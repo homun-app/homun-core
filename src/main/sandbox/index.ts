@@ -47,13 +47,17 @@ import {
   type BoxEnsureFacts,
   dockerVolumeLsArgv,
   dockerPluginsVolumeCreateArgv,
+  dockerBrowserVolumeCreateArgv,
+  dockerBrowserRootArgv,
   dockerBoxMountsArgv,
   boxHasPluginsMountRo,
+  boxHasBrowserMountRw,
   dockerClientEnv,
   BOX_CONTAINER,
   BOX_VOLUME,
   BOX_MOUNT,
   PLUGINS_VOLUME,
+  BROWSER_VOLUME,
   boxHomePath,
   DEFAULT_BOX_LIMITS,
   type BoxLimits
@@ -311,8 +315,10 @@ async function execDocker(agentId: string, command: string, opts: ExecOptions): 
 /**
  * Esegue ARGV PURI nel container condiviso (F6): per i path che arrivano dal
  * modello (es. `stat -c %s -- <path>`) — nessuna shell, niente interpolazione.
+ * `input` (P2, fase 14 correzioni): contenuto da scrivere sul stdin del
+ * processo docker (la copia dello screenshot scrive i byte base64 così).
  */
-export async function runDockerArgv(argv: string[], opts: ExecOptions = {}): Promise<ExecResult> {
+export async function runDockerArgv(argv: string[], opts: ExecOptions & { input?: string } = {}): Promise<ExecResult> {
   const r = await docker(argv, opts)
   const o = capOutput(r.stdout)
   const e = capOutput(r.stderr)
@@ -431,11 +437,13 @@ export async function ensureBoxContainer(): Promise<void> {
         const img = await dockerRunner(dockerContainerImageArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
         facts.imageOk = img.exitCode === 0 ? img.stdout.trim() === image : undefined
       }
-      // M4: container nato PRIMA del volume dei plugin → niente mount
-      // /plugins:ro → si ricrea (solo il container; il volume /box resta
-      // intatto). Inspect fallito: come sopra, NON si ricrea
+      // M4 + P2: container nato PRIMA del volume dei plugin / del volume del
+      // browser → manca il mount corrispondente → si ricrea (solo il
+      // container; i volumi restano intatti). Inspect fallito: come sopra,
+      // NON si ricrea
       const mounts = await dockerRunner(dockerBoxMountsArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
       facts.pluginsMountOk = mounts.exitCode === 0 ? boxHasPluginsMountRo(mounts.stdout) : undefined
+      facts.browserMountOk = mounts.exitCode === 0 ? boxHasBrowserMountRw(mounts.stdout) : undefined
       const start = await dockerRunner(dockerStartArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
       if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
       const w = await dockerRunner(dockerBoxWritableArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
@@ -461,6 +469,14 @@ export async function ensureBoxContainer(): Promise<void> {
   // (volume create è idempotente: lo crea solo se manca)
   const pvc = await dockerRunner(dockerPluginsVolumeCreateArgv(), { timeoutMs: 15_000 })
   if (pvc.exitCode !== 0) throw new Error(`creazione del volume ${PLUGINS_VOLUME} non riuscita: ${pvc.stderr}`)
+  // P2 (fase 14 correzioni): il volume DEDICATO del browser esiste e la sua
+  // RADICE è di 1001 (pwuser) e 0700 — il one-shot di root tocca SOLO la
+  // radice del volume (regola del modulo: mai un percorso che il bot può
+  // scrivere), è idempotente e gira a ogni (ri)creazione del box
+  const bvc = await dockerRunner(dockerBrowserVolumeCreateArgv(), { timeoutMs: 15_000 })
+  if (bvc.exitCode !== 0) throw new Error(`creazione del volume ${BROWSER_VOLUME} non riuscita: ${bvc.stderr}`)
+  const browserRoot = await dockerRunner(dockerBrowserRootArgv(image), { timeoutMs: 60_000 })
+  if (browserRoot.exitCode !== 0) throw new Error(`init del volume ${BROWSER_VOLUME} non riuscito: ${browserRoot.stderr}`)
   // creazione (prima volta o ricreazione G2/H1): il one-shot rende il volume
   // NON vuoto (workspace e home) e lo consegna all'utente del container; il
   // mount :nocopy del create non dipende dal copy-up di docker

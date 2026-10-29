@@ -248,9 +248,16 @@ export async function listVaultItems(): Promise<VaultItemInfo[]> {
 }
 
 /**
- * saveLogin (punto 7b): origini ESATTE https://host[:porta] (niente wildcard),
- * utente, password e TOTP facoltativo; il tutto cifrato in un solo envelope.
- * Torna l'id (label e origini si possono aggiornare: stesso id).
+ * saveLogin (punto 7b + P4 fase 14 correzioni): origini ESATTE
+ * https://host[:porta] (niente wildcard), utente, password e TOTP facoltativo;
+ * il tutto cifrato in un solo envelope. Torna l'id (label e origini si
+ * possono aggiornare: stesso id).
+ * P4: il segreto TOTP si accetta SOLO base32 valido (spazi e minuscole
+ * ammessi) o come URI otpauth://totp/…?secret=… — si normalizza (maiuscole,
+ * senza spazi né padding) e si VERIFICA con base32Decode PRIMA di cifrarlo:
+ * un segreto sbagliato faceva lanciare totpCode DURANTE il fill, dopo che
+ * utente e password erano già stati scritti. L'errore non contiene mai il
+ * valore (va all'utente nel modulo, non al modello).
  */
 export async function saveLogin(input: {
   id?: string
@@ -268,10 +275,17 @@ export async function saveLogin(input: {
   if (bad.length) throw new Error(`origini non valide (serve la forma esatta https://host[:porta], niente wildcard): ${bad.join(', ')}`)
   if (!input.username) throw new Error('serve il nome utente del login')
   if (!input.password) throw new Error('serve la password del login')
+  let totp: string | undefined
+  if (input.totp !== undefined && input.totp.trim() !== '') {
+    const { parseTotpSecret } = await import('./agent/credentials')
+    const check = parseTotpSecret(input.totp)
+    if (!check.ok) throw new Error(check.error)
+    totp = check.secret
+  }
   const key = await getMasterKey()
   const now = Date.now()
   const id = input.id ?? newVaultId('login')
-  const sealed = seal(key, JSON.stringify({ username: input.username, password: input.password, ...(input.totp ? { totp: input.totp } : {}) }))
+  const sealed = seal(key, JSON.stringify({ username: input.username, password: input.password, ...(totp ? { totp } : {}) }))
   const list = logins().filter((l) => l.id !== id)
   list.push({ id, label, origins, sealed, createdAt: logins().find((l) => l.id === id)?.createdAt ?? now, updatedAt: now })
   setSetting('vault.logins', list)

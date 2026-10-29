@@ -168,6 +168,11 @@ export function browserActionRisk(
  * `browser_evaluate` INTERNA (mai esposta al modello): un `<input
  * type="password">` senza etichetta compare nello snapshot come
  * `textbox [ref=f1e18]`, senza nome — il deny sul nome accessibile non scatta.
+ * P3 (fase 14 correzioni): il probe porta anche l'ORIGINE del FRAME del campo
+ * e se il campo sta nel documento TOP — è l'origine verificata al momento del
+ * fill, come fanno i password manager (1Password, Bitwarden), non l'ultima
+ * URL nota della sessione (che per browser_open è l'URL RICHIESTA, non quella
+ * finale dopo i redirect).
  */
 export interface FieldProbeInfo {
   type: string
@@ -179,6 +184,10 @@ export interface FieldProbeInfo {
   aria: string
   /** giro K1: il `title` dell'elemento (un altro posto dove la pagina nomina il campo) */
   title: string
+  /** P3: l'origine del FRAME del campo (el.ownerDocument.defaultView.location.origin) */
+  origin: string
+  /** P3: il campo sta nel documento TOP (non in un iframe) */
+  top: boolean
 }
 
 /**
@@ -227,7 +236,8 @@ export function parseEvaluateResult(mcpResultText: string): FieldProbeInfo | nul
       type: String(info.type ?? ''), autocomplete: String(info.autocomplete ?? ''),
       name: String(info.name ?? ''), id: String(info.id ?? ''),
       placeholder: String(info.placeholder ?? ''), label: String(info.label ?? ''),
-      aria: String(info.aria ?? ''), title: String(info.title ?? '')
+      aria: String(info.aria ?? ''), title: String(info.title ?? ''),
+      origin: String(info.origin ?? ''), top: info.top === true
     }
   } catch {
     return null

@@ -3596,6 +3596,38 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
     expect(h.sandboxMock.exec.calls).toBe(2)
   })
 
+  // P5 (fase 14 correzioni): la card secure-input nata dopo contenuti web
+  // porta untrusted: true nel meta (la UI avvisa di controllare l'origine)
+  it('P5: request_secure_input DOPO contenuto web → la card secure-input porta untrusted: true; senza contaminazione no', async () => {
+    setWebSearchProviderForTests({ search: async () => [{ title: 't', url: 'https://x.example', snippet: 's' }] })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'w1', name: 'web_search', arguments: JSON.stringify({ query: 'x' }) }] },
+      { toolCalls: [{ id: 's1', name: 'request_secure_input', arguments: JSON.stringify({ kind: 'login', label: 'Banca', origin: 'https://banca-finta.example', reason: 'serve per accedere' }) }] },
+      { text: '.' }
+    ]
+    const turn = runTurn(AGENT, 'cerca e chiedi il login', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'secure-input' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const card = h.db.entries.findLast((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'secure-input')!
+    expect((card.meta!.message as { untrusted?: true }).untrusted).toBe(true)
+    resolveApproval(AGENT, String(card.meta!.approvalId), 'deny', 'once')
+    await turn
+    // senza contaminazione (nessun contenuto web nel turno) la card NON porta untrusted
+    h.llm.queue = [
+      { toolCalls: [{ id: 's2', name: 'request_secure_input', arguments: JSON.stringify({ kind: 'secret', name: 'API_KEY', reason: 'serve per il comando' }) }] },
+      { text: '.' }
+    ]
+    const turn2 = runTurn(AGENT, 'chiedi il secret', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.findLast((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'secure-input' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const clean = h.db.entries.findLast((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'secure-input')!
+    expect((clean.meta!.message as { untrusted?: true }).untrusted).toBeUndefined()
+    resolveApproval(AGENT, String(clean.meta!.approvalId), 'deny', 'once')
+    await turn2
+  })
+
   it('la auto-review pura esclude le azioni contaminate anche col revisore favorevole', async () => {
     const { autoReviewDecision, CONTAMINATED_ASK_TOOLS } = await import('../auto-review')
     const cfg = { enabled: true, allowRules: ['qualsiasi cosa'], blockRules: [], providerId: 'prov', model: 'm1' }

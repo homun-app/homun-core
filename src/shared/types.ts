@@ -207,6 +207,8 @@ export type SendMessagePayload =
       /** login: origine precompilata e modificabile */
       origin?: string
       reason: string
+      /** P5 (fase 14 correzioni): richiesta nata in un turno contaminato — la UI avvisa di controllare l'origine */
+      untrusted?: true
     }
   | {
       /** fase 14 (punto 7f): card di conferma del contatto che il bot vuole salvare */

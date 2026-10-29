@@ -34,10 +34,10 @@ RUN npm install -g @playwright/mcp@0.0.83 \
  && playwright-mcp --help >/dev/null \
  && chmod -R a+rX,go-w "${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}"
 
-# fase 14 (punto 7a): l'utente del SOLO processo Playwright MCP — uid/gid 1001
-# (sbrowser) col gruppo supplementare 1000 (quello del bot): il suo profilo
-# (/box/browser/<id>/profile, 0700 di 1001) NON è leggibile dalla shell del
-# bot (uid 1000), quindi nemmeno il cookie di sessione dopo un login; il gruppo
-# supplementare gli lascia scrivere pid e screenshot nelle cartelle del bot
-# (gruppo 1000, g+w, setgid — le prepara il one-shot del daemon).
-RUN useradd --uid 1001 --user-group --groups 1000 --system --shell /usr/sbin/nologin sbrowser
+# fase 14 correzioni (P1): NESSUN useradd — l'immagine base Playwright porta
+# GIÀ l'utente non-root pwuser (uid/gid 1001:1001, membro di 100/users) previsto
+# apposta per far girare il browser: è lui l'utente del processo Playwright MCP
+# e di TUTTO il suo stato (profilo, output, pid) nel volume /browser. La riga
+# VERIFICA l'assunzione e fa FALLIRE la build in modo chiaro se l'immagine base
+# cambia utente o uid: meglio una build rossa che un browser con uid inatteso.
+RUN test "$(id -u pwuser)" = 1001 && test "$(id -g pwuser)" = 1001

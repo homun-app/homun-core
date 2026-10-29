@@ -91,6 +91,21 @@ const PAGES = {
       '- textbox "Codice di verifica" [ref=e4]',
       '- button "Accedi" [ref=e5]'
     ]
+  },
+  // P3 (fase 14 correzioni): pagina col campo di login DENTRO un iframe di
+  // un'ALTRA origine — il ref NON ha prefisso f (la difesa del prefisso iframe
+  // non scatta) ma il probe riporta top:false e l'origine DEL FRAME:
+  // fill_credential rifiuta dal confronto origine/top del campo
+  'https://app.example.test/embedded': {
+    title: 'Accesso incorporato',
+    file: 'page-appexample-embedded',
+    lines: [
+      '- Page URL: https://app.example.test/embedded',
+      '- Page Title: Accesso incorporato',
+      '- heading "Accesso incorporato" [ref=e1]',
+      '- textbox "Utente" [ref=e2]',
+      '- button "Accedi" [ref=e3]'
+    ]
   }
 }
 
@@ -120,6 +135,11 @@ const FIELD_TYPES = {
     e8: { type: 'text', autocomplete: '', name: 'username', id: 'username', placeholder: '', label: 'Username Password', aria: '', title: '' },
     e9: { type: 'password', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '' },
     e10: { type: 'submit', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '' }
+  },
+  // P3: il campo e2 della pagina embedded è DENTRO un iframe di widget.example.net
+  'https://app.example.test/embedded': {
+    e2: { type: 'text', autocomplete: 'username', name: 'user', id: '', placeholder: '', label: 'Utente', aria: '', title: '', origin: 'https://widget.example.net', top: false },
+    e3: { type: 'submit', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '' }
   }
 }
 
@@ -231,15 +251,19 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   // result è quello REALE della 0.0.83, NON JSON nudo: `### Result` col JSON
   // indentato, poi il codice eseguito e la pagina (il parser del daemon legge
   // la sola sezione Result). Un ref SENZA campo restituisce testo non-JSON
-  // senza la sezione (valutazione fallita per il chiamante → ask)
+  // senza la sezione (valutazione fallita per il chiamante → ask).
+  // P3 (fase 14 correzioni): il JSON porta anche origin (del FRAME del campo)
+  // e top (documento TOP) — i default vengono dalla pagina corrente e ogni
+  // campo può sovrascriverli (il test dell'iframe: top:false, origine diversa)
   if (name === 'browser_evaluate') {
     const fields = FIELD_TYPES[state.url] ?? {}
     const target = String(args.target ?? '')
     const info = fields[target]
     if (!info) return text(`(nessun campo per il ref ${target} in questa pagina)`)
+    const full = { origin: new URL(state.url).origin, top: true, ...info }
     return text([
       '### Result',
-      JSON.stringify(info, null, 2),
+      JSON.stringify(full, null, 2),
       '### Ran Playwright code',
       '```js',
       `await page.locator('[ref=${target}]').evaluate(${String(args.function ?? '')})`,

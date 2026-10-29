@@ -27,12 +27,14 @@ import {
   errorSection, fieldIsCredential, parseEvaluateResult, SNAPSHOT_BLOCKED_NOTE, type RefInfo, type FieldProbeInfo
 } from './browser-guard'
 import {
-  dockerBrowserMcpArgv, browserMcpFlags, BOX_CONTAINER,
-  BROWSER_IDLE_MS, BROWSERS_PER_BOX_MAX, boxHomePath, browserPidFile, dockerReadFileArgv, dockerKillGroupArgv,
-  dockerBrowserInitArgv
+  dockerBrowserMcpArgv, BOX_CONTAINER, BROWSER_MOUNT, BROWSER_USER,
+  BROWSER_IDLE_MS, BROWSERS_PER_BOX_MAX, boxHomePath, browserPidFile, browserStateDir,
+  dockerBrowserReadFileArgv, dockerBrowserWritableArgv, dockerBrowserOldProfileRmArgv,
+  dockerBrowserReadB64Argv, dockerBrowserWriteB64Argv, dockerBrowserRmFileArgv,
+  dockerKillGroupArgv
 } from '../sandbox/docker-argv'
 import {
-  sandboxMode, browserSandboxOk, ensureBoxContainer, ensureBotHome, runDockerRaw,
+  sandboxMode, browserSandboxOk, ensureBoxContainer, ensureBotHome, runDockerRaw, runDockerArgv,
   boxOwnerOf, isSubagent
 } from '../sandbox'
 import { ensureBrowserProxy } from './browser-proxy'
@@ -240,21 +242,25 @@ function touchSession(agentId: string, s: BrowserSession): void {
  * Kill dell'eventuale ORFANO del bot, dal pid file (argv puri, come G1): se il
  * daemon è morto senza chiudere, il server nel container è ancora vivo e
  * terrà il profilo bloccato. Chiamato al boot e prima di ogni avvio.
+ * P2 (fase 14 correzioni): il pid file sta nel volume /browser (di 1001) e il
+ * processo è di pwuser — lettura E kill girano come 1001:1001 (un kill come
+ * 1000 riceverebbe EPERM e l'orfano terrebbe il SingletonLock del profilo).
  */
 async function killOrphanByPidFile(pidFileContent: string | null): Promise<void> {
   const parsed = parseShellPgid(pidFileContent)
   if (!parsed.ok) return
-  await runDockerRaw(dockerKillGroupArgv(BOX_CONTAINER, parsed.pgid, 'TERM'), { timeoutMs: 15_000 }).catch(() => undefined)
+  await runDockerRaw(dockerKillGroupArgv(BOX_CONTAINER, parsed.pgid, 'TERM', BROWSER_USER), { timeoutMs: 15_000 }).catch(() => undefined)
 }
 
 export async function killBrowserOrphan(agentId: string): Promise<void> {
   if (sandboxMode() !== 'docker') return
-  // fase 12 (punto 1): il pid file di un FIGLIO sta nella home del padre e
-  // porta il suo id nel nome
-  const home = boxHomePath(boxOwnerOf(agentId))
-  const pidFile = browserPidFile(agentId, isSubagent(agentId))
+  // fase 12 (punto 1): il pid file di un FIGLIO sta nella cartella del padre
+  // e porta il suo id nel nome
+  const owner = boxOwnerOf(agentId)
+  const child = isSubagent(agentId)
+  const pidFile = browserPidFile(owner, child ? agentId : undefined)
   // best effort: senza container o senza pid file non c'è nessun orfano
-  const r = await runDockerRaw(dockerReadFileArgv(BOX_CONTAINER, `${home}/${pidFile}`), { timeoutMs: 15_000 }).catch(() => null)
+  const r = await runDockerRaw(dockerBrowserReadFileArgv(BOX_CONTAINER, pidFile), { timeoutMs: 15_000 }).catch(() => null)
   if (!r || r.exitCode !== 0) return
   await killOrphanByPidFile(r.stdout)
 }
@@ -298,24 +304,30 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
     }
   } else {
     await ensureBoxContainer()
-    await ensureBotHome(agentId) // -w punta alla home (del proprietario)
+    await ensureBotHome(agentId) // la home del proprietario serve ai file del BOT
     await killBrowserOrphan(agentId)
-    // fase 14 (punto 7a): il terreno del browser — profilo nuovo di 1001
-    // (0700, /box/browser/<owner>/profile), cartelle di output del gruppo
-    // 1000 scrivibili da 1001, profilo VECCHIO cancellato. Per un FIGLIO non
-    // serve: gira --isolated come 1000 nella home del padre, come prima
+    // P2 (fase 14 correzioni): il terreno del browser — TUTTO nello stato di
+    // 1001 nel volume /browser. Il controllo come 1001 (radice di 1001 e
+    // scrivibile) è la verifica del one-shot della radice che ensureBoxContainer
+    // gira a ogni (ri)creazione; il profilo VECCHIO rimasto nella home del bot
+    // (fase 14 7a) si cancella COME 1000: file del bot, nessun privilegio, e
+    // un rm di una cartella assente non costa nulla
     const child = isSubagent(agentId)
+    const owner = boxOwnerOf(agentId)
+    const w = await runDockerRaw(dockerBrowserWritableArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
+    if (w.exitCode !== 0) {
+      throw new Error(`il volume del browser non è di ${BROWSER_USER} e 0700 (test -O/-w /browser fallito come 1001): lo stato del browser non è sicuro, il browser non parte. I volumi non sono stati toccati.`)
+    }
     if (!child) {
-      const { runDockerRaw } = await import('../sandbox')
-      const init = await runDockerRaw(dockerBrowserInitArgv(BOX_CONTAINER, boxOwnerOf(agentId)), { timeoutMs: 30_000 })
-      if (init.exitCode !== 0) {
-        throw new Error(`preparazione del profilo del browser non riuscita: ${init.stderr || `exit ${init.exitCode}`}`)
+      const rm = await runDockerRaw(dockerBrowserOldProfileRmArgv(BOX_CONTAINER, owner), { timeoutMs: 30_000 })
+      if (rm.exitCode !== 0) {
+        throw new Error(`rimozione del profilo vecchio del browser non riuscita: ${rm.stderr || `exit ${rm.exitCode}`}`)
       }
     }
-    // fase 12 (punto 1): il browser di un FIGLIO ha istanza e pid file SUOI,
-    // --isolated al posto del profilo persistente e l'output separato — ma
-    // gira nella HOME DEL PADRE (condivisa)
-    args = dockerBrowserMcpArgv(agentId, proxyPort, { child, home: boxHomePath(boxOwnerOf(agentId)) })
+    // fase 12 (punto 1) + P2: il browser di un FIGLIO ha istanza e pid file
+    // SUOI (--isolated, output- e pid col suo id) ma gira ANCH'ESSO come 1001
+    // nello stato del PADRE (/browser/<owner>)
+    args = dockerBrowserMcpArgv(agentId, proxyPort, { child, owner })
   }
   const client = new Client({ name: 'sandbot', version: '0.1.0' })
   await client.connect(new StdioClientTransport(env ? { command, args, env } : { command, args }))
@@ -387,9 +399,14 @@ const isConnectionError = (e: unknown): boolean =>
  * label dell'elemento (in quotes.toscrape.com/login il campo username ne ha
  * DUE, "Username" e "Password"), aria-label più il testo degli elementi di
  * aria-labelledby risolti per id, e il title dell'elemento.
+ * P3 (fase 14 correzioni): il probe riporta anche l'ORIGINE del FRAME del
+ * campo (location.origin del documento che lo contiene) e se il campo sta nel
+ * documento TOP — l'origine si verifica al momento del fill, non sull'ultima
+ * URL nota della sessione (che per browser_open è l'URL richiesta, non quella
+ * finale dopo i redirect).
  */
 export const FIELD_PROBE_FN =
-  "(el) => ({ type: el.type || '', autocomplete: el.autocomplete || '', name: el.name || '', id: el.id || '', placeholder: el.placeholder || '', label: Array.from(el.labels || []).map((l) => l.textContent || '').join(' '), aria: [el.getAttribute('aria-label') || ''].concat((el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean).map((i) => (document.getElementById(i) || {}).textContent || '')).join(' ').trim(), title: el.title || '' })"
+  "(el) => ({ type: el.type || '', autocomplete: el.autocomplete || '', name: el.name || '', id: el.id || '', placeholder: el.placeholder || '', label: Array.from(el.labels || []).map((l) => l.textContent || '').join(' '), aria: [el.getAttribute('aria-label') || ''].concat((el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean).map((i) => (document.getElementById(i) || {}).textContent || '')).join(' ').trim(), title: el.title || '', origin: (el.ownerDocument && el.ownerDocument.defaultView) ? el.ownerDocument.defaultView.location.origin : '', top: !!(el.ownerDocument && el.ownerDocument.defaultView && el.ownerDocument.defaultView.top && el.ownerDocument.defaultView === el.ownerDocument.defaultView.top) })"
 
 /**
  * Chiama INTERNAMENTE browser_evaluate sul campo del ref (0a): serve al
@@ -452,6 +469,29 @@ export async function callBrowserTool(agentId: string, tool: string, input: Reco
   }
 }
 
+/**
+ * La copia dello screenshot dal volume PRIVATO del browser alla home del bot
+ * (P2, fase 14 correzioni), in tre argv puri di docker-argv: lettura dei byte
+ * COME 1001 (base64: il PNG nel canale stdout di una stringa JS non si
+ * corrompe), scrittura atomica COME 1000 nella home del bot (temporaneo nella
+ * stessa cartella + rename, la forma di DOCKER_WRITE_SH) e cancellazione
+ * dell'originale COME 1001. Torna null se tutto è andato bene, altrimenti
+ * l'errore CHIARO (mai contenuti di pagina). Esportata per i test (runner
+ * docker finto): il flusso dal vivo lo prova il revisore.
+ */
+export async function copyBrowserScreenshot(owner: string, name: string, dest: string): Promise<string | null> {
+  const src = `${browserStateDir(owner)}/${name}`
+  const read = await runDockerArgv(dockerBrowserReadB64Argv(BOX_CONTAINER, src), { timeoutMs: 30_000 })
+  if (read.exitCode !== 0) return `lettura dello screenshot nel volume del browser non riuscita: ${read.stderr || `exit ${read.exitCode}`}`
+  // base64 troncato dal tetto dell'output = PNG corrotto: meglio fermarsi
+  if (read.trimmed) return 'screenshot troppo grande per la copia (lettura troncata): riprova con una pagina più semplice'
+  const write = await runDockerArgv(dockerBrowserWriteB64Argv(BOX_CONTAINER, dest), { timeoutMs: 30_000, input: read.stdout })
+  if (write.exitCode !== 0) return `scrittura dello screenshot nella home del bot non riuscita: ${write.stderr || `exit ${write.exitCode}`}`
+  const rm = await runDockerArgv(dockerBrowserRmFileArgv(BOX_CONTAINER, src), { timeoutMs: 30_000 })
+  if (rm.exitCode !== 0) return `cancellazione dell'originale nello stato del browser non riuscita: ${rm.stderr || `exit ${rm.exitCode}`}`
+  return null
+}
+
 async function runBrowserTool(agentId: string, tool: string, input: Record<string, unknown>): Promise<BrowserToolResult> {
   const session = await getBrowserSession(agentId)
   const ref = String(input.ref ?? '')
@@ -508,17 +548,27 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
       break
     }
     case 'browser_screenshot': {
-      // il nome del file è RELATIVO alla workspace root del server MCP (la
-      // home del bot): finisce in .browser/screens/<id>.png nel box
-      const filename = `.browser/screens/${randomUUID().slice(0, 8)}.png`
-      const res = await session.client.callTool({ name: 'browser_take_screenshot', arguments: { filename, type: 'png' } })
+      // P2 (fase 14 correzioni): lo screenshot nasce nello STATO PRIVATO del
+      // browser (cwd del server = /browser/<owner>, di 1001: lì non arriva la
+      // shell del bot) e il DAEMON lo copia nella home del bot — lettura come
+      // 1001, scrittura atomica come 1000, cancellazione dell'originale come
+      // 1001. Il modello vede lo STESSO path di prima; uno screenshot mostra i
+      // campi password mascherati, ma comunque non resta nel volume privato.
+      const id = randomUUID().slice(0, 8)
+      const owner = boxOwnerOf(agentId)
+      const name = `screenshot-${id}.png`
+      const res = await session.client.callTool({ name: 'browser_take_screenshot', arguments: { filename: name, type: 'png' } })
       // fase 12 (0c): al modello solo il path del file e l'eventuale errore —
       // niente `### Ran Playwright code` né link alle uscite del server
       const err = errorSection(mcpText(res))
-      // fase 12 (punto 1): il file finisce nella home del PROPRIETARIO (il
-      // server MCP gira lì): per un figlio è la home del padre
-      const path = `${boxHomePath(boxOwnerOf(agentId))}/${filename}`
-      return { output: `Screenshot salvato nel box: ${path}${err ? `\n${err}` : ''}`, meta: { screenshot: path } }
+      const dest = `${boxHomePath(owner)}/.browser/screens/${id}.png`
+      if (fakeBrowserMcpPath()) {
+        // MODALITÀ TEST (server finto sull'host): nessun file vero da copiare
+        return { output: `Screenshot salvato nel box: ${dest}${err ? `\n${err}` : ''}`, meta: { screenshot: dest } }
+      }
+      const copyErr = await copyBrowserScreenshot(owner, name, dest)
+      if (copyErr) return { output: copyErr, meta: { browserError: true } }
+      return { output: `Screenshot salvato nel box: ${dest}${err ? `\n${err}` : ''}`, meta: { screenshot: dest } }
     }
     case 'browser_close':
       mcpName = 'browser_close'

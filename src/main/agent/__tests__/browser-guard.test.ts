@@ -275,7 +275,8 @@ describe('I7: il passaggio da web_fetch al browser (pagine SPA vere)', () => {
 import { fieldIsCredential, errorSection, type FieldProbeInfo } from '../browser-guard'
 
 const info = (patch: Partial<FieldProbeInfo>): FieldProbeInfo => ({
-  type: 'text', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '', ...patch
+  type: 'text', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '',
+  origin: 'https://app.example.test', top: true, ...patch
 })
 
 describe('fase 12 0a: fieldIsCredential (il tipo di campo letto DENTRO la pagina)', () => {
@@ -344,7 +345,10 @@ describe('correzione J3: parseEvaluateResult — la sezione ### Result del resul
   it('il testo REALE (con blocco del codice e sezione Page) → il FieldProbeInfo del campo', () => {
     expect(parseEvaluateResult(REAL_RESULT)).toEqual({
       type: 'password', autocomplete: '', name: 'password', id: 'password',
-      placeholder: '', label: '', aria: '', title: ''
+      placeholder: '', label: '', aria: '', title: '',
+      // P3 (fase 14 correzioni): il probe porta anche origine del frame e top —
+      // il result REALE della 0.0.83 non li ha → defaults ('' e false)
+      origin: '', top: false
     })
     expect(fieldIsCredential(parseEvaluateResult(REAL_RESULT)!)).toBe(true)
   })
