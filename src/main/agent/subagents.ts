@@ -137,7 +137,7 @@ const SUBAGENT_DENY_REASONS: ReadonlyArray<{ test: (tool: string) => boolean; re
     reason: 'il sottoagente lavora sul brief, il roster e il vault sono del padre'
   },
   {
-    test: (t) => ['draft_external', 'offer_connector', 'search_connectors', 'propose_rule_change', 'create_agent', 'update_agent', 'delete_agent', 'create_group', 'update_group'].includes(t),
+    test: (t) => ['draft_external', 'offer_connector', 'search_connectors', 'add_mcp_server', 'install_plugin', 'propose_rule_change', 'create_agent', 'update_agent', 'delete_agent', 'create_group', 'update_group'].includes(t),
     reason: 'gli invii esterni, i connettori e la configurazione dei bot sono del padre'
   }
 ]

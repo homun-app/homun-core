@@ -7,7 +7,8 @@
 // Parsing e validazione sono funzioni pure; l'I/O file sta in fondo.
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { dataDir } from '../store/db'
+import { dataDir, getSetting } from '../store/db'
+import { boxOwnerOf } from '../sandbox'
 
 export interface SkillRecord {
   name: string
@@ -57,7 +58,28 @@ export function skillsSectionPrompt(skills: SkillRecord[]): string {
   ].join('\n')
 }
 
-// ---- I/O file ----
+// ---- fase 13 (punto 4): le skill dei PLUGIN (sola lettura, mai copiate) ----
+
+import { installedPlugins, pluginSkillBody, type InstalledPlugin } from '../connectors/install'
+
+/** Il rifiuto fisso di update_skill/delete_skill su una skill di plugin. */
+export const PLUGIN_SKILL_REFUSAL = 'skill di un plugin: si cambia aggiornando il plugin'
+
+/** I plugin installati abilitati per un bot (enabledFor; il figlio eredita dal padre). */
+export function pluginsEnabledFor(agentId: string, parentId?: string): InstalledPlugin[] {
+  const all = installedPlugins({ getSetting })
+  return all.filter((p) => p.enabledFor.includes('*') || p.enabledFor.includes(agentId) || (parentId !== undefined && p.enabledFor.includes(parentId)))
+}
+
+/** Le skill dei plugin abilitati per un bot: nome nel prompt <plugin>--<skill> con "(plugin <nome>)". */
+export function pluginSkillsOf(agentId: string): SkillRecord[] {
+  const owner = boxOwnerOf(agentId)
+  return pluginsEnabledFor(agentId, owner === agentId ? undefined : owner).flatMap((p) =>
+    p.skills.map((s) => ({ name: s.name, description: `${s.description} (plugin ${p.name})`, content: '' }))
+  )
+}
+
+
 
 export function skillsDir(agentId: string): string {
   return join(dataDir(), 'agents', agentId, 'skills')
@@ -75,12 +97,19 @@ export function listSkills(agentId: string): SkillRecord[] {
   }
 }
 
-/** Corpo (istruzioni) di una skill — è ciò che il tool skill({name}) consegna al modello. */
+/** Corpo (istruzioni) di una skill — è ciò che il tool skill({name}) consegna al modello. Fase 13: le skill dei plugin si LEGGONO (sono in sola lettura nella cartella del plugin). */
 export function readSkillBody(agentId: string, name: string): string {
   if (!isValidSkillName(name)) throw new Error(`Nome skill non valido: "${name}" (solo [a-z0-9-], max 64)`)
+  // fase 12: il figlio legge le skill del PADRE; fase 13: e le skill dei plugin
+  const readFor = boxOwnerOf(agentId)
   try {
-    return parseSkillFile(readFileSync(join(skillsDir(agentId), name, 'SKILL.md'), 'utf8'))?.content ?? ''
+    return parseSkillFile(readFileSync(join(skillsDir(readFor), name, 'SKILL.md'), 'utf8'))?.content ?? ''
   } catch {
+    // non è una skill del bot: può essere una skill di PLUGIN abilitato
+    for (const p of pluginsEnabledFor(readFor)) {
+      const body = pluginSkillBody(p, dataDir(), name)
+      if (body !== null) return parseSkillFile(body)?.content ?? body
+    }
     throw new Error(`Skill "${name}" non trovata`)
   }
 }
@@ -113,10 +142,17 @@ export function deleteSkill(agentId: string, name: string): boolean {
   return true
 }
 
-/** Sezione skill del system prompt per un agente ('' se non ci sono skill). */
+/** Sezione skill del system prompt per un agente ('' se non ci sono skill). Fase 13: anche le skill dei plugin. */
 export function buildSkillsSection(agentId: string): string {
   try {
-    return skillsSectionPrompt(listSkills(agentId))
+    const own = listSkills(agentId)
+    let pluginSkills: SkillRecord[] = []
+    try {
+      pluginSkills = pluginSkillsOf(agentId)
+    } catch {
+      pluginSkills = [] // i plugin non devono mai rompere il prompt
+    }
+    return skillsSectionPrompt([...own, ...pluginSkills])
   } catch {
     return '' // le skill non devono mai rompere il turno
   }

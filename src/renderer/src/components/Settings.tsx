@@ -211,23 +211,287 @@ const STATUS_LABEL: Record<string, string> = {
   error: 'errore'
 }
 
+/**
+ * Fase 13: Connettori con QUATTRO schede — App (catalogo, come prima),
+ * Installati (server del registro/plugin/gateway con enabledFor per bot),
+ * Marketplace (elenco, aggiungi/rimuovi) e Gateway (modulo del punto 7).
+ */
 function ConnectorsTab() {
   const connectors = useStore((s) => s.connectors)
   const refreshConnectors = useStore((s) => s.refreshConnectors)
+  const [sub, setSub] = useState<'app' | 'installati' | 'marketplace' | 'gateway'>('app')
   useEffect(() => { void refreshConnectors() }, [refreshConnectors])
+  const subBtn = (id: typeof sub, label: string): ReactNode => (
+    <button
+      key={id}
+      className={`rounded-lg px-2.5 py-1 text-xs ${sub === id ? 'bg-neutral-700 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}
+      onClick={() => setSub(id)}
+    >
+      {label}
+    </button>
+  )
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-1">{subBtn('app', 'App')}{subBtn('installati', 'Installati')}{subBtn('marketplace', 'Marketplace')}{subBtn('gateway', 'Gateway')}</div>
+      {sub === 'app' && (
+        <>
+          <p className="text-xs text-neutral-500">
+            Le app si collegano come server MCP con OAuth: i loro tool diventano <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>.
+            I token stanno cifrati nel Keychain. Il bot può proporre un'app in chat, ma la connessione parte solo dal tuo click.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {connectors.map((c) => (
+              <ConnectorTile key={c.id} c={c} />
+            ))}
+          </div>
+          <ManualServers />
+          <ClientMetadataUrlRow />
+        </>
+      )}
+      {sub === 'installati' && <InstalledTab />}
+      {sub === 'marketplace' && <MarketplaceTab />}
+      {sub === 'gateway' && <GatewayTab />}
+    </div>
+  )
+}
+
+/**
+ * Fase 13 (punto 6.2): URL del Client ID Metadata Document (CIMD) ospitato
+ * dall'utente — vuoto = Dynamic Client Registration. Una riga che spiega.
+ */
+function ClientMetadataUrlRow() {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    void api.settingsGet<string>('connectors.oauth.clientMetadataUrl', '').then(setUrl).catch(() => setUrl(''))
+  }, [])
+  if (url === null) return null
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-neutral-800 pt-3">
+      <span className="text-[11px] uppercase tracking-wide text-neutral-500">OAuth</span>
+      <span className="text-[11px] text-neutral-500">Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR).</span>
+      <input
+        className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none"
+        placeholder="https://utente.github.io/sandbot/client.json"
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        onBlur={() => void api.connectorsSetClientMetadataUrl(url.trim())}
+      />
+    </div>
+  )
+}
+
+/** Scheda Installati: server del registro/plugin/gateway con fonte, fiducia, stato, enabledFor, disinstalla. */
+function InstalledTab() {
+  const [data, setData] = useState<{ servers: McpServerInfo[]; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> } | null>(null)
+  const agents = useStore((s) => s.agents)
+  const [values, setValues] = useState<Record<string, string>>({})
+  const refresh = async (): Promise<void> => { setData(await api.connectorsInstalled() as { servers: McpServerInfo[]; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> }) }
+  useEffect(() => { void refresh() }, [])
+  if (data === null) return <p className="text-xs text-neutral-600">installati…</p>
+
+  const enabledForEditor = (kind: 'server' | 'plugin', id: string, current: string[] | undefined): ReactNode => (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-[11px] text-neutral-500">per bot:</span>
+      {agents.map((a) => {
+        const on = current?.includes('*') || current?.includes(a.id)
+        return (
+          <label key={a.id} className="flex items-center gap-1 text-[11px] text-neutral-400">
+            <input
+              type="checkbox"
+              className="h-3 w-3 accent-neutral-300"
+              checked={on}
+              onChange={() => {
+                const next = current?.includes('*') ? [] : [...(current ?? [])]
+                const i = next.indexOf(a.id)
+                if (i >= 0) next.splice(i, 1)
+                else next.push(a.id)
+                void api.connectorsSetEnabledFor(kind, id, next).then(refresh)
+              }}
+            />
+            {a.name}
+          </label>
+        )
+      })}
+    </div>
+  )
+
+  return (
+    <div className="space-y-3">
       <p className="text-xs text-neutral-500">
-        Le app si collegano come server MCP con OAuth: i loro tool diventano <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>.
-        I token stanno cifrati nel Keychain. Il bot può proporre un'app in chat, ma la connessione parte solo dal tuo click.
+        Server del registro pubblico e plugin installati. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat.
       </p>
-      <div className="grid grid-cols-2 gap-2">
-        {connectors.map((c) => (
-          <ConnectorTile key={c.id} c={c} />
+      {data.servers.length === 0 && data.plugins.length === 0 && <p className="text-xs text-neutral-600">nessun server o plugin installato</p>}
+      {data.servers.map((sv) => {
+        const src = sv.source as { kind?: string; name?: string; plugin?: string; preset?: string } | undefined
+        const needs = sv.needsAuth as { kind?: string; keys?: string[] } | undefined
+        return (
+          <div key={sv.id} className="rounded-xl border border-neutral-800 px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 rounded-full ${needs ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+              <span className="text-sm text-neutral-100">{sv.name}</span>
+              <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-neutral-400">{src?.kind ?? 'manuale'}</span>
+              {sv.trustLabel && <span className="text-[10px] text-neutral-500">{sv.trustLabel}</span>}
+              <span className="flex-1 truncate text-xs text-neutral-600">{sv.transport === 'http' ? sv.url : `${sv.box?.command ?? ''} ${(sv.box?.args ?? []).join(' ')}`}</span>
+              <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.connectorsUninstallServer(sv.id); await refresh() }}>disinstalla</button>
+            </div>
+            {enabledForEditor('server', sv.id, sv.enabledFor)}
+            {needs?.keys?.length ? (
+              <div className="mt-2 space-y-1 border-t border-neutral-800 pt-2">
+                <p className="text-[11px] text-amber-500/80">serve: {needs.keys.join(', ')} {needs.kind === 'key' ? '(header)' : needs.kind === 'env' ? '(variabile d&rsquo;ambiente)' : '(impostazione del plugin)'}</p>
+                {needs.keys.map((k) => (
+                  <div key={k} className="flex gap-1">
+                    <input
+                      className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2 py-1 text-xs outline-none"
+                      type="password"
+                      placeholder={k}
+                      value={values[`${sv.id}:${k}`] ?? ''}
+                      onChange={(e) => setValues((p) => ({ ...p, [`${sv.id}:${k}`]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+                <button
+                  className="rounded-lg bg-neutral-700 px-2 py-1 text-xs text-white hover:bg-neutral-600"
+                  onClick={async () => {
+                    const vals: Record<string, string> = {}
+                    for (const k of needs.keys ?? []) if (values[`${sv.id}:${k}`]?.trim()) vals[k] = values[`${sv.id}:${k}`]!.trim()
+                    await api.connectorsSaveServerValues(sv.id, needs.kind === 'key' ? 'headers' : needs.kind === 'env' ? 'env' : 'userConfig', vals)
+                    setValues({})
+                    await refresh()
+                  }}
+                >
+                  salva cifrato
+                </button>
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
+      {data.plugins.map((p) => (
+        <div key={`${p.marketplace}/${p.name}`} className="rounded-xl border border-neutral-800 px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-neutral-100">{p.name}</span>
+            <span className="text-xs text-neutral-500">{p.marketplace} · {p.sha12}</span>
+            <span className="flex-1" />
+            <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.pluginsUninstall(p.name, p.marketplace); await refresh() }}>disinstalla</button>
+          </div>
+          <p className="mt-0.5 text-[11px] text-neutral-600">{p.skills.length} skill · {p.servers.length} server{p.updateAvailable ? ' · nuova versione disponibile (aggiorna = nuova card in chat)' : ''}</p>
+          {enabledForEditor('plugin', p.name, p.enabledFor)}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Scheda Marketplace: elenco dei marketplace registrati, aggiungi (owner/repo o URL git) o rimuovi. Il BOT non può. */
+function MarketplaceTab() {
+  const [list, setList] = useState<Array<{ name: string; source: string; kind: string; official: boolean }> | null>(null)
+  const [input, setInput] = useState('')
+  const [error, setError] = useState('')
+  const refresh = async (): Promise<void> => setList(await api.marketplaceList())
+  useEffect(() => { void refresh() }, [])
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-neutral-500">
+        Plugin nel formato di Claude Code. Predefinito: <code>anthropics/claude-plugins-official</code> (puoi rimuoverlo).
+        Di un plugin SandBot importa SOLO skill e server MCP; hook, bin/ e comandi non girano mai.
+      </p>
+      {(list ?? []).map((m) => (
+        <div key={m.source} className="flex items-center gap-2 rounded-xl border border-neutral-800 px-3 py-2">
+          <span className="text-sm text-neutral-100">{m.name}</span>
+          {m.official && <span className="rounded bg-sky-900/50 px-1.5 py-0.5 text-[10px] text-sky-300">marketplace ufficiale</span>}
+          <span className="flex-1 truncate text-xs text-neutral-600">{m.source}</span>
+          <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.marketplaceRemove(m.source); await refresh() }}>rimuovi</button>
+        </div>
+      ))}
+      <div className="flex gap-1">
+        <input
+          className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2.5 py-1.5 text-xs outline-none"
+          placeholder="owner/repo di GitHub oppure URL git https"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+        />
+        <button
+          className="rounded-lg bg-neutral-700 px-2.5 py-1.5 text-xs text-white hover:bg-neutral-600 disabled:opacity-40"
+          disabled={!input.trim()}
+          onClick={async () => {
+            setError('')
+            try {
+              await api.marketplaceAdd(input.trim())
+              setInput('')
+              await refresh()
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e))
+            }
+          }}
+        >
+          aggiungi
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  )
+}
+
+/** Scheda Gateway (punto 7): un server MCP remoto di aggregazione, preset come dati, chiavi cifrate. */
+function GatewayTab() {
+  const [presets, setPresets] = useState<Array<{ id: string; name: string; auth: string; headerName?: string; help: string }> | null>(null)
+  const [warning, setWarning] = useState('')
+  const [name, setName] = useState('')
+  const [url, setUrl] = useState('')
+  const [token, setToken] = useState('')
+  const [error, setError] = useState('')
+  useEffect(() => {
+    void api.connectorsGatewayPresets().then((r) => { setPresets(r.presets); setWarning(r.warning) }).catch(() => setPresets([]))
+  }, [])
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-neutral-500">{warning || "Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi"}</p>
+      <div className="flex flex-wrap gap-1">
+        {(presets ?? []).map((p) => (
+          <button
+            key={p.id}
+            className="rounded-lg border border-neutral-700 px-2 py-1 text-[11px] text-neutral-300 hover:border-sky-700 hover:text-sky-300"
+            onClick={() => { setName(p.name); setUrl(''); setToken('') }}
+            title={p.help}
+          >
+            {p.name}
+          </button>
         ))}
       </div>
-      <ManualServers />
+      <div className="space-y-2 rounded-xl border border-neutral-800 p-3">
+        <div className="grid grid-cols-2 gap-2">
+          <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. Composio)" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="URL https del server MCP" value={url} onChange={(e) => setUrl(e.target.value)} />
+        </div>
+        <input className="w-full rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" type="password" placeholder="chiave / token Bearer (salvata cifrata)" value={token} onChange={(e) => setToken(e.target.value)} />
+        {(presets ?? []).find((p) => p.name === name)?.help && (
+          <p className="text-[11px] text-neutral-500">{presets!.find((p) => p.name === name)!.help}</p>
+        )}
+        <button
+          className="rounded-lg bg-sky-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40"
+          disabled={!name.trim() || !url.trim().startsWith('https://') || !token.trim()}
+          onClick={async () => {
+            setError('')
+            const preset = (presets ?? []).find((p) => p.name === name)
+            try {
+              // il preset dice SOLO nome header e testo d'aiuto (dati, nessuna chiamata API)
+              await api.connectorsAddGateway({
+                name: name.trim(), url: url.trim(),
+                auth: preset?.auth === 'bearer' ? 'bearer' : 'headers',
+                ...(preset ? { preset: preset.id } : {}),
+                ...(preset?.headerName ? { headerName: preset.headerName, headers: { [preset.headerName]: token.trim() } } : { headers: { Authorization: `Bearer ${token.trim()}` } })
+              })
+              setName(''); setUrl(''); setToken('')
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e))
+            }
+          }}
+        >
+          aggiungi gateway
+        </button>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+      </div>
     </div>
   )
 }

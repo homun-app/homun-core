@@ -623,6 +623,8 @@ vi.mock('../../mcp', () => ({
   activeTools: async () => [{
     name: 'mcp__gmail__send_message', description: 'invia email', parameters: { type: 'object', properties: {} }
   }],
+  // fase 13 (punto 5): la sezione "Connettori attivi" in modalità differita
+  activeServersForAgent: async () => [],
   listServers: () => [],
   McpNeedsReconnectError: class extends Error {},
   callTool: async () => {
@@ -4461,5 +4463,173 @@ describe('fase 12 (punto 5): il turno SUBAGENTS_DONE parte già CONTAMINATO', ()
     expect(String(appr.content)).toContain('contenuti web non fidati')
     resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
     await turn
+  })
+})
+
+
+// ---- fase 13: connettori su larga scala (punti 2, 3, 5, 8) ----
+
+// fase 13: il bridge dei deps d'installazione (finti nei test)
+const { setInstallDeps } = await import('../../connectors/install-bridge')
+
+describe('fase 13: add_mcp_server / install_plugin / find_tools / result MCP', () => {
+  /** deps d'installazione FINTI: registro dalla fixture, server registrati in memoria */
+  const installState = { savedServers: [] as Array<Record<string, unknown>> }
+  const fakeInstallDeps = (): void => {
+    installState.savedServers = []
+    setInstallDeps({
+      store: {
+        read: async () => undefined,
+        write: async () => undefined,
+        remove: async () => undefined,
+        removeAll: async () => undefined
+      },
+      marketplaces: {
+        findPlugin: async (id: string) =>
+          id === 'plugin:demo@mp'
+            ? {
+                reg: { name: 'mp', source: 'x', kind: 'git', official: false, addedAt: 1 },
+                plugin: { name: 'demo', source: { kind: 'relative', path: './demo' } }
+              }
+            : null,
+        cloneOf: () => null,
+        list: () => [{ name: 'mp', source: 'x', kind: 'git', official: false, addedAt: 1 }]
+      },
+      findRegistryEntry: async (name: string) =>
+        name === 'com.notion/mcp'
+          ? { server: { name: 'com.notion/mcp', description: 'Official Notion MCP server', version: '1.0.1', remotes: [{ type: 'streamable-http', url: 'https://mcp.notion.com/mcp' }] } }
+          : null,
+      listServers: () => installState.savedServers as never[],
+      saveServers: (sv: never[]) => { installState.savedServers = [...sv] },
+      toolsOfServer: async () => [{ name: 't', annotations: { readOnlyHint: true } }],
+      openExternal: async () => undefined,
+      hasUi: () => true,
+      dockerMode: () => false,
+      dataDir: () => TMP,
+      onChange: () => undefined
+    })
+  }
+
+  it("add_mcp_server crea SOLO la card e NON installa: proposta pending, result di proposta", async () => {
+    fakeInstallDeps()
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p1', name: 'add_mcp_server', arguments: JSON.stringify({ id: 'registry:com.notion/mcp', reason: 'per Notion' }) }] },
+      { toolCalls: [{ id: 'p2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ti ho proposto il server' }) }] }
+    ]
+    await runTurn(AGENT, 'colleghiamo Notion', emit)
+    const card = h.db.entries.find((e) => e.kind === 'send-message')
+    expect(card).toBeTruthy()
+    expect(card?.meta?.message).toMatchObject({
+      type: 'mcp-server', id: 'registry:com.notion/mcp', name: 'mcp',
+      trust: 'dominio verificato (notion.com)', runtime: { kind: 'remote', host: 'mcp.notion.com' }
+    })
+    expect(card?.meta?.status).toBe('pending')
+    // NESSUNA installazione: il tool non registra server
+    expect(installState.savedServers).toEqual([])
+    // il result al modello è la proposta, non un'esecuzione
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'p1')
+    expect(res?.content).toContain("proposta mostrata all'utente")
+  })
+
+  it('punto 3: la chiamata fuori da un turno utente (routine) viene NEGATA e non crea card', async () => {
+    fakeInstallDeps()
+    h.llm.queue = [
+      { toolCalls: [{ id: 'n1', name: 'add_mcp_server', arguments: JSON.stringify({ id: 'registry:com.notion/mcp', reason: 'x' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '[routine] controlla', emit, undefined, { source: 'routine', title: 'R' })
+    expect(h.db.entries.find((e) => e.kind === 'send-message')).toBeFalsy()
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'n1')
+    expect(res?.content).toBe('puoi proporre connettori solo quando l\'utente te lo chiede in chat')
+    expect(installState.savedServers).toEqual([])
+  })
+
+  it('punto 3: nel turno CONTAMINATO il tool resta offerto ma la card porta l\'avviso in cima', async () => {
+    fakeInstallDeps()
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'add_mcp_server', arguments: JSON.stringify({ id: 'registry:com.notion/mcp', reason: 'per il servizio' }) }] },
+      { toolCalls: [{ id: 'c2', name: 'send_to_user', arguments: JSON.stringify({ text: 'proposta fatta' }) }] }
+    ]
+    await runTurn(AGENT, 'risultati sottoagenti', emit, undefined, { source: 'user', contaminated: true })
+    const card = h.db.entries.find((e) => e.kind === 'send-message')
+    expect((card?.meta?.message as { untrusted?: true })?.untrusted).toBe(true)
+  })
+
+  it('punto 8: OGNI result MCP entra nel blocco dati esterni e CONTAMINA il turno (lettura senza card, ma dopo si chiede)', async () => {
+    // un tool MCP in SOLA LETTURA di un server del catalogo (readOnlyHint)
+    ;(mcpMock as { activeTools: () => Promise<unknown[]> }).activeTools = async () => [
+      { name: 'mcp__cloudflare__whoami', description: 'chi sono', parameters: { type: 'object', properties: {} } }
+    ]
+    const { setMcpAnnotationsLookup } = await import('../permissions')
+    setMcpAnnotationsLookup(() => ({ annotations: { readOnlyHint: true }, catalogServer: true }))
+    h.db.settings.set('permissions', {
+      default: 'needs_approval',
+      rules: [{ tool: 'run-command', pattern: 'echo', mode: 'always_allow' }]
+    })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'm1', name: 'mcp__cloudflare__whoami', arguments: '{}' }] },
+      { toolCalls: [{ id: 'm2', name: 'run-command', arguments: JSON.stringify({ command: 'echo DopoLaLettura' }) }] },
+      { toolCalls: [{ id: 'm3', name: 'send_to_user', arguments: JSON.stringify({ text: 'fatto' }) }] }
+    ]
+    const turn = runTurn(AGENT, 'chi sono?', emit)
+    // la lettura readOnly del catalogo NON fa card…
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'm1')).toBeTruthy()
+    })
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'm1')!
+    // …ma il result è nel BLOCCO DATI ESTERNI con la fonte mcp:<server>
+    expect(res.content).toContain('<dato_esterno fonte="mcp:cloudflare">')
+    expect(res.meta?.webEvidence).toBe(true)
+    // e il turno è CONTAMINATO: il run-command coperto da always_allow torna a chiedere
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending' && e.meta?.tool === 'run-command')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval' && e.meta?.tool === 'run-command')!
+    expect(String(appr.content)).toContain('contenuti web non fidati')
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
+    await turn
+    setMcpAnnotationsLookup(() => undefined)
+  })
+
+  it('punto 5: sopra la soglia NESSUNO schema MCP nel prompt, sezione "Connettori attivi" e find_tools che ATTIVA', async () => {
+    ;(mcpMock as { activeTools: () => Promise<unknown[]> }).activeTools = async () => [
+      { name: 'mcp__gw__linear_create_issue', description: 'Crea una issue su Linear', parameters: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } },
+      { name: 'mcp__gw__linear_list_issues', description: 'Elenca le issue', parameters: { type: 'object', properties: {} } },
+      { name: 'mcp__gw__docs_search', description: 'Cerca nella documentazione', parameters: { type: 'object', properties: {} } }
+    ]
+    ;(mcpMock as { activeServersForAgent: () => Promise<unknown[]> }).activeServersForAgent = async () => [
+      { id: 'gw', name: 'gw', tools: [{ name: 'a' }, { name: 'b' }] }
+    ]
+    h.db.settings.set('connectors.maxInlineTools', 1) // 2 tool MCP > 1 → deferiti
+    const { setMcpAnnotationsLookup } = await import('../permissions')
+    setMcpAnnotationsLookup(() => ({ annotations: { readOnlyHint: true }, catalogServer: true }))
+    h.llm.queue = [
+      // passo 1: cerca lo strumento (i mcp__ NON sono nella lista del turno)
+      { toolCalls: [{ id: 'f1', name: 'find_tools', arguments: JSON.stringify({ query: 'issue linear crea' }) }] },
+      // passo 2: chiama il tool ATTIVATO (dopo find_tools è nella lista)
+      { toolCalls: [{ id: 'i1', name: 'mcp__gw__linear_create_issue', arguments: JSON.stringify({ title: 'Bug login' }) }] },
+      // passo 3: un tool NON attivato da find_tools viene RIFIUTATO senza eseguirlo
+      { toolCalls: [{ id: 'i2', name: 'mcp__gw__docs_search', arguments: '{}' }] },
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'issue creata' }) }] }
+    ]
+    await runTurn(AGENT, 'crea una issue su Linear: titolo Bug login', emit)
+    // il prompt del primo passo: sezione Connettori attivi, NESSUNO schema MCP
+    const first = h.llm.calls[0]!
+    const system = (first[0] as { content: string }).content
+    expect(system).toContain('# Connettori attivi')
+    expect(system).not.toContain('mcp__gw__linear_create_issue')
+    // il find_tools ha attivato e il suo result porta meta.activated
+    const fRes = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'f1')!
+    expect(fRes.content).toContain('mcp__gw__linear_create_issue')
+    expect((fRes.meta?.activated as string[])[0]).toBe('mcp__gw__linear_create_issue')
+    // il tool attivato è stato ESEGUITO (dal passo successivo)
+    expect(h.mcp.calls).toBe(1)
+    // il tool NON attivo è rifiutato senza esecuzione cieca
+    const iRes = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'i2')!
+    expect(iRes.content).toContain('strumento non attivo')
+    expect(iRes.meta?.inactive).toBe(true)
+    expect(h.mcp.calls).toBe(1) // nessuna seconda esecuzione
+    // la persistenza: meta.activated nel transcript alimenta i turni dopo
+    setMcpAnnotationsLookup(() => undefined)
   })
 })

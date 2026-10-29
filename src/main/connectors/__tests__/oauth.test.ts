@@ -33,6 +33,10 @@ interface FakeAs {
   authorizeRequests: Array<URL>
   registrations: number
   rejectRefresh: boolean
+  /** fase 13 (punto 6): parametro iss della redirect (RFC 9207), se impostato */
+  issParam: string | null
+  /** fase 13 (punto 6): gli ultimi metadati ricevuti dalla DCR */
+  lastRegistrationMeta: Record<string, unknown> | null
 }
 
 async function startFakeAs(): Promise<FakeAs> {
@@ -45,7 +49,9 @@ async function startFakeAs(): Promise<FakeAs> {
     accessTokens: [],
     authorizeRequests: [],
     registrations: 0,
-    rejectRefresh: false
+    rejectRefresh: false,
+    issParam: null,
+    lastRegistrationMeta: null
   }
   let n = 0
   const server = createServer((req, res) => {
@@ -77,6 +83,7 @@ async function startFakeAs(): Promise<FakeAs> {
       req.on('end', () => {
         as.registrations++
         const meta = JSON.parse(body) as { redirect_uris?: string[] }
+        as.lastRegistrationMeta = meta
         const clientId = 'client_dyn_' + as.registrations
         as.clients.set(clientId, { redirect_uris: meta.redirect_uris ?? [] })
         json(201, { client_id: clientId, redirect_uris: meta.redirect_uris ?? [] })
@@ -95,7 +102,8 @@ async function startFakeAs(): Promise<FakeAs> {
       if (!challenge || method !== 'S256') return json(400, { error: 'invalid_request', error_description: 'pkce' })
       const code = 'code_' + randomBytes(6).toString('hex')
       as.codes.set(code, { challenge, redirectUri, clientId })
-      res.writeHead(302, { location: `${redirectUri}?code=${code}&state=${encodeURIComponent(state)}` }).end()
+      const iss = as.issParam ? `&iss=${encodeURIComponent(as.issParam)}` : ''
+      res.writeHead(302, { location: `${redirectUri}?code=${code}&state=${encodeURIComponent(state)}${iss}` }).end()
       return
     }
     if (req.method === 'POST' && url.pathname === '/token') {
@@ -206,6 +214,8 @@ afterAll(() => {
 })
 afterEach(() => {
   as.rejectRefresh = false
+  as.issParam = null
+  as.lastRegistrationMeta = null
   // lo stato dell'AS è condiviso tra i test del file: si azzera qui
   as.registrations = 0
   as.authorizeRequests = []
@@ -311,6 +321,89 @@ describe('flusso OAuth completo (discovery + DCR + PKCE + loopback + refresh)', 
     expect(await store.read('fake', 'oauth.client')).toBeUndefined()
     expect(registered).toEqual([])
     expect(manager.stateOf('fake').status).toBe('not_connected')
+  })
+})
+
+// ---- fase 13 (punto 6): verso la specifica MCP 2026-07-28 con l'SDK 1.32 ----
+
+describe('fase 13 (punto 6): application_type native, iss della redirect (RFC 9207), issuer cambiato', () => {
+  it('la DCR manda application_type "native" (i server accettano i redirect loopback)', async () => {
+    const { manager } = makeEnv(as)
+    const r = await manager.runConnect(ENTRY)
+    expect(r.status).toBe('connected')
+    const meta = (as.lastRegistrationMeta ?? {}) as { application_type?: string; redirect_uris?: string[] }
+    expect(meta.application_type).toBe('native')
+    expect(meta.redirect_uris?.[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/callback$/)
+  })
+
+  it('iss GIUSTO sulla redirect: il codice si riscatta e il connettore si connette', async () => {
+    as.issParam = as.url
+    const { manager } = makeEnv(as)
+    const r = await manager.runConnect(ENTRY)
+    expect(r.status).toBe('connected')
+    expect(as.codes.size).toBe(0) // il codice è stato speso
+  })
+
+  it('iss SBAGLIATO sulla redirect: "issuer non corrispondente", il codice NON si riscatta', async () => {
+    as.issParam = 'https://evil.example'
+    const { manager } = makeEnv(as)
+    const r = await manager.runConnect(ENTRY)
+    expect(r.status).toBe('error')
+    expect(r.message).toContain('issuer non corrispondente')
+    // il codice emesso NON è mai stato speso
+    expect(as.codes.size).toBe(1)
+    expect(as.accessTokens.length).toBe(0)
+  })
+
+  it('issuer CAMBIATO: le credenziali DCR salvate si indicizzano per issuer → NUOVA registrazione', async () => {
+    // prima connessione su questo AS (issuer = as.url)
+    const env = makeEnv(as)
+    await env.manager.runConnect(ENTRY)
+    expect(as.registrations).toBe(1)
+    // un SECONDO AS su un'altra porta = issuer diverso, STESSO store cifrato
+    const as2 = await startFakeAs()
+    try {
+      const entry2 = { ...ENTRY, id: 'fake2', mcpUrl: as2.url + '/' }
+      const manager2 = createConnectorsManager({
+        store: env.store,
+        getSetting: <T>(key: string, fallback: T): T => (env.settings.has(key) ? (env.settings.get(key) as T) : fallback),
+        setSetting: (key: string, value: unknown) => {
+          env.settings.set(key, value)
+        },
+        openExternal: fakeBrowser,
+        hasUi: () => true,
+        toolsOf: async () => [],
+        registerServer: () => undefined,
+        removeServer: () => undefined,
+        serverExists: () => false,
+        onChange: () => undefined
+      })
+      // il provider legge il client salvato dal primo AS: l'SDK lo scarta
+      // (timbrato con l'issuer sbagliato) e si REGISTRA di nuovo su as2
+      const r = await manager2.runConnect(entry2)
+      expect(r.status).toBe('connected')
+      expect(as2.registrations).toBe(1)
+    } finally {
+      as2.server.closeAllConnections?.()
+      as2.server.close()
+    }
+  })
+
+  it("CIMD: clientMetadataUrl passa al provider (l'SDK lo usa per gli URL-based client id)", async () => {
+    const { issuersMatch, createOAuthProvider: make } = await import('../oauth-provider')
+    const provider = make({
+      serverId: 'x', redirectUrl: 'http://127.0.0.1:9/callback',
+      openExternal: async () => undefined,
+      store: makeEnv(as).store,
+      clientMetadataUrl: 'https://utente.github.io/sandbot/client.json'
+    })
+    expect((provider as { clientMetadataUrl?: string }).clientMetadataUrl).toBe('https://utente.github.io/sandbot/client.json')
+    // vuoto di default: SandBot non ha un dominio, nessun URL inventato
+    const bare = make({ serverId: 'x', redirectUrl: 'http://127.0.0.1:9/callback', openExternal: async () => undefined, store: makeEnv(as).store })
+    expect((bare as { clientMetadataUrl?: string }).clientMetadataUrl).toBeUndefined()
+    // issuersMatch tollera la slash finale (come l'SDK)
+    expect(issuersMatch('https://a.example', 'https://a.example/')).toBe(true)
+    expect(issuersMatch('https://a.example', 'https://b.example')).toBe(false)
   })
 })
 

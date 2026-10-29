@@ -28,6 +28,15 @@ import { tickScheduler, tickConnectorPolls, enqueueRoutineRun } from './schedule
 import { attachHostBridge } from './host-bridge'
 import { makeJobRunner } from './run-job'
 import { wireConnectors } from '../main/connectors/wiring'
+// fase 13: connettori su larga scala (marketplace, installazioni, registro)
+import { createMarketplaceManager } from '../main/connectors/marketplace-manager'
+import { createConnectorsSecretStore } from '../main/connectors/sealed-store'
+import { findRegistryEntry, fetchRegistryEntries } from '../main/connectors/registry'
+import { setConnectorsSearchRunner } from '../main/connectors/search-runtime'
+import { setInstallDeps } from '../main/connectors/install-bridge'
+import { getConnectorsKey } from './keychain'
+import { sandboxMode } from '../main/sandbox'
+import { spawn } from 'node:child_process'
 import { createPresence, mainAgentOf } from './presence'
 import { handleWebhook } from './webhooks'
 import { deliverDueHeld } from './outbox'
@@ -221,6 +230,67 @@ async function main(): Promise<void> {
     () => emit({ type: 'connectors' })
   )
 
+  // fase 13 (punti 1, 2, 4, 5, 7): connettori su larga scala — marketplace dei
+  // plugin, deps d'installazione (registro/plugin/gateway), ricerca unificata
+  // sulle tre fonti e migrazione enabledFor dei server esistenti (restano per
+  // tutti: per l'utente non cambia nulla)
+  const mcpServers = await import('../main/mcp')
+  const marketplaces = createMarketplaceManager()
+  const installDeps: import('../main/connectors/install').InstallDeps = {
+    store: createConnectorsSecretStore({
+      getKey: () => getConnectorsKey(),
+      getSetting,
+      setSetting
+    }),
+    marketplaces,
+    findRegistryEntry: (name) => findRegistryEntry(name),
+    listServers: () => mcpServers.listServers(),
+    saveServers: (sv) => mcpServers.saveServers(sv),
+    toolsOfServer: async (id) => mcpServers.toolsOfServer(id),
+    openExternal: (url) => server.callUi('host.openExternal', [url]).then(() => undefined),
+    hasUi: () => server.hasUi(),
+    dockerMode: () => sandboxMode() === 'docker',
+    dataDir,
+    runDocker: (argv) =>
+      new Promise((res, rej) => {
+        const child = spawn('docker', argv, { stdio: ['ignore', 'pipe', 'pipe'] })
+        let stdout = ''
+        let stderr = ''
+        child.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+        child.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+        child.on('error', rej)
+        child.on('close', (code) => res({ code: code ?? 1, stdout, stderr }))
+      }),
+    clientMetadataUrl: () => getSetting<string>('connectors.oauth.clientMetadataUrl', ''),
+    onChange: () => emit({ type: 'connectors' })
+  }
+  setInstallDeps(installDeps)
+  // la ricerca unificata: catalogo + plugin dei marketplace + registro (host
+  // fisso, fetch con guardia SSRF, cache 10 minuti); il registro giù non
+  // ferma le altre fonti
+  setConnectorsSearchRunner(async (query) => {
+    const { loadCatalog } = await import('../main/connectors')
+    const { mergeConnectorResults, formatSearchResults } = await import('../main/connectors/search')
+    const states = getSetting<Record<string, import('../main/connectors').ConnectorState>>('connectors.state', {})
+    const catalog = loadCatalog().map((entry) => ({ entry, state: states[entry.id] }))
+    const { ok } = await marketplaces.catalogs()
+    const plugins = ok.flatMap((c) =>
+      c.parsed.plugins.map((plugin) => ({ marketplace: c.parsed.name, official: c.marketplace.official, plugin }))
+    )
+    const registry = await fetchRegistryEntries(query).catch(() => null)
+    const out = mergeConnectorResults({ catalog, plugins, registry }, query)
+    // le descrizioni di registro e marketplace sono testo di TERZI: il result
+    // va nel blocco dati esterni e contamina il turno (punto 1)
+    const thirdParty = out.rows.some((r) => r.source !== 'catalog')
+    return { text: formatSearchResults(out), thirdParty }
+  })
+  // migrazione enabledFor: i server GIÀ ESISTENTI restano abilitati a tutti
+  {
+    const mcpMod = await import('../main/mcp')
+    const migrated = mcpMod.migrateEnabledFor(mcpMod.listServers())
+    if (migrated.changed) mcpMod.saveServers(migrated.servers)
+  }
+
   const worker = new JobWorker(
     database,
     {
@@ -293,7 +363,7 @@ async function main(): Promise<void> {
     },
     emit: (e) => broadcast(e)
   })
-  server.methods = buildApiMethods(emit, worker, connectors, presence, { webhookPort: server.port, onboarding })
+  server.methods = buildApiMethods(emit, worker, connectors, presence, { webhookPort: server.port, onboarding, marketplaces })
 
   // scheduler: ogni 30s calcola le routine dovute (cron e trigger schedule),
   // fa i poll dei connettori, mette in pausa le routine se l'utente è via da

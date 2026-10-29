@@ -4,6 +4,10 @@ import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  dockerStdioMcpArgv,
+  dockerCpDirArgv,
+  dockerChmodReadOnlyArgv,
+  dockerRmDirArgv,
   dockerExecArgv,
     dockerReadFileArgv,
     dockerWriteFileArgv,
@@ -489,5 +493,37 @@ describe('il launcher del browser di un SOTTOAGENTE', () => {
   it('browserPidFile: padre e figlio non si pestano il pid file', () => {
     expect(browserPidFile('agent_x', false)).toBe('.sandbot/browser.pid')
     expect(browserPidFile('sub_a1b2c3d4', true)).toBe('.sandbot/browser-sub_a1b2c3d4.pid')
+  })
+})
+
+// ---- fase 13 (punto 2): i server MCP stdio del registro/plugin nel BOX ----
+
+describe('fase 13: argv del server MCP stdio nel box (dockerStdioMcpArgv)', () => {
+  it('docker exec -i -u 1000:1000 -w <home> sandbot-box npx -y <identifier>@<version>, SENZA wrapper né setsid', () => {
+    const argv = dockerStdioMcpArgv({ workdir: '/box/home/agent_x', command: 'npx', args: ['-y', '@foreverworks/mcp-notion@0.1.0'] })
+    expect(argv).toEqual([
+      'exec', '-i', '-u', '1000:1000', '-w', '/box/home/agent_x',
+      'sandbot-box', 'npx', '-y', '@foreverworks/mcp-notion@0.1.0'
+    ])
+    expect(argv.join(' ')).not.toContain('setsid')
+    expect(argv.join(' ')).not.toContain('sh -c')
+  })
+  it('le variabili d\'ambiente passano col SOLO nome (-e NOME): il VALORE mai in argv', () => {
+    const argv = dockerStdioMcpArgv({
+      workdir: '/box/home/a', command: 'npx', args: ['-y', 'x@1.0.0'],
+      envKeys: ['NOTION_TOKENS_DIR', 'API_KEY']
+    })
+    expect(argv).toEqual([
+      'exec', '-i', '-u', '1000:1000', '-w', '/box/home/a',
+      '-e', 'NOTION_TOKENS_DIR', '-e', 'API_KEY',
+      'sandbot-box', 'npx', '-y', 'x@1.0.0'
+    ])
+    // nessun valore segreto può finire nell'argv: solo i NOMI delle chiavi
+    expect(argv.filter((a) => a.includes('=')).length).toBe(0)
+  })
+  it('dockerCpDirArgv / dockerChmodReadOnlyArgv / dockerRmDirArgv: copia nel box, sola lettura, rimozione esatta', () => {
+    expect(dockerCpDirArgv('/tmp/p', '/box/plugins/mp/demo/abc')).toEqual(['cp', '/tmp/p', 'sandbot-box:/box/plugins/mp/demo/abc'])
+    expect(dockerChmodReadOnlyArgv('/box/plugins/mp/demo/abc')).toEqual(['exec', 'sandbot-box', 'chmod', '-R', 'a-w', '--', '/box/plugins/mp/demo/abc'])
+    expect(dockerRmDirArgv('/box/plugins/mp/demo/abc')).toEqual(['exec', 'sandbot-box', 'rm', '-rf', '--', '/box/plugins/mp/demo/abc'])
   })
 })

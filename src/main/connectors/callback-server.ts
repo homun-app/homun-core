@@ -9,8 +9,12 @@ export interface CallbackServer {
   port: number
   /** URL da registrare come redirect_uri (http://127.0.0.1:<porta>/callback). */
   url: string
-  /** Risolve col codice valido; rifiuta allo scadere dei 10 minuti. */
-  waitForCode(): Promise<{ code: string }>
+  /**
+   * Risolve col codice valido; rifiuta allo scadere dei 10 minuti. Fase 13
+   * (punto 6): porta anche l'eventuale parametro iss della redirect (RFC
+   * 9207) — chi riscatta il codice lo confronta con l'issuer scoperto.
+   */
+  waitForCode(): Promise<{ code: string; iss?: string }>
   close(): void
 }
 
@@ -24,9 +28,9 @@ export async function startCallbackServer(opts: {
 }): Promise<CallbackServer> {
   const timeoutMs = opts.timeoutMs ?? 10 * 60_000
   let settled = false
-  let resolveCode: ((v: { code: string }) => void) | null = null
+  let resolveCode: ((v: { code: string; iss?: string }) => void) | null = null
   let rejectCode: ((e: Error) => void) | null = null
-  const waiter = new Promise<{ code: string }>((resolve, reject) => {
+  const waiter = new Promise<{ code: string; iss?: string }>((resolve, reject) => {
     resolveCode = resolve
     rejectCode = reject
   })
@@ -52,7 +56,8 @@ export async function startCallbackServer(opts: {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGE_OK)
     if (!settled) {
       settled = true
-      resolveCode?.({ code })
+      // fase 13 (punto 6): iss della redirect (RFC 9207), se il server lo manda
+      resolveCode?.({ code, ...(url.searchParams.get('iss') ? { iss: url.searchParams.get('iss')! } : {}) })
     }
   })
 

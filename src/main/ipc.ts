@@ -32,6 +32,12 @@ export const DAEMON_RPC_CHANNELS = [
   'mcp:list', 'mcp:save', 'mcp:delete', 'mcp:test',
   'connectors:list', 'connectors:connect', 'connectors:disconnect',
   'connectors:set-tools', 'connectors:set-instructions', 'connectors:save-static',
+  // fase 13: connettori su larga scala (registro, plugin, gateway)
+  'connectors:installed', 'connectors:resolve-mcp-server', 'connectors:save-server-values',
+  'connectors:set-enabled-for', 'connectors:uninstall-server', 'connectors:add-gateway',
+  'connectors:gateway-presets', 'connectors:set-client-metadata-url',
+  'plugins:resolve', 'plugins:uninstall',
+  'marketplace:list', 'marketplace:add', 'marketplace:remove',
   'vault:list', 'vault:store', 'vault:delete',
   'approvals:resolve', 'approvals:resolve-latest',
   // fase 8: regole di auto-review proposte dal bot (salvataggio SOLO al click)

@@ -111,6 +111,56 @@ export type SendMessagePayload =
       why?: string
     }
   | {
+      /**
+       * Fase 13 (punto 2): proposta di aggiungere un server MCP del registro
+       * (o un URL). Tutto in codice tranne `reason`; l'installazione parte
+       * SOLO dal click su Aggiungi (mai "sempre").
+       */
+      type: 'mcp-server'
+      /** registry:<nome> oppure url:https://… */
+      id: string
+      name: string
+      publisher?: string
+      trust: string
+      trustKind: 'verified-domain' | 'github-account' | 'unverified'
+      siteUrl?: string
+      runtime: { kind: 'remote'; host: string } | { kind: 'box-npm'; command: string }
+      needs:
+        | { kind: 'oauth' }
+        | { kind: 'key'; header: string }
+        | { kind: 'env'; vars: Array<{ name: string; required: boolean; description?: string }> }
+      /** fiducia ≠ dominio verificato: l'avviso che il server è di terzi */
+      thirdPartyWarning?: true
+      /** proposta nata in un turno contaminato: avviso in cima alla card */
+      untrusted?: true
+      /** modalità host: il server stdio non si installa, bottone disattivato */
+      disabledReason?: string
+      reason?: string
+    }
+  | {
+      /**
+       * Fase 13 (punto 4): proposta di installare un plugin di un marketplace
+       * (formato Claude Code). L'installazione parte SOLO dal click su
+       * Installa; hook/bin/monitor/LSP non si importano MAI (elenco "ignored").
+       */
+      type: 'plugin'
+      /** plugin:<nome>@<marketplace> */
+      id: string
+      name: string
+      marketplace: string
+      trust: string
+      repoUrl?: string
+      /** i primi 12 caratteri dello sha effettivo */
+      sha12: string
+      skills: string[]
+      servers: Array<{ name: string; runtimeLabel: string }>
+      settings: Array<{ key: string; description?: string; sensitive?: boolean }>
+      /** componenti presenti ma NON importate (non girano in SandBot) */
+      ignored: string[]
+      untrusted?: true
+      reason?: string
+    }
+  | {
       /** fase 12 (punto 2): card del sottoagente lanciato — l'unica riga del figlio nella chat del padre */
       type: 'subagent'
       subagentId: string
@@ -338,6 +388,20 @@ export interface SandbotApi {
   connectorsSetTools(id: string, disabledTools: string[]): Promise<void>
   connectorsSetInstructions(id: string, instructions: string): Promise<void>
   connectorsSaveStaticClient(id: string, clientId: string, clientSecret: string): Promise<void>
+  // fase 13: registro, plugin, marketplace, gateway (installazione SOLO dal click)
+  connectorsInstalled(): Promise<{ servers: McpServerInfo[]; plugins: unknown[] }>
+  connectorsResolveMcpServer(agentId: string, entryId: number, decision: 'add' | 'no'): Promise<{ ok: boolean; installed?: boolean; message?: string; error?: string }>
+  connectorsSaveServerValues(serverId: string, kind: 'bearer' | 'headers' | 'env' | 'userConfig', values: Record<string, string>): Promise<{ ok: boolean }>
+  connectorsSetEnabledFor(kind: 'server' | 'plugin', id: string, agentIds: string[]): Promise<{ ok: boolean }>
+  connectorsUninstallServer(id: string): Promise<{ ok: boolean }>
+  connectorsAddGateway(input: { name: string; url: string; auth: 'oauth' | 'bearer' | 'headers'; preset?: string; headerName?: string; token?: string; headers?: Record<string, string> }): Promise<McpServerInfo>
+  connectorsGatewayPresets(): Promise<{ presets: Array<{ id: string; name: string; auth: string; headerName?: string; help: string }>; warning: string }>
+  connectorsSetClientMetadataUrl(url: string): Promise<{ ok: boolean }>
+  pluginsResolve(agentId: string, entryId: number, decision: 'install' | 'no'): Promise<{ ok: boolean; installed?: boolean; message?: string; error?: string }>
+  pluginsUninstall(name: string, marketplace: string): Promise<{ ok: boolean }>
+  marketplaceList(): Promise<Array<{ name: string; source: string; kind: 'github' | 'git'; official: boolean }>>
+  marketplaceAdd(source: string): Promise<{ name: string; source: string }>
+  marketplaceRemove(source: string): Promise<{ ok: boolean }>
   // vault
   vaultList(): Promise<string[]>
   vaultStore(name: string, value: string): Promise<void>
@@ -597,6 +661,19 @@ export interface McpServerInfo {
   auth?: { kind: 'oauth' | 'bearer' | 'headers' }
   /** fase 5: id del connettore del catalogo che ha creato questo server */
   catalogId?: string
+  /** fase 13 (punto 5): per quali bot è abilitato (['*'] = tutti) */
+  enabledFor?: string[]
+  /** fase 13: da dove arriva il server (registro, plugin, gateway) */
+  source?:
+    | { kind: 'registry'; name: string; version?: string }
+    | { kind: 'plugin'; plugin: string; marketplace: string; sha: string }
+    | { kind: 'gateway'; preset?: string }
+  /** fase 13: server stdio che gira nel box (docker exec) */
+  box?: { workdir: string; command: string; args?: string[]; envKeys?: string[] }
+  /** fase 13: installato ma in attesa di valori dalle Impostazioni */
+  needsAuth?: { kind: 'key' | 'env' | 'settings'; keys: string[] }
+  /** fase 13: fiducia della scheda Installati */
+  trustLabel?: string
 }
 
 /**

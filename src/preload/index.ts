@@ -80,6 +80,23 @@ const api: SandbotApi = {
   connectorsSetInstructions: (id, instructions) => ipcRenderer.invoke('connectors:set-instructions', id, instructions),
   connectorsSaveStaticClient: (id, clientId, clientSecret) =>
     ipcRenderer.invoke('connectors:save-static', id, clientId, clientSecret),
+  // fase 13: registro, plugin, marketplace, gateway
+  connectorsInstalled: () => ipcRenderer.invoke('connectors:installed'),
+  connectorsResolveMcpServer: (agentId, entryId, decision) =>
+    ipcRenderer.invoke('connectors:resolve-mcp-server', agentId, entryId, decision),
+  connectorsSaveServerValues: (serverId, kind, values) =>
+    ipcRenderer.invoke('connectors:save-server-values', serverId, kind, values),
+  connectorsSetEnabledFor: (kind, id, agentIds) =>
+    ipcRenderer.invoke('connectors:set-enabled-for', kind, id, agentIds),
+  connectorsUninstallServer: (id) => ipcRenderer.invoke('connectors:uninstall-server', id),
+  connectorsAddGateway: (input) => ipcRenderer.invoke('connectors:add-gateway', input),
+  connectorsGatewayPresets: () => ipcRenderer.invoke('connectors:gateway-presets'),
+  connectorsSetClientMetadataUrl: (url) => ipcRenderer.invoke('connectors:set-client-metadata-url', url),
+  pluginsResolve: (agentId, entryId, decision) => ipcRenderer.invoke('plugins:resolve', agentId, entryId, decision),
+  pluginsUninstall: (name, marketplace) => ipcRenderer.invoke('plugins:uninstall', name, marketplace),
+  marketplaceList: () => ipcRenderer.invoke('marketplace:list'),
+  marketplaceAdd: (source) => ipcRenderer.invoke('marketplace:add', source),
+  marketplaceRemove: (source) => ipcRenderer.invoke('marketplace:remove', source),
   vaultList: () => ipcRenderer.invoke('vault:list'),
   vaultStore: (name, value) => ipcRenderer.invoke('vault:store', name, value),
   vaultDelete: (name) => ipcRenderer.invoke('vault:delete', name),

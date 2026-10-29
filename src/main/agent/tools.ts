@@ -244,7 +244,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'search_connectors',
-    description: "Cerca le app connettibili nel catalogo (\"Connetti app\") con lo stato di ciascuna: non connessa, connessa, da autorizzare. Usalo prima di offer_connector per trovare l'id esatto e per sapere se un connettore è già attivo.",
+    description: "Cerca le app e i server MCP collegabili su TRE fonti, in ordine di fiducia: catalogo verificato → plugin dei marketplace → registro pubblico MCP. Ogni riga dice id (usalo per offer_connector / install_plugin / add_mcp_server), fonte, fiducia e come gira. Della scelta di' all'utente fonte e fiducia in una riga.",
     parameters: {
       type: 'object',
       properties: {
@@ -261,6 +261,30 @@ export const toolDefs: ToolDef[] = [
       properties: {
         id: { type: 'string', description: 'Id del connettore dal catalogo (search_connectors)' },
         reason: { type: 'string', description: 'Perché questa app aiuterebbe (una frase, mostrata nella card)' }
+      },
+      required: ['id', 'reason']
+    }
+  },
+  {
+    name: 'add_mcp_server',
+    description: "PROPONE l'aggiunta di un server MCP del registro pubblico (o di un URL https che l'utente ti ha dato): mostra una card con nome, fiducia e cosa serve (OAuth, chiave o variabili); l'aggiunta avviene SOLO dal click dell'utente. id = registry:<nome> da search_connectors, oppure url:https://…. Non chiedere MAI chiavi o token in chat: l'utente li mette nelle Impostazioni.",
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'registry:<nome> (da search_connectors) oppure url:https://…' },
+        reason: { type: 'string', description: 'Perché questo server serve (una frase, mostrata nella card)' }
+      },
+      required: ['id', 'reason']
+    }
+  },
+  {
+    name: 'install_plugin',
+    description: "PROPONE l'installazione di un plugin nel formato di Claude Code da un marketplace registrato: mostra una card con le skill e i server MCP che ARRIVANO e le componenti che NON girano in SandBot; l'installazione avviene SOLO dal click dell'utente. Di un plugin si importano solo skill e server MCP. id = plugin:<nome>@<marketplace> da search_connectors.",
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'plugin:<nome>@<marketplace> (da search_connectors)' },
+        reason: { type: 'string', description: 'Perché questo plugin serve (una frase, mostrata nella card)' }
       },
       required: ['id', 'reason']
     }
@@ -799,6 +823,12 @@ export async function executeTool(
     }
     case 'update_skill': {
       const name = String(input.name ?? '')
+      // fase 13 (punto 4): le skill dei PLUGIN sono in sola lettura — si
+      // cambiano aggiornando il plugin, non scrivendoci sopra
+      const { pluginSkillsOf, PLUGIN_SKILL_REFUSAL } = await import('./skills')
+      if (pluginSkillsOf(agentId).some((x) => x.name === name)) {
+        return { output: PLUGIN_SKILL_REFUSAL, meta: {} }
+      }
       // l'esistenza si guarda PRIMA della scrittura (dopo ci sarebbe sempre)
       const existed = listSkills(agentId).some((x) => x.name === name)
       const s = writeSkill(agentId, {
@@ -809,18 +839,13 @@ export async function executeTool(
       return { output: `Skill "${s.name}" ${existed ? 'aggiornata' : 'creata'} (disponibile da subito in "# Skill disponibili").`, meta: { skill: s.name } }
     }
     case 'search_connectors': {
-      // catalogo + stato di ogni connettore (il funnel §3ter T2-T3 parte da qui)
-      const { loadCatalog, searchCatalog, connectorStatusLine } = await import('../connectors')
-      type ConnectorState = import('../connectors').ConnectorState
-      const states = (await import('../store/db')).getSetting<Record<string, ConnectorState>>('connectors.state', {})
-      const found = searchCatalog(loadCatalog(), String(input.query ?? ''))
-      if (!found.length) return { output: 'Nessun connettore trovato per questa ricerca.', meta: {} }
-      return {
-        output: found
-          .map((e) => connectorStatusLine(e, states[e.id] ?? { status: 'not_connected', disabledTools: [], instructions: '' }))
-          .join('\n'),
-        meta: {}
-      }
+      // fase 13 (punto 1): la porta unica su tre fonti — il runner del daemon
+      // porta catalogo + marketplace + registro; il meta dice se ci sono righe
+      // DI TERZI (registro/marketplace): il loop le mette nel blocco dati
+      // esterni e contamina il turno
+      const { runConnectorsSearch } = await import('../connectors/search-runtime')
+      const out = await runConnectorsSearch(String(input.query ?? ''))
+      return { output: out.text, meta: out.thirdParty ? { thirdParty: true } : {} }
     }
     case 'update_state': {
       if (input.target === 'memory') return runMemoryAction(agentId, input)

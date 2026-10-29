@@ -382,6 +382,43 @@ export function dockerBuildArgv(tag: string, dockerfilePath: string, contextDir:
   return ['build', '-t', tag, '-f', dockerfilePath, contextDir]
 }
 
+/**
+ * Fase 13 (punto 2): l'argv del server MCP stdio di registro/plugin NEL BOX
+ * (puro) — come il launcher del browser ma SENZA wrapper né setsid (lezione
+ * I2: il processo di docker exec è già leader di sessione). Il comando è
+ * `npx -y <identifier>@<version>` con la versione FISSATA a quella del
+ * registro; le variabili d'ambiente passano come `-e NOME` col SOLO nome: il
+ * valore viaggia nell'ambiente del processo figlio del client docker, MAI in
+ * argv (regola dei segreti).
+ */
+export function dockerStdioMcpArgv(opts: { workdir: string; command: string; args?: string[]; envKeys?: string[] }): string[] {
+  const argv = ['exec', '-i', '-u', CONTAINER_USER, '-w', opts.workdir]
+  for (const key of opts.envKeys ?? []) argv.push('-e', key)
+  argv.push(BOX_CONTAINER, opts.command, ...(opts.args ?? []))
+  return argv
+}
+
+/**
+ * Fase 13 (punto 4): copia del plugin installato nel box (docker cp, argv
+ * puro) e messa in SOLA LETTURA per l'utente 1000 (chmod a-w ricorsivo): il
+ * codice di terzi nel box non si modifica da sé.
+ */
+export function dockerCpDirArgv(localDir: string, boxPath: string): string[] {
+  return ['cp', localDir, `${BOX_CONTAINER}:${boxPath}`]
+}
+
+export function dockerChmodReadOnlyArgv(boxPath: string): string[] {
+  return ['exec', BOX_CONTAINER, 'chmod', '-R', 'a-w', '--', boxPath]
+}
+
+/**
+ * Fase 13 (punto 4): rimozione della NOSTRA copia del plugin nel box alla
+ * disinstallazione — argv PURO sul path esatto (mai volumi, mai dati utente).
+ */
+export function dockerRmDirArgv(boxPath: string): string[] {
+  return ['exec', BOX_CONTAINER, 'rm', '-rf', '--', boxPath]
+}
+
 // ---- fase 11b (punto 2): il browser del bot — Playwright MCP nel container ----
 
 /** Il pid file dell'istanza browser di un bot (relativo alla SUA home nel box). */

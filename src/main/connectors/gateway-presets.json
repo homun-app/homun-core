@@ -1,0 +1,21 @@
+[
+  {
+    "id": "composio",
+    "name": "Composio Tool Router",
+    "auth": "header",
+    "headerName": "x-api-key",
+    "help": "crea una sessione Tool Router dalla dashboard o dall'SDK e incolla qui l'URL MCP e la chiave del progetto"
+  },
+  {
+    "id": "zapier",
+    "name": "Zapier MCP",
+    "auth": "url",
+    "help": "Zapier MCP espone un URL MCP personale per account: crealo dal sito di Zapier e incollalo qui"
+  },
+  {
+    "id": "pipedream",
+    "name": "Pipedream",
+    "auth": "bearer",
+    "help": "incolla qui il token Bearer del tuo ambiente Pipedream"
+  }
+]

@@ -38,10 +38,12 @@ export function buildApiMethods(
   worker: JobWorker,
   connectors?: ConnectorsManager,
   presence?: Presence,
-  opts: { webhookPort?: number; onboarding?: Onboarding } = {}
+  opts: { webhookPort?: number; onboarding?: Onboarding; marketplaces?: import('../main/connectors/marketplace-manager').MarketplaceManager } = {}
 ): Record<string, (params: unknown[]) => unknown> {
   const mcp = () => import('../main/mcp')
   const vault = () => import('../main/vault')
+  /** fase 13: il wiring del daemon registra qui i deps d'installazione */
+  const installBridge = () => import('../main/connectors/install-bridge')
 
   /** URL del webhook di una routine (per copiarlo dalla UI). */
   const webhookUrl = (r: { id: number; trigger?: RoutineTrigger | null }): string | undefined =>
@@ -581,6 +583,174 @@ export function buildApiMethods(
     'connectors:save-static': ([id, clientId, clientSecret]) => {
       if (!connectors) throw new Error('connettori non disponibili')
       return connectors.saveStaticClient(String(id), String(clientId ?? ''), String(clientSecret ?? ''))
+    },
+
+    // ---- fase 13: connettori su larga scala (registro, plugin, gateway) ----
+
+    /** I server del registro/plugin/gateway e i plugin installati (scheda Installati). */
+    'connectors:installed': async () => {
+      const mcpMod = await mcp()
+      const { installedPlugins } = await import('../main/connectors/install')
+      const { getSetting } = store
+      const servers = mcpMod.listServers().filter((s) => s.source || s.needsAuth)
+      // punto 4: "nuova versione disponibile" se lo sha del marketplace è
+      // cambiato rispetto a quello installato (aggiornare = nuova card)
+      const plugins = installedPlugins({ getSetting }).map((p) => ({ ...p, updateAvailable: false }))
+      if (opts.marketplaces) {
+        const { ok } = await opts.marketplaces.catalogs().catch(() => ({ ok: [], failed: [] }))
+        for (const p of plugins) {
+          const inMarketplace = ok
+            .find((c) => c.parsed.name === p.marketplace)?.parsed.plugins.find((x) => x.name === p.name)
+          const sha = inMarketplace && 'sha' in inMarketplace.source ? (inMarketplace.source as { sha?: string }).sha : undefined
+          if (sha && sha !== p.sha) p.updateAvailable = true
+        }
+      }
+      return {
+        servers: servers.map((s) => ({ ...s, tools: undefined, toolsCount: null })),
+        plugins
+      }
+    },
+    /** Il click su Aggiungi/No della card "Aggiungi server MCP" (codice del daemon). */
+    'connectors:resolve-mcp-server': async ([agentId, entryId, decision]) => {
+      const aid = agentId as string
+      const entry = store.getEntries(aid).find((e) => e.id === (entryId as number))
+      const message = entry?.meta?.message as SendMessagePayload | undefined
+      if (!entry || entry.kind !== 'send-message' || message?.type !== 'mcp-server') throw new Error('Proposta di server non trovata')
+      if (entry.meta?.status === 'installed' || entry.meta?.status === 'declined') throw new Error('Proposta già gestita')
+      if (decision !== 'add') {
+        store.updateEntryMeta(entry.id, { ...entry.meta, status: 'declined' })
+        emitUpdatedEntry(aid, entry.id)
+        return { ok: true, installed: false }
+      }
+      const { installMcpServer } = await import('../main/connectors/install')
+      const r = await installMcpServer(message, aid, (await installBridge()).getInstallDeps())
+      store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
+      emitUpdatedEntry(aid, entry.id)
+      const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Server "${message.name}" NON aggiunto: ${r.error}`
+      enqueueUserMessage(db(), aid, text, undefined, emit, undefined, 'CONNECTOR_INSTALLED')
+      worker.poke()
+      return r
+    },
+    /** Il click su Installa/No della card "Installa plugin" (codice del daemon). */
+    'plugins:resolve': async ([agentId, entryId, decision]) => {
+      const aid = agentId as string
+      const entry = store.getEntries(aid).find((e) => e.id === (entryId as number))
+      const message = entry?.meta?.message as SendMessagePayload | undefined
+      if (!entry || entry.kind !== 'send-message' || message?.type !== 'plugin') throw new Error('Proposta di plugin non trovata')
+      if (entry.meta?.status === 'installed' || entry.meta?.status === 'declined') throw new Error('Proposta già gestita')
+      if (decision !== 'install') {
+        store.updateEntryMeta(entry.id, { ...entry.meta, status: 'declined' })
+        emitUpdatedEntry(aid, entry.id)
+        return { ok: true, installed: false }
+      }
+      const { installPlugin } = await import('../main/connectors/install')
+      const r = await installPlugin(message, aid, (await installBridge()).getInstallDeps(), store.setSetting, store.getSetting)
+      store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
+      emitUpdatedEntry(aid, entry.id)
+      const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Plugin "${message.name}" NON installato: ${r.error}`
+      enqueueUserMessage(db(), aid, text, undefined, emit, undefined, 'PLUGIN_INSTALLED')
+      worker.poke()
+      return r
+    },
+    /** Valori di chiavi/header/variabili/userConfig di un server: SOLO nello store cifrato. */
+    'connectors:save-server-values': async ([serverId, kind, values]) => {
+      const { getInstallDeps } = await import('../main/connectors/install-bridge')
+      const deps = getInstallDeps()
+      const v = (values ?? {}) as Record<string, string>
+      if (kind === 'bearer') await deps.store.write(String(serverId), 'bearer', v.token ?? '')
+      else await deps.store.write(String(serverId), String(kind), v)
+      // needsAuth si pulisce solo quando TUTTE le chiavi attese sono arrivate
+      const mcpMod = await mcp()
+      const servers = mcpMod.listServers()
+      const cfg = servers.find((x) => x.id === serverId)
+      if (cfg?.needsAuth) {
+        const saved = (await deps.store.read<Record<string, string>>(String(serverId), String(kind))) ?? {}
+        if (cfg.needsAuth.keys.every((k) => saved[k])) {
+          cfg.needsAuth = undefined
+          mcpMod.saveServers(servers)
+        }
+      }
+      deps.onChange()
+      return { ok: true }
+    },
+    /** Abilitazione per bot: server MCP o plugin (scheda Installati). */
+    'connectors:set-enabled-for': async ([kind, id, agentIds]) => {
+      const ids = Array.isArray(agentIds) ? agentIds.map(String) : []
+      const mcpMod = await mcp()
+      if (kind === 'server') {
+        const servers = mcpMod.listServers()
+        const cfg = servers.find((x) => x.id === id)
+        if (!cfg) throw new Error(`server ${String(id)} non trovato`)
+        cfg.enabledFor = ids.includes('*') ? ['*'] : ids
+        mcpMod.saveServers(servers)
+        return { ok: true }
+      }
+      const { installedPlugins, PLUGINS_SETTING } = await import('../main/connectors/install')
+      const all = installedPlugins({ getSetting: store.getSetting })
+      const idx = all.findIndex((x) => x.name === String(id))
+      if (idx < 0) throw new Error(`plugin ${String(id)} non trovato`)
+      all[idx]!.enabledFor = ids.includes('*') ? ['*'] : ids
+      store.setSetting(PLUGINS_SETTING, all)
+      return { ok: true }
+    },
+    /** Disinstallazione di un server del registro/plugin/gateway (solo dalle Impostazioni). */
+    'connectors:uninstall-server': async ([id]) => {
+      const mcpMod = await mcp()
+      mcpMod.saveServers(mcpMod.listServers().filter((s) => s.id !== id))
+      emit({ type: 'connectors' })
+      return { ok: true }
+    },
+    /** Disinstallazione di un plugin: cartelle (Mac e box), server, skill. */
+    'plugins:uninstall': async ([name, marketplace]) => {
+      const { installedPlugins, uninstallPlugin } = await import('../main/connectors/install')
+      const { getInstallDeps } = await import('../main/connectors/install-bridge')
+      const all = installedPlugins({ getSetting: store.getSetting })
+      const rec = all.find((x) => x.name === String(name) && x.marketplace === String(marketplace))
+      if (!rec) throw new Error('plugin non trovato')
+      await uninstallPlugin(rec, getInstallDeps(), store.setSetting, store.getSetting)
+      emit({ type: 'connectors' })
+      return { ok: true }
+    },
+    /** Marketplace registrati (scheda Marketplace). */
+    'marketplace:list': async () => {
+      if (!opts.marketplaces) throw new Error('marketplace non disponibili')
+      return opts.marketplaces.list()
+    },
+    'marketplace:add': ([source]) => {
+      if (!opts.marketplaces) throw new Error('marketplace non disponibili')
+      return opts.marketplaces.add(String(source ?? ''))
+    },
+    'marketplace:remove': ([source]) => {
+      if (!opts.marketplaces) throw new Error('marketplace non disponibili')
+      opts.marketplaces.remove(String(source ?? ''))
+      return { ok: true }
+    },
+    /** Il modulo Gateway (punto 7): il bot NON può creare gateway, solo l'utente da qui. */
+    'connectors:add-gateway': async ([input]) => {
+      const { addGateway } = await import('../main/connectors/install')
+      const i = input as { name: string; url: string; auth: 'oauth' | 'bearer' | 'headers'; preset?: string; headerName?: string; token?: string; headers?: Record<string, string> }
+      const cfg = await addGateway(
+        {
+          name: i.name, url: i.url, auth: i.auth,
+          ...(i.preset ? { preset: i.preset } : {}),
+          ...(i.headerName ? { headerName: i.headerName } : {}),
+          ...(i.token ? { bearerToken: i.token } : {}),
+          ...(i.headers ? { headers: i.headers } : {})
+        },
+        (await installBridge()).getInstallDeps()
+      )
+      emit({ type: 'connectors' })
+      return cfg
+    },
+    /** Preset dei gateway e avviso fisso (dati, nessuna chiamata ai fornitori). */
+    'connectors:gateway-presets': async () => {
+      const { GATEWAY_PRESETS, GATEWAY_WARNING } = await import('../main/connectors/install')
+      return { presets: GATEWAY_PRESETS, warning: GATEWAY_WARNING }
+    },
+    /** Impostazione CIMD (punto 6): l'URL del documento ospitato dall'utente. */
+    'connectors:set-client-metadata-url': ([url]) => {
+      store.setSetting('connectors.oauth.clientMetadataUrl', String(url ?? ''))
+      return { ok: true }
     },
 
     // ---- vault credenziali ----

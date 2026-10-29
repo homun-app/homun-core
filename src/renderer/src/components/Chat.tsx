@@ -8,6 +8,7 @@ import { ApprovalCard } from './ApprovalCard'
 import { WidgetCard } from './WidgetCard'
 import { DraftCard } from './DraftCard'
 import { ConnectorCard } from './ConnectorCard'
+import { McpServerCard, PluginCard } from './ConnectorCards13'
 import { RuleProposalCard } from './RuleProposalCard'
 import { TaskCard } from './TaskCard'
 import { SubagentCard } from './SubagentCard'
@@ -322,6 +323,9 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       if (message?.type === 'widget') return <WidgetCard entry={entry} />
       if (message?.type === 'draft') return <DraftCard entry={entry} />
       if (message?.type === 'connector') return <ConnectorCard entry={entry} />
+      // fase 13: proposte di server del registro e di plugin (installano SOLO dal click)
+      if (message?.type === 'mcp-server') return <McpServerCard entry={entry} />
+      if (message?.type === 'plugin') return <PluginCard entry={entry} />
       // fase 8 (§3bis L5): regola di auto-review proposta dal bot — si salva
       // solo al click dell'utente
       if (message?.type === 'rule') return <RuleProposalCard entry={entry} />

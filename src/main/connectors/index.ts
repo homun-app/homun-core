@@ -7,12 +7,9 @@
 //
 // L'agente NON può connettere da solo: offer_connector crea solo la card con
 // il bottone "Connetti" — la connessione parte dal click dell'utente.
-import { randomBytes } from 'node:crypto'
-import { auth } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import catalogJson from './catalog.json'
-import { startCallbackServer } from './callback-server'
-import { createOAuthProvider, type StaticClientCredentials } from './oauth-provider'
+import { createOAuthProvider, authorizeWithLoopback, type StaticClientCredentials } from './oauth-provider'
 import type { ConnectorsSecretStore } from './sealed-store'
 
 export interface CatalogEntry {
@@ -181,7 +178,9 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
   /**
    * Il provider della connessione in corso: redirect = il callback server di
    * questa porta; per i server statici (Google) si aggiungono i parametri che
-   * garantiscono il refresh token duraturo (access_type=offline).
+   * garantiscono il refresh token duraturo (access_type=offline). Fase 13
+   * (punto 6): clientMetadataUrl dell'impostazione connectors.oauth.clientMetadataUrl
+   * quando l'utente ospita un Client ID Metadata Document (CIMD).
    */
   const providerFor = (
     entry: CatalogEntry,
@@ -198,6 +197,9 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
         ...(entry.clientRegistration === 'static' ? { staticClient: staticCreds(entry.id) } : {}),
         ...(entry.clientRegistration === 'static'
           ? { extraAuthParams: { access_type: 'offline', prompt: 'consent' } }
+          : {}),
+        ...(deps.getSetting<string>('connectors.oauth.clientMetadataUrl', '') || undefined
+          ? { clientMetadataUrl: deps.getSetting<string>('connectors.oauth.clientMetadataUrl', '') }
           : {}),
         stateFactory
       },
@@ -275,18 +277,11 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
         setState(entry.id, { status: 'needs_auth', error: 'Apri la finestra di SandBot per autorizzare' })
         return { status: 'needs_auth', message: 'finestra chiusa: autorizzazione rinviata' }
       }
-      const state = randomBytes(16).toString('hex')
-      const cb = await startCallbackServer({ expectedState: state })
-      const provider = providerFor(entry, cb.url, () => state)
       try {
-        // discovery/DCR/PKCE/refresh li guida l'orchestratore auth() dell'SDK
-        let result = await auth(provider, { serverUrl: entry.mcpUrl })
-        if (result === 'REDIRECT') {
-          // il browser è stato aperto da redirectToAuthorization: si aspetta
-          // il codice sul loopback (state verificato dal callback server)
-          const { code } = await cb.waitForCode()
-          result = await auth(provider, { serverUrl: entry.mcpUrl, authorizationCode: code })
-        }
+        // fase 13 (punto 6): discovery/DCR/PKCE/refresh guidati da auth()
+        // dell'SDK dentro il flusso col callback di loopback, che VALIDA
+        // l'iss della redirect (RFC 9207) prima di riscattare il codice
+        await authorizeWithLoopback(entry.mcpUrl, (redirectUrl, stateFactory) => providerFor(entry, redirectUrl, stateFactory))
         // i token ora sono validi e persistiti: il connettore diventa un
         // server MCP e lo si connette per davvero (lista tool)
         deps.registerServer({ id: entry.id, name: entry.name, url: entry.mcpUrl })
@@ -304,8 +299,6 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
         }
         setState(entry.id, { status: 'error', error: message })
         return { status: 'error', message }
-      } finally {
-        cb.close()
       }
     },
 

@@ -9,6 +9,11 @@
 // offerti al modello; un token scaduto manda il connettore in 'needs_auth'.
 // Fase 6 (residuo 0a): l'auto-allow da readOnlyHint vale solo per i server
 // del catalogo (quelli con catalogId), non per i server manuali.
+// Fase 13: i server hanno enabledFor (quali bot li vedono — serversForAgent);
+// i server stdio del registro e dei plugin girano NEL BOX via docker exec
+// (cfg.box: codice di terzi MAI sul Mac); i server del registro/plugin/gateway
+// (cfg.source) NON hanno auto-consenso dalle annotazioni (niente catalogId);
+// un server in attesa di chiavi/variabili (needsAuth) non è offerto al modello.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -16,6 +21,8 @@ import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import { getSetting, setSetting } from '../store/db'
 import { setMcpAnnotationsLookup } from '../agent/permissions'
+import { dockerStdioMcpArgv } from '../sandbox/docker-argv'
+import { boxOwnerOf } from '../sandbox'
 import type { ToolDef } from '../agent/llm'
 
 export interface McpServerConfig {
@@ -30,6 +37,49 @@ export interface McpServerConfig {
   auth?: { kind: 'oauth' | 'bearer' | 'headers' }
   /** fase 5: id del connettore del catalogo (per stato/tool disattivati) */
   catalogId?: string
+  /** fase 13 (punto 5): per quali bot è abilitato il server (['*'] = tutti) */
+  enabledFor?: string[]
+  /** fase 13: da dove arriva il server (registro pubblico, plugin, gateway) */
+  source?:
+    | { kind: 'registry'; name: string; version?: string }
+    | { kind: 'plugin'; plugin: string; marketplace: string; sha: string }
+    | { kind: 'gateway'; preset?: string }
+  /**
+   * fase 13 (punto 2): server stdio che gira NEL BOX — docker exec con utente
+   * e workdir del bot; `envKeys` passano come `-e NOME` col valore preso
+   * dall'ambiente del processo figlio, MAI in argv (regola dei segreti).
+   */
+  box?: { workdir: string; command: string; args?: string[]; envKeys?: string[] }
+  /** fase 13: installato ma in attesa di valori che l'utente inserisce nelle Impostazioni */
+  needsAuth?: { kind: 'key' | 'env' | 'settings'; keys: string[] }
+  /** fase 13: fiducia mostrata nella scheda Installati (dominio verificato, …) */
+  trustLabel?: string
+}
+
+/**
+ * serversForAgent (pura, punto 5): i server abilitati per un bot. enabledFor
+ * contiene '*' oppure l'id del bot; un FIGLIO eredita dal padre (boxOwnerOf).
+ * I server esistenti prima della migrazione hanno enabledFor indefinito →
+ * valgono per tutti (il daemon li migra a ['*'] al primo avvio).
+ */
+export function serversForAgent(servers: McpServerConfig[], agentId: string, parentId?: string): McpServerConfig[] {
+  return servers.filter((s) => {
+    const ids = s.enabledFor ?? ['*']
+    return ids.includes('*') || ids.includes(agentId) || (parentId !== undefined && ids.includes(parentId))
+  })
+}
+
+/** Migrazione punto 5: i server ESISTENTI al primo avvio restano per tutti. */
+export function migrateEnabledFor(servers: McpServerConfig[]): { servers: McpServerConfig[]; changed: boolean } {
+  let changed = false
+  const out = servers.map((s) => {
+    if (s.enabledFor === undefined) {
+      changed = true
+      return { ...s, enabledFor: ['*'] as string[] }
+    }
+    return s
+  })
+  return { servers: out, changed }
 }
 
 /** Annotazioni MCP standard che interessano il gate dei permessi. */
@@ -56,6 +106,8 @@ export interface McpToolInfo {
 export interface McpAuth {
   authProvider?: OAuthClientProvider
   headers?: Record<string, string>
+  /** fase 13: env del processo figlio per i server stdio NEL BOX (valori MAI in argv) */
+  stdioEnv?: Record<string, string>
 }
 export type McpAuthResolver = (cfg: McpServerConfig) => McpAuth | Promise<McpAuth>
 let authResolver: McpAuthResolver = () => ({})
@@ -85,6 +137,7 @@ function connectorStateOf(cfg: McpServerConfig): { status?: string; disabledTool
 
 /** Un server in needs_auth/errore non viene offerto al modello (evita retry lenti a ogni turno). */
 function skippedByConnectorState(cfg: McpServerConfig): boolean {
+  if (cfg.needsAuth) return true // fase 13: aspetta chiavi/variabili dalle Impostazioni
   const status = connectorStateOf(cfg).status
   return status === 'needs_auth' || status === 'error'
 }
@@ -92,7 +145,7 @@ function skippedByConnectorState(cfg: McpServerConfig): boolean {
 /** Token scaduto/rifiutato: il connettore va riconnesso dall'utente. */
 function markNeedsAuth(cfg: McpServerConfig, message: string): void {
   const id = cfg.catalogId ?? cfg.id
-  if (!cfg.catalogId) return // server manuale senza stato connettore: niente da segnare
+  if (!cfg.catalogId && !cfg.source) return // server manuale senza stato connettore: niente da segnare
   const all = getSetting<Record<string, Record<string, unknown>>>('connectors.state', {})
   const cur = (all[id] ?? {}) as Record<string, unknown>
   setSetting('connectors.state', { ...all, [id]: { ...cur, status: 'needs_auth', error: message } })
@@ -101,6 +154,18 @@ function markNeedsAuth(cfg: McpServerConfig, message: string): void {
 async function connect(cfg: McpServerConfig): Promise<Client> {
   const client = new Client({ name: 'sandbot', version: '0.1.0' })
   if (cfg.transport === 'stdio') {
+    if (cfg.box) {
+      // fase 13: server stdio di registro/plugin — gira NEL BOX (docker exec),
+      // mai sul Mac; le env col solo NOME in argv, i valori nell'env del figlio
+      const a = await authResolver(cfg)
+      const argv = dockerStdioMcpArgv(cfg.box)
+      await client.connect(
+        a.stdioEnv && Object.keys(a.stdioEnv).length
+          ? new StdioClientTransport({ command: 'docker', args: argv, env: { ...process.env, ...a.stdioEnv } as Record<string, string> })
+          : new StdioClientTransport({ command: 'docker', args: argv })
+      )
+      return client
+    }
     await client.connect(new StdioClientTransport({ command: cfg.command ?? '', args: cfg.args ?? [] }))
   } else {
     const a = await authResolver(cfg)
@@ -166,16 +231,44 @@ export async function toolsOfServer(id: string): Promise<
   }))
 }
 
-/** Tutti i tool MCP abilitati, pronti per il loop agente. Riconnette se scaduti. */
-export async function activeTools(): Promise<ToolDef[]> {
+/**
+ * Tutti i tool MCP abilitati, pronti per il loop agente. Riconnette se scaduti.
+ * Fase 13 (punto 5): con agentId restano solo i server abilitati PER QUEL BOT
+ * (serversForAgent; un figlio eredita dal padre via boxOwnerOf). Senza agentId
+ * (compatibilità) restano tutti.
+ */
+export async function activeTools(agentId?: string): Promise<ToolDef[]> {
   const out: ToolDef[] = []
-  for (const cfg of listServers().filter((s) => s.enabled && !skippedByConnectorState(s))) {
+  const owner = agentId !== undefined ? boxOwnerOf(agentId) : undefined
+  const servers = agentId !== undefined ? serversForAgent(listServers(), agentId, owner) : listServers()
+  for (const cfg of servers.filter((s) => s.enabled && !skippedByConnectorState(s))) {
     try {
       const c = await ensure(cfg)
       const disabled = new Set(connectorStateOf(cfg).disabledTools ?? [])
       out.push(...c.tools.filter((t) => !disabled.has(t.def.name)).map((t) => t.def))
     } catch {
       // server non raggiungibile: lo saltiamo senza rompere il turno
+    }
+  }
+  return out
+}
+
+/**
+ * I tool MCP raggruppati per server, per un bot (fase 13, punto 5): serve alla
+ * sezione "Connettori attivi" del prompt quando i tool sono deferiti.
+ */
+export async function activeServersForAgent(agentId?: string): Promise<Array<{ id: string; name: string; tools: ToolDef[] }>> {
+  const out: Array<{ id: string; name: string; tools: ToolDef[] }> = []
+  const owner = agentId !== undefined ? boxOwnerOf(agentId) : undefined
+  const servers = agentId !== undefined ? serversForAgent(listServers(), agentId, owner) : listServers()
+  for (const cfg of servers.filter((s) => s.enabled && !skippedByConnectorState(s))) {
+    try {
+      const c = await ensure(cfg)
+      const disabled = new Set(connectorStateOf(cfg).disabledTools ?? [])
+      const tools = c.tools.filter((t) => !disabled.has(t.def.name)).map((t) => t.def)
+      if (tools.length) out.push({ id: cfg.id, name: cfg.name, tools })
+    } catch {
+      // server non raggiungibile: saltato
     }
   }
   return out

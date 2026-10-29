@@ -88,8 +88,11 @@ export async function check(
 
   // fase 5: il funnel dei connettori — search_connectors è una lettura del
   // catalogo, offer_connector crea solo una entry nel transcript (la
-  // connessione vera parte dal click dell'utente)
-  if (tool === 'search_connectors' || tool === 'offer_connector') {
+  // connessione vera parte dal click dell'utente). Fase 13 (punti 2 e 4):
+  // add_mcp_server e install_plugin sono uguali — PROPONGONO una card, non
+  // installano nulla; l'installazione parte dal click e non passa di qui
+  // (mai "Consenti sempre" su quelle card).
+  if (tool === 'search_connectors' || tool === 'offer_connector' || tool === 'add_mcp_server' || tool === 'install_plugin') {
     return { kind: 'allow', via: 'rule' }
   }
 

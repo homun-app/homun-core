@@ -32,7 +32,7 @@ import { buildMemorySection } from './memory'
 import { buildSkillsSection } from './skills'
 import { maybeCompactHistory, summarizeWithLlm } from './compaction'
 import { automationEventText } from './update-state'
-import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX, formatWebSearchEvidence, formatWebFetchEvidence, formatWebBrowserEvidence } from '../../shared/agent-message'
+import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX, formatWebSearchEvidence, formatWebFetchEvidence, formatWebBrowserEvidence, formatExternalDataEvidence } from '../../shared/agent-message'
 import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto } from './permission-rules'
@@ -55,6 +55,14 @@ import {
   GROUP_CALLED_RECOVERY_NUDGE, GROUP_CALLED_CLOSING_RECOVERY_NUDGE
 } from './group-turns'
 import { MAX_CREATE_AGENTS_PER_TURN, wakeParentToolDef } from './tools'
+// fase 13 (punto 3): add_mcp_server/install_plugin SOLO nei turni dell'utente;
+// (punto 5): tool MCP deferiti oltre connectors.maxInlineTools
+import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED } from './connectors-policy'
+import { PROPOSAL_RESULT } from '../connectors/install'
+import {
+  findToolsToolDef, rankTools, requiredParamsOf, formatFindToolsResult, toolsDeferred,
+  activeToolsFromTranscript, connectorsActiveSection, DEFAULT_MAX_INLINE_TOOLS
+} from '../mcp/find-tools'
 import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 // fase 12: sottoagenti — policy pura del figlio, store del registro, formatters
 import {
@@ -170,6 +178,8 @@ function appendSend(
     : message.type === 'task' ? message.title
     : message.type === 'subagent' ? message.title
     : message.type === 'rule' ? message.text
+    : message.type === 'mcp-server' ? `Aggiungi server MCP: ${message.name}`
+    : message.type === 'plugin' ? `Installa plugin: ${message.name}`
     : (message.subject || message.to || '')
   const entry = appendEntry({
     agentId, kind: 'send-message', role: 'assistant', content,
@@ -802,19 +812,39 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       }
       // fase 12 (punto 6): la sezione Sottoagenti solo nei bot NORMALI, mai
       // nei turni di gruppo (lì si coordina col gruppo)
-      systemText = systemPrompt(agent, { subagents: opts.groupTurn === undefined }) +
+      systemText = systemPrompt(agent, { subagents: opts.groupTurn === undefined, connectors: opts.groupTurn === undefined }) +
         mainSection + buildMemorySection(agentId) + buildSkillsSection(agentId) + connectorsSection
     }
-    const messages: ChatMessage[] = buildMessages(systemText, scopedEntries(), images)
 
     // tool statici + tool MCP attivi (server esterni → mcp__<server>__<tool>)
+    // fase 13 (punto 5): i tool MCP sono PER BOT (enabledFor via
+    // serversForAgent; un figlio eredita dal padre); sopra
+    // connectors.maxInlineTools si DEFERISCONO: niente schemi MCP nel prompt,
+    // la sezione "Connettori attivi" e il tool find_tools al loro posto
     const { toolDefs } = await import('./tools')
     let allTools = toolDefs
+    let mcpToolDefs: import('./llm').ToolDef[] = []
     try {
       const { activeTools } = await import('../mcp')
-      allTools = [...toolDefs, ...(await activeTools())]
+      mcpToolDefs = await activeTools(agentId)
     } catch {
       // MCP non disponibile: prosegue coi tool base
+    }
+    const maxInlineTools = getSetting<number>('connectors.maxInlineTools', DEFAULT_MAX_INLINE_TOOLS)
+    const deferredMcp = toolsDeferred(mcpToolDefs.length, maxInlineTools)
+    if (!deferredMcp) {
+      allTools = [...toolDefs, ...mcpToolDefs]
+    } else {
+      // nessuno schema MCP nel prompt: restano attivi solo quelli già
+      // attivati con find_tools in QUESTA conversazione (dal transcript,
+      // ultimi 20), aggiunti in FONDO in ordine stabile (cache del prompt)
+      const prevActive = activeToolsFromTranscript(scopedEntries())
+      const prevSet = new Set(prevActive)
+      allTools = [
+        ...toolDefs,
+        findToolsToolDef,
+        ...mcpToolDefs.filter((t) => prevSet.has(t.name))
+      ]
     }
     // fase 11b (punto 2): i tool del browser compaiono SOLO quando il browser
     // è disponibile (docker + rete bridge): in host il modello non li vede
@@ -830,6 +860,37 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     if (opts.subagent) {
       allTools = [...allTools.filter((t) => subagentToolDenyReason(t.name) === null), wakeParentToolDef]
     }
+    // fase 13 (punto 3): add_mcp_server e install_plugin SOLO nei turni nati
+    // da un messaggio diretto dell'utente in chat (regola 9 dell'onboarding)
+    allTools = toolsForTurnSource(allTools, {
+      source,
+      groupTurn: opts.groupTurn,
+      subagent: opts.subagent,
+      taskId: opts.taskId,
+      automatic,
+      agentMessage: opts.agentMessage,
+      initiator: opts.initiator
+    })
+    // i nomi dei tool MCP attivi del turno: in modalità differita un mcp__*
+    // fuori da questo insieme NON si esegue ("strumento non attivo")
+    const activeMcpNames = new Set(allTools.filter((t) => t.name.startsWith('mcp__')).map((t) => t.name))
+    // fase 13 (punto 5): in modalità differita il prompt porta la sezione
+    // "Connettori attivi" al posto degli schemi MCP (una riga per server)
+    if (deferredMcp && !opts.subagent) {
+      try {
+        const { activeServersForAgent } = await import('../mcp')
+        const servers = await activeServersForAgent(agentId)
+        systemText +=
+          '\n' + connectorsActiveSection(servers.map((x) => ({
+            name: x.name,
+            toolCount: x.tools.length,
+            description: (x.tools[0]?.description ?? '').replace(/^\[MCP:[^\]]*\]\s*/, '')
+          })))
+      } catch {
+        // MCP non disponibile: nessuna sezione
+      }
+    }
+    const messages: ChatMessage[] = buildMessages(systemText, scopedEntries(), images)
     // correzione E2: i tool del passo corrente — la chiamata di recupero di un
     // turno di gruppo li restringe a quelli del sollecito
     let turnTools = allTools
@@ -1436,12 +1497,124 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           continue
         }
 
+        // fase 13 (punto 1): search_connectors — quando il result contiene righe
+        // di REGISTRO o MARKETPLACE è testo di TERZI: blocco dati esterni (come
+        // web_fetch) e CONTAMINAZIONE del turno; le righe del catalogo
+        // verificato sono nostre e restano un result normale
+        if (call.name === 'search_connectors') {
+          emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
+          const sEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [sEntry] })
+          let output = ''
+          let thirdParty = false
+          try {
+            const r = await executeTool(agentId, call.name, input, { turnInitiator: opts.initiator })
+            output = r.output
+            thirdParty = r.meta.thirdParty === true
+          } catch (e) {
+            output = `Errore: ${e instanceof Error ? e.message : String(e)}`
+          }
+          let content = output
+          if (thirdParty) {
+            if (!contaminated) {
+              run.turnAllows.clear()
+              run.turnGrantEpoch++
+            }
+            contaminated = true
+            content = formatExternalDataEvidence('search_connectors', output)
+          }
+          const res = add({
+            agentId, kind: 'tool-result', role: 'system', content: content.slice(0, 50_000),
+            meta: { callId: call.id, ...(thirdParty ? { webEvidence: true, thirdParty: true } : {}) }
+          })
+          emit({ type: 'entries', agentId, entries: [res] })
+          messages.push({ role: 'tool', toolCallId: call.id, content: content.slice(0, 50_000) })
+          continue
+        }
+
+        // fase 13 (punto 2): PROPONENTE di un server MCP del registro (o di un
+        // URL) — il tool NON installa nulla: crea SOLO la card "Aggiungi server
+        // MCP" e torna subito. La card è TUTTA in codice (solo reason è del
+        // modello); l'installazione parte dal click dell'utente, mai "sempre".
+        // Punto 3: una chiamata arrivata fuori da un turno dell'utente viene
+        // negata col testo fisso
+        if (call.name === 'add_mcp_server' || call.name === 'install_plugin') {
+          const propEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [propEntry] })
+          const offerFacts = {
+            source, groupTurn: opts.groupTurn, subagent: opts.subagent, taskId: opts.taskId,
+            automatic, agentMessage: opts.agentMessage, initiator: opts.initiator
+          }
+          if (!connectorProposalOffered(offerFacts)) {
+            const refused = CONNECTOR_PROPOSAL_DENIED
+            messages.push({ role: 'tool', toolCallId: call.id, content: refused })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
+          const { getInstallDeps } = await import('../connectors/install-bridge')
+          const reason = String(input.reason ?? '')
+          const built = call.name === 'add_mcp_server'
+            ? await (await import('../connectors/install')).buildMcpServerCard(String(input.id ?? ''), reason, getInstallDeps())
+            : await (await import('../connectors/install')).buildPluginCard(String(input.id ?? ''), reason, getInstallDeps())
+          if (!built.ok) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: built.error })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: built.error, meta: { callId: call.id } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
+          // turno contaminato: la card mostra l'avviso in cima (punto 3)
+          const message = contaminated ? { ...built.card, untrusted: true as const } : built.card
+          appendSend(agentId, call, message, emit, { status: 'pending' }, opts.taskId)
+          messages.push({ role: 'tool', toolCallId: call.id, content: PROPOSAL_RESULT })
+          const res = add({ agentId, kind: 'tool-result', role: 'system', content: PROPOSAL_RESULT, meta: { callId: call.id } })
+          emit({ type: 'entries', agentId, entries: [res] })
+          continue
+        }
+
+        // fase 13 (punto 5): find_tools — cerca fra i tool MCP DEFERITI del
+        // bot e li ATTIVA dal passo successivo (in fondo, ordine stabile)
+        if (call.name === 'find_tools') {
+          const fEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: 'find_tools',
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [fEntry] })
+          const found = rankTools(
+            mcpToolDefs.map((t) => ({ name: t.name, description: t.description, requiredParams: requiredParamsOf(t) })),
+            String(input.query ?? '')
+          )
+          const text = formatFindToolsResult(found)
+          const res = add({
+            agentId, kind: 'tool-result', role: 'system', content: text,
+            meta: { callId: call.id, activated: found.map((t) => t.name) }
+          })
+          emit({ type: 'entries', agentId, entries: [res] })
+          messages.push({ role: 'tool', toolCallId: call.id, content: text })
+          // i tool trovati diventano ATTIVI dal passo successivo e restano
+          // nella lista, in FONDO e in ordine stabile (cache del prompt)
+          for (const t of found) {
+            activeMcpNames.add(t.name)
+            const def = mcpToolDefs.find((x) => x.name === t.name)
+            if (def && !turnTools.some((x) => x.name === t.name)) turnTools = [...turnTools, def]
+          }
+          continue
+        }
+
         // fase 5 (§3ter T2-T3, funnel): OFFERTA di connessione — l'agente NON
         // può connettere da solo, crea solo la card col bottone "Connetti";
         // quando l'utente connette, arriverà un messaggio di sistema
         // (meta.initiator CONNECTOR_CONNECTED) per proseguire
         if (call.name === 'offer_connector') {
-          const entry2 = (await import('../connectors')).loadCatalog().find((c) => c.id === String(input.id ?? ''))
+          // fase 13: search_connectors mostra gli id come 'catalog:<id>' — si accetta anche quello
+          const wanted = String(input.id ?? '').replace(/^catalog:/, '')
+          const entry2 = (await import('../connectors')).loadCatalog().find((c) => c.id === wanted)
           if (!entry2) {
             messages.push({
               role: 'tool', toolCallId: call.id,
@@ -2002,6 +2175,17 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // turnGranted: esecuzione senza chiedere di nuovo (grant di turno)
         }
 
+        // fase 13 (punto 5): in modalità differita un tool MCP NON attivo non si
+        // esegue — niente esecuzione cieca di un nome indovinato: il result
+        // dice di cercarlo con find_tools
+        if (deferredMcp && call.name.startsWith('mcp__') && !activeMcpNames.has(call.name)) {
+          const refused = 'strumento non attivo: cercalo con find_tools({query}) e chiamalo dal passo dopo'
+          messages.push({ role: 'tool', toolCallId: call.id, content: refused })
+          const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id, inactive: true } })
+          emit({ type: 'entries', agentId, entries: [res] })
+          continue
+        }
+
         // esecuzione
         try {
           // correzione A5: il contesto del turno (chi lo ha aperto) serve a
@@ -2012,10 +2196,25 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             turnInitiator: opts.initiator,
             ...(opts.taskId !== undefined ? { taskId: opts.taskId } : {})
           })
+          // fase 13 (punto 8): OGNI result MCP è un DATO ESTERNO (email, pagine
+          // Notion, issue): blocco evidenza con la fonte mcp:<server> e
+          // CONTAMINAZIONE del turno, con le stesse conseguenze di web_fetch
+          // (le regole "consenti" tornano a chiedere, l'auto-review non
+          // approva le azioni con effetti). Nessuna eccezione in questa fase.
+          let finalOutput = output
+          if (call.name.startsWith('mcp__')) {
+            const serverSlug = call.name.split('__')[1] ?? 'server'
+            finalOutput = formatExternalDataEvidence(`mcp:${serverSlug}`, output)
+            if (!contaminated) {
+              run.turnAllows.clear()
+              run.turnGrantEpoch++
+            }
+            contaminated = true
+          }
           const res = add({
             agentId, kind: 'tool-result', role: 'system',
-            content: output.slice(0, 50_000),
-            meta: { callId: call.id, ...meta }
+            content: finalOutput.slice(0, 50_000),
+            meta: { callId: call.id, ...meta, ...(call.name.startsWith('mcp__') ? { webEvidence: true, mcpEvidence: true } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [res] })
           // fase 5: il tool MCP ha rifiutato perché il connettore ha il token
@@ -2045,7 +2244,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // sidebar e la vista gruppo si aggiornano
           if (meta.groupChanged) emit({ type: 'groups' })
           // run-command restituisce output GIÀ redatto (§5.6): stesso testo al modello e al transcript
-          messages.push({ role: 'tool', toolCallId: call.id, content: output.slice(0, 50_000) })
+          messages.push({ role: 'tool', toolCallId: call.id, content: finalOutput.slice(0, 50_000) })
           // immagini (computer use): le inietta come messaggio vision — il formato
           // "immagine dentro il tool result" non è supportato ovunque, un user message sì
           if (images?.length) {

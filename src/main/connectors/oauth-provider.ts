@@ -4,15 +4,28 @@
 // di loopback (RFC 8252), la persistenza CIFRATA (sealed-store.ts) e
 // l'apertura del browser di sistema (via UI/HostBridge).
 //
+// Fase 13 (punto 6), verso la specifica MCP 2026-07-28 con l'SDK 1.32:
+// - clientMetadata manda application_type "native" (DCR): i server accettano
+//   i redirect loopback delle app desktop;
+// - clientMetadataUrl opzionale (impostazione connectors.oauth.clientMetadataUrl,
+//   vuota di default): se l'utente OSPITA un Client ID Metadata Document
+//   (es. GitHub Pages) l'SDK usa CIMD/URL-based client id, altrimenti DCR —
+//   SandBot non ha un dominio, quindi nessun URL inventato;
+// - authorizeWithLoopback valida l'iss della redirect (RFC 9207) prima di
+//   riscattare il codice. Il LEGAME delle credenziali all'issuer lo fa già
+//   l'SDK 1.32.2 (le timbra con issuer e si ri-registra quando cambia).
+//
 // Il provider è una fabbrica a dipendenze iniettabili (store, openExternal,
 // state) così i test girano contro un authorization server finto in memoria.
 import { randomBytes } from 'node:crypto'
+import { auth } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { OAuthClientProvider, OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js'
 import type {
   OAuthClientMetadata,
   OAuthClientInformationMixed,
   OAuthTokens
 } from '@modelcontextprotocol/sdk/shared/auth.js'
+import { startCallbackServer } from './callback-server'
 import type { ConnectorsSecretStore } from './sealed-store'
 
 /** Credenziali statiche inserite dall'utente (es. client OAuth Google). */
@@ -37,6 +50,8 @@ export interface OAuthProviderDeps {
   extraAuthParams?: Record<string, string>
   /** Factory dello state (la connessione la pre-generata per il callback server). */
   stateFactory?(): string
+  /** Fase 13 (punto 6): URL del Client ID Metadata Document ospitato dall'utente (CIMD). */
+  clientMetadataUrl?: string
 }
 
 /**
@@ -60,10 +75,15 @@ export function createOAuthProvider(
       return deps.redirectUrl
     },
 
+    /** Fase 13 (punto 6): CIMD se l'utente ospita il documento (l'SDK lo usa per gli URL-based client id). */
+    ...(deps.clientMetadataUrl ? { clientMetadataUrl: deps.clientMetadataUrl } : {}),
+
     get clientMetadata(): OAuthClientMetadata {
-      // client pubblico con PKCE; con credenziali statiche (es. Google) il
-      // secret accompagna le richieste del token endpoint (client_secret_basic)
-      return {
+      // client pubblico con PKCE; application_type native (punto 6): i server
+      // accettano i redirect loopback delle app desktop — l'SDK 1.32.2 non lo
+      // tipizza ma lo inoltra nella DCR così com'è; con credenziali statiche
+      // (es. Google) il secret accompagna le richieste del token endpoint
+      const meta: OAuthClientMetadata & { application_type?: string } = {
         client_name: 'SandBot',
         redirect_uris: [deps.redirectUrl],
         grant_types: ['authorization_code', 'refresh_token'],
@@ -71,6 +91,8 @@ export function createOAuthProvider(
         token_endpoint_auth_method: deps.staticClient ? 'client_secret_basic' : 'none',
         ...(deps.scope ? { scope: deps.scope } : {})
       }
+      meta.application_type = 'native'
+      return meta
     },
 
     async state(): Promise<string> {
@@ -131,5 +153,49 @@ export function createOAuthProvider(
       else if (scope === 'verifier') await deps.store.remove(deps.serverId, [fields.codeVerifier])
       else if (scope === 'discovery') await deps.store.remove(deps.serverId, [fields.discovery])
     }
+  }
+}
+
+/** Come l'SDK: due issuer combaciano anche con una sola slash finale diversa. */
+export function issuersMatch(a: string, b: string): boolean {
+  let [x, y] = [a, b]
+  try {
+    ;[x, y] = [new URL(a).href, new URL(b).href]
+  } catch {
+    // non due URL: confronto come scritti
+  }
+  return x === y || (x.endsWith('/') && x.slice(0, -1) === y) || (y.endsWith('/') && y.slice(0, -1) === x)
+}
+
+/**
+ * Fase 13 (punto 6): il flusso di autorizzazione completo col callback di
+ * loopback — prima auth() (discovery/DCR/PKCE + apertura del browser), attesa
+ * del codice con lo state verificato dal callback server, VALIDAZIONE dell'iss
+ * della redirect (RFC 9207): un iss diverso dall'issuer scoperto rifiuta il
+ * codice con "issuer non corrispondente" (mai riscattato), poi riscatto.
+ * Il ri-legame delle credenziali all'issuer (nuova registrazione quando
+ * cambia) lo fa già l'SDK 1.32.2, che le timbra con l'issuer della discovery.
+ */
+export async function authorizeWithLoopback(
+  serverUrl: string,
+  providerFor: (redirectUrl: string, stateFactory: () => string) => OAuthClientProvider,
+  opts: { timeoutMs?: number } = {}
+): Promise<void> {
+  const state = randomBytes(16).toString('hex')
+  const cb = await startCallbackServer({ expectedState: state, ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}) })
+  try {
+    const provider = providerFor(cb.url, () => state)
+    let result = await auth(provider, { serverUrl })
+    if (result === 'REDIRECT') {
+      const { code, iss } = await cb.waitForCode()
+      const expected = (await provider.discoveryState?.())?.authorizationServerUrl
+      if (iss && expected && !issuersMatch(iss, expected)) {
+        throw new Error(`issuer non corrispondente: la redirect dichiara ${iss}, l'authorization server scoperto è ${expected}`)
+      }
+      result = await auth(provider, { serverUrl, authorizationCode: code })
+    }
+    if (result !== 'AUTHORIZED') throw new Error(`autenticazione non completata (${String(result)})`)
+  } finally {
+    cb.close()
   }
 }
