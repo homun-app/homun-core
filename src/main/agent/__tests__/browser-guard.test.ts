@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import {
   refInfo, browserActionRisk, truncateSnapshot, snapshotChallenge, browserPageUrl,
   composeBrowserResult, COMMIT_WORDS, CREDENTIAL_FIELD_WORDS, SNAPSHOT_MAX_CHARS,
-  CREDENTIAL_DENY_TEXT, INVALID_REF_DENY_TEXT
+  CREDENTIAL_DENY_TEXT, INVALID_REF_DENY_TEXT, type BrowserActionRisk
 } from '../browser-guard'
 import { looksJsBuiltPage, JS_PAGE_HINT } from '../web-guard'
 
@@ -275,7 +275,7 @@ describe('I7: il passaggio da web_fetch al browser (pagine SPA vere)', () => {
 import { fieldIsCredential, errorSection, type FieldProbeInfo } from '../browser-guard'
 
 const info = (patch: Partial<FieldProbeInfo>): FieldProbeInfo => ({
-  type: 'text', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', ...patch
+  type: 'text', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '', ...patch
 })
 
 describe('fase 12 0a: fieldIsCredential (il tipo di campo letto DENTRO la pagina)', () => {
@@ -304,6 +304,11 @@ describe('fase 12 0a: fieldIsCredential (il tipo di campo letto DENTRO la pagina
     expect(fieldIsCredential(info({ label: 'La tua opinione' }))).toBe(false) // "pin" non è parola intera
     expect(fieldIsCredential(info({ name: 'shipping' }))).toBe(false)
     expect(fieldIsCredential(info({ type: 'text' }))).toBe(false)
+  })
+  it('K1: aria "Numero carta" (il campo aria-labelledby senza nome) → vero; title "Password" → vero; due label "Nome Cognome" → falso', () => {
+    expect(fieldIsCredential(info({ name: 'f1', aria: 'Numero carta' }))).toBe(true)
+    expect(fieldIsCredential(info({ title: 'Password' }))).toBe(true)
+    expect(fieldIsCredential(info({ label: 'Nome Cognome' }))).toBe(false)
   })
 })
 
@@ -339,7 +344,7 @@ describe('correzione J3: parseEvaluateResult — la sezione ### Result del resul
   it('il testo REALE (con blocco del codice e sezione Page) → il FieldProbeInfo del campo', () => {
     expect(parseEvaluateResult(REAL_RESULT)).toEqual({
       type: 'password', autocomplete: '', name: 'password', id: 'password',
-      placeholder: '', label: '', aria: ''
+      placeholder: '', label: '', aria: '', title: ''
     })
     expect(fieldIsCredential(parseEvaluateResult(REAL_RESULT)!)).toBe(true)
   })
@@ -354,7 +359,7 @@ describe('correzione J3: parseEvaluateResult — la sezione ### Result del resul
   })
 })
 
-describe('correzione J3: applyFieldProbe — quando la verifica RIESCE decide il campo VERO', () => {
+describe('correzione J3, giro K1: applyFieldProbe — la verifica AGGIUNGE un deny, MAI lo toglie', () => {
   const SNAPSHOT_LOGIN = [
     '- Page URL: https://quotes.toscrape.com/login',
     '- heading "Login" [ref=e1]',
@@ -368,12 +373,32 @@ describe('correzione J3: applyFieldProbe — quando la verifica RIESCE decide il
   const riskOf = (snapshot: string, ref: string, args: Record<string, unknown> = {}) =>
     browserActionRisk('browser_type', { ref, ...args }, refInfoOf(snapshot, ref))
 
-  it('username di quotes.toscrape.com/login: nome accessibile "Username Password" ma text/username → FREE', () => {
-    // il nome dello snapshot da solo lo NEGHEREBBE (parola "Password"):
-    // il campo vero ({type: "text", name: "username", label: "Username"}) decide
+  it('username di quotes.toscrape.com/login: il nome accessibile "Username Password" NEGA e il campo pulito NON declassa', () => {
+    // il nome dello snapshot nega (parola "Password"): con l'info del probe
+    // VECCHIO ({type: "text", name: "username", label: "Username"} → campo
+    // pulito) il deny del nome resta deny — la verifica non apre varchi
     expect(riskOf(SNAPSHOT_LOGIN, 'e8').kind).toBe('deny')
     const decided = applyFieldProbe(riskOf(SNAPSHOT_LOGIN, 'e8'), { ref: 'e8', text: 'pippo' }, refInfoOf(SNAPSHOT_LOGIN, 'e8'), false)
-    expect(decided).toEqual({ kind: 'free' })
+    expect(decided).toEqual({ kind: 'deny', reason: CREDENTIAL_DENY_TEXT })
+  })
+  it('K1: tabella risk {free, ask, deny} × credential {true, false, null} — vince il più restrittivo', () => {
+    const free: BrowserActionRisk = { kind: 'free' }
+    const ask: BrowserActionRisk = { kind: 'ask', reason: 'browser_type con submit: true invia il modulo (campo "x")' }
+    const deny: BrowserActionRisk = { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
+    const args = { ref: 'e9', text: 'x' }
+    const ref = refInfoOf(SNAPSHOT_LOGIN, 'e9')
+    // true → deny SEMPRE (il campo vero è di credenziali)
+    for (const risk of [free, ask, deny]) {
+      expect(applyFieldProbe(risk, args, ref, true)).toEqual({ kind: 'deny', reason: CREDENTIAL_DENY_TEXT })
+    }
+    // false → risk INVARIATO: un deny del nome resta deny, un ask resta ask, un free resta free
+    for (const risk of [free, ask, deny]) {
+      expect(applyFieldProbe(risk, args, ref, false)).toBe(risk)
+    }
+    // null → solo il free diventa ask "non riesco a verificare", il resto invariato
+    expect(applyFieldProbe(free, args, ref, null)).toEqual({ kind: 'ask', reason: FIELD_PROBE_ASK_TEXT })
+    expect(applyFieldProbe(ask, args, ref, null)).toBe(ask)
+    expect(applyFieldProbe(deny, args, ref, null)).toBe(deny)
   })
   it('password {type: "password"} SENZA nome accessibile → DENY dal campo vero', () => {
     expect(riskOf(SNAPSHOT_LOGIN, 'e9').kind).toBe('free') // nessun nome nel snapshot

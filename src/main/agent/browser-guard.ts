@@ -177,6 +177,8 @@ export interface FieldProbeInfo {
   placeholder: string
   label: string
   aria: string
+  /** giro K1: il `title` dell'elemento (un altro posto dove la pagina nomina il campo) */
+  title: string
 }
 
 /**
@@ -188,13 +190,13 @@ const AUTOCOMPLETE_CREDENTIAL_RE = /(^|\s)(current-password|new-password|one-tim
 /**
  * fieldIsCredential (pura, 0a): il campo è di credenziali o pagamento per il
  * TIPO, per l'autocomplete o per una parola intera in name/id/placeholder/
- * label/aria → il deny di browser_type scatta anche senza nome accessibile.
+ * label/aria/title → il deny di browser_type scatta anche senza nome accessibile.
  */
 export function fieldIsCredential(info: FieldProbeInfo): boolean {
   if (info.type === 'password') return true
   if (AUTOCOMPLETE_CREDENTIAL_RE.test(info.autocomplete)) return true
   return matchesWholeWord(
-    `${info.name} ${info.id} ${info.placeholder} ${info.label} ${info.aria}`,
+    `${info.name} ${info.id} ${info.placeholder} ${info.label} ${info.aria} ${info.title}`,
     CREDENTIAL_FIELD_WORDS
   )
 }
@@ -225,7 +227,7 @@ export function parseEvaluateResult(mcpResultText: string): FieldProbeInfo | nul
       type: String(info.type ?? ''), autocomplete: String(info.autocomplete ?? ''),
       name: String(info.name ?? ''), id: String(info.id ?? ''),
       placeholder: String(info.placeholder ?? ''), label: String(info.label ?? ''),
-      aria: String(info.aria ?? '')
+      aria: String(info.aria ?? ''), title: String(info.title ?? '')
     }
   } catch {
     return null
@@ -236,14 +238,15 @@ export function parseEvaluateResult(mcpResultText: string): FieldProbeInfo | nul
 export const FIELD_PROBE_ASK_TEXT = 'non riesco a verificare il tipo del campo'
 
 /**
- * Correzione J3: la decisione di browser_type dopo la verifica INTERNA del
- * campo. `credential` è l'esito di fieldIsCredentialRef: true/false quando la
- * valutazione è riuscita, null quando è fallita. Quando RIESCE decide il
- * campo VERO: deny se è di credenziali; se NON lo è, il deny venuto dal NOME
- * ACCESSIBILE dello snapshot NON conta più (in quotes.toscrape.com/login il
- * campo username si chiama "Username Password" ma è {type: "text", name:
- * "username", label: "Username"}): resta solo l'ask di submit. Quando FALLISCE
- * le regole dello snapshot restano e un free NON resta free (ask, mai free).
+ * Correzione J3, giro K1: la decisione di browser_type dopo la verifica INTERNA
+ * del campo. `credential` è l'esito di fieldIsCredentialRef: true/false quando
+ * la valutazione è riuscita, null quando è fallita. I due segnali (nome
+ * accessibile dello snapshot, campo vero) si combinano in modo CONSERVATIVO,
+ * come un guard di sicurezza: la verifica può solo AGGIUNGERE un deny, mai
+ * toglierlo. credential true → deny; false → `risk` INVARIATO (un deny del
+ * nome resta deny — un probe "pulito" che legge solo la prima label o solo
+ * aria-label non può aprire un varco); null (valutazione fallita) → le regole
+ * dello snapshot restano e un free NON resta free (ask, mai free).
  */
 export function applyFieldProbe(
   risk: BrowserActionRisk,
@@ -252,14 +255,7 @@ export function applyFieldProbe(
   credential: boolean | null
 ): BrowserActionRisk {
   if (credential === true) return { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
-  if (credential === false) {
-    // il campo vero non è di credenziali: il deny del nome non conta; l'ask
-    // del submit (o di altro) resta quello di browserActionRisk
-    if (risk.kind !== 'deny') return risk
-    return args.submit === true
-      ? { kind: 'ask', reason: `browser_type con submit: true invia il modulo (campo "${ref?.name || ref?.text || '?'}")` }
-      : { kind: 'free' }
-  }
+  if (credential === false) return risk
   if (risk.kind === 'free') return { kind: 'ask', reason: FIELD_PROBE_ASK_TEXT }
   return risk
 }

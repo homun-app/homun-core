@@ -353,9 +353,14 @@ const isConnectionError = (e: unknown): boolean =>
  * di browser_evaluate nella 0.0.83 è {function, target?, element?} — obbligatorio
  * solo `function`. La funzione è del daemon, MAI del modello: il result non
  * entra nel contesto, non contamina e non aggiorna lo snapshot.
+ * Giro K1: si allinea al NOME ACCESSIBILE (Chromium calcola l'accname
+ * completo nello snapshot — il probe serve ai campi SENZA nome): TUTTE le
+ * label dell'elemento (in quotes.toscrape.com/login il campo username ne ha
+ * DUE, "Username" e "Password"), aria-label più il testo degli elementi di
+ * aria-labelledby risolti per id, e il title dell'elemento.
  */
 export const FIELD_PROBE_FN =
-  "(el) => ({ type: el.type || '', autocomplete: el.autocomplete || '', name: el.name || '', id: el.id || '', placeholder: el.placeholder || '', label: (el.labels && el.labels[0] ? el.labels[0].textContent : '') || '', aria: el.getAttribute('aria-label') || '' })"
+  "(el) => ({ type: el.type || '', autocomplete: el.autocomplete || '', name: el.name || '', id: el.id || '', placeholder: el.placeholder || '', label: Array.from(el.labels || []).map((l) => l.textContent || '').join(' '), aria: [el.getAttribute('aria-label') || ''].concat((el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean).map((i) => (document.getElementById(i) || {}).textContent || '')).join(' ').trim(), title: el.title || '' })"
 
 /**
  * Chiama INTERNAMENTE browser_evaluate sul campo del ref (0a): serve al

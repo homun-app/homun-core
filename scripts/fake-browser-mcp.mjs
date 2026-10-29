@@ -54,6 +54,10 @@ const PAGES = {
       '- heading "Prenotazione cena" [ref=e1]',
       '- textbox "Nome" [ref=e4]',
       '- textbox "Numero carta" [ref=e6]',
+      // giro K1: il campo dell'esempio aria-labelledby — <span id="l">Numero
+      // carta</span><input aria-labelledby="l" name="f1"> — SENZA nome nello
+      // snapshot: il deny arriva dal CAMPO VERO del probe (aria)
+      '- textbox [ref=e7]',
       '- button "Conferma prenotazione" [ref=e8]'
     ]
   },
@@ -64,9 +68,10 @@ const PAGES = {
       '- Page URL: https://spa.example/login',
       '- Page Title: Accedi',
       '- heading "Accedi" [ref=e1]',
-      // correzione J3: come quotes.toscrape.com/login visto dal revisore — il
-      // campo username ha nome accessibile "Username Password" (stranezza
-      // della pagina) ma è un text: decide il campo VERO del probe, non il nome
+      // correzione J3, giro K1: come quotes.toscrape.com/login visto dal
+      // revisore — il campo username ha DUE label nel DOM ("Username" e
+      // "Password"): il nome accessibile "Username Password" è CORRETTO e il
+      // campo è deny, dal nome E dal campo vero del probe
       '- textbox "Username Password" [ref=e8]',
       '- textbox [ref=e9]',
       '- button "Accedi" [ref=e10]'
@@ -78,18 +83,22 @@ const PAGES = {
 // browser_evaluate — il campo e9 del login è type=password SENZA nome (nome,
 // id, placeholder e aria vuoti: il deny può scattare SOLO dal tipo); l'e8 è
 // lo username della pagina vera di quotes.toscrape.com/login: nome
-// accessibile "Username Password" MA text/name username/label Username
+// accessibile "Username Password" e, col probe del giro K1, DUE label ("Username"
+// e "Password") — il campo è credential anche dal nome vero, esito atteso deny;
+// l'e7 della prenota è l'esempio aria-labelledby (nome assente nello snapshot,
+// aria "Numero carta" dallo span): deny dal probe
 const FIELD_TYPES = {
   'https://spa.example/offerte': {},
   'https://spa.example/menu': {},
   'https://spa.example/prenota': {
-    e4: { type: 'text', autocomplete: 'name', name: 'nome', id: '', placeholder: '', label: 'Nome', aria: '' },
-    e6: { type: 'text', autocomplete: 'cc-number', name: 'card', id: 'card-number', placeholder: 'Numero carta', label: 'Numero carta', aria: '' }
+    e4: { type: 'text', autocomplete: 'name', name: 'nome', id: '', placeholder: '', label: 'Nome', aria: '', title: '' },
+    e6: { type: 'text', autocomplete: 'cc-number', name: 'card', id: 'card-number', placeholder: 'Numero carta', label: 'Numero carta', aria: '', title: '' },
+    e7: { type: 'text', autocomplete: '', name: 'f1', id: '', placeholder: '', label: '', aria: 'Numero carta', title: '' }
   },
   'https://spa.example/login': {
-    e8: { type: 'text', autocomplete: 'username', name: 'username', id: '', placeholder: '', label: 'Username', aria: '' },
-    e9: { type: 'password', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '' },
-    e10: { type: 'submit', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '' }
+    e8: { type: 'text', autocomplete: '', name: 'username', id: 'username', placeholder: '', label: 'Username Password', aria: '', title: '' },
+    e9: { type: 'password', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '' },
+    e10: { type: 'submit', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '' }
   }
 }
 

@@ -187,7 +187,7 @@ describe('evidenza del browser: blocco <pagina_web via="browser"> col tag neutra
 
 // ---- fase 12 (punto 0): 0a probe interno del tipo di campo, 0c screenshot ----
 
-import { probeFieldType, fieldIsCredentialRef } from '../browser'
+import { probeFieldType, fieldIsCredentialRef, FIELD_PROBE_FN } from '../browser'
 import { fieldIsCredential } from '../browser-guard'
 
 describe('fase 12 0a / correzione J3: il probe INTERNO del tipo di campo (browser_evaluate, mai esposto)', () => {
@@ -208,24 +208,74 @@ describe('fase 12 0a / correzione J3: il probe INTERNO del tipo di campo (browse
     }
     expect(await fieldIsCredentialRef(AGENT, 'e9')).toBe(true)
   })
-  it('J3: il campo username del login si chiama "Username Password" nello snapshot ma è un text → probe pulito', async () => {
+  it('K1: il campo username del login ha DUE label — col probe nuovo è "Username Password" → fieldIsCredential VERO (deny)', async () => {
     await callBrowserTool(AGENT, 'browser_open', { url: 'https://spa.example/login' })
-    // il nome accessibile contiene "Password" (stranezza della pagina vera di
-    // quotes.toscrape.com/login): il campo VERO dice text/username
+    // il nome accessibile contiene "Password" (le due label della pagina vera
+    // di quotes.toscrape.com/login): il probe ALLINEATO al nome accessibile
+    // ora le legge TUTTE e due → il campo è credential, esito atteso deny
     expect(refInfoOf(AGENT, 'e8')).toEqual({ role: 'textbox', name: 'Username Password', text: '' })
     const probe = await probeFieldType(AGENT, 'e8')
     expect(probe.ok).toBe(true)
     if (probe.ok) {
-      expect(probe.info).toMatchObject({ type: 'text', name: 'username', label: 'Username' })
-      expect(fieldIsCredential(probe.info)).toBe(false)
+      expect(probe.info).toMatchObject({ type: 'text', name: 'username', id: 'username', label: 'Username Password', title: '' })
+      expect(fieldIsCredential(probe.info)).toBe(true)
     }
-    expect(await fieldIsCredentialRef(AGENT, 'e8')).toBe(false)
+    expect(await fieldIsCredentialRef(AGENT, 'e8')).toBe(true)
+  })
+  it('K1: il campo e7 della prenota è SENZA nome nello snapshot, aria "Numero carta" dal probe (aria-labelledby) → DENY dal campo vero', async () => {
+    await callBrowserTool(AGENT, 'browser_open', { url: 'https://spa.example/prenota' })
+    // il caso dell'esempio del revisore: <span id="l">Numero carta</span>
+    // <input aria-labelledby="l" name="f1"> — lo snapshot NON ha il nome, il
+    // probe lo legge nell'aria: la verifica AGGIUNGE il deny
+    expect(refInfoOf(AGENT, 'e7')).toEqual({ role: 'textbox', name: '', text: '' })
+    const probe = await probeFieldType(AGENT, 'e7')
+    expect(probe.ok).toBe(true)
+    if (probe.ok) {
+      expect(probe.info).toMatchObject({ type: 'text', name: 'f1', aria: 'Numero carta' })
+      expect(fieldIsCredential(probe.info)).toBe(true)
+    }
+    expect(await fieldIsCredentialRef(AGENT, 'e7')).toBe(true)
   })
   it('ref senza campo nella pagina → valutazione NON riuscita (ok:false → il loop chiede, mai free)', async () => {
     await callBrowserTool(AGENT, 'browser_open', { url: 'https://spa.example/menu' })
     const probe = await probeFieldType(AGENT, 'e1')
     expect(probe.ok).toBe(false)
     expect(await fieldIsCredentialRef(AGENT, 'e1')).toBeNull()
+  })
+})
+
+describe('K1: FIELD_PROBE_FN eseguita su un DOM minimo (nessuna dipendenza: finto el e finto document)', () => {
+  // il progetto non ha jsdom né happy-dom: un finto el con labels,
+  // getAttribute e title, e un document.getElementById di prova passati al
+  // new Function (la funzione-stringa vera del daemon, INMODIFICATA)
+  const fakeEl = (opts: { labels?: string[]; attrs?: Record<string, string>; title?: string }) => ({
+    type: 'text', autocomplete: '', name: opts.attrs?.name ?? '', id: opts.attrs?.id ?? '', placeholder: '',
+    labels: (opts.labels ?? []).map((t) => ({ textContent: t })),
+    getAttribute: (a: string) => (opts.attrs ?? {})[a] ?? null,
+    title: opts.title ?? ''
+  })
+  const fnWith = (ids: Record<string, string> = {}) =>
+    new Function('document', 'return (' + FIELD_PROBE_FN + ')')({
+      getElementById: (id: string) => ({ textContent: ids[id] ?? null })
+    }) as (el: ReturnType<typeof fakeEl>) => Record<string, string>
+
+  it('DUE label (quotes.toscrape.com/login: "Username" e "Password") → label "Username Password"', () => {
+    const r = fnWith()(fakeEl({ labels: ['Username', 'Password'], attrs: { name: 'username' } }))
+    expect(r.label).toBe('Username Password')
+    expect(r.aria).toBe('')
+    expect(r.title).toBe('')
+  })
+  it('aria-labelledby con DUE id risolti per id (+ aria-label) → aria unita da spazio', () => {
+    const el = fakeEl({ attrs: { 'aria-label': 'Codice', 'aria-labelledby': 'l1 l2' } })
+    const r = fnWith({ l1: 'Numero', l2: 'carta' })(el)
+    expect(r.aria).toBe('Codice Numero carta')
+    // un id che NON esiste nel document non lascia buchi
+    const r2 = fnWith({ l2: 'carta' })(fakeEl({ attrs: { 'aria-labelledby': 'l1 l2' } }))
+    expect(r2.aria).toBe('carta')
+  })
+  it('title letto dal campo: "Password" → il deny può scattare anche da lì', () => {
+    const r = fnWith()(fakeEl({ title: 'Password' }))
+    expect(r.title).toBe('Password')
   })
 })
 

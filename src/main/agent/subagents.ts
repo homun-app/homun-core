@@ -67,6 +67,34 @@ export function briefTargets(brief: string, names: readonly string[]): string[] 
   return names.filter((n) => hit.has(n.toLowerCase())).map((n) => n.toLowerCase())
 }
 
+// ---- correzione K2 (caso 21 eval): l'OBIETTIVO di un brief ----
+
+/** La regex di un nome come PAROLA INTERA (case-insensitive), come in briefTargets. */
+const nameRe = (name: string): RegExp =>
+  new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'iu')
+
+/**
+ * briefTarget (pura, correzione K2): l'OBIETTIVO di un brief. Vince il
+ * framework del TITOLO della spawn quando il titolo ne nomina esattamente
+ * uno ("Ricerca su Remix"): inseguire ogni formulazione del brief con altre
+ * parole chiave non converge — "per un confronto comparativo con SvelteKit e
+ * Remix" NON è un confine. Altrimenti vince il framework con PIÙ menzioni
+ * nel brief (parola intera), purché il massimo sia UNICO; col pareggio non
+ * c'è un obiettivo (null). briefTargets resta come segnale secondario.
+ */
+export function briefTarget(title: string, brief: string, names: readonly string[]): string | null {
+  const inTitle = names.filter((n) => nameRe(n).test(title)).map((n) => n.toLowerCase())
+  if (inTitle.length === 1) return inTitle[0]!
+  const counts = names.map((n) => ({
+    name: n.toLowerCase(),
+    count: (brief.match(new RegExp(nameRe(n).source, 'giu')) ?? []).length
+  }))
+  const max = Math.max(...counts.map((c) => c.count))
+  if (max === 0) return null
+  const top = counts.filter((c) => c.count === max)
+  return top.length === 1 ? top[0]!.name : null
+}
+
 // ---- punto 3: la whitelist dei tool del figlio ----
 
 /** I tool di LAVORO e lettura che il figlio riceve (i browser_* se disponibili si aggiungono a parte). */

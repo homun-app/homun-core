@@ -3891,7 +3891,7 @@ describe('fase 12 0a/0d: probe interno del tipo di campo e card di press_key', (
     expect(String(res.content)).toContain('Non scrivo MAI password')
   })
 
-  it('correzione J3: username "Username Password" col campo VERO pulito → FREE ed ESEGUITO (il nome dello snapshot non conta)', async () => {
+  it('correzione K1: username "Username Password" col campo VERO pulito → DENY e NON eseguito (la verifica non declassa il nome)', async () => {
     browserState.available = true
     browserState.fieldProbe = false // il probe dice: {type: "text", name: "username"} — pulito
     h.llm.queue = [
@@ -3899,12 +3899,13 @@ describe('fase 12 0a/0d: probe interno del tipo di campo e card di press_key', (
       { toolCalls: [{ id: 'p0b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
     ]
     await runTurn(AGENT, 'compila lo username', emit)
-    // il nome accessibile conterrebbe "Password" (deny del nome): la verifica
-    // interna RIESCE e decide lei — free, nessuna card, il typing parte
+    // il nome accessibile contiene "Password" (deny del nome): col giro K1 la
+    // verifica interna può solo AGGIUNGERE un deny — resta deny, nessuna
+    // card, il typing NON parte
     expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
-    expect(browserState.calls.filter((c) => c.tool === 'browser_type')).toHaveLength(1)
+    expect(browserState.calls).toHaveLength(0)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).not.toContain('Non scrivo MAI password')
+    expect(String(res.content)).toContain('Non scrivo MAI password')
   })
 
   it('0a: valutazione fallita (errore MCP o result non leggibile) → ASK "non riesco a verificare il tipo del campo", mai free', async () => {

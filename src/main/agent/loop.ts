@@ -1247,15 +1247,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             continue
           }
           let risk = guard.browserActionRisk(call.name, input, browser.refInfoOf(agentId, String(input.ref ?? '')))
-          // fase 12 (0a, correzione J3): per browser_type col ref valido e
-          // presente nello snapshot il daemon verifica INTERNAMENTE il campo
-          // con browser_evaluate (mai esposto al modello). Quando la
-          // verifica RIESCE decide IL CAMPO VERO (type, autocomplete, name,
-          // id, placeholder, label, aria): il nome accessibile dello snapshot
-          // NON conta — in quotes.toscrape.com/login il campo username si
-          // chiama "Username Password" ma è un text e deve passare libero.
-          // Quando FALLISCE (errore MCP, result non leggibile) restano le
-          // regole dello snapshot e un free diventa ask, mai free
+          // fase 12 (0a, correzione J3, giro K1): per browser_type col ref
+          // valido e presente nello snapshot il daemon verifica INTERNAMENTE
+          // il campo con browser_evaluate (mai esposto al modello). I segnali
+          // indipendenti (nome accessibile dello snapshot, campo vero) si
+          // combinano in modo CONSERVATIVO: il campo vero può AGGIUNGERE un
+          // deny (password senza nome, carta nascosta in aria-labelledby),
+          // MAI toglierne uno al nome; quando la verifica FALLISCE (errore
+          // MCP, result non leggibile) restano le regole dello snapshot e un
+          // free diventa ask, mai free
           const askedRef = String(input.ref ?? '')
           if (call.name === 'browser_type' && guard.VALID_REF_RE.test(askedRef) && browser.refInfoOf(agentId, askedRef)) {
             const credential = await browser.fieldIsCredentialRef(agentId, askedRef)

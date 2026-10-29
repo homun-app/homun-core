@@ -92,9 +92,36 @@ describe('fase 12 (punto 3): subagentClosure, la chiusura robusta', () => {
   })
 })
 
-// ---- correzione J4 (caso 21): i CONFINI nel brief non sono obiettivi ----
+// ---- correzione J4 (caso 21) + K2: i CONFINI nel brief e l'OBIETTIVO ----
 
-import { briefTargets } from '../subagents'
+import { briefTargets, briefTarget } from '../subagents'
+
+describe('correzione K2: briefTarget — il titolo della spawn vince, altrimenti le menzioni uniche', () => {
+  const FW = ['astro', 'sveltekit', 'remix']
+  // il brief REALE del modello (abbreviato, stesse menzioni): "confronto
+  // comparativo con" NON è un confine → astro 2, sveltekit 1, remix 1
+  const BRIEF_ASTRO = [
+    'Ricerca approfondita sul framework web Astro per un confronto comparativo con SvelteKit e Remix.',
+    'OBIETTIVO: analizzi Astro: punti di forza, limiti principali e quando sceglierlo.',
+    'Consegna un summary condensato e il report nel file indicato.'
+  ].join('\n')
+  // menzioni PARI (2/2/2): senza titolo che nomini un framework non c'è obiettivo
+  const BRIEF_PARI = 'Confronto aperto: Astro e SvelteKit, Astro o SvelteKit, con Remix e Remix. Analizza e consegna.'
+
+  it('il brief vero col "confronto comparativo con" → astro (dal titolo, e anche dalle menzioni 2/1/1)', () => {
+    expect(briefTarget('Ricerca su Astro', BRIEF_ASTRO, FW)).toBe('astro')
+    // anche senza framework nel titolo: le menzioni hanno massimo UNICO
+    expect(briefTarget('Ricerca framework web', BRIEF_ASTRO, FW)).toBe('astro')
+  })
+  it('titolo "Ricerca su Remix" → remix ANCHE con le menzioni pari', () => {
+    expect(briefTarget('Ricerca su Remix', BRIEF_PARI, FW)).toBe('remix')
+  })
+  it('titolo senza framework e menzioni pari → null (nessun obiettivo)', () => {
+    expect(briefTarget('Ricerca framework web', BRIEF_PARI, FW)).toBeNull()
+    // e nessuna menzione da nessuna parte → null
+    expect(briefTarget('Ricerca', 'Analisi del gestore di contenuti headless più adatto.', FW)).toBeNull()
+  })
+})
 
 describe('correzione J4: briefTargets — un brief "copre" un nome solo se lo dichiara OBIETTIVO', () => {
   // il brief del caso eval 24: obiettivo Astro, SvelteKit e Remix solo nei
